@@ -42191,35 +42191,17 @@ function _buildTrackRow(track, album, admin) {
         }
         tr.appendChild(tagTd);
 
-        // Source info button (admin only)
-        const srcTd = document.createElement('td');
-        srcTd.className = 'col-source-info';
-        const srcBtn = document.createElement('button');
-        srcBtn.className = 'enhanced-source-info-btn';
-        srcBtn.innerHTML = 'ℹ';
-        srcBtn.title = 'View download source info';
-        srcTd.appendChild(srcBtn);
-        tr.appendChild(srcTd);
-
-        // Redownload button (admin only)
-        const rdTd = document.createElement('td');
-        rdTd.className = 'col-redownload';
-        const rdBtn = document.createElement('button');
-        rdBtn.className = 'enhanced-redownload-btn';
-        rdBtn.innerHTML = '&#8635;';
-        rdBtn.title = 'Redownload this track';
-        rdTd.appendChild(rdBtn);
-        tr.appendChild(rdTd);
-
-        // Delete button (admin only)
-        const delTd = document.createElement('td');
-        delTd.className = 'col-delete';
-        const delBtn = document.createElement('button');
-        delBtn.className = 'enhanced-delete-btn';
-        delBtn.innerHTML = '&#10005;';
-        delBtn.title = 'Delete track from library';
-        delTd.appendChild(delBtn);
-        tr.appendChild(delTd);
+        // Track actions cell — source info, redownload, delete (admin only)
+        const actionsTd = document.createElement('td');
+        actionsTd.className = 'col-track-actions';
+        actionsTd.innerHTML = `
+            <div class="enhanced-track-actions-group">
+                <button class="enhanced-source-info-btn" title="View download source info">ℹ</button>
+                <button class="enhanced-redownload-btn" title="Redownload this track">&#8635;</button>
+                <button class="enhanced-delete-btn" title="Delete track from library">&#10005;</button>
+            </div>
+        `;
+        tr.appendChild(actionsTd);
     } else {
         // Report Issue button per track (non-admin)
         const reportTd = document.createElement('td');
