@@ -16014,6 +16014,11 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
             # Cover Art Archive high-resolution lookup.
             _embed_source_ids(audio_file, metadata)
 
+            # Propagate MusicBrainz release ID to album_info so _download_cover_art
+            # can use it for Cover Art Archive high-res cover.jpg
+            if album_info is not None and metadata.get('musicbrainz_release_id'):
+                album_info['musicbrainz_release_id'] = metadata['musicbrainz_release_id']
+
             # ── Embed album art on the same object ──
             if config_manager.get('metadata_enhancement.embed_album_art', True):
                 _embed_album_art_metadata(audio_file, metadata)
@@ -16486,9 +16491,6 @@ def _embed_source_ids(audio_file, metadata: dict):
         # Store release MBID in metadata for downstream use (e.g. Cover Art Archive)
         if _rc_mbid:
             metadata['musicbrainz_release_id'] = _rc_mbid
-            # Also store on album_info so _download_cover_art can use it for cover.jpg
-            if album_info is not None:
-                album_info['musicbrainz_release_id'] = _rc_mbid
 
         # Write release year to file tags if not already present
         if release_year and 'ORIGINALDATE' not in id_tags:
