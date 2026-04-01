@@ -43015,6 +43015,48 @@ function _renderRedownloadStep1(overlay, track, data) {
         `;
         modal.appendChild(footer);
 
+        // Wire up download button IMMEDIATELY (before streaming starts)
+        // so it works as soon as results appear
+        window._redownloadCandidates = [];
+        window._redownloadMetadata = selectedMeta;
+        document.getElementById('redownload-start-btn').addEventListener('click', async () => {
+            const checked = document.querySelector('input[name="source-choice"]:checked');
+            if (!checked) { showToast('Select a download source', 'error'); return; }
+            const cand = window._redownloadCandidates[parseInt(checked.value)];
+            if (!cand) { showToast('Invalid selection', 'error'); return; }
+            const deleteOld = document.getElementById('redownload-delete-old-check')?.checked ?? true;
+
+            overlay.querySelectorAll('.redownload-step').forEach(s => s.classList.remove('active'));
+            overlay.querySelector('.redownload-step[data-step="3"]').classList.add('active');
+
+            // Remove sticky footer for step 3
+            const ft = overlay.querySelector('.redownload-sticky-footer');
+            if (ft) ft.remove();
+
+            const body = document.getElementById('redownload-body');
+            body.innerHTML = `
+                <div class="redownload-progress">
+                    <div class="redownload-progress-title">Downloading: ${_esc(cand.display_name)}</div>
+                    <div class="redownload-progress-from">from ${_esc(cand.source_service === 'soulseek' ? cand.username : (cand.source_service || 'unknown'))}</div>
+                    <div class="redownload-progress-bar-wrap"><div class="redownload-progress-bar" id="redownload-progress-bar"></div></div>
+                    <div class="redownload-progress-status" id="redownload-progress-status">Starting download...</div>
+                </div>
+            `;
+
+            try {
+                const res = await fetch(`/api/library/track/${track.id}/redownload/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ metadata: window._redownloadMetadata, candidate: cand, delete_old_file: deleteOld })
+                });
+                const startData = await res.json();
+                if (!startData.success) throw new Error(startData.error);
+                _pollRedownloadProgress(startData.task_id, overlay);
+            } catch (e) {
+                body.innerHTML = `<div class="redownload-error">Download failed: ${_esc(e.message)}</div>`;
+            }
+        });
+
         _streamRedownloadSources(overlay, track, selectedMeta);
     });
 }
@@ -43067,6 +43109,7 @@ async function _streamRedownloadSources(overlay, track, metadata) {
                     const startIdx = allCandidates.length;
                     candidates.forEach((c, i) => { c._globalIdx = startIdx + i; });
                     allCandidates.push(...candidates);
+                    window._redownloadCandidates = allCandidates; // Keep global ref updated for button handler
 
                     // Find best overall candidate
                     bestGlobalIdx = -1;
@@ -43141,45 +43184,8 @@ async function _streamRedownloadSources(overlay, track, metadata) {
         loadingEl.innerHTML = '<div class="rdl-src-col-empty">No download sources found for this track.</div>';
     }
 
-    // Store candidates for the download button
+    // Update the shared candidates array (button handler reads from window._redownloadCandidates)
     window._redownloadCandidates = allCandidates;
-
-    // Wire up download button
-    const startBtn2 = document.getElementById('redownload-start-btn');
-    if (startBtn2) {
-        startBtn2.addEventListener('click', async () => {
-            const checked = document.querySelector('input[name="source-choice"]:checked');
-            if (!checked) { showToast('Select a download source', 'error'); return; }
-            const candidate = window._redownloadCandidates[parseInt(checked.value)];
-            const deleteOld = document.getElementById('redownload-delete-old-check')?.checked ?? true;
-
-            overlay.querySelectorAll('.redownload-step').forEach(s => s.classList.remove('active'));
-            overlay.querySelector('.redownload-step[data-step="3"]').classList.add('active');
-
-            const body = document.getElementById('redownload-body');
-            body.innerHTML = `
-                <div class="redownload-progress">
-                    <div class="redownload-progress-title">Downloading: ${_esc(candidate.display_name)}</div>
-                    <div class="redownload-progress-from">from ${_esc(candidate.source_service === 'soulseek' ? candidate.username : (candidate.source_service || 'unknown'))}</div>
-                    <div class="redownload-progress-bar-wrap"><div class="redownload-progress-bar" id="redownload-progress-bar"></div></div>
-                    <div class="redownload-progress-status" id="redownload-progress-status">Starting download...</div>
-                </div>
-            `;
-
-            try {
-                const res = await fetch(`/api/library/track/${track.id}/redownload/start`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ metadata, candidate, delete_old_file: deleteOld })
-                });
-                const startData = await res.json();
-                if (!startData.success) throw new Error(startData.error);
-                _pollRedownloadProgress(startData.task_id, overlay);
-            } catch (e) {
-                body.innerHTML = `<div class="redownload-error">Download failed: ${_esc(e.message)}</div>`;
-            }
-        });
-    }
 }
 
 /* _renderRedownloadStep2 removed — replaced by _streamRedownloadSources above */
@@ -43296,72 +43302,80 @@ if (false) {
 function _pollRedownloadProgress(taskId, overlay) {
     const bar = document.getElementById('redownload-progress-bar');
     const status = document.getElementById('redownload-progress-status');
+    let completed = false;
 
     const poll = setInterval(async () => {
+        if (completed) return;
         try {
-            const res = await fetch(`/api/active-processes`);
-            const data = await res.json();
+            // Poll real download progress from /api/downloads/status
+            const dlRes = await fetch('/api/downloads/status');
+            const dlData = await dlRes.json();
+            const transfers = dlData.transfers || [];
 
-            // Find our task in download_tasks via batch
-            // Check if the task is in any batch
-            let taskStatus = null;
-            const procs = data.active_processes || [];
-            for (const proc of procs) {
-                if (proc.batch_id && proc.batch_id.includes(`redownload_batch_`)) {
-                    taskStatus = proc;
+            // Find our transfer — match by checking active non-completed transfers
+            let bestTransfer = null;
+            for (const t of transfers) {
+                const st = (t.state || '').toLowerCase();
+                if (st.includes('inprogress') || st.includes('queued') || st.includes('initializing')) {
+                    bestTransfer = t;
                     break;
                 }
             }
 
-            // Simpler: just check the task status directly
-            // Since we can't easily get individual task status from active-processes,
-            // we'll use a simple timer-based approach
-            if (status) {
-                const elapsed = Math.round((Date.now() - _redownloadStartTime) / 1000);
-                status.textContent = `Downloading... (${elapsed}s)`;
+            if (bestTransfer) {
+                const pct = bestTransfer.percentComplete || 0;
+                const transferred = bestTransfer.bytesTransferred || 0;
+                const total = bestTransfer.size || 0;
+                const transferredMB = (transferred / 1048576).toFixed(1);
+                const totalMB = (total / 1048576).toFixed(1);
+
+                if (bar) bar.style.width = `${Math.min(95, pct)}%`;
+                if (status) {
+                    if (total > 0) {
+                        status.textContent = `Downloading... ${Math.round(pct)}% (${transferredMB} / ${totalMB} MB)`;
+                    } else {
+                        status.textContent = `Downloading... ${Math.round(pct)}%`;
+                    }
+                }
+            } else {
+                // No active Soulseek transfer — might be a streaming source (Tidal/YouTube)
+                // or post-processing phase
+                if (bar && parseFloat(bar.style.width) < 50) {
+                    bar.style.width = '60%';
+                }
+                if (status) status.textContent = 'Processing...';
             }
-            if (bar) bar.style.width = `${Math.min(90, (Date.now() - _redownloadStartTime) / 600)}%`;
 
-        } catch (e) { /* ignore poll errors */ }
-    }, 2000);
-
-    _redownloadStartTime = Date.now();
-
-    // Also poll for completion via a simpler check
-    const completionCheck = setInterval(async () => {
-        try {
-            // Check if the task completed by trying to see if the batch is gone
-            const res = await fetch('/api/active-processes');
-            const data = await res.json();
-            const procs = data.active_processes || [];
+            // Check for completion — look for completed transfers or batch gone
+            const procRes = await fetch('/api/active-processes');
+            const procData = await procRes.json();
+            const procs = procData.active_processes || [];
             const ourBatch = procs.find(p => p.batch_id && p.batch_id.includes('redownload_batch_'));
 
             if (!ourBatch) {
-                // Batch is gone — either completed or failed
+                completed = true;
                 clearInterval(poll);
-                clearInterval(completionCheck);
                 if (bar) bar.style.width = '100%';
-                if (status) status.textContent = 'Complete!';
+                if (status) status.textContent = 'Complete! File replaced successfully.';
                 showToast('Track redownloaded successfully', 'success');
                 setTimeout(() => {
                     overlay.remove();
-                    // Refresh enhanced view
                     if (artistDetailPageState.enhancedData?.artist?.id) {
                         loadEnhancedViewData(artistDetailPageState.enhancedData.artist.id);
                     }
-                }, 1500);
+                }, 2000);
             }
-        } catch (e) { /* ignore */ }
-    }, 3000);
+        } catch (e) { /* ignore poll errors */ }
+    }, 1500);
 
-    // Safety timeout — 5 minutes max
+    // Safety timeout — 5 minutes
     setTimeout(() => {
-        clearInterval(poll);
-        clearInterval(completionCheck);
-        if (status) status.textContent = 'Download may still be in progress. Check the dashboard.';
+        if (!completed) {
+            clearInterval(poll);
+            if (status) status.textContent = 'Download may still be in progress. Check the dashboard.';
+        }
     }, 300000);
 }
-let _redownloadStartTime = 0;
 
 async function deleteLibraryAlbum(albumId) {
     if (!await showConfirmDialog({ title: 'Delete Album', message: 'Delete this album and all its tracks from the library? (Files on disk are not affected)', confirmText: 'Delete', destructive: true })) return;
