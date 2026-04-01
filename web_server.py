@@ -42891,7 +42891,7 @@ def playlist_explorer_build_tree():
 
             # Fetch albums
             try:
-                all_albums = active_client.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                all_albums = active_client.get_artist_albums(artist_id, album_type='album,single', limit=50, skip_cache=True)
             except Exception as e:
                 return {'success': False, 'error': f'Album fetch failed: {e}'}
 
