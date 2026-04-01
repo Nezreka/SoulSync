@@ -40949,7 +40949,7 @@ function applyDiscographyFilters() {
 
 // ==================== Download Discography Modal ====================
 
-function openDiscographyModal() {
+async function openDiscographyModal() {
     // Support both Artists search page and Library artist detail page
     let artist = artistsPageState.selectedArtist;
     let discography = artistsPageState.artistDiscography;
@@ -40961,13 +40961,28 @@ function openDiscographyModal() {
         const libName = artistDetailPageState.currentArtistName;
         if (libId && libName) {
             artist = { id: libId, name: libName, image_url: document.getElementById('artist-detail-image')?.src || '' };
-            // Library page stores discography in the same artistsPageState when viewing from library
             discography = artistsPageState.artistDiscography;
+
+            // If discography not loaded, fetch it on-demand
+            if (!discography) {
+                try {
+                    showToast('Loading discography...', 'info');
+                    const res = await fetch(`/api/artist/${libId}/discography?artist_name=${encodeURIComponent(libName)}`);
+                    const data = await res.json();
+                    if (data && (data.albums || data.eps || data.singles)) {
+                        discography = data;
+                        artistsPageState.artistDiscography = data;
+                        artistsPageState.selectedArtist = artist;
+                    }
+                } catch (e) {
+                    console.error('Failed to load discography:', e);
+                }
+            }
         }
     }
 
     if (!artist || !discography) {
-        showToast('No discography data available', 'error');
+        showToast('No discography data available. Artist may not be on Spotify/iTunes.', 'error');
         return;
     }
 
