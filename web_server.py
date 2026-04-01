@@ -12853,6 +12853,344 @@ def library_delete_track(track_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ==================================================================================
+# TRACK REDOWNLOAD — Search metadata, search download sources, start redownload
+# ==================================================================================
+
+@app.route('/api/library/track/<int:track_id>/redownload/search-metadata', methods=['POST'])
+def redownload_search_metadata(track_id):
+    """Search all available metadata sources for a track to find the correct version."""
+    try:
+        database = get_database()
+        conn = database._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT t.id, t.title, t.file_path, t.bitrate, t.duration,
+                   ar.name AS artist_name, al.title AS album_title,
+                   t.spotify_track_id, t.deezer_id
+            FROM tracks t
+            JOIN artists ar ON t.artist_id = ar.id
+            JOIN albums al ON t.album_id = al.id
+            WHERE t.id = ?
+        """, (track_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return jsonify({"success": False, "error": "Track not found"}), 404
+
+        track_title = row['title']
+        artist_name = row['artist_name']
+        query = f"{artist_name} {track_title}"
+
+        # Resolve file info
+        file_path = row['file_path'] or ''
+        ext = os.path.splitext(file_path)[1].lstrip('.').upper() if file_path else ''
+        fmt = ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else ''
+
+        current_track = {
+            'id': row['id'],
+            'title': track_title,
+            'artist': artist_name,
+            'album': row['album_title'],
+            'duration_ms': row['duration'] or 0,
+            'file_path': file_path,
+            'format': fmt,
+            'bitrate': row['bitrate'] or 0,
+            'spotify_track_id': row['spotify_track_id'],
+            'deezer_id': row['deezer_id'],
+        }
+
+        # Search all available metadata sources in parallel
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from difflib import SequenceMatcher
+
+        def _score_metadata_match(result):
+            """Score a metadata result against the current track."""
+            title_sim = SequenceMatcher(None, track_title.lower(), (result.get('name') or '').lower()).ratio()
+            artist_sim = SequenceMatcher(None, artist_name.lower(), (result.get('artist') or '').lower()).ratio()
+            dur_diff = abs((row['duration'] or 0) - (result.get('duration_ms') or 0))
+            dur_score = max(0, 1 - dur_diff / 30000) if row['duration'] else 0.5
+            return round((title_sim * 0.5 + artist_sim * 0.35 + dur_score * 0.15), 3)
+
+        metadata_results = {}
+        sources_to_search = []
+
+        if spotify_client and spotify_client.is_authenticated():
+            sources_to_search.append(('spotify', spotify_client))
+        try:
+            from core.itunes_client import iTunesClient
+            sources_to_search.append(('itunes', iTunesClient()))
+        except Exception:
+            pass
+        try:
+            from core.deezer_client import DeezerClient
+            sources_to_search.append(('deezer', DeezerClient()))
+        except Exception:
+            pass
+
+        def _search_source(source_name, client):
+            try:
+                track_objs = client.search_tracks(query, limit=10)
+                results = []
+                for t in track_objs:
+                    r = {
+                        'id': str(t.id),
+                        'name': t.name,
+                        'artist': ', '.join(t.artists) if t.artists else '',
+                        'album': t.album or '',
+                        'duration_ms': t.duration_ms or 0,
+                        'image_url': t.image_url or '',
+                        'is_current_match': False,
+                    }
+                    # Flag current match
+                    if source_name == 'spotify' and row['spotify_track_id'] and str(t.id) == str(row['spotify_track_id']):
+                        r['is_current_match'] = True
+                    elif source_name == 'deezer' and row['deezer_id'] and str(t.id) == str(row['deezer_id']):
+                        r['is_current_match'] = True
+                    r['match_score'] = _score_metadata_match(r)
+                    results.append(r)
+                results.sort(key=lambda x: (-int(x['is_current_match']), -x['match_score']))
+                return source_name, results
+            except Exception as e:
+                logger.debug(f"Metadata search failed for {source_name}: {e}")
+                return source_name, []
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {pool.submit(_search_source, name, client): name for name, client in sources_to_search}
+            for future in as_completed(futures):
+                source_name, results = future.result()
+                metadata_results[source_name] = results
+
+        # Find best overall match
+        best_match = None
+        for source, results in metadata_results.items():
+            if results:
+                top = results[0]
+                if not best_match or top['match_score'] > best_match['score']:
+                    best_match = {'source': source, 'index': 0, 'score': top['match_score']}
+
+        return jsonify({
+            "success": True,
+            "current_track": current_track,
+            "metadata_results": metadata_results,
+            "best_match": best_match,
+        })
+    except Exception as e:
+        logger.error(f"Error in redownload metadata search: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/track/<int:track_id>/redownload/search-sources', methods=['POST'])
+def redownload_search_sources(track_id):
+    """Search all active download sources for a track using the selected metadata."""
+    try:
+        data = request.get_json()
+        metadata = data.get('metadata', {})
+        if not metadata.get('name'):
+            return jsonify({"success": False, "error": "metadata with name required"}), 400
+
+        # Build a track-like object for query generation
+        from core.itunes_client import Track as MetaTrack
+        track_obj = MetaTrack(
+            id=metadata.get('id', ''),
+            name=metadata['name'],
+            artists=[metadata.get('artist', '')],
+            album=metadata.get('album', ''),
+            duration_ms=metadata.get('duration_ms', 0),
+        )
+
+        # Generate search queries
+        search_queries = matching_engine.generate_download_queries(track_obj)
+        if not search_queries:
+            search_queries = [f"{metadata.get('artist', '')} {metadata['name']}".strip()]
+
+        # Limit to first 3 queries for speed
+        search_queries = search_queries[:3]
+
+        # Search download sources
+        candidates = []
+        database = get_database()
+
+        for qi, query in enumerate(search_queries):
+            try:
+                tracks_result, _ = run_async(soulseek_client.search(query, timeout=25))
+                if not tracks_result:
+                    continue
+
+                valid = get_valid_candidates(tracks_result, track_obj, query)
+                for candidate in valid:
+                    # Check blacklist
+                    is_bl = database.is_blacklisted(candidate.username, candidate.filename)
+
+                    # Extract display name from filename
+                    display_name = os.path.basename(candidate.filename.replace('\\', '/'))
+                    ext = os.path.splitext(display_name)[1].lstrip('.').upper()
+                    quality = ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else candidate.quality or ''
+
+                    candidates.append({
+                        'username': candidate.username,
+                        'filename': candidate.filename,
+                        'display_name': display_name,
+                        'size': candidate.size or 0,
+                        'size_display': f"{(candidate.size or 0) / 1048576:.1f} MB",
+                        'bitrate': candidate.bitrate or 0,
+                        'quality': quality,
+                        'duration': candidate.duration or 0,
+                        'confidence': round(getattr(candidate, 'confidence', 0), 3),
+                        'source_query': query,
+                        'blacklisted': is_bl,
+                        'free_upload_slots': getattr(candidate, 'free_upload_slots', 0),
+                        'upload_speed': getattr(candidate, 'upload_speed', 0),
+                        'queue_length': getattr(candidate, 'queue_length', 0),
+                    })
+            except Exception as e:
+                logger.debug(f"Download source search failed for query '{query}': {e}")
+
+        # Deduplicate by username+filename
+        seen = set()
+        unique = []
+        for c in candidates:
+            key = f"{c['username']}|{c['filename']}"
+            if key not in seen:
+                seen.add(key)
+                unique.append(c)
+        candidates = unique
+
+        # Sort: non-blacklisted first, then by confidence
+        candidates.sort(key=lambda c: (-int(not c['blacklisted']), -c['confidence']))
+
+        best_idx = next((i for i, c in enumerate(candidates) if not c['blacklisted']), 0) if candidates else -1
+
+        return jsonify({
+            "success": True,
+            "candidates": candidates,
+            "best_candidate_index": best_idx,
+            "queries_used": search_queries,
+        })
+    except Exception as e:
+        logger.error(f"Error in redownload source search: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/track/<int:track_id>/redownload/start', methods=['POST'])
+def redownload_start(track_id):
+    """Start downloading a specific track from a selected source to replace the current file."""
+    try:
+        data = request.get_json()
+        metadata = data.get('metadata', {})
+        candidate = data.get('candidate', {})
+        delete_old = data.get('delete_old_file', True)
+
+        if not candidate.get('username') or not candidate.get('filename'):
+            return jsonify({"success": False, "error": "candidate with username and filename required"}), 400
+
+        # Get current track info for old file path
+        database = get_database()
+        conn = database._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (track_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        old_file_path = None
+        if row and row['file_path'] and delete_old:
+            old_file_path = _resolve_library_file_path(row['file_path'])
+
+        # Build track data for the download worker
+        import uuid
+        task_id = f"redownload_{track_id}_{int(time.time())}"
+        batch_id = f"redownload_batch_{track_id}"
+
+        # Create a track dict compatible with the download worker
+        track_data = {
+            'id': metadata.get('id', ''),
+            'name': metadata.get('name', ''),
+            'artists': [{'name': metadata.get('artist', '')}],
+            'album': {'name': metadata.get('album', '')},
+            'duration_ms': metadata.get('duration_ms', 0),
+        }
+
+        # Create batch
+        with tasks_lock:
+            download_batches[batch_id] = {
+                'queue': [task_id],
+                'queue_index': 0,
+                'active_count': 0,
+                'max_concurrent': 1,
+                'playlist_id': f'redownload_{track_id}',
+                'playlist_name': f"Redownload: {metadata.get('artist', '')} - {metadata.get('name', '')}",
+                'phase': 'downloading',
+                'total_tracks': 1,
+                'completed_count': 0,
+                'failed_count': 0,
+                'force_download': True,
+                'auto_initiated': False,
+            }
+
+            download_tasks[task_id] = {
+                'status': 'queued',
+                'track_info': track_data,
+                'playlist_id': f'redownload_{track_id}',
+                'batch_id': batch_id,
+                'track_index': 0,
+                'download_id': None,
+                'username': None,
+                'filename': None,
+                'retry_count': 0,
+                'cached_candidates': [],
+                'used_sources': set(),
+                'status_change_time': time.time(),
+                'metadata_enhanced': False,
+                'error_message': None,
+                '_redownload_context': {
+                    'library_track_id': track_id,
+                    'old_file_path': old_file_path,
+                    'delete_old_file': delete_old,
+                },
+            }
+
+        # Build a TrackResult-like candidate and submit to download
+        def _run_redownload():
+            try:
+                from core.soulseek_client import TrackResult
+                tr = TrackResult(
+                    username=candidate['username'],
+                    filename=candidate['filename'],
+                    size=candidate.get('size', 0),
+                    bitrate=candidate.get('bitrate', 0),
+                    duration=candidate.get('duration', 0),
+                    quality=candidate.get('quality', ''),
+                    free_upload_slots=candidate.get('free_upload_slots', 0),
+                    upload_speed=candidate.get('upload_speed', 0),
+                    queue_length=candidate.get('queue_length', 0),
+                )
+                # Set track metadata on the candidate
+                tr.artist = metadata.get('artist', '')
+                tr.title = metadata.get('name', '')
+                tr.album = metadata.get('album', '')
+
+                _attempt_download_with_candidates(task_id, [tr], track_data, batch_id)
+            except Exception as e:
+                logger.error(f"Redownload failed: {e}", exc_info=True)
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'failed'
+                        download_tasks[task_id]['error_message'] = str(e)
+
+        missing_download_executor.submit(_run_redownload)
+
+        return jsonify({
+            "success": True,
+            "task_id": task_id,
+            "batch_id": batch_id,
+            "message": "Redownload started",
+        })
+    except Exception as e:
+        logger.error(f"Error starting redownload: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/library/artist/<artist_id>/sync', methods=['POST'])
 def sync_artist_library(artist_id):
     """Validate an artist's library entries — remove stale tracks/albums, recount."""
@@ -17656,6 +17994,31 @@ def _post_process_matched_download_with_verification(context_key, context, file_
                 if task_id in download_tasks:
                     _mark_task_completed(task_id, context.get('track_info'))
                     download_tasks[task_id]['metadata_enhanced'] = True
+
+                    # Redownload hook: delete old file and update DB path
+                    redownload_ctx = download_tasks[task_id].get('_redownload_context')
+                    if redownload_ctx:
+                        try:
+                            old_path = redownload_ctx.get('old_file_path')
+                            lib_track_id = redownload_ctx.get('library_track_id')
+                            if redownload_ctx.get('delete_old_file') and old_path and os.path.exists(old_path):
+                                if os.path.normpath(old_path) != os.path.normpath(expected_final_path):
+                                    os.remove(old_path)
+                                    logger.info(f"[Redownload] Deleted old file: {old_path}")
+                            # Update DB track with new file path
+                            if lib_track_id and expected_final_path:
+                                _rd_db = get_database()
+                                _rd_conn = _rd_db._get_connection()
+                                _rd_cursor = _rd_conn.cursor()
+                                _rd_cursor.execute("""
+                                    UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP
+                                    WHERE id = ?
+                                """, (expected_final_path, lib_track_id))
+                                _rd_conn.commit()
+                                _rd_conn.close()
+                                logger.info(f"[Redownload] Updated DB path for track {lib_track_id}")
+                        except Exception as e:
+                            logger.error(f"[Redownload] Post-processing hook error: {e}")
 
             with matched_context_lock:
                 if context_key in matched_downloads_context:
@@ -25468,6 +25831,15 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
         if source_key in used_sources:
             print(f"⏭️ [Modal Worker] Skipping already tried source: {source_key}")
             continue
+
+        # Blacklist check — skip sources the user has flagged as bad matches
+        try:
+            _bl_db = get_database()
+            if _bl_db.is_blacklisted(candidate.username, candidate.filename):
+                print(f"⛔ [Modal Worker] Skipping blacklisted source: {source_key}")
+                continue
+        except Exception:
+            pass
         
         # CRITICAL: Add source to used_sources IMMEDIATELY to prevent race conditions
         # This must happen BEFORE starting download to prevent multiple retries from picking same source

@@ -42191,6 +42191,16 @@ function _buildTrackRow(track, album, admin) {
         }
         tr.appendChild(tagTd);
 
+        // Redownload button (admin only)
+        const rdTd = document.createElement('td');
+        rdTd.className = 'col-redownload';
+        const rdBtn = document.createElement('button');
+        rdBtn.className = 'enhanced-redownload-btn';
+        rdBtn.innerHTML = '&#8635;';
+        rdBtn.title = 'Redownload this track';
+        rdTd.appendChild(rdBtn);
+        tr.appendChild(rdTd);
+
         // Delete button (admin only)
         const delTd = document.createElement('td');
         delTd.className = 'col-delete';
@@ -42350,6 +42360,13 @@ function _attachTableDelegation(table, album) {
             return;
         }
 
+        // Redownload button (admin)
+        if (target.closest('.enhanced-redownload-btn')) {
+            e.stopPropagation();
+            showTrackRedownloadModal(track, album);
+            return;
+        }
+
         // Delete button (admin)
         if (target.closest('.enhanced-delete-btn')) {
             e.stopPropagation();
@@ -42406,6 +42423,7 @@ function _showMobileTrackActions(track, album) {
         actions.push({ icon: '✎', label: 'Write Tags', action: () => showTagPreview(track.id) });
     }
     if (admin) {
+        actions.push({ icon: '↻', label: 'Redownload Track', action: () => showTrackRedownloadModal(track, album) });
         actions.push({ icon: '✕', label: 'Delete Track', cls: 'popover-delete', action: () => deleteLibraryTrack(track.id, album.id) });
     }
 
@@ -42648,6 +42666,311 @@ function _showSmartDeleteDialog() {
         document.body.appendChild(overlay);
     });
 }
+
+// ==================================================================================
+// TRACK REDOWNLOAD MODAL — Multi-step: metadata selection → source selection → download
+// ==================================================================================
+
+async function showTrackRedownloadModal(track, album) {
+    const overlay = document.createElement('div');
+    overlay.id = 'redownload-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+    const artistName = artistDetailPageState.enhancedData?.artist?.name || '';
+    const ext = (track.file_path || '').split('.').pop().toUpperCase();
+    const fmt = ['FLAC','MP3','OPUS','OGG','M4A','WAV'].includes(ext) ? ext : '';
+
+    overlay.innerHTML = `
+        <div class="redownload-modal">
+            <div class="redownload-header">
+                <h3>Redownload Track</h3>
+                <button class="redownload-close" onclick="document.getElementById('redownload-overlay')?.remove()">&times;</button>
+            </div>
+            <div class="redownload-current">
+                <div class="redownload-current-title">${_esc(track.title)}</div>
+                <div class="redownload-current-meta">${_esc(artistName)} · ${_esc(album?.title || '')}${fmt ? ` · ${fmt}` : ''}${track.bitrate ? ` · ${track.bitrate}kbps` : ''}</div>
+            </div>
+            <div class="redownload-steps">
+                <div class="redownload-step active" data-step="1">1. Metadata</div>
+                <div class="redownload-step-arrow">→</div>
+                <div class="redownload-step" data-step="2">2. Source</div>
+                <div class="redownload-step-arrow">→</div>
+                <div class="redownload-step" data-step="3">3. Download</div>
+            </div>
+            <div class="redownload-body" id="redownload-body">
+                <div class="redownload-loading">
+                    <div class="server-search-spinner"></div>
+                    Searching metadata sources...
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Escape to close
+    const escH = e => { if (e.key === 'Escape') { document.removeEventListener('keydown', escH); overlay.remove(); } };
+    document.addEventListener('keydown', escH);
+
+    document.body.appendChild(overlay);
+
+    // Auto-search metadata
+    try {
+        const res = await fetch(`/api/library/track/${track.id}/redownload/search-metadata`, { method: 'POST' });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+        _renderRedownloadStep1(overlay, track, data);
+    } catch (e) {
+        document.getElementById('redownload-body').innerHTML = `<div class="redownload-error">Error: ${_esc(e.message)}</div>`;
+    }
+}
+
+function _renderRedownloadStep1(overlay, track, data) {
+    const body = document.getElementById('redownload-body');
+    if (!body) return;
+
+    const sources = Object.keys(data.metadata_results);
+    if (sources.length === 0) {
+        body.innerHTML = '<div class="redownload-error">No metadata sources available. Check your Spotify/iTunes/Deezer connections.</div>';
+        return;
+    }
+
+    const bestSource = data.best_match?.source || sources[0];
+    let selectedMeta = null;
+
+    // Build source tabs + results
+    const tabsHtml = sources.map(s => `<button class="redownload-tab${s === bestSource ? ' active' : ''}" data-source="${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</button>`).join('');
+
+    const resultsHtml = sources.map(source => {
+        const results = data.metadata_results[source] || [];
+        if (results.length === 0) return `<div class="redownload-source-panel" data-source="${source}" style="display:${source === bestSource ? '' : 'none'}"><div class="redownload-empty">No results from ${source}</div></div>`;
+
+        const items = results.map((r, i) => {
+            const pct = Math.round((r.match_score || 0) * 100);
+            const cls = pct >= 90 ? 'high' : pct >= 70 ? 'medium' : 'low';
+            const dur = r.duration_ms ? `${Math.floor(r.duration_ms / 60000)}:${String(Math.floor((r.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
+            const checked = (source === bestSource && i === 0) ? 'checked' : '';
+            return `
+                <label class="redownload-result" data-source="${source}" data-index="${i}">
+                    <input type="radio" name="metadata-choice" value="${source}|${i}" ${checked}>
+                    <div class="redownload-result-art">${r.image_url ? `<img src="${r.image_url}" loading="lazy">` : '<div class="redownload-art-empty"></div>'}</div>
+                    <div class="redownload-result-info">
+                        <div class="redownload-result-title">${_esc(r.name)}${r.is_current_match ? ' <span class="redownload-current-badge">current</span>' : ''}</div>
+                        <div class="redownload-result-meta">${_esc(r.artist)} · ${_esc(r.album || '')}</div>
+                    </div>
+                    <div class="redownload-result-score ${cls}">${pct}%</div>
+                    ${dur ? `<div class="redownload-result-dur">${dur}</div>` : ''}
+                </label>`;
+        }).join('');
+
+        return `<div class="redownload-source-panel" data-source="${source}" style="display:${source === bestSource ? '' : 'none'}">${items}</div>`;
+    }).join('');
+
+    body.innerHTML = `
+        <div class="redownload-tabs">${tabsHtml}</div>
+        <div class="redownload-results-wrap">${resultsHtml}</div>
+        <div class="redownload-actions">
+            <button class="redownload-btn secondary" onclick="document.getElementById('redownload-overlay')?.remove()">Cancel</button>
+            <button class="redownload-btn primary" id="redownload-next-btn">Next: Search Sources →</button>
+        </div>
+    `;
+
+    // Tab switching
+    body.querySelectorAll('.redownload-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            body.querySelectorAll('.redownload-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            body.querySelectorAll('.redownload-source-panel').forEach(p => p.style.display = 'none');
+            const panel = body.querySelector(`.redownload-source-panel[data-source="${tab.dataset.source}"]`);
+            if (panel) panel.style.display = '';
+        });
+    });
+
+    // Next button
+    document.getElementById('redownload-next-btn').addEventListener('click', async () => {
+        const checked = body.querySelector('input[name="metadata-choice"]:checked');
+        if (!checked) { showToast('Select a metadata source first', 'error'); return; }
+        const [source, idx] = checked.value.split('|');
+        selectedMeta = data.metadata_results[source][parseInt(idx)];
+        selectedMeta._source = source;
+
+        // Update step indicator
+        overlay.querySelectorAll('.redownload-step').forEach(s => s.classList.remove('active'));
+        overlay.querySelector('.redownload-step[data-step="2"]').classList.add('active');
+
+        body.innerHTML = '<div class="redownload-loading"><div class="server-search-spinner"></div>Searching download sources...</div>';
+
+        try {
+            const res = await fetch(`/api/library/track/${track.id}/redownload/search-sources`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ metadata: selectedMeta })
+            });
+            const srcData = await res.json();
+            if (!srcData.success) throw new Error(srcData.error);
+            _renderRedownloadStep2(overlay, track, selectedMeta, srcData);
+        } catch (e) {
+            body.innerHTML = `<div class="redownload-error">Source search failed: ${_esc(e.message)}</div>`;
+        }
+    });
+}
+
+function _renderRedownloadStep2(overlay, track, metadata, srcData) {
+    const body = document.getElementById('redownload-body');
+    if (!body) return;
+
+    const candidates = srcData.candidates || [];
+    if (candidates.length === 0) {
+        body.innerHTML = `
+            <div class="redownload-empty">No download sources found for this track.</div>
+            <div class="redownload-actions">
+                <button class="redownload-btn secondary" onclick="document.getElementById('redownload-overlay')?.remove()">Close</button>
+            </div>`;
+        return;
+    }
+
+    const bestIdx = srcData.best_candidate_index >= 0 ? srcData.best_candidate_index : 0;
+
+    const candidatesHtml = candidates.map((c, i) => {
+        const confPct = Math.round((c.confidence || 0) * 100);
+        const confCls = confPct >= 90 ? 'high' : confPct >= 70 ? 'medium' : 'low';
+        const checked = (i === bestIdx && !c.blacklisted) ? 'checked' : '';
+        const blClass = c.blacklisted ? ' blacklisted' : '';
+
+        return `
+            <label class="redownload-candidate${blClass}" data-index="${i}">
+                ${c.blacklisted ? '' : `<input type="radio" name="source-choice" value="${i}" ${checked}>`}
+                <div class="redownload-candidate-info">
+                    <div class="redownload-candidate-name">${_esc(c.display_name)}</div>
+                    <div class="redownload-candidate-meta">${_esc(c.username)} · ${c.free_upload_slots || 0} slots${c.queue_length > 0 ? ` · ${c.queue_length} in queue` : ''}</div>
+                </div>
+                <div class="redownload-candidate-details">
+                    ${c.quality ? `<span class="redownload-fmt">${c.quality}</span>` : ''}
+                    ${c.bitrate ? `<span class="redownload-bitrate">${c.bitrate}k</span>` : ''}
+                    <span class="redownload-size">${c.size_display}</span>
+                </div>
+                <div class="redownload-candidate-conf ${confCls}">${confPct}%</div>
+                ${c.blacklisted ? '<span class="redownload-blacklisted">Blacklisted</span>' : ''}
+            </label>`;
+    }).join('');
+
+    body.innerHTML = `
+        <div class="redownload-candidates-wrap">${candidatesHtml}</div>
+        <label class="redownload-delete-old">
+            <input type="checkbox" id="redownload-delete-old-check" checked>
+            Delete old file after successful download
+        </label>
+        <div class="redownload-actions">
+            <button class="redownload-btn secondary" onclick="document.getElementById('redownload-overlay')?.remove()">Cancel</button>
+            <button class="redownload-btn primary" id="redownload-start-btn">Start Download</button>
+        </div>
+    `;
+
+    document.getElementById('redownload-start-btn').addEventListener('click', async () => {
+        const checked = body.querySelector('input[name="source-choice"]:checked');
+        if (!checked) { showToast('Select a download source', 'error'); return; }
+        const candidate = candidates[parseInt(checked.value)];
+        const deleteOld = document.getElementById('redownload-delete-old-check')?.checked ?? true;
+
+        // Update step indicator
+        overlay.querySelectorAll('.redownload-step').forEach(s => s.classList.remove('active'));
+        overlay.querySelector('.redownload-step[data-step="3"]').classList.add('active');
+
+        body.innerHTML = `
+            <div class="redownload-progress">
+                <div class="redownload-progress-title">Downloading: ${_esc(candidate.display_name)}</div>
+                <div class="redownload-progress-from">from ${_esc(candidate.username)}</div>
+                <div class="redownload-progress-bar-wrap"><div class="redownload-progress-bar" id="redownload-progress-bar"></div></div>
+                <div class="redownload-progress-status" id="redownload-progress-status">Starting download...</div>
+            </div>
+        `;
+
+        try {
+            const res = await fetch(`/api/library/track/${track.id}/redownload/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ metadata, candidate, delete_old_file: deleteOld })
+            });
+            const startData = await res.json();
+            if (!startData.success) throw new Error(startData.error);
+
+            // Poll for progress
+            _pollRedownloadProgress(startData.task_id, overlay);
+        } catch (e) {
+            body.innerHTML = `<div class="redownload-error">Download failed: ${_esc(e.message)}</div>`;
+        }
+    });
+}
+
+function _pollRedownloadProgress(taskId, overlay) {
+    const bar = document.getElementById('redownload-progress-bar');
+    const status = document.getElementById('redownload-progress-status');
+
+    const poll = setInterval(async () => {
+        try {
+            const res = await fetch(`/api/active-processes`);
+            const data = await res.json();
+
+            // Find our task in download_tasks via batch
+            // Check if the task is in any batch
+            let taskStatus = null;
+            const procs = data.active_processes || [];
+            for (const proc of procs) {
+                if (proc.batch_id && proc.batch_id.includes(`redownload_batch_`)) {
+                    taskStatus = proc;
+                    break;
+                }
+            }
+
+            // Simpler: just check the task status directly
+            // Since we can't easily get individual task status from active-processes,
+            // we'll use a simple timer-based approach
+            if (status) {
+                const elapsed = Math.round((Date.now() - _redownloadStartTime) / 1000);
+                status.textContent = `Downloading... (${elapsed}s)`;
+            }
+            if (bar) bar.style.width = `${Math.min(90, (Date.now() - _redownloadStartTime) / 600)}%`;
+
+        } catch (e) { /* ignore poll errors */ }
+    }, 2000);
+
+    _redownloadStartTime = Date.now();
+
+    // Also poll for completion via a simpler check
+    const completionCheck = setInterval(async () => {
+        try {
+            // Check if the task completed by trying to see if the batch is gone
+            const res = await fetch('/api/active-processes');
+            const data = await res.json();
+            const procs = data.active_processes || [];
+            const ourBatch = procs.find(p => p.batch_id && p.batch_id.includes('redownload_batch_'));
+
+            if (!ourBatch) {
+                // Batch is gone — either completed or failed
+                clearInterval(poll);
+                clearInterval(completionCheck);
+                if (bar) bar.style.width = '100%';
+                if (status) status.textContent = 'Complete!';
+                showToast('Track redownloaded successfully', 'success');
+                setTimeout(() => {
+                    overlay.remove();
+                    // Refresh enhanced view
+                    if (artistDetailPageState.enhancedData?.artist?.id) {
+                        loadEnhancedViewData(artistDetailPageState.enhancedData.artist.id);
+                    }
+                }, 1500);
+            }
+        } catch (e) { /* ignore */ }
+    }, 3000);
+
+    // Safety timeout — 5 minutes max
+    setTimeout(() => {
+        clearInterval(poll);
+        clearInterval(completionCheck);
+        if (status) status.textContent = 'Download may still be in progress. Check the dashboard.';
+    }, 300000);
+}
+let _redownloadStartTime = 0;
 
 async function deleteLibraryAlbum(albumId) {
     if (!await showConfirmDialog({ title: 'Delete Album', message: 'Delete this album and all its tracks from the library? (Files on disk are not affected)', confirmText: 'Delete', destructive: true })) return;
