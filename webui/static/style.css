@@ -52354,8 +52354,8 @@ tr.tag-diff-same {
 .redownload-progress { padding: 20px 0; text-align: center; }
 .redownload-progress-title { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.8); }
 .redownload-progress-from { font-size: 11px; color: rgba(255,255,255,0.3); margin: 4px 0 16px; }
-.redownload-progress-bar-wrap { height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
-.redownload-progress-bar { height: 100%; background: var(--accent); border-radius: 3px; width: 0; transition: width 0.5s ease; }
+.redownload-progress-bar-wrap { height: 8px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; }
+.redownload-progress-bar { height: 100%; background: linear-gradient(90deg, #4caf50, #66bb6a); border-radius: 4px; width: 0; transition: width 0.5s ease; box-shadow: 0 0 8px rgba(76, 175, 80, 0.4); }
 .redownload-progress-status { font-size: 11px; color: rgba(255,255,255,0.3); margin-top: 12px; }
 
 /* Action buttons */
