@@ -30425,14 +30425,10 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                 print(f"🔍 Tidal query {query_idx + 1}/{len(search_queries)}: {search_query} ({source_name})")
 
                 if use_spotify and not _spotify_rate_limited():
-                    raw_results = spotify_client.sp.search(q=search_query, type='track', limit=10)
-                    if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
-                        continue
                     results = spotify_client.search_tracks(search_query, limit=10)
                     if not results:
                         continue
                 else:
-                    raw_results = None
                     results = itunes_client.search_tracks(search_query, limit=10)
                     if not results:
                         continue
@@ -30445,8 +30441,11 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                 if match and confidence > best_confidence and confidence >= min_confidence:
                     best_confidence = confidence
                     best_match = match
-                    if use_spotify and raw_results:
-                        best_match_raw = raw_results['tracks']['items'][match_idx] if match_idx < len(raw_results['tracks']['items']) else None
+                    if use_spotify and match.id:
+                        _cache = get_metadata_cache()
+                        best_match_raw = _cache.get_entity('spotify', 'track', match.id)
+                    else:
+                        best_match_raw = None
                     print(f"✅ New best Tidal match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                 if best_confidence >= 0.9:
@@ -32727,13 +32726,9 @@ def _run_youtube_discovery_worker(url_hash):
                     try:
                         print(f"🔍 YouTube query {query_idx + 1}/{len(search_queries)}: {search_query}")
 
-                        raw_results = None
                         search_results = None
 
                         if use_spotify and not _spotify_rate_limited():
-                            raw_results = spotify_client.sp.search(q=search_query, type='track', limit=10)
-                            if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
-                                continue
                             search_results = spotify_client.search_tracks(search_query, limit=10)
                         else:
                             search_results = itunes_client.search_tracks(search_query, limit=10)
@@ -32749,8 +32744,9 @@ def _run_youtube_discovery_worker(url_hash):
                         if match and confidence > best_confidence and confidence >= min_confidence:
                             best_confidence = confidence
                             matched_track = match
-                            if use_spotify and raw_results:
-                                best_raw_track = raw_results['tracks']['items'][match_idx] if match_idx < len(raw_results['tracks']['items']) else None
+                            if use_spotify and match.id:
+                                _cache = get_metadata_cache()
+                                best_raw_track = _cache.get_entity('spotify', 'track', match.id)
                             else:
                                 best_raw_track = None
                             print(f"✅ New best YouTube match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
@@ -33042,13 +33038,9 @@ def _run_listenbrainz_discovery_worker(state_key):
                     try:
                         print(f"🔍 ListenBrainz query {query_idx + 1}/{len(search_queries)}: {search_query}")
 
-                        raw_results = None
                         search_results = None
 
                         if use_spotify and not _spotify_rate_limited():
-                            raw_results = spotify_client.sp.search(q=search_query, type='track', limit=10)
-                            if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
-                                continue
                             search_results = spotify_client.search_tracks(search_query, limit=10)
                         else:
                             search_results = itunes_client.search_tracks(search_query, limit=10)
@@ -33064,8 +33056,9 @@ def _run_listenbrainz_discovery_worker(state_key):
                         if match and confidence > best_confidence and confidence >= min_confidence:
                             best_confidence = confidence
                             matched_track = match
-                            if use_spotify and raw_results:
-                                best_raw_track = raw_results['tracks']['items'][match_idx] if match_idx < len(raw_results['tracks']['items']) else None
+                            if use_spotify and match.id:
+                                _cache = get_metadata_cache()
+                                best_raw_track = _cache.get_entity('spotify', 'track', match.id)
                             else:
                                 best_raw_track = None
                             print(f"✅ New best ListenBrainz match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
@@ -38738,15 +38731,13 @@ def search_artists_for_playlist():
             # Try Spotify first, fall back to iTunes
             if spotify_client.sp and not _spotify_rate_limited():
                 try:
-                    search_query = f'artist:{query}' if len(query.strip()) <= 4 else query
-                    results = spotify_client.sp.search(q=search_query, type='artist', limit=10)
-                    if results and 'artists' in results and 'items' in results['artists']:
-                        for artist in results['artists']['items']:
-                            artists.append({
-                                'id': artist['id'],
-                                'name': artist['name'],
-                                'image_url': artist['images'][0]['url'] if artist.get('images') else None
-                            })
+                    artist_results = spotify_client.search_artists(query, limit=10)
+                    for artist in artist_results:
+                        artists.append({
+                            'id': artist.id,
+                            'name': artist.name,
+                            'image_url': artist.image_url
+                        })
                 except Exception as e:
                     logger.warning(f"Spotify artist search failed, falling back to iTunes: {e}")
 
@@ -41708,13 +41699,9 @@ def _run_beatport_discovery_worker(url_hash):
                     try:
                         print(f"🔍 Query {query_idx + 1}/{len(search_queries)}: {search_query} ({discovery_source.upper()})")
 
-                        raw_results = None
                         search_results = None
 
                         if use_spotify and not _spotify_rate_limited():
-                            raw_results = spotify_client.sp.search(q=search_query, type='track', limit=10)
-                            if not raw_results or 'tracks' not in raw_results or not raw_results['tracks']['items']:
-                                continue
                             search_results = spotify_client.search_tracks(search_query, limit=10)
                         else:
                             search_results = itunes_client_instance.search_tracks(search_query, limit=10)
@@ -41730,8 +41717,9 @@ def _run_beatport_discovery_worker(url_hash):
                         if match and confidence > best_confidence and confidence >= min_confidence:
                             best_confidence = confidence
                             found_track = match
-                            if use_spotify and raw_results:
-                                best_raw_track = raw_results['tracks']['items'][match_idx] if match_idx < len(raw_results['tracks']['items']) else None
+                            if use_spotify and match.id:
+                                _cache = get_metadata_cache()
+                                best_raw_track = _cache.get_entity('spotify', 'track', match.id)
                             else:
                                 best_raw_track = None
                             print(f"✅ New best Beatport match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
