@@ -42982,71 +42982,260 @@ function _renderRedownloadStep1(overlay, track, data) {
         overlay.querySelectorAll('.redownload-step').forEach(s => s.classList.remove('active'));
         overlay.querySelector('.redownload-step[data-step="2"]').classList.add('active');
 
-        body.innerHTML = '<div class="redownload-loading"><div class="server-search-spinner"></div>Searching download sources...</div>';
+        // Stream results from all download sources — columns appear as each source responds
+        body.innerHTML = `
+            <div class="rdl-src-columns" id="rdl-src-columns">
+                <div class="redownload-loading" id="rdl-src-loading"><div class="server-search-spinner"></div>Searching download sources...</div>
+            </div>
+            <label class="redownload-delete-old">
+                <input type="checkbox" id="redownload-delete-old-check" checked>
+                Delete old file after successful download
+            </label>
+            <div class="redownload-actions">
+                <button class="redownload-btn secondary" onclick="document.getElementById('redownload-overlay')?.remove()">Cancel</button>
+                <button class="redownload-btn primary" id="redownload-start-btn" disabled>Waiting for results...</button>
+            </div>
+        `;
 
-        try {
-            const res = await fetch(`/api/library/track/${track.id}/redownload/search-sources`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ metadata: selectedMeta })
-            });
-            const srcData = await res.json();
-            if (!srcData.success) throw new Error(srcData.error);
-            _renderRedownloadStep2(overlay, track, selectedMeta, srcData);
-        } catch (e) {
-            body.innerHTML = `<div class="redownload-error">Source search failed: ${_esc(e.message)}</div>`;
-        }
+        _streamRedownloadSources(overlay, track, selectedMeta);
     });
 }
 
-function _renderRedownloadStep2(overlay, track, metadata, srcData) {
-    const body = document.getElementById('redownload-body');
-    if (!body) return;
+async function _streamRedownloadSources(overlay, track, metadata) {
+    const columnsEl = document.getElementById('rdl-src-columns');
+    const loadingEl = document.getElementById('rdl-src-loading');
+    const startBtn = document.getElementById('redownload-start-btn');
+    if (!columnsEl) return;
 
-    const candidates = srcData.candidates || [];
-    if (candidates.length === 0) {
-        body.innerHTML = `
-            <div class="redownload-empty">No download sources found for this track.</div>
-            <div class="redownload-actions">
-                <button class="redownload-btn secondary" onclick="document.getElementById('redownload-overlay')?.remove()">Close</button>
-            </div>`;
-        return;
+    const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer_dl: '💜', hybrid: '⚡' };
+    const serviceLabels = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', hybrid: 'Auto' };
+
+    let allCandidates = [];
+    let firstResult = true;
+    let bestGlobalIdx = -1;
+
+    try {
+        const res = await fetch(`/api/library/track/${track.id}/redownload/search-sources`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ metadata })
+        });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // keep incomplete line
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const data = JSON.parse(line);
+                    if (data.done) continue;
+
+                    const svc = data.source;
+                    const candidates = data.candidates || [];
+
+                    // Remove loading spinner on first result
+                    if (firstResult && loadingEl) { loadingEl.remove(); firstResult = false; }
+
+                    // Assign global indices
+                    const startIdx = allCandidates.length;
+                    candidates.forEach((c, i) => { c._globalIdx = startIdx + i; });
+                    allCandidates.push(...candidates);
+
+                    // Find best overall candidate
+                    bestGlobalIdx = -1;
+                    let bestConf = 0;
+                    allCandidates.forEach((c, i) => {
+                        if (!c.blacklisted && c.confidence > bestConf) { bestConf = c.confidence; bestGlobalIdx = i; }
+                    });
+
+                    // Render column for this source
+                    const icon = serviceIcons[svc] || '📦';
+                    const label = serviceLabels[svc] || svc;
+
+                    const itemsHtml = candidates.length === 0
+                        ? '<div class="rdl-src-col-empty">No results</div>'
+                        : candidates.slice(0, 10).map(c => {
+                            const confPct = Math.round((c.confidence || 0) * 100);
+                            const confCls = confPct >= 90 ? 'high' : confPct >= 70 ? 'medium' : 'low';
+                            const isRec = c._globalIdx === bestGlobalIdx;
+                            const blClass = c.blacklisted ? ' blacklisted' : '';
+                            const dur = c.duration ? `${Math.floor(c.duration / 60000)}:${String(Math.floor((c.duration % 60000) / 1000)).padStart(2, '0')}` : '';
+                            return `
+                                <label class="rdl-src-item${blClass}${isRec ? ' recommended' : ''}">
+                                    ${c.blacklisted ? '<div class="rdl-src-radio-placeholder"></div>' : `<input type="radio" name="source-choice" value="${c._globalIdx}" ${isRec ? 'checked' : ''}>`}
+                                    <div class="rdl-src-item-body">
+                                        <div class="rdl-src-item-top">
+                                            <div class="rdl-src-item-name" title="${_esc(c.filename)}">${_esc(c.display_name)}</div>
+                                            ${isRec ? '<span class="rdl-src-recommended">Best</span>' : ''}
+                                        </div>
+                                        <div class="rdl-src-item-details">
+                                            ${c.quality ? `<span class="rdl-src-fmt">${c.quality}</span>` : ''}
+                                            ${c.bitrate ? `<span class="rdl-src-detail">${c.bitrate}k</span>` : ''}
+                                            <span class="rdl-src-detail">${c.size_display}</span>
+                                            ${dur ? `<span class="rdl-src-detail">${dur}</span>` : ''}
+                                            ${svc === 'soulseek' ? `<span class="rdl-src-detail rdl-src-user">${_esc(c.username)}</span>` : ''}
+                                            ${svc === 'soulseek' && c.free_upload_slots != null ? `<span class="rdl-src-detail">${c.free_upload_slots} slots</span>` : ''}
+                                        </div>
+                                        <div class="rdl-src-conf-bar"><div class="rdl-src-conf-fill ${confCls}" style="width:${confPct}%"></div></div>
+                                    </div>
+                                    <div class="rdl-src-conf-pct ${confCls}">${confPct}%</div>
+                                    ${c.blacklisted ? '<span class="rdl-src-bl">Blacklisted</span>' : ''}
+                                </label>`;
+                        }).join('');
+
+                    const colEl = document.createElement('div');
+                    colEl.className = 'rdl-src-col';
+                    colEl.style.animation = 'fadeSlideUp 0.3s ease both';
+                    colEl.innerHTML = `
+                        <div class="rdl-src-col-header">
+                            <span class="rdl-src-col-icon">${icon}</span>
+                            <span class="rdl-src-col-label">${label}</span>
+                            <span class="rdl-src-col-count">${candidates.length}</span>
+                        </div>
+                        <div class="rdl-src-col-body">${itemsHtml}</div>
+                    `;
+                    columnsEl.appendChild(colEl);
+
+                    // Enable the download button
+                    if (startBtn && allCandidates.some(c => !c.blacklisted)) {
+                        startBtn.disabled = false;
+                        startBtn.textContent = 'Download Selected';
+                    }
+
+                } catch (e) { /* skip malformed lines */ }
+            }
+        }
+    } catch (e) {
+        if (loadingEl) loadingEl.innerHTML = `<div class="redownload-error">Error: ${_esc(e.message)}</div>`;
     }
 
-    const bestIdx = srcData.best_candidate_index >= 0 ? srcData.best_candidate_index : 0;
+    // If no results at all
+    if (allCandidates.length === 0 && loadingEl) {
+        loadingEl.innerHTML = '<div class="rdl-src-col-empty">No download sources found for this track.</div>';
+    }
 
-    const candidatesHtml = candidates.map((c, i) => {
-        const confPct = Math.round((c.confidence || 0) * 100);
-        const confCls = confPct >= 90 ? 'high' : confPct >= 70 ? 'medium' : 'low';
-        const checked = (i === bestIdx && !c.blacklisted) ? 'checked' : '';
-        const blClass = c.blacklisted ? ' blacklisted' : '';
+    // Store candidates for the download button
+    window._redownloadCandidates = allCandidates;
+
+    // Wire up download button
+    const startBtn2 = document.getElementById('redownload-start-btn');
+    if (startBtn2) {
+        startBtn2.addEventListener('click', async () => {
+            const checked = document.querySelector('input[name="source-choice"]:checked');
+            if (!checked) { showToast('Select a download source', 'error'); return; }
+            const candidate = window._redownloadCandidates[parseInt(checked.value)];
+            const deleteOld = document.getElementById('redownload-delete-old-check')?.checked ?? true;
+
+            overlay.querySelectorAll('.redownload-step').forEach(s => s.classList.remove('active'));
+            overlay.querySelector('.redownload-step[data-step="3"]').classList.add('active');
+
+            const body = document.getElementById('redownload-body');
+            body.innerHTML = `
+                <div class="redownload-progress">
+                    <div class="redownload-progress-title">Downloading: ${_esc(candidate.display_name)}</div>
+                    <div class="redownload-progress-from">from ${_esc(candidate.source_service === 'soulseek' ? candidate.username : (candidate.source_service || 'unknown'))}</div>
+                    <div class="redownload-progress-bar-wrap"><div class="redownload-progress-bar" id="redownload-progress-bar"></div></div>
+                    <div class="redownload-progress-status" id="redownload-progress-status">Starting download...</div>
+                </div>
+            `;
+
+            try {
+                const res = await fetch(`/api/library/track/${track.id}/redownload/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ metadata, candidate, delete_old_file: deleteOld })
+                });
+                const startData = await res.json();
+                if (!startData.success) throw new Error(startData.error);
+                _pollRedownloadProgress(startData.task_id, overlay);
+            } catch (e) {
+                body.innerHTML = `<div class="redownload-error">Download failed: ${_esc(e.message)}</div>`;
+            }
+        });
+    }
+}
+
+/* _renderRedownloadStep2 removed — replaced by _streamRedownloadSources above */
+if (false) {
+    const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer_dl: '💜', hybrid: '⚡' };
+    const serviceLabels = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', hybrid: 'Auto' };
+
+    // Group candidates by source service
+    const grouped = {};
+    candidates.forEach((c, i) => {
+        c._origIdx = i; // preserve original index for radio value
+        const svc = c.source_service || 'unknown';
+        if (!grouped[svc]) grouped[svc] = [];
+        grouped[svc].push(c);
+    });
+
+    // Build columns — one per source
+    const sourceColumnsHtml = Object.entries(grouped).map(([svc, items]) => {
+        const icon = serviceIcons[svc] || '📦';
+        const label = serviceLabels[svc] || svc;
+
+        const itemsHtml = items.slice(0, 10).map(c => {
+            const confPct = Math.round((c.confidence || 0) * 100);
+            const confCls = confPct >= 90 ? 'high' : confPct >= 70 ? 'medium' : 'low';
+            const isRecommended = c._origIdx === bestIdx && !c.blacklisted;
+            const checked = isRecommended ? 'checked' : '';
+            const blClass = c.blacklisted ? ' blacklisted' : '';
+            const dur = c.duration ? `${Math.floor(c.duration / 60000)}:${String(Math.floor((c.duration % 60000) / 1000)).padStart(2, '0')}` : '';
+
+            return `
+                <label class="rdl-src-item${blClass}${isRecommended ? ' recommended' : ''}" data-index="${c._origIdx}">
+                    ${c.blacklisted ? '<div class="rdl-src-radio-placeholder"></div>' : `<input type="radio" name="source-choice" value="${c._origIdx}" ${checked}>`}
+                    <div class="rdl-src-item-body">
+                        <div class="rdl-src-item-top">
+                            <div class="rdl-src-item-name" title="${_esc(c.filename)}">${_esc(c.display_name)}</div>
+                            ${isRecommended ? '<span class="rdl-src-recommended">Best Match</span>' : ''}
+                        </div>
+                        <div class="rdl-src-item-details">
+                            ${c.quality ? `<span class="rdl-src-fmt">${c.quality}</span>` : ''}
+                            ${c.bitrate ? `<span class="rdl-src-detail">${c.bitrate}k</span>` : ''}
+                            <span class="rdl-src-detail">${c.size_display}</span>
+                            ${dur ? `<span class="rdl-src-detail">${dur}</span>` : ''}
+                            ${svc === 'soulseek' ? `<span class="rdl-src-detail rdl-src-user">${_esc(c.username)}</span>` : ''}
+                            ${svc === 'soulseek' ? `<span class="rdl-src-detail">${c.free_upload_slots || 0} slots</span>` : ''}
+                        </div>
+                        <div class="rdl-src-conf-bar">
+                            <div class="rdl-src-conf-fill ${confCls}" style="width:${confPct}%"></div>
+                        </div>
+                    </div>
+                    <div class="rdl-src-conf-pct ${confCls}">${confPct}%</div>
+                    ${c.blacklisted ? '<span class="rdl-src-bl">Blacklisted</span>' : ''}
+                </label>`;
+        }).join('');
 
         return `
-            <label class="redownload-candidate${blClass}" data-index="${i}">
-                ${c.blacklisted ? '' : `<input type="radio" name="source-choice" value="${i}" ${checked}>`}
-                <div class="redownload-candidate-info">
-                    <div class="redownload-candidate-name">${_esc(c.display_name)}</div>
-                    <div class="redownload-candidate-meta">${_esc(c.username)} · ${c.free_upload_slots || 0} slots${c.queue_length > 0 ? ` · ${c.queue_length} in queue` : ''}</div>
+            <div class="rdl-src-col">
+                <div class="rdl-src-col-header">
+                    <span class="rdl-src-col-icon">${icon}</span>
+                    <span class="rdl-src-col-label">${label}</span>
+                    <span class="rdl-src-col-count">${items.length}</span>
                 </div>
-                <div class="redownload-candidate-details">
-                    ${c.quality ? `<span class="redownload-fmt">${c.quality}</span>` : ''}
-                    ${c.bitrate ? `<span class="redownload-bitrate">${c.bitrate}k</span>` : ''}
-                    <span class="redownload-size">${c.size_display}</span>
-                </div>
-                <div class="redownload-candidate-conf ${confCls}">${confPct}%</div>
-                ${c.blacklisted ? '<span class="redownload-blacklisted">Blacklisted</span>' : ''}
-            </label>`;
+                <div class="rdl-src-col-body">${itemsHtml}</div>
+            </div>`;
     }).join('');
 
     body.innerHTML = `
-        <div class="redownload-candidates-wrap">${candidatesHtml}</div>
+        <div class="rdl-src-columns">${sourceColumnsHtml}</div>
         <label class="redownload-delete-old">
             <input type="checkbox" id="redownload-delete-old-check" checked>
             Delete old file after successful download
         </label>
         <div class="redownload-actions">
             <button class="redownload-btn secondary" onclick="document.getElementById('redownload-overlay')?.remove()">Cancel</button>
-            <button class="redownload-btn primary" id="redownload-start-btn">Start Download</button>
+            <button class="redownload-btn primary" id="redownload-start-btn">Download Selected</button>
         </div>
     `;
 

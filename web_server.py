@@ -13068,13 +13068,20 @@ def redownload_search_metadata(track_id):
         except Exception as e:
             logger.debug(f"Deezer client not available for redownload search: {e}")
 
+        # Build source-optimized queries
+        deezer_query = f'artist:"{artist_name}" track:"{clean_title}"'
+
         def _search_source(source_name, client):
             try:
-                logger.info(f"[Redownload] Searching {source_name} for: {query}")
-                track_objs = client.search_tracks(query, limit=10)
-                # If no results with full query, try title only
-                if not track_objs and clean_title:
-                    logger.info(f"[Redownload] {source_name} got 0 results, trying title only: {clean_title}")
+                # Deezer works best with structured artist:/track: queries
+                search_q = deezer_query if source_name == 'deezer' else query
+                logger.info(f"[Redownload] Searching {source_name} for: {search_q}")
+                track_objs = client.search_tracks(search_q, limit=10)
+                # If no results, try plain query as fallback
+                if not track_objs and search_q != query:
+                    track_objs = client.search_tracks(query, limit=10)
+                # Last resort: title only
+                if not track_objs and clean_title != query:
                     track_objs = client.search_tracks(clean_title, limit=10)
                 logger.info(f"[Redownload] {source_name} returned {len(track_objs)} results")
                 results = []
@@ -13151,69 +13158,109 @@ def redownload_search_sources(track_id):
         if not search_queries:
             search_queries = [f"{metadata.get('artist', '')} {metadata['name']}".strip()]
 
-        # Limit to first 3 queries for speed
-        search_queries = search_queries[:3]
+        # Use first 2 queries for speed
+        search_queries = search_queries[:2]
 
-        # Search download sources
+        # Search ALL configured download sources individually (not through hybrid which stops at first hit)
         candidates = []
         database = get_database()
 
-        for qi, query in enumerate(search_queries):
-            try:
-                tracks_result, _ = run_async(soulseek_client.search(query, timeout=25))
-                if not tracks_result:
-                    continue
+        # Get all available download source clients
+        download_clients = {}
+        try:
+            orch = soulseek_client  # The download orchestrator
+            if hasattr(orch, 'soulseek') and orch.soulseek:
+                if not (hasattr(orch.soulseek, 'is_configured') and not orch.soulseek.is_configured()):
+                    download_clients['soulseek'] = orch.soulseek
+            if hasattr(orch, 'youtube') and orch.youtube:
+                if not (hasattr(orch.youtube, 'is_configured') and not orch.youtube.is_configured()):
+                    download_clients['youtube'] = orch.youtube
+            if hasattr(orch, 'tidal') and orch.tidal:
+                if not (hasattr(orch.tidal, 'is_configured') and not orch.tidal.is_configured()):
+                    download_clients['tidal'] = orch.tidal
+            if hasattr(orch, 'qobuz') and orch.qobuz:
+                if not (hasattr(orch.qobuz, 'is_configured') and not orch.qobuz.is_configured()):
+                    download_clients['qobuz'] = orch.qobuz
+            if hasattr(orch, 'hifi') and orch.hifi:
+                if not (hasattr(orch.hifi, 'is_configured') and not orch.hifi.is_configured()):
+                    download_clients['hifi'] = orch.hifi
+            if hasattr(orch, 'deezer_dl') and orch.deezer_dl:
+                if not (hasattr(orch.deezer_dl, 'is_configured') and not orch.deezer_dl.is_configured()):
+                    download_clients['deezer_dl'] = orch.deezer_dl
+        except Exception as e:
+            logger.warning(f"[Redownload] Error getting download clients: {e}")
 
-                valid = get_valid_candidates(tracks_result, track_obj, query)
-                for candidate in valid:
-                    # Check blacklist
-                    is_bl = database.is_blacklisted(candidate.username, candidate.filename)
+        if not download_clients:
+            # Fallback: use orchestrator directly
+            download_clients = {'default': soulseek_client}
 
-                    # Extract display name from filename
-                    display_name = os.path.basename(candidate.filename.replace('\\', '/'))
-                    ext = os.path.splitext(display_name)[1].lstrip('.').upper()
-                    quality = ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else candidate.quality or ''
+        logger.info(f"[Redownload] Streaming search across {len(download_clients)} sources: {list(download_clients.keys())}")
 
-                    candidates.append({
-                        'username': candidate.username,
-                        'filename': candidate.filename,
-                        'display_name': display_name,
-                        'size': candidate.size or 0,
-                        'size_display': f"{(candidate.size or 0) / 1048576:.1f} MB",
-                        'bitrate': candidate.bitrate or 0,
-                        'quality': quality,
-                        'duration': candidate.duration or 0,
-                        'confidence': round(getattr(candidate, 'confidence', 0), 3),
-                        'source_query': query,
-                        'blacklisted': is_bl,
-                        'free_upload_slots': getattr(candidate, 'free_upload_slots', 0),
-                        'upload_speed': getattr(candidate, 'upload_speed', 0),
-                        'queue_length': getattr(candidate, 'queue_length', 0),
-                    })
-            except Exception as e:
-                logger.debug(f"Download source search failed for query '{query}': {e}")
+        def _search_one_source(source_name, client):
+            """Search a single download source and return formatted candidates."""
+            source_candidates = []
+            for qi, q in enumerate(search_queries):
+                try:
+                    tracks_result, _ = run_async(client.search(q, timeout=20))
+                    if not tracks_result:
+                        continue
+                    valid = get_valid_candidates(tracks_result, track_obj, q)
+                    for candidate in valid:
+                        is_bl = database.is_blacklisted(candidate.username, candidate.filename)
+                        display_name = os.path.basename(candidate.filename.replace('\\', '/'))
+                        ext = os.path.splitext(display_name)[1].lstrip('.').upper()
+                        quality = ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else candidate.quality or ''
+                        svc = source_name if source_name != 'default' else 'hybrid'
+                        uname = candidate.username
+                        if uname in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
+                            svc = uname
+                        source_candidates.append({
+                            'username': uname,
+                            'filename': candidate.filename,
+                            'display_name': display_name,
+                            'size': candidate.size or 0,
+                            'size_display': f"{(candidate.size or 0) / 1048576:.1f} MB",
+                            'bitrate': candidate.bitrate or 0,
+                            'quality': quality,
+                            'duration': candidate.duration or 0,
+                            'confidence': round(getattr(candidate, 'confidence', 0), 3),
+                            'source_service': svc,
+                            'source_query': q,
+                            'blacklisted': is_bl,
+                            'free_upload_slots': getattr(candidate, 'free_upload_slots', 0),
+                            'upload_speed': getattr(candidate, 'upload_speed', 0),
+                            'queue_length': getattr(candidate, 'queue_length', 0),
+                        })
+                except Exception as e:
+                    logger.debug(f"[Redownload] {source_name} search failed for query '{q}': {e}")
+            # Deduplicate within source
+            seen = set()
+            unique = []
+            for c in source_candidates:
+                key = f"{c['username']}|{c['filename']}"
+                if key not in seen:
+                    seen.add(key)
+                    unique.append(c)
+            unique.sort(key=lambda c: (-int(not c['blacklisted']), -c['confidence']))
+            return unique
 
-        # Deduplicate by username+filename
-        seen = set()
-        unique = []
-        for c in candidates:
-            key = f"{c['username']}|{c['filename']}"
-            if key not in seen:
-                seen.add(key)
-                unique.append(c)
-        candidates = unique
+        # Stream NDJSON — one line per source as it completes
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # Sort: non-blacklisted first, then by confidence
-        candidates.sort(key=lambda c: (-int(not c['blacklisted']), -c['confidence']))
+        def generate_stream():
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                futures = {pool.submit(_search_one_source, name, client): name for name, client in download_clients.items()}
+                for future in as_completed(futures):
+                    source_name = futures[future]
+                    try:
+                        results = future.result()
+                        yield json.dumps({'source': source_name, 'candidates': results}) + '\n'
+                    except Exception as e:
+                        yield json.dumps({'source': source_name, 'candidates': [], 'error': str(e)}) + '\n'
+            yield json.dumps({'done': True}) + '\n'
 
-        best_idx = next((i for i, c in enumerate(candidates) if not c['blacklisted']), 0) if candidates else -1
+        return app.response_class(generate_stream(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
 
-        return jsonify({
-            "success": True,
-            "candidates": candidates,
-            "best_candidate_index": best_idx,
-            "queries_used": search_queries,
-        })
     except Exception as e:
         logger.error(f"Error in redownload source search: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
