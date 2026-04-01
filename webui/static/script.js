@@ -15109,7 +15109,7 @@ function startSyncPolling(playlistId) {
     // Start a new poller that checks every 2 seconds
     console.log(`🔄 Starting sync polling for playlist: ${playlistId}`);
     activeSyncPollers[playlistId] = setInterval(async () => {
-        if (socketConnected) return; // Phase 5: WS handles updates
+        // Always poll — no dedicated WebSocket events for discovery progress
         try {
             console.log(`📊 Polling sync status for: ${playlistId}`);
             const response = await fetch(`/api/sync/status/${playlistId}`);
@@ -24049,7 +24049,7 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
     }
 
     const pollInterval = setInterval(async () => {
-        if (socketConnected) return; // Phase 5: WS handles updates
+        // Always poll — no dedicated WebSocket events for discovery progress
         try {
             const response = await fetch(`/api/tidal/discovery/status/${playlistId}`);
             const status = await response.json();
@@ -26851,7 +26851,7 @@ function startBeatportDiscoveryPolling(urlHash) {
     }
 
     const pollInterval = setInterval(async () => {
-        if (socketConnected) return; // Phase 5: WS handles updates
+        // Always poll — no dedicated WebSocket events for discovery progress
         try {
             const response = await fetch(`/api/beatport/discovery/status/${urlHash}`);
             const status = await response.json();
@@ -30231,7 +30231,7 @@ function startYouTubeDiscoveryPolling(urlHash) {
     }
 
     const pollInterval = setInterval(async () => {
-        if (socketConnected) return; // Phase 5: WS handles updates
+        // Always poll — no dedicated WebSocket events for discovery progress
         try {
             const response = await fetch(`/api/youtube/discovery/status/${urlHash}`);
             const status = await response.json();
@@ -31678,7 +31678,7 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
     }
 
     const pollInterval = setInterval(async () => {
-        if (socketConnected) return; // Phase 5: WS handles updates
+        // Always poll — no dedicated WebSocket events for discovery progress
         try {
             const response = await fetch(`/api/listenbrainz/discovery/status/${playlistMbid}`);
             const status = await response.json();
@@ -51143,7 +51143,7 @@ function startDecadeSyncPolling(decade, virtualPlaylistId) {
     }
 
     discoverSyncPollers[pollerId] = setInterval(async () => {
-        if (socketConnected) return; // Phase 5: WS handles updates
+        // Always poll — no dedicated WebSocket events for discovery progress
         try {
             const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
             if (!response.ok) return;
@@ -51544,7 +51544,7 @@ function startGenreSyncPolling(genreName, genreId, virtualPlaylistId) {
     }
 
     discoverSyncPollers[pollerId] = setInterval(async () => {
-        if (socketConnected) return; // Phase 5: WS handles updates
+        // Always poll — no dedicated WebSocket events for discovery progress
         try {
             const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
             if (!response.ok) return;
@@ -54003,7 +54003,7 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
 
     // Poll every 500ms for progress updates
     discoverSyncPollers[playlistType] = setInterval(async () => {
-        if (socketConnected) return; // Phase 5: WS handles updates
+        // Always poll — no dedicated WebSocket events for discovery progress
         try {
             const response = await fetch(`/api/sync/status/${virtualPlaylistId}`);
             if (!response.ok) {
