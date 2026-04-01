@@ -13290,26 +13290,87 @@ def redownload_start(track_id):
         if row and row['file_path'] and delete_old:
             old_file_path = _resolve_library_file_path(row['file_path'])
 
-        # Build track data for the download worker
-        import uuid
         task_id = f"redownload_{track_id}_{int(time.time())}"
         batch_id = f"redownload_batch_{track_id}"
 
-        # Create a track dict compatible with the download worker
+        # Fetch full track details from the metadata source for pipeline parity
+        # This gives us track_number, disc_number, full album data
+        meta_source = metadata.get('_source', '')
+        meta_id = metadata.get('id', '')
+        full_track_details = None
+        full_album_data = None
+
+        if meta_id:
+            try:
+                if meta_source == 'spotify' and spotify_client and spotify_client.is_authenticated():
+                    full_track_details = spotify_client.get_track_details(meta_id)
+                    if full_track_details and full_track_details.get('album', {}).get('id'):
+                        full_album_data = spotify_client.get_album(full_track_details['album']['id'])
+                elif meta_source == 'itunes':
+                    from core.itunes_client import iTunesClient
+                    _it = iTunesClient()
+                    results = _it._lookup(id=meta_id, entity='song')
+                    if results:
+                        for r in results:
+                            if r.get('wrapperType') == 'track':
+                                full_track_details = r
+                                break
+                elif meta_source == 'deezer':
+                    _dz = _get_deezer_client()
+                    full_track_details = _dz._api_get(f'track/{meta_id}')
+            except Exception as e:
+                logger.debug(f"[Redownload] Could not fetch full track details: {e}")
+
+        # Build track data with full metadata for pipeline parity
+        track_number = None
+        disc_number = 1
+        album_data = {'name': metadata.get('album', '')}
+
+        if full_track_details:
+            if meta_source == 'spotify':
+                track_number = full_track_details.get('track_number')
+                disc_number = full_track_details.get('disc_number', 1)
+                album_raw = full_track_details.get('album', {})
+                if album_raw:
+                    album_images = album_raw.get('images', [])
+                    album_data = {
+                        'id': album_raw.get('id', ''),
+                        'name': album_raw.get('name', metadata.get('album', '')),
+                        'release_date': album_raw.get('release_date', ''),
+                        'album_type': album_raw.get('album_type', 'album'),
+                        'total_tracks': album_raw.get('total_tracks', 0),
+                        'images': album_images,
+                        'image_url': album_images[0]['url'] if album_images else '',
+                    }
+            elif meta_source == 'itunes':
+                track_number = full_track_details.get('trackNumber')
+                disc_number = full_track_details.get('discNumber', 1)
+            elif meta_source == 'deezer':
+                track_number = full_track_details.get('track_position')
+                disc_number = full_track_details.get('disk_number', 1)
+
         track_data = {
-            'id': metadata.get('id', ''),
+            'id': meta_id,
             'name': metadata.get('name', ''),
             'artists': [{'name': metadata.get('artist', '')}],
-            'album': {'name': metadata.get('album', '')},
+            'album': album_data,
             'duration_ms': metadata.get('duration_ms', 0),
+            'track_number': track_number,
+            'disc_number': disc_number,
+            '_is_explicit_album_download': bool(full_album_data or (album_data.get('id'))),
         }
+
+        # Build explicit context if we have full album data
+        if full_album_data or album_data.get('id'):
+            track_data['_explicit_album_context'] = full_album_data if isinstance(full_album_data, dict) else album_data
+            track_data['_explicit_artist_context'] = {'name': metadata.get('artist', ''), 'id': '', 'genres': []}
 
         # Create batch
         with tasks_lock:
             download_batches[batch_id] = {
                 'queue': [task_id],
-                'queue_index': 0,
-                'active_count': 0,
+                'queue_index': 1,  # Already past the first (only) item
+                'active_count': 1,  # One worker is about to start
                 'max_concurrent': 1,
                 'playlist_id': f'redownload_{track_id}',
                 'playlist_name': f"Redownload: {metadata.get('artist', '')} - {metadata.get('name', '')}",
@@ -13317,6 +13378,8 @@ def redownload_start(track_id):
                 'total_tracks': 1,
                 'completed_count': 0,
                 'failed_count': 0,
+                'cancelled_tracks': set(),
+                'permanently_failed_tracks': [],
                 'force_download': True,
                 'auto_initiated': False,
             }
@@ -14642,13 +14705,18 @@ def _clean_track_title(track_title: str, artist_name: str) -> str:
     return cleaned if cleaned else original
 
 def _extract_track_number_from_filename(filename: str, title: str = None) -> int:
-    """Extract track number from filename or title, returns 1 if not found."""
+    """Extract track number from filename, returns 1 if not found.
+    Only matches numbers followed by a separator (dash, dot, space-dash) to avoid
+    picking up numbers that are part of artist/track names (e.g. '50 Cent')."""
     import re
     import os
-    text_to_check = f"{title or ''} {os.path.splitext(os.path.basename(filename))[0]}"
-    match = re.match(r'^\d{1,2}', text_to_check.strip())
+    basename = os.path.splitext(os.path.basename(filename))[0]
+    # Match patterns like: "01 - Song", "01. Song", "01-Song", "1 Song"
+    match = re.match(r'^(\d{1,3})\s*[\-\.)\]]\s*', basename.strip())
     if match:
-        return int(match.group(0))
+        num = int(match.group(1))
+        if 1 <= num <= 999:
+            return num
     return 1
 
 def _search_track_in_album_context(original_search: dict, artist: dict) -> dict:
