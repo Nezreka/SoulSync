@@ -2839,6 +2839,7 @@ async function loadPageData(pageId) {
                 await loadSettingsData();
                 await loadQualityProfile();
                 loadApiKeys();
+                loadBlacklistCount();
                 switchSettingsTab('connections');
                 break;
             case 'stats':
@@ -20357,6 +20358,95 @@ function _cleanupModalSync(playlistId, finalStatus) {
 let _mcacheCurrentTab = 'artist';
 let _mcachePage = 0;
 let _mcacheSearchTimeout = null;
+// ==================================================================================
+// DOWNLOAD BLACKLIST VIEWER
+// ==================================================================================
+
+async function loadBlacklistCount() {
+    try {
+        const res = await fetch('/api/library/blacklist');
+        const data = await res.json();
+        const el = document.getElementById('blacklist-count');
+        if (el) el.textContent = data.entries?.length || 0;
+    } catch (e) { /* ignore */ }
+}
+
+async function openBlacklistModal() {
+    const existing = document.getElementById('blacklist-modal-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'blacklist-modal-overlay';
+    overlay.className = 'redownload-overlay';
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+    overlay.innerHTML = `
+        <div class="blacklist-modal">
+            <div class="blacklist-modal-header">
+                <h3>Download Blacklist</h3>
+                <button class="redownload-close" onclick="document.getElementById('blacklist-modal-overlay')?.remove()">&times;</button>
+            </div>
+            <div class="blacklist-modal-body" id="blacklist-modal-body">
+                <div class="redownload-loading"><div class="server-search-spinner"></div>Loading...</div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const escH = e => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escH); } };
+    document.addEventListener('keydown', escH);
+
+    try {
+        const res = await fetch('/api/library/blacklist');
+        const data = await res.json();
+        const body = document.getElementById('blacklist-modal-body');
+
+        if (!data.success || !data.entries || data.entries.length === 0) {
+            body.innerHTML = '<div class="blacklist-empty">No blocked sources. Sources can be blacklisted from the Source Info (ℹ) button on tracks in the enhanced library view.</div>';
+            return;
+        }
+
+        const serviceIcons = { soulseek: '🔍', youtube: '▶️', tidal: '🌊', qobuz: '🎵', hifi: '🎧', deezer_dl: '💜' };
+
+        body.innerHTML = data.entries.map(e => {
+            const displayFile = (e.blocked_filename || '').replace(/\\/g, '/').split('/').pop() || 'Unknown';
+            const svc = e.blocked_username && ['youtube','tidal','qobuz','hifi','deezer_dl'].includes(e.blocked_username) ? e.blocked_username : 'soulseek';
+            const icon = serviceIcons[svc] || '🔍';
+            const ago = e.created_at ? timeAgo(e.created_at) : '';
+            return `
+                <div class="blacklist-entry">
+                    <div class="blacklist-entry-icon">${icon}</div>
+                    <div class="blacklist-entry-info">
+                        <div class="blacklist-entry-track">${_esc(e.track_artist || '')}${e.track_artist && e.track_title ? ' — ' : ''}${_esc(e.track_title || '')}</div>
+                        <div class="blacklist-entry-file" title="${_esc(e.blocked_filename || '')}">${_esc(displayFile)}</div>
+                        ${e.blocked_username && svc === 'soulseek' ? `<div class="blacklist-entry-user">from ${_esc(e.blocked_username)}</div>` : ''}
+                    </div>
+                    <div class="blacklist-entry-meta">${ago}</div>
+                    <button class="blacklist-entry-remove" onclick="_removeBlacklistEntry(${e.id}, this)" title="Remove from blacklist">✕</button>
+                </div>`;
+        }).join('');
+
+    } catch (e) {
+        document.getElementById('blacklist-modal-body').innerHTML = `<div class="blacklist-empty">Error: ${e.message}</div>`;
+    }
+}
+
+async function _removeBlacklistEntry(id, btn) {
+    if (!await showConfirmDialog({ title: 'Remove from Blacklist', message: 'Allow this source to be used for downloads again?', confirmText: 'Remove' })) return;
+    try {
+        const res = await fetch(`/api/library/blacklist/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            btn.closest('.blacklist-entry').remove();
+            showToast('Removed from blacklist', 'success');
+            loadBlacklistCount();
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
 const MCACHE_PAGE_SIZE = 48;
 
 function openMetadataCacheModal() {
