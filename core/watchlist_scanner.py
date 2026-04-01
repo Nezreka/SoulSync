@@ -850,7 +850,7 @@ class WatchlistScanner:
         try:
             # Get all artist albums (albums + singles) - this is rate limited in spotify_client
             logger.debug(f"Fetching discography for artist {spotify_artist_id}")
-            albums = self.spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single', limit=50)
+            albums = self.spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single', limit=50, skip_cache=True)
 
             if not albums:
                 logger.warning(f"No albums found for artist {spotify_artist_id}")
@@ -906,8 +906,10 @@ class WatchlistScanner:
         """
         try:
             # Get all artist albums (albums + singles)
+            # skip_cache for Spotify so watchlist scans always get fresh data
             logger.debug(f"Fetching discography for artist {artist_id}")
-            albums = client.get_artist_albums(artist_id, album_type='album,single', limit=50)
+            _skip = {'skip_cache': True} if hasattr(client, 'sp') else {}
+            albums = client.get_artist_albums(artist_id, album_type='album,single', limit=50, **_skip)
 
             if not albums:
                 logger.warning(f"No albums found for artist {artist_id}")
@@ -1914,7 +1916,8 @@ class WatchlistScanner:
                                 all_albums = self.spotify_client.get_artist_albums(
                                     artist_id,
                                     album_type='album,single,ep',
-                                    limit=50
+                                    limit=50,
+                                    skip_cache=True
                                 )
                             else:  # itunes or deezer fallback
                                 all_albums = itunes_client.get_artist_albums(
@@ -2319,7 +2322,8 @@ class WatchlistScanner:
                     recent_releases = self.spotify_client.get_artist_albums(
                         artist.spotify_artist_id,
                         album_type='album,single,ep',
-                        limit=5
+                        limit=5,
+                        skip_cache=True
                     )
 
                     if not recent_releases:
@@ -2556,7 +2560,8 @@ class WatchlistScanner:
                         albums = self.spotify_client.get_artist_albums(
                             artist.spotify_artist_id,
                             album_type='album,single,ep',
-                            limit=20
+                            limit=20,
+                            skip_cache=True
                         )
                         for album in albums or []:
                             process_album(album, artist.artist_name, artist.spotify_artist_id, fallback_id if fallback_source == 'itunes' else None, 'spotify')
@@ -2612,7 +2617,8 @@ class WatchlistScanner:
                         albums = self.spotify_client.get_artist_albums(
                             artist.similar_artist_spotify_id,
                             album_type='album,single,ep',
-                            limit=20
+                            limit=20,
+                            skip_cache=True
                         )
                         for album in albums or []:
                             process_album(album, artist.similar_artist_name, artist.similar_artist_spotify_id, fallback_id if fallback_source == 'itunes' else None, 'spotify')
