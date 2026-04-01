@@ -19733,6 +19733,20 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔄 Track Redownload & Smart Delete",
+                "description": "Fix mismatched downloads with manual source selection and smart file management",
+                "features": [
+                    "• Redownload button (↻) on each track in the enhanced library view",
+                    "• Step 1: Search Spotify, iTunes, and Deezer simultaneously for the correct metadata",
+                    "• Step 2: Search all download sources (Soulseek, YouTube, Tidal, etc.) and pick the right file",
+                    "• Step 3: Download replaces the old file automatically",
+                    "• Smart Delete: choose to remove from library only, delete file too, or delete & blacklist",
+                    "• Download Blacklist: blacklisted sources are skipped in all future downloads",
+                    "• Blacklist integration in the download pipeline prevents re-downloading bad matches"
+                ],
+                "usage_note": "In the enhanced library view, click ↻ on any track to redownload, or click ✕ to smart-delete."
+            },
+            {
                 "title": "🖥️ Server Playlist Manager — Compare & Fix Matches",
                 "description": "Review and fix track matches between your source playlists and media server",
                 "features": [

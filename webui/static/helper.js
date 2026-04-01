@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Track Redownload & Smart Delete',             desc: 'Fix mismatched downloads — pick metadata source, choose download source, replace old file. Smart delete with file removal and blacklist', page: 'library' },
         { title: 'Server Playlist Manager',                   desc: 'Compare source playlists against your media server — find missing tracks, swap wrong matches, remove extras with a dual-column editor', page: 'sync' },
         { title: 'Sync History Dashboard',                    desc: 'Dashboard shows recent syncs as cards — click for per-track match details with confidence scores and album art' },
         { title: 'Fix Japanese/CJK Soulseek Searches',       desc: 'Japanese kanji no longer mangled into Chinese pinyin — searches now use original characters' },
