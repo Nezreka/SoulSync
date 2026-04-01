@@ -1307,6 +1307,18 @@ class SpotifyClient:
     @rate_limited
     def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 10) -> List[Album]:
         """Get albums by artist ID - falls back to iTunes if Spotify not authenticated"""
+        # Check cache first — keyed by artist_id + album_type
+        cache = get_metadata_cache()
+        fallback_src = self._fallback_source
+        source = fallback_src if self._is_itunes_id(artist_id) else 'spotify'
+        cache_key = f"{artist_id}_albums_{album_type.replace(',', '_')}"
+        cached = cache.get_entity(source, 'artist', cache_key)
+        if cached:
+            try:
+                return [Album.from_spotify_album(ad) for ad in cached]
+            except Exception:
+                pass  # Cache data incompatible, re-fetch
+
         if self.is_spotify_authenticated():
             try:
                 albums = []
@@ -1324,11 +1336,13 @@ class SpotifyClient:
 
                 logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
 
-                # Cache individual albums opportunistically (skip if full data already cached)
-                cache = get_metadata_cache()
-                entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
-                if entries:
-                    cache.store_entities_bulk('spotify', 'album', entries, skip_if_exists=True)
+                # Cache the full artist albums result
+                if raw_items:
+                    cache.store_entity('spotify', 'artist', cache_key, raw_items)
+                    # Also cache individual albums opportunistically
+                    entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
+                    if entries:
+                        cache.store_entities_bulk('spotify', 'album', entries, skip_if_exists=True)
 
                 return albums
 
@@ -1339,7 +1353,7 @@ class SpotifyClient:
 
         # Fallback - only if ID is numeric (non-Spotify format)
         if self._is_itunes_id(artist_id):
-            logger.debug(f"Using {self._fallback_source} fallback for artist albums: {artist_id}")
+            logger.debug(f"Using {fallback_src} fallback for artist albums: {artist_id}")
             return self._fallback.get_artist_albums(artist_id, album_type, limit)
         else:
             logger.debug(f"Cannot use fallback for Spotify artist ID: {artist_id}")
