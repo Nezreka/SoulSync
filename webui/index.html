@@ -1080,7 +1080,11 @@
                     <!-- Left Panel: Tabbed Playlist Section -->
                     <div class="sync-main-panel">
                         <div class="sync-tabs">
-                            <button class="sync-tab-button active" data-tab="spotify">
+                            <button class="sync-tab-button sync-tab-server active" data-tab="server">
+                                <span class="tab-icon server-icon"></span> Server Playlists
+                            </button>
+                            <div class="sync-tab-divider"></div>
+                            <button class="sync-tab-button" data-tab="spotify">
                                 <span class="tab-icon spotify-icon"></span> Spotify
                             </button>
                             <button class="sync-tab-button" data-tab="spotify-public">
@@ -1107,7 +1111,7 @@
                         </div>
 
                         <!-- Spotify Tab Content -->
-                        <div class="sync-tab-content active" id="spotify-tab-content">
+                        <div class="sync-tab-content" id="spotify-tab-content">
                             <div class="playlist-header">
                                 <h3>Your Spotify Playlists</h3>
                                 <button class="refresh-button" id="spotify-refresh-btn">🔄 Refresh</button>
@@ -1957,6 +1961,75 @@
                             </div>
                             <div class="playlist-scroll-container" id="mirrored-playlist-container">
                                 <div class="playlist-placeholder">Playlists you parse from any service will appear here as persistent backups.</div>
+                            </div>
+                        </div>
+
+                        <!-- Server Playlist Manager Tab -->
+                        <div class="sync-tab-content active" id="server-tab-content">
+                            <div class="playlist-header">
+                                <h3 id="server-tab-title">Server Playlists</h3>
+                                <button class="refresh-button" id="server-refresh-btn" onclick="loadServerPlaylists()">🔄 Refresh</button>
+                            </div>
+                            <div id="server-playlist-view">
+                                <!-- Playlist list (default view) -->
+                                <div class="playlist-scroll-container" id="server-playlist-container">
+                                    <div class="playlist-placeholder">Playlists from your media server will load automatically.</div>
+                                </div>
+                                <!-- Disambiguation modal -->
+                                <div id="server-disambig-overlay" class="server-disambig-overlay hidden">
+                                    <div class="server-disambig-modal">
+                                        <div class="server-disambig-header">
+                                            <div>
+                                                <h3 class="server-disambig-title">Multiple Sources Found</h3>
+                                                <p class="server-disambig-subtitle" id="server-disambig-subtitle"></p>
+                                            </div>
+                                            <button class="server-disambig-close" onclick="closeServerDisambig()">&times;</button>
+                                        </div>
+                                        <div class="server-disambig-list" id="server-disambig-list"></div>
+                                    </div>
+                                </div>
+                                <!-- Comparison editor -->
+                                <div id="server-editor" style="display: none;">
+                                    <div class="server-editor-header">
+                                        <button class="server-editor-back" onclick="serverEditorBack()">← Back</button>
+                                        <div class="server-editor-info">
+                                            <h4 class="server-editor-name" id="server-editor-name"></h4>
+                                            <span class="server-editor-meta" id="server-editor-meta"></span>
+                                        </div>
+                                        <div class="server-editor-stats" id="server-editor-stats"></div>
+                                        <button class="server-editor-refresh" onclick="_serverEditorRefresh()" title="Re-fetch from server">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6M3 12a9 9 0 0115.356-6.356L21 8M3 22v-6h6M21 12a9 9 0 01-15.356 6.356L3 16"/></svg>
+                                        </button>
+                                    </div>
+                                    <div id="server-no-source-banner" class="server-no-source-banner" style="display:none">
+                                        No mirrored playlist found matching this name. Showing server tracks only.
+                                    </div>
+                                    <div class="server-editor-filters">
+                                        <button class="discog-filter active" data-filter="all" onclick="_serverEditorFilter(this, 'all')">All</button>
+                                        <button class="discog-filter" data-filter="matched" onclick="_serverEditorFilter(this, 'matched')">Matched</button>
+                                        <button class="discog-filter" data-filter="missing" onclick="_serverEditorFilter(this, 'missing')">Missing</button>
+                                        <button class="discog-filter" data-filter="extra" onclick="_serverEditorFilter(this, 'extra')">Extra</button>
+                                    </div>
+                                    <div class="server-compare-columns">
+                                        <div class="server-compare-col source" id="server-col-source">
+                                            <div class="server-col-header">
+                                                <span class="server-col-icon" id="server-col-source-icon"></span>
+                                                <span class="server-col-label" id="server-col-source-label">Source</span>
+                                                <span class="server-col-count" id="server-col-source-count"></span>
+                                            </div>
+                                            <div class="server-col-scroll" id="server-col-source-scroll"></div>
+                                        </div>
+                                        <div class="server-compare-col server" id="server-col-server">
+                                            <div class="server-col-header">
+                                                <span class="server-col-icon" id="server-col-server-icon"></span>
+                                                <span class="server-col-label" id="server-col-server-label">Server</span>
+                                                <span class="server-col-count" id="server-col-server-count"></span>
+                                            </div>
+                                            <div class="server-col-scroll" id="server-col-server-scroll"></div>
+                                        </div>
+                                    </div>
+                                    <div class="server-editor-footer" id="server-editor-footer"></div>
+                                </div>
                             </div>
                         </div>
                     </div>

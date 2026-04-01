@@ -19315,6 +19315,24 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🖥️ Server Playlist Manager — Compare & Fix Matches",
+                "description": "Review and fix track matches between your source playlists and media server",
+                "features": [
+                    "• New Server Playlists tab (default on Sync page) — shows server playlists that match your mirrored playlists",
+                    "• Dual-column comparison view — source tracks on the left, server tracks on the right with match status",
+                    "• Click any track to highlight and auto-scroll to its pair in the other column",
+                    "• Find & Add — click empty slots to search your library and add tracks at the correct position",
+                    "• Swap — replace a matched track with a different version from your library",
+                    "• Remove — delete incorrect tracks from server playlists with confirmation",
+                    "• Title similarity percentage shown on each match (exact, high, or fuzzy)",
+                    "• Disambiguation modal when multiple mirrored playlists share the same name",
+                    "• Album art shown for source tracks, server tracks, and search results",
+                    "• Smart matching — exact title match first, then fuzzy artist+title match (≥75% threshold)",
+                    "• Works with Plex, Jellyfin, and Navidrome"
+                ],
+                "usage_note": "Navigate to Sync → Server Playlists tab. Click any playlist card to open the comparison editor."
+            },
+            {
                 "title": "📊 Sync History Dashboard with Per-Track Details",
                 "description": "Dashboard shows recent syncs as visual cards with full per-track match data",
                 "features": [
@@ -27424,6 +27442,579 @@ def _record_sync_history_completion(batch_id, batch):
 
     except Exception as e:
         logger.warning(f"Failed to record sync history completion: {e}")
+
+# ===============================
+# == SERVER PLAYLIST MANAGER ==
+# ===============================
+
+@app.route('/api/server/playlists', methods=['GET'])
+def get_server_playlists():
+    """Get all playlists from the active media server."""
+    try:
+        active_server = config_manager.get_active_media_server()
+        logger.info(f"[ServerPlaylists] Active server: {active_server}")
+        if not active_server:
+            return jsonify({"success": False, "error": "No media server configured"}), 400
+
+        playlists_data = []
+        if active_server == 'plex' and plex_client and plex_client.is_connected():
+            # Use raw Plex API to get playlist metadata without fetching all tracks
+            try:
+                raw_playlists = plex_client.server.playlists()
+                logger.info(f"[ServerPlaylists] Plex returned {len(raw_playlists)} total playlists")
+                for playlist in raw_playlists:
+                    if playlist.playlistType == 'audio':
+                        playlists_data.append({
+                            'id': str(playlist.ratingKey),
+                            'name': playlist.title,
+                            'track_count': playlist.leafCount,
+                        })
+                logger.info(f"[ServerPlaylists] Found {len(playlists_data)} audio playlists")
+            except Exception as e:
+                logger.error(f"[ServerPlaylists] Error fetching Plex playlists: {e}", exc_info=True)
+                return jsonify({"success": False, "error": f"Plex error: {str(e)}"}), 500
+        elif active_server == 'jellyfin' and jellyfin_client and jellyfin_client.is_connected():
+            for pl in jellyfin_client.get_all_playlists():
+                playlists_data.append({
+                    'id': pl.id,
+                    'name': pl.title,
+                    'track_count': pl.leaf_count,
+                })
+        elif active_server == 'navidrome' and navidrome_client and navidrome_client.is_connected():
+            for pl in navidrome_client.get_all_playlists():
+                playlists_data.append({
+                    'id': pl.id,
+                    'name': pl.title,
+                    'track_count': pl.leaf_count,
+                })
+        else:
+            logger.warning(f"[ServerPlaylists] Server '{active_server}' not connected. plex_client={plex_client is not None}, jellyfin_client={jellyfin_client is not None}, navidrome_client={navidrome_client is not None}")
+            return jsonify({"success": False, "error": f"{active_server} not connected"}), 400
+
+        return jsonify({"success": True, "server_type": active_server, "playlists": playlists_data})
+    except Exception as e:
+        logger.error(f"Error getting server playlists: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/tracks', methods=['GET'])
+def get_server_playlist_tracks(playlist_id):
+    """Get tracks from a server playlist with source match info from sync history."""
+    try:
+        active_server = config_manager.get_active_media_server()
+        playlist_name = request.args.get('name', '')
+
+        # Get tracks from server
+        server_tracks = []
+        if active_server == 'plex' and plex_client:
+            try:
+                # Try by ID first, fall back to name lookup (ID changes when playlist is recreated)
+                raw_playlist = None
+                try:
+                    raw_playlist = plex_client.server.fetchItem(int(playlist_id))
+                except Exception:
+                    pass
+                if not raw_playlist and playlist_name:
+                    try:
+                        raw_playlist = plex_client.server.playlist(playlist_name)
+                    except Exception:
+                        pass
+                if raw_playlist:
+                    if not playlist_name:
+                        playlist_name = raw_playlist.title
+                    plex_base = getattr(plex_client.server, '_baseurl', '') or ''
+                    plex_token = getattr(plex_client.server, '_token', '') or ''
+                    if not plex_base:
+                        # Fallback: get from config
+                        _pc = config_manager.get_plex_config()
+                        plex_base = (_pc.get('base_url', '') or '').rstrip('/')
+                        plex_token = plex_token or _pc.get('token', '')
+                    logger.debug(f"[ServerPlaylistTracks] Plex base URL: {plex_base}")
+                    for item in raw_playlist.items():
+                        grandparent = getattr(item, 'grandparentTitle', '') or ''
+                        parent = getattr(item, 'parentTitle', '') or ''
+                        # Build full thumb URL from Plex relative path
+                        thumb = ''
+                        raw_thumb = getattr(item, 'thumb', '') or getattr(item, 'parentThumb', '') or ''
+                        if raw_thumb and plex_base and plex_token:
+                            thumb = f"{plex_base}{raw_thumb}?X-Plex-Token={plex_token}"
+                        server_tracks.append({
+                            'id': str(item.ratingKey),
+                            'title': item.title,
+                            'artist': grandparent,
+                            'album': parent,
+                            'duration': item.duration or 0,
+                            'thumb': thumb,
+                        })
+            except Exception as e:
+                logger.error(f"[ServerPlaylistTracks] Plex error: {e}", exc_info=True)
+        elif active_server == 'jellyfin' and jellyfin_client:
+            tracks = jellyfin_client.get_playlist_tracks(playlist_id)
+            jf_base = jellyfin_client.base_url or ''
+            for t in (tracks or []):
+                raw = t._data if hasattr(t, '_data') else {}
+                artists = raw.get('Artists', [])
+                # Jellyfin image: /Items/{Id}/Images/Primary
+                album_id = raw.get('AlbumId', '')
+                thumb = f"{jf_base}/Items/{album_id}/Images/Primary?maxHeight=100" if album_id and jf_base else ''
+                server_tracks.append({
+                    'id': str(t.ratingKey),
+                    'title': t.title,
+                    'artist': artists[0] if artists else raw.get('AlbumArtist', ''),
+                    'album': raw.get('Album', ''),
+                    'duration': t.duration,
+                    'thumb': thumb,
+                })
+        elif active_server == 'navidrome' and navidrome_client:
+            tracks = navidrome_client.get_playlist_tracks(playlist_id)
+            for t in (tracks or []):
+                raw = t._data if hasattr(t, '_data') else {}
+                # Navidrome cover art via Subsonic API
+                cover_id = raw.get('coverArt', '') or raw.get('albumId', '')
+                thumb = f"/api/navidrome/cover/{cover_id}" if cover_id else ''
+                server_tracks.append({
+                    'id': str(t.ratingKey),
+                    'title': t.title,
+                    'artist': raw.get('artist', ''),
+                    'album': raw.get('album', ''),
+                    'duration': t.duration,
+                    'thumb': thumb,
+                })
+
+        # Get source tracks — prefer mirrored playlist, fall back to sync history
+        source_tracks = []
+        mirrored_id = request.args.get('mirrored_playlist_id')
+        if mirrored_id:
+            db = get_database()
+            raw_tracks = db.get_mirrored_playlist_tracks(int(mirrored_id))
+
+            # Build server art URL prefix for resolving relative thumb paths
+            _art_prefix = ''
+            _art_suffix = ''
+            if active_server == 'plex' and plex_client and plex_client.server:
+                _ab = getattr(plex_client.server, '_baseurl', '') or ''
+                _at = getattr(plex_client.server, '_token', '') or ''
+                if not _ab:
+                    _pc = config_manager.get_plex_config()
+                    _ab = (_pc.get('base_url', '') or '').rstrip('/')
+                    _at = _at or _pc.get('token', '')
+                _art_prefix = _ab
+                _art_suffix = f"?X-Plex-Token={_at}" if _at else ''
+
+            def _resolve_thumb(url):
+                """Make relative server thumb URLs absolute."""
+                if not url:
+                    return ''
+                if url.startswith('http'):
+                    return url
+                if url.startswith('/') and _art_prefix:
+                    return f"{_art_prefix}{url}{_art_suffix}"
+                return url
+
+            # Build art lookup from server tracks we already fetched (no extra DB queries)
+            _server_art_map = {}
+            for svr in server_tracks:
+                if svr.get('thumb'):
+                    key = f"{(svr.get('artist') or '').lower().strip()}|{svr['title'].lower().strip()}"
+                    _server_art_map[key] = svr['thumb']
+                    # Also store by title-only as fallback
+                    _server_art_map[svr['title'].lower().strip()] = svr['thumb']
+
+            for t in raw_tracks:
+                img = t.get('image_url') or ''
+                if not img:
+                    # Try artist+title first, fall back to title-only
+                    key = f"{(t.get('artist_name') or '').lower().strip()}|{(t.get('track_name') or '').lower().strip()}"
+                    img = _server_art_map.get(key, '') or _server_art_map.get((t.get('track_name') or '').lower().strip(), '')
+
+                source_tracks.append({
+                    'name': t.get('track_name', ''),
+                    'artist': t.get('artist_name', ''),
+                    'album': t.get('album_name', ''),
+                    'image_url': img,
+                    'duration_ms': t.get('duration_ms', 0),
+                    'position': t.get('position', 0),
+                })
+        elif playlist_name:
+            # Legacy fallback: cross-reference with sync history
+            db = get_database()
+            entries, _ = db.get_sync_history(page=1, limit=50)
+            for entry in entries:
+                if entry.get('playlist_name', '').lower() == playlist_name.lower():
+                    full_entry = db.get_sync_history_entry(entry['id'])
+                    if full_entry:
+                        try:
+                            tr = json.loads(full_entry.get('track_results') or '[]')
+                            source_tracks = tr if isinstance(tr, list) else []
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                        if not source_tracks:
+                            try:
+                                source_tracks = json.loads(full_entry.get('tracks_json') or '[]')
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                    break
+
+        # Build combined view with two-pass matching (exact then fuzzy)
+        from difflib import SequenceMatcher
+        combined = []
+        used_server_indices = set()
+        unmatched_source = []  # (index_in_combined, src_dict) for fuzzy second pass
+
+        # Pass 1: Exact title match
+        for i, src in enumerate(source_tracks):
+            src_name = src.get('name', '')
+            src_artist = src.get('artist', '')
+            if not src_artist and src.get('artists'):
+                a = src['artists'][0] if src['artists'] else ''
+                src_artist = a.get('name', a) if isinstance(a, dict) else str(a)
+
+            src_entry = {
+                'name': src_name, 'artist': src_artist,
+                'album': src.get('album', ''), 'image_url': src.get('image_url', ''),
+                'duration_ms': src.get('duration_ms', 0), 'position': src.get('position', i),
+            }
+
+            best_idx = -1
+            for j, svr in enumerate(server_tracks):
+                if j in used_server_indices:
+                    continue
+                if svr['title'].lower().strip() == src_name.lower().strip():
+                    best_idx = j
+                    break
+
+            if best_idx >= 0:
+                used_server_indices.add(best_idx)
+                combined.append({
+                    'source_track': src_entry,
+                    'server_track': server_tracks[best_idx],
+                    'match_status': 'matched',
+                    'confidence': 1.0,
+                })
+            else:
+                idx = len(combined)
+                combined.append({
+                    'source_track': src_entry,
+                    'server_track': None,
+                    'match_status': 'missing',
+                    'confidence': 0.0,
+                })
+                unmatched_source.append((idx, src_entry))
+
+        # Pass 2: Fuzzy match on remaining unmatched source tracks
+        for combo_idx, src_entry in unmatched_source:
+            src_key = f"{src_entry['artist']} {src_entry['name']}".lower().strip()
+            best_score = 0.0
+            best_j = -1
+            for j, svr in enumerate(server_tracks):
+                if j in used_server_indices:
+                    continue
+                svr_key = f"{svr['artist']} {svr['title']}".lower().strip()
+                score = SequenceMatcher(None, src_key, svr_key).ratio()
+                if score > best_score and score >= 0.75:
+                    best_score = score
+                    best_j = j
+
+            if best_j >= 0:
+                used_server_indices.add(best_j)
+                combined[combo_idx] = {
+                    'source_track': src_entry,
+                    'server_track': server_tracks[best_j],
+                    'match_status': 'matched',
+                    'confidence': round(best_score, 3),
+                }
+
+        # Add server tracks that aren't in the source (extra tracks on server)
+        for j, svr in enumerate(server_tracks):
+            if j not in used_server_indices:
+                combined.append({
+                    'source_track': None,
+                    'server_track': svr,
+                    'match_status': 'extra',
+                    'confidence': 0.0,
+                })
+
+        return jsonify({
+            "success": True,
+            "server_type": active_server,
+            "playlist_name": playlist_name,
+            "tracks": combined,
+            "server_track_count": len(server_tracks),
+            "source_track_count": len(source_tracks),
+        })
+    except Exception as e:
+        logger.error(f"Error getting server playlist tracks: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/replace-track', methods=['POST'])
+def server_playlist_replace_track(playlist_id):
+    """Replace a track in a server playlist. Rebuilds the playlist with the swap."""
+    try:
+        data = request.get_json()
+        old_track_id = data.get('old_track_id')
+        new_track_id = data.get('new_track_id')
+        playlist_name = data.get('playlist_name', '')
+
+        if not old_track_id or not new_track_id:
+            return jsonify({"success": False, "error": "old_track_id and new_track_id required"}), 400
+        if not playlist_name:
+            return jsonify({"success": False, "error": "playlist_name required"}), 400
+
+        active_server = config_manager.get_active_media_server()
+
+        if active_server == 'plex' and plex_client:
+            # Use raw Plex API - fetch playlist directly
+            try:
+                raw_playlist = plex_client.server.playlist(playlist_name)
+            except Exception:
+                return jsonify({"success": False, "error": "Playlist not found on server"}), 404
+
+            # Build new track list with replacement
+            new_tracks = []
+            replaced = False
+            for item in raw_playlist.items():
+                if str(item.ratingKey) == str(old_track_id) and not replaced:
+                    new_item = plex_client.server.fetchItem(int(new_track_id))
+                    if new_item:
+                        new_tracks.append(new_item)
+                        replaced = True
+                    else:
+                        new_tracks.append(item)
+                else:
+                    new_tracks.append(item)
+
+            if replaced:
+                # Delete old and recreate directly (avoid update_playlist's backup logic)
+                raw_playlist.delete()
+                from plexapi.playlist import Playlist
+                new_pl = Playlist.create(plex_client.server, playlist_name, items=new_tracks)
+                return jsonify({"success": True, "message": "Track replaced", "new_playlist_id": str(new_pl.ratingKey)})
+            else:
+                return jsonify({"success": False, "error": "Old track not found in playlist"}), 404
+
+        elif active_server == 'jellyfin' and jellyfin_client:
+            current_tracks = jellyfin_client.get_playlist_tracks(playlist_id)
+            new_track_ids = []
+            replaced = False
+            for t in (current_tracks or []):
+                tid = str(t.ratingKey)
+                if tid == str(old_track_id) and not replaced:
+                    new_track_ids.append(new_track_id)
+                    replaced = True
+                else:
+                    new_track_ids.append(tid)
+
+            if replaced:
+                new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
+                jellyfin_client.update_playlist(playlist_name, new_track_objs)
+                return jsonify({"success": True, "message": "Track replaced"})
+            return jsonify({"success": False, "error": "Old track not found"}), 404
+
+        elif active_server == 'navidrome' and navidrome_client:
+            current_tracks = navidrome_client.get_playlist_tracks(playlist_id)
+            new_track_ids = []
+            replaced = False
+            for t in (current_tracks or []):
+                tid = str(t.ratingKey)
+                if tid == str(old_track_id) and not replaced:
+                    new_track_ids.append(new_track_id)
+                    replaced = True
+                else:
+                    new_track_ids.append(tid)
+
+            if replaced:
+                new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_track_ids]
+                navidrome_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+                return jsonify({"success": True, "message": "Track replaced"})
+            return jsonify({"success": False, "error": "Old track not found"}), 404
+
+        return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
+    except Exception as e:
+        logger.error(f"Error replacing track in server playlist: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/add-track', methods=['POST'])
+def server_playlist_add_track(playlist_id):
+    """Add a track to a server playlist at a specific position."""
+    try:
+        data = request.get_json()
+        track_id = data.get('track_id')
+        playlist_name = data.get('playlist_name', '')
+        position = data.get('position')  # 0-based index; None = append
+
+        if not track_id:
+            return jsonify({"success": False, "error": "track_id required"}), 400
+        if not playlist_name:
+            return jsonify({"success": False, "error": "playlist_name required"}), 400
+
+        active_server = config_manager.get_active_media_server()
+
+        if active_server == 'plex' and plex_client:
+            try:
+                raw_playlist = plex_client.server.playlist(playlist_name)
+            except Exception:
+                return jsonify({"success": False, "error": "Playlist not found"}), 404
+            new_item = plex_client.server.fetchItem(int(track_id))
+            if not new_item:
+                return jsonify({"success": False, "error": "Track not found on server"}), 404
+
+            logger.info(f"[ServerPlaylist] Adding track: '{new_item.title}' (ratingKey={new_item.ratingKey}) at position={position} to playlist '{playlist_name}'")
+
+            if position is not None:
+                # Rebuild playlist with track inserted at correct position
+                current_items = list(raw_playlist.items())
+                logger.info(f"[ServerPlaylist] Current playlist has {len(current_items)} tracks, inserting at pos {position}")
+                pos = max(0, min(int(position), len(current_items)))
+                current_items.insert(pos, new_item)
+                # Delete old and recreate directly (avoid update_playlist's backup logic)
+                raw_playlist.delete()
+                from plexapi.playlist import Playlist
+                new_pl = Playlist.create(plex_client.server, playlist_name, items=current_items)
+                new_id = str(new_pl.ratingKey)
+                logger.info(f"[ServerPlaylist] Recreated playlist with {len(current_items)} tracks, new ID: {new_id}")
+            else:
+                raw_playlist.addItems([new_item])
+                new_id = str(raw_playlist.ratingKey)
+            return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
+
+        elif active_server == 'jellyfin' and jellyfin_client:
+            current_tracks = jellyfin_client.get_playlist_tracks(playlist_id) or []
+            track_ids = [str(t.ratingKey) for t in current_tracks]
+            pos = max(0, min(int(position), len(track_ids))) if position is not None else len(track_ids)
+            track_ids.insert(pos, track_id)
+            new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
+            jellyfin_client.update_playlist(playlist_name, new_track_objs)
+            return jsonify({"success": True, "message": "Track added"})
+
+        elif active_server == 'navidrome' and navidrome_client:
+            current_tracks = navidrome_client.get_playlist_tracks(playlist_id) or []
+            track_ids = [str(t.ratingKey) for t in current_tracks]
+            pos = max(0, min(int(position), len(track_ids))) if position is not None else len(track_ids)
+            track_ids.insert(pos, track_id)
+            new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in track_ids]
+            navidrome_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            return jsonify({"success": True, "message": "Track added"})
+
+        return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
+    except Exception as e:
+        logger.error(f"Error adding track to server playlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/remove-track', methods=['POST'])
+def server_playlist_remove_track(playlist_id):
+    """Remove a track from a server playlist by its server track ID."""
+    try:
+        data = request.get_json()
+        remove_track_id = data.get('track_id')
+        playlist_name = data.get('playlist_name', '')
+
+        if not remove_track_id:
+            return jsonify({"success": False, "error": "track_id required"}), 400
+        if not playlist_name:
+            return jsonify({"success": False, "error": "playlist_name required"}), 400
+
+        active_server = config_manager.get_active_media_server()
+
+        if active_server == 'plex' and plex_client:
+            try:
+                raw_playlist = plex_client.server.playlist(playlist_name)
+            except Exception:
+                return jsonify({"success": False, "error": "Playlist not found"}), 404
+
+            # Rebuild without the target track
+            current_items = list(raw_playlist.items())
+            new_items = [item for item in current_items if str(item.ratingKey) != str(remove_track_id)]
+            if len(new_items) == len(current_items):
+                return jsonify({"success": False, "error": "Track not found in playlist"}), 404
+            raw_playlist.delete()
+            if new_items:
+                from plexapi.playlist import Playlist
+                new_pl = Playlist.create(plex_client.server, playlist_name, items=new_items)
+                return jsonify({"success": True, "message": "Track removed", "new_playlist_id": str(new_pl.ratingKey)})
+            return jsonify({"success": True, "message": "Track removed (playlist now empty)"})
+
+        elif active_server == 'jellyfin' and jellyfin_client:
+            current_tracks = jellyfin_client.get_playlist_tracks(playlist_id) or []
+            new_ids = [str(t.ratingKey) for t in current_tracks if str(t.ratingKey) != str(remove_track_id)]
+            if len(new_ids) == len(current_tracks):
+                return jsonify({"success": False, "error": "Track not found in playlist"}), 404
+            new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
+            jellyfin_client.update_playlist(playlist_name, new_track_objs)
+            return jsonify({"success": True, "message": "Track removed"})
+
+        elif active_server == 'navidrome' and navidrome_client:
+            current_tracks = navidrome_client.get_playlist_tracks(playlist_id) or []
+            new_ids = [str(t.ratingKey) for t in current_tracks if str(t.ratingKey) != str(remove_track_id)]
+            if len(new_ids) == len(current_tracks):
+                return jsonify({"success": False, "error": "Track not found in playlist"}), 404
+            new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in new_ids]
+            navidrome_client.create_playlist(playlist_name, new_track_objs, playlist_id=playlist_id)
+            return jsonify({"success": True, "message": "Track removed"})
+
+        return jsonify({"success": False, "error": f"Unsupported server: {active_server}"}), 400
+    except Exception as e:
+        logger.error(f"Error removing track from server playlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/search-tracks', methods=['GET'])
+def library_search_tracks():
+    """Search SoulSync's local database for tracks (for manual match correction)."""
+    try:
+        query = request.args.get('q', '').strip()
+        limit = int(request.args.get('limit', 10))
+        if not query:
+            return jsonify({"success": True, "tracks": []})
+
+        active_server = config_manager.get_active_media_server()
+        database = get_database()
+
+        # Build thumb URL resolver for this server
+        _art_prefix = ''
+        _art_suffix = ''
+        if active_server == 'plex' and plex_client and plex_client.server:
+            _ab = getattr(plex_client.server, '_baseurl', '') or ''
+            _at = getattr(plex_client.server, '_token', '') or ''
+            if not _ab:
+                _pc = config_manager.get_plex_config()
+                _ab = (_pc.get('base_url', '') or '').rstrip('/')
+                _at = _at or _pc.get('token', '')
+            _art_prefix = _ab
+            _art_suffix = f"?X-Plex-Token={_at}" if _at else ''
+
+        def _resolve_search_thumb(url):
+            if not url:
+                return ''
+            if url.startswith('http'):
+                return url
+            if url.startswith('/') and _art_prefix:
+                return f"{_art_prefix}{url}{_art_suffix}"
+            return url
+
+        results = database.search_tracks(title=query, artist='', limit=limit, server_source=active_server)
+
+        tracks = []
+        for t in results:
+            tracks.append({
+                'id': t.id,
+                'title': t.title,
+                'artist_name': t.artist_name,
+                'album_title': getattr(t, 'album_title', ''),
+                'album_thumb_url': _resolve_search_thumb(getattr(t, 'album_thumb_url', '')),
+                'file_path': getattr(t, 'file_path', ''),
+                'bitrate': getattr(t, 'bitrate', 0),
+                'duration': getattr(t, 'duration', 0),
+                'server_source': getattr(t, 'server_source', ''),
+            })
+
+        return jsonify({"success": True, "tracks": tracks})
+    except Exception as e:
+        logger.error(f"Error searching library tracks: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/playlists/<playlist_id>/start-missing-process', methods=['POST'])
 def start_missing_tracks_process(playlist_id):

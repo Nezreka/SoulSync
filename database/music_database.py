@@ -4646,7 +4646,7 @@ class MusicDatabase:
         params.append(limit)
         
         cursor.execute(f"""
-            SELECT tracks.*, artists.name as artist_name, albums.title as album_title
+            SELECT tracks.*, artists.name as artist_name, albums.title as album_title, albums.thumb_url as album_thumb_url
             FROM tracks
             JOIN artists ON tracks.artist_id = artists.id
             JOIN albums ON tracks.album_id = albums.id
@@ -4654,7 +4654,7 @@ class MusicDatabase:
             ORDER BY tracks.title, artists.name
             LIMIT ?
         """, params)
-        
+
         return self._rows_to_tracks(cursor.fetchall())
     
     def _search_tracks_fuzzy_fallback(self, cursor, title: str, artist: str, limit: int, server_source: str = None) -> List[DatabaseTrack]:
@@ -4695,7 +4695,7 @@ class MusicDatabase:
         params.append(limit * 3)  # Get more results for scoring
         
         cursor.execute(f"""
-            SELECT tracks.*, artists.name as artist_name, albums.title as album_title
+            SELECT tracks.*, artists.name as artist_name, albums.title as album_title, albums.thumb_url as album_thumb_url
             FROM tracks
             JOIN artists ON tracks.artist_id = artists.id
             JOIN albums ON tracks.album_id = albums.id
@@ -4703,9 +4703,9 @@ class MusicDatabase:
             ORDER BY tracks.title, artists.name
             LIMIT ?
         """, params)
-        
+
         rows = cursor.fetchall()
-        
+
         # Score and filter results
         scored_results = []
         for row in rows:
@@ -4746,6 +4746,8 @@ class MusicDatabase:
             # Add artist and album info for compatibility with Plex responses
             track.artist_name = row['artist_name']
             track.album_title = row['album_title']
+            track.album_thumb_url = row['album_thumb_url'] if 'album_thumb_url' in row.keys() else ''
+            track.server_source = row['server_source'] if 'server_source' in row.keys() else ''
             tracks.append(track)
         return tracks
     
