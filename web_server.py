@@ -13347,6 +13347,7 @@ def redownload_start(track_id):
         def _run_redownload():
             try:
                 from core.soulseek_client import TrackResult
+                from core.itunes_client import Track as MetaTrack
                 tr = TrackResult(
                     username=candidate['username'],
                     filename=candidate['filename'],
@@ -13358,12 +13359,24 @@ def redownload_start(track_id):
                     upload_speed=candidate.get('upload_speed', 0),
                     queue_length=candidate.get('queue_length', 0),
                 )
-                # Set track metadata on the candidate
                 tr.artist = metadata.get('artist', '')
                 tr.title = metadata.get('name', '')
                 tr.album = metadata.get('album', '')
+                tr.confidence = candidate.get('confidence', 1.0)
 
-                _attempt_download_with_candidates(task_id, [tr], track_data, batch_id)
+                # Build a proper Track object (not a dict) — _attempt_download_with_candidates
+                # accesses track.artists, track.album etc. as attributes
+                artist_name = metadata.get('artist', '')
+                track_obj = MetaTrack(
+                    id=metadata.get('id', ''),
+                    name=metadata.get('name', ''),
+                    artists=[artist_name] if artist_name else ['Unknown'],
+                    album=metadata.get('album', ''),
+                    duration_ms=metadata.get('duration_ms', 0),
+                    popularity=0,
+                )
+
+                _attempt_download_with_candidates(task_id, [tr], track_obj, batch_id)
             except Exception as e:
                 logger.error(f"Redownload failed: {e}", exc_info=True)
                 with tasks_lock:
@@ -18183,39 +18196,39 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         # VERIFICATION: Check if file exists at the path processing actually used
         if os.path.exists(expected_final_path):
             # Mark task as completed only after successful verification
+            redownload_ctx = None
             with tasks_lock:
                 if task_id in download_tasks:
                     _mark_task_completed(task_id, context.get('track_info'))
                     download_tasks[task_id]['metadata_enhanced'] = True
-
-                    # Redownload hook: delete old file and update DB path
                     redownload_ctx = download_tasks[task_id].get('_redownload_context')
-                    if redownload_ctx:
-                        try:
-                            old_path = redownload_ctx.get('old_file_path')
-                            lib_track_id = redownload_ctx.get('library_track_id')
-                            if redownload_ctx.get('delete_old_file') and old_path and os.path.exists(old_path):
-                                if os.path.normpath(old_path) != os.path.normpath(expected_final_path):
-                                    os.remove(old_path)
-                                    logger.info(f"[Redownload] Deleted old file: {old_path}")
-                            # Update DB track with new file path
-                            if lib_track_id and expected_final_path:
-                                _rd_db = get_database()
-                                _rd_conn = _rd_db._get_connection()
-                                _rd_cursor = _rd_conn.cursor()
-                                _rd_cursor.execute("""
-                                    UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP
-                                    WHERE id = ?
-                                """, (expected_final_path, lib_track_id))
-                                _rd_conn.commit()
-                                _rd_conn.close()
-                                logger.info(f"[Redownload] Updated DB path for track {lib_track_id}")
-                        except Exception as e:
-                            logger.error(f"[Redownload] Post-processing hook error: {e}")
 
             with matched_context_lock:
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
+
+            # Redownload hook: delete old file and update DB path (outside locks)
+            if redownload_ctx:
+                try:
+                    old_path = redownload_ctx.get('old_file_path')
+                    lib_track_id = redownload_ctx.get('library_track_id')
+                    if redownload_ctx.get('delete_old_file') and old_path and os.path.exists(old_path):
+                        if os.path.normpath(old_path) != os.path.normpath(expected_final_path):
+                            os.remove(old_path)
+                            logger.info(f"[Redownload] Deleted old file: {old_path}")
+                    if lib_track_id and expected_final_path:
+                        _rd_db = get_database()
+                        _rd_conn = _rd_db._get_connection()
+                        _rd_cursor = _rd_conn.cursor()
+                        _rd_cursor.execute("""
+                            UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        """, (expected_final_path, lib_track_id))
+                        _rd_conn.commit()
+                        _rd_conn.close()
+                        logger.info(f"[Redownload] Updated DB path for track {lib_track_id}")
+                except Exception as e:
+                    logger.error(f"[Redownload] Post-processing hook error: {e}")
 
             _on_download_completed(batch_id, task_id, success=True)
         else:
