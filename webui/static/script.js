@@ -9163,6 +9163,12 @@ async function loadDashboardData() {
 
 async function loadSyncData() {
     // This is called when the sync page is navigated to.
+    // Load server playlists first (default active tab)
+    if (!window._serverPlaylistsLoaded) {
+        window._serverPlaylistsLoaded = true;
+        loadServerPlaylists(); // Don't await — load in background
+    }
+
     if (!spotifyPlaylistsLoaded) {
         await loadSpotifyPlaylists();
     }
@@ -25632,6 +25638,12 @@ function initializeSyncPage() {
             // Auto-load mirrored playlists on first tab activation
             if (tabId === 'mirrored' && !mirroredPlaylistsLoaded) {
                 loadMirroredPlaylists();
+            }
+
+            // Auto-load server playlists on first tab activation
+            if (tabId === 'server' && !window._serverPlaylistsLoaded) {
+                window._serverPlaylistsLoaded = true;
+                loadServerPlaylists();
             }
 
             // Refresh Beatport download bubbles when switching to the Beatport tab
@@ -64517,6 +64529,733 @@ window.addEventListener('resize', () => {
 // ==================================================================================
 // DASHBOARD — Recent Syncs Section
 // ==================================================================================
+
+// ==================================================================================
+// SERVER PLAYLIST MANAGER — Sync Page Server Tab
+// ==================================================================================
+
+let _serverPlaylists = [];
+let _serverEditorState = { playlistId: null, playlistName: '', tracks: [] };
+
+async function loadServerPlaylists() {
+    const container = document.getElementById('server-playlist-container');
+    const editor = document.getElementById('server-editor');
+    const btn = document.getElementById('server-refresh-btn');
+
+    if (editor) editor.style.display = 'none';
+    if (container) container.style.display = '';
+    if (btn) { btn.disabled = true; btn.textContent = '🔄 Loading...'; }
+
+    // Show skeleton loader
+    if (container) {
+        container.innerHTML = `<div class="server-pl-grid">${Array.from({length: 6}, (_, i) => `
+            <div class="server-pl-card server-pl-skeleton" style="animation-delay: ${i * 0.06}s">
+                <div class="server-pl-card-top">
+                    <div class="skeleton-box" style="width:44px;height:44px;border-radius:12px"></div>
+                    <div class="skeleton-box" style="width:28px;height:28px;border-radius:8px"></div>
+                </div>
+                <div class="server-pl-card-body">
+                    <div class="skeleton-box" style="width:${60 + Math.random()*30}%;height:14px;border-radius:4px;margin-bottom:8px"></div>
+                    <div class="skeleton-box" style="width:40%;height:11px;border-radius:4px"></div>
+                </div>
+                <div class="server-pl-card-footer" style="border-top:1px solid rgba(255,255,255,0.05);padding-top:12px">
+                    <div class="skeleton-box" style="width:60px;height:10px;border-radius:3px"></div>
+                </div>
+            </div>`).join('')}</div>`;
+    }
+
+    try {
+        // Fetch server playlists and mirrored playlists in parallel
+        const [serverRes, mirroredRes] = await Promise.all([
+            fetch('/api/server/playlists'),
+            fetch('/api/mirrored-playlists'),
+        ]);
+        const data = await serverRes.json();
+        let mirroredAll = [];
+        try { mirroredAll = await mirroredRes.json(); } catch (_) {}
+        if (!Array.isArray(mirroredAll)) mirroredAll = [];
+
+        if (!data.success || !data.playlists) {
+            if (container) container.innerHTML = `<div class="playlist-placeholder">${data.error || 'Could not load server playlists'}</div>`;
+            return;
+        }
+
+        // Only show server playlists that have a matching mirrored playlist
+        const mirroredNames = new Set(mirroredAll.map(p => p.name.trim().toLowerCase()));
+        const filtered = data.playlists.filter(pl => mirroredNames.has(pl.name.trim().toLowerCase()));
+
+        _serverPlaylists = filtered;
+        const title = document.getElementById('server-tab-title');
+        if (title) title.textContent = `Server Playlists (${data.server_type ? data.server_type.charAt(0).toUpperCase() + data.server_type.slice(1) : ''})`;
+
+        if (filtered.length === 0) {
+            if (container) container.innerHTML = '<div class="playlist-placeholder">No synced playlists found. Only server playlists that match your mirrored playlists are shown here.</div>';
+            return;
+        }
+
+        // Server type icon SVG
+        const serverIcons = {
+            plex: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M11.643 0H4.68l7.679 12L4.68 24h6.963L19.32 12z"/></svg>',
+            jellyfin: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2C8.5 2 6 5.1 6 9c0 2.4 1.2 5.5 3.3 8.7.7 1 1.5 2 2.2 2.9.2.3.4.3.5.4.1 0 .3-.1.5-.4.7-.9 1.5-1.9 2.2-2.9C16.8 14.5 18 11.4 18 9c0-3.9-2.5-7-6-7z"/></svg>',
+            navidrome: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>'
+        };
+        const sIcon = serverIcons[data.server_type] || serverIcons.plex;
+
+        container.innerHTML = `<div class="server-pl-grid">${filtered.map((pl, i) => {
+            const hue = (i * 37 + 200) % 360;
+            const safeName = _esc(pl.name).replace(/'/g, "\\'");
+            return `
+            <div class="server-pl-card" onclick="openServerPlaylistEditor('${pl.id}', '${safeName}')" style="animation-delay: ${i * 0.04}s; --card-hue: ${hue}">
+                <div class="server-pl-card-glow"></div>
+                <div class="server-pl-card-top">
+                    <div class="server-pl-card-icon-wrap">
+                        <div class="server-pl-card-bars">
+                            <span></span><span></span><span></span><span></span>
+                        </div>
+                    </div>
+                    <div class="server-pl-card-badge">${sIcon}</div>
+                </div>
+                <div class="server-pl-card-body">
+                    <div class="server-pl-card-name">${_esc(pl.name)}</div>
+                    <div class="server-pl-card-meta">
+                        <span class="server-pl-track-count">${pl.track_count}</span> tracks
+                    </div>
+                </div>
+                <div class="server-pl-card-footer">
+                    <span class="server-pl-card-action">Open Editor</span>
+                    <span class="server-pl-card-arrow">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </span>
+                </div>
+            </div>`;
+        }).join('')}</div>`;
+
+    } catch (e) {
+        if (container) container.innerHTML = `<div class="playlist-placeholder">Error: ${e.message}</div>`;
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '🔄 Refresh'; }
+    }
+}
+
+async function openServerPlaylistEditor(playlistId, playlistName) {
+    // Step 1: Look up mirrored playlists by name
+    let mirroredPlaylists = [];
+    try {
+        const res = await fetch('/api/mirrored-playlists');
+        const all = await res.json();
+        mirroredPlaylists = (Array.isArray(all) ? all : []).filter(p =>
+            p.name.trim().toLowerCase() === playlistName.trim().toLowerCase()
+        );
+    } catch (e) {
+        console.error('Failed to fetch mirrored playlists:', e);
+    }
+
+    if (mirroredPlaylists.length === 1) {
+        // Single match — go straight to compare
+        _openServerCompareView(playlistId, playlistName, mirroredPlaylists[0]);
+    } else if (mirroredPlaylists.length === 0) {
+        // No match — server-only view
+        _openServerCompareView(playlistId, playlistName, null);
+    } else {
+        // Multiple — disambiguation
+        _showServerDisambig(playlistId, playlistName, mirroredPlaylists);
+    }
+}
+
+// ── Disambiguation ──
+
+function _showServerDisambig(playlistId, playlistName, candidates) {
+    const overlay = document.getElementById('server-disambig-overlay');
+    const list = document.getElementById('server-disambig-list');
+    const subtitle = document.getElementById('server-disambig-subtitle');
+    if (!overlay || !list) return;
+
+    if (subtitle) subtitle.textContent = `"${playlistName}" was found on ${candidates.length} sources. Which one do you want to compare against?`;
+
+    const sourceIcons = { spotify: '🟢', tidal: '🌊', youtube: '▶️', beatport: '🎛️', deezer: '🟣', file: '📄' };
+
+    list.innerHTML = candidates.map((p, i) => {
+        const icon = sourceIcons[p.source] || '📋';
+        const ago = timeAgo(p.mirrored_at || p.updated_at);
+        return `
+        <div class="server-disambig-card" onclick="selectDisambigPlaylist('${playlistId}', '${_esc(playlistName).replace(/'/g, "\\'")}', ${p.id})" style="animation-delay: ${i * 0.06}s">
+            <div class="server-disambig-icon">${icon}</div>
+            <div class="server-disambig-info">
+                <div class="server-disambig-name">${_esc(p.name)}</div>
+                <div class="server-disambig-details">
+                    <span class="source-badge">${_esc(p.source)}</span>
+                    <span>${p.track_count || 0} tracks</span>
+                    ${p.owner ? `<span>by ${_esc(p.owner)}</span>` : ''}
+                    <span>Mirrored ${ago}</span>
+                </div>
+            </div>
+            <div class="server-disambig-arrow">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </div>
+        </div>`;
+    }).join('');
+
+    overlay.classList.remove('hidden');
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    // Escape key + click backdrop to close
+    overlay.onclick = e => { if (e.target === overlay) closeServerDisambig(); };
+    window._disambigEsc = e => { if (e.key === 'Escape') closeServerDisambig(); };
+    document.addEventListener('keydown', window._disambigEsc);
+}
+
+function closeServerDisambig() {
+    const overlay = document.getElementById('server-disambig-overlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+        setTimeout(() => overlay.classList.add('hidden'), 250);
+    }
+    if (window._disambigEsc) { document.removeEventListener('keydown', window._disambigEsc); window._disambigEsc = null; }
+}
+
+async function selectDisambigPlaylist(playlistId, playlistName, mirroredId) {
+    closeServerDisambig();
+    try {
+        const res = await fetch(`/api/mirrored-playlists/${mirroredId}`);
+        const mirrored = await res.json();
+        _openServerCompareView(playlistId, playlistName, mirrored);
+    } catch (e) {
+        showToast('Failed to load mirrored playlist: ' + e.message, 'error');
+    }
+}
+
+// ── Compare View ──
+
+async function _openServerCompareView(playlistId, playlistName, mirroredPlaylist) {
+    const container = document.getElementById('server-playlist-container');
+    const editor = document.getElementById('server-editor');
+    if (!editor) return;
+
+    if (container) container.style.display = 'none';
+    editor.style.display = '';
+
+    const nameEl = document.getElementById('server-editor-name');
+    const metaEl = document.getElementById('server-editor-meta');
+    const banner = document.getElementById('server-no-source-banner');
+    const sourceScroll = document.getElementById('server-col-source-scroll');
+    const serverScroll = document.getElementById('server-col-server-scroll');
+
+    if (nameEl) nameEl.textContent = playlistName;
+    if (metaEl) metaEl.textContent = 'Loading comparison...';
+    if (banner) banner.style.display = 'none';
+    if (sourceScroll) sourceScroll.innerHTML = '<div style="text-align:center;padding:30px;color:rgba(255,255,255,0.2);font-size:12px">Loading...</div>';
+    if (serverScroll) serverScroll.innerHTML = '<div style="text-align:center;padding:30px;color:rgba(255,255,255,0.2);font-size:12px">Loading...</div>';
+
+    // Store state
+    _serverEditorState = {
+        playlistId,
+        playlistName,
+        mirroredPlaylist,
+        tracks: [],
+    };
+
+    // Build API URL
+    let url = `/api/server/playlist/${playlistId}/tracks?name=${encodeURIComponent(playlistName)}`;
+    if (mirroredPlaylist && mirroredPlaylist.id) {
+        url += `&mirrored_playlist_id=${mirroredPlaylist.id}`;
+    }
+
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (!data.success) {
+            if (metaEl) metaEl.textContent = data.error || 'Failed to load';
+            return;
+        }
+
+        _serverEditorState.tracks = data.tracks || [];
+        _serverEditorState.serverType = data.server_type;
+
+        const tracks = _serverEditorState.tracks;
+        const serverLabel = data.server_type ? data.server_type.charAt(0).toUpperCase() + data.server_type.slice(1) : 'Server';
+
+        // Header metadata
+        if (metaEl) metaEl.textContent = `${serverLabel} · ${data.server_track_count || 0} server tracks · ${data.source_track_count || 0} source tracks`;
+
+        // Show no-source banner if needed
+        if (!mirroredPlaylist && banner) {
+            banner.style.display = '';
+        }
+
+        // Stats, filter counts, footer
+        _updateCompareStats(tracks);
+
+        // Column headers
+        const sourceLabel = mirroredPlaylist ? (mirroredPlaylist.source || 'source').charAt(0).toUpperCase() + (mirroredPlaylist.source || 'source').slice(1) : 'Source';
+        const sourceIconMap = { spotify: '🟢', tidal: '🌊', youtube: '▶️', beatport: '🎛️', deezer: '🟣', file: '📄' };
+        const serverIconMap = { plex: '🟠', jellyfin: '🟣', navidrome: '🔵' };
+
+        const srcIconEl = document.getElementById('server-col-source-icon');
+        const srcLabelEl = document.getElementById('server-col-source-label');
+        const srcCountEl = document.getElementById('server-col-source-count');
+        const svrIconEl = document.getElementById('server-col-server-icon');
+        const svrLabelEl = document.getElementById('server-col-server-label');
+        const svrCountEl = document.getElementById('server-col-server-count');
+
+        if (srcIconEl) srcIconEl.textContent = mirroredPlaylist ? (sourceIconMap[mirroredPlaylist.source] || '📋') : '📋';
+        if (srcLabelEl) srcLabelEl.textContent = sourceLabel;
+        if (srcCountEl) srcCountEl.textContent = `${data.source_track_count || 0} tracks`;
+        if (svrIconEl) svrIconEl.textContent = serverIconMap[data.server_type] || '💻';
+        if (svrLabelEl) svrLabelEl.textContent = serverLabel;
+        if (svrCountEl) svrCountEl.textContent = `${data.server_track_count || 0} tracks`;
+
+        // Render columns
+        _renderCompareColumns(tracks);
+
+        // Scroll linking
+        _setupScrollLinking();
+
+    } catch (e) {
+        if (metaEl) metaEl.textContent = 'Error: ' + e.message;
+    }
+}
+
+function _updateCompareStats(tracks) {
+    const matched = tracks.filter(t => t.match_status === 'matched').length;
+    const missing = tracks.filter(t => t.match_status === 'missing').length;
+    const extra = tracks.filter(t => t.match_status === 'extra').length;
+
+    const statsEl = document.getElementById('server-editor-stats');
+    if (statsEl) {
+        statsEl.innerHTML = `
+            <div class="server-editor-stat"><div class="server-editor-stat-num matched">${matched}</div><div class="server-editor-stat-label">Matched</div></div>
+            <div class="server-editor-stat"><div class="server-editor-stat-num missing">${missing}</div><div class="server-editor-stat-label">Missing</div></div>
+            ${extra > 0 ? `<div class="server-editor-stat"><div class="server-editor-stat-num extra">${extra}</div><div class="server-editor-stat-label">Extra</div></div>` : ''}
+        `;
+    }
+
+    const editor = document.getElementById('server-editor');
+    if (editor) {
+        editor.querySelectorAll('.discog-filter').forEach(btn => {
+            const f = btn.dataset.filter;
+            if (f === 'all') btn.textContent = `All (${tracks.length})`;
+            else if (f === 'matched') btn.textContent = `Matched (${matched})`;
+            else if (f === 'missing') btn.textContent = `Missing (${missing})`;
+            else if (f === 'extra') btn.textContent = `Extra (${extra})`;
+        });
+    }
+
+    const footer = document.getElementById('server-editor-footer');
+    if (footer) footer.textContent = `${matched}/${matched + missing} matched${extra > 0 ? ` · ${extra} extra on server` : ''}`;
+}
+
+function _formatDurationMs(ms) {
+    if (!ms) return '';
+    const s = Math.round(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function _renderCompareColumns(tracks) {
+    const sourceScroll = document.getElementById('server-col-source-scroll');
+    const serverScroll = document.getElementById('server-col-server-scroll');
+    if (!sourceScroll || !serverScroll) return;
+
+    let sourceHTML = '';
+    let serverHTML = '';
+
+    tracks.forEach((t, i) => {
+        const src = t.source_track;
+        const svr = t.server_track;
+        const status = t.match_status;
+        const pairId = `pair-${i}`;
+
+        // ── Source (left) column ──
+        if (src) {
+            const dur = _formatDurationMs(src.duration_ms);
+            sourceHTML += `
+            <div class="server-track-item ${status}" data-pair-id="${pairId}" data-index="${i}" data-status="${status}"
+                 onclick="_compareTrackClick('source', ${i})">
+                <div class="server-track-num">${src.position != null ? src.position : i + 1}</div>
+                <div class="server-track-art">
+                    ${src.image_url ? `<img src="${src.image_url}" alt="" loading="lazy">` : '<div class="server-track-art-empty"></div>'}
+                </div>
+                <div class="server-track-info">
+                    <div class="server-track-title">${_esc(src.name)}</div>
+                    <div class="server-track-artist">${_esc(src.artist || '')}</div>
+                </div>
+                <div class="server-track-duration">${dur}</div>
+                <div class="server-track-status-dot"></div>
+            </div>`;
+        } else {
+            // Extra track — no source
+            sourceHTML += `
+            <div class="server-track-item extra-gap" data-pair-id="${pairId}" data-index="${i}" data-status="${status}">
+                <div class="server-track-empty-slot extra">
+                    <span class="empty-slot-label">No source track</span>
+                </div>
+            </div>`;
+        }
+
+        // ── Server (right) column ──
+        if (svr) {
+            const dur = _formatDurationMs(svr.duration);
+            const conf = t.confidence != null ? t.confidence : null;
+            let confBadge = '';
+            if (status === 'matched' && conf != null) {
+                const pct = Math.round(conf * 100);
+                const cls = pct >= 100 ? 'exact' : pct >= 90 ? 'high' : 'fuzzy';
+                confBadge = `<span class="server-track-conf ${cls}" title="Title similarity">${pct}%</span>`;
+            }
+            serverHTML += `
+            <div class="server-track-item ${status}" data-pair-id="${pairId}" data-index="${i}" data-status="${status}"
+                 onclick="_compareTrackClick('server', ${i})">
+                <div class="server-track-num">${i + 1}</div>
+                <div class="server-track-art">
+                    ${svr.thumb ? `<img src="${svr.thumb}" alt="" loading="lazy">` : '<div class="server-track-art-empty"></div>'}
+                </div>
+                <div class="server-track-info">
+                    <div class="server-track-title">${_esc(svr.title)}</div>
+                    <div class="server-track-artist">${_esc(svr.artist || '')}</div>
+                </div>
+                ${confBadge}
+                <div class="server-track-duration">${dur}</div>
+                <div class="server-track-actions">
+                    ${status === 'matched' ? `<button class="server-track-swap-btn" onclick="event.stopPropagation(); serverSearchReplace(${i}, 'replace')" title="Swap for different version">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+                    </button>` : ''}
+                    <button class="server-track-remove-btn" onclick="event.stopPropagation(); _serverRemoveTrack(${i}, '${svr.id}')" title="Remove from playlist">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="server-track-status-dot"></div>
+            </div>`;
+        } else {
+            // Missing on server — clickable empty slot
+            const hint = src ? `${src.artist || ''} — ${src.name}` : '';
+            serverHTML += `
+            <div class="server-track-item empty-slot-wrap" data-pair-id="${pairId}" data-index="${i}" data-status="${status}"
+                 onclick="serverSearchReplace(${i}, 'add')">
+                <div class="server-track-empty-slot missing">
+                    <div class="empty-slot-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    </div>
+                    <span class="empty-slot-label">Find &amp; add</span>
+                    <span class="empty-slot-hint">${_esc(hint)}</span>
+                </div>
+            </div>`;
+        }
+    });
+
+    sourceScroll.innerHTML = sourceHTML;
+    serverScroll.innerHTML = serverHTML;
+}
+
+function _setupScrollLinking() {
+    const sourceScroll = document.getElementById('server-col-source-scroll');
+    const serverScroll = document.getElementById('server-col-server-scroll');
+    if (!sourceScroll || !serverScroll) return;
+
+    // Remove old listeners to prevent accumulation on refresh
+    if (window._serverScrollAC) window._serverScrollAC.abort();
+    window._serverScrollAC = new AbortController();
+    const signal = window._serverScrollAC.signal;
+
+    let syncing = false;
+
+    const syncScroll = (from, to) => {
+        if (syncing) return;
+        syncing = true;
+        const maxFrom = from.scrollHeight - from.clientHeight;
+        const maxTo = to.scrollHeight - to.clientHeight;
+        if (maxFrom > 0 && maxTo > 0) {
+            to.scrollTop = (from.scrollTop / maxFrom) * maxTo;
+        }
+        requestAnimationFrame(() => { syncing = false; });
+    };
+
+    sourceScroll.addEventListener('scroll', () => syncScroll(sourceScroll, serverScroll), { signal });
+    serverScroll.addEventListener('scroll', () => syncScroll(serverScroll, sourceScroll), { signal });
+}
+
+function _compareTrackClick(side, index) {
+    const otherSide = side === 'source' ? 'server' : 'source';
+    const otherScroll = document.getElementById(`server-col-${otherSide}-scroll`);
+    const pairId = `pair-${index}`;
+
+    // Clear previous highlights
+    document.querySelectorAll('.server-track-item.highlighted').forEach(el => el.classList.remove('highlighted'));
+
+    // Highlight both paired items
+    document.querySelectorAll(`[data-pair-id="${pairId}"]`).forEach(el => el.classList.add('highlighted'));
+
+    // Scroll the OTHER column to show the paired item
+    const target = otherScroll?.querySelector(`[data-pair-id="${pairId}"]`);
+    if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+}
+
+function _serverEditorRefresh() {
+    _openServerCompareView(_serverEditorState.playlistId, _serverEditorState.playlistName, _serverEditorState.mirroredPlaylist);
+}
+
+function serverEditorBack() {
+    const container = document.getElementById('server-playlist-container');
+    const editor = document.getElementById('server-editor');
+    if (editor) editor.style.display = 'none';
+    if (container) container.style.display = '';
+}
+
+function _serverEditorFilter(btn, filter) {
+    btn.closest('.server-editor-filters').querySelectorAll('.discog-filter').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    // Filter both columns simultaneously
+    ['server-col-source-scroll', 'server-col-server-scroll'].forEach(colId => {
+        document.querySelectorAll(`#${colId} .server-track-item`).forEach(item => {
+            const status = item.dataset.status;
+            item.style.display = (filter === 'all' || status === filter) ? '' : 'none';
+        });
+    });
+}
+
+// ── Track Search / Replace ──
+
+async function serverSearchReplace(trackIndex, mode) {
+    const track = _serverEditorState.tracks[trackIndex];
+    if (!track) return;
+
+    const src = track.source_track || {};
+    const svr = track.server_track || {};
+    // Search by track name only first (more reliable than "artist trackname" blob)
+    const searchQuery = src.name ? src.name.trim() : (svr.title || '').trim();
+    const contextArtist = src.artist || svr.artist || '';
+    const contextName = src.name || svr.title || '';
+
+    const existing = document.getElementById('server-search-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'server-search-overlay';
+    overlay.className = 'server-search-overlay';
+    overlay.innerHTML = `
+        <div class="server-search-popover" id="server-search-popover">
+            <div class="server-search-header">
+                <div>
+                    <div class="server-search-title">${mode === 'replace' ? 'Swap Track' : 'Add Track to Server'}</div>
+                    ${contextName ? `<div class="server-search-context">
+                        <span class="server-search-context-label">Source:</span>
+                        <span class="server-search-context-artist">${_esc(contextArtist)}</span>
+                        <span class="server-search-context-sep">—</span>
+                        <span class="server-search-context-name">${_esc(contextName)}</span>
+                    </div>` : ''}
+                </div>
+                <button class="server-search-close" onclick="document.getElementById('server-search-overlay')?.remove()">&times;</button>
+            </div>
+            <div class="server-search-input-wrap">
+                <div class="server-search-input-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                </div>
+                <input type="text" class="server-search-input" id="server-search-input" value="${_esc(searchQuery)}" placeholder="Search by track name, artist, or album..." onkeydown="if(event.key==='Enter') _serverSearchExecute()">
+            </div>
+            <div class="server-search-results-header" id="server-search-results-header"></div>
+            <div class="server-search-results" id="server-search-results">
+                <div class="server-search-hint">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="margin-bottom:6px;opacity:0.4"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    <br>Searching...
+                </div>
+            </div>
+        </div>
+    `;
+    // Click overlay background or press Escape to close
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    overlay._escHandler = e => { if (e.key === 'Escape') overlay.remove(); };
+    document.addEventListener('keydown', overlay._escHandler);
+    // Clean up Escape listener when overlay is removed
+    const obs = new MutationObserver(() => {
+        if (!document.body.contains(overlay)) { document.removeEventListener('keydown', overlay._escHandler); obs.disconnect(); }
+    });
+    obs.observe(document.body, { childList: true });
+
+    const popover = overlay.querySelector('.server-search-popover');
+    popover.dataset.trackIndex = trackIndex;
+    popover.dataset.mode = mode;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+    document.getElementById('server-search-input')?.focus();
+    document.getElementById('server-search-input')?.select();
+
+    _serverSearchExecute();
+}
+
+async function _serverSearchExecute() {
+    const input = document.getElementById('server-search-input');
+    const results = document.getElementById('server-search-results');
+    const resultsHeader = document.getElementById('server-search-results-header');
+    const popover = document.getElementById('server-search-popover');
+    if (!input || !results || !popover) return;
+
+    const query = input.value.trim();
+    if (!query) {
+        results.innerHTML = '<div class="server-search-hint">Type a search query</div>';
+        if (resultsHeader) resultsHeader.textContent = '';
+        return;
+    }
+
+    results.innerHTML = '<div class="server-search-hint"><div class="server-search-spinner"></div>Searching library...</div>';
+    if (resultsHeader) resultsHeader.textContent = '';
+
+    try {
+        const response = await fetch(`/api/library/search-tracks?q=${encodeURIComponent(query)}&limit=20`);
+        const data = await response.json();
+
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            results.innerHTML = `<div class="server-search-hint">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="margin-bottom:6px;opacity:0.3"><path d="M9.172 14.828a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <br>No results found<br><span style="font-size:10px;opacity:0.5">Try different keywords or a shorter query</span>
+            </div>`;
+            return;
+        }
+
+        const trackIndex = parseInt(popover.dataset.trackIndex);
+        const mode = popover.dataset.mode;
+
+        if (resultsHeader) resultsHeader.textContent = `${data.tracks.length} result${data.tracks.length !== 1 ? 's' : ''}`;
+
+        results.innerHTML = data.tracks.map((t, i) => {
+            const ext = (t.file_path || '').split('.').pop().toUpperCase();
+            const format = ['FLAC','MP3','OPUS','OGG','M4A','AAC','WAV'].includes(ext) ? (ext === 'M4A' ? 'AAC' : ext) : '';
+            const dur = _formatDurationMs(t.duration);
+            const bitrateStr = t.bitrate ? `${t.bitrate}k` : '';
+            return `
+                <div class="server-search-result" onclick="_serverSelectTrack(${trackIndex}, '${mode}', '${t.id}', this)" style="animation-delay:${i * 0.03}s">
+                    <div class="server-search-result-art">
+                        ${t.album_thumb_url ? `<img src="${t.album_thumb_url}" alt="" loading="lazy">` : '<div class="server-search-result-art-empty"></div>'}
+                    </div>
+                    <div class="server-search-result-info">
+                        <div class="server-search-result-title">${_esc(t.title)}</div>
+                        <div class="server-search-result-meta">${_esc(t.artist_name)}${t.album_title ? ` · ${_esc(t.album_title)}` : ''}</div>
+                    </div>
+                    <div class="server-search-result-details">
+                        ${format ? `<span class="server-search-format">${format}</span>` : ''}
+                        ${bitrateStr ? `<span class="server-search-bitrate">${bitrateStr}</span>` : ''}
+                        ${dur ? `<span class="server-search-dur">${dur}</span>` : ''}
+                    </div>
+                    <button class="server-search-select-btn">Select</button>
+                </div>
+            `;
+        }).join('');
+
+    } catch (e) {
+        results.innerHTML = `<div class="server-search-hint">Error: ${e.message}</div>`;
+    }
+}
+
+async function _serverSelectTrack(trackIndex, mode, newTrackId, el) {
+    const track = _serverEditorState.tracks[trackIndex];
+    if (!track) return;
+
+    const btn = el.querySelector('.server-search-select-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '...'; }
+
+    try {
+        let response;
+        if (mode === 'replace') {
+            response = await fetch(`/api/server/playlist/${_serverEditorState.playlistId}/replace-track`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    old_track_id: track.server_track?.id,
+                    new_track_id: newTrackId,
+                    playlist_name: _serverEditorState.playlistName,
+                })
+            });
+        } else {
+            // Calculate the server-side position for this track
+            // Count how many server tracks exist before this index
+            let serverPos = 0;
+            for (let k = 0; k < trackIndex; k++) {
+                if (_serverEditorState.tracks[k]?.server_track) serverPos++;
+            }
+            response = await fetch(`/api/server/playlist/${_serverEditorState.playlistId}/add-track`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    track_id: newTrackId,
+                    playlist_name: _serverEditorState.playlistName,
+                    position: serverPos,
+                })
+            });
+        }
+
+        const data = await response.json();
+        if (data.success) {
+            showToast(data.message || 'Track updated', 'success');
+            document.getElementById('server-search-overlay')?.remove();
+            // Update playlist ID if server recreated it (Plex deletes+recreates)
+            if (data.new_playlist_id) _serverEditorState.playlistId = data.new_playlist_id;
+
+            // Update local state directly — don't re-run the matcher which would
+            // lose the user's explicit assignment if titles don't match exactly
+            const trackEntry = _serverEditorState.tracks[trackIndex];
+            if (trackEntry && mode === 'add') {
+                // Fill the empty slot with the selected track info
+                const svrTitle = el.querySelector('.server-search-result-title')?.textContent || '';
+                const svrArtist = (el.querySelector('.server-search-result-meta')?.textContent || '').split('·')[0].trim();
+                const svrThumb = el.querySelector('.server-search-result-art img')?.src || '';
+                trackEntry.server_track = { id: newTrackId, title: svrTitle, artist: svrArtist, thumb: svrThumb };
+                trackEntry.match_status = 'matched';
+                // Calculate real title similarity so the badge is accurate
+                const srcName = trackEntry.source_track?.name || '';
+                const srcArtist = trackEntry.source_track?.artist || '';
+                const srcKey = `${srcArtist} ${srcName}`.trim().toLowerCase();
+                const svrKey = `${svrArtist} ${svrTitle}`.trim().toLowerCase();
+                trackEntry.confidence = srcKey && svrKey ? calculateStringSimilarity(srcKey, svrKey) : 0;
+                _renderCompareColumns(_serverEditorState.tracks);
+                _updateCompareStats(_serverEditorState.tracks);
+                _setupScrollLinking();
+            } else {
+                // For replace mode, re-fetch to get the updated server state
+                _openServerCompareView(_serverEditorState.playlistId, _serverEditorState.playlistName, _serverEditorState.mirroredPlaylist);
+            }
+        } else {
+            showToast(data.error || 'Failed to update track', 'error');
+            if (btn) { btn.disabled = false; btn.textContent = 'Select'; }
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Select'; }
+    }
+}
+
+async function _serverRemoveTrack(trackIndex, serverTrackId) {
+    if (!serverTrackId) return;
+
+    const track = _serverEditorState.tracks[trackIndex];
+    const trackTitle = track?.server_track?.title || 'this track';
+
+    if (!await showConfirmDialog({ title: 'Remove Track', message: `Remove "${trackTitle}" from this playlist?`, confirmText: 'Remove', destructive: true })) return;
+
+    try {
+        const response = await fetch(`/api/server/playlist/${_serverEditorState.playlistId}/remove-track`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track_id: serverTrackId,
+                playlist_name: _serverEditorState.playlistName,
+            })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            showToast(data.message || 'Track removed', 'success');
+            const pid = data.new_playlist_id || _serverEditorState.playlistId;
+            _serverEditorState.playlistId = pid;
+            _openServerCompareView(pid, _serverEditorState.playlistName, _serverEditorState.mirroredPlaylist);
+        } else {
+            showToast(data.error || 'Failed to remove track', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
 
 // Auto-refresh sync cards every 30 seconds when on dashboard
 setInterval(() => {
