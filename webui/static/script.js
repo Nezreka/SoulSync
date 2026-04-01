@@ -16205,61 +16205,181 @@ function hideLoadingOverlay() {
     document.getElementById('loading-overlay').classList.add('hidden');
 }
 
-// Toast deduplication cache
-let recentToasts = new Map();
+// ==================================================================================
+// NOTIFICATION SYSTEM — Compact toasts + bell button + notification history panel
+// ==================================================================================
+
+const _notifState = {
+    history: [],
+    unreadCount: 0,
+    panelOpen: false,
+    currentToast: null,
+    toastTimer: null,
+    maxHistory: 50,
+};
+const _recentToastKeys = new Map();
+
+const _notifIcons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
 
 function showToast(message, type = 'success', helpSection = null) {
-    const container = document.getElementById('toast-container');
-
-    // Create a unique key for this toast
     const toastKey = `${type}:${message}`;
     const now = Date.now();
 
-    // Check if we've shown this exact toast recently (within 5 seconds)
-    if (recentToasts.has(toastKey)) {
-        const lastShown = recentToasts.get(toastKey);
-        if (now - lastShown < 5000) {
-            console.log(`🚫 Suppressing duplicate toast: "${message}"`);
-            return; // Don't show duplicate
-        }
+    // Deduplication — suppress identical toasts within 5 seconds
+    if (_recentToastKeys.has(toastKey) && now - _recentToastKeys.get(toastKey) < 5000) return;
+    _recentToastKeys.set(toastKey, now);
+    for (const [k, t] of _recentToastKeys) { if (now - t > 10000) _recentToastKeys.delete(k); }
+
+    // Add to notification history
+    const entry = { id: now + Math.random(), message, type, helpSection, timestamp: now, read: false };
+    _notifState.history.unshift(entry);
+    if (_notifState.history.length > _notifState.maxHistory) _notifState.history.pop();
+    _notifState.unreadCount++;
+    _updateNotifBadge();
+
+    // Show compact toast — dismiss current if showing
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    if (_notifState.currentToast && container.contains(_notifState.currentToast)) {
+        _notifState.currentToast.classList.add('toast-exit');
+        const old = _notifState.currentToast;
+        setTimeout(() => { if (container.contains(old)) container.removeChild(old); }, 200);
     }
+    if (_notifState.toastTimer) clearTimeout(_notifState.toastTimer);
 
-    // Record this toast
-    recentToasts.set(toastKey, now);
-
-    // Clean up old entries (older than 10 seconds)
-    for (const [key, timestamp] of recentToasts.entries()) {
-        if (now - timestamp > 10000) {
-            recentToasts.delete(key);
-        }
-    }
-
+    const icon = _notifIcons[type] || 'ℹ';
     const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.textContent = message;
-
-    // Add contextual help link if a docs section is specified
+    toast.className = `toast-compact toast-${type}`;
+    toast.innerHTML = `<span class="toast-compact-icon">${icon}</span><span class="toast-compact-msg">${_escToast(message)}</span>`;
     if (helpSection) {
-        const helpLink = document.createElement('span');
-        helpLink.className = 'toast-help-link';
-        helpLink.textContent = 'Learn more';
-        helpLink.onclick = (e) => {
-            e.stopPropagation();
-            if (typeof navigateToDocsSection === 'function') {
-                navigateToDocsSection(helpSection);
-            }
-        };
-        toast.appendChild(helpLink);
+        const link = document.createElement('span');
+        link.className = 'toast-compact-link';
+        link.textContent = 'Learn more →';
+        link.onclick = e => { e.stopPropagation(); if (typeof navigateToDocsSection === 'function') navigateToDocsSection(helpSection); };
+        toast.appendChild(link);
     }
+    toast.onclick = () => { toast.classList.add('toast-exit'); setTimeout(() => { if (container.contains(toast)) container.removeChild(toast); }, 200); };
 
     container.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('toast-enter'));
+    _notifState.currentToast = toast;
 
-    // Auto-remove after 3 seconds (5 seconds if has help link)
-    setTimeout(() => {
+    _notifState.toastTimer = setTimeout(() => {
         if (container.contains(toast)) {
-            container.removeChild(toast);
+            toast.classList.add('toast-exit');
+            setTimeout(() => { if (container.contains(toast)) container.removeChild(toast); }, 300);
         }
-    }, helpSection ? 5000 : 3000);
+        _notifState.currentToast = null;
+    }, helpSection ? 5000 : 3500);
+}
+
+function _escToast(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function _updateNotifBadge() {
+    const badge = document.getElementById('notif-bell-badge');
+    if (badge) {
+        badge.textContent = _notifState.unreadCount > 99 ? '99+' : _notifState.unreadCount;
+        badge.style.display = _notifState.unreadCount > 0 ? '' : 'none';
+    }
+}
+
+function toggleNotifPanel() {
+    if (_notifState.panelOpen) {
+        _closeNotifPanel();
+    } else {
+        _openNotifPanel();
+    }
+}
+
+function _openNotifPanel() {
+    _closeNotifPanel(); // Remove existing
+
+    _notifState.panelOpen = true;
+    _notifState.unreadCount = 0;
+    _notifState.history.forEach(e => e.read = true);
+    _updateNotifBadge();
+
+    const btn = document.getElementById('notif-bell-btn');
+    const panel = document.createElement('div');
+    panel.id = 'notif-panel';
+    panel.className = 'notif-panel';
+
+    const entries = _notifState.history;
+
+    panel.innerHTML = `
+        <div class="notif-panel-header">
+            <span class="notif-panel-title">Notifications</span>
+            ${entries.length > 0 ? '<button class="notif-panel-clear" onclick="_clearNotifHistory()">Clear All</button>' : ''}
+        </div>
+        <div class="notif-panel-body">
+            ${entries.length === 0 ? '<div class="notif-panel-empty">No notifications yet</div>' :
+              entries.map(e => {
+                  const icon = _notifIcons[e.type] || 'ℹ';
+                  const ago = _notifTimeAgo(e.timestamp);
+                  const unreadDot = e.read ? '' : '<span class="notif-entry-unread"></span>';
+                  const learnMore = e.helpSection ? `<span class="notif-entry-link" onclick="event.stopPropagation(); _closeNotifPanel(); navigateToDocsSection('${e.helpSection}')">Learn more →</span>` : '';
+                  return `
+                    <div class="notif-entry notif-entry-${e.type}">
+                        ${unreadDot}
+                        <span class="notif-entry-icon notif-icon-${e.type}">${icon}</span>
+                        <div class="notif-entry-body">
+                            <div class="notif-entry-msg">${_escToast(e.message)}</div>
+                            <div class="notif-entry-meta">${ago}${learnMore}</div>
+                        </div>
+                    </div>`;
+              }).join('')}
+        </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    // Position above the bell button
+    if (btn) {
+        const rect = btn.getBoundingClientRect();
+        panel.style.right = (window.innerWidth - rect.right) + 'px';
+        panel.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+    }
+
+    requestAnimationFrame(() => panel.classList.add('visible'));
+
+    // Close on outside click
+    setTimeout(() => {
+        const closeHandler = e => {
+            if (!panel.contains(e.target) && e.target.id !== 'notif-bell-btn') {
+                _closeNotifPanel();
+                document.removeEventListener('click', closeHandler);
+            }
+        };
+        document.addEventListener('click', closeHandler);
+    }, 100);
+}
+
+function _closeNotifPanel() {
+    _notifState.panelOpen = false;
+    const panel = document.getElementById('notif-panel');
+    if (panel) {
+        panel.classList.remove('visible');
+        setTimeout(() => panel.remove(), 200);
+    }
+}
+
+function _clearNotifHistory() {
+    _notifState.history = [];
+    _notifState.unreadCount = 0;
+    _updateNotifBadge();
+    _closeNotifPanel();
+}
+
+function _notifTimeAgo(ts) {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 5) return 'just now';
+    if (s < 60) return `${s}s ago`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
 }
 
 function escapeHtml(text) {

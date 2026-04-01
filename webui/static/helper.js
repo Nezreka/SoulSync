@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.1': [
         // Newest features first
+        { title: 'Redesigned Notifications',                    desc: 'Compact pill toasts, notification bell with unread badge, history panel with last 50 notifications and Learn More links' },
         { title: 'Track Redownload & Source Info',              desc: 'Fix mismatched downloads — search all metadata and download sources in columns, pick the right version, auto-replace. Source Info shows where tracks came from with blacklist option', page: 'library' },
         { title: 'Spotify API Rate Limit Improvements',       desc: 'Cached get_artist_albums, eliminated duplicate search calls, auth probe reduced 66%, enrichment workers auto-pause during downloads' },
         { title: 'Server Playlist Manager',                   desc: 'Compare source playlists against your media server — find missing tracks, swap wrong matches, remove extras with a dual-column editor', page: 'sync' },

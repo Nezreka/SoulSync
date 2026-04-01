@@ -20015,6 +20015,19 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔔 Redesigned Notification System",
+                "description": "Modern compact toasts with notification history and bell button",
+                "features": [
+                    "• Compact pill-shaped toasts in the bottom-right — one at a time, auto-dismiss after 3.5s",
+                    "• Notification bell button with unread badge counter next to the help button",
+                    "• Click the bell to open the notification history panel with the last 50 notifications",
+                    "• Each notification shows type icon, message, relative timestamp, and optional 'Learn more' link",
+                    "• Unread dot indicators — panel marks all as read when opened",
+                    "• Clear All button to empty notification history",
+                    "• Click any toast to dismiss it immediately"
+                ]
+            },
+            {
                 "title": "🔄 Track Redownload — Fix Mismatched Downloads",
                 "description": "Replace wrong downloads with the correct version using manual source selection",
                 "features": [
