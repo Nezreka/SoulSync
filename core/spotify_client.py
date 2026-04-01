@@ -1318,7 +1318,8 @@ class SpotifyClient:
             cached = cache.get_entity(source, 'artist', cache_key)
             if cached:
                 try:
-                    return [Album.from_spotify_album(ad) for ad in cached]
+                    albums_list = cached.get('_albums', cached) if isinstance(cached, dict) else cached
+                    return [Album.from_spotify_album(ad) for ad in albums_list]
                 except Exception:
                     pass  # Cache data incompatible, re-fetch
 
@@ -1339,9 +1340,9 @@ class SpotifyClient:
 
                 logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
 
-                # Cache the full artist albums result
+                # Cache the full artist albums result (wrapped in dict for cache compatibility)
                 if raw_items:
-                    cache.store_entity('spotify', 'artist', cache_key, raw_items)
+                    cache.store_entity('spotify', 'artist', cache_key, {'name': f'albums_{artist_id}', '_albums': raw_items})
                     # Also cache individual albums opportunistically
                     entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
                     if entries:
