@@ -11,7 +11,7 @@ logger = get_logger("genius_client")
 # Global rate limiting variables
 _last_api_call_time = 0
 _api_call_lock = threading.Lock()
-MIN_API_INTERVAL = 1.5  # 1.5s between calls — Genius 429s at 500ms
+MIN_API_INTERVAL = 2.0  # 2s between calls — Genius rate limits are undocumented, ~30req/min is safe
 _rate_limit_backoff = 0  # Extra backoff seconds after 429
 _rate_limit_until = 0    # Timestamp until which all calls should wait
 
