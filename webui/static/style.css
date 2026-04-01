@@ -52049,111 +52049,197 @@ tr.tag-diff-same {
    TRACK REDOWNLOAD MODAL
    ================================================================================== */
 
+.redownload-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .redownload-modal {
-    background: rgba(20, 20, 28, 0.98);
-    backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 20px;
-    max-width: 600px;
+    background: rgba(16, 16, 24, 0.85);
+    backdrop-filter: blur(40px) saturate(1.4);
+    -webkit-backdrop-filter: blur(40px) saturate(1.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 24px;
+    max-width: 1100px;
     width: 95vw;
-    max-height: 85vh;
+    max-height: 88vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 40px 100px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255,255,255,0.06) inset, 0 0 80px rgba(0,0,0,0.3) inset;
 }
 
 .redownload-header {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    padding: 20px 24px 0;
+    align-items: flex-start;
+    padding: 28px 32px 0;
 }
-.redownload-header h3 { font-size: 16px; font-weight: 700; color: #fff; margin: 0; }
+.redownload-header h3 { font-size: 20px; font-weight: 800; color: #fff; margin: 0; letter-spacing: -0.02em; }
+.redownload-header-sub { font-size: 13px; color: rgba(255,255,255,0.3); margin: 6px 0 0; }
 
 .redownload-close {
-    width: 30px; height: 30px; border: none; background: rgba(255,255,255,0.06);
+    width: 32px; height: 32px; border: none; background: rgba(255,255,255,0.06);
     color: rgba(255,255,255,0.4); border-radius: 50%; font-size: 18px; cursor: pointer;
     display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+    flex-shrink: 0;
 }
 .redownload-close:hover { background: rgba(255,255,255,0.12); color: #fff; }
 
+/* Current track card */
 .redownload-current {
-    padding: 10px 24px 0;
+    display: flex; align-items: center; gap: 16px;
+    margin: 20px 32px 0; padding: 16px 20px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
 }
-.redownload-current-title { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.8); }
-.redownload-current-meta { font-size: 11px; color: rgba(255,255,255,0.3); margin-top: 2px; }
+.redownload-current-art {
+    width: 56px; height: 56px; border-radius: 12px;
+    overflow: hidden; flex-shrink: 0;
+    background: rgba(var(--accent-rgb), 0.1);
+    display: flex; align-items: center; justify-content: center;
+}
+.redownload-current-art img {
+    width: 100%; height: 100%; object-fit: cover;
+}
+.redownload-current-art .redownload-art-empty {
+    font-size: 22px; width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(var(--accent-rgb), 0.1); border-radius: 0;
+}
+.redownload-current-info { flex: 1; min-width: 0; }
+.redownload-current-title { font-size: 16px; font-weight: 700; color: rgba(255,255,255,0.95); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.redownload-current-meta { font-size: 12px; color: rgba(255,255,255,0.35); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.redownload-current-badges { display: flex; gap: 4px; flex-shrink: 0; }
+.redownload-badge {
+    font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 6px;
+    letter-spacing: 0.03em;
+}
+.redownload-badge.fmt { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
+.redownload-badge.bitrate { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.4); }
 
 /* Step indicator */
 .redownload-steps {
-    display: flex; align-items: center; gap: 8px; padding: 14px 24px;
+    display: flex; align-items: center; gap: 0; padding: 22px 32px 10px;
 }
 .redownload-step {
-    font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.2);
-    padding: 4px 10px; border-radius: 6px; transition: all 0.2s;
+    font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.2);
+    padding: 8px 16px; border-radius: 10px; transition: all 0.25s;
+    display: flex; align-items: center; gap: 10px; white-space: nowrap;
 }
-.redownload-step.active { color: var(--accent); background: rgba(var(--accent-rgb), 0.1); }
-.redownload-step-arrow { color: rgba(255,255,255,0.1); font-size: 11px; }
+.redownload-step.active {
+    color: #fff; background: rgba(var(--accent-rgb), 0.12);
+}
+.redownload-step-num {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: rgba(255,255,255,0.06); display: flex;
+    align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800;
+}
+.redownload-step.active .redownload-step-num {
+    background: var(--accent); color: #fff;
+}
+.redownload-step-line {
+    flex: 1; height: 2px; background: rgba(255,255,255,0.06);
+    margin: 0 6px; min-width: 20px; border-radius: 1px;
+}
 
-.redownload-body { padding: 0 24px 20px; overflow-y: auto; flex: 1; }
+.redownload-body { padding: 8px 32px 28px; overflow-y: auto; flex: 1; }
 
 .redownload-loading, .redownload-error, .redownload-empty {
     text-align: center; padding: 30px; color: rgba(255,255,255,0.25); font-size: 12px;
 }
 .redownload-error { color: #ef5350; }
 
-/* Step 1 — Metadata tabs + results */
-.redownload-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
-.redownload-tab {
-    padding: 6px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);
-    background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.5); font-size: 11px;
-    font-weight: 600; cursor: pointer; transition: all 0.2s;
+/* Step 1 — Metadata source columns */
+.redownload-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
 }
-.redownload-tab.active { background: rgba(var(--accent-rgb),0.12); color: var(--accent); border-color: rgba(var(--accent-rgb),0.2); }
-.redownload-tab:hover:not(.active) { background: rgba(255,255,255,0.06); }
 
-.redownload-results-wrap { max-height: 300px; overflow-y: auto; }
-.redownload-results-wrap::-webkit-scrollbar { width: 4px; }
-.redownload-results-wrap::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+.redownload-source-col {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.redownload-col-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.6);
+}
+.redownload-col-icon { font-size: 16px; }
+.redownload-col-label { flex: 1; }
+.redownload-col-count {
+    font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.35);
+    font-variant-numeric: tabular-nums;
+}
+
+.redownload-col-results {
+    max-height: 380px; overflow-y: auto; padding: 6px;
+}
+.redownload-col-results::-webkit-scrollbar { width: 3px; }
+.redownload-col-results::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 2px; }
+
+.redownload-col-empty {
+    padding: 30px 16px; text-align: center;
+    font-size: 12px; color: rgba(255, 255, 255, 0.2);
+}
 
 .redownload-result {
-    display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px;
-    cursor: pointer; transition: background 0.15s; margin-bottom: 2px;
+    display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px;
+    cursor: pointer; transition: all 0.15s; margin-bottom: 3px;
+    border: 1px solid transparent;
 }
-.redownload-result:hover { background: rgba(255,255,255,0.04); }
-.redownload-result input[type="radio"] { accent-color: var(--accent); flex-shrink: 0; }
+.redownload-result:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.06); }
+.redownload-result:has(input:checked) { background: rgba(var(--accent-rgb), 0.06); border-color: rgba(var(--accent-rgb), 0.15); }
+.redownload-result input[type="radio"] { accent-color: var(--accent); flex-shrink: 0; width: 16px; height: 16px; }
 
-.redownload-result-art { width: 40px; height: 40px; border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+.redownload-result-art { width: 48px; height: 48px; border-radius: 10px; overflow: hidden; flex-shrink: 0; }
 .redownload-result-art img { width: 100%; height: 100%; object-fit: cover; }
 .redownload-art-empty { width: 100%; height: 100%; background: rgba(255,255,255,0.04); border-radius: 6px; }
 
 .redownload-result-info { flex: 1; min-width: 0; }
-.redownload-result-title { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.redownload-result-meta { font-size: 10px; color: rgba(255,255,255,0.35); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.redownload-result-title { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.redownload-result-meta { font-size: 11px; color: rgba(255,255,255,0.35); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .redownload-current-badge { font-size: 8px; background: rgba(var(--accent-rgb),0.15); color: var(--accent); padding: 1px 5px; border-radius: 3px; font-weight: 700; text-transform: uppercase; }
 
-.redownload-result-score { font-size: 10px; font-weight: 700; flex-shrink: 0; padding: 2px 6px; border-radius: 4px; }
+.redownload-result-score { font-size: 11px; font-weight: 700; flex-shrink: 0; padding: 4px 10px; border-radius: 6px; }
 .redownload-result-score.high { background: rgba(76,175,80,0.12); color: #4caf50; }
 .redownload-result-score.medium { background: rgba(255,183,77,0.12); color: #ffb74d; }
 .redownload-result-score.low { background: rgba(239,83,80,0.12); color: #ef5350; }
 
+.redownload-result-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
 .redownload-result-dur { font-size: 10px; color: rgba(255,255,255,0.2); flex-shrink: 0; min-width: 30px; text-align: right; }
 
 /* Step 2 — Download candidates */
-.redownload-candidates-wrap { max-height: 320px; overflow-y: auto; }
+.redownload-candidates-wrap { max-height: 450px; overflow-y: auto; }
 .redownload-candidates-wrap::-webkit-scrollbar { width: 4px; }
 .redownload-candidates-wrap::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
 
 .redownload-candidate {
-    display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px;
-    cursor: pointer; transition: background 0.15s; margin-bottom: 2px; border: 1px solid transparent;
+    display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 12px;
+    cursor: pointer; transition: all 0.15s; margin-bottom: 3px; border: 1px solid transparent;
 }
-.redownload-candidate:hover { background: rgba(255,255,255,0.04); }
-.redownload-candidate input[type="radio"] { accent-color: var(--accent); flex-shrink: 0; }
+.redownload-candidate:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.06); }
+.redownload-candidate:has(input:checked) { background: rgba(var(--accent-rgb), 0.06); border-color: rgba(var(--accent-rgb), 0.15); }
+.redownload-candidate input[type="radio"] { accent-color: var(--accent); flex-shrink: 0; width: 16px; height: 16px; }
 .redownload-candidate.blacklisted { opacity: 0.35; cursor: not-allowed; }
 
 .redownload-candidate-info { flex: 1; min-width: 0; }
-.redownload-candidate-name { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.redownload-candidate-meta { font-size: 10px; color: rgba(255,255,255,0.35); }
+.redownload-candidate-name { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.redownload-candidate-meta { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 2px; }
 
 .redownload-candidate-details { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .redownload-fmt { font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px; background: rgba(var(--accent-rgb),0.12); color: var(--accent); }
@@ -52182,14 +52268,19 @@ tr.tag-diff-same {
 .redownload-progress-status { font-size: 11px; color: rgba(255,255,255,0.3); margin-top: 12px; }
 
 /* Action buttons */
-.redownload-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 14px; }
+.redownload-actions { display: flex; justify-content: flex-end; gap: 12px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.05); margin-top: 12px; }
 .redownload-btn {
-    padding: 8px 18px; border-radius: 10px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s; border: none;
+    padding: 12px 28px; border-radius: 12px; font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s; border: none;
 }
-.redownload-btn.primary { background: var(--accent); color: #000; }
-.redownload-btn.primary:hover { filter: brightness(1.1); }
+.redownload-btn.primary {
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 1), rgba(var(--accent-rgb), 0.8));
+    color: #fff;
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3);
+    letter-spacing: 0.01em;
+}
+.redownload-btn.primary:hover { filter: brightness(1.15); transform: translateY(-1px); box-shadow: 0 6px 24px rgba(var(--accent-rgb), 0.4); }
 .redownload-btn.secondary { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.6); }
-.redownload-btn.secondary:hover { background: rgba(255,255,255,0.1); }
+.redownload-btn.secondary:hover { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); }
 
 /* Redownload button in track table */
 .enhanced-redownload-btn {

@@ -12987,6 +12987,7 @@ def redownload_search_metadata(track_id):
         cursor.execute("""
             SELECT t.id, t.title, t.file_path, t.bitrate, t.duration,
                    ar.name AS artist_name, al.title AS album_title,
+                   al.thumb_url AS album_thumb_url,
                    t.spotify_track_id, t.deezer_id
             FROM tracks t
             JOIN artists ar ON t.artist_id = ar.id
@@ -13001,12 +13002,30 @@ def redownload_search_metadata(track_id):
 
         track_title = row['title']
         artist_name = row['artist_name']
-        query = f"{artist_name} {track_title}"
+        # Clean the title for better search results — strip version/edition suffixes
+        import re as _re
+        clean_title = _re.sub(r'\s*[\(\[](single version|album version|remaster|deluxe|bonus|explicit|clean|radio edit)[\)\]]', '', track_title, flags=_re.IGNORECASE).strip()
+        query = f"{artist_name} {clean_title}"
 
         # Resolve file info
         file_path = row['file_path'] or ''
         ext = os.path.splitext(file_path)[1].lstrip('.').upper() if file_path else ''
         fmt = ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else ''
+
+        # Resolve album thumb URL (may be relative Plex path)
+        thumb_url = row['album_thumb_url'] or ''
+        if thumb_url and not thumb_url.startswith('http'):
+            _ab = ''
+            _at = ''
+            if plex_client and plex_client.server:
+                _ab = getattr(plex_client.server, '_baseurl', '') or ''
+                _at = getattr(plex_client.server, '_token', '') or ''
+            if not _ab:
+                _pc = config_manager.get_plex_config()
+                _ab = (_pc.get('base_url', '') or '').rstrip('/')
+                _at = _at or _pc.get('token', '')
+            if _ab and thumb_url.startswith('/'):
+                thumb_url = f"{_ab}{thumb_url}?X-Plex-Token={_at}" if _at else f"{_ab}{thumb_url}"
 
         current_track = {
             'id': row['id'],
@@ -13019,6 +13038,7 @@ def redownload_search_metadata(track_id):
             'bitrate': row['bitrate'] or 0,
             'spotify_track_id': row['spotify_track_id'],
             'deezer_id': row['deezer_id'],
+            'thumb_url': thumb_url,
         }
 
         # Search all available metadata sources in parallel
@@ -13041,17 +13061,22 @@ def redownload_search_metadata(track_id):
         try:
             from core.itunes_client import iTunesClient
             sources_to_search.append(('itunes', iTunesClient()))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"iTunes client not available for redownload search: {e}")
         try:
-            from core.deezer_client import DeezerClient
-            sources_to_search.append(('deezer', DeezerClient()))
-        except Exception:
-            pass
+            sources_to_search.append(('deezer', _get_deezer_client()))
+        except Exception as e:
+            logger.debug(f"Deezer client not available for redownload search: {e}")
 
         def _search_source(source_name, client):
             try:
+                logger.info(f"[Redownload] Searching {source_name} for: {query}")
                 track_objs = client.search_tracks(query, limit=10)
+                # If no results with full query, try title only
+                if not track_objs and clean_title:
+                    logger.info(f"[Redownload] {source_name} got 0 results, trying title only: {clean_title}")
+                    track_objs = client.search_tracks(clean_title, limit=10)
+                logger.info(f"[Redownload] {source_name} returned {len(track_objs)} results")
                 results = []
                 for t in track_objs:
                     r = {
@@ -13073,7 +13098,7 @@ def redownload_search_metadata(track_id):
                 results.sort(key=lambda x: (-int(x['is_current_match']), -x['match_score']))
                 return source_name, results
             except Exception as e:
-                logger.debug(f"Metadata search failed for {source_name}: {e}")
+                logger.error(f"[Redownload] Metadata search failed for {source_name}: {e}", exc_info=True)
                 return source_name, []
 
         with ThreadPoolExecutor(max_workers=3) as pool:
@@ -13118,6 +13143,7 @@ def redownload_search_sources(track_id):
             artists=[metadata.get('artist', '')],
             album=metadata.get('album', ''),
             duration_ms=metadata.get('duration_ms', 0),
+            popularity=0,
         )
 
         # Generate search queries
