@@ -41655,9 +41655,9 @@ textarea.enhanced-meta-field-input {
     color: rgba(255,255,255,0.4);
     font-size: 12px;
 }
-.enhanced-track-table .col-delete {
-    width: 36px;
-    text-align: center;
+.enhanced-track-table .col-track-actions {
+    width: auto;
+    text-align: right;
 }
 .enhanced-delete-btn {
     background: none;
@@ -52379,15 +52379,41 @@ tr.tag-diff-same {
     font-size: 16px; padding: 2px 4px; border-radius: 4px; transition: all 0.2s;
 }
 .enhanced-redownload-btn:hover { color: var(--accent); background: rgba(var(--accent-rgb),0.1); }
-.col-redownload { width: 30px; text-align: center; }
+/* Track actions group — source info, redownload, delete in one cell */
+.col-track-actions { width: auto; padding: 0 4px !important; }
 
-/* Source Info button */
-.enhanced-source-info-btn {
-    background: none; border: none; color: rgba(255,255,255,0.15); cursor: pointer;
-    font-size: 14px; padding: 2px 4px; border-radius: 4px; transition: all 0.2s;
+.enhanced-track-actions-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    justify-content: flex-end;
+    opacity: 0.4;
+    transition: opacity 0.15s;
 }
-.enhanced-source-info-btn:hover { color: rgba(100,181,246,0.8); background: rgba(100,181,246,0.1); }
-.col-source-info { width: 28px; text-align: center; }
+tr:hover .enhanced-track-actions-group { opacity: 1; }
+
+.enhanced-source-info-btn,
+.enhanced-redownload-btn {
+    background: none; border: none; cursor: pointer;
+    width: 24px; height: 24px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s; padding: 0;
+}
+
+.enhanced-source-info-btn { color: rgba(255,255,255,0.35); font-size: 13px; }
+.enhanced-source-info-btn:hover { color: rgba(100,181,246,0.9); background: rgba(100,181,246,0.1); }
+
+.enhanced-redownload-btn { color: rgba(255,255,255,0.35); font-size: 15px; }
+.enhanced-redownload-btn:hover { color: var(--accent); background: rgba(var(--accent-rgb),0.1); }
+
+.enhanced-delete-btn {
+    background: none; border: none; cursor: pointer;
+    width: 24px; height: 24px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.35); font-size: 13px;
+    transition: all 0.15s; padding: 0;
+}
+.enhanced-delete-btn:hover { color: #ef5350; background: rgba(239,83,80,0.1); }
 
 /* Source Info Popover */
 .source-info-popover {
