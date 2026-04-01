@@ -20015,18 +20015,45 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
-                "title": "🔄 Track Redownload & Smart Delete",
-                "description": "Fix mismatched downloads with manual source selection and smart file management",
+                "title": "🔄 Track Redownload — Fix Mismatched Downloads",
+                "description": "Replace wrong downloads with the correct version using manual source selection",
                 "features": [
                     "• Redownload button (↻) on each track in the enhanced library view",
-                    "• Step 1: Search Spotify, iTunes, and Deezer simultaneously for the correct metadata",
-                    "• Step 2: Search all download sources (Soulseek, YouTube, Tidal, etc.) and pick the right file",
-                    "• Step 3: Download replaces the old file automatically",
-                    "• Smart Delete: choose to remove from library only, delete file too, or delete & blacklist",
-                    "• Download Blacklist: blacklisted sources are skipped in all future downloads",
-                    "• Blacklist integration in the download pipeline prevents re-downloading bad matches"
+                    "• Step 1: All metadata sources (Spotify, iTunes, Deezer) searched in columns side-by-side",
+                    "• Step 2: All download sources searched simultaneously — results stream in as each source responds",
+                    "• Step 3: Download with real progress bar, old file deleted, DB path updated automatically",
+                    "• Full pipeline parity — track number, album context, metadata tagging all work correctly",
+                    "• Source Info (ℹ) button shows where each track was downloaded from",
+                    "• Download provenance tracking — every download's source is recorded for future reference",
+                    "• Smart Delete: choose to remove from library only or delete the file from disk too",
+                    "• Download Blacklist: block specific sources from the Source Info popover — blacklisted sources skipped in all future downloads",
+                    "• Blacklist viewer on dashboard Tools section with remove capability"
                 ],
-                "usage_note": "In the enhanced library view, click ↻ on any track to redownload, or click ✕ to smart-delete."
+                "usage_note": "In the enhanced library view, click ↻ to redownload, ℹ for source info, or ✕ to delete."
+            },
+            {
+                "title": "⚡ Spotify API Rate Limit Improvements",
+                "description": "Reduced Spotify API usage through caching and smart worker management",
+                "features": [
+                    "• get_artist_albums now cached — discography views, completion badges hit cache instead of API",
+                    "• Watchlist scans bypass cache with skip_cache flag to always detect new releases",
+                    "• All 5 discovery workers (Tidal, YouTube, ListenBrainz, Beatport, playlist search) now use cached search methods",
+                    "• Eliminated duplicate API calls — discovery workers were calling sp.search() AND search_tracks() per query",
+                    "• Auth probe cache TTL increased from 5 to 15 minutes — reduces /v1/me calls by 66%",
+                    "• Spotify, Last.fm, and Genius enrichment workers auto-pause during active downloads to preserve rate limit headroom",
+                    "• Dashboard shows 'Yielding for downloads' when workers are auto-paused"
+                ]
+            },
+            {
+                "title": "🔧 Additional Fixes",
+                "description": "Bug fixes and quality-of-life improvements",
+                "features": [
+                    "• YouTube '- Topic' suffix stripped from auto-generated channel names (#231)",
+                    "• Cover Art Archive album art now opt-in via Settings toggle (#232)",
+                    "• cover.jpg now correctly uses Cover Art Archive when enabled (was silently failing)",
+                    "• Genius artist search returns multiple results for manual matching (#233)",
+                    "• Genius API interval increased from 1.5s to 2s to reduce 429 rate limits"
+                ]
             },
             {
                 "title": "🖥️ Server Playlist Manager — Compare & Fix Matches",
