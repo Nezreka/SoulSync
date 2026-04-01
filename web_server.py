@@ -12791,16 +12791,61 @@ def library_manual_match():
 
 @app.route('/api/library/track/<int:track_id>', methods=['DELETE'])
 def library_delete_track(track_id):
-    """Delete a single track record from the database (does NOT delete the file on disk)."""
+    """Delete a track from the database, optionally deleting the file and blacklisting the source."""
     try:
+        delete_file = request.args.get('delete_file', 'false').lower() == 'true'
+        add_blacklist = request.args.get('blacklist', 'false').lower() == 'true'
+
         database = get_database()
+        file_deleted = False
+        blacklisted = False
+
         with database._get_connection() as conn:
             cursor = conn.cursor()
+
+            # Get track info before deleting (for file removal + blacklist)
+            track_info = None
+            if delete_file or add_blacklist:
+                cursor.execute("""
+                    SELECT t.file_path, t.title, ar.name AS artist_name
+                    FROM tracks t
+                    JOIN artists ar ON t.artist_id = ar.id
+                    WHERE t.id = ?
+                """, (track_id,))
+                track_info = cursor.fetchone()
+
+            # Delete file from disk if requested
+            if delete_file and track_info and track_info['file_path']:
+                resolved = _resolve_library_file_path(track_info['file_path'])
+                if resolved and os.path.exists(resolved):
+                    try:
+                        os.remove(resolved)
+                        file_deleted = True
+                        logger.info(f"Deleted file from disk: {resolved}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete file: {e}")
+
+            # Add to blacklist if requested
+            if add_blacklist and track_info and track_info['file_path']:
+                # Extract username and filename from the file path for blacklisting
+                # Soulseek paths are stored as: username/path/to/file.ext or just the local path
+                fp = track_info['file_path'].replace('\\', '/')
+                database.add_to_blacklist(
+                    track_title=track_info['title'],
+                    track_artist=track_info['artist_name'],
+                    blocked_filename=os.path.basename(fp),
+                    blocked_username='',  # Local files don't have a username
+                    reason='user_rejected'
+                )
+                blacklisted = True
+
+            # Delete DB record
             cursor.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
             conn.commit()
             if cursor.rowcount == 0:
                 return jsonify({"success": False, "error": "Track not found"}), 404
-            return jsonify({"success": True, "deleted_count": cursor.rowcount})
+
+            return jsonify({"success": True, "deleted_count": cursor.rowcount, "file_deleted": file_deleted, "blacklisted": blacklisted})
     except Exception as e:
         print(f"❌ Error deleting track {track_id}: {e}")
         import traceback

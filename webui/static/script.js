@@ -42561,12 +42561,25 @@ function sortEnhancedTracks(album, field, ascending) {
 
 async function deleteLibraryTrack(trackId, albumId) {
     cancelInlineEdit();
-    if (!await showConfirmDialog({ title: 'Delete Track', message: 'Delete this track from the library? (File on disk is not affected)', confirmText: 'Delete', destructive: true })) return;
+
+    // Smart delete dialog — three options
+    const choice = await _showSmartDeleteDialog();
+    if (!choice) return;
+
+    const params = new URLSearchParams();
+    if (choice === 'delete_file' || choice === 'delete_and_blacklist') params.set('delete_file', 'true');
+    if (choice === 'delete_and_blacklist') params.set('blacklist', 'true');
+
     try {
-        const response = await fetch(`/api/library/track/${trackId}`, { method: 'DELETE' });
+        const response = await fetch(`/api/library/track/${trackId}?${params}`, { method: 'DELETE' });
         const result = await response.json();
         if (!result.success) throw new Error(result.error);
-        showToast('Track deleted from library', 'success');
+
+        let msg = 'Track removed from library';
+        if (result.file_deleted) msg = 'Track deleted from library and disk';
+        if (result.blacklisted) msg += ' (source blacklisted)';
+        showToast(msg, 'success');
+
         if (artistDetailPageState.enhancedData) {
             const albums = artistDetailPageState.enhancedData.albums || [];
             const album = albums.find(a => a.id === albumId);
@@ -42579,6 +42592,61 @@ async function deleteLibraryTrack(trackId, albumId) {
     } catch (error) {
         showToast(`Delete failed: ${error.message}`, 'error');
     }
+}
+
+function _showSmartDeleteDialog() {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+
+        const close = (val) => { overlay.remove(); resolve(val); };
+        overlay.onclick = e => { if (e.target === overlay) close(null); };
+
+        overlay.innerHTML = `
+            <div class="smart-delete-modal">
+                <div class="smart-delete-header">
+                    <h3>Delete Track</h3>
+                    <button class="smart-delete-close">&times;</button>
+                </div>
+                <p class="smart-delete-desc">How should this track be deleted?</p>
+                <div class="smart-delete-options">
+                    <button class="smart-delete-option" data-choice="db_only">
+                        <div class="smart-delete-option-icon">📋</div>
+                        <div class="smart-delete-option-info">
+                            <div class="smart-delete-option-title">Remove from Library</div>
+                            <div class="smart-delete-option-desc">Remove the database entry only. File stays on disk.</div>
+                        </div>
+                    </button>
+                    <button class="smart-delete-option destructive" data-choice="delete_file">
+                        <div class="smart-delete-option-icon">🗑️</div>
+                        <div class="smart-delete-option-info">
+                            <div class="smart-delete-option-title">Delete File Too</div>
+                            <div class="smart-delete-option-desc">Remove from library and delete the audio file from disk.</div>
+                        </div>
+                    </button>
+                    <button class="smart-delete-option destructive" data-choice="delete_and_blacklist">
+                        <div class="smart-delete-option-icon">⛔</div>
+                        <div class="smart-delete-option-info">
+                            <div class="smart-delete-option-title">Delete & Blacklist</div>
+                            <div class="smart-delete-option-desc">Delete file and blacklist the source so it won't be downloaded again.</div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        `;
+
+        overlay.querySelectorAll('.smart-delete-option').forEach(btn => {
+            btn.addEventListener('click', () => close(btn.dataset.choice));
+        });
+        overlay.querySelector('.smart-delete-close').addEventListener('click', () => close(null));
+
+        // Escape to close
+        const escHandler = e => { if (e.key === 'Escape') { document.removeEventListener('keydown', escHandler); close(null); } };
+        document.addEventListener('keydown', escHandler);
+
+        document.body.appendChild(overlay);
+    });
 }
 
 async function deleteLibraryAlbum(albumId) {
