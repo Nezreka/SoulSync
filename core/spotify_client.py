@@ -1305,19 +1305,22 @@ class SpotifyClient:
             return None
     
     @rate_limited
-    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 10) -> List[Album]:
-        """Get albums by artist ID - falls back to iTunes if Spotify not authenticated"""
-        # Check cache first — keyed by artist_id + album_type
+    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 10, skip_cache: bool = False) -> List[Album]:
+        """Get albums by artist ID - falls back to iTunes if Spotify not authenticated.
+        Set skip_cache=True for watchlist scans that need fresh data to detect new releases."""
         cache = get_metadata_cache()
         fallback_src = self._fallback_source
         source = fallback_src if self._is_itunes_id(artist_id) else 'spotify'
         cache_key = f"{artist_id}_albums_{album_type.replace(',', '_')}"
-        cached = cache.get_entity(source, 'artist', cache_key)
-        if cached:
-            try:
-                return [Album.from_spotify_album(ad) for ad in cached]
-            except Exception:
-                pass  # Cache data incompatible, re-fetch
+
+        # Check cache first (unless caller needs fresh data)
+        if not skip_cache:
+            cached = cache.get_entity(source, 'artist', cache_key)
+            if cached:
+                try:
+                    return [Album.from_spotify_album(ad) for ad in cached]
+                except Exception:
+                    pass  # Cache data incompatible, re-fetch
 
         if self.is_spotify_authenticated():
             try:
