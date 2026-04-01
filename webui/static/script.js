@@ -36316,7 +36316,7 @@ function renderEnrichmentCards(enrichment) {
                 statusLabel = 'Set up';
             } else if (svc.paused) {
                 statusClass = 'paused';
-                statusLabel = 'Paused';
+                statusLabel = svc.yield_reason === 'downloads' ? 'Yielding' : 'Paused';
             } else if (svc.running) {
                 statusClass = svc.idle ? 'idle' : 'running';
                 statusLabel = svc.idle ? 'Idle' : 'Running';
@@ -53937,7 +53937,7 @@ function updateMusicBrainzStatusFromData(data) {
         } else if (data.running && !data.paused) {
             tooltipStatus.textContent = 'Running';
         } else if (data.paused) {
-            tooltipStatus.textContent = 'Paused';
+            tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused';
         } else {
             tooltipStatus.textContent = 'Idle';
         }
@@ -54070,7 +54070,7 @@ function updateAudioDBStatusFromData(data) {
     if (tooltipStatus) {
         if (data.idle) { tooltipStatus.textContent = 'Complete'; }
         else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
-        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
         else { tooltipStatus.textContent = 'Idle'; }
     }
 
@@ -54196,7 +54196,7 @@ function updateDeezerStatusFromData(data) {
     if (tooltipStatus) {
         if (data.idle) { tooltipStatus.textContent = 'Complete'; }
         else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
-        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
         else { tooltipStatus.textContent = 'Idle'; }
     }
 
@@ -54469,7 +54469,7 @@ function updateiTunesEnrichmentStatusFromData(data) {
     if (tooltipStatus) {
         if (data.idle) { tooltipStatus.textContent = 'Complete'; }
         else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
-        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
         else { tooltipStatus.textContent = 'Idle'; }
     }
 
@@ -55161,7 +55161,7 @@ function updateRepairStatusFromData(data) {
     if (tooltipStatus) {
         if (data.idle) { tooltipStatus.textContent = 'Complete'; }
         else if (data.running && !data.paused) { tooltipStatus.textContent = 'Running'; }
-        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else if (data.paused) { tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused'; }
         else { tooltipStatus.textContent = 'Idle'; }
     }
 
