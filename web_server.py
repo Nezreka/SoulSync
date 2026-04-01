@@ -26068,7 +26068,64 @@ def _download_track_worker(task_id, batch_id=None):
                 search_diagnostics.append(f'"{query}": search error — {e}')
                 continue
 
-        # If we get here, all search queries failed
+        # === HYBRID FALLBACK: If primary source failed, try remaining sources directly ===
+        # The orchestrator's hybrid search stops at the first source with results, even if
+        # those results all fail quality filtering. Try remaining sources individually.
+        if getattr(soulseek_client, 'mode', '') == 'hybrid':
+            try:
+                orch = soulseek_client
+                hybrid_order = getattr(orch, 'hybrid_order', None) or []
+                if not hybrid_order:
+                    primary = getattr(orch, 'hybrid_primary', 'soulseek')
+                    secondary = getattr(orch, 'hybrid_secondary', '')
+                    hybrid_order = [primary, secondary] if secondary and secondary != primary else [primary]
+
+                source_clients = {
+                    'soulseek': getattr(orch, 'soulseek', None),
+                    'youtube': getattr(orch, 'youtube', None),
+                    'tidal': getattr(orch, 'tidal', None),
+                    'qobuz': getattr(orch, 'qobuz', None),
+                    'hifi': getattr(orch, 'hifi', None),
+                    'deezer_dl': getattr(orch, 'deezer_dl', None),
+                }
+
+                # The orchestrator tried sources in order but stopped at the first with results.
+                # We don't know which it stopped at, so try ALL sources except the first
+                # (which was definitely tried). If the first was skipped (unconfigured),
+                # the orchestrator would have tried the second — but trying it again is
+                # harmless (streaming sources return fast).
+                remaining_sources = [s for s in hybrid_order[1:] if s in source_clients and source_clients[s]]
+                if remaining_sources:
+                    print(f"🔄 [Hybrid Fallback] Primary source had no valid matches. Trying fallback sources: {remaining_sources}")
+
+                for fallback_source in remaining_sources:
+                    fb_client = source_clients[fallback_source]
+                    if hasattr(fb_client, 'is_configured') and not fb_client.is_configured():
+                        continue
+
+                    # Use first 2 queries only for speed
+                    for fb_query in search_queries[:2]:
+                        try:
+                            print(f"🔄 [Hybrid Fallback] Trying {fallback_source}: '{fb_query}'")
+                            fb_results, _ = run_async(fb_client.search(fb_query, timeout=20))
+                            if not fb_results:
+                                continue
+                            fb_candidates = get_valid_candidates(fb_results, track, fb_query)
+                            if fb_candidates:
+                                print(f"✅ [Hybrid Fallback] {fallback_source} found {len(fb_candidates)} valid candidates!")
+                                success = _attempt_download_with_candidates(task_id, fb_candidates, track, batch_id)
+                                if success:
+                                    return
+                        except Exception as e:
+                            print(f"⚠️ [Hybrid Fallback] {fallback_source} search failed: {e}")
+                            continue
+
+                    print(f"⏭️ [Hybrid Fallback] {fallback_source} returned no valid candidates")
+
+            except Exception as e:
+                print(f"⚠️ [Hybrid Fallback] Error in fallback logic: {e}")
+
+        # If we get here, all search queries and hybrid fallbacks failed
         print(f"❌ [Modal Worker] No valid candidates found for '{track.name}' after trying all {len(search_queries)} queries.")
         with tasks_lock:
             if task_id in download_tasks:
