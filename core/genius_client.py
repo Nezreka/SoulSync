@@ -212,23 +212,46 @@ class GeniusClient:
         Returns:
             Artist dict with: id, name, url, image_url
         """
-        hits = self.search(artist_name, per_page=5)
-        if not hits:
+        artists = self.search_artists(artist_name, limit=10)
+        if not artists:
             return None
 
         artist_lower = artist_name.lower().strip()
 
-        for hit in hits:
-            result = hit.get('result', {})
-            primary = result.get('primary_artist', {})
-            primary_name = (primary.get('name') or '').lower()
-            if primary and (artist_lower in primary_name or primary_name in artist_lower):
-                logger.debug(f"Found artist: {primary.get('name')}")
-                return primary
+        for a in artists:
+            a_name = (a.get('name') or '').lower()
+            if artist_lower in a_name or a_name in artist_lower:
+                logger.debug(f"Found artist: {a.get('name')}")
+                return a
 
         # No confident match — let the worker mark as not_found and retry later
         logger.debug(f"No artist match found in search results for: {artist_name}")
         return None
+
+    @rate_limited
+    def search_artists(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Search for artists by name. Extracts unique artists from song results.
+
+        Returns:
+            List of artist dicts with: id, name, url, image_url
+        """
+        hits = self.search(query, per_page=min(limit * 2, 20))
+        if not hits:
+            return []
+
+        seen_ids = set()
+        artists = []
+        for hit in hits:
+            result = hit.get('result', {})
+            primary = result.get('primary_artist', {})
+            if primary and primary.get('id') and primary['id'] not in seen_ids:
+                seen_ids.add(primary['id'])
+                artists.append(primary)
+                if len(artists) >= limit:
+                    break
+
+        return artists
 
     @rate_limited
     def get_artist(self, artist_id: int) -> Optional[Dict[str, Any]]:

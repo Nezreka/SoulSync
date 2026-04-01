@@ -12614,15 +12614,22 @@ def _search_service(service, entity_type, query):
             raise ValueError("Genius worker not initialized")
         client = genius_worker.client
         if entity_type == 'artist':
-            result = client.search_artist(query)
-            if result:
-                return [{'id': str(result.get('id', '')), 'name': result.get('name', ''),
-                         'image': result.get('image_url'), 'extra': ''}]
+            artists = client.search_artists(query, limit=8)
+            return [{'id': str(a.get('id', '')), 'name': a.get('name', ''),
+                     'image': a.get('image_url'), 'extra': a.get('url', '')} for a in artists]
         elif entity_type == 'track':
-            result = client.search_song(query, '')
-            if result:
-                return [{'id': str(result.get('id', '')), 'name': result.get('title', ''),
-                         'image': result.get('song_art_image_url'), 'extra': result.get('artist_names', '')}]
+            # Search with broader results for manual matching
+            hits = client.search(f"{query}", per_page=10)
+            results = []
+            seen_ids = set()
+            for hit in hits:
+                r = hit.get('result', {})
+                rid = r.get('id')
+                if rid and rid not in seen_ids:
+                    seen_ids.add(rid)
+                    results.append({'id': str(rid), 'name': r.get('title', ''),
+                                    'image': r.get('song_art_image_url'), 'extra': r.get('artist_names', '')})
+            return results
         return []
 
     elif service == 'tidal':
