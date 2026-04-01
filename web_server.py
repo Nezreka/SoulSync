@@ -16277,9 +16277,9 @@ def _embed_album_art_metadata(audio_file, metadata: dict):
         image_data = None
         mime_type = None
 
-        # Try Cover Art Archive first (often 1200x1200+, original quality)
+        # Try Cover Art Archive first (often 1200x1200+, original quality) — opt-in
         release_mbid = metadata.get('musicbrainz_release_id')
-        if release_mbid:
+        if release_mbid and config_manager.get('metadata_enhancement.prefer_caa_art', False):
             try:
                 caa_url = f"https://coverartarchive.org/release/{release_mbid}/front"
                 req = urllib.request.Request(caa_url, headers={'Accept': 'image/*'})
@@ -17040,10 +17040,10 @@ def _download_cover_art(album_info: dict, target_dir: str):
 
         image_data = None
 
-        # Try Cover Art Archive first (often 1200x1200+, original quality)
+        # Try Cover Art Archive first (often 1200x1200+, original quality) — opt-in
         # The MBID is stored in album_info by _enhance_file_metadata before this is called
         release_mbid = album_info.get('musicbrainz_release_id')
-        if release_mbid:
+        if release_mbid and config_manager.get('metadata_enhancement.prefer_caa_art', False):
             try:
                 caa_url = f"https://coverartarchive.org/release/{release_mbid}/front"
                 req = urllib.request.Request(caa_url, headers={'Accept': 'image/*'})
