@@ -42962,13 +42962,21 @@ function _renderRedownloadStep1(overlay, track, data) {
             </div>`;
     }).join('');
 
-    body.innerHTML = `
-        <div class="redownload-columns">${columnsHtml}</div>
+    body.innerHTML = `<div class="redownload-columns">${columnsHtml}</div>`;
+
+    // Add sticky footer for Step 1
+    const modal = overlay.querySelector('.redownload-modal');
+    const oldFooter = modal.querySelector('.redownload-sticky-footer');
+    if (oldFooter) oldFooter.remove();
+    const footer = document.createElement('div');
+    footer.className = 'redownload-sticky-footer';
+    footer.innerHTML = `
         <div class="redownload-actions">
             <button class="redownload-btn secondary" onclick="document.getElementById('redownload-overlay')?.remove()">Cancel</button>
             <button class="redownload-btn primary" id="redownload-next-btn">Search Download Sources →</button>
         </div>
     `;
+    modal.appendChild(footer);
 
     // Next button
     document.getElementById('redownload-next-btn').addEventListener('click', async () => {
@@ -42983,10 +42991,19 @@ function _renderRedownloadStep1(overlay, track, data) {
         overlay.querySelector('.redownload-step[data-step="2"]').classList.add('active');
 
         // Stream results from all download sources — columns appear as each source responds
+        // Body gets the scrollable content, footer is sticky outside the scroll
         body.innerHTML = `
             <div class="rdl-src-columns" id="rdl-src-columns">
                 <div class="redownload-loading" id="rdl-src-loading"><div class="server-search-spinner"></div>Searching download sources...</div>
             </div>
+        `;
+        // Add sticky footer outside the scrollable body
+        const existingFooter = overlay.querySelector('.redownload-sticky-footer');
+        if (existingFooter) existingFooter.remove();
+        const modal = overlay.querySelector('.redownload-modal');
+        const footer = document.createElement('div');
+        footer.className = 'redownload-sticky-footer';
+        footer.innerHTML = `
             <label class="redownload-delete-old">
                 <input type="checkbox" id="redownload-delete-old-check" checked>
                 Delete old file after successful download
@@ -42996,6 +43013,7 @@ function _renderRedownloadStep1(overlay, track, data) {
                 <button class="redownload-btn primary" id="redownload-start-btn" disabled>Waiting for results...</button>
             </div>
         `;
+        modal.appendChild(footer);
 
         _streamRedownloadSources(overlay, track, selectedMeta);
     });
