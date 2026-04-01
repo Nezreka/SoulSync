@@ -42891,7 +42891,9 @@ def playlist_explorer_build_tree():
 
             # Fetch albums
             try:
-                all_albums = active_client.get_artist_albums(artist_id, album_type='album,single', limit=50, skip_cache=True)
+                # skip_cache only supported by spotify_client — other clients don't cache this call
+                _skip = {'skip_cache': True} if hasattr(active_client, 'sp') else {}
+                all_albums = active_client.get_artist_albums(artist_id, album_type='album,single', limit=50, **_skip)
             except Exception as e:
                 return {'success': False, 'error': f'Album fetch failed: {e}'}
 
