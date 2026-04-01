@@ -44529,6 +44529,8 @@ def spotify_enrichment_resume():
 
         spotify_enrichment_worker.resume()
         config_manager.set('spotify_enrichment_paused', False)
+        _download_auto_paused.discard('spotify-enrichment')
+        _download_yield_override.add('spotify-enrichment')  # User override — don't re-pause during this download session
         logger.info("Spotify enrichment worker resumed via UI")
         return jsonify({'status': 'running'}), 200
     except Exception as e:
@@ -44682,6 +44684,8 @@ def lastfm_enrichment_resume():
 
         lastfm_worker.resume()
         config_manager.set('lastfm_enrichment_paused', False)
+        _download_auto_paused.discard('lastfm-enrichment')
+        _download_yield_override.add('lastfm-enrichment')  # User override — don't re-pause during this download session
         logger.info("Last.fm worker resumed via UI")
         return jsonify({'status': 'running'}), 200
     except Exception as e:
@@ -44823,6 +44827,8 @@ def genius_enrichment_resume():
 
         genius_worker.resume()
         config_manager.set('genius_enrichment_paused', False)
+        _download_auto_paused.discard('genius-enrichment')
+        _download_yield_override.add('genius-enrichment')  # User override — don't re-pause during this download session
         logger.info("Genius worker resumed via UI")
         return jsonify({'status': 'running'}), 200
     except Exception as e:
@@ -47037,6 +47043,7 @@ def _has_active_downloads():
 
 # Track whether we auto-paused workers so we only resume ones we paused (not user-paused ones)
 _download_auto_paused = set()
+_download_yield_override = set()  # Workers the user explicitly resumed during downloads — don't re-pause
 
 
 def _emit_enrichment_status_loop():
@@ -47071,11 +47078,13 @@ def _emit_enrichment_status_loop():
         # Auto-pause/resume rate-limited workers during downloads
         try:
             downloading = _has_active_downloads()
+            if not downloading:
+                _download_yield_override.clear()  # Reset overrides when downloads finish
             for name, get_w in yield_workers.items():
                 w = get_w()
                 if w is None:
                     continue
-                if downloading and not w.paused:
+                if downloading and not w.paused and name not in _download_yield_override:
                     w.paused = True
                     _download_auto_paused.add(name)
                     logger.debug(f"Auto-paused {name} during active downloads")
@@ -47092,6 +47101,9 @@ def _emit_enrichment_status_loop():
                 if worker is None:
                     continue
                 status = worker.get_stats()
+                # Flag workers that were auto-paused for downloads
+                if name in _download_auto_paused:
+                    status['yield_reason'] = 'downloads'
                 socketio.emit(f'enrichment:{name}', status)
             except Exception as e:
                 logger.debug(f"Error emitting {name} status: {e}")
