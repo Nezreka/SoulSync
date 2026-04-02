@@ -6813,6 +6813,26 @@ class MusicDatabase:
             logger.error(f"Error updating watchlist iTunes ID: {e}")
             return False
 
+    def update_watchlist_deezer_id(self, watchlist_id: int, deezer_id: str) -> bool:
+        """Update the Deezer artist ID for a watchlist artist (cross-provider support)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    UPDATE watchlist_artists
+                    SET deezer_artist_id = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (deezer_id, watchlist_id))
+
+                conn.commit()
+                logger.info(f"Updated Deezer ID for watchlist artist {watchlist_id}: {deezer_id}")
+                return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.error(f"Error updating watchlist Deezer ID: {e}")
+            return False
+
     def update_watchlist_artist_itunes_id(self, spotify_artist_id: str, itunes_id: str) -> bool:
         """Update the iTunes artist ID for a watchlist artist by Spotify ID (for cross-provider caching)"""
         try:
