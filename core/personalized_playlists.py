@@ -245,6 +245,7 @@ class PersonalizedPlaylistsService:
                     WHERE release_date IS NOT NULL
                       AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) BETWEEN ? AND ?
                       AND source = ?
+                      AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
                     ORDER BY RANDOM()
                     LIMIT ?
                 """, (start_year, end_year, active_source, limit * 10))
@@ -401,6 +402,7 @@ class PersonalizedPlaylistsService:
                     FROM discovery_pool
                     WHERE artist_genres IS NOT NULL
                       AND source = ?
+                      AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
                 """, (active_source,))
                 rows = cursor.fetchall()
 
@@ -531,6 +533,7 @@ class PersonalizedPlaylistsService:
                         source
                     FROM discovery_pool
                     WHERE popularity >= 60 AND source = ?
+                      AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
                     ORDER BY popularity DESC, RANDOM()
                     LIMIT ?
                 """, (active_source, limit * 3))
@@ -590,6 +593,7 @@ class PersonalizedPlaylistsService:
                         source
                     FROM discovery_pool
                     WHERE popularity < 40 AND source = ?
+                      AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
                     ORDER BY RANDOM()
                     LIMIT ?
                 """, (active_source, limit))
@@ -628,6 +632,7 @@ class PersonalizedPlaylistsService:
                         source
                     FROM discovery_pool
                     WHERE source = ?
+                      AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
                     ORDER BY RANDOM()
                     LIMIT ?
                 """, (active_source, limit))
@@ -808,6 +813,7 @@ class PersonalizedPlaylistsService:
                         source
                     FROM discovery_pool
                     WHERE (artist_name LIKE ? OR track_name LIKE ?) AND source = ?
+                      AND LOWER(artist_name) NOT IN (SELECT LOWER(artist_name) FROM discovery_artist_blacklist)
                     ORDER BY RANDOM()
                     LIMIT ?
                 """, (f'%{category}%', f'%{category}%', active_source, limit))

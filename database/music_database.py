@@ -1156,6 +1156,21 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_file_path ON track_downloads (file_path)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_source ON track_downloads (source_username, source_filename)")
 
+            # Discovery artist blacklist — artists users never want to see in discovery
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS discovery_artist_blacklist (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    artist_name TEXT NOT NULL COLLATE NOCASE,
+                    spotify_artist_id TEXT,
+                    itunes_artist_id TEXT,
+                    deezer_artist_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(artist_name)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dab_name ON discovery_artist_blacklist (artist_name COLLATE NOCASE)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dab_spotify ON discovery_artist_blacklist (spotify_artist_id)")
+
             logger.info("Discovery tables created successfully")
 
         except Exception as e:
@@ -8529,6 +8544,62 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error removing from blacklist: {e}")
             return False
+
+    # ==================== Discovery Artist Blacklist Methods ====================
+
+    def add_to_discovery_blacklist(self, artist_name: str, spotify_id: str = None,
+                                   itunes_id: str = None, deezer_id: str = None) -> bool:
+        """Block an artist from appearing in discovery results."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO discovery_artist_blacklist
+                (artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id)
+                VALUES (?, ?, ?, ?)
+            """, (artist_name.strip(), spotify_id, itunes_id, deezer_id))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error adding to discovery blacklist: {e}")
+            return False
+
+    def remove_from_discovery_blacklist(self, blacklist_id: int) -> bool:
+        """Remove an artist from the discovery blacklist."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM discovery_artist_blacklist WHERE id = ?", (blacklist_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing from discovery blacklist: {e}")
+            return False
+
+    def get_discovery_blacklist(self) -> list:
+        """Get all blacklisted discovery artists."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id, created_at
+                FROM discovery_artist_blacklist ORDER BY created_at DESC
+            """)
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting discovery blacklist: {e}")
+            return []
+
+    def get_discovery_blacklist_names(self) -> set:
+        """Get set of blacklisted artist names (lowercased) for fast filtering."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT LOWER(artist_name) FROM discovery_artist_blacklist")
+            return {r[0] for r in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Error getting discovery blacklist names: {e}")
+            return set()
 
     # ==================== Track Download Provenance Methods ====================
 

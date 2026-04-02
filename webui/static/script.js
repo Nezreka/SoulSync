@@ -50190,7 +50190,8 @@ async function loadDiscoverPage() {
         initializeListenBrainzTabs(),  // ListenBrainz playlists (tabbed)
         loadDecadeBrowserTabs(),  // Time Machine (tabbed by decade)
         loadGenreBrowserTabs(),  // Browse by Genre (tabbed by genre)
-        loadListenBrainzPlaylistsFromBackend()  // Load ListenBrainz playlist states for persistence
+        loadListenBrainzPlaylistsFromBackend(),  // Load ListenBrainz playlist states for persistence
+        loadDiscoveryBlacklist()  // Blocked artists list
     ]);
 
     // Check for active syncs after page load
@@ -53934,6 +53935,7 @@ function renderCompactPlaylist(container, tracks) {
         const durationMin = Math.floor(track.duration_ms / 60000);
         const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
         const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
+        const artistEsc = (track.artist_name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
         html += `
             <div class="discover-playlist-track-compact" data-track-index="${index}">
@@ -53947,6 +53949,7 @@ function renderCompactPlaylist(container, tracks) {
                 </div>
                 <div class="track-compact-album">${track.album_name}</div>
                 <div class="track-compact-duration">${duration}</div>
+                <button class="track-compact-block" onclick="event.stopPropagation(); blockDiscoveryArtist('${artistEsc}')" title="Block ${artistEsc} from discovery">✕</button>
             </div>
         `;
     });
@@ -53954,6 +53957,161 @@ function renderCompactPlaylist(container, tracks) {
     html += '</div>';
     container.innerHTML = html;
 }
+
+async function blockDiscoveryArtist(artistName) {
+    if (!confirm(`Block "${artistName}" from all discovery playlists?`)) return;
+    try {
+        const res = await fetch('/api/discover/artist-blacklist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_name: artistName })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Blocked ${artistName} from discovery`, 'success');
+            // Refresh all discovery sections to remove the artist
+            loadPersonalizedHiddenGems();
+            loadDiscoveryShuffle();
+            loadPersonalizedDailyMixes();
+        } else {
+            showToast(data.error || 'Failed to block artist', 'error');
+        }
+    } catch (e) {
+        showToast('Error blocking artist', 'error');
+    }
+}
+
+async function openDiscoveryBlacklistModal() {
+    if (document.getElementById('discovery-blacklist-modal-overlay')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'discovery-blacklist-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    overlay.innerHTML = `
+        <div class="discover-blacklist-modal">
+            <div class="discover-blacklist-modal-header">
+                <h2>Blocked Artists</h2>
+                <p>These artists won't appear in any discovery playlist across all sources</p>
+                <button class="watch-all-close" onclick="document.getElementById('discovery-blacklist-modal-overlay').remove()">&times;</button>
+            </div>
+            <div class="discover-blacklist-modal-search">
+                <input type="text" id="dbl-search-input" placeholder="Search for an artist to block..." autocomplete="off">
+                <div id="dbl-search-results" class="dbl-search-results" style="display:none"></div>
+            </div>
+            <div class="discover-blacklist-modal-list" id="dbl-list">
+                <div class="discover-blacklist-empty">Loading...</div>
+            </div>
+            <div class="discover-blacklist-modal-footer">
+                <button class="watch-all-btn watch-all-btn-cancel" onclick="document.getElementById('discovery-blacklist-modal-overlay').remove()">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Wire up search
+    let searchTimer = null;
+    const input = document.getElementById('dbl-search-input');
+    input.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        const q = input.value.trim();
+        if (q.length < 2) { document.getElementById('dbl-search-results').style.display = 'none'; return; }
+        searchTimer = setTimeout(() => _dblSearch(q), 300);
+    });
+
+    _dblLoadList();
+}
+
+async function _dblSearch(query) {
+    const resultsEl = document.getElementById('dbl-search-results');
+    if (!resultsEl) return;
+    try {
+        // Use existing enhanced search to find artists
+        const res = await fetch('/api/enhanced-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, limit: 8 })
+        });
+        const data = await res.json();
+        const artists = data.spotify_artists || data.artists || [];
+        if (artists.length === 0) {
+            resultsEl.innerHTML = '<div class="dbl-search-empty">No artists found</div>';
+            resultsEl.style.display = 'block';
+            return;
+        }
+        resultsEl.innerHTML = artists.map(a => {
+            const name = _escToast(a.name || '');
+            const img = a.image_url ? `<img src="${a.image_url}" class="dbl-search-img">` : '<div class="dbl-search-img-placeholder">🎤</div>';
+            return `<div class="dbl-search-item" onclick="_dblBlockFromSearch('${name.replace(/'/g, "\\'")}')">
+                ${img}
+                <span class="dbl-search-name">${name}</span>
+                <span class="dbl-search-action">Block</span>
+            </div>`;
+        }).join('');
+        resultsEl.style.display = 'block';
+    } catch (e) {
+        resultsEl.style.display = 'none';
+    }
+}
+
+async function _dblBlockFromSearch(artistName) {
+    try {
+        const res = await fetch('/api/discover/artist-blacklist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_name: artistName })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Blocked ${artistName} from discovery`, 'success');
+            document.getElementById('dbl-search-results').style.display = 'none';
+            const input = document.getElementById('dbl-search-input');
+            if (input) input.value = '';
+            _dblLoadList();
+        }
+    } catch (e) {
+        showToast('Error blocking artist', 'error');
+    }
+}
+
+async function _dblLoadList() {
+    const container = document.getElementById('dbl-list');
+    if (!container) return;
+    try {
+        const res = await fetch('/api/discover/artist-blacklist');
+        const data = await res.json();
+        if (!data.success || !data.entries || data.entries.length === 0) {
+            container.innerHTML = '<div class="discover-blacklist-empty">No blocked artists yet — search above to block one</div>';
+            return;
+        }
+        container.innerHTML = data.entries.map(e => `
+            <div class="discover-blacklist-item">
+                <span class="discover-blacklist-name">${_escToast(e.artist_name)}</span>
+                <span class="discover-blacklist-date">${e.created_at ? new Date(e.created_at).toLocaleDateString() : ''}</span>
+                <button class="discover-blacklist-remove" onclick="unblockDiscoveryArtist(${e.id}, '${_escToast(e.artist_name).replace(/'/g, "\\'")}')" title="Unblock">✕</button>
+            </div>
+        `).join('');
+    } catch (e) {
+        container.innerHTML = '<div class="discover-blacklist-empty">Failed to load</div>';
+    }
+}
+
+async function unblockDiscoveryArtist(id, name) {
+    try {
+        const res = await fetch(`/api/discover/artist-blacklist/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Unblocked ${name}`, 'success');
+            _dblLoadList();
+        }
+    } catch (e) {
+        showToast('Error unblocking artist', 'error');
+    }
+}
+
+// Backwards compat — called during page init but now a no-op (modal handles it)
+function loadDiscoveryBlacklist() {}
 
 async function loadDiscoveryShuffle() {
     try {
