@@ -3365,3 +3365,261 @@
         font-size: 12px;
     }
 }
+
+/* ======================================
+   API RATE MONITOR — MOBILE
+   ====================================== */
+
+@media (max-width: 768px) {
+    .rate-monitor-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 8px;
+    }
+
+    .rate-gauge-card {
+        padding: 10px 8px 8px;
+        border-radius: 12px;
+    }
+
+    .gauge-card-header {
+        gap: 5px;
+        margin-bottom: 2px;
+    }
+
+    .gauge-card-name {
+        font-size: 11px;
+    }
+
+    .gauge-card-status {
+        font-size: 8px;
+        padding: 1px 5px;
+    }
+
+    .gauge-card-stats {
+        padding: 0 2px;
+    }
+
+    .gauge-card-stat-val {
+        font-size: 11px;
+    }
+
+    .gauge-card-stat-label {
+        font-size: 7px;
+    }
+
+    .gauge-value {
+        font-size: 20px !important;
+    }
+
+    .gauge-unit {
+        font-size: 8px !important;
+    }
+
+    /* Rate modal */
+    .rate-modal {
+        width: 95vw !important;
+        max-height: 90vh;
+        border-radius: 14px;
+    }
+
+    .rate-modal-header h3 {
+        font-size: 14px;
+    }
+
+    .rate-modal-body {
+        padding: 14px 16px;
+    }
+
+    .rate-modal-ep-name {
+        width: 100px;
+        font-size: 11px;
+    }
+
+    .rate-modal-ep-value {
+        font-size: 10px;
+        width: 50px;
+    }
+}
+
+@media (max-width: 480px) {
+    .rate-monitor-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 6px;
+    }
+
+    .gauge-card-dot {
+        width: 6px;
+        height: 6px;
+    }
+
+    .gauge-card-name {
+        font-size: 10px;
+    }
+
+    .gauge-card-status {
+        display: none;
+    }
+
+    .gauge-budget-label {
+        font-size: 7px;
+    }
+
+    .gauge-rl-badge {
+        font-size: 8px;
+        padding: 2px 6px;
+        gap: 3px;
+    }
+}
+
+/* ======================================
+   NOTIFICATION SYSTEM — MOBILE
+   ====================================== */
+
+@media (max-width: 768px) {
+    /* Toast */
+    .toast-container {
+        bottom: 72px;
+        right: 12px;
+        left: 12px;
+    }
+
+    .toast-compact {
+        max-width: 100%;
+        font-size: 12px;
+        padding: 10px 12px;
+        gap: 8px;
+    }
+
+    /* Bell button */
+    .notif-bell-btn {
+        bottom: 16px;
+        right: 60px;
+        width: 38px;
+        height: 38px;
+        font-size: 16px;
+    }
+
+    .notif-bell-badge {
+        font-size: 9px;
+        min-width: 14px;
+        height: 14px;
+    }
+
+    /* Notification panel */
+    .notif-panel {
+        width: calc(100vw - 24px);
+        max-width: 100%;
+        right: 12px;
+        bottom: 62px;
+        max-height: 55vh;
+        border-radius: 14px;
+    }
+
+    .notif-panel-header {
+        padding: 12px 14px 10px;
+    }
+
+    .notif-panel-title {
+        font-size: 13px;
+    }
+
+    .notif-item {
+        padding: 8px 14px;
+    }
+
+    .notif-item-msg {
+        font-size: 12px;
+    }
+
+    .notif-item-time {
+        font-size: 9px;
+    }
+
+    /* Helper button */
+    .helper-float-btn {
+        bottom: 16px;
+        right: 12px;
+        width: 38px;
+        height: 38px;
+        font-size: 16px;
+    }
+
+    /* Global search bar */
+    .gsearch-bar {
+        width: calc(100vw - 160px);
+        bottom: 16px;
+        height: 38px;
+    }
+
+    .gsearch-bar.active {
+        width: calc(100vw - 24px);
+    }
+
+    .gsearch-input {
+        font-size: 13px;
+    }
+
+    .gsearch-results {
+        max-height: 50vh;
+        width: calc(100vw - 24px);
+        left: 12px;
+        right: 12px;
+        transform: none;
+        bottom: 60px;
+    }
+
+    .gsearch-item {
+        padding: 6px;
+    }
+
+    .gsearch-item-art {
+        width: 36px;
+        height: 36px;
+    }
+
+    .gsearch-item-title {
+        font-size: 12px;
+    }
+
+    .gsearch-item-sub {
+        font-size: 10px;
+    }
+}
+
+@media (max-width: 480px) {
+    .notif-bell-btn {
+        bottom: 12px;
+        right: 54px;
+        width: 34px;
+        height: 34px;
+    }
+
+    .helper-float-btn {
+        bottom: 12px;
+        right: 10px;
+        width: 34px;
+        height: 34px;
+    }
+
+    .gsearch-bar {
+        width: calc(100vw - 130px);
+        bottom: 12px;
+        height: 34px;
+    }
+
+    .gsearch-bar.active {
+        width: calc(100vw - 20px);
+    }
+
+    .toast-container {
+        bottom: 56px;
+        right: 8px;
+        left: 8px;
+    }
+
+    .notif-panel {
+        right: 8px;
+        width: calc(100vw - 16px);
+        bottom: 54px;
+    }
+}
