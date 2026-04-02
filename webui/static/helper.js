@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.2': [
         // Newest features first
+        { title: 'Webhook THEN Action',                              desc: 'Send HTTP POST to any URL when automations complete — integrate with Gotify, Home Assistant, Slack, n8n. Configurable headers and message template', page: 'automations' },
         { title: 'API Rate Monitor',                               desc: 'Real-time speedometer gauges for all 9 enrichment services on the Dashboard. Click any gauge for 24h history chart. Spotify shows per-endpoint breakdown', page: 'dashboard' },
         { title: 'Configurable Concurrent Downloads',             desc: 'Set max simultaneous downloads per batch (1-10) in Settings. Soulseek albums stay at 1 for source reuse. Higher values speed up playlists and wishlists' },
         { title: 'Streaming Search Sources',                      desc: 'Apple Music and other slow sources now stream results progressively — see artists, albums, tracks as each loads instead of waiting for all 3' },

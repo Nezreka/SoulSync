@@ -5631,6 +5631,8 @@ def get_automation_blocks():
              "variables": ["time", "name", "run_count", "status"]},
             {"type": "telegram", "label": "Telegram", "icon": "message", "description": "Send a Telegram message", "available": True,
              "variables": ["time", "name", "run_count", "status"]},
+            {"type": "webhook", "label": "Webhook (POST)", "icon": "globe", "description": "Send a POST request to any URL", "available": True,
+             "variables": ["time", "name", "run_count", "status"]},
             # Signal fire action
             {"type": "fire_signal", "label": "Fire Signal", "icon": "zap",
              "description": "Fire a signal that other automations can listen for", "available": True,
@@ -20300,7 +20302,10 @@ def get_version_info():
                     "• Track source-info and redownload work with Jellyfin string IDs (#237)",
                     "• Clear Match button to undo wrong manual matches (#236)",
                     "• Tidal auth no longer crashes when download orchestrator not initialized",
-                    "• Copy Debug Info includes API call rates and Spotify rate limit state"
+                    "• Download orchestrator hardened — one failing client no longer kills all download sources",
+                    "• Webhook THEN action — send HTTP POST to any URL (Gotify, Home Assistant, Slack, n8n) from automations",
+                    "• M3U auto-export now skips albums — only generates for playlists (#241)",
+                    "• Copy Debug Info includes API call rates, Spotify rate limit state, and download client failures"
                 ]
             },
             {
