@@ -45098,6 +45098,38 @@ function openManualMatchModal(entityType, entityId, service, defaultQuery, artis
     searchBtn.textContent = 'Search';
     searchBtn.onclick = () => doManualMatchSearch(service, entityType, searchInput.value, resultsContainer, entityId, artistId);
     searchRow.appendChild(searchBtn);
+
+    // Clear Match button — lets user revert a wrong match to not_found
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'enhanced-enrich-btn';
+    clearBtn.style.cssText = 'background:rgba(255,80,80,0.12);color:#ff6b6b;margin-left:6px';
+    clearBtn.textContent = 'Clear Match';
+    clearBtn.title = 'Remove the current match — reverts to Not Found';
+    clearBtn.onclick = async () => {
+        if (!confirm(`Clear ${serviceLabels[service] || service} match for this ${entityType}? It will revert to "Not Found".`)) return;
+        try {
+            const res = await fetch('/api/library/clear-match', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entity_type: entityType, entity_id: entityId, service, artist_id: artistId })
+            });
+            const data = await res.json();
+            if (data.success) {
+                showToast(`Cleared ${serviceLabels[service] || service} match`, 'success');
+                overlay.remove();
+                if (data.updated_data) {
+                    artistDetailPageState.enhancedData = data.updated_data;
+                    renderEnhancedArtistView(data.updated_data, true);
+                }
+            } else {
+                showToast(data.error || 'Failed to clear match', 'error');
+            }
+        } catch (e) {
+            showToast('Error clearing match', 'error');
+        }
+    };
+    searchRow.appendChild(clearBtn);
+
     modal.appendChild(searchRow);
 
     // Handle Enter key
