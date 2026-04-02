@@ -2291,6 +2291,29 @@ function initializeDocsPage() {
                 }
                 text += '\n';
 
+                text += '── API Rates (calls/min) ──\n';
+                if (data.api_rates) {
+                    Object.entries(data.api_rates).forEach(([svc, info]) => {
+                        const cpm = info.cpm || 0;
+                        const limit = info.limit || '?';
+                        const pct = limit ? Math.round(cpm / limit * 100) : 0;
+                        text += `${svc.padEnd(14)} ${String(cpm).padStart(5)}/min  (limit: ${limit}, ${pct}%)`;
+                        if (info.endpoints && Object.keys(info.endpoints).length > 0) {
+                            text += `  endpoints: ${Object.entries(info.endpoints).map(([e, c]) => `${e}:${c}`).join(', ')}`;
+                        }
+                        text += '\n';
+                    });
+                }
+                if (data.spotify_rate_limit?.active) {
+                    const rl = data.spotify_rate_limit;
+                    const mins = Math.ceil((rl.remaining_seconds || 0) / 60);
+                    text += `\n*** SPOTIFY RATE LIMITED ***\n`;
+                    text += `Triggered by: ${rl.endpoint || 'unknown'}\n`;
+                    text += `Remaining:    ${mins} minutes\n`;
+                    text += `Retry-After:  ${rl.retry_after || '?'}s\n`;
+                }
+                text += '\n';
+
                 text += `── Logs: ${data.log_source || 'app'}.log (last ${data.recent_logs?.length || 0} lines) ──\n`;
                 if (data.recent_logs?.length) {
                     data.recent_logs.forEach(line => { text += line + '\n'; });

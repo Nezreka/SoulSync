@@ -4523,6 +4523,28 @@ def get_debug_info():
         'm3u_export_enabled': config_manager.get('m3u.enabled', False),
     }
 
+    # API rate monitor — current calls/min per service + Spotify rate limit state
+    try:
+        from core.api_call_tracker import api_call_tracker
+        rates = api_call_tracker.get_all_rates()
+        info['api_rates'] = rates
+        # Spotify rate limit details
+        if spotify_client:
+            rl_info = spotify_client.get_rate_limit_info()
+            if rl_info:
+                info['spotify_rate_limit'] = {
+                    'active': True,
+                    'remaining_seconds': rl_info.get('remaining_seconds', 0),
+                    'retry_after': rl_info.get('retry_after', 0),
+                    'endpoint': rl_info.get('endpoint', ''),
+                    'expires_at': rl_info.get('expires_at', ''),
+                }
+            else:
+                info['spotify_rate_limit'] = {'active': False}
+    except Exception:
+        info['api_rates'] = {}
+        info['spotify_rate_limit'] = {'active': False}
+
     # Database size
     db_path = os.path.join('database', 'music_library.db')
     if os.path.exists(db_path):
