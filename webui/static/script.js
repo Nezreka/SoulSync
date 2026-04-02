@@ -11595,22 +11595,152 @@ async function exportPlaylistAsM3U(playlistId) {
 // WING IT — Download without metadata discovery
 // ==================================================================================
 
-async function wingItDownload(tracks, playlistName, source = 'playlist', cardIdentifier = null) {
+function _toggleWingItDropdown(btn, urlHash) {
+    // Remove any existing dropdown
+    const existing = document.querySelector('.wing-it-dropdown.visible');
+    if (existing) { existing.classList.remove('visible'); setTimeout(() => existing.remove(), 150); return; }
+
+    const wrap = btn.closest('.wing-it-wrap');
+    if (!wrap) return;
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'wing-it-dropdown';
+    dropdown.innerHTML = `
+        <button class="wing-it-dropdown-item" data-action="download">
+            <span class="wing-it-dropdown-icon">⬇️</span>
+            <span class="wing-it-dropdown-label">Download</span>
+            <span class="wing-it-dropdown-hint">Raw names</span>
+        </button>
+        <button class="wing-it-dropdown-item" data-action="sync">
+            <span class="wing-it-dropdown-icon">🔄</span>
+            <span class="wing-it-dropdown-label">Sync to Server</span>
+            <span class="wing-it-dropdown-hint">Best-effort</span>
+        </button>
+    `;
+
+    dropdown.querySelectorAll('.wing-it-dropdown-item').forEach(item => {
+        item.addEventListener('click', () => {
+            dropdown.classList.remove('visible');
+            setTimeout(() => dropdown.remove(), 150);
+            const action = item.dataset.action;
+            if (action === 'download') {
+                _wingItAction(urlHash, 'download');
+            } else {
+                _wingItAction(urlHash, 'sync');
+            }
+        });
+    });
+
+    // Flip dropdown direction if button is in the top portion of viewport
+    const btnRect = btn.getBoundingClientRect();
+    if (btnRect.top < 200) dropdown.classList.add('flip-down');
+
+    wrap.appendChild(dropdown);
+    requestAnimationFrame(() => dropdown.classList.add('visible'));
+
+    // Close on outside click
+    setTimeout(() => {
+        const closeHandler = e => {
+            if (!dropdown.contains(e.target) && e.target !== btn) {
+                dropdown.classList.remove('visible');
+                setTimeout(() => dropdown.remove(), 150);
+                document.removeEventListener('click', closeHandler);
+            }
+        };
+        document.addEventListener('click', closeHandler);
+    }, 50);
+}
+
+function _wingItAction(urlHash, action) {
+    if (urlHash) {
+        // Called from a modal — use _wingItFromModal logic
+        const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash] || {};
+        const tracks = state.tracks || state.rawTracks || state.playlist?.tracks || [];
+        const name = state.playlistName || state.name || state.playlist?.name || 'Playlist';
+        const isTidal = state.is_tidal_playlist;
+        const isLB = state.is_listenbrainz_playlist;
+        const isBeatport = state.is_beatport_playlist;
+        const isDeezer = state.is_deezer_playlist;
+        const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
+
+        if (!tracks.length) {
+            showToast('No tracks available for Wing It', 'error');
+            return;
+        }
+
+        if (action === 'sync') {
+            // Sync inline — keep modal open
+            _wingItSyncFromModal(urlHash, tracks, name, isLB);
+        } else {
+            // Download — close modal, open download modal
+            const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+            if (modal) modal.remove();
+            const overlay = document.getElementById(`youtube-discovery-overlay-${urlHash}`);
+            if (overlay) overlay.remove();
+            wingItDownload(tracks, name, source, null, true);
+        }
+    }
+}
+
+async function _wingItSyncFromModal(urlHash, tracks, name, isLB) {
+    showToast('Starting Wing It sync...', 'info');
+    updateYouTubeModalButtons(urlHash, 'syncing');
+
+    try {
+        const syncTracks = tracks.map((t, i) => {
+            let artists = t.artists || [];
+            if (!Array.isArray(artists)) artists = [{ name: String(artists) }];
+            return {
+                id: t.id || t.source_track_id || `wing_it_${i}`,
+                name: t.name || t.track_name || 'Unknown',
+                artists: artists.map(a => typeof a === 'string' ? { name: a } : a),
+                album: typeof t.album === 'object' ? t.album : { name: t.album || t.album_name || '' },
+                duration_ms: t.duration_ms || 0,
+            };
+        });
+
+        const res = await fetch('/api/wing-it/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tracks: syncTracks, playlist_name: name })
+        });
+        const data = await res.json();
+
+        if (data.error) {
+            showToast(`Sync failed: ${data.error}`, 'error');
+            updateYouTubeModalButtons(urlHash, 'discovered');
+            return;
+        }
+
+        if (isLB) {
+            const state = listenbrainzPlaylistStates[urlHash];
+            if (state) state.syncPlaylistId = data.sync_playlist_id;
+            startListenBrainzSyncPolling(urlHash, data.sync_playlist_id);
+        } else {
+            startYouTubeSyncPolling(urlHash, data.sync_playlist_id);
+        }
+    } catch (e) {
+        showToast('Sync failed: ' + e.message, 'error');
+        updateYouTubeModalButtons(urlHash, 'discovered');
+    }
+}
+
+async function wingItDownload(tracks, playlistName, source = 'playlist', cardIdentifier = null, skipConfirm = false) {
     if (!tracks || tracks.length === 0) {
         showToast('No tracks to download', 'error');
         return;
     }
 
-    // Show choice: Download or Sync
-    const choice = await _showWingItChoiceDialog(tracks.length, source);
-    if (!choice) return;
+    if (!skipConfirm) {
+        // Show choice: Download or Sync (for LB card button which doesn't have dropdown)
+        const choice = await _showWingItChoiceDialog(tracks.length, source);
+        if (!choice) return;
 
-    if (choice === 'sync') {
-        await _wingItSync(tracks, playlistName, source, cardIdentifier);
-        return;
+        if (choice === 'sync') {
+            await _wingItSync(tracks, playlistName, source, cardIdentifier);
+            return;
+        }
     }
-
-    // choice === 'download' — continue with download flow
 
     // Normalize tracks to Spotify-compatible format
     const formattedTracks = tracks.map(t => {
@@ -11787,7 +11917,7 @@ function _pollWingItSyncProgress(syncPlaylistId, playlistName, cardPlaylistId) {
                 if (data.status === 'error') {
                     showToast(`Sync failed: ${data.error || 'Unknown error'}`, 'error');
                 } else {
-                    showToast(`Sync complete — ${matched}/${total} tracks matched to server`, 'success');
+                    showToast(`⚡ Wing It sync complete — "${playlistName}" created on server (${matched}/${total} tracks matched)`, 'success');
                 }
 
                 // Update card status display to show completion
@@ -30823,7 +30953,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
         case 'discovering':
             // Show start discovery button for fresh playlists
             if (phase === 'fresh') {
-                const wingItBtn = ` <button class="modal-btn wing-it-btn" onclick="_wingItFromModal('${urlHash}')">⚡ Wing It</button>`;
+                const wingItBtn = ` <span class="wing-it-wrap"><button class="modal-btn wing-it-btn" onclick="_toggleWingItDropdown(this, '${urlHash}')">⚡ Wing It</button></span>`;
 
                 if (isListenBrainz) {
                     return `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzDiscovery('${urlHash}')">🔍 Start Discovery</button>${wingItBtn}`;
@@ -30895,8 +31025,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 buttons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Rediscover</button>`;
             }
 
-            // Wing It button — available in discovered phase for unmatched tracks
-            buttons += ` <button class="modal-btn wing-it-btn" onclick="_wingItFromModal('${urlHash}')">⚡ Wing It</button>`;
+            // Wing It button — available in discovered phase
+            buttons += ` <span class="wing-it-wrap"><button class="modal-btn wing-it-btn" onclick="_toggleWingItDropdown(this, '${urlHash}')">⚡ Wing It</button></span>`;
 
             if (!buttons || buttons.trim().startsWith('<button class="modal-btn wing-it-btn"')) {
                 buttons = `<div class="modal-info">ℹ️ No Spotify matches found.</div>` + buttons;
@@ -31020,7 +31150,7 @@ function getModalActionButtons(urlHash, phase, state = null) {
             }
 
             // Wing It button
-            syncCompleteButtons += ` <button class="modal-btn wing-it-btn" onclick="_wingItFromModal('${urlHash}')">⚡ Wing It</button>`;
+            syncCompleteButtons += ` <span class="wing-it-wrap"><button class="modal-btn wing-it-btn" onclick="_toggleWingItDropdown(this, '${urlHash}')">⚡ Wing It</button></span>`;
 
             return syncCompleteButtons;
 
@@ -52150,12 +52280,14 @@ function buildListenBrainzPlaylistsHtml(playlists, tabId) {
                             <span class="button-icon">↓</span>
                             <span class="button-text">Download</span>
                         </button>
+                        <span class="wing-it-wrap">
                         <button class="action-button wing-it-btn-sm"
-                                onclick="_wingItFromLBCard('${identifier}', '${escapeForInlineJs(title)}')"
-                                title="Download using raw track names — no metadata discovery">
+                                onclick="_toggleWingItDropdownLB(this, '${identifier}', '${escapeForInlineJs(title)}')"
+                                title="Download or sync using raw track names — no metadata discovery">
                             <span class="button-icon">⚡</span>
                             <span class="button-text">Wing It</span>
                         </button>
+                        </span>
                         <button class="action-button primary"
                                 id="${playlistId}-sync-btn"
                                 onclick="startListenBrainzPlaylistSync('${identifier}')"
@@ -52426,7 +52558,65 @@ function displayListenBrainzTracks(tracks, playlistId) {
     playlistContainer.innerHTML = html;
 }
 
+function _toggleWingItDropdownLB(btn, identifier, title) {
+    const existing = document.querySelector('.wing-it-dropdown.visible');
+    if (existing) { existing.classList.remove('visible'); setTimeout(() => existing.remove(), 150); return; }
+
+    const wrap = btn.closest('.wing-it-wrap');
+    if (!wrap) return;
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'wing-it-dropdown';
+    dropdown.innerHTML = `
+        <button class="wing-it-dropdown-item" data-action="download">
+            <span class="wing-it-dropdown-icon">⬇️</span>
+            <span class="wing-it-dropdown-label">Download</span>
+            <span class="wing-it-dropdown-hint">Raw names</span>
+        </button>
+        <button class="wing-it-dropdown-item" data-action="sync">
+            <span class="wing-it-dropdown-icon">🔄</span>
+            <span class="wing-it-dropdown-label">Sync to Server</span>
+            <span class="wing-it-dropdown-hint">Best-effort</span>
+        </button>
+    `;
+
+    dropdown.querySelectorAll('.wing-it-dropdown-item').forEach(item => {
+        item.addEventListener('click', () => {
+            dropdown.classList.remove('visible');
+            setTimeout(() => dropdown.remove(), 150);
+            const tracks = listenbrainzTracksCache[identifier];
+            if (!tracks || tracks.length === 0) {
+                showToast('No tracks cached. Try opening the playlist first.', 'error');
+                return;
+            }
+            if (item.dataset.action === 'download') {
+                wingItDownload(tracks, title, 'ListenBrainz', identifier, true);
+            } else {
+                _wingItSync(tracks, title, 'ListenBrainz', identifier);
+            }
+        });
+    });
+
+    const btnRect2 = btn.getBoundingClientRect();
+    if (btnRect2.top < 200) dropdown.classList.add('flip-down');
+
+    wrap.appendChild(dropdown);
+    requestAnimationFrame(() => dropdown.classList.add('visible'));
+
+    setTimeout(() => {
+        const closeHandler = e => {
+            if (!dropdown.contains(e.target) && e.target !== btn) {
+                dropdown.classList.remove('visible');
+                setTimeout(() => dropdown.remove(), 150);
+                document.removeEventListener('click', closeHandler);
+            }
+        };
+        document.addEventListener('click', closeHandler);
+    }, 50);
+}
+
 async function _wingItFromLBCard(identifier, title) {
+    // Legacy — kept for backward compat
     const tracks = listenbrainzTracksCache[identifier];
     if (!tracks || tracks.length === 0) {
         showToast('No tracks cached for this playlist. Try opening the discovery modal first.', 'error');
