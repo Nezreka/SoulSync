@@ -3403,6 +3403,8 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.2': [
         // Newest features first
+        { title: 'Global Search Bar',                             desc: 'Spotlight-style search from any page — press / or Ctrl+K. Full enhanced search with source tabs, library badges, and playback' },
+        { title: 'MusicBrainz Cache in Browser',                 desc: 'MusicBrainz cache now visible in Cache Browser — browse, clear all, or clear failed lookups only. Cache Health shows MB alongside other sources' },
         { title: 'Wing It Mode',                                desc: 'Download or sync playlists without metadata discovery — uses raw track names directly. Great for obscure tracks not on Spotify/iTunes' },
         { title: 'Redesigned Notifications',                    desc: 'Compact pill toasts, notification bell with unread badge, history panel with last 50 notifications and Learn More links' },
         { title: 'Track Redownload & Source Info',              desc: 'Fix mismatched downloads — search all metadata and download sources in columns, pick the right version, auto-replace. Source Info shows where tracks came from with blacklist option', page: 'library' },
