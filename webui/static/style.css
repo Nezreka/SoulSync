@@ -8195,45 +8195,44 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .rate-monitor-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
     padding: 8px 0;
 }
 
 .rate-gauge-card {
     position: relative;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 8px 4px 4px;
-    border-radius: 16px;
-    background: rgba(12, 12, 16, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    flex-direction: column;
+    padding: 14px 14px 10px;
+    border-radius: 14px;
+    background: rgba(18, 18, 22, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     cursor: pointer;
-    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-    backdrop-filter: blur(8px);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(12px);
     overflow: visible;
 }
 
 .rate-gauge-card:hover {
-    background: rgba(20, 20, 28, 0.8);
+    background: rgba(24, 24, 30, 0.85);
     border-color: rgba(255, 255, 255, 0.1);
-    transform: translateY(-3px);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
 }
 
 .rate-gauge-card.active {
-    border-color: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.07);
 }
 
 .rate-gauge-card.danger {
-    border-color: rgba(239, 68, 68, 0.35);
+    border-color: rgba(239, 68, 68, 0.3);
     animation: gauge-danger-pulse 1.8s ease-in-out infinite;
 }
 
 @keyframes gauge-danger-pulse {
-    0%, 100% { box-shadow: 0 0 0 rgba(239, 68, 68, 0), inset 0 0 0 rgba(239, 68, 68, 0); }
-    50% { box-shadow: 0 0 24px rgba(239, 68, 68, 0.15), inset 0 0 20px rgba(239, 68, 68, 0.03); }
+    0%, 100% { box-shadow: 0 0 0 rgba(239, 68, 68, 0); }
+    50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.12); }
 }
 
 .rate-gauge-card.rate-limited {
@@ -8241,23 +8240,122 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     animation: gauge-danger-pulse 1.8s ease-in-out infinite;
 }
 
-.gauge-rl-badge {
-    position: absolute;
-    bottom: 8px;
-    left: 50%;
-    transform: translateX(-50%);
+/* Card header — service name + status */
+.gauge-card-header {
     display: flex;
     align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.gauge-card-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.gauge-card-name {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    letter-spacing: 0.3px;
+}
+
+.gauge-card-status {
+    font-size: 10px;
+    font-weight: 500;
+    padding: 2px 7px;
+    border-radius: 10px;
+    letter-spacing: 0.3px;
+}
+.gauge-card-status[data-status="running"] { background: rgba(34, 197, 94, 0.12); color: #4ade80; }
+.gauge-card-status[data-status="idle"] { background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.35); }
+.gauge-card-status[data-status="paused"] { background: rgba(234, 179, 8, 0.12); color: #fbbf24; }
+.gauge-card-status[data-status="stopped"] { background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.2); }
+.gauge-card-status[data-status="not_configured"] { background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.2); }
+
+/* Arc wrap */
+.gauge-arc-wrap {
+    display: flex;
+    justify-content: center;
+    margin: -4px 0;
+}
+
+/* Stats row below gauge */
+.gauge-card-stats {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 4px;
+    margin-top: -2px;
+}
+
+.gauge-card-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+}
+
+.gauge-card-stat-val {
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.gauge-card-stat-label {
+    font-size: 8px;
+    color: rgba(255, 255, 255, 0.25);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Spotify budget bar */
+.gauge-budget-bar {
+    position: relative;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    margin: 6px 4px 2px;
+    overflow: hidden;
+}
+
+.gauge-budget-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, rgba(29, 185, 84, 0.7), #1DB954);
+    transition: width 0.8s ease;
+}
+
+.gauge-budget-bar.high .gauge-budget-fill { background: linear-gradient(90deg, rgba(245, 166, 35, 0.7), #f5a623); }
+.gauge-budget-bar.exhausted .gauge-budget-fill { background: linear-gradient(90deg, rgba(239, 68, 68, 0.7), #ef4444); }
+
+.gauge-budget-label {
+    position: absolute;
+    top: 6px;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-size: 8px;
+    color: rgba(255, 255, 255, 0.2);
+}
+
+/* Rate limit badge */
+.gauge-rl-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     gap: 5px;
-    padding: 3px 10px;
-    border-radius: 20px;
-    background: rgba(239, 68, 68, 0.15);
-    border: 1px solid rgba(239, 68, 68, 0.25);
+    padding: 4px 10px;
+    margin-top: 6px;
+    border-radius: 8px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
     font-size: 9px;
     font-weight: 700;
     color: #ef4444;
     letter-spacing: 0.5px;
-    white-space: nowrap;
 }
 
 .gauge-rl-dot {
@@ -8274,12 +8372,14 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .gauge-rl-time {
-    color: rgba(239, 68, 68, 0.6);
+    color: rgba(239, 68, 68, 0.5);
     font-weight: 500;
 }
 
+/* SVG gauge */
 .rate-gauge-svg {
     width: 100%;
+    max-width: 160px;
     height: auto;
     overflow: visible;
 }
@@ -8298,24 +8398,20 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .gauge-value {
     font-family: -apple-system, 'SF Pro Display', 'Segoe UI', sans-serif;
-    font-size: 32px;
+    font-size: 24px;
     font-weight: 800;
     fill: rgba(255, 255, 255, 0.95);
-    letter-spacing: -1px;
+    letter-spacing: -0.5px;
 }
 
 .gauge-unit {
     font-family: -apple-system, sans-serif;
-    font-size: 10px;
+    font-size: 9px;
     fill: rgba(255, 255, 255, 0.2);
 }
 
 .gauge-label {
-    font-family: -apple-system, sans-serif;
-    font-size: 11px;
-    font-weight: 600;
-    fill: rgba(255, 255, 255, 0.45);
-    letter-spacing: 0.5px;
+    display: none; /* Label is now in the card header, not the SVG */
 }
 
 /* Rate Monitor Detail Modal */
@@ -8470,18 +8566,19 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-size: 12px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
     .rate-monitor-grid {
         grid-template-columns: repeat(3, 1fr);
         gap: 10px;
     }
-    .rate-gauge-card { padding: 10px 8px 6px; }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 600px) {
     .rate-monitor-grid {
         grid-template-columns: repeat(2, 1fr);
     }
+    .gauge-card-stats { gap: 2px; }
+    .gauge-card-stat-val { font-size: 11px; }
 }
 
 /* System Stats Grid */
