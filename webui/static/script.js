@@ -11892,7 +11892,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                                             'YouTube';
 
     // Store metadata for discover download sidebar (will be added when Begin Analysis is clicked)
-    if (source === 'SoulSync' || virtualPlaylistId.startsWith('discover_lb_') || virtualPlaylistId.startsWith('listenbrainz_')) {
+    if (source === 'SoulSync' || virtualPlaylistId.startsWith('discover_lb_') || virtualPlaylistId.startsWith('listenbrainz_') || virtualPlaylistId.startsWith('wing_it_')) {
         // Extract image URL from album context or first track's album cover
         let imageUrl = null;
         if (album && album.images && album.images.length > 0) {
