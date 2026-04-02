@@ -20055,6 +20055,20 @@ def get_version_info():
                 "usage_note": "Click the ⚡ Wing It button next to Start Discovery or Download Missing in any playlist modal."
             },
             {
+                "title": "🔍 Global Search Bar — Search From Anywhere",
+                "description": "Spotlight-style search bar accessible from every page",
+                "features": [
+                    "• Persistent search bar at the bottom of the screen — faded when idle, expands on focus",
+                    "• Full enhanced search parity — artists, albums, singles/EPs, tracks with source tabs",
+                    "• Keyboard shortcuts: / or Ctrl+K to focus, Escape to close",
+                    "• Click artists to navigate to their detail page, albums to open download modal",
+                    "• In Library badges and green play buttons for tracks you already own",
+                    "• Source tabs (Spotify, iTunes, Deezer) with result counts",
+                    "• Results collapse on navigation, search bar stays visible"
+                ],
+                "usage_note": "Press / or Ctrl+K from any page, or click the search bar at the bottom of the screen."
+            },
+            {
                 "title": "🔔 Redesigned Notification System",
                 "description": "Modern compact toasts with notification history and bell button",
                 "features": [
@@ -20105,7 +20119,9 @@ def get_version_info():
                     "• Cover Art Archive album art now opt-in via Settings toggle (#232)",
                     "• cover.jpg now correctly uses Cover Art Archive when enabled (was silently failing)",
                     "• Genius artist search returns multiple results for manual matching (#233)",
-                    "• Genius API interval increased from 1.5s to 2s to reduce 429 rate limits"
+                    "• Genius API interval increased from 1.5s to 2s to reduce 429 rate limits",
+                    "• MusicBrainz cache now visible in Cache Browser with browse, clear, and clear-failed-only options",
+                    "• Cache Health popup shows MusicBrainz alongside other sources, 'Failed Lookups' clarified as MB-specific"
                 ]
             },
             {
@@ -23236,6 +23252,67 @@ def metadata_cache_entity_detail(source, entity_type, entity_id):
         logger.error(f"Error getting metadata cache entity: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/metadata-cache/browse-musicbrainz', methods=['GET'])
+def metadata_cache_browse_musicbrainz():
+    """Browse MusicBrainz cache entries in the same format as metadata cache browse."""
+    try:
+        entity_type = request.args.get('entity_type', 'artist')
+        search = request.args.get('search', '').strip()
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 48))
+        offset = (page - 1) * limit
+
+        database = get_database()
+        conn = database._get_connection()
+        try:
+            cursor = conn.cursor()
+
+            where_parts = []
+            params = []
+            if entity_type:
+                where_parts.append("entity_type = ?")
+                params.append(entity_type)
+            if search:
+                where_parts.append("LOWER(entity_name) LIKE LOWER(?)")
+                params.append(f"%{search}%")
+
+            where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+
+            cursor.execute(f"SELECT COUNT(*) FROM musicbrainz_cache {where_clause}", params)
+            total = cursor.fetchone()[0]
+
+            cursor.execute(f"""
+                SELECT * FROM musicbrainz_cache
+                {where_clause}
+                ORDER BY last_updated DESC
+                LIMIT ? OFFSET ?
+            """, params + [limit, offset])
+
+            items = []
+            for row in cursor.fetchall():
+                r = dict(row)
+                matched = r.get('musicbrainz_id') is not None
+                items.append({
+                    'entity_id': r.get('musicbrainz_id') or f"mb-{r.get('entity_type','')}-{r.get('entity_name','')}",
+                    'source': 'musicbrainz',
+                    'name': r.get('entity_name', ''),
+                    'artist_name': r.get('artist_name', ''),
+                    'image_url': None,
+                    'popularity': int((r.get('match_confidence') or 0) * 100),
+                    'access_count': 1,
+                    'last_accessed_at': r.get('last_updated', ''),
+                    'created_at': r.get('last_updated', ''),
+                    '_mb_matched': matched,
+                    '_mb_id': r.get('musicbrainz_id', ''),
+                })
+
+            return jsonify({'items': items, 'total': total, 'offset': offset})
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error(f"Error browsing MusicBrainz cache: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/metadata-cache/clear', methods=['DELETE'])
 def metadata_cache_clear():
     """Clear cached metadata. Optional query params: source, type."""
@@ -23261,6 +23338,18 @@ def metadata_cache_evict():
         return jsonify({"success": True, "evicted": evicted})
     except Exception as e:
         logger.error(f"Error evicting metadata cache: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/metadata-cache/clear-musicbrainz', methods=['DELETE'])
+def metadata_cache_clear_musicbrainz():
+    """Clear MusicBrainz cache entries. Optional query param: failed_only=true."""
+    try:
+        cache = get_metadata_cache()
+        failed_only = request.args.get('failed_only', '').lower() == 'true'
+        cleared = cache.clear_musicbrainz(failed_only=failed_only)
+        return jsonify({"success": True, "cleared": cleared})
+    except Exception as e:
+        logger.error(f"Error clearing MusicBrainz cache: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================

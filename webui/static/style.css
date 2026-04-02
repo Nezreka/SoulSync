@@ -46534,6 +46534,20 @@ tr.tag-diff-same {
     color: #00d278;
 }
 
+.mcache-source-badge.musicbrainz {
+    background: rgba(186, 71, 143, 0.15);
+    color: #BA478F;
+}
+
+.mcache-card.mb-matched {
+    border-left: 2px solid rgba(76, 175, 80, 0.5);
+}
+
+.mcache-card.mb-failed {
+    border-left: 2px solid rgba(255, 152, 0, 0.5);
+    cursor: default;
+}
+
 .mcache-card-cache-info {
     font-size: 10px;
     color: rgba(255, 255, 255, 0.25);

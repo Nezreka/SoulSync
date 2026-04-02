@@ -21498,6 +21498,7 @@ async function loadMetadataCacheBrowseStats() {
         el('mcache-browse-itunes-count', itunesTotal);
         el('mcache-browse-deezer-count', deezerTotal);
         el('mcache-browse-beatport-count', beatportTotal);
+        el('mcache-browse-musicbrainz-count', stats.musicbrainz_total || 0);
         el('mcache-browse-hits', stats.total_hits || 0);
         el('mcache-browse-searches', stats.searches || 0);
     } catch (e) { /* ignore */ }
@@ -21520,22 +21521,35 @@ async function loadMetadataCacheBrowse() {
     const search = document.getElementById('mcache-search')?.value || '';
     const sort = document.getElementById('mcache-sort-filter')?.value || 'last_accessed_at';
 
-    const params = new URLSearchParams({
-        type: _mcacheCurrentTab,
-        sort: sort,
-        sort_dir: sort === 'name' ? 'asc' : 'desc',
-        offset: _mcachePage * MCACHE_PAGE_SIZE,
-        limit: MCACHE_PAGE_SIZE
-    });
-    if (source) params.set('source', source);
-    if (search) params.set('search', search);
-
     grid.innerHTML = '<div class="mcache-empty"><div class="mcache-empty-icon">...</div><div class="mcache-empty-sub">Loading...</div></div>';
 
     try {
-        const response = await fetch(`/api/metadata-cache/browse?${params}`);
-        if (!response.ok) throw new Error('Failed to load');
-        const data = await response.json();
+        let data;
+        if (source === 'musicbrainz') {
+            // MusicBrainz is a separate cache table — use dedicated endpoint
+            const params = new URLSearchParams({
+                entity_type: _mcacheCurrentTab,
+                page: _mcachePage + 1,
+                limit: MCACHE_PAGE_SIZE
+            });
+            if (search) params.set('search', search);
+            const response = await fetch(`/api/metadata-cache/browse-musicbrainz?${params}`);
+            if (!response.ok) throw new Error('Failed to load');
+            data = await response.json();
+        } else {
+            const params = new URLSearchParams({
+                type: _mcacheCurrentTab,
+                sort: sort,
+                sort_dir: sort === 'name' ? 'asc' : 'desc',
+                offset: _mcachePage * MCACHE_PAGE_SIZE,
+                limit: MCACHE_PAGE_SIZE
+            });
+            if (source) params.set('source', source);
+            if (search) params.set('search', search);
+            const response = await fetch(`/api/metadata-cache/browse?${params}`);
+            if (!response.ok) throw new Error('Failed to load');
+            data = await response.json();
+        }
 
         if (!data.items || data.items.length === 0) {
             grid.innerHTML = `
@@ -21578,7 +21592,10 @@ function renderMetadataCacheGrid(items, entityType) {
         let subText = '';
         let metaText = '';
 
-        if (entityType === 'artist') {
+        if (source === 'musicbrainz') {
+            subText = item.artist_name || '';
+            metaText = item._mb_matched ? `MBID: ${(item._mb_id || '').substring(0, 8)}…` : 'No match found';
+        } else if (entityType === 'artist') {
             const genres = item.genres ? (typeof item.genres === 'string' ? JSON.parse(item.genres || '[]') : item.genres) : [];
             subText = genres.length > 0 ? genres.slice(0, 2).join(', ') : '';
             if (item.popularity) metaText = `Pop: ${item.popularity}`;
@@ -21597,8 +21614,11 @@ function renderMetadataCacheGrid(items, entityType) {
             metaText = parts.join(' · ');
         }
 
+        const clickAttr = source === 'musicbrainz' ? '' : `onclick="openMetadataCacheDetail('${source}', '${entityType}', '${encodeURIComponent(item.entity_id)}')"`;
+        const mbStatusClass = source === 'musicbrainz' ? (item._mb_matched ? ' mb-matched' : ' mb-failed') : '';
+
         return `
-            <div class="mcache-card" onclick="openMetadataCacheDetail('${source}', '${entityType}', '${encodeURIComponent(item.entity_id)}')">
+            <div class="mcache-card${mbStatusClass}" ${clickAttr}>
                 <div class="mcache-card-top">
                     ${imageHtml}
                     <div class="mcache-card-info">
@@ -21819,6 +21839,28 @@ async function clearMetadataCacheBySource(source) {
         }
     } catch (e) {
         showToast(`Error clearing ${source} cache`, 'error');
+    }
+}
+
+async function clearMusicBrainzCache(failedOnly = false) {
+    const label = failedOnly ? 'failed MusicBrainz lookups' : 'ALL MusicBrainz cache entries';
+    if (!confirm(`Clear ${label}?`)) return;
+    document.getElementById('mcache-clear-dropdown-menu').style.display = 'none';
+
+    try {
+        const url = failedOnly ? '/api/metadata-cache/clear-musicbrainz?failed_only=true' : '/api/metadata-cache/clear-musicbrainz';
+        const response = await fetch(url, { method: 'DELETE' });
+        const data = await response.json();
+        if (data.success) {
+            showToast(`Cleared ${data.cleared} MusicBrainz cache entries`, 'success');
+            loadMetadataCacheBrowseStats();
+            loadMetadataCacheBrowse();
+            loadMetadataCacheStats();
+        } else {
+            showToast('Failed to clear MusicBrainz cache', 'error');
+        }
+    } catch (e) {
+        showToast('Error clearing MusicBrainz cache', 'error');
     }
 }
 
@@ -57860,22 +57902,27 @@ async function openCacheHealthModal() {
                 </div>
                 <div class="cache-health-card">
                     <div class="cache-health-card-value ${s.stale_mb_nulls > 10 ? 'warn' : ''}">${s.stale_mb_nulls}</div>
-                    <div class="cache-health-card-label">Failed Lookups</div>
+                    <div class="cache-health-card-label">Failed MB Lookups</div>
                 </div>
             </div>
 
             <div class="cache-health-section">
                 <div class="cache-health-section-title">By Source</div>
                 <div class="cache-health-source-bars">
-                    ${Object.entries(s.by_source || {}).map(([src, count]) => {
-                        const pct = s.total_entities > 0 ? Math.round(count / s.total_entities * 100) : 0;
-                        const color = src === 'spotify' ? '#1DB954' : src === 'itunes' ? '#FC3C44' : src === 'deezer' ? '#A238FF' : '#666';
-                        return `<div class="cache-health-source-row">
-                            <span class="cache-health-source-name">${src}</span>
-                            <div class="cache-health-source-track"><div class="cache-health-source-fill" style="width:${pct}%;background:${color}"></div></div>
-                            <span class="cache-health-source-count">${count.toLocaleString()}</span>
-                        </div>`;
-                    }).join('')}
+                    ${(() => {
+                        const allSources = {...(s.by_source || {})};
+                        if (s.total_musicbrainz) allSources['musicbrainz'] = s.total_musicbrainz;
+                        const maxCount = Math.max(...Object.values(allSources), 1);
+                        return Object.entries(allSources).map(([src, count]) => {
+                            const pct = Math.round(count / maxCount * 100);
+                            const color = src === 'spotify' ? '#1DB954' : src === 'itunes' ? '#FC3C44' : src === 'deezer' ? '#A238FF' : src === 'musicbrainz' ? '#BA478F' : '#666';
+                            return `<div class="cache-health-source-row">
+                                <span class="cache-health-source-name">${src === 'musicbrainz' ? 'MusicBrainz' : src}</span>
+                                <div class="cache-health-source-track"><div class="cache-health-source-fill" style="width:${pct}%;background:${color}"></div></div>
+                                <span class="cache-health-source-count">${count.toLocaleString()}</span>
+                            </div>`;
+                        }).join('');
+                    })()}
                 </div>
             </div>
 
@@ -57893,7 +57940,6 @@ async function openCacheHealthModal() {
                     <div class="cache-health-metric"><span class="cache-health-metric-label">Total Cache Hits</span><span class="cache-health-metric-value">${s.total_access_hits.toLocaleString()}</span></div>
                     <div class="cache-health-metric"><span class="cache-health-metric-label">Expiring in 24h</span><span class="cache-health-metric-value">${s.expiring_24h}</span></div>
                     <div class="cache-health-metric"><span class="cache-health-metric-label">Expiring in 7 days</span><span class="cache-health-metric-value">${s.expiring_7d}</span></div>
-                    <div class="cache-health-metric"><span class="cache-health-metric-label">MusicBrainz Entries</span><span class="cache-health-metric-value">${s.total_musicbrainz}</span></div>
                 </div>
             </div>
         `;

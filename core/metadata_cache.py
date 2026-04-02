@@ -525,6 +525,16 @@ class MetadataCache:
                     stats['oldest'] = row['oldest']
                     stats['newest'] = row['newest']
 
+                # MusicBrainz cache stats
+                try:
+                    cursor.execute("SELECT COUNT(*) as cnt FROM musicbrainz_cache")
+                    stats['musicbrainz_total'] = cursor.fetchone()['cnt']
+                    cursor.execute("SELECT COUNT(*) as cnt FROM musicbrainz_cache WHERE musicbrainz_id IS NULL")
+                    stats['musicbrainz_failed'] = cursor.fetchone()['cnt']
+                except Exception:
+                    stats['musicbrainz_total'] = 0
+                    stats['musicbrainz_failed'] = 0
+
                 return stats
             finally:
                 conn.close()
@@ -803,6 +813,27 @@ class MetadataCache:
                 conn.close()
         except Exception as e:
             logger.error(f"Cache clear error: {e}")
+            return 0
+
+    def clear_musicbrainz(self, failed_only: bool = False) -> int:
+        """Clear MusicBrainz cache entries. If failed_only=True, only clears entries with NULL musicbrainz_id."""
+        try:
+            db = self._get_db()
+            conn = db._get_connection()
+            try:
+                cursor = conn.cursor()
+                if failed_only:
+                    cursor.execute("DELETE FROM musicbrainz_cache WHERE musicbrainz_id IS NULL")
+                else:
+                    cursor.execute("DELETE FROM musicbrainz_cache")
+                count = cursor.rowcount
+                conn.commit()
+                logger.info(f"Cleared {count} MusicBrainz cache entries (failed_only={failed_only})")
+                return count
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.error(f"MusicBrainz cache clear error: {e}")
             return 0
 
     # ─── Field Extraction ─────────────────────────────────────────────
