@@ -4245,6 +4245,24 @@
                                     </div>
                                 </div>
 
+                                <div class="form-group">
+                                    <label>Concurrent Downloads:</label>
+                                    <select id="max-concurrent-downloads" class="form-select">
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="3" selected>3 (Default)</option>
+                                        <option value="4">4</option>
+                                        <option value="5">5</option>
+                                        <option value="6">6</option>
+                                        <option value="8">8</option>
+                                        <option value="10">10</option>
+                                    </select>
+                                    <div class="setting-help-text">
+                                        Maximum simultaneous downloads per batch. Soulseek album downloads always use 1 worker
+                                        due to per-user upload limits. Higher values speed up large playlists and wishlists.
+                                    </div>
+                                </div>
+
                                 <!-- Hybrid Mode Settings (shown only when hybrid is selected) -->
                                 <div id="hybrid-settings-container" style="display: none;">
                                     <div class="setting-help-text">

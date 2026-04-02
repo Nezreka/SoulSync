@@ -1896,6 +1896,23 @@ download_batches = {}  # batch_id -> {queue, active_count, max_concurrent}
 tasks_lock = threading.Lock()
 batch_locks = {}  # batch_id -> Lock() for atomic batch operations
 
+def _get_max_concurrent():
+    """Get configured max concurrent downloads. Default 3."""
+    return config_manager.get('download_source.max_concurrent', 3)
+
+def _get_batch_max_concurrent(is_album=False, source=None):
+    """Get max concurrent workers for a batch.
+    Soulseek album downloads always use 1 (source reuse per user).
+    Everything else uses the configured setting."""
+    if is_album and source in ('soulseek', None):
+        # Check if active source is soulseek
+        if source == 'soulseek':
+            return 1
+        mode = config_manager.get('download_source.mode', 'soulseek')
+        if mode == 'soulseek':
+            return 1
+    return _get_max_concurrent()
+
 # --- Session Download Statistics ---
 # Track individual download completions (matches dashboard.py behavior)
 session_completed_downloads = 0
@@ -21794,7 +21811,7 @@ def _process_wishlist_automatically(automation_id=None):
                     'playlist_name': playlist_name,
                     'queue': [],
                     'active_count': 0,
-                    'max_concurrent': 1 if current_cycle == 'albums' else 3,  # 1 worker for album source reuse, 3 for singles
+                    'max_concurrent': _get_batch_max_concurrent(is_album=(current_cycle == 'albums')),
                     'queue_index': 0,
                     'analysis_total': len(wishlist_tracks),
                     'analysis_processed': 0,
@@ -22692,7 +22709,7 @@ def start_wishlist_missing_downloads():
                 'playlist_name': playlist_name,
                 'queue': task_queue,
                 'active_count': 0,
-                'max_concurrent': 1 if category == 'albums' else 3,  # 1 worker for album source reuse, 3 for singles
+                'max_concurrent': _get_batch_max_concurrent(is_album=(category == 'albums')),
                 'queue_index': 0,
                 'analysis_total': len(wishlist_tracks),
                 'analysis_processed': 0,
@@ -27134,7 +27151,7 @@ def start_playlist_missing_downloads(playlist_id):
             download_batches[batch_id] = {
                 'queue': [],
                 'active_count': 0,
-                'max_concurrent': 3,
+                'max_concurrent': _get_max_concurrent(),
                 'queue_index': 0,
                 # Track state management (replicating sync.py)
                 'permanently_failed_tracks': [],
@@ -29131,7 +29148,7 @@ def start_missing_tracks_process(playlist_id):
             'playlist_name': playlist_name,
             'queue': [],
             'active_count': 0,
-            'max_concurrent': 1 if is_album_download else 3,  # Album/EP: 1 worker for source reuse; Playlist: 3 workers
+            'max_concurrent': _get_batch_max_concurrent(is_album=is_album_download),
             # Track state management (replicating sync.py)
             'permanently_failed_tracks': [],
             'cancelled_tracks': set(),
@@ -29229,7 +29246,7 @@ def start_missing_downloads():
             download_batches[batch_id] = {
                 'queue': [],
                 'active_count': 0,
-                'max_concurrent': 3,
+                'max_concurrent': _get_max_concurrent(),
                 'queue_index': 0,
                 # Track state management (replicating sync.py)
                 'permanently_failed_tracks': [],

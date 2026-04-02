@@ -5781,6 +5781,7 @@ async function loadSettingsData() {
         // Populate Download Source settings
         document.getElementById('download-source-mode').value = settings.download_source?.mode || 'soulseek';
         document.getElementById('stream-source').value = settings.download_source?.stream_source || 'youtube';
+        document.getElementById('max-concurrent-downloads').value = settings.download_source?.max_concurrent || '3';
         loadHybridSourceOrder(settings);
         document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
         document.getElementById('tidal-allow-fallback').checked = settings.tidal_download?.allow_fallback !== false;
@@ -6814,6 +6815,7 @@ async function saveSettings(quiet = false) {
             hybrid_secondary: document.getElementById('hybrid-secondary-source').value,
             hybrid_order: getHybridOrder(),
             stream_source: document.getElementById('stream-source').value,
+            max_concurrent: parseInt(document.getElementById('max-concurrent-downloads').value) || 3,
         },
         tidal_download: {
             quality: document.getElementById('tidal-download-quality').value || 'lossless',
