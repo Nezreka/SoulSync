@@ -8189,6 +8189,301 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 
+/* ========================================= */
+/* API Rate Monitor Gauges                   */
+/* ========================================= */
+
+.rate-monitor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 14px;
+    padding: 8px 0;
+}
+
+.rate-gauge-card {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 4px 4px;
+    border-radius: 16px;
+    background: rgba(12, 12, 16, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(8px);
+    overflow: visible;
+}
+
+.rate-gauge-card:hover {
+    background: rgba(20, 20, 28, 0.8);
+    border-color: rgba(255, 255, 255, 0.1);
+    transform: translateY(-3px);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+
+.rate-gauge-card.active {
+    border-color: rgba(255, 255, 255, 0.06);
+}
+
+.rate-gauge-card.danger {
+    border-color: rgba(239, 68, 68, 0.35);
+    animation: gauge-danger-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes gauge-danger-pulse {
+    0%, 100% { box-shadow: 0 0 0 rgba(239, 68, 68, 0), inset 0 0 0 rgba(239, 68, 68, 0); }
+    50% { box-shadow: 0 0 24px rgba(239, 68, 68, 0.15), inset 0 0 20px rgba(239, 68, 68, 0.03); }
+}
+
+.rate-gauge-card.rate-limited {
+    border-color: rgba(239, 68, 68, 0.4);
+    animation: gauge-danger-pulse 1.8s ease-in-out infinite;
+}
+
+.gauge-rl-badge {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.25);
+    font-size: 9px;
+    font-weight: 700;
+    color: #ef4444;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+.gauge-rl-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #ef4444;
+    animation: gauge-rl-blink 1s ease-in-out infinite;
+}
+
+@keyframes gauge-rl-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+.gauge-rl-time {
+    color: rgba(239, 68, 68, 0.6);
+    font-weight: 500;
+}
+
+.rate-gauge-svg {
+    width: 100%;
+    height: auto;
+    overflow: visible;
+}
+
+.gauge-active-arc {
+    transition: d 0.6s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.4s ease;
+}
+
+.gauge-dot {
+    transition: cx 0.6s cubic-bezier(0.4, 0, 0.2, 1), cy 0.6s cubic-bezier(0.4, 0, 0.2, 1), fill 0.4s ease;
+}
+
+.gauge-dot + circle {
+    transition: cx 0.6s cubic-bezier(0.4, 0, 0.2, 1), cy 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.gauge-value {
+    font-family: -apple-system, 'SF Pro Display', 'Segoe UI', sans-serif;
+    font-size: 32px;
+    font-weight: 800;
+    fill: rgba(255, 255, 255, 0.95);
+    letter-spacing: -1px;
+}
+
+.gauge-unit {
+    font-family: -apple-system, sans-serif;
+    font-size: 10px;
+    fill: rgba(255, 255, 255, 0.2);
+}
+
+.gauge-label {
+    font-family: -apple-system, sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    fill: rgba(255, 255, 255, 0.45);
+    letter-spacing: 0.5px;
+}
+
+/* Rate Monitor Detail Modal */
+.rate-modal {
+    background: #141418;
+    border-radius: 20px;
+    width: 740px;
+    max-width: 95vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7);
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.rate-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.rate-modal-header-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.rate-modal-header-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.rate-modal-header h3 {
+    margin: 0;
+    font-size: 16px;
+    color: #fff;
+    font-weight: 600;
+}
+
+.rate-modal-header-sub {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.rate-modal-body {
+    padding: 20px 24px;
+    overflow-y: auto;
+}
+
+.rate-modal-chart-wrap {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.rate-modal-chart-wrap canvas {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.rate-modal-chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    padding: 10px 4px 0;
+    min-height: 0;
+}
+
+.rate-chart-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.45);
+    white-space: nowrap;
+}
+
+.rate-chart-legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.rate-modal-section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 10px;
+}
+
+.rate-modal-endpoints {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.rate-modal-ep {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+}
+
+.rate-modal-ep-name {
+    width: 140px;
+    flex-shrink: 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.rate-modal-ep-bar {
+    flex: 1;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.rate-modal-ep-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease, background 0.3s ease;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.05);
+}
+
+.rate-modal-ep-value {
+    width: 60px;
+    flex-shrink: 0;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    text-align: right;
+}
+
+.rate-modal-ep-empty {
+    text-align: center;
+    padding: 16px;
+    color: rgba(255, 255, 255, 0.2);
+    font-size: 12px;
+}
+
+@media (max-width: 768px) {
+    .rate-monitor-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+    }
+    .rate-gauge-card { padding: 10px 8px 6px; }
+}
+
+@media (max-width: 480px) {
+    .rate-monitor-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
 /* System Stats Grid */
 .stats-grid-dashboard {
     display: grid;

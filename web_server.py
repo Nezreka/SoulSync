@@ -45673,6 +45673,22 @@ except Exception as e:
     print(f"⚠️ Spotify enrichment worker initialization failed: {e}")
     spotify_enrichment_worker = None
 
+# --- API Rate Monitor Endpoints ---
+
+@app.route('/api/rate-monitor/history/<service_key>', methods=['GET'])
+def get_rate_monitor_history(service_key):
+    """Get 24-hour minute-bucketed call history for a service. Used by the detail modal graph."""
+    try:
+        from core.api_call_tracker import api_call_tracker, RATE_LIMITS
+        history = api_call_tracker.get_24h_history(service_key)
+        return jsonify({
+            'service': service_key,
+            'rate_limit': RATE_LIMITS.get(service_key.split(':')[0], 60),
+            'history': history,
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # --- Spotify API Endpoints ---
 
 @app.route('/api/spotify-enrichment/status', methods=['GET'])
@@ -48244,6 +48260,30 @@ _download_auto_paused = set()
 _download_yield_override = set()  # Workers the user explicitly resumed during downloads — don't re-pause
 
 
+def _emit_rate_monitor_loop():
+    """Background thread that pushes API call rate data every 1 second for speedometer gauges."""
+    while True:
+        socketio.sleep(1)
+        try:
+            from core.api_call_tracker import api_call_tracker
+            payload = api_call_tracker.get_all_rates()
+
+            # Add Spotify rate limit state
+            try:
+                if spotify_client:
+                    rl_info = spotify_client.get_rate_limit_info()
+                    if rl_info:
+                        payload['spotify']['rate_limited'] = True
+                        payload['spotify']['rl_remaining'] = rl_info.get('remaining_seconds', 0)
+                        payload['spotify']['rl_endpoint'] = rl_info.get('endpoint', '')
+            except Exception:
+                pass
+
+            socketio.emit('rate-monitor:update', payload)
+        except Exception as e:
+            logger.debug(f"Error emitting rate monitor: {e}")
+
+
 def _emit_enrichment_status_loop():
     """Background thread that pushes all enrichment worker statuses every 2 seconds.
     Also auto-pauses rate-limited enrichment workers during active downloads."""
@@ -48656,6 +48696,8 @@ if __name__ == '__main__':
     socketio.start_background_task(_emit_repair_progress_loop)
     # Hydrabase auto-reconnect monitor
     socketio.start_background_task(_hydrabase_reconnect_loop)
-    print("✅ WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair)")
+    # API Rate Monitor — 1s push for speedometer gauges
+    socketio.start_background_task(_emit_rate_monitor_loop)
+    print("✅ WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor)")
 
     socketio.run(app, host='0.0.0.0', port=8008, debug=False, allow_unsafe_werkzeug=True)

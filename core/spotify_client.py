@@ -235,6 +235,9 @@ def rate_limited(func):
 
                 _last_api_call_time = time.time()
 
+            from core.api_call_tracker import api_call_tracker
+            api_call_tracker.record_call('spotify', endpoint=func.__name__)
+
             try:
                 return func(*args, **kwargs)
             except SpotifyRateLimitError:

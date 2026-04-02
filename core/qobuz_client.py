@@ -54,6 +54,9 @@ def _qobuz_throttle():
             time.sleep(_QOBUZ_MIN_INTERVAL - elapsed)
         _qobuz_last_api_call = time.time()
 
+    from core.api_call_tracker import api_call_tracker
+    api_call_tracker.record_call('qobuz')
+
 
 def _qobuz_set_rate_limit(retry_after: float = 60.0):
     """Set a global rate limit ban for all Qobuz instances."""

@@ -331,6 +331,7 @@ function initializeWebSocket() {
     socket.on('downloads:batch_update', handleDownloadBatchUpdate);
 
     // Phase 2 event listeners (dashboard pollers)
+    socket.on('rate-monitor:update', _handleRateMonitorUpdate);
     socket.on('dashboard:stats', handleDashboardStats);
     socket.on('dashboard:activity', handleDashboardActivity);
     socket.on('dashboard:toast', handleDashboardToast);
@@ -37662,6 +37663,488 @@ function renderEnrichmentCards(enrichment) {
     }
 
     grid.innerHTML = chips.join('');
+}
+
+// ===============================
+// == API RATE MONITOR GAUGES   ==
+// ===============================
+
+const _rateMonitorState = {};
+const _RATE_GAUGE_SERVICES = [
+    'spotify', 'itunes', 'deezer', 'lastfm', 'genius',
+    'musicbrainz', 'audiodb', 'tidal', 'qobuz',
+];
+const _RATE_GAUGE_LABELS = {
+    spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer',
+    lastfm: 'Last.fm', genius: 'Genius', musicbrainz: 'MusicBrainz',
+    audiodb: 'AudioDB', tidal: 'Tidal', qobuz: 'Qobuz',
+};
+const _RATE_GAUGE_COLORS = {
+    spotify: '#1DB954', itunes: '#FC3C44', deezer: '#A238FF',
+    lastfm: '#D51007', genius: '#FFFF64', musicbrainz: '#BA478F',
+    audiodb: '#00BCD4', tidal: '#00FFFF', qobuz: '#FF6B35',
+};
+
+// SVG constants — 240° arc, gap at bottom, extra padding for glow
+const _G = { size: 220, cx: 110, cy: 116, r: 74, stroke: 10, startAngle: 240, totalArc: 240 };
+
+function _gPt(angle, radius) {
+    const rad = (angle - 90) * Math.PI / 180;
+    const r = radius || _G.r;
+    return { x: _G.cx + r * Math.cos(rad), y: _G.cy + r * Math.sin(rad) };
+}
+
+function _gArc(startDeg, endDeg, radius) {
+    const r = radius || _G.r;
+    const s = _gPt(startDeg, r), e = _gPt(endDeg, r);
+    const sweep = ((endDeg - startDeg + 360) % 360);
+    const large = sweep > 180 ? 1 : 0;
+    return `M${s.x},${s.y} A${r},${r} 0 ${large} 1 ${e.x},${e.y}`;
+}
+
+function _handleRateMonitorUpdate(data) {
+    const grid = document.getElementById('rate-monitor-grid');
+    if (!grid) return;
+
+    if (!grid.children.length) {
+        for (const svc of _RATE_GAUGE_SERVICES) {
+            const div = document.createElement('div');
+            div.className = 'rate-gauge-card';
+            div.id = `rate-gauge-${svc}`;
+            div.onclick = () => _openRateModal(svc);
+            grid.appendChild(div);
+        }
+    }
+
+    for (const svc of _RATE_GAUGE_SERVICES) {
+        const d = data[svc];
+        if (!d) continue;
+        _rateMonitorState[svc] = d;
+        const container = document.getElementById(`rate-gauge-${svc}`);
+        if (!container) continue;
+
+        const value = d.cpm || 0;
+        const max = d.limit || 60;
+        const pct = Math.min(value / max, 1);
+
+        let svg = container.querySelector('svg');
+        if (!svg) {
+            container.innerHTML = _buildGaugeSVG(svc, value, max);
+        } else {
+            _updateGauge(container, value, max, svc);
+        }
+
+        container.classList.toggle('danger', pct > 0.8);
+        container.classList.toggle('active', value > 0);
+
+        // Rate limited badge (Spotify only for now)
+        const isRateLimited = d.rate_limited === true;
+        container.classList.toggle('rate-limited', isRateLimited);
+        let badge = container.querySelector('.gauge-rl-badge');
+        if (isRateLimited) {
+            const mins = Math.ceil((d.rl_remaining || 0) / 60);
+            const text = mins > 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+            if (!badge) {
+                badge = document.createElement('div');
+                badge.className = 'gauge-rl-badge';
+                container.appendChild(badge);
+            }
+            badge.innerHTML = `<span class="gauge-rl-dot"></span>RATE LIMITED<span class="gauge-rl-time">${text}</span>`;
+        } else if (badge) {
+            badge.remove();
+        }
+    }
+}
+
+function _buildGaugeSVG(svc, value, max) {
+    const { size, cx, cy, r, stroke, startAngle, totalArc } = _G;
+    const label = _RATE_GAUGE_LABELS[svc] || svc;
+    const accent = _RATE_GAUGE_COLORS[svc] || '#888';
+    const pct = Math.min(value / max, 1);
+    const endAngle = startAngle + pct * totalArc;
+    const arcEnd = startAngle + totalArc;
+    const glowId = `glow-${svc}`;
+
+    // Endpoint dot position
+    const dot = pct > 0 ? _gPt(endAngle, r) : null;
+
+    // Gradient ID for the colored arc
+    const gradId = `grad-${svc}`;
+
+    const color = pct > 0.8 ? '#ef4444' : pct > 0.6 ? '#eab308' : accent;
+
+    return `
+        <svg viewBox="0 0 ${size} ${size}" class="rate-gauge-svg">
+            <!-- Background track -->
+            <path d="${_gArc(startAngle, arcEnd)}" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="${stroke}" stroke-linecap="round"/>
+
+            <!-- Danger zone marker (last 20% of arc, subtle) -->
+            <path d="${_gArc(startAngle + totalArc * 0.8, arcEnd)}" fill="none" stroke="rgba(239,68,68,0.1)" stroke-width="${stroke}" stroke-linecap="round"/>
+
+            <!-- Active arc (CSS handles glow via drop-shadow) -->
+            ${pct > 0 ? `<path class="gauge-active-arc" data-color="${color}" d="${_gArc(startAngle, endAngle)}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" style="filter:drop-shadow(0 0 6px ${color}60)"/>` : ''}
+
+            <!-- Endpoint dot -->
+            ${dot ? `<circle class="gauge-dot" cx="${dot.x}" cy="${dot.y}" r="5" fill="${color}" style="filter:drop-shadow(0 0 4px ${color}80)"/><circle cx="${dot.x}" cy="${dot.y}" r="2.5" fill="#fff" opacity="0.9"/>` : ''}
+
+            <!-- Scale labels: 0 and max -->
+            <text x="${_gPt(startAngle, r + 16).x}" y="${_gPt(startAngle, r + 16).y}" text-anchor="middle" dominant-baseline="middle" fill="rgba(255,255,255,0.2)" font-size="9" font-family="-apple-system,sans-serif">0</text>
+            <text x="${_gPt(arcEnd, r + 16).x}" y="${_gPt(arcEnd, r + 16).y}" text-anchor="middle" dominant-baseline="middle" fill="rgba(255,255,255,0.2)" font-size="9" font-family="-apple-system,sans-serif">${max}</text>
+
+            <!-- Center content -->
+            <text class="gauge-value" x="${cx}" y="${cy - 12}" text-anchor="middle" dominant-baseline="middle">${Math.round(value)}</text>
+            <text class="gauge-unit" x="${cx}" y="${cy + 6}" text-anchor="middle">/min</text>
+
+            <!-- Service label -->
+            <text class="gauge-label" x="${cx}" y="${cy + 28}" text-anchor="middle">${label}</text>
+        </svg>
+    `;
+}
+
+function _updateGauge(container, value, max, svc) {
+    const { r, stroke, startAngle, totalArc } = _G;
+    const accent = _RATE_GAUGE_COLORS[svc] || '#888';
+    const pct = Math.min(value / max, 1);
+    const endAngle = startAngle + pct * totalArc;
+    const color = pct > 0.8 ? '#ef4444' : pct > 0.6 ? '#eab308' : accent;
+
+    // Update center value
+    const valText = container.querySelector('.gauge-value');
+    if (valText) valText.textContent = Math.round(value);
+
+    // Update active arc
+    const activeArc = container.querySelector('.gauge-active-arc');
+    if (pct > 0) {
+        const d = _gArc(startAngle, endAngle);
+        if (activeArc) {
+            activeArc.setAttribute('d', d);
+            activeArc.setAttribute('stroke', color);
+            activeArc.style.filter = `drop-shadow(0 0 6px ${color}60)`;
+        } else {
+            // Rebuild the whole gauge when transitioning from 0 to active
+            container.innerHTML = _buildGaugeSVG(svc, value, max);
+            return;
+        }
+    } else if (activeArc) {
+        activeArc.remove();
+        // Also remove dots
+        container.querySelectorAll('.gauge-dot').forEach(d => d.remove());
+        const innerDot = container.querySelector('.gauge-dot + circle');
+        if (innerDot) innerDot.remove();
+        return;
+    }
+
+    // Update endpoint dot
+    const gaugeDot = container.querySelector('.gauge-dot');
+    if (pct > 0 && gaugeDot) {
+        const dot = _gPt(endAngle, r);
+        gaugeDot.setAttribute('cx', dot.x);
+        gaugeDot.setAttribute('cy', dot.y);
+        gaugeDot.setAttribute('fill', color);
+        gaugeDot.style.filter = `drop-shadow(0 0 4px ${color}80)`;
+        const inner = gaugeDot.nextElementSibling;
+        if (inner && inner.tagName === 'circle') {
+            inner.setAttribute('cx', dot.x);
+            inner.setAttribute('cy', dot.y);
+        }
+    }
+}
+
+// ── Rate Monitor Detail Modal ──
+
+let _rateModalService = null;
+let _rateModalInterval = null;
+
+function _openRateModal(serviceKey) {
+    _rateModalService = serviceKey;
+    const label = _RATE_GAUGE_LABELS[serviceKey] || serviceKey;
+    const accent = _RATE_GAUGE_COLORS[serviceKey] || '#888';
+
+    let overlay = document.getElementById('rate-modal-overlay');
+    if (overlay) overlay.remove();
+
+    overlay = document.createElement('div');
+    overlay.id = 'rate-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) _closeRateModal(); };
+
+    const isSpotify = serviceKey === 'spotify';
+    const currentData = _rateMonitorState[serviceKey] || {};
+
+    overlay.innerHTML = `
+        <div class="rate-modal">
+            <div class="rate-modal-header">
+                <div class="rate-modal-header-info">
+                    <div class="rate-modal-header-dot" style="background:${accent}"></div>
+                    <div>
+                        <h3>${label}</h3>
+                        <span class="rate-modal-header-sub">${currentData.cpm || 0} calls/min — limit ${currentData.limit || '?'}/min</span>
+                    </div>
+                </div>
+                <button class="watch-all-close" onclick="_closeRateModal()">&times;</button>
+            </div>
+            <div class="rate-modal-body">
+                <div class="rate-modal-section-title">24-Hour Call History</div>
+                <div class="rate-modal-chart-wrap">
+                    <canvas id="rate-modal-chart" width="700" height="280"></canvas>
+                    <div class="rate-modal-chart-legend" id="rate-modal-chart-legend"></div>
+                </div>
+                ${isSpotify ? '<div class="rate-modal-section-title">Per-Endpoint Breakdown</div><div class="rate-modal-endpoints" id="rate-modal-endpoints"></div>' : ''}
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Fetch main history + per-endpoint histories for Spotify
+    const historyPromises = [
+        fetch(`/api/rate-monitor/history/${serviceKey}`).then(r => r.json())
+    ];
+    if (isSpotify) {
+        const activeEps = Object.keys(_rateMonitorState.spotify?.endpoints || {});
+        for (const ep of activeEps) {
+            historyPromises.push(
+                fetch(`/api/rate-monitor/history/spotify:${ep}`).then(r => r.json()).catch(() => null)
+            );
+        }
+    }
+    Promise.all(historyPromises).then(results => {
+        const main = results[0];
+        const epHistories = isSpotify ? results.slice(1).filter(Boolean) : [];
+        _renderRateChart(main.history || [], main.rate_limit || 60, accent, epHistories);
+    }).catch(() => {});
+
+    if (isSpotify) {
+        _updateSpotifyEndpoints();
+        _rateModalInterval = setInterval(_updateSpotifyEndpoints, 1000);
+    }
+}
+
+function _closeRateModal() {
+    const overlay = document.getElementById('rate-modal-overlay');
+    if (overlay) overlay.remove();
+    if (_rateModalInterval) { clearInterval(_rateModalInterval); _rateModalInterval = null; }
+    _rateModalService = null;
+}
+
+function _renderRateChart(history, rateLimit, accent, epHistories = []) {
+    const canvas = document.getElementById('rate-modal-chart');
+    if (!canvas) return;
+
+    // HiDPI support
+    const dpr = window.devicePixelRatio || 1;
+    const W = 700, H = 280;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const pad = { top: 24, right: 24, bottom: 36, left: 50 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Build data points
+    const now = Math.floor(Date.now() / 1000);
+    const start = now - 86400;
+    const points = [];
+
+    if (history.length > 0) {
+        const histMap = new Map(history.map(h => [h[0], h[1]]));
+        for (let t = start; t <= now; t += 300) {
+            const bucket = Math.floor(t / 60) * 60;
+            let sum = 0;
+            for (let m = bucket; m < bucket + 300; m += 60) sum += histMap.get(m) || 0;
+            points.push({ t, v: sum / 5 });
+        }
+    }
+
+    const maxVal = Math.max(rateLimit * 1.15, ...points.map(p => p.v), 1);
+
+    // Grid lines (horizontal)
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i <= 4; i++) {
+        const y = pad.top + plotH * (1 - i / 4);
+        ctx.beginPath();
+        ctx.moveTo(pad.left, y);
+        ctx.lineTo(pad.left + plotW, y);
+        ctx.stroke();
+    }
+
+    // Danger zone band
+    const dangerY = pad.top + plotH * (1 - rateLimit / maxVal);
+    const grad = ctx.createLinearGradient(0, pad.top, 0, dangerY);
+    grad.addColorStop(0, 'rgba(239, 68, 68, 0.08)');
+    grad.addColorStop(1, 'rgba(239, 68, 68, 0.02)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(pad.left, pad.top, plotW, dangerY - pad.top);
+
+    // Rate limit line
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)';
+    ctx.setLineDash([8, 5]);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, dangerY);
+    ctx.lineTo(pad.left + plotW, dangerY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.6)';
+    ctx.font = '10px -apple-system, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`Rate limit: ${rateLimit}/min`, pad.left + 6, dangerY - 6);
+
+    // Draw area fill + line
+    if (points.length > 1) {
+        // Area gradient fill
+        const areaGrad = ctx.createLinearGradient(0, pad.top, 0, pad.top + plotH);
+        // Parse accent to rgba
+        areaGrad.addColorStop(0, accent + '30');
+        areaGrad.addColorStop(1, accent + '05');
+
+        ctx.beginPath();
+        points.forEach((p, i) => {
+            const x = pad.left + (i / (points.length - 1)) * plotW;
+            const y = pad.top + plotH * (1 - p.v / maxVal);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.lineTo(pad.left + plotW, pad.top + plotH);
+        ctx.lineTo(pad.left, pad.top + plotH);
+        ctx.closePath();
+        ctx.fillStyle = areaGrad;
+        ctx.fill();
+
+        // Line
+        ctx.beginPath();
+        points.forEach((p, i) => {
+            const x = pad.left + (i / (points.length - 1)) * plotW;
+            const y = pad.top + plotH * (1 - p.v / maxVal);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 2;
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+
+        // Glow effect
+        ctx.shadowColor = accent;
+        ctx.shadowBlur = 8;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+    }
+
+    // Per-endpoint lines (Spotify breakdown)
+    const legendEl = document.getElementById('rate-modal-chart-legend');
+    if (epHistories.length > 0) {
+        const epColors = ['#1DB954', '#FF6B6B', '#4ECDC4', '#FFE66D', '#A78BFA', '#F97316', '#06B6D4', '#EC4899', '#F472B6', '#34D399'];
+        const legendItems = [];
+
+        epHistories.forEach((epData, idx) => {
+            if (!epData || !epData.history || epData.history.length === 0) return;
+            const epName = (epData.service || '').replace('spotify:', '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            const color = epColors[idx % epColors.length];
+            legendItems.push({ name: epName, color });
+
+            const histMap = new Map(epData.history.map(h => [h[0], h[1]]));
+            const epPoints = [];
+            for (let t = start; t <= now; t += 300) {
+                const bucket = Math.floor(t / 60) * 60;
+                let sum = 0;
+                for (let m = bucket; m < bucket + 300; m += 60) sum += histMap.get(m) || 0;
+                epPoints.push({ t, v: sum / 5 });
+            }
+
+            if (epPoints.length > 1) {
+                ctx.beginPath();
+                epPoints.forEach((p, i) => {
+                    const x = pad.left + (i / (epPoints.length - 1)) * plotW;
+                    const y = pad.top + plotH * (1 - p.v / maxVal);
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.strokeStyle = color + 'BB';
+                ctx.lineWidth = 1.5;
+                ctx.lineJoin = 'round';
+                ctx.stroke();
+            }
+        });
+
+        // HTML legend below chart
+        if (legendEl && legendItems.length > 0) {
+            legendEl.innerHTML = legendItems.map(item =>
+                `<span class="rate-chart-legend-item"><span class="rate-chart-legend-dot" style="background:${item.color}"></span>${item.name}</span>`
+            ).join('');
+        }
+    } else if (legendEl) {
+        legendEl.innerHTML = '';
+    }
+
+    // X-axis labels
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.font = '10px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    for (let i = 0; i <= 6; i++) {
+        const t = start + (86400 * i / 6);
+        const x = pad.left + (i / 6) * plotW;
+        const d = new Date(t * 1000);
+        const hr = d.getHours();
+        const label = hr === 0 ? '12am' : hr < 12 ? `${hr}am` : hr === 12 ? '12pm' : `${hr - 12}pm`;
+        ctx.fillText(label, x, H - 10);
+        // Subtle vertical grid
+        ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, pad.top);
+        ctx.lineTo(x, pad.top + plotH);
+        ctx.stroke();
+    }
+
+    // Y-axis labels
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.textAlign = 'right';
+    ctx.font = '10px -apple-system, sans-serif';
+    for (let i = 0; i <= 4; i++) {
+        const v = maxVal * i / 4;
+        const y = pad.top + plotH * (1 - i / 4);
+        ctx.fillText(Math.round(v), pad.left - 8, y + 4);
+    }
+
+    // Empty state
+    if (points.length === 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx.font = '13px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No call history yet — data populates as API calls are made', W / 2, H / 2);
+    }
+}
+
+function _updateSpotifyEndpoints() {
+    const container = document.getElementById('rate-modal-endpoints');
+    if (!container) return;
+    const endpoints = _rateMonitorState.spotify?.endpoints || {};
+    const entries = Object.entries(endpoints).sort((a, b) => b[1] - a[1]);
+
+    if (entries.length === 0) {
+        container.innerHTML = '<div class="rate-modal-ep-empty">No active Spotify endpoints — start an enrichment worker or search to see activity</div>';
+        return;
+    }
+
+    const limit = _rateMonitorState.spotify?.limit || 171;
+    container.innerHTML = entries.map(([ep, cpm]) => {
+        const pct = Math.min(cpm / limit * 100, 100);
+        const name = ep.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        const color = pct > 80 ? '#ef4444' : pct > 60 ? '#eab308' : '#1DB954';
+        return `<div class="rate-modal-ep">
+            <span class="rate-modal-ep-name">${name}</span>
+            <div class="rate-modal-ep-bar"><div class="rate-modal-ep-fill" style="width:${pct}%;background:${color}"></div></div>
+            <span class="rate-modal-ep-value">${Math.round(cpm)}/min</span>
+        </div>`;
+    }).join('');
 }
 
 async function fetchAndUpdateSystemStats() {
