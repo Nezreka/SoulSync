@@ -5379,6 +5379,16 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     text-align: center; padding: 24px; font-size: 12px; color: rgba(255,255,255,0.2);
 }
 
+.gsearch-section-loading,
+.enh-section-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 8px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.3);
+}
+
 /* Track list (not grid) */
 .gsearch-track-list { display: flex; flex-direction: column; }
 
