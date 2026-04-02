@@ -20,7 +20,7 @@ from utils.logging_config import get_logger
 logger = get_logger("watchlist_scanner")
 
 # Rate limiting constants for watchlist operations
-DELAY_BETWEEN_ARTISTS = 2.0      # 2 seconds between different artists
+DELAY_BETWEEN_ARTISTS = 4.0      # 4 seconds between different artists (was 2s, increased to reduce Spotify rate limit risk)
 DELAY_BETWEEN_ALBUMS = 0.5       # 500ms between albums for same artist
 DELAY_BETWEEN_API_BATCHES = 1.0  # 1 second between API batch operations
 
@@ -621,15 +621,20 @@ class WatchlistScanner:
             
             scan_results = []
             for i, artist in enumerate(watchlist_artists):
+                # Abort scan if Spotify is rate limited — don't keep hammering
+                if self.spotify_client and hasattr(self.spotify_client, 'is_rate_limited') and self.spotify_client.is_rate_limited():
+                    logger.warning(f"⚠️ Spotify rate limited — aborting watchlist scan after {i}/{len(watchlist_artists)} artists")
+                    break
+
                 try:
                     result = self.scan_artist(artist)
                     scan_results.append(result)
-                    
+
                     if result.success:
                         logger.info(f"✅ Scanned {artist.artist_name}: {result.new_tracks_found} new tracks found")
                     else:
                         logger.warning(f"❌ Failed to scan {artist.artist_name}: {result.error_message}")
-                    
+
                     # Rate limiting: Add delay between artists to avoid hitting Spotify API limits
                     # This is critical to prevent getting banned for 6+ hours
                     if i < len(watchlist_artists) - 1:  # Don't delay after the last artist
