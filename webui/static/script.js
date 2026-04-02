@@ -60255,6 +60255,14 @@ function _importQueueAdd(job) {
 
 async function _importQueueRunJob(entry, job) {
     for (let i = 0; i < job.items.length; i++) {
+        const itemName = job.type === 'album'
+            ? (job.items[i].spotify_track?.name || `Track ${i + 1}`)
+            : (job.items[i].title || job.items[i].filename || `File ${i + 1}`);
+
+        // Update status with current track info
+        entry.sublabel = `Processing ${i + 1}/${job.items.length}: ${itemName}`;
+        _importQueueRender();
+
         try {
             let resp;
             if (job.type === 'album') {
@@ -60279,9 +60287,6 @@ async function _importQueueRunJob(entry, job) {
             if (data.success) entry.processed += (data.processed || 0);
             if (data.errors && data.errors.length > 0) entry.errors.push(...data.errors);
         } catch (err) {
-            const itemName = job.type === 'album'
-                ? (job.items[i].spotify_track?.name || `Track ${i + 1}`)
-                : (job.items[i].title || job.items[i].filename || `File ${i + 1}`);
             entry.errors.push(`${itemName}: ${err.message}`);
         }
 
