@@ -4002,6 +4002,22 @@
                                     </div>
                                 </div>
 
+                                <!-- Discogs Settings -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title" style="color: #333;">Discogs</h4>
+                                    <div class="form-group">
+                                        <label>Personal Access Token:</label>
+                                        <input type="password" id="discogs-token"
+                                            placeholder="Discogs Personal Access Token">
+                                    </div>
+                                    <div class="callback-info">
+                                        <div class="callback-help">Get your free token from <a
+                                                href="https://www.discogs.com/settings/developers" target="_blank"
+                                                style="color: #ffff64;">Discogs Developer Settings</a></div>
+                                        <div class="callback-help">Click "Generate new token" — no app registration needed. Provides 60 req/min and cover art in search results.</div>
+                                    </div>
+                                </div>
+
                                 <!-- Metadata Source Selection -->
                                 <div class="api-service-frame">
                                     <h4 class="service-title" style="color: #e8e8e8;">Metadata Source</h4>
@@ -4010,10 +4026,11 @@
                                         <select id="metadata-fallback-source">
                                             <option value="itunes">iTunes / Apple Music</option>
                                             <option value="deezer">Deezer</option>
+                                            <option value="discogs">Discogs</option>
                                         </select>
                                     </div>
                                     <div class="callback-info">
-                                        <div class="callback-help">When Spotify is not connected, this source provides artist, album, and track metadata. Hydrabase requires a connection configured above.</div>
+                                        <div class="callback-help">When Spotify is not connected, this source provides artist, album, and track metadata. Discogs requires a personal token configured above.</div>
                                     </div>
                                 </div>
 

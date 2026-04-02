@@ -5744,6 +5744,9 @@ async function loadSettingsData() {
         // Populate iTunes settings
         document.getElementById('itunes-country').value = settings.itunes?.country || 'US';
 
+        // Populate Discogs settings
+        document.getElementById('discogs-token').value = settings.discogs?.token || '';
+
         // Populate Metadata source setting
         document.getElementById('metadata-fallback-source').value = settings.metadata?.fallback_source || 'itunes';
 
@@ -6801,6 +6804,9 @@ async function saveSettings(quiet = false) {
             country: document.getElementById('itunes-country').value || 'US',
             embed_tags: document.getElementById('embed-itunes').checked,
             tags: _collectServiceTags('itunes')
+        },
+        discogs: {
+            token: document.getElementById('discogs-token').value,
         },
         metadata: {
             fallback_source: document.getElementById('metadata-fallback-source').value || 'itunes'
@@ -37701,17 +37707,17 @@ function renderEnrichmentCards(enrichment) {
 const _rateMonitorState = {};
 const _RATE_GAUGE_SERVICES = [
     'spotify', 'itunes', 'deezer', 'lastfm', 'genius',
-    'musicbrainz', 'audiodb', 'tidal', 'qobuz',
+    'musicbrainz', 'audiodb', 'tidal', 'qobuz', 'discogs',
 ];
 const _RATE_GAUGE_LABELS = {
     spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer',
     lastfm: 'Last.fm', genius: 'Genius', musicbrainz: 'MusicBrainz',
-    audiodb: 'AudioDB', tidal: 'Tidal', qobuz: 'Qobuz',
+    audiodb: 'AudioDB', tidal: 'Tidal', qobuz: 'Qobuz', discogs: 'Discogs',
 };
 const _RATE_GAUGE_COLORS = {
     spotify: '#1DB954', itunes: '#FC3C44', deezer: '#A238FF',
     lastfm: '#D51007', genius: '#FFFF64', musicbrainz: '#BA478F',
-    audiodb: '#00BCD4', tidal: '#00FFFF', qobuz: '#FF6B35',
+    audiodb: '#00BCD4', tidal: '#00FFFF', qobuz: '#FF6B35', discogs: '#333333',
 };
 
 // SVG constants — 240° arc, gap at bottom
