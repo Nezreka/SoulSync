@@ -43,8 +43,11 @@ jobs:
             boulderbadgedad/soulsync:${{ inputs.version_tag }}
 
       - name: Announce release to Discord
-        if: success() && secrets.DISCORD_ANNOUNCEMENTS_WEBHOOK
+        if: success()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_ANNOUNCEMENTS_WEBHOOK }}
         run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then echo "No webhook configured, skipping"; exit 0; fi
           curl -s -H "Content-Type: application/json" \
             -d "{\"embeds\": [{\"title\": \"SoulSync v${{ inputs.version_tag }} Released\", \"description\": \"A new version of SoulSync is available! Pull the latest Docker image to update.\n\n\`\`\`\ndocker pull boulderbadgedad/soulsync:${{ inputs.version_tag }}\n\`\`\`\", \"color\": 5025616, \"footer\": {\"text\": \"SoulSync Auto-Release\"}, \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
-            "${{ secrets.DISCORD_ANNOUNCEMENTS_WEBHOOK }}"
+            "$DISCORD_WEBHOOK"
