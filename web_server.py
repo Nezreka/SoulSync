@@ -16520,6 +16520,12 @@ def _create_lossy_copy(final_path):
                         from mutagen import File as MutagenFile
                         test_audio = MutagenFile(out_path)
                         if test_audio is not None:
+                            # Update provenance record to point to the new transcoded file
+                            try:
+                                db = get_database()
+                                db.update_provenance_file_path(final_path, out_path)
+                            except Exception:
+                                pass
                             os.remove(final_path)
                             print(f"🔥 [Blasphemy Mode] Deleted original: {os.path.basename(final_path)}")
                             # Rename lyrics sidecar file to match the output filename

@@ -8667,6 +8667,20 @@ class MusicDatabase:
             logger.error(f"Error getting track downloads: {e}")
             return []
 
+    def update_provenance_file_path(self, old_path: str, new_path: str) -> bool:
+        """Update file_path in provenance records when a file is transcoded/moved."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE track_downloads SET file_path = ? WHERE file_path = ?
+            """, (new_path, old_path))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating provenance file path: {e}")
+            return False
+
     def get_download_by_file_path(self, file_path: str) -> Optional[dict]:
         """Find the most recent download record for a file path."""
         try:
