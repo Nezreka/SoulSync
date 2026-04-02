@@ -7404,13 +7404,13 @@ def enhanced_search_library_check():
             owned_albums = {r[0] for r in cursor.fetchall()}
 
             cursor.execute("""
-                SELECT LOWER(t.title) || '|||' || LOWER(a.name), t.id, t.file_path, t.title, a.name, al.title
+                SELECT LOWER(t.title) || '|||' || LOWER(a.name), t.id, t.file_path, t.title, a.name, al.title, al.thumb_url
                 FROM tracks t JOIN artists a ON a.id = t.artist_id JOIN albums al ON al.id = t.album_id
             """)
             owned_tracks = {}
             for r in cursor.fetchall():
                 if r[0] not in owned_tracks:  # Keep first match only
-                    owned_tracks[r[0]] = {'track_id': r[1], 'file_path': r[2], 'title': r[3], 'artist_name': r[4], 'album_title': r[5]}
+                    owned_tracks[r[0]] = {'track_id': r[1], 'file_path': r[2], 'title': r[3], 'artist_name': r[4], 'album_title': r[5], 'album_thumb_url': r[6]}
 
             # O(1) lookups per item
             album_results = []
@@ -7418,11 +7418,27 @@ def enhanced_search_library_check():
                 key = (a.get('name', '').lower() + '|||' + a.get('artist', '').split(',')[0].strip().lower())
                 album_results.append(key in owned_albums)
 
+            # Resolve Plex thumb URLs (relative paths need base URL + token)
+            _plex_base = ''
+            _plex_token = ''
+            if plex_client and plex_client.server:
+                _plex_base = getattr(plex_client.server, '_baseurl', '') or ''
+                _plex_token = getattr(plex_client.server, '_token', '') or ''
+            if not _plex_base:
+                _pc = config_manager.get_plex_config()
+                _plex_base = (_pc.get('base_url', '') or '').rstrip('/')
+                _plex_token = _plex_token or _pc.get('token', '')
+
             track_results = []
             for t in tracks:
                 key = (t.get('name', '').lower() + '|||' + t.get('artist', '').split(',')[0].strip().lower())
                 match = owned_tracks.get(key)
                 if match:
+                    # Resolve thumb URL
+                    thumb = match.get('album_thumb_url') or ''
+                    if thumb and not thumb.startswith('http') and _plex_base and thumb.startswith('/'):
+                        thumb = f"{_plex_base}{thumb}?X-Plex-Token={_plex_token}" if _plex_token else f"{_plex_base}{thumb}"
+                    match['album_thumb_url'] = thumb
                     track_results.append({'in_library': True, **match})
                 else:
                     track_results.append({'in_library': False})
@@ -12234,14 +12250,24 @@ def _resolve_library_file_path(file_path):
         return file_path
 
     # Try resolving server-side paths to local directories
-    # Check both transfer path (final music location) and download path (intermediate)
+    # Check transfer path, download path, and media server library paths
     transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
     download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
+
+    # Also check the media server's music library path (handles Docker↔host path mismatch)
+    library_dirs = set()
+    try:
+        if plex_client and plex_client.server and plex_client.music_library:
+            for loc in plex_client.music_library.locations:
+                library_dirs.add(loc)
+    except Exception:
+        pass
+
     path_parts = file_path.replace('\\', '/').split('/')
 
     # Try progressively shorter path suffixes against each candidate directory
     # (skip index 0 to avoid drive letter issues)
-    for base_dir in [transfer_dir, download_dir]:
+    for base_dir in [transfer_dir, download_dir] + list(library_dirs):
         if not base_dir or not os.path.isdir(base_dir):
             continue
         for i in range(1, len(path_parts)):
