@@ -37685,8 +37685,8 @@ const _RATE_GAUGE_COLORS = {
     audiodb: '#00BCD4', tidal: '#00FFFF', qobuz: '#FF6B35',
 };
 
-// SVG constants — 240° arc, gap at bottom, extra padding for glow
-const _G = { size: 220, cx: 110, cy: 116, r: 74, stroke: 10, startAngle: 240, totalArc: 240 };
+// SVG constants — 240° arc, gap at bottom
+const _G = { size: 160, cx: 80, cy: 84, r: 56, stroke: 8, startAngle: 240, totalArc: 240 };
 
 function _gPt(angle, radius) {
     const rad = (angle - 90) * Math.PI / 180;
@@ -37726,34 +37726,110 @@ function _handleRateMonitorUpdate(data) {
         const value = d.cpm || 0;
         const max = d.limit || 60;
         const pct = Math.min(value / max, 1);
-
-        let svg = container.querySelector('svg');
-        if (!svg) {
-            container.innerHTML = _buildGaugeSVG(svc, value, max);
-        } else {
-            _updateGauge(container, value, max, svc);
-        }
-
-        container.classList.toggle('danger', pct > 0.8);
-        container.classList.toggle('active', value > 0);
-
-        // Rate limited badge (Spotify only for now)
+        const accent = _RATE_GAUGE_COLORS[svc] || '#888';
+        const label = _RATE_GAUGE_LABELS[svc] || svc;
+        const worker = d.worker || {};
+        const wStatus = worker.status || 'stopped';
         const isRateLimited = d.rate_limited === true;
-        container.classList.toggle('rate-limited', isRateLimited);
-        let badge = container.querySelector('.gauge-rl-badge');
-        if (isRateLimited) {
-            const mins = Math.ceil((d.rl_remaining || 0) / 60);
-            const text = mins > 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
-            if (!badge) {
-                badge = document.createElement('div');
-                badge.className = 'gauge-rl-badge';
-                container.appendChild(badge);
+
+        // Build or update the card content
+        let gaugeWrap = container.querySelector('.gauge-arc-wrap');
+        if (!gaugeWrap) {
+            // Full rebuild
+            container.innerHTML = `
+                <div class="gauge-card-header">
+                    <span class="gauge-card-dot" style="background:${accent}"></span>
+                    <span class="gauge-card-name">${label}</span>
+                    <span class="gauge-card-status" data-status="${wStatus}">${_workerStatusLabel(wStatus, worker)}</span>
+                </div>
+                <div class="gauge-arc-wrap">${_buildGaugeSVG(svc, value, max)}</div>
+                <div class="gauge-card-stats">
+                    <div class="gauge-card-stat"><span class="gauge-card-stat-val">${value.toFixed(0)}</span><span class="gauge-card-stat-label">calls/min</span></div>
+                    <div class="gauge-card-stat"><span class="gauge-card-stat-val">${worker.calls_1h || 0}</span><span class="gauge-card-stat-label">last hour</span></div>
+                    <div class="gauge-card-stat"><span class="gauge-card-stat-val">${(worker.calls_24h || 0).toLocaleString()}</span><span class="gauge-card-stat-label">24h</span></div>
+                </div>
+                ${svc === 'spotify' && worker.daily_budget ? _buildBudgetBar(worker.daily_budget) : ''}
+                ${isRateLimited ? _buildRateLimitBadge(d) : ''}
+            `;
+        } else {
+            // Fast update — only change values
+            _updateGauge(gaugeWrap, value, max, svc);
+
+            // Update status
+            const statusEl = container.querySelector('.gauge-card-status');
+            if (statusEl) {
+                statusEl.dataset.status = wStatus;
+                statusEl.textContent = _workerStatusLabel(wStatus, worker);
             }
-            badge.innerHTML = `<span class="gauge-rl-dot"></span>RATE LIMITED<span class="gauge-rl-time">${text}</span>`;
-        } else if (badge) {
-            badge.remove();
+
+            // Update stats
+            const statVals = container.querySelectorAll('.gauge-card-stat-val');
+            if (statVals[0]) statVals[0].textContent = value.toFixed(0);
+            if (statVals[1]) statVals[1].textContent = worker.calls_1h || 0;
+            if (statVals[2]) statVals[2].textContent = (worker.calls_24h || 0).toLocaleString();
+
+            // Budget bar (Spotify)
+            if (svc === 'spotify' && worker.daily_budget) {
+                let budgetEl = container.querySelector('.gauge-budget-bar');
+                if (!budgetEl) {
+                    const div = document.createElement('div');
+                    div.innerHTML = _buildBudgetBar(worker.daily_budget);
+                    const statsEl = container.querySelector('.gauge-card-stats');
+                    if (statsEl) statsEl.after(div.firstElementChild);
+                } else {
+                    const b = worker.daily_budget;
+                    const pctB = Math.min(100, Math.round((b.used / b.limit) * 100));
+                    const fill = budgetEl.querySelector('.gauge-budget-fill');
+                    if (fill) { fill.style.width = pctB + '%'; }
+                    const label = budgetEl.querySelector('.gauge-budget-label');
+                    if (label) label.textContent = `${b.used.toLocaleString()} / ${b.limit.toLocaleString()} daily`;
+                }
+            }
+
+            // Rate limit badge
+            let badge = container.querySelector('.gauge-rl-badge');
+            if (isRateLimited) {
+                if (!badge) {
+                    const div = document.createElement('div');
+                    div.innerHTML = _buildRateLimitBadge(d);
+                    container.appendChild(div.firstElementChild);
+                } else {
+                    const mins = Math.ceil((d.rl_remaining || 0) / 60);
+                    const timeEl = badge.querySelector('.gauge-rl-time');
+                    if (timeEl) timeEl.textContent = mins > 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+                }
+            } else if (badge) {
+                badge.remove();
+            }
         }
+
+        container.classList.toggle('danger', pct > 0.8 || isRateLimited);
+        container.classList.toggle('active', value > 0 || wStatus === 'running');
+        container.classList.toggle('rate-limited', isRateLimited);
     }
+}
+
+function _workerStatusLabel(status, worker) {
+    if (status === 'not_configured') return 'Not configured';
+    if (status === 'paused') return worker.yield_reason === 'downloads' ? 'Yielding' : 'Paused';
+    if (status === 'idle') return 'Idle';
+    if (status === 'running') return 'Running';
+    return 'Stopped';
+}
+
+function _buildBudgetBar(budget) {
+    const pct = Math.min(100, Math.round((budget.used / budget.limit) * 100));
+    const cls = budget.exhausted ? 'exhausted' : pct > 80 ? 'high' : '';
+    return `<div class="gauge-budget-bar ${cls}">
+        <div class="gauge-budget-fill" style="width:${pct}%"></div>
+        <span class="gauge-budget-label">${budget.used.toLocaleString()} / ${budget.limit.toLocaleString()} daily</span>
+    </div>`;
+}
+
+function _buildRateLimitBadge(d) {
+    const mins = Math.ceil((d.rl_remaining || 0) / 60);
+    const text = mins > 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+    return `<div class="gauge-rl-badge"><span class="gauge-rl-dot"></span>RATE LIMITED<span class="gauge-rl-time">${text}</span></div>`;
 }
 
 function _buildGaugeSVG(svc, value, max) {

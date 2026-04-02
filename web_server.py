@@ -4009,6 +4009,9 @@ def _get_windowed_calls(key, current_total):
     return max(0, current_total - oldest_1h_total), max(0, current_total - oldest_24h_total)
 
 
+_idle_since = {}  # worker_key -> timestamp when current_item first became None
+_IDLE_GRACE_SECONDS = 5  # Don't report idle until current_item has been None this long
+
 def _get_enrichment_status():
     """Get lightweight status for all enrichment services (no DB queries).
     Reads worker properties directly to avoid expensive get_stats() calls."""
@@ -4050,12 +4053,22 @@ def _get_enrichment_status():
             total_processed = stats.get('matched', 0) + stats.get('not_found', 0) + stats.get('errors', 0)
             calls_1h, calls_24h = _get_windowed_calls(key, total_processed)
 
+            # Debounced idle detection — only report idle after 5s of no current_item
+            has_item = getattr(worker, 'current_item', None) is not None
+            if has_item:
+                _idle_since.pop(key, None)
+                is_idle = False
+            else:
+                if key not in _idle_since:
+                    _idle_since[key] = time.time()
+                is_idle = (time.time() - _idle_since[key]) >= _IDLE_GRACE_SECONDS
+
             svc_data = {
                 'name': name,
                 'configured': configured,
                 'running': worker.running and is_alive and not worker.paused,
                 'paused': worker.paused,
-                'idle': is_alive and not worker.paused and getattr(worker, 'current_item', None) is None,
+                'idle': is_alive and not worker.paused and is_idle,
                 'calls_1h': calls_1h,
                 'calls_24h': calls_24h,
             }
@@ -48300,12 +48313,42 @@ _download_yield_override = set()  # Workers the user explicitly resumed during d
 
 
 def _emit_rate_monitor_loop():
-    """Background thread that pushes API call rate data every 1 second for speedometer gauges."""
+    """Background thread that pushes API call rate data every 1 second for speedometer gauges.
+    Also includes enrichment worker status so the combined cards have everything."""
+    # Map rate monitor service keys to enrichment status keys
+    _enrichment_key_map = {
+        'spotify': 'spotify_enrichment', 'itunes': 'itunes_enrichment',
+        'deezer': 'deezer_enrichment', 'lastfm': 'lastfm', 'genius': 'genius',
+        'musicbrainz': 'musicbrainz', 'audiodb': 'audiodb',
+        'tidal': 'tidal_enrichment', 'qobuz': 'qobuz_enrichment',
+    }
+
     while True:
         socketio.sleep(1)
         try:
             from core.api_call_tracker import api_call_tracker
             payload = api_call_tracker.get_all_rates()
+
+            # Merge enrichment worker status into each service
+            try:
+                enrichment = _get_enrichment_status()
+                for svc_key, entry in payload.items():
+                    enr_key = _enrichment_key_map.get(svc_key)
+                    enr = enrichment.get(enr_key) if enr_key else None
+                    if enr:
+                        entry['worker'] = {
+                            'status': 'not_configured' if not enr.get('configured') else
+                                      'paused' if enr.get('paused') else
+                                      'idle' if enr.get('idle') else
+                                      'running' if enr.get('running') else 'stopped',
+                            'yield_reason': enr.get('yield_reason', ''),
+                            'calls_1h': enr.get('calls_1h', 0),
+                            'calls_24h': enr.get('calls_24h', 0),
+                        }
+                        if svc_key == 'spotify' and enr.get('daily_budget'):
+                            entry['worker']['daily_budget'] = enr['daily_budget']
+            except Exception:
+                pass
 
             # Add Spotify rate limit state
             try:
