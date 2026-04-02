@@ -2741,6 +2741,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: none;
     height: 100%;
     padding: 40px;
+    padding-bottom: 90px;
 }
 
 .page.active {

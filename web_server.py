@@ -12857,12 +12857,72 @@ def library_manual_match():
 
     except Exception as e:
         print(f"❌ Error manual matching: {e}")
+
+@app.route('/api/library/clear-match', methods=['PUT'])
+def library_clear_match():
+    """Clear a service ID match for an entity, reverting it to not_found.
+    Body: { entity_type: str, entity_id: str, service: str }
+    """
+    try:
+        data = request.get_json()
+        entity_type = data.get('entity_type')
+        entity_id = data.get('entity_id')
+        service = data.get('service')
+
+        if not all([entity_type, entity_id, service]):
+            return jsonify({"success": False, "error": "entity_type, entity_id, and service are required"}), 400
+
+        id_col = _SERVICE_ID_COLUMNS.get(service, {}).get(entity_type)
+        if not id_col:
+            return jsonify({"success": False, "error": f"Invalid service/entity_type combination"}), 400
+
+        status_col = f"{service}_match_status"
+        attempted_col = f"{service}_last_attempted"
+        table = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}.get(entity_type)
+        if not table:
+            return jsonify({"success": False, "error": "Invalid entity_type"}), 400
+
+        database = get_database()
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                UPDATE {table}
+                SET {id_col} = NULL, {status_col} = 'not_found', {attempted_col} = NULL
+                WHERE id = ?
+            """, (entity_id,))
+            conn.commit()
+            if cursor.rowcount == 0:
+                return jsonify({"success": False, "error": "Entity not found"}), 404
+
+        # Re-fetch fresh data
+        artist_id = data.get('artist_id', entity_id)
+        if entity_type != 'artist':
+            artist_id = _get_artist_id_for_entity(database, entity_type, entity_id)
+
+        updated = database.get_artist_full_detail(artist_id)
+        if updated.get('success'):
+            if updated.get('artist', {}).get('thumb_url'):
+                updated['artist']['thumb_url'] = fix_artist_image_url(updated['artist']['thumb_url'])
+            for album in updated.get('albums', []):
+                if album.get('thumb_url'):
+                    album['thumb_url'] = fix_artist_image_url(album['thumb_url'])
+
+        return jsonify({
+            "success": True,
+            "message": f"Cleared {service} match for {entity_type}",
+            "updated_data": updated if updated.get('success') else None
+        })
+
+    except Exception as e:
+        print(f"❌ Error clearing match: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/library/track/<int:track_id>', methods=['DELETE'])
+@app.route('/api/library/track/<track_id>', methods=['DELETE'])
 def library_delete_track(track_id):
     """Delete a track from the database, optionally deleting the file and blacklisting the source."""
     try:
@@ -12974,7 +13034,7 @@ def remove_from_blacklist(blacklist_id):
 # TRACK SOURCE INFO & PROVENANCE
 # ==================================================================================
 
-@app.route('/api/library/track/<int:track_id>/source-info', methods=['GET'])
+@app.route('/api/library/track/<track_id>/source-info', methods=['GET'])
 def get_track_source_info(track_id):
     """Get download provenance info for a library track."""
     try:
@@ -13003,7 +13063,7 @@ def get_track_source_info(track_id):
 # TRACK REDOWNLOAD — Search metadata, search download sources, start redownload
 # ==================================================================================
 
-@app.route('/api/library/track/<int:track_id>/redownload/search-metadata', methods=['POST'])
+@app.route('/api/library/track/<track_id>/redownload/search-metadata', methods=['POST'])
 def redownload_search_metadata(track_id):
     """Search all available metadata sources for a track to find the correct version."""
     try:
@@ -13159,7 +13219,7 @@ def redownload_search_metadata(track_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/library/track/<int:track_id>/redownload/search-sources', methods=['POST'])
+@app.route('/api/library/track/<track_id>/redownload/search-sources', methods=['POST'])
 def redownload_search_sources(track_id):
     """Search all active download sources for a track using the selected metadata."""
     try:
@@ -13292,7 +13352,7 @@ def redownload_search_sources(track_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/library/track/<int:track_id>/redownload/start', methods=['POST'])
+@app.route('/api/library/track/<track_id>/redownload/start', methods=['POST'])
 def redownload_start(track_id):
     """Start downloading a specific track from a selected source to replace the current file."""
     try:
