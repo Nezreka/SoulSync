@@ -1728,6 +1728,21 @@ def _record_download_provenance(context):
         quality = context.get('_audio_quality', '')
         size = search_result.get('size', 0)
 
+        # Read audio details from the file for provenance (survives transcoding)
+        bit_depth = None
+        sample_rate = None
+        bitrate = None
+        try:
+            if file_path and os.path.isfile(file_path):
+                from mutagen import File as MutagenFile
+                audio = MutagenFile(file_path)
+                if audio and audio.info:
+                    sample_rate = getattr(audio.info, 'sample_rate', None)
+                    bitrate = getattr(audio.info, 'bitrate', None)
+                    bit_depth = getattr(audio.info, 'bits_per_sample', None)
+        except Exception:
+            pass
+
         db = get_database()
         db.record_track_download(
             file_path=file_path,
@@ -1739,6 +1754,9 @@ def _record_download_provenance(context):
             track_title=title,
             track_artist=artist_name,
             track_album=album_name,
+            bit_depth=bit_depth,
+            sample_rate=sample_rate,
+            bitrate=bitrate,
         )
     except Exception:
         pass  # Non-critical, never block download flow
