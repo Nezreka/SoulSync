@@ -47498,24 +47498,26 @@ def import_album_process():
                 errors.append(err_msg)
                 logger.error(f"Import processing error: {err_msg}")
 
-        # Trigger library scan
-        if web_scan_manager and processed > 0:
-            threading.Thread(
-                target=lambda: web_scan_manager.request_scan("Import album processed"),
-                daemon=True
-            ).start()
-
         add_activity_item("📥", "Album Imported", f"{album_name} by {artist_name} ({processed}/{len(matches)} tracks)", "Now")
 
-        try:
-            if automation_engine:
-                automation_engine.emit('import_completed', {
-                    'track_count': str(processed),
-                    'album_name': album_name or '',
-                    'artist': artist_name or '',
-                })
-        except Exception:
-            pass
+        # Emit events through automation engine — same chain as download batches
+        # batch_complete → auto-scan → library_scan_completed → auto-update DB
+        if processed > 0:
+            try:
+                if automation_engine:
+                    automation_engine.emit('import_completed', {
+                        'track_count': str(processed),
+                        'album_name': album_name or '',
+                        'artist': artist_name or '',
+                    })
+                    automation_engine.emit('batch_complete', {
+                        'playlist_name': f"Import: {album_name}" if album_name else 'Import',
+                        'total_tracks': str(len(matches)),
+                        'completed_tracks': str(processed),
+                        'failed_tracks': str(len(errors)),
+                    })
+            except Exception:
+                pass
 
         # Rebuild suggestions cache since staging contents changed
         if processed > 0:
@@ -47756,24 +47758,26 @@ def import_singles_process():
                 errors.append(err_msg)
                 logger.error(f"Import single processing error: {err_msg}")
 
-        # Trigger library scan
-        if web_scan_manager and processed > 0:
-            threading.Thread(
-                target=lambda: web_scan_manager.request_scan("Import singles processed"),
-                daemon=True
-            ).start()
-
         add_activity_item("📥", "Singles Imported", f"{processed}/{len(files)} tracks processed", "Now")
 
-        try:
-            if automation_engine:
-                automation_engine.emit('import_completed', {
-                    'track_count': str(processed),
-                    'album_name': '',
-                    'artist': 'Various',
-                })
-        except Exception:
-            pass
+        # Emit events through automation engine — same chain as download batches
+        # batch_complete → auto-scan → library_scan_completed → auto-update DB
+        if processed > 0:
+            try:
+                if automation_engine:
+                    automation_engine.emit('import_completed', {
+                        'track_count': str(processed),
+                        'album_name': '',
+                        'artist': 'Various',
+                    })
+                    automation_engine.emit('batch_complete', {
+                        'playlist_name': 'Import: Singles',
+                        'total_tracks': str(len(files)),
+                        'completed_tracks': str(processed),
+                        'failed_tracks': str(len(errors)),
+                    })
+            except Exception:
+                pass
 
         # Rebuild suggestions cache since staging contents changed
         if processed > 0:
