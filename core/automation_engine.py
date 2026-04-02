@@ -836,6 +836,8 @@ class AutomationEngine:
                     self._send_pushbullet_notification(c, variables)
                 elif t == 'telegram':
                     self._send_telegram_notification(c, variables)
+                elif t == 'webhook':
+                    self._send_webhook(c, variables)
                 elif t == 'fire_signal':
                     sig = self._sanitize_signal_name(c.get('signal_name', ''))
                     if sig:
@@ -966,3 +968,36 @@ class AutomationEngine:
         data = resp.json() if resp.status_code == 200 else {}
         if not data.get('ok'):
             raise RuntimeError(f"Telegram returned {resp.status_code}: {resp.text[:200]}")
+
+    def _send_webhook(self, config, variables):
+        """Send a POST request to a user-configured webhook URL with JSON payload."""
+        url = config.get('url', '').strip()
+        if not url:
+            raise ValueError("No webhook URL configured")
+
+        # Build headers — always include Content-Type, plus optional custom headers
+        headers = {'Content-Type': 'application/json'}
+        custom_headers = config.get('headers', '').strip()
+        if custom_headers:
+            for line in custom_headers.split('\n'):
+                line = line.strip()
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    # Substitute variables in header values
+                    for vk, vv in variables.items():
+                        value = value.replace('{' + vk + '}', vv)
+                    headers[key.strip()] = value.strip()
+
+        # Build JSON payload with all variables
+        payload = dict(variables)
+
+        # Add custom message if configured
+        message = config.get('message', '').strip()
+        if message:
+            for key, value in variables.items():
+                message = message.replace('{' + key + '}', value)
+            payload['message'] = message
+
+        resp = requests.post(url, json=payload, headers=headers, timeout=15)
+        if resp.status_code >= 400:
+            raise RuntimeError(f"Webhook returned {resp.status_code}: {resp.text[:200]}")

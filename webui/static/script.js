@@ -23157,6 +23157,34 @@ const TOOL_HELP_CONTENT = {
         `
     },
 
+    'auto-webhook': {
+        title: 'Webhook (POST)',
+        content: `
+            <h4>What does this then-action do?</h4>
+            <p>Sends an HTTP POST request with a JSON payload to any URL when the automation's action completes. Use it to integrate with Gotify, Home Assistant, Slack, n8n, or any service that accepts webhooks.</p>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>URL:</strong> The endpoint to POST to (e.g. <code>https://gotify.example.com/message?token=xxx</code>)</li>
+                <li><strong>Headers:</strong> Optional custom headers, one per line in <code>Key: Value</code> format. Useful for auth tokens.</li>
+                <li><strong>Custom Message:</strong> Optional message with variable placeholders. Added as a "message" field in the JSON payload.</li>
+            </ul>
+
+            <h4>JSON payload</h4>
+            <p>The POST body always includes all event variables as JSON fields:</p>
+            <pre style="background:rgba(255,255,255,0.05);padding:8px;border-radius:6px;font-size:11px;">{"time": "2026-04-02 ...", "name": "My Automation", "status": "success", ...}</pre>
+
+            <h4>Available variables</h4>
+            <p>Use these in your message or header values:</p>
+            <ul>
+                <li><code>{time}</code> — When the automation ran</li>
+                <li><code>{name}</code> — Automation name</li>
+                <li><code>{run_count}</code> — How many times this automation has run</li>
+                <li><code>{status}</code> — Result status of the action</li>
+            </ul>
+        `
+    },
+
     // ==================== Signal System Help ====================
 
     'auto-signal_received': {
@@ -62695,7 +62723,7 @@ const _autoIcons = {
     process_wishlist: '\uD83D\uDCCB', scan_watchlist: '\uD83D\uDC41\uFE0F',
     scan_library: '\uD83D\uDD04', refresh_mirrored: '\uD83D\uDCC2', sync_playlist: '\uD83D\uDD01',
     discover_playlist: '\uD83D\uDD0D', discovery_completed: '\uD83D\uDD0D',
-    notify_only: '\uD83D\uDD14', discord_webhook: '\uD83D\uDCAC', pushbullet: '\uD83D\uDD14', telegram: '\u2709\uFE0F',
+    notify_only: '\uD83D\uDD14', discord_webhook: '\uD83D\uDCAC', pushbullet: '\uD83D\uDD14', telegram: '\u2709\uFE0F', webhook: '\uD83C\uDF10',
     signal_received: '\u26A1', fire_signal: '\u26A1',
     // Phase 3
     wishlist_processing_completed: '\u2705', watchlist_scan_completed: '\u2705',
@@ -64758,6 +64786,26 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         </div>
         ${_notifyVarHtml(slotKey)}`;
     }
+    if (blockType === 'webhook') {
+        const url = _escAttr(config.url || '');
+        const hdrs = (config.headers || '').replace(/"/g, '&quot;');
+        return `<div class="config-row">
+            <label>URL</label>
+            <input type="text" id="cfg-${slotKey}-url" value="${url}" placeholder="https://your-server.com/hook">
+        </div>
+        <div class="config-row">
+            <label>Headers <span style="opacity:0.4;font-weight:400">(one per line, Key: Value)</span></label>
+            <textarea id="cfg-${slotKey}-headers" placeholder="Authorization: Bearer token123\nX-Custom: value" style="font-family:monospace;font-size:11px;">${hdrs}</textarea>
+        </div>
+        <div class="config-row">
+            <label>Custom Message <span style="opacity:0.4;font-weight:400">(optional)</span></label>
+            <textarea id="cfg-${slotKey}-message" placeholder="Message with {variables}...">${config.message || ''}</textarea>
+        </div>
+        <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">
+            Sends a JSON POST with all event variables. Custom message added as "message" field if set.
+        </div>
+        ${_notifyVarHtml(slotKey)}`;
+    }
     return '';
 }
 
@@ -64996,6 +65044,13 @@ function _readPlacedConfig(slotKey) {
         return {
             bot_token: document.getElementById('cfg-' + slotKey + '-bot_token')?.value?.trim() || '',
             chat_id: document.getElementById('cfg-' + slotKey + '-chat_id')?.value?.trim() || '',
+            message: document.getElementById('cfg-' + slotKey + '-message')?.value || '',
+        };
+    }
+    if (type === 'webhook') {
+        return {
+            url: document.getElementById('cfg-' + slotKey + '-url')?.value?.trim() || '',
+            headers: document.getElementById('cfg-' + slotKey + '-headers')?.value || '',
             message: document.getElementById('cfg-' + slotKey + '-message')?.value || '',
         };
     }
