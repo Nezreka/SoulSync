@@ -1156,6 +1156,15 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_file_path ON track_downloads (file_path)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_source ON track_downloads (source_username, source_filename)")
 
+            # Migration: Add audio detail columns to track_downloads
+            cursor.execute("PRAGMA table_info(track_downloads)")
+            td_columns = [c[1] for c in cursor.fetchall()]
+            if 'bit_depth' not in td_columns:
+                cursor.execute("ALTER TABLE track_downloads ADD COLUMN bit_depth INTEGER")
+                cursor.execute("ALTER TABLE track_downloads ADD COLUMN sample_rate INTEGER")
+                cursor.execute("ALTER TABLE track_downloads ADD COLUMN bitrate INTEGER")
+                logger.info("Added audio detail columns (bit_depth, sample_rate, bitrate) to track_downloads")
+
             # Discovery artist blacklist — artists users never want to see in discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS discovery_artist_blacklist (
@@ -8626,7 +8635,8 @@ class MusicDatabase:
     def record_track_download(self, file_path: str, source_service: str, source_username: str,
                                source_filename: str, source_size: int = 0, audio_quality: str = '',
                                track_title: str = '', track_artist: str = '', track_album: str = '',
-                               status: str = 'completed', track_id: str = None) -> Optional[int]:
+                               status: str = 'completed', track_id: str = None,
+                               bit_depth: int = None, sample_rate: int = None, bitrate: int = None) -> Optional[int]:
         """Record a download with full source provenance. Returns the record ID."""
         try:
             conn = self._get_connection()
@@ -8642,10 +8652,12 @@ class MusicDatabase:
             cursor.execute("""
                 INSERT INTO track_downloads
                 (track_id, file_path, source_service, source_username, source_filename,
-                 source_size, audio_quality, track_title, track_artist, track_album, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 source_size, audio_quality, track_title, track_artist, track_album, status,
+                 bit_depth, sample_rate, bitrate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (track_id, file_path, source_service, source_username, source_filename,
-                  source_size, audio_quality, track_title, track_artist, track_album, status))
+                  source_size, audio_quality, track_title, track_artist, track_album, status,
+                  bit_depth, sample_rate, bitrate))
             conn.commit()
             return cursor.lastrowid
         except Exception as e:

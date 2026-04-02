@@ -44658,6 +44658,10 @@ async function showTrackSourceInfo(track, anchorEl) {
                     <span class="source-info-label">Quality</span>
                     <span class="source-info-value">${_esc(dl.audio_quality)}</span>
                 </div>` : ''}
+                ${dl.bit_depth || dl.sample_rate || dl.bitrate ? `<div class="source-info-row">
+                    <span class="source-info-label">Audio</span>
+                    <span class="source-info-value">${[dl.bit_depth ? `${dl.bit_depth}-bit` : '', dl.sample_rate ? `${(dl.sample_rate / 1000).toFixed(1)}kHz` : '', dl.bitrate ? `${Math.round(dl.bitrate / 1000)}kbps` : ''].filter(Boolean).join(' · ')}</span>
+                </div>` : ''}
                 ${dateStr ? `<div class="source-info-row">
                     <span class="source-info-label">Downloaded</span>
                     <span class="source-info-value">${dateStr}</span>
