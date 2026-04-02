@@ -309,8 +309,11 @@ class PlaylistSyncService:
                                 matched_tracks=len(matched_tracks),
                                 failed_tracks=failed_tracks)
 
-            # Auto-add unmatched tracks to wishlist
+            # Auto-add unmatched tracks to wishlist (skip in Wing It mode)
             wishlist_added_count = 0
+            if unmatched_tracks and getattr(self, '_skip_wishlist', False):
+                logger.info(f"⚡ [Wing It] Skipping wishlist for {len(unmatched_tracks)} unmatched tracks")
+                unmatched_tracks = []  # Clear so the loop below doesn't run
             if unmatched_tracks:
                 try:
                     from core.wishlist_service import get_wishlist_service

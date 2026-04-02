@@ -24379,13 +24379,19 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         from datetime import datetime
         
         print(f"🔍 [Wishlist Processing] Starting wishlist processing for batch {batch_id}")
-        
+
         with tasks_lock:
             if batch_id not in download_batches:
                 print(f"⚠️ [Wishlist Processing] Batch {batch_id} not found")
                 return {'tracks_added': 0, 'errors': 0}
-        
+
         batch = download_batches[batch_id]
+
+        # Wing It mode — skip wishlist entirely for failed tracks
+        if batch.get('wing_it'):
+            failed_count = len(batch.get('permanently_failed_tracks', []))
+            print(f"⚡ [Wing It] Skipping wishlist for {failed_count} failed tracks (wing it mode)")
+            return {'tracks_added': 0, 'errors': 0}
         permanently_failed_tracks = batch.get('permanently_failed_tracks', [])
         cancelled_tracks = batch.get('cancelled_tracks', set())
         
@@ -28847,6 +28853,7 @@ def start_missing_tracks_process(playlist_id):
     playlist_name = data.get('playlist_name', 'Unknown Playlist')
     force_download_all = data.get('force_download_all', False)
     playlist_folder_mode = data.get('playlist_folder_mode', False)
+    wing_it = data.get('wing_it', False)
 
     # Get album/artist context for artist album downloads
     is_album_download = data.get('is_album_download', False)
@@ -28899,7 +28906,8 @@ def start_missing_tracks_process(playlist_id):
             # Album context for artist album downloads (explicit folder structure)
             'is_album_download': is_album_download,
             'album_context': album_context,
-            'artist_context': artist_context
+            'artist_context': artist_context,
+            'wing_it': wing_it,
         }
 
     # Record sync history
@@ -34682,6 +34690,11 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
         # Attach original tracks map to sync_service for wishlist with album images
         sync_service._original_tracks_map = original_tracks_map
 
+        # Wing It mode — skip wishlist for unmatched tracks
+        with sync_lock:
+            is_wing_it = sync_states.get(playlist_id, {}).get('wing_it', False)
+        sync_service._skip_wishlist = is_wing_it
+
         # Run the sync (this is a blocking call within this thread)
         result = run_async(sync_service.sync_playlist(playlist, download_missing=False, profile_id=profile_id))
 
@@ -40277,6 +40290,68 @@ def convert_listenbrainz_results_to_spotify_tracks(discovery_results):
 
     print(f"🔄 Converted {len(spotify_tracks)} ListenBrainz matches to Spotify tracks for sync")
     return spotify_tracks
+
+@app.route('/api/wing-it/sync', methods=['POST'])
+def wing_it_sync():
+    """Sync a playlist to the media server using raw track names — no metadata discovery."""
+    try:
+        data = request.get_json()
+        tracks_raw = data.get('tracks', [])
+        playlist_name = data.get('playlist_name', 'Wing It Playlist')
+
+        if not tracks_raw:
+            return jsonify({"error": "No tracks provided"}), 400
+
+        # Convert raw tracks to dicts — _run_sync_task expects dicts with .get()
+        sync_tracks = []
+        for t in tracks_raw:
+            artist_name = ''
+            if isinstance(t.get('artists'), list) and t['artists']:
+                a = t['artists'][0]
+                artist_name = a.get('name', str(a)) if isinstance(a, dict) else str(a)
+            elif t.get('artist_name'):
+                artist_name = t['artist_name']
+
+            album_name = ''
+            if isinstance(t.get('album'), dict):
+                album_name = t['album'].get('name', '')
+            elif isinstance(t.get('album'), str):
+                album_name = t['album']
+            elif t.get('album_name'):
+                album_name = t['album_name']
+
+            sync_tracks.append({
+                'id': t.get('id', f"wing_it_{len(sync_tracks)}"),
+                'name': t.get('name', t.get('track_name', 'Unknown')),
+                'artists': [{'name': artist_name}] if artist_name else [{'name': 'Unknown'}],
+                'album': album_name,
+                'duration_ms': t.get('duration_ms', 0),
+            })
+
+        if not sync_tracks:
+            return jsonify({"error": "No valid tracks to sync"}), 400
+
+        sync_playlist_id = f"wing_it_sync_{int(time.time())}"
+
+        add_activity_item("⚡", "Wing It Sync Started", f"'{playlist_name}' — {len(sync_tracks)} tracks", "Now")
+
+        with sync_lock:
+            sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
+
+        # Pass wing_it flag via sync state so _run_sync_task can skip wishlist
+        with sync_lock:
+            sync_states[sync_playlist_id]['wing_it'] = True
+
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, playlist_name, sync_tracks, None, get_current_profile_id())
+        active_sync_workers[sync_playlist_id] = future
+
+        logger.info(f"⚡ [Wing It] Started sync for: {playlist_name} ({len(sync_tracks)} tracks)")
+        return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
+
+    except Exception as e:
+        logger.error(f"Error in Wing It sync: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/listenbrainz/sync/start/<playlist_mbid>', methods=['POST'])
 def start_listenbrainz_sync(playlist_mbid):
