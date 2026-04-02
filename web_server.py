@@ -20271,7 +20271,16 @@ def get_version_info():
                     "• Genius API interval increased from 1.5s to 2s to reduce 429 rate limits",
                     "• MusicBrainz cache now visible in Cache Browser with browse, clear, and clear-failed-only options",
                     "• Cache Health popup shows MusicBrainz alongside other sources, 'Failed Lookups' clarified as MB-specific",
-                    "• Block artists from discovery — hover any track in a discovery playlist and click ✕ to permanently exclude that artist"
+                    "• Block artists from discovery — hover any track in a discovery playlist and click ✕ to permanently exclude that artist",
+                    "• Configurable concurrent downloads (1-10) — Settings → Downloads, Soulseek albums stay at 1",
+                    "• Streaming search sources — Apple Music results load progressively instead of blocking for 9+ seconds",
+                    "• API Rate Monitor — real-time speedometer gauges for all services on Dashboard, click for 24h history",
+                    "• Spotify pagination throttled — prevents 429 bans during watchlist scans with large discographies",
+                    "• Import now triggers full scan → DB update chain through automation engine",
+                    "• Track source-info and redownload work with Jellyfin string IDs (#237)",
+                    "• Clear Match button to undo wrong manual matches (#236)",
+                    "• Tidal auth no longer crashes when download orchestrator not initialized",
+                    "• Copy Debug Info includes API call rates and Spotify rate limit state"
                 ]
             },
             {

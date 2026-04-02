@@ -3403,12 +3403,20 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.2': [
         // Newest features first
+        { title: 'API Rate Monitor',                               desc: 'Real-time speedometer gauges for all 9 enrichment services on the Dashboard. Click any gauge for 24h history chart. Spotify shows per-endpoint breakdown', page: 'dashboard' },
+        { title: 'Configurable Concurrent Downloads',             desc: 'Set max simultaneous downloads per batch (1-10) in Settings. Soulseek albums stay at 1 for source reuse. Higher values speed up playlists and wishlists' },
+        { title: 'Streaming Search Sources',                      desc: 'Apple Music and other slow sources now stream results progressively — see artists, albums, tracks as each loads instead of waiting for all 3' },
         { title: 'Global Search Bar',                             desc: 'Spotlight-style search from any page — press / or Ctrl+K. Full enhanced search with source tabs, library badges, and playback' },
         { title: 'Block Artists from Discovery',                  desc: 'Block artists you never want to see in discovery playlists — hover any track and click ✕, or use the 🚫 button on the Discover hero to search and manage blocked artists', page: 'discover' },
         { title: 'MusicBrainz Cache in Browser',                 desc: 'MusicBrainz cache now visible in Cache Browser — browse, clear all, or clear failed lookups only. Cache Health shows MB alongside other sources' },
         { title: 'Wing It Mode',                                desc: 'Download or sync playlists without metadata discovery — uses raw track names directly. Great for obscure tracks not on Spotify/iTunes' },
         { title: 'Redesigned Notifications',                    desc: 'Compact pill toasts, notification bell with unread badge, history panel with last 50 notifications and Learn More links' },
         { title: 'Track Redownload & Source Info',              desc: 'Fix mismatched downloads — search all metadata and download sources in columns, pick the right version, auto-replace. Source Info shows where tracks came from with blacklist option', page: 'library' },
+        { title: 'Fix Spotify Pagination Rate Limits',           desc: 'Paginated API calls (get_artist_albums, playlist tracks) now throttled — were bypassing rate limiter and causing 429 bans during watchlist scans' },
+        { title: 'Fix Track Source Info / Redownload 404',      desc: 'Source info and redownload endpoints now accept string IDs (Jellyfin GUIDs) — were rejecting non-integer IDs (#237)' },
+        { title: 'Clear Matched IDs',                           desc: 'New "Clear Match" button in the manual match modal lets you undo wrong matches and revert to Not Found (#236)' },
+        { title: 'Fix Import Not Triggering DB Update',          desc: 'Import now emits batch_complete through automation engine — server scan + DB update chain works like normal downloads' },
+        { title: 'Fix Tidal Auth Crash',                        desc: 'Tidal download auth no longer crashes with NoneType error when download orchestrator failed to initialize' },
         { title: 'Fix Hybrid Download Mode',                   desc: 'Hybrid mode now tries fallback sources when primary source results all fail quality filtering (#235)' },
         { title: 'Fix Discovery Progress Display',              desc: 'Discovery modals (YouTube, Tidal, ListenBrainz, Beatport) now show live progress instead of staying on Pending' },
         { title: 'Spotify API Rate Limit Improvements',       desc: 'Cached get_artist_albums, eliminated duplicate search calls, auth probe reduced 66%, enrichment workers auto-pause during downloads' },
