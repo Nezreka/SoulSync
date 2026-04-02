@@ -7349,8 +7349,9 @@ def _enhanced_search_source(query, client):
 def enhanced_search_source(source_name):
     """Fetch search results from a specific alternate metadata source.
 
-    Called asynchronously by the frontend after the primary search returns.
-    Each source tab fires its own request so slow sources don't block fast ones.
+    Streams NDJSON — one line per search type (artists, albums, tracks) as each completes.
+    This prevents slow sources (iTunes with 3s rate limit) from blocking the UI.
+    Falls back to single JSON response if streaming not supported.
     """
     if source_name not in ('spotify', 'itunes', 'deezer', 'hydrabase'):
         return jsonify({"error": f"Unknown source: {source_name}"}), 400
@@ -7378,8 +7379,57 @@ def enhanced_search_source(source_name):
             else:
                 return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
 
-        result = _enhanced_search_source(query, client)
-        return jsonify(result)
+        def generate():
+            # Stream each search type as it completes
+            try:
+                artist_objs = client.search_artists(query, limit=10)
+                artists = []
+                for artist in artist_objs:
+                    artists.append({
+                        "id": artist.id, "name": artist.name,
+                        "image_url": artist.image_url,
+                        "external_urls": artist.external_urls or {},
+                    })
+                yield json.dumps({"type": "artists", "data": artists}) + "\n"
+            except Exception as e:
+                logger.debug(f"Artist search failed for {source_name}: {e}")
+                yield json.dumps({"type": "artists", "data": []}) + "\n"
+
+            try:
+                album_objs = client.search_albums(query, limit=10)
+                albums = []
+                for album in album_objs:
+                    artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
+                    albums.append({
+                        "id": album.id, "name": album.name, "artist": artist_name,
+                        "image_url": album.image_url, "release_date": album.release_date,
+                        "total_tracks": album.total_tracks, "album_type": album.album_type,
+                        "external_urls": album.external_urls or {},
+                    })
+                yield json.dumps({"type": "albums", "data": albums}) + "\n"
+            except Exception as e:
+                logger.warning(f"Album search failed for {source_name}: {e}")
+                yield json.dumps({"type": "albums", "data": []}) + "\n"
+
+            try:
+                track_objs = client.search_tracks(query, limit=10)
+                tracks = []
+                for track in track_objs:
+                    artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
+                    tracks.append({
+                        "id": track.id, "name": track.name, "artist": artist_name,
+                        "album": track.album, "duration_ms": track.duration_ms,
+                        "image_url": track.image_url, "release_date": track.release_date,
+                        "external_urls": track.external_urls or {},
+                    })
+                yield json.dumps({"type": "tracks", "data": tracks}) + "\n"
+            except Exception as e:
+                logger.warning(f"Track search failed for {source_name}: {e}")
+                yield json.dumps({"type": "tracks", "data": []}) + "\n"
+
+            yield json.dumps({"type": "done"}) + "\n"
+
+        return app.response_class(generate(), mimetype='application/x-ndjson')
     except Exception as e:
         logger.error(f"Enhanced search source ({source_name}) error: {e}")
         return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
