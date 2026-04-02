@@ -8299,7 +8299,7 @@ function initializeSearchModeToggle() {
             // Stream NDJSON — render each search type (artists, albums, tracks) as it arrives
             if (!_enhancedSearchData) return;
             if (!_enhancedSearchData.sources[sourceName]) {
-                _enhancedSearchData.sources[sourceName] = { artists: [], albums: [], tracks: [], available: true };
+                _enhancedSearchData.sources[sourceName] = { artists: [], albums: [], tracks: [], available: true, _loading: new Set(['artists', 'albums', 'tracks']) };
             }
             const sourceData = _enhancedSearchData.sources[sourceName];
 
@@ -8320,14 +8320,17 @@ function initializeSearchModeToggle() {
 
                     try {
                         const chunk = JSON.parse(line);
-                        if (chunk.type === 'artists') sourceData.artists = chunk.data;
-                        else if (chunk.type === 'albums') sourceData.albums = chunk.data;
-                        else if (chunk.type === 'tracks') sourceData.tracks = chunk.data;
-                        else if (chunk.type === 'done') break;
+                        if (chunk.type === 'artists') { sourceData.artists = chunk.data; if (sourceData._loading) sourceData._loading.delete('artists'); }
+                        else if (chunk.type === 'albums') { sourceData.albums = chunk.data; if (sourceData._loading) sourceData._loading.delete('albums'); }
+                        else if (chunk.type === 'tracks') { sourceData.tracks = chunk.data; if (sourceData._loading) sourceData._loading.delete('tracks'); }
+                        else if (chunk.type === 'done') { delete sourceData._loading; break; }
 
-                        // Re-render tabs after each chunk
+                        // Re-render tabs + content if this is the active source
                         if (_enhancedSearchData.primary_source) {
                             renderSourceTabs(_enhancedSearchData);
+                            if (_activeSearchSource === sourceName) {
+                                window._switchEnhSourceTab(sourceName);
+                            }
                         }
                     } catch (parseErr) {
                         console.debug(`NDJSON parse error for ${sourceName}:`, parseErr);
@@ -8403,6 +8406,25 @@ function initializeSearchModeToggle() {
 
         renderDropdownResults(viewData);
         resultsContainer.classList.remove('hidden');
+
+        // Show loading spinners for categories still streaming
+        if (src._loading && src._loading.size > 0) {
+            const loadingHtml = '<div class="enh-section-loading"><div class="server-search-spinner" style="width:16px;height:16px"></div><span>Loading...</span></div>';
+            if (src._loading.has('artists')) {
+                const sec = document.getElementById('enh-spotify-artists-section');
+                if (sec) { sec.classList.remove('hidden'); document.getElementById('enh-spotify-artists-list').innerHTML = loadingHtml; }
+            }
+            if (src._loading.has('albums')) {
+                const sec = document.getElementById('enh-albums-section');
+                if (sec) { sec.classList.remove('hidden'); document.getElementById('enh-albums-list').innerHTML = loadingHtml; }
+                const sec2 = document.getElementById('enh-singles-section');
+                if (sec2) { sec2.classList.remove('hidden'); document.getElementById('enh-singles-list').innerHTML = loadingHtml; }
+            }
+            if (src._loading.has('tracks')) {
+                const sec = document.getElementById('enh-tracks-section');
+                if (sec) { sec.classList.remove('hidden'); document.getElementById('enh-tracks-list').innerHTML = loadingHtml; }
+            }
+        }
     };
 
     // Lazy load artist images for enhanced search results
@@ -17028,7 +17050,7 @@ async function _gsFetchSourceStream(src, query) {
         if (!res.ok) return;
 
         if (!_gsState.sources[src]) {
-            _gsState.sources[src] = { artists: [], albums: [], tracks: [], available: true };
+            _gsState.sources[src] = { artists: [], albums: [], tracks: [], available: true, _loading: new Set(['artists', 'albums', 'tracks']) };
         }
         const sourceData = _gsState.sources[src];
 
@@ -17048,10 +17070,15 @@ async function _gsFetchSourceStream(src, query) {
                 if (!line) continue;
                 try {
                     const chunk = JSON.parse(line);
-                    if (chunk.type === 'artists') sourceData.artists = chunk.data;
-                    else if (chunk.type === 'albums') sourceData.albums = chunk.data;
-                    else if (chunk.type === 'tracks') sourceData.tracks = chunk.data;
+                    if (chunk.type === 'artists') { sourceData.artists = chunk.data; if (sourceData._loading) sourceData._loading.delete('artists'); }
+                    else if (chunk.type === 'albums') { sourceData.albums = chunk.data; if (sourceData._loading) sourceData._loading.delete('albums'); }
+                    else if (chunk.type === 'tracks') { sourceData.tracks = chunk.data; if (sourceData._loading) sourceData._loading.delete('tracks'); }
+                    if (chunk.type === 'done') delete sourceData._loading;
                     _gsRenderTabs();
+                    // Re-render content if this is the active source tab
+                    if (_gsState.activeSource === src && _gsState.data) {
+                        _gsRender(_gsState.data);
+                    }
                 } catch (e) {}
             }
         }
@@ -17066,6 +17093,7 @@ function _gsRender(data) {
     if (!results) return;
 
     const src = _gsState.sources[_gsState.activeSource] || {};
+    const loading = src._loading || new Set();
     const dbArtists = data?.db_artists || [];
     const artists = src.artists || [];
     const allAlbums = src.albums || [];
@@ -17073,8 +17101,9 @@ function _gsRender(data) {
     const singles = allAlbums.filter(a => a.album_type === 'single' || a.album_type === 'ep');
     const tracks = src.tracks || [];
     const total = dbArtists.length + artists.length + albums.length + singles.length + tracks.length;
+    const isLoading = loading.size > 0;
 
-    if (total === 0) {
+    if (total === 0 && !isLoading) {
         results.innerHTML = `<div class="gsearch-empty">No results for "${_escToast(_gsState.query)}"<br><span style="font-size:10px;opacity:0.5">Try different keywords or check spelling</span></div>`;
         results.classList.add('visible');
         return;
@@ -17095,9 +17124,11 @@ function _gsRender(data) {
     }
 
     if (artists.length) {
-        h += `<div class="gsearch-section-header">🎤 Artists <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-grid">`;
-        h += artists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escToast(a.name).replace(/'/g, "\\'")}', false)"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div></div></div>`).join('');
+        h += `<div class="gsearch-section-header">🎤 Artists <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-grid" id="gsearch-artists-grid">`;
+        h += artists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escToast(a.name).replace(/'/g, "\\'")}', false)" ${!a.image_url ? `data-artist-id="${a.id}" data-needs-image="true"` : ''}><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div></div></div>`).join('');
         h += '</div>';
+    } else if (loading.has('artists')) {
+        h += `<div class="gsearch-section-header">🎤 Artists <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-section-loading"><div class="server-search-spinner" style="width:14px;height:14px"></div> Loading artists...</div>`;
     }
 
     const activeSrc = _gsState.activeSource || 'spotify';
@@ -17111,6 +17142,10 @@ function _gsRender(data) {
             return `<div class="gsearch-item" onclick="_gsClickAlbum('${a.id}', '${_escToast(a.name).replace(/'/g, "\\'")}', '${_escToast(ar).replace(/'/g, "\\'")}', '${img}', '${activeSrc}')"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '💿'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${yr ? ` · ${yr}` : ''}</div></div></div>`;
         }).join('');
         h += '</div>';
+    }
+
+    if (!albums.length && !singles.length && loading.has('albums')) {
+        h += `<div class="gsearch-section-header">💿 Albums <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-section-loading"><div class="server-search-spinner" style="width:14px;height:14px"></div> Loading albums...</div>`;
     }
 
     if (singles.length) {
@@ -17131,12 +17166,39 @@ function _gsRender(data) {
             return `<div class="gsearch-track" onclick="_gsClickTrack('${_escToast(ar).replace(/'/g, "\\'")}', '${_escToast(t.name).replace(/'/g, "\\'")}')"><div class="gsearch-item-art" style="width:32px;height:32px;border-radius:6px">${t.image_url ? `<img src="${t.image_url}" loading="lazy">` : '🎵'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(t.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${t.album ? ` · ${_escToast(t.album)}` : ''}</div></div><div class="gsearch-track-dur">${dur}</div><button class="gsearch-play-btn" onclick="event.stopPropagation(); _gsPlayTrack('${_escToast(t.name).replace(/'/g, "\\'")}', '${_escToast(ar).replace(/'/g, "\\'")}', '${_escToast(t.album || '').replace(/'/g, "\\'")}')" title="Stream">▶</button></div>`;
         }).join('');
         h += '</div>';
+    } else if (loading.has('tracks')) {
+        h += `<div class="gsearch-section-header">🎵 Tracks <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-section-loading"><div class="server-search-spinner" style="width:14px;height:14px"></div> Loading tracks...</div>`;
     }
 
     h += '</div>';
     results.innerHTML = h;
     results.classList.add('visible');
     _gsRenderTabs();
+
+    // Lazy load artist images for sources that don't provide them (iTunes/Deezer)
+    _gsLazyLoadArtistImages();
+}
+
+async function _gsLazyLoadArtistImages() {
+    const grid = document.getElementById('gsearch-artists-grid');
+    if (!grid) return;
+    const cards = grid.querySelectorAll('[data-needs-image="true"]');
+    if (cards.length === 0) return;
+    const activeSrc = _gsState.activeSource || 'spotify';
+
+    for (const card of cards) {
+        const artistId = card.dataset.artistId;
+        if (!artistId) continue;
+        try {
+            const res = await fetch(`/api/artist/${artistId}/image?source=${activeSrc}`);
+            const data = await res.json();
+            if (data.success && data.image_url) {
+                const artDiv = card.querySelector('.gsearch-item-art');
+                if (artDiv) artDiv.innerHTML = `<img src="${data.image_url}" loading="lazy">`;
+                card.removeAttribute('data-needs-image');
+            }
+        } catch (e) { /* ignore */ }
+    }
 }
 
 function _gsRenderTabs() {
