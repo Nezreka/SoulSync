@@ -8295,16 +8295,49 @@ function initializeSearchModeToggle() {
                 signal: _altSourceController?.signal,
             });
             if (!response.ok) return;
-            const result = await response.json();
-            if (!result.available) return;
 
-            // Store in multi-source state
-            if (_enhancedSearchData) {
-                _enhancedSearchData.sources[sourceName] = result;
-                // Re-render tabs if primary has loaded (primary_source is set)
-                if (_enhancedSearchData.primary_source) {
-                    renderSourceTabs(_enhancedSearchData);
+            // Stream NDJSON — render each search type (artists, albums, tracks) as it arrives
+            if (!_enhancedSearchData) return;
+            if (!_enhancedSearchData.sources[sourceName]) {
+                _enhancedSearchData.sources[sourceName] = { artists: [], albums: [], tracks: [], available: true };
+            }
+            const sourceData = _enhancedSearchData.sources[sourceName];
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+
+                let newlineIdx;
+                while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+                    const line = buffer.slice(0, newlineIdx).trim();
+                    buffer = buffer.slice(newlineIdx + 1);
+                    if (!line) continue;
+
+                    try {
+                        const chunk = JSON.parse(line);
+                        if (chunk.type === 'artists') sourceData.artists = chunk.data;
+                        else if (chunk.type === 'albums') sourceData.albums = chunk.data;
+                        else if (chunk.type === 'tracks') sourceData.tracks = chunk.data;
+                        else if (chunk.type === 'done') break;
+
+                        // Re-render tabs after each chunk
+                        if (_enhancedSearchData.primary_source) {
+                            renderSourceTabs(_enhancedSearchData);
+                        }
+                    } catch (parseErr) {
+                        console.debug(`NDJSON parse error for ${sourceName}:`, parseErr);
+                    }
                 }
+            }
+
+            // Final render
+            if (_enhancedSearchData.primary_source) {
+                renderSourceTabs(_enhancedSearchData);
             }
         } catch (e) {
             if (e.name !== 'AbortError') {
@@ -16973,21 +17006,58 @@ async function _gsPerformSearch(query) {
         // Async library ownership check — adds badges + swaps play buttons for library tracks
         setTimeout(() => _gsLibraryCheck(), 200);
 
-        // Fetch alternate sources
+        // Fetch alternate sources — stream NDJSON so slow sources render incrementally
         const alts = data.alternate_sources || [];
         for (const src of alts) {
             if (src === _gsState.activeSource) continue;
-            fetch(`/api/enhanced-search/source/${src}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query }),
-                signal: _gsState.altAbortCtrl.signal,
-            }).then(r => r.json()).then(altData => {
-                if (altData.available) { _gsState.sources[src] = altData; _gsRenderTabs(); }
-            }).catch(() => {});
+            _gsFetchSourceStream(src, query);
         }
     } catch (e) {
         if (e.name !== 'AbortError') results.innerHTML = '<div class="gsearch-empty">Search failed</div>';
+    }
+}
+
+async function _gsFetchSourceStream(src, query) {
+    try {
+        const res = await fetch(`/api/enhanced-search/source/${src}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query }),
+            signal: _gsState.altAbortCtrl.signal,
+        });
+        if (!res.ok) return;
+
+        if (!_gsState.sources[src]) {
+            _gsState.sources[src] = { artists: [], albums: [], tracks: [], available: true };
+        }
+        const sourceData = _gsState.sources[src];
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let idx;
+            while ((idx = buffer.indexOf('\n')) !== -1) {
+                const line = buffer.slice(0, idx).trim();
+                buffer = buffer.slice(idx + 1);
+                if (!line) continue;
+                try {
+                    const chunk = JSON.parse(line);
+                    if (chunk.type === 'artists') sourceData.artists = chunk.data;
+                    else if (chunk.type === 'albums') sourceData.albums = chunk.data;
+                    else if (chunk.type === 'tracks') sourceData.tracks = chunk.data;
+                    _gsRenderTabs();
+                } catch (e) {}
+            }
+        }
+        _gsRenderTabs();
+    } catch (e) {
+        if (e.name !== 'AbortError') console.debug(`GS alt source ${src} failed:`, e);
     }
 }
 
