@@ -662,8 +662,18 @@ class SpotifyClient:
                     playlist = Playlist.from_spotify_playlist(playlist_data, tracks)
                     playlists.append(playlist)
                 
-                results = self.sp.next(results) if results['next'] else None
-            
+                if results['next']:
+                    with _api_call_lock:
+                        elapsed = time.time() - _last_api_call_time
+                        if elapsed < MIN_API_INTERVAL:
+                            time.sleep(MIN_API_INTERVAL - elapsed)
+                        globals()['_last_api_call_time'] = time.time()
+                    from core.api_call_tracker import api_call_tracker
+                    api_call_tracker.record_call('spotify', endpoint='get_user_playlists_page')
+                    results = self.sp.next(results)
+                else:
+                    results = None
+
             logger.info(f"Retrieved {len(playlists)} playlists")
             return playlists
             
@@ -931,7 +941,17 @@ class SpotifyClient:
                         track = Track.from_spotify_track(track_data)
                         tracks.append(track)
 
-                results = self.sp.next(results) if results['next'] else None
+                if results['next']:
+                    with _api_call_lock:
+                        elapsed = time.time() - _last_api_call_time
+                        if elapsed < MIN_API_INTERVAL:
+                            time.sleep(MIN_API_INTERVAL - elapsed)
+                        globals()['_last_api_call_time'] = time.time()
+                    from core.api_call_tracker import api_call_tracker
+                    api_call_tracker.record_call('spotify', endpoint='get_playlist_tracks_page')
+                    results = self.sp.next(results)
+                else:
+                    results = None
 
             return tracks
 
@@ -1263,9 +1283,16 @@ class SpotifyClient:
                 # Collect all tracks starting with first page
                 all_tracks = first_page['items'][:]
 
-                # Fetch remaining pages if they exist
+                # Fetch remaining pages if they exist — throttle pagination
                 next_page = first_page
                 while next_page.get('next'):
+                    with _api_call_lock:
+                        elapsed = time.time() - _last_api_call_time
+                        if elapsed < MIN_API_INTERVAL:
+                            time.sleep(MIN_API_INTERVAL - elapsed)
+                        globals()['_last_api_call_time'] = time.time()
+                    from core.api_call_tracker import api_call_tracker
+                    api_call_tracker.record_call('spotify', endpoint='get_album_tracks_page')
                     next_page = self.sp.next(next_page)
                     if next_page and 'items' in next_page:
                         all_tracks.extend(next_page['items'])
@@ -1338,8 +1365,19 @@ class SpotifyClient:
                         albums.append(album)
                         raw_items.append(album_data)
 
-                    # Get next batch if available
-                    results = self.sp.next(results) if results['next'] else None
+                    # Get next batch if available — throttle pagination to respect rate limits
+                    if results['next']:
+                        # Enforce same rate limit as decorated calls
+                        with _api_call_lock:
+                            elapsed = time.time() - _last_api_call_time
+                            if elapsed < MIN_API_INTERVAL:
+                                time.sleep(MIN_API_INTERVAL - elapsed)
+                            globals()['_last_api_call_time'] = time.time()
+                        from core.api_call_tracker import api_call_tracker
+                        api_call_tracker.record_call('spotify', endpoint='get_artist_albums_page')
+                        results = self.sp.next(results)
+                    else:
+                        results = None
 
                 logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
 
