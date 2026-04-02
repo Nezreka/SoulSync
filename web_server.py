@@ -30209,25 +30209,33 @@ def deezer_download_test_download():
 # TIDAL DOWNLOAD AUTH ENDPOINTS
 # ===================================================================
 
+def _get_tidal_download_client():
+    """Get Tidal download client from the orchestrator, with helpful error if unavailable."""
+    if not soulseek_client:
+        raise RuntimeError("Download orchestrator not initialized — check startup logs for errors")
+    if not hasattr(soulseek_client, 'tidal') or not soulseek_client.tidal:
+        raise RuntimeError("Tidal download client not available — ensure tidalapi is installed")
+    return soulseek_client.tidal
+
 @app.route('/api/tidal/download/auth/start', methods=['POST'])
 def tidal_download_auth_start():
     """Start Tidal device-code OAuth flow for download client."""
     try:
-        tidal_dl = soulseek_client.tidal
+        tidal_dl = _get_tidal_download_client()
         result = tidal_dl.start_device_auth()
         if result:
             return jsonify({"success": True, **result})
         else:
             return jsonify({"error": "Failed to start Tidal auth. Is tidalapi installed?"}), 500
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Failed to start Tidal auth: {e}"}), 500
 
 
 @app.route('/api/tidal/download/auth/check', methods=['GET'])
 def tidal_download_auth_check():
     """Check status of Tidal device-code OAuth flow."""
     try:
-        tidal_dl = soulseek_client.tidal
+        tidal_dl = _get_tidal_download_client()
         result = tidal_dl.check_device_auth()
         return jsonify(result)
     except Exception as e:
@@ -30238,7 +30246,7 @@ def tidal_download_auth_check():
 def tidal_download_auth_status():
     """Check if Tidal download client is authenticated."""
     try:
-        tidal_dl = soulseek_client.tidal
+        tidal_dl = _get_tidal_download_client()
         authenticated = tidal_dl.is_authenticated()
         return jsonify({"authenticated": authenticated})
     except Exception as e:
