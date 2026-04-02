@@ -604,20 +604,18 @@ class WatchlistScanner:
             watchlist_artists = artists_to_scan
             
             # PROACTIVE ID BACKFILLING (cross-provider support)
-            # Before scanning, ensure all artists have IDs for the current provider
-            logger.info(f"DEBUG: About to check backfilling. _metadata_service = {getattr(self, '_metadata_service', 'ATTRIBUTE MISSING')}")
-            if self._metadata_service is not None:
+            # Before scanning, ensure ALL artists have IDs for ALL available sources
+            # iTunes and Deezer are always available; Spotify requires authentication
+            providers_to_backfill = ['itunes', 'deezer']
+            if self.spotify_client and self.spotify_client.is_spotify_authenticated():
+                providers_to_backfill.append('spotify')
+
+            for provider in providers_to_backfill:
                 try:
-                    active_provider = self._metadata_service.get_active_provider()
-                    logger.info(f"🔍 Checking for missing {active_provider} IDs in watchlist...")
-                    self._backfill_missing_ids(all_watchlist_artists, active_provider)
+                    self._backfill_missing_ids(all_watchlist_artists, provider)
                 except Exception as backfill_error:
-                    logger.warning(f"Error during ID backfilling: {backfill_error}")
-                    import traceback
-                    traceback.print_exc()
+                    logger.warning(f"Error during {provider} ID backfilling: {backfill_error}")
                     # Continue with scan even if backfilling fails
-            else:
-                logger.warning(f"⚠️ Backfilling SKIPPED - _metadata_service is None")
             
             scan_results = []
             for i, artist in enumerate(watchlist_artists):
@@ -976,46 +974,54 @@ class WatchlistScanner:
         Example: User has 50 artists with only Spotify IDs.
         When iTunes becomes active, this matches ALL 50 to iTunes in one batch.
         """
-        artists_to_match = []
-        
-        if provider == 'spotify':
-            # Find all artists missing Spotify IDs
-            artists_to_match = [a for a in artists if not a.spotify_artist_id and a.itunes_artist_id]
-        elif provider == 'itunes':
-            # Find all artists missing iTunes IDs
-            artists_to_match = [a for a in artists if not a.itunes_artist_id and a.spotify_artist_id]
-        
+        # Find artists missing IDs for the active provider (regardless of which other IDs they have)
+        id_attr = {
+            'spotify': 'spotify_artist_id',
+            'itunes': 'itunes_artist_id',
+            'deezer': 'deezer_artist_id',
+        }.get(provider)
+
+        if not id_attr:
+            logger.debug(f"Backfill not supported for provider: {provider}")
+            return
+
+        artists_to_match = [a for a in artists if not getattr(a, id_attr, None)]
+
         if not artists_to_match:
             logger.info(f"✅ All artists already have {provider} IDs")
             return
-        
+
         logger.info(f"🔄 Backfilling {len(artists_to_match)} artists with {provider} IDs...")
+
+        match_fn = {
+            'spotify': self._match_to_spotify,
+            'itunes': self._match_to_itunes,
+            'deezer': self._match_to_deezer,
+        }.get(provider)
+
+        update_fn = {
+            'spotify': self.database.update_watchlist_spotify_id,
+            'itunes': self.database.update_watchlist_itunes_id,
+            'deezer': getattr(self.database, 'update_watchlist_deezer_id', None),
+        }.get(provider)
+
+        if not match_fn or not update_fn:
+            logger.debug(f"No match/update function available for provider: {provider}")
+            return
 
         matched_count = 0
         unmatched_names = []
         for artist in artists_to_match:
             try:
-                if provider == 'spotify':
-                    new_id = self._match_to_spotify(artist.artist_name)
-                    if new_id:
-                        self.database.update_watchlist_spotify_id(artist.id, new_id)
-                        artist.spotify_artist_id = new_id  # Update in memory
-                        matched_count += 1
-                        logger.info(f"✅ Matched '{artist.artist_name}' to Spotify: {new_id}")
-                    else:
-                        unmatched_names.append(artist.artist_name)
+                new_id = match_fn(artist.artist_name)
+                if new_id:
+                    update_fn(artist.id, new_id)
+                    setattr(artist, id_attr, new_id)
+                    matched_count += 1
+                    logger.info(f"✅ Matched '{artist.artist_name}' to {provider}: {new_id}")
+                else:
+                    unmatched_names.append(artist.artist_name)
 
-                elif provider == 'itunes':
-                    new_id = self._match_to_itunes(artist.artist_name)
-                    if new_id:
-                        self.database.update_watchlist_itunes_id(artist.id, new_id)
-                        artist.itunes_artist_id = new_id  # Update in memory
-                        matched_count += 1
-                        logger.info(f"✅ Matched '{artist.artist_name}' to iTunes: {new_id}")
-                    else:
-                        unmatched_names.append(artist.artist_name)
-
-                # Small delay to avoid API rate limits
                 time.sleep(0.3)
 
             except Exception as e:
@@ -1122,6 +1128,26 @@ class WatchlistScanner:
             return self._best_artist_match(results, artist_name)
         except Exception as e:
             logger.warning(f"Could not match {artist_name} to iTunes: {e}")
+        return None
+
+    def _match_to_deezer(self, artist_name: str) -> Optional[str]:
+        """Match artist name to Deezer ID using fuzzy name comparison."""
+        try:
+            # Try MetadataService fallback client (if it's Deezer)
+            if hasattr(self, '_metadata_service') and self._metadata_service:
+                client = self._metadata_service.itunes  # Named 'itunes' but may be DeezerClient
+                from core.deezer_client import DeezerClient
+                if isinstance(client, DeezerClient):
+                    results = client.search_artists(artist_name, limit=5)
+                    return self._best_artist_match(results, artist_name)
+
+            # Fallback: create a fresh Deezer client
+            from core.deezer_client import DeezerClient
+            client = DeezerClient()
+            results = client.search_artists(artist_name, limit=5)
+            return self._best_artist_match(results, artist_name)
+        except Exception as e:
+            logger.warning(f"Could not match {artist_name} to Deezer: {e}")
         return None
 
     def _get_lookback_period_setting(self) -> str:
