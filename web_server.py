@@ -639,7 +639,42 @@ def _register_automation_handlers():
                         from core.spotify_public_scraper import parse_spotify_url, scrape_spotify_embed
                         spotify_url = pl.get('description', '')
                         parsed = parse_spotify_url(spotify_url) if spotify_url else None
-                        if parsed:
+
+                        # If Spotify is authenticated, use the full API (auto-discovers with album art)
+                        if parsed and parsed.get('type') == 'playlist' and spotify_client and spotify_client.is_spotify_authenticated():
+                            playlist_obj = spotify_client.get_playlist_by_id(parsed['id'])
+                            if playlist_obj and playlist_obj.tracks:
+                                tracks = []
+                                for t in playlist_obj.tracks:
+                                    artist_name = t.artists[0] if t.artists else ''
+                                    track_dict = {
+                                        'track_name': t.name or '',
+                                        'artist_name': str(artist_name),
+                                        'album_name': t.album or '',
+                                        'duration_ms': t.duration_ms or 0,
+                                        'source_track_id': t.id or '',
+                                    }
+                                    if t.id:
+                                        _album_obj = {'name': t.album or ''}
+                                        if getattr(t, 'image_url', None):
+                                            _album_obj['images'] = [{'url': t.image_url, 'height': 600, 'width': 600}]
+                                        track_dict['extra_data'] = json.dumps({
+                                            'discovered': True,
+                                            'provider': 'spotify',
+                                            'confidence': 1.0,
+                                            'matched_data': {
+                                                'id': t.id,
+                                                'name': t.name or '',
+                                                'artists': [{'name': str(a)} for a in (t.artists or [])],
+                                                'album': _album_obj,
+                                                'duration_ms': t.duration_ms or 0,
+                                                'image_url': getattr(t, 'image_url', None),
+                                            }
+                                        })
+                                    tracks.append(track_dict)
+
+                        # Fallback: public embed scraper (no auth or album-type URL)
+                        if tracks is None and parsed:
                             embed_data = scrape_spotify_embed(parsed['type'], parsed['id'])
                             if embed_data and not embed_data.get('error') and embed_data.get('tracks'):
                                 embed_album = embed_data.get('name', '') if embed_data.get('type') == 'album' else ''
@@ -647,26 +682,14 @@ def _register_automation_handlers():
                                 for t in embed_data['tracks']:
                                     artist_names = [a['name'] for a in t.get('artists', [])]
                                     artist_name = artist_names[0] if artist_names else ''
-                                    track_dict = {
+                                    tracks.append({
                                         'track_name': t.get('name', ''),
                                         'artist_name': artist_name,
                                         'album_name': embed_album,
                                         'duration_ms': t.get('duration_ms', 0),
                                         'source_track_id': t.get('id', ''),
-                                    }
-                                    # Store Spotify track ID as a hint for the Discover step,
-                                    # but do NOT mark as discovered — Discover needs to run a proper
-                                    # API lookup to get real album art (embed only has playlist-level images)
-                                    if t.get('id'):
-                                        track_dict['extra_data'] = json.dumps({
-                                            'discovered': False,
-                                            'spotify_hint': {
-                                                'id': t['id'],
-                                                'name': t.get('name', ''),
-                                                'artists': t.get('artists', []),
-                                            }
-                                        })
-                                    tracks.append(track_dict)
+                                    })
+                                    # No extra_data — let preservation code keep existing discovery data
                     except Exception as e:
                         logger.warning(f"Spotify public playlist refresh failed for {source_id}: {e}")
 
