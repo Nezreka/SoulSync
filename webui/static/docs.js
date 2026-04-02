@@ -2291,6 +2291,12 @@ function initializeDocsPage() {
                 }
                 text += '\n';
 
+                if (data.download_client_failures?.length > 0) {
+                    text += '── Download Client Failures ──\n';
+                    data.download_client_failures.forEach(f => { text += `  ❌ ${f}\n`; });
+                    text += '\n';
+                }
+
                 text += '── API Rates (calls/min) ──\n';
                 if (data.api_rates) {
                     Object.entries(data.api_rates).forEach(([svc, info]) => {
