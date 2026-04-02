@@ -37,13 +37,19 @@ class DownloadOrchestrator:
     """
 
     def __init__(self):
-        """Initialize orchestrator with all clients"""
-        self.soulseek = SoulseekClient()
-        self.youtube = YouTubeClient()
-        self.tidal = TidalDownloadClient()
-        self.qobuz = QobuzClient()
-        self.hifi = HiFiClient()
-        self.deezer_dl = DeezerDownloadClient()
+        """Initialize orchestrator with all clients.
+        Each client is initialized independently — one failing client doesn't prevent others from working."""
+        self._init_failures = []
+
+        self.soulseek = self._safe_init('Soulseek', SoulseekClient)
+        self.youtube = self._safe_init('YouTube', YouTubeClient)
+        self.tidal = self._safe_init('Tidal', TidalDownloadClient)
+        self.qobuz = self._safe_init('Qobuz', QobuzClient)
+        self.hifi = self._safe_init('HiFi', HiFiClient)
+        self.deezer_dl = self._safe_init('Deezer', DeezerDownloadClient)
+
+        if self._init_failures:
+            logger.warning(f"⚠️  Download clients failed to initialize: {', '.join(self._init_failures)}")
 
         # Load mode from config
         self.mode = config_manager.get('download_source.mode', 'soulseek')
@@ -58,6 +64,15 @@ class DownloadOrchestrator:
             else:
                 logger.info(f"   Primary: {self.hybrid_primary}, Fallback: {self.hybrid_secondary}")
 
+    def _safe_init(self, name, cls):
+        """Initialize a download client, returning None on failure instead of crashing."""
+        try:
+            return cls()
+        except Exception as e:
+            logger.error(f"❌ {name} download client failed to initialize: {e}")
+            self._init_failures.append(name)
+            return None
+
     def reload_settings(self):
         """Reload settings from config (call after settings change)"""
         self.mode = config_manager.get('download_source.mode', 'soulseek')
@@ -66,16 +81,22 @@ class DownloadOrchestrator:
         self.hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
 
         # Reload underlying client configs (SLSKD URL, API key, etc.)
-        self.soulseek._setup_client()
-        logger.info(f"🔄 Soulseek client config reloaded")
+        if self.soulseek:
+            self.soulseek._setup_client()
+            logger.info(f"🔄 Soulseek client config reloaded")
 
         # Reconnect Deezer if ARL changed
         deezer_arl = config_manager.get('deezer_download.arl', '')
-        if deezer_arl:
+        if deezer_arl and self.deezer_dl:
             self.deezer_dl.reconnect(deezer_arl)
             self.deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
 
         logger.info(f"🔄 Download Orchestrator settings reloaded - Mode: {self.mode}")
+
+    def _client(self, name):
+        """Get a client by name, returning None if not initialized."""
+        return {'soulseek': self.soulseek, 'youtube': self.youtube, 'tidal': self.tidal,
+                'qobuz': self.qobuz, 'hifi': self.hifi, 'deezer_dl': self.deezer_dl}.get(name)
 
     def is_configured(self) -> bool:
         """
@@ -83,36 +104,20 @@ class DownloadOrchestrator:
 
         Returns True if at least one download source is configured.
         """
-        if self.mode == 'soulseek':
-            return self.soulseek.is_configured()
-        elif self.mode == 'youtube':
-            return self.youtube.is_configured()
-        elif self.mode == 'tidal':
-            return self.tidal.is_configured()
-        elif self.mode == 'qobuz':
-            return self.qobuz.is_configured()
-        elif self.mode == 'hifi':
-            return self.hifi.is_configured()
-        elif self.mode == 'deezer_dl':
-            return self.deezer_dl.is_configured()
+        client = self._client(self.mode)
+        if client:
+            return client.is_configured()
         elif self.mode == 'hybrid':
-            clients = {'soulseek': self.soulseek, 'youtube': self.youtube, 'tidal': self.tidal, 'qobuz': self.qobuz, 'hifi': self.hifi, 'deezer_dl': self.deezer_dl}
             sources = self.hybrid_order if self.hybrid_order else [self.hybrid_primary, self.hybrid_secondary]
-            return any(clients[s].is_configured() for s in sources if s in clients)
-
+            return any(c.is_configured() for s in sources if (c := self._client(s)))
         return False
 
     def get_source_status(self) -> dict:
         """Return configured status for each download source."""
-        clients = {
-            'soulseek': self.soulseek,
-            'youtube': self.youtube,
-            'tidal': self.tidal,
-            'qobuz': self.qobuz,
-            'hifi': self.hifi,
-            'deezer_dl': self.deezer_dl,
-        }
-        return {name: client.is_configured() for name, client in clients.items()}
+        return {name: (c.is_configured() if c else False)
+                for name, c in [('soulseek', self.soulseek), ('youtube', self.youtube),
+                                ('tidal', self.tidal), ('qobuz', self.qobuz),
+                                ('hifi', self.hifi), ('deezer_dl', self.deezer_dl)]}
 
     async def check_connection(self) -> bool:
         """
@@ -120,29 +125,14 @@ class DownloadOrchestrator:
 
         Returns True if the configured source(s) are reachable.
         """
-        if self.mode == 'soulseek':
-            return await self.soulseek.check_connection()
-        elif self.mode == 'youtube':
-            return await self.youtube.check_connection()
-        elif self.mode == 'tidal':
-            return await self.tidal.check_connection()
-        elif self.mode == 'qobuz':
-            return await self.qobuz.check_connection()
-        elif self.mode == 'hifi':
-            return await self.hifi.check_connection()
-        elif self.mode == 'deezer_dl':
-            return await self.deezer_dl.check_connection()
+        client = self._client(self.mode)
+        if client and self.mode != 'hybrid':
+            return await client.check_connection()
         elif self.mode == 'hybrid':
-            # Only check sources that are in the configured hybrid order
-            clients = {
-                'soulseek': self.soulseek, 'youtube': self.youtube,
-                'tidal': self.tidal, 'qobuz': self.qobuz,
-                'hifi': self.hifi, 'deezer_dl': self.deezer_dl,
-            }
-            sources_to_check = self.hybrid_order if self.hybrid_order else list(clients.keys())
+            sources_to_check = self.hybrid_order if self.hybrid_order else ['soulseek', 'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl']
             results = {}
             for source in sources_to_check:
-                client = clients.get(source)
+                client = self._client(source)
                 if client:
                     try:
                         results[source] = await client.check_connection()
@@ -168,39 +158,19 @@ class DownloadOrchestrator:
         Returns:
             Tuple of (track_results, album_results)
         """
-        if self.mode == 'soulseek':
-            logger.info(f"🔍 Searching Soulseek: {query}")
-            return await self.soulseek.search(query, timeout, progress_callback)
+        source_names = {'soulseek': 'Soulseek', 'youtube': 'YouTube', 'tidal': 'Tidal',
+                        'qobuz': 'Qobuz', 'hifi': 'HiFi', 'deezer_dl': 'Deezer'}
 
-        elif self.mode == 'youtube':
-            logger.info(f"🔍 Searching YouTube: {query}")
-            return await self.youtube.search(query, timeout, progress_callback)
-
-        elif self.mode == 'tidal':
-            logger.info(f"🔍 Searching Tidal: {query}")
-            return await self.tidal.search(query, timeout, progress_callback)
-
-        elif self.mode == 'qobuz':
-            logger.info(f"🔍 Searching Qobuz: {query}")
-            return await self.qobuz.search(query, timeout, progress_callback)
-
-        elif self.mode == 'hifi':
-            logger.info(f"🔍 Searching HiFi: {query}")
-            return await self.hifi.search(query, timeout, progress_callback)
-
-        elif self.mode == 'deezer_dl':
-            logger.info(f"🔍 Searching Deezer: {query}")
-            return await self.deezer_dl.search(query, timeout, progress_callback)
+        if self.mode != 'hybrid':
+            client = self._client(self.mode)
+            if not client:
+                logger.error(f"❌ {source_names.get(self.mode, self.mode)} client not available (failed to initialize)")
+                return [], []
+            logger.info(f"🔍 Searching {source_names.get(self.mode, self.mode)}: {query}")
+            return await client.search(query, timeout, progress_callback)
 
         elif self.mode == 'hybrid':
-            clients = {
-                'soulseek': self.soulseek,
-                'youtube': self.youtube,
-                'tidal': self.tidal,
-                'qobuz': self.qobuz,
-                'hifi': self.hifi,
-                'deezer_dl': self.deezer_dl,
-            }
+            clients = {name: self._client(name) for name in source_names}
 
             # Build ordered source list: prefer hybrid_order, fall back to legacy primary/secondary
             if self.hybrid_order:
@@ -217,9 +187,12 @@ class DownloadOrchestrator:
 
             logger.info(f"🔍 Hybrid search ({' → '.join(source_order)}): {query}")
 
-            # Try each source in priority order (skip unconfigured ones)
+            # Try each source in priority order (skip unconfigured/unavailable ones)
             for i, source_name in enumerate(source_order):
-                client = clients[source_name]
+                client = clients.get(source_name)
+                if not client:
+                    logger.info(f"⏭️ Skipping {source_name} (not available)")
+                    continue
                 if hasattr(client, 'is_configured') and not client.is_configured():
                     logger.info(f"⏭️ Skipping {source_name} (not configured)")
                     continue
@@ -274,7 +247,7 @@ class DownloadOrchestrator:
         if is_streaming:
             filtered_results = tracks
         else:
-            filtered_results = self.soulseek.filter_results_by_quality_preference(tracks)
+            filtered_results = self.soulseek.filter_results_by_quality_preference(tracks) if self.soulseek else tracks
 
         if not filtered_results:
             logger.warning(f"No suitable quality results found for: {query}")
@@ -305,22 +278,20 @@ class DownloadOrchestrator:
             download_id: Unique download ID for tracking
         """
         # Detect which client to use based on username
-        if username == 'youtube':
-            logger.info(f"📥 Downloading from YouTube: {filename}")
-            return await self.youtube.download(username, filename, file_size)
-        elif username == 'tidal':
-            logger.info(f"📥 Downloading from Tidal: {filename}")
-            return await self.tidal.download(username, filename, file_size)
-        elif username == 'qobuz':
-            logger.info(f"📥 Downloading from Qobuz: {filename}")
-            return await self.qobuz.download(username, filename, file_size)
-        elif username == 'hifi':
-            logger.info(f"📥 Downloading from HiFi: {filename}")
-            return await self.hifi.download(username, filename, file_size)
-        elif username == 'deezer_dl':
-            logger.info(f"📥 Downloading from Deezer: {filename}")
-            return await self.deezer_dl.download(username, filename, file_size)
+        source_map = {'youtube': self.youtube, 'tidal': self.tidal, 'qobuz': self.qobuz,
+                      'hifi': self.hifi, 'deezer_dl': self.deezer_dl}
+        source_names = {'youtube': 'YouTube', 'tidal': 'Tidal', 'qobuz': 'Qobuz',
+                        'hifi': 'HiFi', 'deezer_dl': 'Deezer'}
+
+        if username in source_map:
+            client = source_map[username]
+            if not client:
+                raise RuntimeError(f"{source_names[username]} download client not available (failed to initialize)")
+            logger.info(f"📥 Downloading from {source_names[username]}: {filename}")
+            return await client.download(username, filename, file_size)
         else:
+            if not self.soulseek:
+                raise RuntimeError("Soulseek client not available (failed to initialize)")
             logger.info(f"📥 Downloading from Soulseek: {filename}")
             return await self.soulseek.download(username, filename, file_size)
 
@@ -331,15 +302,15 @@ class DownloadOrchestrator:
         Returns:
             List of DownloadStatus objects
         """
-        # Get downloads from all sources
-        soulseek_downloads = await self.soulseek.get_all_downloads()
-        youtube_downloads = await self.youtube.get_all_downloads()
-        tidal_downloads = await self.tidal.get_all_downloads()
-        qobuz_downloads = await self.qobuz.get_all_downloads()
-        hifi_downloads = await self.hifi.get_all_downloads()
-        deezer_downloads = await self.deezer_dl.get_all_downloads()
-
-        return soulseek_downloads + youtube_downloads + tidal_downloads + qobuz_downloads + hifi_downloads + deezer_downloads
+        # Get downloads from all available sources
+        all_downloads = []
+        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl]:
+            if client:
+                try:
+                    all_downloads.extend(await client.get_all_downloads())
+                except Exception:
+                    pass
+        return all_downloads
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
         """
@@ -351,35 +322,16 @@ class DownloadOrchestrator:
         Returns:
             DownloadStatus object or None if not found
         """
-        # Try Soulseek first
-        status = await self.soulseek.get_download_status(download_id)
-        if status:
-            return status
-
-        # Try YouTube
-        status = await self.youtube.get_download_status(download_id)
-        if status:
-            return status
-
-        # Try Tidal
-        status = await self.tidal.get_download_status(download_id)
-        if status:
-            return status
-
-        # Try Qobuz
-        status = await self.qobuz.get_download_status(download_id)
-        if status:
-            return status
-
-        # Try HiFi
-        status = await self.hifi.get_download_status(download_id)
-        if status:
-            return status
-
-        # Try Deezer
-        status = await self.deezer_dl.get_download_status(download_id)
-        if status:
-            return status
+        # Try each source until we find the download
+        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl]:
+            if not client:
+                continue
+            try:
+                status = await client.get_download_status(download_id)
+                if status:
+                    return status
+            except Exception:
+                pass
 
         return None
 
@@ -395,43 +347,25 @@ class DownloadOrchestrator:
         Returns:
             True if cancelled successfully
         """
-        # If username is provided, route directly
-        if username == 'youtube':
-            return await self.youtube.cancel_download(download_id, username, remove)
-        elif username == 'tidal':
-            return await self.tidal.cancel_download(download_id, username, remove)
-        elif username == 'qobuz':
-            return await self.qobuz.cancel_download(download_id, username, remove)
-        elif username == 'hifi':
-            return await self.hifi.cancel_download(download_id, username, remove)
-        elif username == 'deezer_dl':
-            return await self.deezer_dl.cancel_download(download_id, username, remove)
+        # If username is provided, route directly to that source
+        source_map = {'youtube': self.youtube, 'tidal': self.tidal, 'qobuz': self.qobuz,
+                      'hifi': self.hifi, 'deezer_dl': self.deezer_dl}
+        if username in source_map:
+            client = source_map[username]
+            return await client.cancel_download(download_id, username, remove) if client else False
         elif username:
-            return await self.soulseek.cancel_download(download_id, username, remove)
+            return await self.soulseek.cancel_download(download_id, username, remove) if self.soulseek else False
 
-        # Otherwise, try all sources
-        soulseek_cancelled = await self.soulseek.cancel_download(download_id, username, remove)
-        if soulseek_cancelled:
-            return True
-
-        youtube_cancelled = await self.youtube.cancel_download(download_id, username, remove)
-        if youtube_cancelled:
-            return True
-
-        tidal_cancelled = await self.tidal.cancel_download(download_id, username, remove)
-        if tidal_cancelled:
-            return True
-
-        qobuz_cancelled = await self.qobuz.cancel_download(download_id, username, remove)
-        if qobuz_cancelled:
-            return True
-
-        hifi_cancelled = await self.hifi.cancel_download(download_id, username, remove)
-        if hifi_cancelled:
-            return True
-
-        deezer_cancelled = await self.deezer_dl.cancel_download(download_id, username, remove)
-        return deezer_cancelled
+        # Otherwise, try all available sources
+        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl]:
+            if not client:
+                continue
+            try:
+                if await client.cancel_download(download_id, username, remove):
+                    return True
+            except Exception:
+                pass
+        return False
 
     async def signal_download_completion(self, download_id: str, username: str, remove: bool = True) -> bool:
         """
@@ -446,6 +380,8 @@ class DownloadOrchestrator:
             True if successful
         """
         # This is Soulseek-specific, so only call on Soulseek client
+        if not self.soulseek:
+            return False
         return await self.soulseek.signal_download_completion(download_id, username, remove)
 
     async def clear_all_completed_downloads(self) -> bool:
@@ -455,14 +391,15 @@ class DownloadOrchestrator:
         Returns:
             True if successful
         """
-        soulseek_cleared = await self.soulseek.clear_all_completed_downloads()
-        youtube_cleared = await self.youtube.clear_all_completed_downloads()
-        tidal_cleared = await self.tidal.clear_all_completed_downloads()
-        qobuz_cleared = await self.qobuz.clear_all_completed_downloads()
-        hifi_cleared = await self.hifi.clear_all_completed_downloads()
-        deezer_cleared = await self.deezer_dl.clear_all_completed_downloads()
+        results = []
+        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl]:
+            if client:
+                try:
+                    results.append(await client.clear_all_completed_downloads())
+                except Exception:
+                    pass
 
-        return soulseek_cleared and youtube_cleared and tidal_cleared and qobuz_cleared and hifi_cleared and deezer_cleared
+        return all(results) if results else True
 
     # ===== Soulseek-specific methods (for backwards compatibility) =====
     # These are internal methods that some parts of the codebase use directly
@@ -480,6 +417,8 @@ class DownloadOrchestrator:
         Returns:
             API response
         """
+        if not self.soulseek:
+            raise RuntimeError("Soulseek client not available (failed to initialize)")
         return await self.soulseek._make_request(method, endpoint, **kwargs)
 
     async def _make_direct_request(self, method: str, endpoint: str, **kwargs):
@@ -495,6 +434,8 @@ class DownloadOrchestrator:
         Returns:
             API response
         """
+        if not self.soulseek:
+            raise RuntimeError("Soulseek client not available (failed to initialize)")
         return await self.soulseek._make_direct_request(method, endpoint, **kwargs)
 
     async def clear_all_searches(self) -> bool:
@@ -504,7 +445,7 @@ class DownloadOrchestrator:
         Returns:
             True if successful
         """
-        return await self.soulseek.clear_all_searches()
+        return await self.soulseek.clear_all_searches() if self.soulseek else True
 
     async def maintain_search_history_with_buffer(self, keep_searches: int = 50, trigger_threshold: int = 200) -> bool:
         """
@@ -517,13 +458,15 @@ class DownloadOrchestrator:
         Returns:
             True if successful
         """
-        return await self.soulseek.maintain_search_history_with_buffer(keep_searches, trigger_threshold)
+        return await self.soulseek.maintain_search_history_with_buffer(keep_searches, trigger_threshold) if self.soulseek else True
 
     async def cancel_all_downloads(self) -> bool:
         """Cancel and remove all downloads from all sources."""
-        soulseek_ok = await self.soulseek.cancel_all_downloads()
-        await self.tidal.clear_all_completed_downloads()
-        await self.qobuz.clear_all_completed_downloads()
-        await self.hifi.clear_all_completed_downloads()
-        await self.deezer_dl.clear_all_completed_downloads()
-        return soulseek_ok
+        ok = True
+        for client in [self.soulseek, self.tidal, self.qobuz, self.hifi, self.deezer_dl]:
+            if client:
+                try:
+                    await client.cancel_all_downloads() if hasattr(client, 'cancel_all_downloads') else await client.clear_all_completed_downloads()
+                except Exception:
+                    ok = False
+        return ok

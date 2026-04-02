@@ -4536,6 +4536,13 @@ def get_debug_info():
         'm3u_export_enabled': config_manager.get('m3u.enabled', False),
     }
 
+    # Download client init failures
+    info['download_client_failures'] = []
+    if soulseek_client and hasattr(soulseek_client, '_init_failures'):
+        info['download_client_failures'] = soulseek_client._init_failures
+    elif not soulseek_client:
+        info['download_client_failures'] = ['ALL (orchestrator failed to initialize)']
+
     # API rate monitor — current calls/min per service + Spotify rate limit state
     try:
         from core.api_call_tracker import api_call_tracker
