@@ -5169,6 +5169,282 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 .notif-entry-link:hover { opacity: 0.7; }
 
+/* ==================================================================================
+   GLOBAL SEARCH BAR — Spotlight-style search from anywhere
+   ================================================================================== */
+
+.gsearch-bar {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 380px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    background: rgba(18, 18, 26, 0.65);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 21px;
+    z-index: 99998;
+    opacity: 0.55;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: text;
+}
+.gsearch-bar:hover {
+    opacity: 0.8;
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(18, 18, 26, 0.8);
+}
+.gsearch-bar.active {
+    opacity: 1;
+    width: 560px;
+    background: rgba(18, 18, 26, 0.92);
+    backdrop-filter: blur(24px);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(var(--accent-rgb), 0.08);
+}
+
+.gsearch-icon {
+    color: rgba(255, 255, 255, 0.3);
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    transition: color 0.2s;
+}
+.gsearch-bar.active .gsearch-icon { color: var(--accent); }
+
+.gsearch-input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    min-width: 0;
+}
+.gsearch-input::placeholder { color: rgba(255, 255, 255, 0.25); }
+.gsearch-bar.active .gsearch-input::placeholder { color: rgba(255, 255, 255, 0.4); }
+
+.gsearch-clear {
+    width: 20px; height: 20px; border-radius: 50%; border: none;
+    background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.4);
+    font-size: 14px; cursor: pointer; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0; transition: all 0.15s; padding: 0;
+}
+.gsearch-clear:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+.gsearch-shortcut {
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 5px;
+    padding: 2px 7px;
+    flex-shrink: 0;
+    transition: opacity 0.2s;
+}
+.gsearch-bar.active .gsearch-shortcut { opacity: 0; pointer-events: none; }
+
+/* ── Results Panel ── */
+.gsearch-results {
+    position: fixed;
+    bottom: 76px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 620px;
+    max-width: 95vw;
+    max-height: 60vh;
+    background: rgba(14, 14, 20, 0.97);
+    backdrop-filter: blur(30px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 18px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+    z-index: 99997;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+}
+.gsearch-results.visible { display: flex; animation: gsearchSlideUp 0.2s ease; }
+
+@keyframes gsearchSlideUp {
+    from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.gsearch-results-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 18px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    flex-shrink: 0;
+}
+.gsearch-results-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: rgba(255,255,255,0.3); }
+.gsearch-results-count { font-size: 10px; color: rgba(255,255,255,0.2); }
+
+.gsearch-results-body {
+    overflow-y: auto;
+    flex: 1;
+    padding: 8px 12px 14px;
+}
+.gsearch-results-body::-webkit-scrollbar { width: 4px; }
+.gsearch-results-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+
+/* Source tabs */
+.gsearch-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 18px 4px;
+    flex-shrink: 0;
+}
+.gsearch-tab {
+    padding: 5px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.gsearch-tab.active { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); border-color: rgba(var(--accent-rgb), 0.2); }
+.gsearch-tab:hover:not(.active) { background: rgba(255,255,255,0.06); }
+
+/* Section headers */
+.gsearch-section-header {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.25);
+    padding: 10px 6px 6px;
+}
+
+/* Result items — compact grid */
+.gsearch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 6px;
+}
+
+.gsearch-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.gsearch-item:hover { background: rgba(255, 255, 255, 0.05); }
+
+.gsearch-item-art {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.04);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.15);
+}
+.gsearch-item-art img { width: 100%; height: 100%; object-fit: cover; }
+
+.gsearch-item-info { flex: 1; min-width: 0; }
+.gsearch-item-title { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gsearch-item-sub { font-size: 10px; color: rgba(255,255,255,0.35); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+.gsearch-item-badge {
+    font-size: 8px; font-weight: 700; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 4px;
+    background: rgba(76,175,80,0.12); color: #4caf50;
+    flex-shrink: 0;
+}
+
+.gsearch-loading {
+    text-align: center; padding: 24px; font-size: 12px; color: rgba(255,255,255,0.2);
+}
+
+.gsearch-empty {
+    text-align: center; padding: 24px; font-size: 12px; color: rgba(255,255,255,0.2);
+}
+
+/* Track list (not grid) */
+.gsearch-track-list { display: flex; flex-direction: column; }
+
+.gsearch-track {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.gsearch-track:hover { background: rgba(255, 255, 255, 0.04); }
+
+.gsearch-track-dur {
+    font-size: 10px; color: rgba(255,255,255,0.2);
+    flex-shrink: 0; min-width: 32px; text-align: right;
+}
+
+.gsearch-play-btn {
+    width: 26px; height: 26px; border-radius: 50%; border: none;
+    background: rgba(var(--accent-rgb), 0.12); color: var(--accent);
+    font-size: 10px; cursor: pointer; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0; transition: all 0.15s;
+    opacity: 0;
+}
+.gsearch-track:hover .gsearch-play-btn { opacity: 1; }
+.gsearch-play-btn:hover { background: var(--accent); color: #fff; transform: scale(1.1); }
+
+.gsearch-source-badge {
+    font-size: 9px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
+    background: rgba(var(--accent-rgb), 0.1); color: var(--accent);
+    margin-left: 6px; vertical-align: middle;
+}
+
+/* ── Global Search Mobile ── */
+@media (max-width: 768px) {
+    .gsearch-bar {
+        width: calc(100% - 48px);
+        left: 24px;
+        right: 24px;
+        transform: none;
+        bottom: 80px;
+        height: 40px;
+    }
+    .gsearch-bar.active {
+        width: calc(100% - 32px);
+        left: 16px;
+        right: 16px;
+    }
+    .gsearch-results {
+        width: calc(100% - 32px);
+        left: 16px;
+        right: 16px;
+        transform: none;
+        bottom: 130px;
+        max-height: 50vh;
+        border-radius: 14px;
+    }
+    .gsearch-grid {
+        grid-template-columns: 1fr;
+    }
+    .gsearch-shortcut { display: none; }
+    .gsearch-item-art { width: 36px; height: 36px; }
+    .gsearch-tabs { flex-wrap: wrap; }
+}
+
 /* ── Wing It Button ── */
 /* ── Wing It Button + Dropdown ── */
 .wing-it-wrap {
