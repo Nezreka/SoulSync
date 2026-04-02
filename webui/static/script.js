@@ -2743,6 +2743,9 @@ function navigateToPage(pageId) {
 
     currentPage = pageId;
 
+    // Show/hide global search bar (hide on downloads page where enhanced search exists)
+    if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
+
     // Show/hide discover download sidebar based on page
     const downloadSidebar = document.getElementById('discover-download-sidebar');
     if (downloadSidebar) {
@@ -16801,6 +16804,464 @@ function _notifTimeAgo(ts) {
     const h = Math.floor(m / 60);
     if (h < 24) return `${h}h ago`;
     return `${Math.floor(h / 24)}d ago`;
+}
+
+// ==================================================================================
+// GLOBAL SEARCH BAR — Spotlight-style search from anywhere
+// ==================================================================================
+
+const _gsState = {
+    active: false,
+    query: '',
+    data: null,
+    sources: {},
+    activeSource: null,
+    abortCtrl: null,
+    altAbortCtrl: null,
+    debounceTimer: null,
+};
+
+(function initGlobalSearch() {
+    // Defer init until DOM is ready
+    const _doInit = () => {
+        const bar = document.getElementById('gsearch-bar');
+        const input = document.getElementById('gsearch-input');
+        const results = document.getElementById('gsearch-results');
+        if (!input || !bar) return;
+
+        bar.addEventListener('click', () => input.focus());
+
+        input.addEventListener('focus', () => {
+            bar.classList.add('active');
+            _gsState.active = true;
+            const shortcut = document.getElementById('gsearch-shortcut');
+            if (shortcut) shortcut.style.display = 'none';
+            if (_gsState.data && _gsState.query) _gsShowResults();
+        });
+
+        // No blur handler — closing is handled by click-outside and Escape only
+        // This prevents tab switching and result clicks from closing the panel
+
+        const clearBtn = document.getElementById('gsearch-clear');
+
+        input.addEventListener('input', () => {
+            const q = input.value.trim();
+            _gsState.query = q;
+            if (clearBtn) clearBtn.style.display = q.length > 0 ? '' : 'none';
+            if (_gsState.debounceTimer) clearTimeout(_gsState.debounceTimer);
+            if (q.length < 2) { _gsHideResults(); return; }
+            _gsState.debounceTimer = setTimeout(() => _gsPerformSearch(q), 300);
+        });
+
+        if (clearBtn) {
+            clearBtn.addEventListener('click', e => {
+                e.stopPropagation();
+                input.value = '';
+                _gsState.query = '';
+                _gsState.data = null;
+                clearBtn.style.display = 'none';
+                _gsHideResults();
+                input.focus();
+            });
+        }
+
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (_gsState.debounceTimer) clearTimeout(_gsState.debounceTimer);
+                const q = input.value.trim();
+                if (q.length >= 2) _gsPerformSearch(q);
+            } else if (e.key === 'Escape') {
+                _gsDeactivate();
+                input.blur();
+            }
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', e => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); input.focus(); return; }
+            if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) { e.preventDefault(); input.focus(); }
+        });
+
+        // Click outside to close — uses delayed check because tab clicks replace DOM
+        document.addEventListener('click', e => {
+            if (!_gsState.active) return;
+            // Skip if click was recent interaction with search system (within 100ms of a switch)
+            if (_gsState._lastInteraction && Date.now() - _gsState._lastInteraction < 200) return;
+            setTimeout(() => {
+                if (!_gsState.active) return;
+                const freshBar = document.getElementById('gsearch-bar');
+                const freshResults = document.getElementById('gsearch-results');
+                const target = e.target;
+                if (freshBar?.contains(target) || freshResults?.contains(target)) return;
+                _gsDeactivate();
+            }, 100);
+        });
+
+        // Collapse on sidebar navigation + hide on downloads page
+        document.addEventListener('click', e => {
+            if (e.target.closest('.sidebar-link, .nav-item, .back-btn')) {
+                if (_gsState.active) _gsDeactivate();
+                // Check after navigation which page we're on
+                setTimeout(_gsUpdateVisibility, 200);
+            }
+        });
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { _doInit(); _gsUpdateVisibility(); });
+    else { _doInit(); setTimeout(_gsUpdateVisibility, 500); }
+})();
+
+function _gsUpdateVisibility() {
+    const bar = document.getElementById('gsearch-bar');
+    if (!bar) return;
+    // Hide on downloads page where enhanced search already exists
+    const onDownloads = typeof currentPage !== 'undefined' && currentPage === 'downloads';
+    bar.style.display = onDownloads ? 'none' : '';
+    if (onDownloads && _gsState.active) _gsDeactivate();
+}
+
+function _gsDeactivate() {
+    console.log('[GSearch] _gsDeactivate called', new Error().stack.split('\n')[2]?.trim());
+    const bar = document.getElementById('gsearch-bar');
+    const shortcut = document.getElementById('gsearch-shortcut');
+    if (bar) bar.classList.remove('active');
+    if (shortcut) shortcut.style.display = '';
+    _gsState.active = false;
+    _gsHideResults();
+}
+
+function _gsHideResults() {
+    const r = document.getElementById('gsearch-results');
+    if (r) r.classList.remove('visible');
+}
+
+function _gsShowResults() {
+    const r = document.getElementById('gsearch-results');
+    if (r && r.innerHTML.trim()) r.classList.add('visible');
+}
+
+async function _gsPerformSearch(query) {
+    if (_gsState.abortCtrl) _gsState.abortCtrl.abort();
+    if (_gsState.altAbortCtrl) _gsState.altAbortCtrl.abort();
+    _gsState.abortCtrl = new AbortController();
+    _gsState.altAbortCtrl = new AbortController();
+
+    const results = document.getElementById('gsearch-results');
+    if (!results) return;
+
+    results.innerHTML = '<div class="gsearch-loading"><div class="server-search-spinner"></div>Searching...</div>';
+    results.classList.add('visible');
+
+    try {
+        const res = await fetch('/api/enhanced-search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query }),
+            signal: _gsState.abortCtrl.signal,
+        });
+        const data = await res.json();
+        _gsState.data = data;
+        _gsState.activeSource = data.primary_source || 'spotify';
+        _gsState.sources = {};
+        _gsState.sources[_gsState.activeSource] = {
+            artists: data.spotify_artists || [],
+            albums: data.spotify_albums || [],
+            tracks: data.spotify_tracks || [],
+        };
+
+        _gsRender(data);
+
+        // Async library ownership check — adds badges + swaps play buttons for library tracks
+        setTimeout(() => _gsLibraryCheck(), 200);
+
+        // Fetch alternate sources
+        const alts = data.alternate_sources || [];
+        for (const src of alts) {
+            if (src === _gsState.activeSource) continue;
+            fetch(`/api/enhanced-search/source/${src}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query }),
+                signal: _gsState.altAbortCtrl.signal,
+            }).then(r => r.json()).then(altData => {
+                if (altData.available) { _gsState.sources[src] = altData; _gsRenderTabs(); }
+            }).catch(() => {});
+        }
+    } catch (e) {
+        if (e.name !== 'AbortError') results.innerHTML = '<div class="gsearch-empty">Search failed</div>';
+    }
+}
+
+function _gsRender(data) {
+    const results = document.getElementById('gsearch-results');
+    if (!results) return;
+
+    const src = _gsState.sources[_gsState.activeSource] || {};
+    const dbArtists = data?.db_artists || [];
+    const artists = src.artists || [];
+    const allAlbums = src.albums || [];
+    const albums = allAlbums.filter(a => !a.album_type || a.album_type === 'album' || a.album_type === 'compilation');
+    const singles = allAlbums.filter(a => a.album_type === 'single' || a.album_type === 'ep');
+    const tracks = src.tracks || [];
+    const total = dbArtists.length + artists.length + albums.length + singles.length + tracks.length;
+
+    if (total === 0) {
+        results.innerHTML = `<div class="gsearch-empty">No results for "${_escToast(_gsState.query)}"<br><span style="font-size:10px;opacity:0.5">Try different keywords or check spelling</span></div>`;
+        results.classList.add('visible');
+        return;
+    }
+
+    const sourceLabels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', hydrabase: 'Hydrabase' };
+    const srcLabel = sourceLabels[_gsState.activeSource] || _gsState.activeSource || '';
+
+    let h = '';
+    h += `<div class="gsearch-results-header"><span class="gsearch-results-title">Results</span><span class="gsearch-results-count">${total} items</span></div>`;
+    h += '<div class="gsearch-tabs" id="gsearch-tabs"></div>';
+    h += '<div class="gsearch-results-body">';
+
+    if (dbArtists.length) {
+        h += '<div class="gsearch-section-header">📚 In Your Library</div><div class="gsearch-grid">';
+        h += dbArtists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escToast(a.name).replace(/'/g, "\\'")}', true)"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></div>`).join('');
+        h += '</div>';
+    }
+
+    if (artists.length) {
+        h += `<div class="gsearch-section-header">🎤 Artists <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-grid">`;
+        h += artists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escToast(a.name).replace(/'/g, "\\'")}', false)"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div></div></div>`).join('');
+        h += '</div>';
+    }
+
+    const activeSrc = _gsState.activeSource || 'spotify';
+
+    if (albums.length) {
+        h += `<div class="gsearch-section-header">💿 Albums <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-grid">`;
+        h += albums.map(a => {
+            const ar = a.artist || (a.artists ? a.artists.join(', ') : '');
+            const yr = a.release_date ? a.release_date.substring(0, 4) : '';
+            const img = (a.image_url || '').replace(/'/g, "\\'");
+            return `<div class="gsearch-item" onclick="_gsClickAlbum('${a.id}', '${_escToast(a.name).replace(/'/g, "\\'")}', '${_escToast(ar).replace(/'/g, "\\'")}', '${img}', '${activeSrc}')"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '💿'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${yr ? ` · ${yr}` : ''}</div></div></div>`;
+        }).join('');
+        h += '</div>';
+    }
+
+    if (singles.length) {
+        h += `<div class="gsearch-section-header">🎶 Singles & EPs <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-grid">`;
+        h += singles.map(a => {
+            const ar = a.artist || (a.artists ? a.artists.join(', ') : '');
+            const img = (a.image_url || '').replace(/'/g, "\\'");
+            return `<div class="gsearch-item" onclick="_gsClickAlbum('${a.id}', '${_escToast(a.name).replace(/'/g, "\\'")}', '${_escToast(ar).replace(/'/g, "\\'")}', '${img}', '${activeSrc}')"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '🎶'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}</div></div></div>`;
+        }).join('');
+        h += '</div>';
+    }
+
+    if (tracks.length) {
+        h += `<div class="gsearch-section-header">🎵 Tracks <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-track-list">`;
+        h += tracks.map(t => {
+            const ar = t.artist || (t.artists ? t.artists.join(', ') : '');
+            const dur = t.duration_ms ? `${Math.floor(t.duration_ms / 60000)}:${String(Math.floor((t.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
+            return `<div class="gsearch-track" onclick="_gsClickTrack('${_escToast(ar).replace(/'/g, "\\'")}', '${_escToast(t.name).replace(/'/g, "\\'")}')"><div class="gsearch-item-art" style="width:32px;height:32px;border-radius:6px">${t.image_url ? `<img src="${t.image_url}" loading="lazy">` : '🎵'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(t.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${t.album ? ` · ${_escToast(t.album)}` : ''}</div></div><div class="gsearch-track-dur">${dur}</div><button class="gsearch-play-btn" onclick="event.stopPropagation(); _gsPlayTrack('${_escToast(t.name).replace(/'/g, "\\'")}', '${_escToast(ar).replace(/'/g, "\\'")}', '${_escToast(t.album || '').replace(/'/g, "\\'")}')" title="Stream">▶</button></div>`;
+        }).join('');
+        h += '</div>';
+    }
+
+    h += '</div>';
+    results.innerHTML = h;
+    results.classList.add('visible');
+    _gsRenderTabs();
+}
+
+function _gsRenderTabs() {
+    const el = document.getElementById('gsearch-tabs');
+    if (!el) return;
+    const sources = Object.keys(_gsState.sources);
+    if (sources.length < 2) { el.style.display = 'none'; return; }
+    const labels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', hydrabase: 'Hydrabase' };
+    el.style.display = 'flex';
+    el.innerHTML = sources.map(s => {
+        const d = _gsState.sources[s];
+        const c = (d.artists?.length || 0) + (d.albums?.length || 0) + (d.tracks?.length || 0);
+        return `<button class="gsearch-tab${s === _gsState.activeSource ? ' active' : ''}" onclick="_gsSwitchSource('${s}')">${labels[s] || s} (${c})</button>`;
+    }).join('');
+}
+
+function _gsSwitchSource(src) {
+    _gsState._lastInteraction = Date.now();
+    _gsState.activeSource = src;
+    _gsRender(_gsState.data);
+    const input = document.getElementById('gsearch-input');
+    if (input) input.focus();
+}
+
+function _gsClickArtist(id, name, isLibrary) {
+    _gsDeactivate();
+    if (isLibrary) {
+        // Same as enhanced search: navigateToArtistDetail
+        navigateToArtistDetail(id, name);
+    } else {
+        // Same as enhanced search: navigate to Artists page + selectArtistForDetail
+        navigateToPage('artists');
+        setTimeout(() => {
+            selectArtistForDetail({ id, name, image_url: '' }, {
+                source: _gsState.activeSource || '',
+            });
+        }, 150);
+    }
+}
+
+async function _gsClickAlbum(albumId, albumName, artistName, imageUrl, source) {
+    _gsDeactivate();
+    // Same flow as handleEnhancedSearchAlbumClick — fetch album, open download modal
+    showLoadingOverlay('Loading album...');
+    try {
+        const params = new URLSearchParams({ name: albumName, artist: artistName });
+        if (source && source !== 'spotify') params.set('source', source);
+        const response = await fetch(`/api/spotify/album/${albumId}?${params}`);
+        if (!response.ok) throw new Error(`Failed to load album: ${response.status}`);
+        const albumData = await response.json();
+
+        if (!albumData || !albumData.tracks || albumData.tracks.length === 0) {
+            hideLoadingOverlay();
+            showToast(`No tracks available for "${albumName}"`, 'warning');
+            return;
+        }
+
+        const enrichedTracks = albumData.tracks.map(t => ({
+            ...t,
+            album: { name: albumData.name, id: albumData.id, album_type: albumData.album_type || 'album', images: albumData.images || [], release_date: albumData.release_date, total_tracks: albumData.total_tracks }
+        }));
+
+        const virtualPlaylistId = `enhanced_search_album_${albumId}`;
+        const firstArtist = (albumData.artists || [])[0] || {};
+        const artistObj = { id: firstArtist.id || '', name: firstArtist.name || artistName, source: source || '' };
+        const albumObj = { name: albumData.name, id: albumData.id, album_type: albumData.album_type || 'album', images: albumData.images || [], release_date: albumData.release_date, total_tracks: albumData.total_tracks, artists: albumData.artists || [{ name: artistName }] };
+
+        await openDownloadMissingModalForArtistAlbum(virtualPlaylistId, `[${artistName}] ${albumData.name}`, enrichedTracks, albumObj, artistObj, false);
+
+    } catch (e) {
+        hideLoadingOverlay();
+        showToast('Failed to load album: ' + e.message, 'error');
+    }
+}
+
+function _gsClickTrack(artistName, trackName) {
+    _gsDeactivate();
+    navigateToPage('downloads');
+    setTimeout(() => {
+        const input = document.getElementById('enhanced-search-input');
+        if (input) { input.value = `${artistName} ${trackName}`.trim(); input.dispatchEvent(new Event('input')); }
+    }, 300);
+}
+
+async function _gsPlayTrack(trackName, artistName, albumName) {
+    try {
+        showToast('Searching for stream...', 'info');
+        const res = await fetch('/api/enhanced-search/stream-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_name: trackName, artist_name: artistName, album_name: albumName })
+        });
+        const data = await res.json();
+        if (data.success && data.result) {
+            if (typeof startStream === 'function') {
+                startStream(data.result);
+            } else {
+                showToast('Streaming not available', 'error');
+            }
+        } else {
+            showToast(data.error || 'No stream found', 'error');
+        }
+    } catch (e) {
+        showToast('Stream failed: ' + e.message, 'error');
+    }
+}
+
+// Async library check for global search results — adds badges + swaps play buttons
+async function _gsLibraryCheck() {
+    try {
+        const src = _gsState.sources[_gsState.activeSource] || {};
+        const allAlbums = src.albums || [];
+        const albums = allAlbums.filter(a => !a.album_type || a.album_type === 'album' || a.album_type === 'compilation');
+        const singles = allAlbums.filter(a => a.album_type === 'single' || a.album_type === 'ep');
+        const tracks = src.tracks || [];
+        if (!allAlbums.length && !tracks.length) return;
+
+        const res = await fetch('/api/enhanced-search/library-check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                albums: allAlbums.map(a => ({ name: a.name, artist: a.artist || (a.artists ? a.artists.join(', ') : '') })),
+                tracks: tracks.map(t => ({ name: t.name, artist: t.artist || (t.artists ? t.artists.join(', ') : '') })),
+            })
+        });
+        const checkData = await res.json();
+
+        // Add "In Library" badges to albums — match by index against allAlbums order
+        const albumResults = checkData.albums || [];
+        let albumIdx = 0;
+        // Albums section
+        document.querySelectorAll('#gsearch-results .gsearch-results-body').forEach(body => {
+            // Find all gsearch-item elements and tag ones that are albums
+            const sections = body.querySelectorAll('.gsearch-section-header');
+            sections.forEach(header => {
+                const text = header.textContent;
+                const isAlbumSection = text.includes('Albums') || text.includes('Singles');
+                if (!isAlbumSection) return;
+                const grid = header.nextElementSibling;
+                if (!grid) return;
+                const items = grid.querySelectorAll('.gsearch-item');
+                items.forEach(item => {
+                    if (albumIdx < albumResults.length && albumResults[albumIdx]) {
+                        if (!item.querySelector('.gsearch-item-badge')) {
+                            const badge = document.createElement('span');
+                            badge.className = 'gsearch-item-badge';
+                            badge.textContent = 'In Library';
+                            item.appendChild(badge);
+                        }
+                    }
+                    albumIdx++;
+                });
+            });
+        });
+
+        // Tag tracks + swap play buttons for library playback
+        const trackResults = checkData.tracks || [];
+        const trackEls = document.querySelectorAll('#gsearch-results .gsearch-track');
+        trackEls.forEach((el, i) => {
+            const tr = trackResults[i];
+            if (tr && tr.in_library) {
+                // Add badge
+                if (!el.querySelector('.gsearch-item-badge')) {
+                    const badge = document.createElement('span');
+                    badge.className = 'gsearch-item-badge';
+                    badge.textContent = 'In Library';
+                    badge.style.marginRight = '4px';
+                    el.querySelector('.gsearch-track-dur')?.before(badge);
+                }
+
+                // Swap play button to library playback
+                if (tr.file_path) {
+                    const playBtn = el.querySelector('.gsearch-play-btn');
+                    if (playBtn) {
+                        const newBtn = playBtn.cloneNode(true);
+                        newBtn.title = 'Play from library';
+                        newBtn.style.background = 'rgba(76,175,80,0.15)';
+                        newBtn.style.color = '#4caf50';
+                        newBtn.addEventListener('click', e => {
+                            e.stopPropagation();
+                            playLibraryTrack(
+                                { id: tr.track_id, title: tr.title, file_path: tr.file_path },
+                                tr.album_title || '',
+                                tr.artist_name || ''
+                            );
+                        });
+                        playBtn.replaceWith(newBtn);
+                    }
+                }
+            }
+        });
+    } catch (e) {
+        // Non-critical
+    }
 }
 
 function escapeHtml(text) {
