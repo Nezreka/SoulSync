@@ -11591,6 +11591,245 @@ async function exportPlaylistAsM3U(playlistId) {
     console.log(`✅ Exported M3U - Total: ${process.tracks.length}, Available: ${availableCount}, Missing: ${missingCount}`);
 }
 
+// ==================================================================================
+// WING IT — Download without metadata discovery
+// ==================================================================================
+
+async function wingItDownload(tracks, playlistName, source = 'playlist', cardIdentifier = null) {
+    if (!tracks || tracks.length === 0) {
+        showToast('No tracks to download', 'error');
+        return;
+    }
+
+    // Show choice: Download or Sync
+    const choice = await _showWingItChoiceDialog(tracks.length, source);
+    if (!choice) return;
+
+    if (choice === 'sync') {
+        await _wingItSync(tracks, playlistName, source, cardIdentifier);
+        return;
+    }
+
+    // choice === 'download' — continue with download flow
+
+    // Normalize tracks to Spotify-compatible format
+    const formattedTracks = tracks.map(t => {
+        // Handle various artist formats
+        let artists = [];
+        if (t.artists) {
+            if (Array.isArray(t.artists)) {
+                artists = t.artists.map(a => typeof a === 'string' ? { name: a } : a);
+            } else if (typeof t.artists === 'string') {
+                artists = [{ name: t.artists }];
+            }
+        } else if (t.artist_name) {
+            artists = [{ name: t.artist_name }];
+        } else if (t.artist) {
+            artists = [{ name: t.artist }];
+        }
+        if (artists.length === 0) artists = [{ name: 'Unknown' }];
+
+        // Handle album
+        let album = { name: '' };
+        if (t.album) {
+            album = typeof t.album === 'string' ? { name: t.album } : t.album;
+        } else if (t.album_name) {
+            album = { name: t.album_name };
+        }
+
+        return {
+            id: t.id || t.source_track_id || `wing_it_${Date.now()}_${Math.random()}`,
+            name: t.name || t.track_name || 'Unknown Track',
+            artists: artists,
+            duration_ms: t.duration_ms || 0,
+            album: album,
+        };
+    });
+
+    const virtualPlaylistId = `wing_it_${Date.now()}`;
+
+    // Store wing_it flag BEFORE opening the modal
+    youtubePlaylistStates[virtualPlaylistId] = {
+        wing_it: true,
+        tracks: formattedTracks,
+    };
+
+    await openDownloadMissingModalForYouTube(virtualPlaylistId, `⚡ ${playlistName}`, formattedTracks);
+
+    // Pre-check the Force Download toggle
+    setTimeout(() => {
+        const forceToggle = document.getElementById(`force-download-all-${virtualPlaylistId}`);
+        if (forceToggle && !forceToggle.checked) forceToggle.checked = true;
+    }, 800);
+}
+
+function _showWingItChoiceDialog(trackCount, source) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+        const close = val => { overlay.remove(); resolve(val); };
+        overlay.onclick = e => { if (e.target === overlay) close(null); };
+
+        overlay.innerHTML = `
+            <div class="smart-delete-modal">
+                <div class="smart-delete-header">
+                    <h3>⚡ Wing It</h3>
+                    <button class="smart-delete-close">&times;</button>
+                </div>
+                <p class="smart-delete-desc">${trackCount} track${trackCount !== 1 ? 's' : ''} from ${source}. No metadata discovery — uses raw names. Failed tracks won't be added to wishlist.</p>
+                <div class="smart-delete-options">
+                    <button class="smart-delete-option" data-choice="download">
+                        <div class="smart-delete-option-icon">⬇️</div>
+                        <div class="smart-delete-option-info">
+                            <div class="smart-delete-option-title" style="color:#4caf50">Download</div>
+                            <div class="smart-delete-option-desc">Search and download each track using raw names.</div>
+                        </div>
+                    </button>
+                    <button class="smart-delete-option" data-choice="sync">
+                        <div class="smart-delete-option-icon">🔄</div>
+                        <div class="smart-delete-option-info">
+                            <div class="smart-delete-option-title" style="color:#64b5f6">Sync to Server</div>
+                            <div class="smart-delete-option-desc">Mirror playlist and sync to your media server. Best-effort matching.</div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        `;
+
+        overlay.querySelectorAll('.smart-delete-option').forEach(btn => {
+            btn.addEventListener('click', () => close(btn.dataset.choice));
+        });
+        overlay.querySelector('.smart-delete-close').addEventListener('click', () => close(null));
+        const escH = e => { if (e.key === 'Escape') { document.removeEventListener('keydown', escH); close(null); } };
+        document.addEventListener('keydown', escH);
+        document.body.appendChild(overlay);
+    });
+}
+
+async function _wingItSync(tracks, playlistName, source, cardIdentifier = null) {
+    try {
+        showToast('Syncing playlist to server...', 'info');
+
+        // Format tracks for the sync endpoint
+        const syncTracks = tracks.map((t, i) => {
+            let artists = t.artists || [];
+            if (!Array.isArray(artists)) artists = [{ name: String(artists) }];
+            return {
+                id: t.id || t.source_track_id || `wing_it_${i}`,
+                name: t.name || t.track_name || 'Unknown',
+                artists: artists.map(a => typeof a === 'string' ? { name: a } : a),
+                album: typeof t.album === 'object' ? t.album : { name: t.album || t.album_name || '' },
+                duration_ms: t.duration_ms || 0,
+                artist_name: t.artist_name,
+            };
+        });
+
+        const res = await fetch('/api/wing-it/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tracks: syncTracks, playlist_name: playlistName })
+        });
+        const data = await res.json();
+
+        if (data.error) {
+            showToast(`Sync failed: ${data.error}`, 'error');
+            return;
+        }
+
+        // Show inline sync status on the card (same display as normal sync)
+        const playlistId = cardIdentifier ? `discover-lb-playlist-${cardIdentifier}` : null;
+        if (playlistId) {
+            const statusDisplay = document.getElementById(`${playlistId}-sync-status`);
+            if (statusDisplay) statusDisplay.style.display = 'block';
+            // Disable sync/wing-it buttons during sync
+            const syncBtn = document.getElementById(`${playlistId}-sync-btn`);
+            if (syncBtn) { syncBtn.disabled = true; syncBtn.style.opacity = '0.5'; }
+        }
+
+        // Poll for sync progress — update inline display
+        if (data.sync_playlist_id) {
+            _pollWingItSyncProgress(data.sync_playlist_id, playlistName, playlistId);
+        }
+
+    } catch (e) {
+        showToast('Sync failed: ' + e.message, 'error');
+    }
+}
+
+function _pollWingItSyncProgress(syncPlaylistId, playlistName, cardPlaylistId) {
+    const poll = setInterval(async () => {
+        try {
+            const res = await fetch(`/api/sync/status/${syncPlaylistId}`);
+            const data = await res.json();
+
+            // Update inline status display if we have a card
+            if (cardPlaylistId && data.progress) {
+                const p = data.progress;
+                const total = p.total_tracks || p.total || 0;
+                const matched = p.matched_tracks || p.matched || 0;
+                const failed = p.failed_tracks || p.failed || 0;
+                const totalEl = document.getElementById(`${cardPlaylistId}-sync-total`);
+                const matchedEl = document.getElementById(`${cardPlaylistId}-sync-matched`);
+                const failedEl = document.getElementById(`${cardPlaylistId}-sync-failed`);
+                const pctEl = document.getElementById(`${cardPlaylistId}-sync-percentage`);
+                if (totalEl) totalEl.textContent = total;
+                if (matchedEl) matchedEl.textContent = matched;
+                if (failedEl) failedEl.textContent = failed;
+                if (pctEl) pctEl.textContent = total > 0 ? Math.round((matched / total) * 100) : 0;
+            }
+
+            if (data.status === 'finished' || data.status === 'complete' || data.status === 'error') {
+                clearInterval(poll);
+                const matched = data.progress?.matched_tracks || data.progress?.matched || 0;
+                const total = data.progress?.total_tracks || data.progress?.total || 0;
+
+                if (data.status === 'error') {
+                    showToast(`Sync failed: ${data.error || 'Unknown error'}`, 'error');
+                } else {
+                    showToast(`Sync complete — ${matched}/${total} tracks matched to server`, 'success');
+                }
+
+                // Update card status display to show completion
+                if (cardPlaylistId) {
+                    const statusLabel = document.querySelector(`#${cardPlaylistId}-sync-status .sync-status-label span:last-child`);
+                    if (statusLabel) statusLabel.textContent = `Sync complete — ${matched}/${total} matched`;
+                    const syncIcon = document.querySelector(`#${cardPlaylistId}-sync-status .sync-icon`);
+                    if (syncIcon) syncIcon.textContent = '✓';
+                }
+            }
+        } catch (e) { /* ignore poll errors */ }
+    }, 2000);
+
+    // Safety timeout
+    setTimeout(() => clearInterval(poll), 180000);
+}
+
+function _wingItFromModal(urlHash) {
+    // Extract tracks from the discovery modal state
+    const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash] || {};
+    const tracks = state.tracks || state.rawTracks || [];
+    const name = state.playlistName || state.name || 'Playlist';
+    const isTidal = state.is_tidal_playlist;
+    const isLB = state.is_listenbrainz_playlist;
+    const isBeatport = state.is_beatport_playlist;
+    const isDeezer = state.is_deezer_playlist;
+    const source = isLB ? 'ListenBrainz' : isTidal ? 'Tidal' : isDeezer ? 'Deezer' : isBeatport ? 'Beatport' : 'YouTube';
+
+    if (!tracks.length) {
+        showToast('No tracks available for Wing It', 'error');
+        return;
+    }
+
+    // Close the discovery modal first
+    const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
+    if (modal) modal.remove();
+    const overlay = document.getElementById(`youtube-discovery-overlay-${urlHash}`);
+    if (overlay) overlay.remove();
+
+    wingItDownload(tracks, name, source);
+}
+
 async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistName, spotifyTracks, artist = null, album = null) {
     showLoadingOverlay('Loading YouTube playlist...');
     // Check if a process is already active for this virtual playlist
@@ -13636,9 +13875,12 @@ async function startMissingTracksProcess(playlistId) {
         if (selectAllCb) selectAllCb.disabled = true;
 
         // Prepare request body - add album/artist context for artist album downloads
+        const wingItState = youtubePlaylistStates[playlistId] || {};
+        const isWingIt = wingItState.wing_it || false;
         const requestBody = {
             tracks: selectedTracks,
-            force_download_all: forceDownloadAll
+            force_download_all: forceDownloadAll || isWingIt,
+            wing_it: isWingIt,
         };
 
         // If this is an artist album download, use album name and include full context
@@ -30532,18 +30774,12 @@ function getModalActionButtons(urlHash, phase, state = null) {
         case 'discovering':
             // Show start discovery button for fresh playlists
             if (phase === 'fresh') {
+                const wingItBtn = ` <button class="modal-btn wing-it-btn" onclick="_wingItFromModal('${urlHash}')">⚡ Wing It</button>`;
+
                 if (isListenBrainz) {
-                    return `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
-                } else if (isTidal) {
-                    return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
-                } else if (isDeezer) {
-                    return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
-                } else if (isSpotifyPublic) {
-                    return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
-                } else if (isBeatport) {
-                    return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
+                    return `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzDiscovery('${urlHash}')">🔍 Start Discovery</button>${wingItBtn}`;
                 } else {
-                    return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>`;
+                    return `<button class="modal-btn modal-btn-primary" onclick="startYouTubeDiscovery('${urlHash}')">🔍 Start Discovery</button>${wingItBtn}`;
                 }
             } else {
                 // Discovering phase - show progress
@@ -30610,8 +30846,11 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 buttons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Rediscover</button>`;
             }
 
-            if (!buttons) {
-                buttons = `<div class="modal-info">ℹ️ No Spotify matches found. Discovery complete but no tracks could be matched.</div>`;
+            // Wing It button — available in discovered phase for unmatched tracks
+            buttons += ` <button class="modal-btn wing-it-btn" onclick="_wingItFromModal('${urlHash}')">⚡ Wing It</button>`;
+
+            if (!buttons || buttons.trim().startsWith('<button class="modal-btn wing-it-btn"')) {
+                buttons = `<div class="modal-info">ℹ️ No Spotify matches found.</div>` + buttons;
             }
 
             return buttons;
@@ -51855,6 +52094,12 @@ function buildListenBrainzPlaylistsHtml(playlists, tabId) {
                             <span class="button-icon">↓</span>
                             <span class="button-text">Download</span>
                         </button>
+                        <button class="action-button wing-it-btn-sm"
+                                onclick="_wingItFromLBCard('${identifier}', '${escapeForInlineJs(title)}')"
+                                title="Download using raw track names — no metadata discovery">
+                            <span class="button-icon">⚡</span>
+                            <span class="button-text">Wing It</span>
+                        </button>
                         <button class="action-button primary"
                                 id="${playlistId}-sync-btn"
                                 onclick="startListenBrainzPlaylistSync('${identifier}')"
@@ -52123,6 +52368,15 @@ function displayListenBrainzTracks(tracks, playlistId) {
     html += '</div>';
 
     playlistContainer.innerHTML = html;
+}
+
+async function _wingItFromLBCard(identifier, title) {
+    const tracks = listenbrainzTracksCache[identifier];
+    if (!tracks || tracks.length === 0) {
+        showToast('No tracks cached for this playlist. Try opening the discovery modal first.', 'error');
+        return;
+    }
+    wingItDownload(tracks, title, 'ListenBrainz', identifier);
 }
 
 async function openDownloadModalForListenBrainzPlaylist(identifier, title) {

@@ -5169,6 +5169,38 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 .notif-entry-link:hover { opacity: 0.7; }
 
+/* ── Wing It Button ── */
+.wing-it-btn {
+    background: transparent !important;
+    border: 1px solid rgba(255, 183, 77, 0.3) !important;
+    color: #ffb74d !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    padding: 6px 14px !important;
+    border-radius: 8px !important;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.wing-it-btn:hover {
+    background: rgba(255, 183, 77, 0.1) !important;
+    border-color: rgba(255, 183, 77, 0.5) !important;
+}
+
+.wing-it-btn-sm {
+    background: transparent;
+    border: 1px solid rgba(255, 183, 77, 0.25);
+    color: #ffb74d;
+    font-size: 11px;
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.wing-it-btn-sm:hover {
+    background: rgba(255, 183, 77, 0.1);
+    border-color: rgba(255, 183, 77, 0.5);
+}
+
 /* Desktop-Only Optimizations */
 @media (min-width: 769px) {
     .main-container {
