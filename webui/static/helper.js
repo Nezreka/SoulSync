@@ -3401,10 +3401,13 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
-    '2.1': [
+    '2.2': [
         // Newest features first
+        { title: 'Wing It Mode',                                desc: 'Download or sync playlists without metadata discovery — uses raw track names directly. Great for obscure tracks not on Spotify/iTunes' },
         { title: 'Redesigned Notifications',                    desc: 'Compact pill toasts, notification bell with unread badge, history panel with last 50 notifications and Learn More links' },
         { title: 'Track Redownload & Source Info',              desc: 'Fix mismatched downloads — search all metadata and download sources in columns, pick the right version, auto-replace. Source Info shows where tracks came from with blacklist option', page: 'library' },
+        { title: 'Fix Hybrid Download Mode',                   desc: 'Hybrid mode now tries fallback sources when primary source results all fail quality filtering (#235)' },
+        { title: 'Fix Discovery Progress Display',              desc: 'Discovery modals (YouTube, Tidal, ListenBrainz, Beatport) now show live progress instead of staying on Pending' },
         { title: 'Spotify API Rate Limit Improvements',       desc: 'Cached get_artist_albums, eliminated duplicate search calls, auth probe reduced 66%, enrichment workers auto-pause during downloads' },
         { title: 'Server Playlist Manager',                   desc: 'Compare source playlists against your media server — find missing tracks, swap wrong matches, remove extras with a dual-column editor', page: 'sync' },
         { title: 'Sync History Dashboard',                    desc: 'Dashboard shows recent syncs as cards — click for per-track match details with confidence scores and album art' },
@@ -3454,12 +3457,12 @@ const WHATS_NEW = {
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '2.1';
+    return btn ? btn.textContent.trim().replace('v', '') : '2.2';
 }
 
 function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
-    return versions[0] || '2.1';
+    return versions[0] || '2.2';
 }
 
 function openWhatsNew() {
