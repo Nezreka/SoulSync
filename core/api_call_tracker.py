@@ -22,6 +22,7 @@ RATE_LIMITS = {
     'audiodb': 30,        # MIN_API_INTERVAL=2.0s → ~30/min
     'tidal': 120,         # MIN_API_INTERVAL=0.5s → ~120/min
     'qobuz': 60,          # Variable throttle, ~60/min estimate
+    'discogs': 60,        # MIN_API_INTERVAL=1.0s with auth → ~60/min
 }
 
 # Display names for UI
@@ -35,12 +36,13 @@ SERVICE_LABELS = {
     'audiodb': 'AudioDB',
     'tidal': 'Tidal',
     'qobuz': 'Qobuz',
+    'discogs': 'Discogs',
 }
 
 # Display order
 SERVICE_ORDER = [
     'spotify', 'itunes', 'deezer', 'lastfm', 'genius',
-    'musicbrainz', 'audiodb', 'tidal', 'qobuz',
+    'musicbrainz', 'audiodb', 'tidal', 'qobuz', 'discogs',
 ]
 
 
