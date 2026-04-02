@@ -8269,7 +8269,7 @@ function initializeSearchModeToggle() {
                                 newBtn.addEventListener('click', (e) => {
                                     e.stopPropagation();
                                     playLibraryTrack(
-                                        { id: trackInfo.track_id, title: trackInfo.title, file_path: trackInfo.file_path },
+                                        { id: trackInfo.track_id, title: trackInfo.title, file_path: trackInfo.file_path, _stats_image: trackInfo.album_thumb_url || null },
                                         trackInfo.album_title || '',
                                         trackInfo.artist_name || ''
                                     );
@@ -16921,7 +16921,6 @@ function _gsUpdateVisibility() {
 }
 
 function _gsDeactivate() {
-    console.log('[GSearch] _gsDeactivate called', new Error().stack.split('\n')[2]?.trim());
     const bar = document.getElementById('gsearch-bar');
     const shortcut = document.getElementById('gsearch-shortcut');
     if (bar) bar.classList.remove('active');
@@ -17243,13 +17242,14 @@ async function _gsLibraryCheck() {
                     const playBtn = el.querySelector('.gsearch-play-btn');
                     if (playBtn) {
                         const newBtn = playBtn.cloneNode(true);
+                        newBtn.removeAttribute('onclick');
                         newBtn.title = 'Play from library';
                         newBtn.style.background = 'rgba(76,175,80,0.15)';
                         newBtn.style.color = '#4caf50';
                         newBtn.addEventListener('click', e => {
                             e.stopPropagation();
                             playLibraryTrack(
-                                { id: tr.track_id, title: tr.title, file_path: tr.file_path },
+                                { id: tr.track_id, title: tr.title, file_path: tr.file_path, _stats_image: tr.album_thumb_url || null },
                                 tr.album_title || '',
                                 tr.artist_name || ''
                             );
