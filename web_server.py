@@ -32,7 +32,7 @@ from config.settings import config_manager
 logger = get_logger("web_server")
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-SOULSYNC_VERSION = "2.1"
+SOULSYNC_VERSION = "2.2"
 
 # Dedicated source reuse logger — writes to logs/source_reuse.log
 import logging as _logging
@@ -20014,6 +20014,20 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "⚡ Wing It — Download or Sync Without Discovery",
+                "description": "Bypass metadata discovery and use raw track names directly",
+                "features": [
+                    "• Wing It button on all discovery modals and ListenBrainz Discover page cards",
+                    "• Choose Download or Sync from a compact dropdown — no extra dialogs",
+                    "• Download: sends raw artist/title to the download engine with full post-processing",
+                    "• Sync: creates playlist on media server by matching raw names against library",
+                    "• Failed tracks are NOT added to wishlist — clean wing-it behavior",
+                    "• Live sync progress displayed inline just like normal sync",
+                    "• Download creates a bubble on the dashboard for progress tracking"
+                ],
+                "usage_note": "Click the ⚡ Wing It button next to Start Discovery or Download Missing in any playlist modal."
+            },
             {
                 "title": "🔔 Redesigned Notification System",
                 "description": "Modern compact toasts with notification history and bell button",
