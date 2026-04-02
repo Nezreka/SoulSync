@@ -93,6 +93,7 @@ from core.matching_engine import MusicMatchingEngine
 from beatport_unified_scraper import BeatportUnifiedScraper
 from core.musicbrainz_worker import MusicBrainzWorker
 from core.audiodb_worker import AudioDBWorker
+from core.discogs_worker import DiscogsWorker
 from core.deezer_worker import DeezerWorker
 from core.spotify_worker import SpotifyWorker
 from core.itunes_worker import iTunesWorker
@@ -4069,6 +4070,7 @@ def _get_enrichment_status():
         ('lastfm', 'Last.fm', lambda: lastfm_worker),
         ('genius', 'Genius', lambda: genius_worker),
         ('audiodb', 'AudioDB', lambda: audiodb_worker),
+        ('discogs', 'Discogs', lambda: discogs_worker),
     ]
 
     # Config-based "configured" checks for services that need API keys/credentials
@@ -22078,7 +22080,7 @@ def _pause_workers_for_scan():
     _workers_paused_by_scan = set()
     workers = {
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
-        'deezer': deezer_worker, 'audiodb': audiodb_worker, 'lastfm': lastfm_worker,
+        'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
         'repair': repair_worker, 'soulid': soulid_worker,
     }
@@ -22094,7 +22096,7 @@ def _resume_workers_after_scan():
     global _workers_paused_by_scan
     workers = {
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
-        'deezer': deezer_worker, 'audiodb': audiodb_worker, 'lastfm': lastfm_worker,
+        'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
         'repair': repair_worker, 'soulid': soulid_worker,
     }
@@ -45685,6 +45687,64 @@ def audiodb_resume():
 # END AUDIODB INTEGRATION
 # ================================================================================================
 
+# --- Discogs Worker Initialization ---
+discogs_worker = None
+try:
+    from core.discogs_worker import DiscogsWorker
+    from database.music_database import MusicDatabase
+    discogs_db = MusicDatabase()
+    discogs_worker = DiscogsWorker(database=discogs_db)
+    discogs_worker.start()
+    if config_manager.get('discogs_enrichment_paused', False):
+        discogs_worker.pause()
+        print("✅ Discogs enrichment worker initialized (paused — restored from config)")
+    else:
+        print("✅ Discogs enrichment worker initialized and started")
+except Exception as e:
+    print(f"⚠️ Discogs worker initialization failed: {e}")
+    discogs_worker = None
+
+# --- Discogs API Endpoints ---
+
+@app.route('/api/discogs/status', methods=['GET'])
+def discogs_status():
+    """Get Discogs enrichment status for UI polling"""
+    try:
+        if discogs_worker is None:
+            return jsonify({
+                'enabled': False, 'running': False, 'paused': False,
+                'current_item': None,
+                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
+            }), 200
+        return jsonify(discogs_worker.get_stats()), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/discogs/pause', methods=['POST'])
+def discogs_pause():
+    """Pause Discogs enrichment worker"""
+    try:
+        if discogs_worker is None:
+            return jsonify({'error': 'Discogs worker not initialized'}), 400
+        discogs_worker.pause()
+        config_manager.set('discogs_enrichment_paused', True)
+        logger.info("Discogs worker paused via UI")
+        return jsonify({'status': 'paused'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/discogs/resume', methods=['POST'])
+def discogs_resume():
+    """Resume Discogs enrichment worker"""
+    try:
+        if discogs_worker is None:
+            return jsonify({'error': 'Discogs worker not initialized'}), 400
+        discogs_worker.resume()
+        config_manager.set('discogs_enrichment_paused', False)
+        logger.info("Discogs worker resumed via UI")
+        return jsonify({'status': 'running'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # ================================================================================================
 # DEEZER ENRICHMENT INTEGRATION
@@ -48378,7 +48438,7 @@ def _emit_rate_monitor_loop():
     _enrichment_key_map = {
         'spotify': 'spotify_enrichment', 'itunes': 'itunes_enrichment',
         'deezer': 'deezer_enrichment', 'lastfm': 'lastfm', 'genius': 'genius',
-        'musicbrainz': 'musicbrainz', 'audiodb': 'audiodb',
+        'musicbrainz': 'musicbrainz', 'audiodb': 'audiodb', 'discogs': 'discogs',
         'tidal': 'tidal_enrichment', 'qobuz': 'qobuz_enrichment',
     }
 
@@ -48431,6 +48491,7 @@ def _emit_enrichment_status_loop():
     workers = {
         'musicbrainz': lambda: mb_worker,
         'audiodb': lambda: audiodb_worker,
+        'discogs': lambda: discogs_worker,
         'deezer': lambda: deezer_worker,
         'spotify-enrichment': lambda: spotify_enrichment_worker,
         'itunes-enrichment': lambda: itunes_enrichment_worker,

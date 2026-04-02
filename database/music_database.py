@@ -336,6 +336,9 @@ class MusicDatabase:
             # Add Tidal and Qobuz enrichment columns (migration)
             self._add_tidal_qobuz_enrichment_columns(cursor)
 
+            # Add Discogs enrichment columns (migration)
+            self._add_discogs_columns(cursor)
+
             # Bubble snapshots table for persisting UI state across page refreshes
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bubble_snapshots (
@@ -1599,6 +1602,46 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding AudioDB columns: {e}")
             # Don't raise - this is a migration, database can still function
+
+    def _add_discogs_columns(self, cursor):
+        """Add Discogs enrichment columns to artists and albums tables."""
+        try:
+            # --- Artists ---
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+
+            for col in ['discogs_id', 'discogs_match_status', 'discogs_bio', 'discogs_members', 'discogs_urls']:
+                if col not in artists_columns:
+                    col_type = 'TIMESTAMP' if col.endswith('_attempted') else 'TEXT'
+                    cursor.execute(f"ALTER TABLE artists ADD COLUMN {col} {col_type}")
+            if 'discogs_last_attempted' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN discogs_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_discogs_id ON artists (discogs_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_discogs_status ON artists (discogs_match_status)")
+
+            # --- Albums ---
+            cursor.execute("PRAGMA table_info(albums)")
+            albums_columns = [column[1] for column in cursor.fetchall()]
+
+            for col in ['discogs_id', 'discogs_match_status', 'discogs_genres', 'discogs_styles',
+                         'discogs_label', 'discogs_catno', 'discogs_country']:
+                if col not in albums_columns:
+                    cursor.execute(f"ALTER TABLE albums ADD COLUMN {col} TEXT")
+            if 'discogs_last_attempted' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN discogs_last_attempted TIMESTAMP")
+            if 'discogs_rating' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN discogs_rating REAL")
+            if 'discogs_rating_count' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN discogs_rating_count INTEGER")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_discogs_id ON albums (discogs_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_discogs_status ON albums (discogs_match_status)")
+
+            logger.info("Discogs enrichment columns added/verified")
+
+        except Exception as e:
+            logger.error(f"Error adding Discogs columns: {e}")
 
     def _add_deezer_columns(self, cursor):
         """Add Deezer tracking + generic metadata columns for enrichment (artists, albums, tracks)"""

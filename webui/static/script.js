@@ -341,6 +341,7 @@ function initializeWebSocket() {
     // Phase 3 event listeners (enrichment sidebar workers)
     socket.on('enrichment:musicbrainz', (data) => updateMusicBrainzStatusFromData(data));
     socket.on('enrichment:audiodb', (data) => updateAudioDBStatusFromData(data));
+    socket.on('enrichment:discogs', (data) => updateDiscogsStatusFromData(data));
     socket.on('enrichment:deezer', (data) => updateDeezerStatusFromData(data));
     socket.on('enrichment:spotify-enrichment', (data) => updateSpotifyEnrichmentStatusFromData(data));
     socket.on('enrichment:itunes-enrichment', (data) => updateiTunesEnrichmentStatusFromData(data));
@@ -57061,6 +57062,11 @@ function updateAudioDBStatusFromData(data) {
 
         tooltipProgress.textContent = progressText;
     }
+}
+
+function updateDiscogsStatusFromData(data) {
+    // Discogs status is handled by the rate monitor cards — no standalone button
+    // This handler exists for WebSocket event compatibility
 }
 
 /**
