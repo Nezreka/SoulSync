@@ -11464,7 +11464,8 @@ async function openDownloadMissingModal(playlistId) {
 
 async function autoSavePlaylistM3U(playlistId) {
     /**
-     * Automatically save M3U file server-side for playlist and album modals.
+     * Automatically save M3U file server-side for playlist modals only.
+     * Albums are skipped — they're already grouped by media servers.
      * The server checks the m3u_export.enabled setting before writing.
      */
     const process = activeDownloadProcesses[playlistId];
@@ -11478,9 +11479,10 @@ async function autoSavePlaylistM3U(playlistId) {
     const m3uContent = generateM3UContent(playlistId);
     if (!m3uContent) return;
 
-    // Determine context type and gather metadata
-    const dataContext = modal.querySelector('.download-missing-modal-content')?.getAttribute('data-context');
-    const isAlbum = dataContext === 'artist_album';
+    // Skip M3U for albums — albums are already naturally grouped in media servers
+    const albumPrefixes = ['artist_album_', 'discover_album_', 'enhanced_search_album_', 'seasonal_album_', 'spotify_library_', 'beatport_release_', 'discover_cache_'];
+    if (albumPrefixes.some(p => playlistId.startsWith(p))) return;
+
     const playlistName = process.playlist?.name || process.playlistName || 'Playlist';
     const artistName = process.artist?.name || '';
     const albumName = process.album?.name || '';
@@ -11494,7 +11496,7 @@ async function autoSavePlaylistM3U(playlistId) {
             body: JSON.stringify({
                 playlist_name: playlistName,
                 m3u_content: m3uContent,
-                context_type: isAlbum ? 'album' : 'playlist',
+                context_type: 'playlist',
                 artist_name: artistName,
                 album_name: albumName,
                 year: year
@@ -11502,7 +11504,7 @@ async function autoSavePlaylistM3U(playlistId) {
         });
 
         if (response.ok) {
-            console.log(`✅ Auto-saved M3U for ${isAlbum ? 'album' : 'playlist'}: ${playlistName}`);
+            console.log(`✅ Auto-saved M3U for playlist: ${playlistName}`);
         } else {
             console.warn(`⚠️ Failed to auto-save M3U for ${playlistName}`);
         }
@@ -11623,9 +11625,8 @@ async function exportPlaylistAsM3U(playlistId) {
     URL.revokeObjectURL(url);
 
     // Also save server-side to the relevant folder (force=true bypasses setting check)
-    const modal = document.getElementById(`download-missing-modal-${playlistId}`);
-    const dataContext = modal?.querySelector('.download-missing-modal-content')?.getAttribute('data-context');
-    const isAlbum = dataContext === 'artist_album';
+    const albumPrefixes = ['artist_album_', 'discover_album_', 'enhanced_search_album_', 'seasonal_album_', 'spotify_library_', 'beatport_release_', 'discover_cache_'];
+    const isAlbumExport = albumPrefixes.some(p => playlistId.startsWith(p));
 
     try {
         const releaseDate = process.album?.release_date || '';
@@ -11636,7 +11637,7 @@ async function exportPlaylistAsM3U(playlistId) {
             body: JSON.stringify({
                 playlist_name: playlistName,
                 m3u_content: m3uContent,
-                context_type: isAlbum ? 'album' : 'playlist',
+                context_type: isAlbumExport ? 'album' : 'playlist',
                 artist_name: process.artist?.name || '',
                 album_name: process.album?.name || '',
                 year: year,
