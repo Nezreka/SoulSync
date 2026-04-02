@@ -11805,11 +11805,11 @@ function _pollWingItSyncProgress(syncPlaylistId, playlistName, cardPlaylistId) {
     setTimeout(() => clearInterval(poll), 180000);
 }
 
-function _wingItFromModal(urlHash) {
-    // Extract tracks from the discovery modal state
+async function _wingItFromModal(urlHash) {
+    // Extract tracks from the discovery modal state — tracks can be in various locations
     const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash] || {};
-    const tracks = state.tracks || state.rawTracks || [];
-    const name = state.playlistName || state.name || 'Playlist';
+    const tracks = state.tracks || state.rawTracks || state.playlist?.tracks || [];
+    const name = state.playlistName || state.name || state.playlist?.name || 'Playlist';
     const isTidal = state.is_tidal_playlist;
     const isLB = state.is_listenbrainz_playlist;
     const isBeatport = state.is_beatport_playlist;
@@ -11821,7 +11821,56 @@ function _wingItFromModal(urlHash) {
         return;
     }
 
-    // Close the discovery modal first
+    const choice = await _showWingItChoiceDialog(tracks.length, source);
+    if (!choice) return;
+
+    if (choice === 'sync') {
+        // Sync inline — keep modal open, show progress in modal
+        showToast('Starting Wing It sync...', 'info');
+        updateYouTubeModalButtons(urlHash, 'syncing');
+
+        try {
+            // Format and send sync request
+            const syncTracks = tracks.map((t, i) => {
+                let artists = t.artists || [];
+                if (!Array.isArray(artists)) artists = [{ name: String(artists) }];
+                return {
+                    id: t.id || t.source_track_id || `wing_it_${i}`,
+                    name: t.name || t.track_name || 'Unknown',
+                    artists: artists.map(a => typeof a === 'string' ? { name: a } : a),
+                    album: typeof t.album === 'object' ? t.album : { name: t.album || t.album_name || '' },
+                    duration_ms: t.duration_ms || 0,
+                };
+            });
+
+            const res = await fetch('/api/wing-it/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tracks: syncTracks, playlist_name: name })
+            });
+            const data = await res.json();
+
+            if (data.error) {
+                showToast(`Sync failed: ${data.error}`, 'error');
+                updateYouTubeModalButtons(urlHash, 'discovered');
+                return;
+            }
+
+            // Use the same sync polling as normal sync — works for any source
+            if (isLB) {
+                if (state) state.syncPlaylistId = data.sync_playlist_id;
+                startListenBrainzSyncPolling(urlHash, data.sync_playlist_id);
+            } else {
+                startYouTubeSyncPolling(urlHash, data.sync_playlist_id);
+            }
+        } catch (e) {
+            showToast('Sync failed: ' + e.message, 'error');
+            updateYouTubeModalButtons(urlHash, 'discovered');
+        }
+        return;
+    }
+
+    // choice === 'download' — close modal and open download modal
     const modal = document.getElementById(`youtube-discovery-modal-${urlHash}`);
     if (modal) modal.remove();
     const overlay = document.getElementById(`youtube-discovery-overlay-${urlHash}`);
@@ -30970,6 +31019,9 @@ function getModalActionButtons(urlHash, phase, state = null) {
                 syncCompleteButtons += `<button class="modal-btn modal-btn-secondary" onclick="resetYouTubePlaylist('${urlHash}')">🔄 Rediscover</button>`;
             }
 
+            // Wing It button
+            syncCompleteButtons += ` <button class="modal-btn wing-it-btn" onclick="_wingItFromModal('${urlHash}')">⚡ Wing It</button>`;
+
             return syncCompleteButtons;
 
         case 'download_complete':
@@ -31617,16 +31669,20 @@ function updateYouTubeCardSyncProgress(urlHash, progress) {
 }
 
 function updateYouTubeModalSyncProgress(urlHash, progress) {
-    const statusDisplay = document.getElementById(`youtube-sync-status-${urlHash}`);
+    // Try all source-specific element ID prefixes
+    const prefixes = ['youtube', 'listenbrainz', 'tidal', 'deezer', 'spotify-public', 'beatport'];
+    let statusDisplay = null;
+    let prefix = 'youtube';
+    for (const p of prefixes) {
+        statusDisplay = document.getElementById(`${p}-sync-status-${urlHash}`);
+        if (statusDisplay) { prefix = p; break; }
+    }
     if (!statusDisplay || !progress) return;
 
-    console.log(`📊 Updating YouTube modal sync progress for ${urlHash}:`, progress);
-
-    // Update individual counters exactly like Spotify sync
-    const totalEl = document.getElementById(`youtube-total-${urlHash}`);
-    const matchedEl = document.getElementById(`youtube-matched-${urlHash}`);
-    const failedEl = document.getElementById(`youtube-failed-${urlHash}`);
-    const percentageEl = document.getElementById(`youtube-percentage-${urlHash}`);
+    const totalEl = document.getElementById(`${prefix}-total-${urlHash}`);
+    const matchedEl = document.getElementById(`${prefix}-matched-${urlHash}`);
+    const failedEl = document.getElementById(`${prefix}-failed-${urlHash}`);
+    const percentageEl = document.getElementById(`${prefix}-percentage-${urlHash}`);
 
     const total = progress.total_tracks || 0;
     const matched = progress.matched_tracks || 0;
