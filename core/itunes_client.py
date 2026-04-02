@@ -29,7 +29,10 @@ def rate_limited(func):
                 time.sleep(sleep_time)
             
             _last_api_call_time = time.time()
-            
+
+        from core.api_call_tracker import api_call_tracker
+        api_call_tracker.record_call('itunes')
+
         try:
             result = func(*args, **kwargs)
             return result
