@@ -20121,7 +20121,8 @@ def get_version_info():
                     "• Genius artist search returns multiple results for manual matching (#233)",
                     "• Genius API interval increased from 1.5s to 2s to reduce 429 rate limits",
                     "• MusicBrainz cache now visible in Cache Browser with browse, clear, and clear-failed-only options",
-                    "• Cache Health popup shows MusicBrainz alongside other sources, 'Failed Lookups' clarified as MB-specific"
+                    "• Cache Health popup shows MusicBrainz alongside other sources, 'Failed Lookups' clarified as MB-specific",
+                    "• Block artists from discovery — hover any track in a discovery playlist and click ✕ to permanently exclude that artist"
                 ]
             },
             {
@@ -38368,6 +38369,11 @@ def get_discover_hero():
 
         print(f"[Discover Hero] Found {len(valid_artists)} valid artists for source: {active_source}")
 
+        # Filter out blacklisted artists
+        blacklisted = database.get_discovery_blacklist_names()
+        if blacklisted:
+            valid_artists = [a for a in valid_artists if a.similar_artist_name.lower() not in blacklisted]
+
         # Take top 10 (already ordered by least-recently-featured, then quality)
         similar_artists = valid_artists[:10]
 
@@ -38766,6 +38772,11 @@ def get_discover_recent_releases():
                                 pass
                 except Exception:
                     pass
+
+        # Filter out blacklisted artists
+        blacklisted = database.get_discovery_blacklist_names()
+        if blacklisted:
+            albums = [a for a in albums if a.get('artist_name', '').lower() not in blacklisted]
 
         return jsonify({"success": True, "albums": albums, "source": active_source})
 
@@ -39664,6 +39675,48 @@ def get_familiar_favorites():
 
     except Exception as e:
         print(f"Error getting familiar favorites playlist: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/artist-blacklist', methods=['GET'])
+def get_discovery_artist_blacklist():
+    """Get all blacklisted discovery artists."""
+    try:
+        database = get_database()
+        entries = database.get_discovery_blacklist()
+        return jsonify({"success": True, "entries": entries})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/artist-blacklist', methods=['POST'])
+def add_discovery_artist_blacklist():
+    """Block an artist from appearing in discovery results."""
+    try:
+        data = request.get_json() or {}
+        artist_name = data.get('artist_name', '').strip()
+        if not artist_name:
+            return jsonify({"success": False, "error": "artist_name is required"}), 400
+
+        database = get_database()
+        success = database.add_to_discovery_blacklist(
+            artist_name=artist_name,
+            spotify_id=data.get('spotify_artist_id'),
+            itunes_id=data.get('itunes_artist_id'),
+            deezer_id=data.get('deezer_artist_id'),
+        )
+        if success:
+            logger.info(f"Blocked artist from discovery: {artist_name}")
+        return jsonify({"success": success})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/discover/artist-blacklist/<int:blacklist_id>', methods=['DELETE'])
+def remove_discovery_artist_blacklist(blacklist_id):
+    """Unblock an artist from discovery."""
+    try:
+        database = get_database()
+        success = database.remove_from_discovery_blacklist(blacklist_id)
+        return jsonify({"success": success})
+    except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/build-playlist/search-artists', methods=['GET'])
