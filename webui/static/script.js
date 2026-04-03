@@ -3362,15 +3362,19 @@ function updateMediaScanFromData(data) {
     }
 }
 
+let _wishlistAutoProcessingNotified = false;
 function updateWishlistStatsFromData(data) {
-    // Auto-processing detection: close modal and notify
+    // Auto-processing detection: close modal and notify (once only)
     if (data.is_auto_processing) {
-        if (typeof closeWishlistOverviewModal === 'function') {
+        if (!_wishlistAutoProcessingNotified && typeof closeWishlistOverviewModal === 'function') {
             closeWishlistOverviewModal();
             showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
+            _wishlistAutoProcessingNotified = true;
         }
         return;
     }
+    // Reset flag when auto-processing ends
+    _wishlistAutoProcessingNotified = false;
     // Store latest stats for countdown timer refresh
     _lastWishlistStats = data;
 }
@@ -5361,7 +5365,7 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$disc', '$year', '$quality'],
+        album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$disc', '$discnum', '$year', '$quality'],
         single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$year', '$quality'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality']
     };
@@ -12891,8 +12895,11 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
             if (socketConnected && _lastWishlistStats) {
                 const data = _lastWishlistStats;
                 if (data.is_auto_processing) {
-                    closeWishlistOverviewModal();
-                    showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
+                    if (!_wishlistAutoProcessingNotified) {
+                        closeWishlistOverviewModal();
+                        showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
+                        _wishlistAutoProcessingNotified = true;
+                    }
                     return;
                 }
                 if (remainingSeconds <= 0) {
@@ -12908,11 +12915,14 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
                 const response = await fetch('/api/wishlist/stats');
                 const data = await response.json();
 
-                // AUTO-CLOSE DETECTION: If auto-processing started, close modal and notify user
+                // AUTO-CLOSE DETECTION: If auto-processing started, close modal and notify user (once)
                 if (data.is_auto_processing) {
-                    console.log('🤖 [Wishlist] Auto-processing detected, closing overview modal');
-                    closeWishlistOverviewModal();
-                    showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
+                    if (!_wishlistAutoProcessingNotified) {
+                        console.log('🤖 [Wishlist] Auto-processing detected, closing overview modal');
+                        closeWishlistOverviewModal();
+                        showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
+                        _wishlistAutoProcessingNotified = true;
+                    }
                     return; // Exit interval
                 }
 
