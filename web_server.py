@@ -36599,10 +36599,47 @@ def add_to_watchlist():
             return jsonify({"success": False, "error": "Missing artist_id or artist_name"}), 400
 
         database = get_database()
-        # Detect ID type and determine source
+        # Detect source from ID — check if it's a library DB ID first
         is_numeric_id = artist_id.isdigit()
-        fallback_source = _get_metadata_fallback_source()
-        source = fallback_source if is_numeric_id else 'spotify'
+        source = None
+        if is_numeric_id:
+            # Could be a library DB ID, iTunes ID, Deezer ID, or Discogs ID
+            # Check if this is a library DB artist and use their actual source IDs
+            try:
+                conn = database._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT spotify_artist_id, itunes_artist_id, deezer_id, discogs_id
+                    FROM artists WHERE id = ? LIMIT 1
+                """, (artist_id,))
+                row = cursor.fetchone()
+                conn.close()
+                if row:
+                    # Library artist — use the best available source ID
+                    fallback = _get_metadata_fallback_source()
+                    if fallback == 'discogs' and row['discogs_id']:
+                        artist_id = row['discogs_id']
+                        source = 'discogs'
+                    elif fallback == 'deezer' and row['deezer_id']:
+                        artist_id = row['deezer_id']
+                        source = 'deezer'
+                    elif row['spotify_artist_id']:
+                        artist_id = row['spotify_artist_id']
+                        source = 'spotify'
+                    elif row['itunes_artist_id']:
+                        artist_id = row['itunes_artist_id']
+                        source = 'itunes'
+                    elif row['deezer_id']:
+                        artist_id = row['deezer_id']
+                        source = 'deezer'
+                    elif row['discogs_id']:
+                        artist_id = row['discogs_id']
+                        source = 'discogs'
+            except Exception:
+                pass
+        if not source:
+            fallback_source = _get_metadata_fallback_source()
+            source = fallback_source if is_numeric_id else 'spotify'
         success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=source)
 
         if success:
@@ -36612,7 +36649,15 @@ def add_to_watchlist():
                 if is_numeric_id:
                     # For numeric IDs, fetch image from the configured fallback source
                     try:
-                        if fallback_source == 'deezer':
+                        if source == 'discogs':
+                            # Discogs: fetch artist image from API
+                            from core.discogs_client import DiscogsClient
+                            dc = DiscogsClient()
+                            dc_data = dc.get_artist(artist_id)
+                            if dc_data:
+                                image_url = dc_data.get('image_url')
+                                print(f"🖼️ Discogs artist image: {image_url[:60] if image_url else 'None'}")
+                        elif source == 'deezer' or fallback_source == 'deezer':
                             # Deezer: fetch artist image directly from API
                             dz_resp = requests.get(f'https://api.deezer.com/artist/{artist_id}', timeout=5)
                             if dz_resp.ok:
@@ -37584,9 +37629,9 @@ def watchlist_artist_config(artist_id):
                 cur2.execute("""
                     SELECT banner_url, summary, style, mood, label, genres
                     FROM artists
-                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
                     LIMIT 1
-                """, (artist_id, artist_id, artist_id))
+                """, (artist_id, artist_id, artist_id, artist_id))
                 lib_row = cur2.fetchone()
                 if lib_row:
                     artist_info['banner_url'] = lib_row[0]
@@ -37679,8 +37724,8 @@ def watchlist_artist_config(artist_id):
             # Check if lookback_days changed — if so, clear last_scan_timestamp to force rescan
             cursor.execute("""
                 SELECT lookback_days FROM watchlist_artists
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
-            """, (artist_id, artist_id, artist_id))
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
+            """, (artist_id, artist_id, artist_id, artist_id))
             old_row = cursor.fetchone()
             old_lookback = old_row[0] if old_row else None
             lookback_changed = old_lookback != lookback_days
@@ -37692,11 +37737,11 @@ def watchlist_artist_config(artist_id):
                     include_instrumentals = ?, lookback_days = ?,
                     last_scan_timestamp = CASE WHEN ? THEN NULL ELSE last_scan_timestamp END,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
                   int(include_instrumentals), lookback_days, lookback_changed,
-                  artist_id, artist_id, artist_id))
+                  artist_id, artist_id, artist_id, artist_id))
             conn.commit()
 
             if cursor.rowcount == 0:
@@ -37752,8 +37797,8 @@ def watchlist_artist_link_provider(artist_id):
         cursor.execute("""
             SELECT id, artist_name, spotify_artist_id, itunes_artist_id
             FROM watchlist_artists
-            WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
-        """, (artist_id, artist_id, artist_id))
+            WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
+        """, (artist_id, artist_id, artist_id, artist_id))
         row = cursor.fetchone()
 
         if not row:
