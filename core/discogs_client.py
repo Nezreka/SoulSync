@@ -12,6 +12,7 @@ import re
 import time
 import threading
 import requests
+from core.metadata_cache import get_metadata_cache
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from functools import wraps
@@ -372,6 +373,18 @@ class DiscogsClient:
 
     def search_artists(self, query: str, limit: int = 10) -> List[Artist]:
         """Search for artists on Discogs."""
+        cache = get_metadata_cache()
+        cached_results = cache.get_search_results('discogs', 'artist', query, limit)
+        if cached_results is not None:
+            artists = []
+            for raw in cached_results:
+                try:
+                    artists.append(Artist.from_discogs_artist(raw))
+                except Exception:
+                    pass
+            if artists:
+                return artists
+
         data = self._api_get('/database/search', {
             'q': query, 'type': 'artist', 'per_page': min(limit, 50),
         })
@@ -379,15 +392,36 @@ class DiscogsClient:
             return []
 
         artists = []
+        raw_items = []
         for item in data['results'][:limit]:
             try:
                 artists.append(Artist.from_discogs_artist(item))
+                raw_items.append(item)
             except Exception as e:
                 logger.debug(f"Error parsing Discogs artist: {e}")
+
+        if raw_items:
+            entries = [(str(r.get('id', '')), r) for r in raw_items if r.get('id')]
+            if entries:
+                cache.store_entities_bulk('discogs', 'artist', entries)
+                cache.store_search_results('discogs', 'artist', query, limit,
+                                           [str(r.get('id', '')) for r in raw_items if r.get('id')])
         return artists
 
     def search_albums(self, query: str, limit: int = 10) -> List[Album]:
         """Search for releases/albums on Discogs."""
+        cache = get_metadata_cache()
+        cached_results = cache.get_search_results('discogs', 'album', query, limit)
+        if cached_results is not None:
+            albums = []
+            for raw in cached_results:
+                try:
+                    albums.append(Album.from_discogs_release(raw))
+                except Exception:
+                    pass
+            if albums:
+                return albums
+
         data = self._api_get('/database/search', {
             'q': query, 'type': 'release', 'per_page': min(limit, 50),
         })
@@ -395,20 +429,28 @@ class DiscogsClient:
             return []
 
         albums = []
+        raw_items = []
         seen_titles = set()
         for item in data['results'][:limit * 2]:
             try:
                 album = Album.from_discogs_release(item)
-                # Deduplicate by title+artist (Discogs has many pressings of same album)
                 dedup_key = f"{album.name.lower()}|{album.artists[0].lower() if album.artists else ''}"
                 if dedup_key in seen_titles:
                     continue
                 seen_titles.add(dedup_key)
                 albums.append(album)
+                raw_items.append(item)
                 if len(albums) >= limit:
                     break
             except Exception as e:
                 logger.debug(f"Error parsing Discogs release: {e}")
+
+        if raw_items:
+            entries = [(str(r.get('id', '')), r) for r in raw_items if r.get('id')]
+            if entries:
+                cache.store_entities_bulk('discogs', 'album', entries, skip_if_exists=True)
+                cache.store_search_results('discogs', 'album', query, limit,
+                                           [str(r.get('id', '')) for r in raw_items if r.get('id')])
         return albums
 
     def search_tracks(self, query: str, limit: int = 10) -> List[Track]:
@@ -423,16 +465,23 @@ class DiscogsClient:
 
     def get_artist(self, artist_id: str) -> Optional[Dict[str, Any]]:
         """Get artist details by Discogs ID."""
-        data = self._api_get(f'/artists/{artist_id}')
-        if not data:
-            return None
+        cache = get_metadata_cache()
+        cached = cache.get_entity('discogs', 'artist', artist_id)
+        if cached and cached.get('name'):
+            # Rebuild normalized result from cached raw data
+            data = cached
+        else:
+            data = self._api_get(f'/artists/{artist_id}')
+            if not data:
+                return None
+            cache.store_entity('discogs', 'artist', artist_id, data)
 
         artist = Artist.from_discogs_artist(data)
 
         # Get profile/bio
         profile = data.get('profile', '')
 
-        return {
+        result = {
             'id': artist.id,
             'name': artist.name,
             'image_url': artist.image_url,
@@ -444,15 +493,22 @@ class DiscogsClient:
             'images': [{'url': artist.image_url}] if artist.image_url else [],
         }
 
+        return result
+
     def get_album(self, release_id: str, include_tracks: bool = True) -> Optional[Dict[str, Any]]:
         """Get release/album details by Discogs ID. Tries master first, falls back to release."""
-        # Try as master first (artist discography returns master IDs)
-        data = self._api_get(f'/masters/{release_id}')
-        if not data or not data.get('title'):
-            # Fall back to release
-            data = self._api_get(f'/releases/{release_id}')
-        if not data:
-            return None
+        cache = get_metadata_cache()
+        cached = cache.get_entity('discogs', 'album', release_id)
+        if cached and cached.get('title'):
+            data = cached
+        else:
+            # Try as master first (artist discography returns master IDs)
+            data = self._api_get(f'/masters/{release_id}')
+            if not data or not data.get('title'):
+                data = self._api_get(f'/releases/{release_id}')
+            if not data:
+                return None
+            cache.store_entity('discogs', 'album', release_id, data)
 
         album = Album.from_discogs_release(data)
 
@@ -560,10 +616,15 @@ class DiscogsClient:
 
     def get_album_tracks(self, release_id: str) -> Optional[Dict[str, Any]]:
         """Get album tracks by Discogs release or master ID. Returns Spotify-compatible format."""
+        cache = get_metadata_cache()
+        cache_key = f"{release_id}_tracks"
+        cached = cache.get_entity('discogs', 'album', cache_key)
+        if cached:
+            return cached
+
         # Try as master first (master IDs are used in artist discography)
         data = self._api_get(f'/masters/{release_id}')
         if not data or not data.get('tracklist'):
-            # Fall back to release
             data = self._api_get(f'/releases/{release_id}')
         if not data or not data.get('tracklist'):
             return None
@@ -630,12 +691,39 @@ class DiscogsClient:
                 '_source': 'discogs',
             })
 
-        return {
+        result = {
             'items': tracks,
             'total': len(tracks),
             'limit': len(tracks),
             'next': None,
         }
+
+        cache.store_entity('discogs', 'album', cache_key, result)
+        return result
+
+    def _fetch_and_cache_artist(self, artist_id: str) -> Optional[Dict]:
+        """Fetch raw artist data with cache. Used by enrichment worker."""
+        cache = get_metadata_cache()
+        cached = cache.get_entity('discogs', 'artist', str(artist_id))
+        if cached and cached.get('name'):
+            return cached
+        data = self._api_get(f'/artists/{artist_id}')
+        if data:
+            cache.store_entity('discogs', 'artist', str(artist_id), data)
+        return data
+
+    def _fetch_and_cache_album(self, release_id: str) -> Optional[Dict]:
+        """Fetch raw album/release data with cache. Used by enrichment worker."""
+        cache = get_metadata_cache()
+        cached = cache.get_entity('discogs', 'album', str(release_id))
+        if cached and cached.get('title'):
+            return cached
+        data = self._api_get(f'/masters/{release_id}')
+        if not data or not data.get('title'):
+            data = self._api_get(f'/releases/{release_id}')
+        if data:
+            cache.store_entity('discogs', 'album', str(release_id), data)
+        return data
 
     def _get_artist_image_from_albums(self, artist_id: str) -> Optional[str]:
         """Get artist image by fetching their first album's cover art.

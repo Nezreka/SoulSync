@@ -489,9 +489,9 @@ class MetadataCache:
                 cursor = conn.cursor()
 
                 stats = {
-                    'artists': {'spotify': 0, 'itunes': 0, 'deezer': 0},
-                    'albums': {'spotify': 0, 'itunes': 0, 'deezer': 0},
-                    'tracks': {'spotify': 0, 'itunes': 0, 'deezer': 0},
+                    'artists': {'spotify': 0, 'itunes': 0, 'deezer': 0, 'discogs': 0},
+                    'albums': {'spotify': 0, 'itunes': 0, 'deezer': 0, 'discogs': 0},
+                    'tracks': {'spotify': 0, 'itunes': 0, 'deezer': 0, 'discogs': 0},
                     'searches': 0,
                     'total_entries': 0,
                     'total_hits': 0,
@@ -541,9 +541,9 @@ class MetadataCache:
         except Exception as e:
             logger.error(f"Cache stats error: {e}")
             return {
-                'artists': {'spotify': 0, 'itunes': 0, 'deezer': 0},
-                'albums': {'spotify': 0, 'itunes': 0, 'deezer': 0},
-                'tracks': {'spotify': 0, 'itunes': 0, 'deezer': 0},
+                'artists': {'spotify': 0, 'itunes': 0, 'deezer': 0, 'discogs': 0},
+                'albums': {'spotify': 0, 'itunes': 0, 'deezer': 0, 'discogs': 0},
+                'tracks': {'spotify': 0, 'itunes': 0, 'deezer': 0, 'discogs': 0},
                 'searches': 0, 'total_entries': 0, 'total_hits': 0,
                 'oldest': None, 'newest': None,
             }
@@ -848,6 +848,8 @@ class MetadataCache:
             return self._extract_deezer_fields(entity_type, raw_data)
         elif source == 'beatport':
             return self._extract_beatport_fields(entity_type, raw_data)
+        elif source == 'discogs':
+            return self._extract_discogs_fields(entity_type, raw_data)
         return {'name': str(raw_data.get('name', raw_data.get('trackName', '')))}
 
     def _extract_spotify_fields(self, entity_type: str, data: dict) -> dict:
@@ -1040,6 +1042,56 @@ class MetadataCache:
             if data.get('trackViewUrl'):
                 urls['itunes'] = data['trackViewUrl']
             fields['external_urls'] = json.dumps(urls)
+
+        return fields
+
+    def _extract_discogs_fields(self, entity_type: str, data: dict) -> dict:
+        """Extract fields from Discogs API response."""
+        fields = {}
+
+        # Discogs uses 'name' for artists, 'title' for releases/masters
+        if entity_type == 'artist':
+            fields['name'] = data.get('name', data.get('title', ''))
+            fields['genres'] = json.dumps([])
+            fields['popularity'] = 0
+            fields['followers'] = 0
+            # Images array — prefer primary type
+            images = data.get('images', [])
+            if images:
+                primary = next((img for img in images if img.get('type') == 'primary'), None)
+                fields['image_url'] = (primary or images[0]).get('uri')
+            # Search results use cover_image/thumb
+            if not fields.get('image_url'):
+                img = data.get('cover_image') or data.get('thumb')
+                if img and 'spacer.gif' not in img:
+                    fields['image_url'] = img
+
+        elif entity_type == 'album':
+            # Handle "Artist - Title" format from search results
+            raw_title = data.get('title', '')
+            if data.get('artists'):
+                fields['name'] = raw_title
+                fields['artist_name'] = data['artists'][0].get('name', '')
+            elif ' - ' in raw_title:
+                parts = raw_title.split(' - ', 1)
+                fields['artist_name'] = parts[0].strip()
+                fields['name'] = parts[1].strip()
+            else:
+                fields['name'] = raw_title
+
+            fields['release_date'] = str(data.get('year', '')) if data.get('year') else ''
+            tracklist = data.get('tracklist', [])
+            fields['total_tracks'] = len(tracklist) if tracklist else 0
+            fields['genres'] = json.dumps(data.get('genres', []))
+
+            images = data.get('images', [])
+            if images:
+                primary = next((img for img in images if img.get('type') == 'primary'), None)
+                fields['image_url'] = (primary or images[0]).get('uri')
+            if not fields.get('image_url'):
+                img = data.get('cover_image') or data.get('thumb')
+                if img and 'spacer.gif' not in img:
+                    fields['image_url'] = img
 
         return fields
 

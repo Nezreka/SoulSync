@@ -244,14 +244,14 @@ class DiscogsWorker:
             if existing_id:
                 try:
                     if item_type == 'artist':
-                        data = self.client._api_get(f'/artists/{existing_id}')
+                        data = self.client._fetch_and_cache_artist(existing_id)
                         if data:
                             self._update_artist(item_id, data)
                             self.stats['matched'] += 1
                             logger.info(f"Enriched artist '{item_name}' from existing Discogs ID: {existing_id}")
                             return
                     elif item_type == 'album':
-                        data = self.client._api_get(f'/releases/{existing_id}')
+                        data = self.client._fetch_and_cache_album(existing_id)
                         if data:
                             self._update_album(item_id, data)
                             self.stats['matched'] += 1
@@ -298,8 +298,8 @@ class DiscogsWorker:
         # Find best match by name similarity
         for result in results:
             if self._name_matches(artist_name, result.name):
-                # Fetch full artist detail
-                data = self.client._api_get(f'/artists/{result.id}')
+                # Fetch full artist detail (uses cache)
+                data = self.client._fetch_and_cache_artist(result.id)
                 if data:
                     self._update_artist(artist_id, data)
                     self.stats['matched'] += 1
@@ -322,8 +322,8 @@ class DiscogsWorker:
 
         for result in results:
             if self._name_matches(album_name, result.name):
-                # Fetch full release detail
-                data = self.client._api_get(f'/releases/{result.id}')
+                # Fetch full release detail (uses cache)
+                data = self.client._fetch_and_cache_album(result.id)
                 if data:
                     self._update_album(album_id, data)
                     self.stats['matched'] += 1

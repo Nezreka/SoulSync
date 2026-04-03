@@ -6625,6 +6625,7 @@
                             <button onclick="clearMetadataCacheBySource('beatport')"><span class="mcache-source-badge beatport" style="margin-right:6px">beatport</span>Clear Beatport</button>
                             <div style="border-top:1px solid rgba(255,255,255,0.08);margin:4px 0"></div>
                             <button onclick="clearMusicBrainzCache()"><span class="mcache-source-badge musicbrainz" style="margin-right:6px">musicbrainz</span>Clear MusicBrainz</button>
+                            <button onclick="clearMetadataCacheBySource('discogs')"><span class="mcache-source-badge discogs" style="margin-right:6px">discogs</span>Clear Discogs</button>
                             <button onclick="clearMusicBrainzCache(true)"><span class="mcache-source-badge musicbrainz" style="margin-right:6px;opacity:0.6">musicbrainz</span>Clear Failed MB Only</button>
                             <div style="border-top:1px solid rgba(255,255,255,0.08);margin:4px 0"></div>
                             <button onclick="clearMetadataCache()">Clear All</button>
@@ -6655,6 +6656,10 @@
                     <span class="mcache-stat-pill-value" id="mcache-browse-musicbrainz-count">0</span>
                 </div>
                 <div class="mcache-stat-pill">
+                    <span class="mcache-stat-pill-label">Discogs</span>
+                    <span class="mcache-stat-pill-value" id="mcache-browse-discogs-count">0</span>
+                </div>
+                <div class="mcache-stat-pill">
                     <span class="mcache-stat-pill-label">Total Hits</span>
                     <span class="mcache-stat-pill-value" id="mcache-browse-hits">0</span>
                 </div>
@@ -6677,6 +6682,7 @@
                     <option value="deezer">Deezer</option>
                     <option value="beatport">Beatport</option>
                     <option value="musicbrainz">MusicBrainz</option>
+                    <option value="discogs">Discogs</option>
                 </select>
                 <select class="mcache-sort-filter" id="mcache-sort-filter" onchange="loadMetadataCacheBrowse()">
                     <option value="last_accessed_at">Recently Accessed</option>

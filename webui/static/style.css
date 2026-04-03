@@ -47303,6 +47303,11 @@ tr.tag-diff-same {
     color: #BA478F;
 }
 
+.mcache-source-badge.discogs {
+    background: rgba(212, 165, 116, 0.15);
+    color: #D4A574;
+}
+
 .mcache-card.mb-matched {
     border-left: 2px solid rgba(76, 175, 80, 0.5);
 }
