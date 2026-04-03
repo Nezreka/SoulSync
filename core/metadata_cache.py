@@ -1060,7 +1060,7 @@ class MetadataCache:
             if images:
                 primary = next((img for img in images if img.get('type') == 'primary'), None)
                 fields['image_url'] = (primary or images[0]).get('uri')
-            # Search results use cover_image/thumb
+            # Search results use cover_image/thumb — upscale from 150px to 600px
             if not fields.get('image_url'):
                 img = data.get('cover_image') or data.get('thumb')
                 if img and 'spacer.gif' not in img:
