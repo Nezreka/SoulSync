@@ -609,6 +609,12 @@ class WatchlistScanner:
             providers_to_backfill = ['itunes', 'deezer']
             if self.spotify_client and self.spotify_client.is_spotify_authenticated():
                 providers_to_backfill.append('spotify')
+            try:
+                from config.settings import config_manager as _cfg
+                if _cfg.get('discogs.token', ''):
+                    providers_to_backfill.append('discogs')
+            except Exception:
+                pass
 
             for provider in providers_to_backfill:
                 try:
@@ -979,6 +985,7 @@ class WatchlistScanner:
             'spotify': 'spotify_artist_id',
             'itunes': 'itunes_artist_id',
             'deezer': 'deezer_artist_id',
+            'discogs': 'discogs_artist_id',
         }.get(provider)
 
         if not id_attr:
@@ -997,12 +1004,14 @@ class WatchlistScanner:
             'spotify': self._match_to_spotify,
             'itunes': self._match_to_itunes,
             'deezer': self._match_to_deezer,
+            'discogs': self._match_to_discogs,
         }.get(provider)
 
         update_fn = {
             'spotify': self.database.update_watchlist_spotify_id,
             'itunes': self.database.update_watchlist_itunes_id,
             'deezer': getattr(self.database, 'update_watchlist_deezer_id', None),
+            'discogs': getattr(self.database, 'update_watchlist_discogs_id', None),
         }.get(provider)
 
         if not match_fn or not update_fn:
@@ -1148,6 +1157,17 @@ class WatchlistScanner:
             return self._best_artist_match(results, artist_name)
         except Exception as e:
             logger.warning(f"Could not match {artist_name} to Deezer: {e}")
+        return None
+
+    def _match_to_discogs(self, artist_name: str) -> Optional[str]:
+        """Match artist name to Discogs ID using fuzzy name comparison."""
+        try:
+            from core.discogs_client import DiscogsClient
+            client = DiscogsClient()
+            results = client.search_artists(artist_name, limit=5)
+            return self._best_artist_match(results, artist_name)
+        except Exception as e:
+            logger.warning(f"Could not match {artist_name} to Discogs: {e}")
         return None
 
     def _get_lookback_period_setting(self) -> str:

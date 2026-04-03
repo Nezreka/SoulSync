@@ -88,6 +88,7 @@ class WatchlistArtist:
     image_url: Optional[str] = None
     itunes_artist_id: Optional[str] = None  # Cross-provider support
     deezer_artist_id: Optional[str] = None  # Cross-provider support
+    discogs_artist_id: Optional[str] = None  # Cross-provider support
     include_albums: bool = True
     include_eps: bool = True
     include_singles: bool = True
@@ -1271,6 +1272,10 @@ class MusicDatabase:
             if 'deezer_artist_id' not in columns:
                 cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN deezer_artist_id TEXT")
                 logger.info("Added deezer_artist_id column to watchlist_artists table for cross-provider support")
+
+            if 'discogs_artist_id' not in columns:
+                cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN discogs_artist_id TEXT")
+                logger.info("Added discogs_artist_id column to watchlist_artists table for cross-provider support")
 
         except Exception as e:
             logger.error(f"Error adding itunes_artist_id column to watchlist_artists: {e}")
@@ -6444,7 +6449,7 @@ class MusicDatabase:
 
                 # Check if artist already exists by name (case-insensitive) for this profile
                 cursor.execute("""
-                    SELECT id, spotify_artist_id, itunes_artist_id, deezer_artist_id
+                    SELECT id, spotify_artist_id, itunes_artist_id, deezer_artist_id, discogs_artist_id
                     FROM watchlist_artists
                     WHERE LOWER(artist_name) = LOWER(?) AND profile_id = ?
                     LIMIT 1
@@ -6457,7 +6462,7 @@ class MusicDatabase:
 
                 if existing:
                     # Artist already on watchlist — update with new source ID if missing
-                    col_map = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id', 'deezer': 'deezer_artist_id'}
+                    col_map = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id', 'deezer': 'deezer_artist_id', 'discogs': 'discogs_artist_id'}
                     col = col_map.get(source)
                     if col and not existing[col]:
                         cursor.execute(f"""
@@ -6486,6 +6491,13 @@ class MusicDatabase:
                         VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
                     """, (artist_id, artist_name, profile_id))
                     logger.info(f"Added artist '{artist_name}' to watchlist (iTunes ID: {artist_id}, profile: {profile_id})")
+                elif source == 'discogs':
+                    cursor.execute("""
+                        INSERT INTO watchlist_artists
+                        (discogs_artist_id, artist_name, date_added, updated_at, profile_id)
+                        VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+                    """, (artist_id, artist_name, profile_id))
+                    logger.info(f"Added artist '{artist_name}' to watchlist (Discogs ID: {artist_id}, profile: {profile_id})")
                 else:
                     cursor.execute("""
                         INSERT INTO watchlist_artists
@@ -6572,7 +6584,7 @@ class MusicDatabase:
                 # Build SELECT query based on existing columns
                 base_columns = ['id', 'spotify_artist_id', 'artist_name', 'date_added',
                                'last_scan_timestamp', 'created_at', 'updated_at']
-                optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'include_albums', 'include_eps', 'include_singles',
+                optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
                                    'include_instrumentals', 'lookback_days']
 
@@ -6600,6 +6612,7 @@ class MusicDatabase:
                     image_url = row['image_url'] if 'image_url' in existing_columns else None
                     itunes_artist_id = row['itunes_artist_id'] if 'itunes_artist_id' in existing_columns else None
                     deezer_artist_id = row['deezer_artist_id'] if 'deezer_artist_id' in existing_columns else None
+                    discogs_artist_id = row['discogs_artist_id'] if 'discogs_artist_id' in existing_columns else None
                     include_albums = bool(row['include_albums']) if 'include_albums' in existing_columns else True
                     include_eps = bool(row['include_eps']) if 'include_eps' in existing_columns else True
                     include_singles = bool(row['include_singles']) if 'include_singles' in existing_columns else True
@@ -6621,6 +6634,7 @@ class MusicDatabase:
                         image_url=image_url,
                         itunes_artist_id=itunes_artist_id,
                         deezer_artist_id=deezer_artist_id,
+                        discogs_artist_id=discogs_artist_id,
                         include_albums=include_albums,
                         include_eps=include_eps,
                         include_singles=include_singles,
@@ -6887,6 +6901,23 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error updating watchlist Deezer ID: {e}")
+            return False
+
+    def update_watchlist_discogs_id(self, watchlist_id: int, discogs_id: str) -> bool:
+        """Update the Discogs artist ID for a watchlist artist (cross-provider support)"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE watchlist_artists
+                    SET discogs_artist_id = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (discogs_id, watchlist_id))
+                conn.commit()
+                logger.info(f"Updated Discogs ID for watchlist artist {watchlist_id}: {discogs_id}")
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating watchlist Discogs ID: {e}")
             return False
 
     def update_watchlist_artist_itunes_id(self, spotify_artist_id: str, itunes_id: str) -> bool:
