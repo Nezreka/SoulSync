@@ -522,7 +522,42 @@ class DiscogsClient:
 
         for item in ordered:
             try:
+                # For master releases, fetch detail to get tracklist and proper metadata
+                if item.get('type') == 'master':
+                    master_detail = self._api_get(f'/masters/{item["id"]}')
+                    if master_detail:
+                        # Merge master detail into the item for better parsing
+                        tracklist = [t for t in master_detail.get('tracklist', [])
+                                     if t.get('type_', '') == 'track' or not t.get('type_')]
+                        item['_track_count'] = len(tracklist)
+                        # Carry over genres/styles from master
+                        if master_detail.get('genres'):
+                            item['genre'] = master_detail['genres']
+                        if master_detail.get('styles'):
+                            item['style'] = master_detail['styles']
+                        if master_detail.get('images'):
+                            primary = next((img for img in master_detail['images'] if img.get('type') == 'primary'), None)
+                            item['cover_image'] = (primary or master_detail['images'][0]).get('uri')
+
                 album = Album.from_discogs_release(item)
+
+                # Override track count from master detail if available
+                if item.get('_track_count'):
+                    album = Album(
+                        id=album.id, name=album.name, artists=album.artists,
+                        release_date=album.release_date, total_tracks=item['_track_count'],
+                        album_type=album.album_type, image_url=album.image_url or item.get('cover_image'),
+                        external_urls=album.external_urls,
+                    )
+                    # Re-evaluate album type with actual track count
+                    if album.total_tracks <= 3:
+                        album = Album(id=album.id, name=album.name, artists=album.artists,
+                                      release_date=album.release_date, total_tracks=album.total_tracks,
+                                      album_type='single', image_url=album.image_url, external_urls=album.external_urls)
+                    elif album.total_tracks <= 6:
+                        album = Album(id=album.id, name=album.name, artists=album.artists,
+                                      release_date=album.release_date, total_tracks=album.total_tracks,
+                                      album_type='ep', image_url=album.image_url, external_urls=album.external_urls)
 
                 # Deduplicate by normalized title
                 dedup_key = album.name.lower().strip()
