@@ -12,3 +12,7 @@ __pycache__/
 
 # Auto-downloaded binaries
 bin/
+config/config.json
+database/music_library.db*
+database/*.json
+logs/
