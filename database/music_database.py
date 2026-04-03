@@ -8077,7 +8077,7 @@ class MusicDatabase:
                 cursor.execute("""
                     SELECT
                         id, name, thumb_url, genres, server_source,
-                        musicbrainz_id, deezer_id, audiodb_id,
+                        musicbrainz_id, deezer_id, audiodb_id, discogs_id,
                         spotify_artist_id, itunes_artist_id, lastfm_url, genius_url,
                         tidal_id, qobuz_id, soul_id,
                         lastfm_listeners, lastfm_playcount, lastfm_tags, lastfm_bio
@@ -8229,6 +8229,7 @@ class MusicDatabase:
                         'musicbrainz_id': artist_row['musicbrainz_id'],
                         'deezer_id': artist_row['deezer_id'],
                         'audiodb_id': artist_row['audiodb_id'],
+                        'discogs_id': artist_row['discogs_id'],
                         'spotify_artist_id': artist_row['spotify_artist_id'],
                         'itunes_artist_id': artist_row['itunes_artist_id'],
                         'lastfm_url': artist_row['lastfm_url'],
