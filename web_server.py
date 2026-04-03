@@ -9792,7 +9792,7 @@ def get_artist_discography(artist_id):
                     cur_lib.execute("""
                         SELECT id, summary, genres, thumb_url,
                                spotify_artist_id, musicbrainz_id, deezer_id, itunes_artist_id,
-                               audiodb_id, tidal_id, qobuz_id, genius_id, soul_id,
+                               audiodb_id, discogs_id, tidal_id, qobuz_id, genius_id, soul_id,
                                lastfm_bio, lastfm_listeners, lastfm_playcount, lastfm_tags,
                                lastfm_url, genius_url, style, mood, label
                         FROM artists WHERE name COLLATE NOCASE = ? LIMIT 1
@@ -9828,7 +9828,7 @@ def get_artist_discography(artist_id):
                             artist_info['genius_url'] = lib['genius_url']
                         # Service IDs for badges
                         for key in ['spotify_artist_id', 'musicbrainz_id', 'deezer_id', 'itunes_artist_id',
-                                    'audiodb_id', 'tidal_id', 'qobuz_id', 'genius_id', 'soul_id']:
+                                    'audiodb_id', 'discogs_id', 'tidal_id', 'qobuz_id', 'genius_id', 'soul_id']:
                             if lib.get(key):
                                 artist_info[key] = lib[key]
                         # Bio fallback from summary
@@ -12992,6 +12992,7 @@ _SERVICE_ID_COLUMNS = {
     'musicbrainz': {'artist': 'musicbrainz_id', 'album': 'musicbrainz_release_id', 'track': 'musicbrainz_recording_id'},
     'deezer': {'artist': 'deezer_id', 'album': 'deezer_id', 'track': 'deezer_id'},
     'audiodb': {'artist': 'audiodb_id', 'album': 'audiodb_id', 'track': 'audiodb_id'},
+    'discogs': {'artist': 'discogs_id', 'album': 'discogs_id'},
     'itunes': {'artist': 'itunes_artist_id', 'album': 'itunes_album_id', 'track': 'itunes_track_id'},
     'lastfm': {'artist': 'lastfm_url', 'album': 'lastfm_url', 'track': 'lastfm_url'},
     'genius': {'artist': 'genius_id', 'track': 'genius_id'},

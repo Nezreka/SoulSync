@@ -534,6 +534,7 @@ const LASTFM_LOGO_URL = 'https://www.last.fm/static/images/lastfm_avatar_twitter
 const GENIUS_LOGO_URL = 'https://images.genius.com/8ed669cadd956443e29c70361ec4f372.1000x1000x1.png';
 const TIDAL_LOGO_URL = 'https://www.svgrepo.com/show/519734/tidal.svg';
 const QOBUZ_LOGO_URL = 'https://www.svgrepo.com/show/504778/qobuz.svg';
+const DISCOGS_LOGO_URL = 'https://www.svgrepo.com/show/305957/discogs.svg';
 function getAudioDBLogoURL() { const el = document.querySelector('img.audiodb-logo'); return el ? el.src : null; }
 
 // --- Wishlist Modal Persistence State Management ---
@@ -34823,6 +34824,7 @@ function updateArtistDetailHeader(artist) {
         if (info.genius_url) badges.push(_hb(GENIUS_LOGO_URL, 'GEN', 'Genius', info.genius_url));
         if (info.tidal_id) badges.push(_hb(TIDAL_LOGO_URL, 'TD', 'Tidal', `https://tidal.com/browse/artist/${info.tidal_id}`));
         if (info.qobuz_id) badges.push(_hb(QOBUZ_LOGO_URL, 'Qz', 'Qobuz', `https://www.qobuz.com/artist/${info.qobuz_id}`));
+        if (info.discogs_id) badges.push(_hb(DISCOGS_LOGO_URL, 'DC', 'Discogs', `https://www.discogs.com/artist/${info.discogs_id}`));
         badgesEl.innerHTML = badges.join('');
     }
 
@@ -41064,6 +41066,7 @@ function buildLibraryArtistCardHTML(artist, index) {
     if (artist.genius_url) badges.push({ logo: GENIUS_LOGO_URL, fb: 'GEN', title: 'Genius', url: artist.genius_url });
     if (artist.tidal_id) badges.push({ logo: TIDAL_LOGO_URL, fb: 'TD', title: 'Tidal', url: `https://tidal.com/browse/artist/${artist.tidal_id}` });
     if (artist.qobuz_id) badges.push({ logo: QOBUZ_LOGO_URL, fb: 'Qz', title: 'Qobuz', url: `https://www.qobuz.com/artist/${artist.qobuz_id}` });
+    if (artist.discogs_id) badges.push({ logo: DISCOGS_LOGO_URL, fb: 'DC', title: 'Discogs', url: `https://www.discogs.com/artist/${artist.discogs_id}` });
     if (artist.soul_id && !artist.soul_id.startsWith('soul_unnamed_')) badges.push({ logo: '/static/trans2.png', fb: 'SS', title: `SoulID: ${artist.soul_id}`, url: null });
 
     // Watchlist badge
@@ -41670,6 +41673,7 @@ function updateArtistDetailPageHeaderWithData(artist) {
         if (artist.genius_url) badges.push(_hb(GENIUS_LOGO_URL, 'GEN', 'Genius', artist.genius_url));
         if (artist.tidal_id) badges.push(_hb(TIDAL_LOGO_URL, 'TD', 'Tidal', `https://tidal.com/browse/artist/${artist.tidal_id}`));
         if (artist.qobuz_id) badges.push(_hb(QOBUZ_LOGO_URL, 'Qz', 'Qobuz', `https://www.qobuz.com/artist/${artist.qobuz_id}`));
+        if (artist.discogs_id) badges.push(_hb(DISCOGS_LOGO_URL, 'DC', 'Discogs', `https://www.discogs.com/artist/${artist.discogs_id}`));
         if (artist.soul_id && !artist.soul_id.startsWith('soul_unnamed_')) badges.push(_hb('/static/trans2.png', 'SS', `SoulID: ${artist.soul_id}`, null));
 
         badgesContainer.innerHTML = badges.join('');
@@ -43452,6 +43456,7 @@ function renderArtistMetaPanel(artist) {
         { key: 'musicbrainz_match_status', label: 'MusicBrainz', attempted: 'musicbrainz_last_attempted', svc: 'musicbrainz' },
         { key: 'deezer_match_status', label: 'Deezer', attempted: 'deezer_last_attempted', svc: 'deezer' },
         { key: 'audiodb_match_status', label: 'AudioDB', attempted: 'audiodb_last_attempted', svc: 'audiodb' },
+        { key: 'discogs_match_status', label: 'Discogs', attempted: 'discogs_last_attempted', svc: 'discogs' },
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
         { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
         { key: 'genius_match_status', label: 'Genius', attempted: 'genius_last_attempted', svc: 'genius' },

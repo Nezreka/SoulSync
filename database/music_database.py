@@ -7916,6 +7916,7 @@ class MusicDatabase:
                         a.itunes_artist_id,
                         a.deezer_id,
                         a.audiodb_id,
+                        a.discogs_id,
                         a.lastfm_url,
                         a.genius_url,
                         a.tidal_id,
