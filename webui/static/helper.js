@@ -3403,6 +3403,7 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.2': [
         // Newest features first
+        { title: 'Fix Album Folder Splitting',                       desc: 'Collab albums and artist name changes no longer scatter tracks across multiple folders — $albumartist now uses album-level artist consistently' },
         { title: 'Discogs Integration',                              desc: 'New metadata source — enrichment worker, fallback source, enhanced search tab, watchlist support, cache browser. Genres, styles, labels, bios, ratings from 400+ taxonomy', page: 'dashboard' },
         { title: 'Webhook THEN Action',                              desc: 'Send HTTP POST to any URL when automations complete — integrate with Gotify, Home Assistant, Slack, n8n. Configurable headers and message template', page: 'automations' },
         { title: 'API Rate Monitor',                               desc: 'Real-time speedometer gauges for all enrichment services on the Dashboard. Click any gauge for 24h history chart. Spotify shows per-endpoint breakdown', page: 'dashboard' },
