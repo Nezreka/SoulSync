@@ -8015,6 +8015,7 @@ class MusicDatabase:
                         'itunes_artist_id': row['itunes_artist_id'],
                         'deezer_id': row['deezer_id'],
                         'audiodb_id': row['audiodb_id'],
+                        'discogs_id': row['discogs_id'],
                         'lastfm_url': row['lastfm_url'],
                         'genius_url': row['genius_url'],
                         'tidal_id': row['tidal_id'],

@@ -41696,6 +41696,7 @@ function renderArtistEnrichmentCoverage(enrichment) {
         { name: 'Last.fm', key: 'lastfm', color: '#d51007' },
         { name: 'iTunes', key: 'itunes', color: '#fc3c44' },
         { name: 'AudioDB', key: 'audiodb', color: '#1a9fff' },
+        { name: 'Discogs', key: 'discogs', color: '#D4A574' },
         { name: 'Genius', key: 'genius', color: '#ffff64' },
         { name: 'Tidal', key: 'tidal', color: '#00ffff' },
         { name: 'Qobuz', key: 'qobuz', color: '#4285f4' },
@@ -43331,6 +43332,7 @@ function renderArtistMetaPanel(artist) {
         { key: 'musicbrainz_id', label: 'MusicBrainz', svc: 'musicbrainz' },
         { key: 'deezer_id', label: 'Deezer', svc: 'deezer' },
         { key: 'audiodb_id', label: 'AudioDB', svc: 'audiodb' },
+        { key: 'discogs_id', label: 'Discogs', svc: 'discogs' },
         { key: 'itunes_artist_id', label: 'iTunes', svc: 'itunes' },
         { key: 'lastfm_url', label: 'Last.fm', svc: 'lastfm' },
         { key: 'genius_url', label: 'Genius', svc: 'genius' },
@@ -43805,6 +43807,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'musicbrainz_release_id', label: 'MusicBrainz', svc: 'musicbrainz' },
         { key: 'deezer_id', label: 'Deezer', svc: 'deezer' },
         { key: 'audiodb_id', label: 'AudioDB', svc: 'audiodb' },
+        { key: 'discogs_id', label: 'Discogs', svc: 'discogs' },
         { key: 'itunes_album_id', label: 'iTunes', svc: 'itunes' },
         { key: 'lastfm_url', label: 'Last.fm', svc: 'lastfm' },
     ];
@@ -43826,6 +43829,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'musicbrainz_match_status', label: 'MB', attempted: 'musicbrainz_last_attempted', svc: 'musicbrainz' },
         { key: 'deezer_match_status', label: 'Deezer', attempted: 'deezer_last_attempted', svc: 'deezer' },
         { key: 'audiodb_match_status', label: 'AudioDB', attempted: 'audiodb_last_attempted', svc: 'audiodb' },
+        { key: 'discogs_match_status', label: 'Discogs', attempted: 'discogs_last_attempted', svc: 'discogs' },
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
         { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
     ];
