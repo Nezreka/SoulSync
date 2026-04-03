@@ -57065,8 +57065,54 @@ function updateAudioDBStatusFromData(data) {
 }
 
 function updateDiscogsStatusFromData(data) {
-    // Discogs status is handled by the rate monitor cards — no standalone button
-    // This handler exists for WebSocket event compatibility
+    const button = document.getElementById('discogs-button');
+    if (!button) return;
+
+    button.classList.remove('active', 'paused', 'complete');
+    if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    }
+
+    const tooltipStatus = document.getElementById('discogs-tooltip-status');
+    const tooltipCurrent = document.getElementById('discogs-tooltip-current');
+    const tooltipProgress = document.getElementById('discogs-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (data.idle) tooltipStatus.textContent = 'Complete';
+        else if (data.running && !data.paused) tooltipStatus.textContent = 'Running';
+        else if (data.paused) tooltipStatus.textContent = data.yield_reason === 'downloads' ? 'Yielding for downloads' : 'Paused';
+        else tooltipStatus.textContent = 'Idle';
+    }
+
+    if (tooltipCurrent) {
+        if (data.idle) tooltipCurrent.textContent = 'All items processed';
+        else if (data.current_item) tooltipCurrent.textContent = `Processing: "${data.current_item}"`;
+        else tooltipCurrent.textContent = 'No active matches';
+    }
+
+    if (tooltipProgress && data.stats) {
+        const s = data.stats;
+        tooltipProgress.textContent = `Matched: ${s.matched || 0} | Not found: ${s.not_found || 0} | Pending: ${s.pending || 0}`;
+    }
+}
+
+async function toggleDiscogsEnrichment() {
+    try {
+        const button = document.getElementById('discogs-button');
+        if (!button) return;
+        const isPaused = button.classList.contains('paused') || button.classList.contains('complete');
+        const endpoint = isPaused ? '/api/discogs/resume' : '/api/discogs/pause';
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (response.ok) {
+            showToast(isPaused ? 'Discogs enrichment resumed' : 'Discogs enrichment paused', 'info');
+        }
+    } catch (e) {
+        showToast('Failed to toggle Discogs enrichment', 'error');
+    }
 }
 
 /**
