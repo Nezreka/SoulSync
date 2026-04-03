@@ -240,20 +240,25 @@ class Album:
         tracklist = release_data.get('tracklist', [])
         total_tracks = len(tracklist) if tracklist else (release_data.get('format_quantity', 0) or 0)
 
-        # Album type from formats
+        # Album type from formats array (full release detail) or format string (search/artist releases)
         formats = release_data.get('formats', [])
         format_name = formats[0].get('name', '').lower() if formats else ''
         descriptions = [d.lower() for d in formats[0].get('descriptions', [])] if formats else []
 
-        if 'single' in descriptions or 'single' in format_name:
+        # Also check the comma-separated 'format' string from search/artist release endpoints
+        format_str = (release_data.get('format') or '').lower()
+
+        if 'single' in descriptions or 'single' in format_name or 'single' in format_str:
             album_type = 'single'
-        elif 'ep' in descriptions:
+        elif 'ep' in descriptions or ', ep' in format_str or format_str.endswith('ep'):
             album_type = 'ep'
-        elif 'compilation' in descriptions or 'compilation' in (release_data.get('type', '') or '').lower():
+        elif 'compilation' in descriptions or 'compilation' in format_str or 'compilation' in (release_data.get('type', '') or '').lower():
             album_type = 'compilation'
-        elif total_tracks <= 3:
+        elif 'lp' in descriptions or 'lp' in format_str or 'album' in descriptions or 'album' in format_str:
+            album_type = 'album'
+        elif total_tracks <= 3 and total_tracks > 0:
             album_type = 'single'
-        elif total_tracks <= 6:
+        elif total_tracks <= 6 and total_tracks > 0:
             album_type = 'ep'
         else:
             album_type = 'album'
@@ -393,39 +398,11 @@ class DiscogsClient:
 
     def search_tracks(self, query: str, limit: int = 10) -> List[Track]:
         """Search for tracks on Discogs.
-        Discogs doesn't have a track-level search, so we search releases
-        and extract matching tracks from the tracklists."""
-        data = self._api_get('/database/search', {
-            'q': query, 'type': 'release', 'per_page': min(limit, 20),
-        })
-        if not data or not data.get('results'):
-            return []
-
-        tracks = []
-        query_lower = query.lower()
-        for item in data['results'][:20]:
-            try:
-                # Fetch full release for tracklist
-                release_url = item.get('resource_url')
-                if not release_url:
-                    continue
-                release = self._api_get(release_url)
-                if not release or not release.get('tracklist'):
-                    continue
-
-                for t in release['tracklist']:
-                    if t.get('type_', '') == 'track' or not t.get('type_'):
-                        # Check if track title matches query
-                        title = t.get('title', '').lower()
-                        if query_lower in title or title in query_lower or any(w in title for w in query_lower.split()):
-                            track = Track.from_discogs_track(t, release)
-                            tracks.append(track)
-                            if len(tracks) >= limit:
-                                return tracks
-            except Exception as e:
-                logger.debug(f"Error extracting Discogs tracks: {e}")
-
-        return tracks
+        Discogs doesn't have a track-level search API — returns empty list.
+        Track data is available via get_album() tracklists instead."""
+        # Discogs has no track search endpoint. Artists and albums are the
+        # searchable entities. Individual tracks come from release tracklists.
+        return []
 
     # --- Lookup Methods ---
 

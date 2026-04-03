@@ -37524,7 +37524,7 @@ function updateServiceStatus(service, statusData) {
     if (service === 'spotify' && statusData.source) {
         const musicSourceTitleElement = document.getElementById('music-source-title');
         if (musicSourceTitleElement) {
-            const sourceName = statusData.source === 'spotify' ? 'Spotify' : statusData.source === 'deezer' ? 'Deezer' : 'iTunes';
+            const sourceName = statusData.source === 'spotify' ? 'Spotify' : statusData.source === 'deezer' ? 'Deezer' : statusData.source === 'discogs' ? 'Discogs' : 'iTunes';
             musicSourceTitleElement.textContent = sourceName;
             currentMusicSourceName = sourceName;
         }
@@ -37579,7 +37579,7 @@ function updateSidebarServiceStatus(service, statusData) {
         if (service === 'spotify' && statusData.source) {
             const musicSourceNameElement = document.getElementById('music-source-name');
             if (musicSourceNameElement) {
-                const sourceName = statusData.source === 'spotify' ? 'Spotify' : statusData.source === 'deezer' ? 'Deezer' : 'iTunes';
+                const sourceName = statusData.source === 'spotify' ? 'Spotify' : statusData.source === 'deezer' ? 'Deezer' : statusData.source === 'discogs' ? 'Discogs' : 'iTunes';
                 musicSourceNameElement.textContent = sourceName;
             }
         }
