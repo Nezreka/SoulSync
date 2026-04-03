@@ -67137,6 +67137,11 @@ function explorerSelectPlaylist(id, el) {
     _explorer.playlistId = id;
     document.querySelectorAll('.explorer-picker-card').forEach(c => c.classList.remove('active'));
     if (el) el.classList.add('active');
+    // Update hint text
+    const hint = document.getElementById('explorer-build-hint');
+    const pl = _explorer._playlists.find(p => p.id === id);
+    if (hint && pl) hint.textContent = `Ready: ${pl.name}`;
+    else if (hint) hint.textContent = '';
 }
 
 function explorerRedirectToDiscover(playlistId) {
