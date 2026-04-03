@@ -546,6 +546,28 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Discogs Enrichment Status Icon -->
+                            <div class="discogs-button-container">
+                                <button class="discogs-button" id="discogs-button" title="Discogs Library Enrichment"
+                                    onclick="toggleDiscogsEnrichment()">
+                                    <span class="discogs-logo-text">dc</span>
+                                    <div class="discogs-spinner"></div>
+                                </button>
+                                <div class="discogs-tooltip" id="discogs-tooltip">
+                                    <div class="discogs-tooltip-content">
+                                        <div class="discogs-tooltip-header">Discogs Enrichment</div>
+                                        <div class="discogs-tooltip-body" id="discogs-tooltip-body">
+                                            <div class="tooltip-status">Status: <span
+                                                    id="discogs-tooltip-status">Idle</span>
+                                            </div>
+                                            <div class="tooltip-current" id="discogs-tooltip-current">No active matches
+                                            </div>
+                                            <div class="tooltip-progress" id="discogs-tooltip-progress">Progress: 0 / 0
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- Hydrabase P2P Mirror Status Icon -->
                             <div class="hydrabase-button-container" id="hydrabase-button-container" style="display: none;">
                                 <button class="hydrabase-button" id="hydrabase-button" title="Hydrabase P2P Mirror">

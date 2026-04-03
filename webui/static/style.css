@@ -33891,6 +33891,108 @@ body.helper-mode-active #dashboard-activity-feed:hover {
    ============================================================================ */
 
 /* Container for button + tooltip positioning */
+/* Discogs Enrichment Button */
+.discogs-button-container {
+    position: relative;
+    display: inline-block;
+    margin-right: 12px;
+}
+
+.discogs-button {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    background: linear-gradient(135deg, rgba(51, 51, 51, 0.2) 0%, rgba(80, 80, 80, 0.25) 100%);
+    backdrop-filter: blur(20px) saturate(1.4);
+    border: 1.5px solid rgba(120, 120, 120, 0.25);
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 16px rgba(80, 80, 80, 0.15), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.discogs-logo-text {
+    font-size: 14px;
+    font-weight: 900;
+    color: rgba(255, 255, 255, 0.7);
+    letter-spacing: -0.5px;
+    font-family: -apple-system, sans-serif;
+}
+
+.discogs-button:hover {
+    transform: scale(1.1);
+    border-color: rgba(180, 180, 180, 0.4);
+    box-shadow: 0 6px 24px rgba(120, 120, 120, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.discogs-button.active {
+    border-color: rgba(120, 120, 120, 0.5);
+    animation: discogs-pulse 2s ease-in-out infinite;
+}
+
+@keyframes discogs-pulse {
+    0%, 100% { box-shadow: 0 4px 16px rgba(120, 120, 120, 0.15), 0 0 0 rgba(120, 120, 120, 0); }
+    50% { box-shadow: 0 4px 16px rgba(120, 120, 120, 0.3), 0 0 12px rgba(120, 120, 120, 0.15); }
+}
+
+.discogs-button.paused {
+    opacity: 0.5;
+}
+
+.discogs-button.complete .discogs-logo-text {
+    color: rgba(76, 175, 80, 0.8);
+}
+
+.discogs-spinner {
+    display: none;
+    position: absolute;
+    top: -3px; left: -3px; right: -3px; bottom: -3px;
+    border: 2px solid transparent;
+    border-top-color: rgba(120, 120, 120, 0.6);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.discogs-button.active .discogs-spinner { display: block; }
+
+.discogs-tooltip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 12px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    pointer-events: none;
+}
+
+.discogs-button-container:hover .discogs-tooltip { display: block; }
+
+.discogs-tooltip-content {
+    background: rgba(14, 14, 20, 0.97);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 12px 16px;
+    min-width: 200px;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.discogs-tooltip-header {
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 8px;
+}
+
+.discogs-tooltip-body {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.6;
+}
+
 .deezer-button-container {
     position: relative;
     display: inline-block;
