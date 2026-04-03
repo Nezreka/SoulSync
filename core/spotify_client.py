@@ -14,7 +14,18 @@ logger = get_logger("spotify_client")
 # Global rate limiting variables
 _last_api_call_time = 0
 _api_call_lock = threading.Lock()
-MIN_API_INTERVAL = 0.35  # 350ms between API calls (~171/min, under Spotify's ~180/min limit)
+MIN_API_INTERVAL = 0.35  # Default: 350ms between API calls (~171/min, under Spotify's ~180/min limit)
+
+def _get_min_api_interval():
+    """Get configurable API interval from settings, falling back to default."""
+    try:
+        from config.settings import config_manager
+        val = config_manager.get('spotify.min_api_interval', None)
+        if val is not None:
+            return max(0.1, float(val))  # Floor at 100ms to prevent abuse
+    except Exception:
+        pass
+    return MIN_API_INTERVAL
 
 # Request queuing for burst handling
 import queue
@@ -178,8 +189,23 @@ def _detect_and_set_rate_limit(exception, endpoint_name="unknown"):
         # Try to extract Retry-After from exception headers
         retry_after = None
         has_real_header = False
-        if hasattr(exception, 'headers') and exception.headers:
-            retry_after = exception.headers.get('Retry-After') or exception.headers.get('retry-after')
+
+        # Method 1: SpotifyException.headers (set by spotipy with retries=0)
+        exc_headers = getattr(exception, 'headers', None)
+        if exc_headers and hasattr(exc_headers, 'get'):
+            retry_after = exc_headers.get('Retry-After') or exc_headers.get('retry-after')
+            if retry_after:
+                logger.info(f"Extracted Retry-After from exception headers: {retry_after}")
+            else:
+                logger.debug(f"Exception has headers but no Retry-After key. Headers type: {type(exc_headers).__name__}, keys: {list(exc_headers.keys())[:10] if hasattr(exc_headers, 'keys') else 'N/A'}")
+
+        # Method 2: Parse from error message (some spotipy versions embed it)
+        if not retry_after:
+            import re
+            ra_match = re.search(r'[Rr]etry[- ][Aa]fter[:\s]+(\d+)', error_str)
+            if ra_match:
+                retry_after = ra_match.group(1)
+                logger.info(f"Extracted Retry-After from error message: {retry_after}")
 
         if retry_after:
             try:
@@ -224,13 +250,14 @@ def rate_limited(func):
             if _is_globally_rate_limited():
                 raise SpotifyRateLimitError(0, func.__name__)
 
-            # Enforce minimum interval between API calls
+            # Enforce minimum interval between API calls (configurable via settings)
+            _interval = _get_min_api_interval()
             with _api_call_lock:
                 current_time = time.time()
                 time_since_last_call = current_time - _last_api_call_time
 
-                if time_since_last_call < MIN_API_INTERVAL:
-                    sleep_time = MIN_API_INTERVAL - time_since_last_call
+                if time_since_last_call < _interval:
+                    sleep_time = _interval - time_since_last_call
                     time.sleep(sleep_time)
 
                 _last_api_call_time = time.time()
@@ -681,8 +708,9 @@ class SpotifyClient:
                 if results['next']:
                     with _api_call_lock:
                         elapsed = time.time() - _last_api_call_time
-                        if elapsed < MIN_API_INTERVAL:
-                            time.sleep(MIN_API_INTERVAL - elapsed)
+                        _pi = _get_min_api_interval()
+                        if elapsed < _pi:
+                            time.sleep(_pi - elapsed)
                         globals()['_last_api_call_time'] = time.time()
                     from core.api_call_tracker import api_call_tracker
                     api_call_tracker.record_call('spotify', endpoint='get_user_playlists_page')
@@ -960,8 +988,9 @@ class SpotifyClient:
                 if results['next']:
                     with _api_call_lock:
                         elapsed = time.time() - _last_api_call_time
-                        if elapsed < MIN_API_INTERVAL:
-                            time.sleep(MIN_API_INTERVAL - elapsed)
+                        _pi = _get_min_api_interval()
+                        if elapsed < _pi:
+                            time.sleep(_pi - elapsed)
                         globals()['_last_api_call_time'] = time.time()
                     from core.api_call_tracker import api_call_tracker
                     api_call_tracker.record_call('spotify', endpoint='get_playlist_tracks_page')
@@ -1304,8 +1333,9 @@ class SpotifyClient:
                 while next_page.get('next'):
                     with _api_call_lock:
                         elapsed = time.time() - _last_api_call_time
-                        if elapsed < MIN_API_INTERVAL:
-                            time.sleep(MIN_API_INTERVAL - elapsed)
+                        _pi = _get_min_api_interval()
+                        if elapsed < _pi:
+                            time.sleep(_pi - elapsed)
                         globals()['_last_api_call_time'] = time.time()
                     from core.api_call_tracker import api_call_tracker
                     api_call_tracker.record_call('spotify', endpoint='get_album_tracks_page')
@@ -1351,9 +1381,11 @@ class SpotifyClient:
             return None
     
     @rate_limited
-    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 10, skip_cache: bool = False) -> List[Album]:
+    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 10, skip_cache: bool = False, max_pages: int = 0) -> List[Album]:
         """Get albums by artist ID - falls back to iTunes if Spotify not authenticated.
-        Set skip_cache=True for watchlist scans that need fresh data to detect new releases."""
+        Set skip_cache=True for watchlist scans that need fresh data to detect new releases.
+        Set max_pages to limit pagination (0 = fetch all). Spotify returns newest first,
+        so max_pages=1 is sufficient for new release detection."""
         cache = get_metadata_cache()
         fallback_src = self._fallback_source
         source = fallback_src if self._is_itunes_id(artist_id) else 'spotify'
@@ -1373,7 +1405,9 @@ class SpotifyClient:
             try:
                 albums = []
                 raw_items = []
+                # Spotify caps artist_albums at 10 per page
                 results = self.sp.artist_albums(artist_id, album_type=album_type, limit=min(limit, 10))
+                pages_fetched = 1
 
                 while results:
                     for album_data in results['items']:
@@ -1381,21 +1415,28 @@ class SpotifyClient:
                         albums.append(album)
                         raw_items.append(album_data)
 
+                    # Stop if we've hit the page limit (0 = unlimited)
+                    if max_pages and pages_fetched >= max_pages:
+                        break
+
                     # Get next batch if available — throttle pagination to respect rate limits
                     if results['next']:
                         # Enforce same rate limit as decorated calls
                         with _api_call_lock:
                             elapsed = time.time() - _last_api_call_time
-                            if elapsed < MIN_API_INTERVAL:
-                                time.sleep(MIN_API_INTERVAL - elapsed)
+                            _pi = _get_min_api_interval()
+                            if elapsed < _pi:
+                                time.sleep(_pi - elapsed)
                             globals()['_last_api_call_time'] = time.time()
                         from core.api_call_tracker import api_call_tracker
                         api_call_tracker.record_call('spotify', endpoint='get_artist_albums_page')
                         results = self.sp.next(results)
+                        pages_fetched += 1
                     else:
                         results = None
 
-                logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
+                logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}" +
+                            (f" (page limit: {max_pages})" if max_pages else ""))
 
                 # Cache the full artist albums result (wrapped in dict for cache compatibility)
                 if raw_items:

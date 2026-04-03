@@ -857,9 +857,33 @@ class WatchlistScanner:
                                 If None, uses lookback period setting from database
         """
         try:
-            # Get all artist albums (albums + singles) - this is rate limited in spotify_client
-            logger.debug(f"Fetching discography for artist {spotify_artist_id}")
-            albums = self.spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single', limit=50, skip_cache=True)
+            # Determine if we need the full discography or just recent releases.
+            # Spotify returns albums sorted newest-first, so for time-bounded scans
+            # we only need the first page (50 albums) — this cuts API calls by ~90%
+            # for prolific artists (262 albums = 27 calls → 1 call).
+            needs_full_discog = False
+            cutoff_timestamp = last_scan_timestamp
+
+            if cutoff_timestamp is None:
+                if lookback_days is not None:
+                    cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+                    logger.info(f"Using per-artist lookback: {lookback_days} days (cutoff: {cutoff_timestamp})")
+                else:
+                    lookback_period = self._get_lookback_period_setting()
+                    if lookback_period == 'all':
+                        needs_full_discog = True
+                    else:
+                        days = int(lookback_period)
+                        cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=days)
+                        logger.info(f"Using global lookback period: {lookback_period} days (cutoff: {cutoff_timestamp})")
+
+            # Fetch albums — limit pagination unless full discography is needed
+            logger.debug(f"Fetching discography for artist {spotify_artist_id}" +
+                         (" (full)" if needs_full_discog else " (recent only, max 1 page)"))
+            albums = self.spotify_client.get_artist_albums(
+                spotify_artist_id, album_type='album,single', limit=50,
+                skip_cache=True, max_pages=0 if needs_full_discog else 1
+            )
 
             if not albums:
                 logger.warning(f"No albums found for artist {spotify_artist_id}")
@@ -867,23 +891,6 @@ class WatchlistScanner:
 
             # Add small delay after fetching artist discography to be extra safe
             time.sleep(0.3)  # 300ms breathing room
-
-            # Determine cutoff date for filtering
-            cutoff_timestamp = last_scan_timestamp
-
-            # If no last scan timestamp, use per-artist lookback or global setting
-            if cutoff_timestamp is None:
-                if lookback_days is not None:
-                    # Per-artist override
-                    cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=lookback_days)
-                    logger.info(f"Using per-artist lookback: {lookback_days} days (cutoff: {cutoff_timestamp})")
-                else:
-                    # Global setting
-                    lookback_period = self._get_lookback_period_setting()
-                    if lookback_period != 'all':
-                        days = int(lookback_period)
-                        cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=days)
-                        logger.info(f"Using global lookback period: {lookback_period} days (cutoff: {cutoff_timestamp})")
 
             # Filter by release date if we have a cutoff timestamp
             if cutoff_timestamp:
@@ -914,25 +921,15 @@ class WatchlistScanner:
             lookback_days: Per-artist override for lookback period (None = use global setting)
         """
         try:
-            # Get all artist albums (albums + singles)
-            # skip_cache for Spotify so watchlist scans always get fresh data
-            logger.debug(f"Fetching discography for artist {artist_id}")
-            _skip = {'skip_cache': True} if hasattr(client, 'sp') else {}
-            albums = client.get_artist_albums(artist_id, album_type='album,single', limit=50, **_skip)
-
-            if not albums:
-                logger.warning(f"No albums found for artist {artist_id}")
-                return []
-
-            # Add small delay after fetching artist discography to be extra safe
-            time.sleep(0.3)  # 300ms breathing room
-
-            # Determine cutoff date for filtering
+            # Determine if we need full discography or just recent releases BEFORE fetching.
+            # Spotify returns albums newest-first, so for time-bounded scans we only need
+            # the first page (50 albums) — cuts API calls by ~90% for prolific artists.
             lookback_period = self._get_lookback_period_setting()
+            needs_full_discog = False
 
-            # If lookback is 'all', always return everything regardless of scan timestamp
             if lookback_period == 'all':
                 cutoff_timestamp = None
+                needs_full_discog = True
             elif last_scan_timestamp is not None:
                 cutoff_timestamp = last_scan_timestamp
 
@@ -941,6 +938,7 @@ class WatchlistScanner:
                 if rescan_cutoff == 'all':
                     logger.info(f"Lookback period changed to 'all' — returning full discography")
                     cutoff_timestamp = None
+                    needs_full_discog = True
                 elif rescan_cutoff is not None:
                     scan_ts = cutoff_timestamp
                     if scan_ts.tzinfo is None:
@@ -951,10 +949,30 @@ class WatchlistScanner:
                         logger.info(f"Lookback period change detected — expanding cutoff from {cutoff_timestamp} to {rescan_cutoff}")
                         cutoff_timestamp = rescan_cutoff
             else:
-                # No scan timestamp — use lookback period
-                days = int(lookback_period)
+                # No scan timestamp — first scan, use lookback period
+                if lookback_days is not None:
+                    days = lookback_days
+                else:
+                    days = int(lookback_period)
                 cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=days)
-                logger.info(f"Using lookback period: {lookback_period} days (cutoff: {cutoff_timestamp})")
+                logger.info(f"Using lookback period: {days} days (cutoff: {cutoff_timestamp})")
+
+            # Fetch albums — limit pagination unless full discography is needed
+            logger.debug(f"Fetching discography for artist {artist_id}" +
+                         (" (full)" if needs_full_discog else " (recent only, max 1 page)"))
+            _skip = {'skip_cache': True} if hasattr(client, 'sp') else {}
+            _max_pages = 0 if needs_full_discog else 1
+            # Only pass max_pages to clients that support it (spotify_client)
+            if hasattr(client, 'sp'):
+                _skip['max_pages'] = _max_pages
+            albums = client.get_artist_albums(artist_id, album_type='album,single', limit=50, **_skip)
+
+            if not albums:
+                logger.warning(f"No albums found for artist {artist_id}")
+                return []
+
+            # Add small delay after fetching artist discography to be extra safe
+            time.sleep(0.3)  # 300ms breathing room
 
             # Filter by release date if we have a cutoff timestamp
             if cutoff_timestamp:
