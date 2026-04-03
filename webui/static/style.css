@@ -8372,9 +8372,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     padding: 20px 22px;
     position: relative;
     overflow: hidden;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-        inset 0 1px 0 rgba(255, 255, 255, 0.15);
-
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -48402,6 +48400,7 @@ tr.tag-diff-same {
     transition: border-color 0.2s;
     appearance: none;
     -webkit-appearance: none;
+    color-scheme: dark;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='%23888'%3E%3Cpath d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 10px center;
@@ -48414,6 +48413,11 @@ tr.tag-diff-same {
 }
 
 .issues-filter-select option {
+    background: #1a1a2e;
+    color: #fff;
+}
+
+.issues-filter-select optgroup {
     background: #1a1a2e;
     color: #fff;
 }
@@ -54555,7 +54559,7 @@ tr.tag-diff-same {
     .explorer-node-artist { width: 56px; height: 56px; }
     .explorer-node-album { width: 60px; height: 60px; }
 }
-    display: flex;
+    /* display: flex;
     align-items: center;
     gap: 20px;
     padding: 24px 32px;
@@ -54567,7 +54571,7 @@ tr.tag-diff-same {
     backdrop-filter: blur(16px);
     animation: explorer-node-enter 0.6s ease both;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
+} */
 
 .explorer-root-glow {
     position: absolute;
