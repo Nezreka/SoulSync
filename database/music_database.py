@@ -5454,10 +5454,12 @@ class MusicDatabase:
                 'deluxe',
                 'platinum edition',
                 'platinum',
-                'special edition', 
+                'special edition',
                 'expanded edition',
                 'remastered',
-                'anniversary edition'
+                'anniversary edition',
+                "collector's edition",
+                'collectors edition',
             ]
             
             for edition in common_editions:
@@ -5471,7 +5473,7 @@ class MusicDatabase:
         # If original title is base form, add edition variants  
         elif not any(re.search(pattern, title_lower) for pattern in edition_patterns.keys()):
             # This appears to be a base album, add deluxe variants
-            common_editions = ['Deluxe Edition', 'Deluxe', 'Platinum Edition', 'Special Edition']
+            common_editions = ['Deluxe Edition', 'Deluxe', 'Platinum Edition', 'Special Edition', "Collector's Edition", 'Collectors Edition']
             for edition in common_editions:
                 variations.extend([
                     f"{title} ({edition})",
