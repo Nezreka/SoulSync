@@ -7922,6 +7922,7 @@ function initializeSearchModeToggle() {
         spotify: { text: 'Spotify', tabClass: 'enh-tab-spotify', badgeClass: 'enh-badge-spotify' },
         itunes: { text: 'Apple Music', tabClass: 'enh-tab-itunes', badgeClass: 'enh-badge-itunes' },
         deezer: { text: 'Deezer', tabClass: 'enh-tab-deezer', badgeClass: 'enh-badge-deezer' },
+        discogs: { text: 'Discogs', tabClass: 'enh-tab-discogs', badgeClass: 'enh-badge-discogs' },
         hydrabase: { text: 'Hydrabase', tabClass: 'enh-tab-hydrabase', badgeClass: 'enh-badge-hydrabase' },
     };
 
@@ -8047,7 +8048,7 @@ function initializeSearchModeToggle() {
         // Fire ALL source fetches immediately in parallel with the primary endpoint.
         // Don't guess which is primary — the main endpoint response will tell us.
         // If an alternate duplicates the primary, it just overwrites with same data.
-        for (const srcName of ['spotify', 'itunes', 'deezer', 'hydrabase']) {
+        for (const srcName of ['spotify', 'itunes', 'deezer', 'discogs', 'hydrabase']) {
             _fetchAlternateSource(srcName, query);
         }
 
@@ -17120,7 +17121,7 @@ function _gsRender(data) {
         return;
     }
 
-    const sourceLabels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', hydrabase: 'Hydrabase' };
+    const sourceLabels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', hydrabase: 'Hydrabase' };
     const srcLabel = sourceLabels[_gsState.activeSource] || _gsState.activeSource || '';
 
     let h = '';
@@ -17217,7 +17218,7 @@ function _gsRenderTabs() {
     if (!el) return;
     const sources = Object.keys(_gsState.sources);
     if (sources.length < 2) { el.style.display = 'none'; return; }
-    const labels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', hydrabase: 'Hydrabase' };
+    const labels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', hydrabase: 'Hydrabase' };
     el.style.display = 'flex';
     el.innerHTML = sources.map(s => {
         const d = _gsState.sources[s];
@@ -44811,7 +44812,7 @@ function _renderRedownloadStep1(overlay, track, data) {
 
     const bestSource = data.best_match?.source || sources[0];
     const sourceIcons = { spotify: '🟢', itunes: '🍎', deezer: '🟣', hydrabase: '🔷' };
-    const sourceLabels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', hydrabase: 'Hydrabase' };
+    const sourceLabels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', hydrabase: 'Hydrabase' };
 
     // Build columns — one per source, side by side
     const columnsHtml = sources.map(source => {

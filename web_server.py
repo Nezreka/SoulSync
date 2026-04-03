@@ -7362,6 +7362,7 @@ def enhanced_search():
         # Determine which alternate sources are available (for frontend to fetch async)
         spotify_available = bool(spotify_client and spotify_client.is_spotify_authenticated())
         hydrabase_available = bool(hydrabase_client and hydrabase_client.is_connected())
+        discogs_available = bool(config_manager.get('discogs.token', ''))
         alternate_sources = []
         if primary_source != 'spotify' and spotify_available:
             alternate_sources.append('spotify')
@@ -7369,6 +7370,8 @@ def enhanced_search():
             alternate_sources.append('itunes')
         if primary_source != 'deezer':
             alternate_sources.append('deezer')
+        if primary_source != 'discogs' and discogs_available:
+            alternate_sources.append('discogs')
         if primary_source != 'hydrabase' and hydrabase_available:
             alternate_sources.append('hydrabase')
 
@@ -7457,7 +7460,7 @@ def enhanced_search_source(source_name):
     This prevents slow sources (iTunes with 3s rate limit) from blocking the UI.
     Falls back to single JSON response if streaming not supported.
     """
-    if source_name not in ('spotify', 'itunes', 'deezer', 'hydrabase'):
+    if source_name not in ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase'):
         return jsonify({"error": f"Unknown source: {source_name}"}), 400
 
     data = request.get_json()
@@ -7477,6 +7480,13 @@ def enhanced_search_source(source_name):
             client = iTunesClient()
         elif source_name == 'deezer':
             client = _get_deezer_client()
+        elif source_name == 'discogs':
+            token = config_manager.get('discogs.token', '')
+            if token:
+                from core.discogs_client import DiscogsClient
+                client = DiscogsClient(token=token)
+            else:
+                return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
         elif source_name == 'hydrabase':
             if hydrabase_client and hydrabase_client.is_connected():
                 client = hydrabase_client
@@ -31896,7 +31906,7 @@ def _get_deezer_client():
     return _deezer_client_instance
 
 def _get_metadata_fallback_source():
-    """Get the configured metadata fallback source ('itunes', 'deezer', or 'hydrabase')."""
+    """Get the configured metadata fallback source ('itunes', 'deezer', 'discogs', or 'hydrabase')."""
     try:
         return config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
     except Exception:
@@ -31904,14 +31914,21 @@ def _get_metadata_fallback_source():
 
 def _get_metadata_fallback_client():
     """Get the active metadata fallback client based on settings.
-    Returns an iTunesClient, DeezerClient, or HydrabaseClient instance with identical interfaces."""
+    Returns an iTunesClient, DeezerClient, DiscogsClient, or HydrabaseClient instance with identical interfaces."""
     source = _get_metadata_fallback_source()
     if source == 'deezer':
         return _get_deezer_client()
+    if source == 'discogs':
+        token = config_manager.get('discogs.token', '')
+        if token:
+            from core.discogs_client import DiscogsClient
+            return DiscogsClient(token=token)
+        # No token — fall back to iTunes
+        from core.itunes_client import iTunesClient
+        return iTunesClient()
     if source == 'hydrabase':
         if hydrabase_client and hydrabase_client.is_connected():
             return hydrabase_client
-        # Hydrabase not connected — fall back to iTunes
         from core.itunes_client import iTunesClient
         return iTunesClient()
     from core.itunes_client import iTunesClient

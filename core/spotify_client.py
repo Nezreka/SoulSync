@@ -417,6 +417,7 @@ class SpotifyClient:
         self.user_id: Optional[str] = None
         self._itunes_client = None  # Lazy-loaded iTunes fallback
         self._deezer_client = None  # Lazy-loaded Deezer fallback
+        self._discogs_client = None  # Lazy-loaded Discogs fallback
         self._auth_cache_lock = threading.Lock()
         self._auth_cached_result: Optional[bool] = None
         self._auth_cache_time: float = 0
@@ -455,8 +456,17 @@ class SpotifyClient:
         return self._deezer_client
 
     @property
+    def _discogs(self):
+        """Lazy-load Discogs client for metadata fallback"""
+        if self._discogs_client is None:
+            from core.discogs_client import DiscogsClient
+            self._discogs_client = DiscogsClient()
+            logger.info("Discogs fallback client initialized")
+        return self._discogs_client
+
+    @property
     def _fallback_source(self) -> str:
-        """Get configured metadata fallback source ('itunes' or 'deezer')"""
+        """Get configured metadata fallback source ('itunes', 'deezer', or 'discogs')"""
         try:
             return config_manager.get('metadata.fallback_source', 'itunes') or 'itunes'
         except Exception:
@@ -467,6 +477,12 @@ class SpotifyClient:
         """Get the active fallback metadata client based on settings"""
         if self._fallback_source == 'deezer':
             return self._deezer
+        if self._fallback_source == 'discogs':
+            # Only use Discogs if token is configured
+            token = config_manager.get('discogs.token', '')
+            if token:
+                return self._discogs
+            return self._itunes  # Fall back to iTunes if no Discogs token
         return self._itunes
 
     def reload_config(self):

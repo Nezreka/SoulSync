@@ -32143,6 +32143,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .enh-source-tab.enh-tab-spotify.active { background: rgba(29, 185, 84, 0.2); color: #1db954; }
 .enh-source-tab.enh-tab-itunes.active { background: rgba(252, 60, 68, 0.2); color: #fc3c44; }
 .enh-source-tab.enh-tab-deezer.active { background: rgba(162, 56, 255, 0.2); color: #a238ff; }
+.enh-source-tab.enh-tab-discogs.active { background: rgba(212, 165, 116, 0.2); color: #D4A574; }
 .enh-source-tab.enh-tab-hydrabase.active { background: rgba(0, 180, 216, 0.2); color: #00b4d8; }
 
 .enh-dropdown-section {
