@@ -33902,8 +33902,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     position: relative;
     width: 44px;
     height: 44px;
-    background: linear-gradient(135deg, rgba(51, 51, 51, 0.2) 0%, rgba(80, 80, 80, 0.25) 100%);
+    background: linear-gradient(135deg,
+            rgba(51, 51, 51, 0.12) 0%,
+            rgba(80, 80, 80, 0.18) 100%);
     backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
     border: 1.5px solid rgba(120, 120, 120, 0.25);
     border-radius: 50%;
     cursor: pointer;
@@ -33911,53 +33914,113 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     align-items: center;
     justify-content: center;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 16px rgba(80, 80, 80, 0.15), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    box-shadow:
+        0 4px 16px rgba(80, 80, 80, 0.15),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-.discogs-logo-text {
-    font-size: 14px;
-    font-weight: 900;
-    color: rgba(255, 255, 255, 0.7);
-    letter-spacing: -0.5px;
-    font-family: -apple-system, sans-serif;
+.discogs-logo {
+    width: 24px;
+    height: 24px;
+    opacity: 0.6;
+    filter: brightness(0) invert(1);
+    transition: all 0.3s ease;
 }
 
 .discogs-button:hover {
     transform: scale(1.1);
     border-color: rgba(180, 180, 180, 0.4);
-    box-shadow: 0 6px 24px rgba(120, 120, 120, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    box-shadow:
+        0 6px 24px rgba(120, 120, 120, 0.3),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* Spinner ring */
+.discogs-spinner {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border: 3px solid transparent;
+    border-top-color: rgba(180, 180, 180, 0.8);
+    border-right-color: rgba(180, 180, 180, 0.5);
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+@keyframes discogs-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Active State */
+.discogs-button.active .discogs-spinner {
+    opacity: 1;
+    animation: discogs-spin 1.2s linear infinite;
 }
 
 .discogs-button.active {
-    border-color: rgba(120, 120, 120, 0.5);
-    animation: discogs-pulse 2s ease-in-out infinite;
+    background: linear-gradient(135deg,
+            rgba(120, 120, 120, 0.22) 0%,
+            rgba(80, 80, 80, 0.28) 100%);
+    border-color: rgba(180, 180, 180, 0.5);
+    box-shadow:
+        0 6px 24px rgba(120, 120, 120, 0.35),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
-@keyframes discogs-pulse {
-    0%, 100% { box-shadow: 0 4px 16px rgba(120, 120, 120, 0.15), 0 0 0 rgba(120, 120, 120, 0); }
-    50% { box-shadow: 0 4px 16px rgba(120, 120, 120, 0.3), 0 0 12px rgba(120, 120, 120, 0.15); }
+.discogs-button.active .discogs-logo {
+    opacity: 1;
+    filter: brightness(0) invert(1) drop-shadow(0 0 6px rgba(200, 200, 200, 0.4));
 }
 
+/* Complete/Idle State */
+.discogs-button.complete {
+    background: linear-gradient(135deg,
+            rgba(76, 175, 80, 0.15) 0%,
+            rgba(56, 142, 60, 0.20) 100%);
+    border-color: rgba(76, 175, 80, 0.35);
+    box-shadow:
+        0 4px 16px rgba(76, 175, 80, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.discogs-button.complete .discogs-logo {
+    opacity: 0.8;
+    filter: brightness(0) invert(0.6) sepia(1) saturate(3) hue-rotate(80deg);
+}
+
+.discogs-button.complete .discogs-spinner {
+    opacity: 0;
+}
+
+/* Paused State */
 .discogs-button.paused {
+    background: linear-gradient(135deg,
+            rgba(255, 193, 7, 0.12) 0%,
+            rgba(255, 152, 0, 0.18) 100%);
+    border-color: rgba(255, 193, 7, 0.35);
+    box-shadow:
+        0 4px 16px rgba(255, 193, 7, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.discogs-button.paused .discogs-logo {
     opacity: 0.5;
+    filter: brightness(0) invert(0.6) sepia(1) saturate(5) hue-rotate(15deg);
 }
 
-.discogs-button.complete .discogs-logo-text {
-    color: rgba(76, 175, 80, 0.8);
+.discogs-button.paused .discogs-spinner {
+    opacity: 0;
 }
 
-.discogs-spinner {
-    display: none;
-    position: absolute;
-    top: -3px; left: -3px; right: -3px; bottom: -3px;
-    border: 2px solid transparent;
-    border-top-color: rgba(120, 120, 120, 0.6);
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-.discogs-button.active .discogs-spinner { display: block; }
-
+/* Tooltip */
 .discogs-tooltip {
     display: none;
     position: absolute;
