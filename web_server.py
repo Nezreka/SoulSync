@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g, abort
+from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g, url_for
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger, setup_logging
 from utils.async_helpers import run_async
@@ -371,6 +371,166 @@ def _log_rejected_socketio_origin():
         request.headers.get('X-Forwarded-Proto', ''),
     )
 
+# --- WebUI asset injection ---
+_webui_react_manifest = None
+_webui_react_manifest_mtime = None
+_webui_react_manifest_path = Path(base_dir) / 'webui' / 'static' / 'dist' / '.vite' / 'manifest.json'
+_webui_vite_dev = os.environ.get('SOULSYNC_WEBUI_VITE_DEV', '').lower() in ('1', 'true', 'yes', 'on')
+_webui_vite_url = os.environ.get('SOULSYNC_WEBUI_VITE_URL', 'http://127.0.0.1:5173').rstrip('/')
+_webui_vite_base = '/static/dist/'
+
+_webui_react_apps = {
+    'router': {
+        'entry': 'src/app/main.tsx',
+        'dev_entry': 'src/app/main.tsx',
+        'mount_id': None,
+        'mount_class': None,
+    },
+}
+
+_webui_client_route_map = {
+    '/dashboard': 'dashboard',
+    '/sync': 'sync',
+    '/search': 'search',
+    '/discover': 'discover',
+    '/playlist-explorer': 'playlist-explorer',
+    '/watchlist': 'watchlist',
+    '/wishlist': 'wishlist',
+    '/automations': 'automations',
+    '/active-downloads': 'active-downloads',
+    '/library': 'library',
+    '/tools': 'tools',
+    '/artist-detail': 'artist-detail',
+    '/stats': 'stats',
+    '/import': 'import',
+    '/settings': 'settings',
+    '/issues': 'issues',
+    '/help': 'help',
+    '/hydrabase': 'hydrabase',
+}
+_webui_react_page_ids = {'issues'}
+
+
+def _resolve_webui_initial_page(pathname: str) -> str | None:
+    normalized = pathname.rstrip('/') or '/'
+    return _webui_client_route_map.get(normalized)
+
+
+def _resolve_webui_initial_nav_page(page_id: str | None) -> str | None:
+    if page_id is None:
+        return None
+    if page_id == 'artist-detail':
+        return 'library'
+    return page_id
+
+
+def _resolve_webui_initial_react_page(page_id: str | None) -> str | None:
+    if page_id in _webui_react_page_ids:
+        return page_id
+    return None
+
+
+def _should_serve_webui_spa(pathname: str) -> bool:
+    normalized = pathname.rstrip('/') or '/'
+    excluded_exact_paths = {'/callback', '/status'}
+    excluded_prefixes = (
+        '/api',
+        '/auth',
+        '/callback/',
+        '/deezer/',
+        '/socket.io',
+        '/static',
+        '/tidal/',
+    )
+
+    if normalized in excluded_exact_paths:
+        return False
+
+    return not normalized.startswith(excluded_prefixes)
+
+
+def _load_webui_react_manifest():
+    global _webui_react_manifest, _webui_react_manifest_mtime
+
+    manifest_mtime = None
+    if _webui_react_manifest_path.exists():
+        try:
+            manifest_mtime = _webui_react_manifest_path.stat().st_mtime
+        except OSError:
+            manifest_mtime = None
+
+    if _webui_react_manifest is not None and manifest_mtime == _webui_react_manifest_mtime:
+        return _webui_react_manifest
+
+    if _webui_react_manifest_path.exists():
+        try:
+            with _webui_react_manifest_path.open('r', encoding='utf-8') as handle:
+                _webui_react_manifest = json.load(handle)
+            _webui_react_manifest_mtime = manifest_mtime
+        except Exception as exc:
+            logger.warning(f"Failed to load webui manifest: {exc}")
+            _webui_react_manifest = {}
+            _webui_react_manifest_mtime = manifest_mtime
+    else:
+        _webui_react_manifest = {}
+        _webui_react_manifest_mtime = None
+    return _webui_react_manifest
+
+
+def _build_webui_react_assets(app_name='issues', placement='body'):
+    app_config = _webui_react_apps.get(app_name)
+    if not app_config:
+        return ''
+
+    if placement not in ('head', 'body'):
+        return ''
+
+    if _webui_vite_dev:
+        if placement == 'head':
+            return ''
+        vite_base_url = f'{_webui_vite_url}{_webui_vite_base.rstrip("/")}'
+        return '\n'.join([
+                f'<script type="module" src="{vite_base_url}/@vite/client"></script>',
+                f'<script type="module" src="{vite_base_url}/{app_config["dev_entry"]}"></script>',
+            ])
+
+    manifest = _load_webui_react_manifest()
+    entry = manifest.get(app_config['entry'])
+    if not entry:
+        return ''
+
+    if placement == 'head':
+        head_assets = []
+        for css_file in entry.get('css', []):
+            head_assets.append(f'<link rel="stylesheet" href="{url_for("static", filename=f"dist/{css_file}")}">')
+        return '\n'.join(head_assets)
+
+    entry_file = entry.get('file')
+    return f'<script type="module" src="{url_for("static", filename=f"dist/{entry_file}")}"></script>'
+
+
+def _build_webui_react_root(app_name='issues'):
+    app_config = _webui_react_apps.get(app_name)
+    if not app_config:
+        return ''
+
+    mount_id = app_config.get('mount_id', f'{app_name}-app-root')
+    mount_class = app_config.get('mount_class', f'{app_name}-app-root')
+    if not mount_id:
+        return ''
+    return f'<div id="{mount_id}" class="{mount_class}" data-react-app="{app_name}"></div>'
+
+
+@app.context_processor
+def inject_webui_assets():
+    return {
+        'react_assets_for': lambda app_name='issues', placement='body': _build_webui_react_assets(app_name, placement),
+        'react_root': lambda app_name='issues': _build_webui_react_root(app_name),
+        # Transitional aliases for older templates while the route contract settles.
+        'react_head_assets': lambda app_name='issues': _build_webui_react_assets(app_name, 'head'),
+        'react_body_assets': lambda app_name='issues': _build_webui_react_assets(app_name, 'body'),
+        'react_mount': lambda app_name='issues': _build_webui_react_root(app_name),
+    }
 
 # --- Profile Context (before_request hook) ---
 @app.before_request
@@ -514,7 +674,26 @@ def get_spotify_client_for_profile(profile_id=None):
     return metadata_registry.get_spotify_client_for_profile(profile_id)
 
 # Valid page IDs for profile permission validation
-VALID_PAGE_IDS = {'dashboard', 'sync', 'search', 'downloads', 'discover', 'artists', 'automations', 'library', 'import', 'settings', 'help'}
+VALID_PAGE_IDS = {
+    'dashboard',
+    'sync',
+    'search',
+    'discover',
+    'playlist-explorer',
+    'watchlist',
+    'wishlist',
+    'automations',
+    'active-downloads',
+    'library',
+    'tools',
+    'artist-detail',
+    'stats',
+    'import',
+    'settings',
+    'help',
+    'hydrabase',
+    'issues',
+}
 
 def check_download_permission():
     """Check if current profile has download permission. Returns error response or None if allowed."""
@@ -3301,7 +3480,13 @@ from core.connection_detect import run_detection
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    initial_page = _resolve_webui_initial_page(request.path)
+    return render_template(
+        'index.html',
+        initial_client_page=initial_page,
+        initial_nav_page=_resolve_webui_initial_nav_page(initial_page),
+        initial_react_page=_resolve_webui_initial_react_page(initial_page),
+    )
 
 
 @app.route('/sw.js')
@@ -3325,9 +3510,9 @@ def service_worker():
 @app.route('/<path:page>')
 def spa_catch_all(page):
     # Serve index.html for client-side routes; let Flask handle real routes first.
-    if page.startswith(('api/', 'static/', 'auth/', 'callback', 'deezer/', 'tidal/', 'status')):
+    if not _should_serve_webui_spa(f'/{page}'):
         abort(404)
-    return render_template('index.html')
+    return index()
 
 # --- API Endpoints ---
 

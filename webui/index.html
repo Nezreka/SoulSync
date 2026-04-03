@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
+    {{ react_assets_for('router', 'head')|safe }}
 </head>
 
 <body>
@@ -103,9 +104,12 @@
                             <option value="sync">Sync</option>
                             <option value="search">Search</option>
                             <option value="discover">Discover</option>
+                            <option value="watchlist">Watchlist</option>
+                            <option value="wishlist">Wishlist</option>
                             <option value="automations">Automations</option>
                             <option value="active-downloads">Downloads</option>
                             <option value="library">Library</option>
+                            <option value="tools">Tools</option>
                             <option value="stats">Listening Stats</option>
                             <option value="playlist-explorer">Playlist Explorer</option>
                             <option value="import">Import</option>
@@ -117,9 +121,12 @@
                             <label><input type="checkbox" value="sync" checked> Sync</label>
                             <label><input type="checkbox" value="search" checked> Search</label>
                             <label><input type="checkbox" value="discover" checked> Discover</label>
+                            <label><input type="checkbox" value="watchlist" checked> Watchlist</label>
+                            <label><input type="checkbox" value="wishlist" checked> Wishlist</label>
                             <label><input type="checkbox" value="automations" checked> Automations</label>
                             <label><input type="checkbox" value="active-downloads" checked> Downloads</label>
                             <label><input type="checkbox" value="library" checked> Library</label>
+                            <label><input type="checkbox" value="tools" checked> Tools</label>
                             <label><input type="checkbox" value="stats" checked> Listening Stats</label>
                             <label><input type="checkbox" value="playlist-explorer" checked> Playlist Explorer</label>
                             <label><input type="checkbox" value="import" checked> Import</label>
@@ -189,75 +196,75 @@
 
             <!-- Navigation Section -->
             <nav class="sidebar-nav">
-                <button class="nav-button active" data-page="dashboard">
+                <button class="nav-button{% if initial_nav_page == 'dashboard' %} active{% endif %}" data-page="dashboard">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="4" rx="1"/><rect x="3" y="14" width="7" height="4" rx="1"/><rect x="14" y="11" width="7" height="7" rx="1"/><line x1="5" y1="20" x2="5" y2="22"/><line x1="8" y1="19" x2="8" y2="22"/></svg></span>
                     <span class="nav-text">Dashboard</span>
                 </button>
-                <button class="nav-button" data-page="sync">
+                <button class="nav-button{% if initial_nav_page == 'sync' %} active{% endif %}" data-page="sync">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></span>
                     <span class="nav-text">Sync</span>
                 </button>
-                <button class="nav-button" data-page="search">
+                <button class="nav-button{% if initial_nav_page == 'search' %} active{% endif %}" data-page="search">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><polyline points="8 11 11 14 14 11"/></svg></span>
                     <span class="nav-text">Search</span>
                 </button>
-                <button class="nav-button" data-page="discover">
+                <button class="nav-button{% if initial_nav_page == 'discover' %} active{% endif %}" data-page="discover">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" opacity="0.2" stroke="currentColor"/></svg></span>
                     <span class="nav-text">Discover</span>
                 </button>
-                <button class="nav-button" data-page="playlist-explorer">
+                <button class="nav-button{% if initial_nav_page == 'playlist-explorer' %} active{% endif %}" data-page="playlist-explorer">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="12" x2="5" y2="18"/><line x1="12" y1="12" x2="19" y2="18"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="12" x2="12" y2="18"/><circle cx="12" cy="19" r="2"/></svg></span>
                     <span class="nav-text">Explorer</span>
                 </button>
-                <button class="nav-button" data-page="watchlist">
+                <button class="nav-button{% if initial_nav_page == 'watchlist' %} active{% endif %}" data-page="watchlist">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>
                     <span class="nav-text">Watchlist</span>
                     <span class="dl-nav-badge hidden" id="watchlist-nav-badge">0</span>
                 </button>
-                <button class="nav-button" data-page="wishlist">
+                <button class="nav-button{% if initial_nav_page == 'wishlist' %} active{% endif %}" data-page="wishlist">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>
                     <span class="nav-text">Wishlist</span>
                     <span class="dl-nav-badge hidden" id="wishlist-nav-badge">0</span>
                 </button>
-                <button class="nav-button" data-page="automations">
+                <button class="nav-button{% if initial_nav_page == 'automations' %} active{% endif %}" data-page="automations">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
                     <span class="nav-text">Automations</span>
                 </button>
-                <button class="nav-button" data-page="active-downloads">
+                <button class="nav-button{% if initial_nav_page == 'active-downloads' %} active{% endif %}" data-page="active-downloads">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
                     <span class="nav-text">Downloads</span>
                     <span class="dl-nav-badge hidden" id="dl-nav-badge">0</span>
                 </button>
-                <button class="nav-button" data-page="import">
-                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 9 12 4 17 9"/><line x1="12" y1="4" x2="12" y2="16"/></svg></span>
+                <button class="nav-button{% if initial_nav_page == 'import' %} active{% endif %}" data-page="import">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
                     <span class="nav-text">Import</span>
                 </button>
-                <button class="nav-button" data-page="library">
+                <button class="nav-button{% if initial_nav_page == 'library' %} active{% endif %}" data-page="library">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="14" y2="11"/></svg></span>
                     <span class="nav-text">Library</span>
                 </button>
-                <button class="nav-button" data-page="tools">
+                <button class="nav-button{% if initial_nav_page == 'tools' %} active{% endif %}" data-page="tools">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
                     <span class="nav-text">Tools</span>
                 </button>
-                <button class="nav-button" data-page="stats">
+                <button class="nav-button{% if initial_nav_page == 'stats' %} active{% endif %}" data-page="stats">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg></span>
                     <span class="nav-text">Stats</span>
                 </button>
-                <button class="nav-button" data-page="settings">
+                <button class="nav-button{% if initial_nav_page == 'settings' %} active{% endif %}" data-page="settings">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
                     <span class="nav-text">Settings</span>
                 </button>
-                <button class="nav-button" data-page="issues">
+                <button class="nav-button{% if initial_nav_page == 'issues' %} active{% endif %}" data-page="issues">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span>
                     <span class="nav-text">Issues</span>
                     <span class="issues-nav-badge hidden" id="issues-nav-badge">0</span>
                 </button>
-                <button class="nav-button" data-page="help">
+                <button class="nav-button{% if initial_nav_page == 'help' %} active{% endif %}" data-page="help">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
                     <span class="nav-text">Help & Docs</span>
                 </button>
-                <button class="nav-button" data-page="hydrabase" id="hydrabase-nav" style="display: none;">
+                <button class="nav-button{% if initial_nav_page == 'hydrabase' %} active{% endif %}" data-page="hydrabase" id="hydrabase-nav" style="display: none;">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span>
                     <span class="nav-text">Hydrabase</span>
                 </button>
@@ -301,9 +308,10 @@
         <div class="main-content">
             <!-- Global particle canvas for page background animations -->
             <canvas id="page-particles-canvas"></canvas>
+            <div id="webui-react-root" class="page{% if initial_react_page %} active{% endif %}" data-react-app="router"></div>
 
             <!-- Dashboard Page -->
-            <div class="page active" id="dashboard-page">
+            <div class="page{% if initial_client_page == 'dashboard' %} active{% endif %}" id="dashboard-page">
                 <div class="dashboard-container">
                     <div class="dashboard-header">
                         <div class="header-text">
@@ -834,7 +842,7 @@
             </div>
 
             <!-- Main container for the Sync page -->
-            <div class="page" id="sync-page">
+            <div class="page{% if initial_client_page == 'sync' %} active{% endif %}" id="sync-page">
                 <!-- Header -->
                 <div class="sync-header">
                     <div class="sync-header-row">
@@ -1844,8 +1852,8 @@
                 </div>
             </div>
 
-            <!-- Downloads Page -->
-            <div class="page" id="search-page">
+            <!-- Search Page -->
+            <div class="page{% if initial_client_page == 'search' %} active{% endif %}" id="search-page">
                 <!-- 
                 This top-level container replicates the QSplitter from downloads.py,
                 creating the two-panel layout for the page.
@@ -2091,10 +2099,8 @@
 
                 </div>
             </div>
-
-
             <!-- Automations Page -->
-            <div class="page" id="automations-page">
+            <div class="page{% if initial_client_page == 'automations' %} active{% endif %}" id="automations-page">
                 <!-- List View -->
                 <div class="automations-list-view" id="automations-list-view">
                     <div class="automations-container">
@@ -2145,65 +2151,59 @@
             </div>
 
             <!-- Active Downloads Page -->
-            <div class="page" id="active-downloads-page">
-                <div class="adl-layout">
-                    <!-- Left: download list -->
-                    <div class="adl-main">
-                        <div class="adl-container">
-                            <div class="adl-header">
-                                <h2 class="adl-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Downloads</h2>
-                                <div class="adl-controls">
-                                    <div class="adl-filter-pills" id="adl-filter-pills">
-                                        <button class="adl-pill active" data-filter="all" onclick="adlSetFilter('all')">All</button>
-                                        <button class="adl-pill" data-filter="active" onclick="adlSetFilter('active')">Active</button>
-                                        <button class="adl-pill" data-filter="queued" onclick="adlSetFilter('queued')">Queued</button>
-                                        <button class="adl-pill" data-filter="completed" onclick="adlSetFilter('completed')">Completed</button>
-                                        <button class="adl-pill" data-filter="failed" onclick="adlSetFilter('failed')">Failed</button>
-                                    </div>
-                                    <div style="display:flex;align-items:center;gap:10px;">
-                                        <span class="adl-count" id="adl-count"></span>
-                                        <button class="adl-cancel-all-btn" id="adl-cancel-all-btn" onclick="adlCancelAll()" style="display:none" title="Cancel all active and queued downloads">Cancel All</button>
-                                        <button class="adl-clear-btn" id="adl-clear-btn" onclick="adlClearCompleted()" style="display:none">Clear Completed</button>
-                                    </div>
-                                </div>
+            <div class="page{% if initial_client_page == 'active-downloads' %} active{% endif %}" id="active-downloads-page">
+                <div class="adl-container">
+                    <div class="adl-header">
+                        <h2 class="adl-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Downloads</h2>
+                        <div class="adl-controls">
+                            <div class="adl-filter-pills" id="adl-filter-pills">
+                                <button class="adl-pill active" data-filter="all" onclick="adlSetFilter('all')">All</button>
+                                <button class="adl-pill" data-filter="active" onclick="adlSetFilter('active')">Active</button>
+                                <button class="adl-pill" data-filter="queued" onclick="adlSetFilter('queued')">Queued</button>
+                                <button class="adl-pill" data-filter="completed" onclick="adlSetFilter('completed')">Completed</button>
+                                <button class="adl-pill" data-filter="failed" onclick="adlSetFilter('failed')">Failed</button>
                             </div>
-                            <div class="adl-list" id="adl-list">
-                                <div class="adl-empty" id="adl-empty">No downloads yet. Start one from Search, Sync, Discover, or Artists.</div>
+                            <div style="display:flex;align-items:center;gap:10px;">
+                                <span class="adl-count" id="adl-count"></span>
+                                <button class="adl-clear-btn" id="adl-clear-btn" onclick="adlClearCompleted()" style="display:none">Clear Completed</button>
                             </div>
                         </div>
                     </div>
-                    <!-- Right: batch context panel -->
-                    <div class="adl-batch-panel" id="adl-batch-panel">
-                        <div class="adl-batch-panel-header">
-                            <h3 class="adl-batch-panel-title">Batches</h3>
-                            <div class="adl-batch-panel-header-actions">
-                                <button class="library-history-btn" onclick="openLibraryHistoryModal()" title="View full download + import history">Download History</button>
-                                <button class="adl-batch-panel-collapse" id="adl-batch-collapse" onclick="adlToggleBatchPanel()" title="Toggle batch panel">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-                                </button>
+                    <div class="adl-list" id="adl-list">
+                        <div class="adl-empty" id="adl-empty">No downloads yet. Start one from Search, Sync, Discover, or Library.</div>
+                    </div>
+                </div>
+                <!-- Right: batch context panel -->
+                <div class="adl-batch-panel" id="adl-batch-panel">
+                    <div class="adl-batch-panel-header">
+                        <h3 class="adl-batch-panel-title">Batches</h3>
+                        <div class="adl-batch-panel-header-actions">
+                            <button class="library-history-btn" onclick="openLibraryHistoryModal()" title="View full download + import history">Download History</button>
+                            <button class="adl-batch-panel-collapse" id="adl-batch-collapse" onclick="adlToggleBatchPanel()" title="Toggle batch panel">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="adl-batch-active" id="adl-batch-active">
+                        <!-- Active batch cards rendered by JS -->
+                    </div>
+                    <div class="adl-batch-history-section" id="adl-batch-history-section" style="display:none">
+                        <div class="adl-batch-history-header" onclick="adlToggleBatchHistory()">
+                            <span>Recent History</span>
+                            <div class="adl-batch-history-header-actions">
+                                <button class="library-history-btn" onclick="event.stopPropagation();openLibraryHistoryModal()" title="View full download + import history">Download History</button>
+                                <svg class="adl-batch-history-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
                             </div>
                         </div>
-                        <div class="adl-batch-active" id="adl-batch-active">
-                            <!-- Active batch cards rendered by JS -->
-                        </div>
-                        <div class="adl-batch-history-section" id="adl-batch-history-section" style="display:none">
-                            <div class="adl-batch-history-header" onclick="adlToggleBatchHistory()">
-                                <span>Recent History</span>
-                                <div class="adl-batch-history-header-actions">
-                                    <button class="library-history-btn" onclick="event.stopPropagation();openLibraryHistoryModal()" title="View full download + import history">Download History</button>
-                                    <svg class="adl-batch-history-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                                </div>
-                            </div>
-                            <div class="adl-batch-history-list" id="adl-batch-history-list">
-                                <!-- Completed batch history rendered by JS -->
-                            </div>
+                        <div class="adl-batch-history-list" id="adl-batch-history-list">
+                            <!-- Completed batch history rendered by JS -->
                         </div>
                     </div>
                 </div>
             </div>
 
             <!-- Library Page -->
-            <div class="page" id="library-page">
+            <div class="page{% if initial_client_page == 'library' %} active{% endif %}" id="library-page">
                 <div class="library-container">
                     <!-- Header -->
                     <div class="library-header">
@@ -2349,7 +2349,7 @@
             </div>
 
             <!-- Artist Detail Page -->
-            <div class="page" id="artist-detail-page">
+            <div class="page{% if initial_client_page == 'artist-detail' %} active{% endif %}" id="artist-detail-page">
                 <div class="page-header">
                     <button class="back-btn" id="artist-detail-back-btn">
                         <span>← Back to Library</span>
@@ -2545,7 +2545,7 @@
                         </div>
 
                         <!-- Similar Artists Section (works for both library and source artists).
-                             Uses its own scoped IDs because the inline Artists page has a section
+                             Uses its own scoped IDs because the artist detail view has a section
                              with the same base IDs and both elements live in the DOM at once. -->
                         <div class="similar-artists-section" id="ad-similar-artists-section">
                             <div class="similar-artists-header">
@@ -2677,7 +2677,7 @@
             </div>
 
             <!-- Discover Page -->
-            <div class="page" id="discover-page">
+            <div class="page{% if initial_client_page == 'discover' %} active{% endif %}" id="discover-page">
                 <div class="discover-container">
                     <!-- Hero Section -->
                     <div class="discover-hero">
@@ -3456,7 +3456,7 @@
             </div>
 
             <!-- Playlist Explorer Page -->
-            <div class="page" id="playlist-explorer-page">
+            <div class="page{% if initial_client_page == 'playlist-explorer' %} active{% endif %}" id="playlist-explorer-page">
                 <div class="explorer-container">
                     <!-- Header (compact) -->
                     <div class="dashboard-header" style="margin-bottom: 12px;">
@@ -3559,7 +3559,7 @@
             </div>
 
             <!-- Settings Page -->
-            <div class="page" id="settings-page">
+            <div class="page{% if initial_client_page == 'settings' %} active{% endif %}" id="settings-page">
                 <div class="dashboard-header">
                     <div class="header-text">
                         <h2 class="header-title"><img src="/static/settings.png" class="page-header-icon" alt=""><span>Settings</span></h2>
@@ -5756,7 +5756,7 @@
             </div>
 
             <!-- Hydrabase Page (Dev Mode Only) -->
-            <div class="page" id="hydrabase-page">
+            <div class="page{% if initial_client_page == 'hydrabase' %} active{% endif %}" id="hydrabase-page">
                 <div class="page-header">
                     <h2><img src="/static/hydrabase.png?v=1" class="page-header-icon" alt=""><span>Hydrabase</span></h2>
                     <div style="display: flex; align-items: center; gap: 12px;">
@@ -5854,7 +5854,7 @@
             </div>
 
             <!-- Stats Page -->
-            <div class="page" id="stats-page">
+            <div class="page{% if initial_client_page == 'stats' %} active{% endif %}" id="stats-page">
                 <div class="stats-container">
                     <div class="stats-header">
                         <div class="stats-header-title">
@@ -5995,7 +5995,7 @@
             </div>
 
             <!-- Import Page -->
-            <div class="page" id="import-page">
+            <div class="page{% if initial_client_page == 'import' %} active{% endif %}" id="import-page">
                 <div class="import-page-container">
             <!-- Header with staging info -->
             <div class="import-page-header">
@@ -6145,52 +6145,6 @@
 
             </div>
         </div>
-    </div>
-
-            <!-- Issues Page -->
-            <div class="page" id="issues-page">
-                <div class="issues-container">
-                    <div class="issues-header">
-                        <div class="issues-header-left">
-                            <h2 class="issues-title">Issues</h2>
-                            <p class="issues-subtitle" id="issues-subtitle">Track and resolve library problems</p>
-                        </div>
-                        <div class="issues-header-right">
-                            <div class="issues-filters" id="issues-filters">
-                                <select id="issues-filter-status" class="issues-filter-select" onchange="loadIssuesPage()">
-                                    <option value="">All Status</option>
-                                    <option value="open" selected>Open</option>
-                                    <option value="in_progress">In Progress</option>
-                                    <option value="resolved">Resolved</option>
-                                    <option value="dismissed">Dismissed</option>
-                                </select>
-                                <select id="issues-filter-category" class="issues-filter-select" onchange="loadIssuesPage()">
-                                    <option value="">All Categories</option>
-                                    <optgroup label="Track Issues">
-                                        <option value="wrong_track">Wrong Track</option>
-                                        <option value="wrong_artist">Wrong Artist</option>
-                                        <option value="wrong_album">Wrong Album</option>
-                                        <option value="audio_quality">Audio Quality</option>
-                                    </optgroup>
-                                    <optgroup label="Album Issues">
-                                        <option value="wrong_cover">Wrong Cover Art</option>
-                                        <option value="duplicate_tracks">Duplicate Tracks</option>
-                                        <option value="missing_tracks">Missing Tracks</option>
-                                        <option value="incomplete_album">Incomplete Album</option>
-                                    </optgroup>
-                                    <optgroup label="Both">
-                                        <option value="wrong_metadata">Wrong Metadata</option>
-                                        <option value="other">Other</option>
-                                    </optgroup>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="issues-stats" id="issues-stats"></div>
-                    <div class="issues-list" id="issues-list">
-                        <div class="issues-empty">Loading issues...</div>
-                    </div>
-                </div>
             </div>
 
             <!-- Report Issue Modal -->
@@ -6210,24 +6164,8 @@
                 </div>
             </div>
 
-            <!-- Issue Detail Modal (Admin) -->
-            <div class="modal-overlay hidden" id="issue-detail-overlay">
-                <div class="enhanced-bulk-modal issue-detail-modal">
-                    <div class="enhanced-bulk-modal-header">
-                        <h3 id="issue-detail-title">Issue Details</h3>
-                        <button class="enhanced-bulk-modal-close" onclick="closeIssueDetailModal()">&times;</button>
-                    </div>
-                    <div class="enhanced-bulk-modal-body" id="issue-detail-body">
-                        <!-- Populated dynamically -->
-                    </div>
-                    <div class="enhanced-bulk-modal-footer" id="issue-detail-footer">
-                        <button class="enhanced-bulk-btn secondary" onclick="closeIssueDetailModal()">Close</button>
-                    </div>
-                </div>
-            </div>
-
             <!-- Help & Docs Page -->
-            <div class="page" id="help-page">
+            <div class="page{% if initial_client_page == 'help' %} active{% endif %}" id="help-page">
                 <div class="docs-layout">
                     <nav class="docs-sidebar" id="docs-sidebar">
                         <div class="docs-sidebar-header">
@@ -6247,7 +6185,7 @@
             <!-- ═══════════════════════════════════════════════════════════════════
                  TOOLS PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
-            <div class="page" id="tools-page">
+            <div class="page{% if initial_client_page == 'tools' %} active{% endif %}" id="tools-page">
                 <div class="tools-page-container">
                     <div class="tools-page-header">
                         <div class="tools-page-header-left">
@@ -6684,7 +6622,7 @@
             <!-- ═══════════════════════════════════════════════════════════════════
                  WATCHLIST PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
-            <div class="page" id="watchlist-page">
+            <div class="page{% if initial_client_page == 'watchlist' %} active{% endif %}" id="watchlist-page">
                 <div class="watchlist-page-container">
                     <!-- Header -->
                     <div class="watchlist-page-header">
@@ -6800,7 +6738,7 @@
             <!-- ═══════════════════════════════════════════════════════════════════
                  WISHLIST PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
-            <div class="page" id="wishlist-page">
+            <div class="page{% if initial_client_page == 'wishlist' %} active{% endif %}" id="wishlist-page">
                 <div class="wishlist-page-container">
                     <!-- Header -->
                     <div class="wishlist-page-header">
@@ -7851,6 +7789,8 @@
 
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js', v=static_v) }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    {{ react_assets_for('router', 'body')|safe }}
+    {{ react_assets_for('issues', 'body')|safe }}
     <script src="{{ url_for('static', filename='setup-wizard.js', v=static_v) }}"></script>
     <!-- Split modules (was: script.js) — core.js must load first, init.js last -->
     <script src="{{ url_for('static', filename='core.js', v=static_v) }}"></script>

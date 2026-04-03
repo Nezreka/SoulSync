@@ -100,6 +100,26 @@ const HELPER_CONTENT = {
         ],
         docsId: 'library'
     },
+    '.nav-button[data-page="watchlist"]': {
+        title: 'Watchlist',
+        description: 'Artists you follow for new releases. Use this page to scan for fresh albums and singles, manage per-artist preferences, and keep discovery data up to date.',
+        tips: [
+            'Watchlist scans add matching releases to your Wishlist',
+            'The page keeps live scan activity visible while jobs run',
+            'Per-artist settings control which release types are included'
+        ],
+        docsId: 'art-watchlist'
+    },
+    '.nav-button[data-page="wishlist"]': {
+        title: 'Wishlist',
+        description: 'Tracks waiting to be downloaded. Failed downloads, watchlist discoveries, and manual adds all land here for batch processing.',
+        tips: [
+            'Album and single queues are shown separately',
+            'Use batch select to remove or download multiple items',
+            'The page shows the next automatic processing cycle'
+        ],
+        docsId: 'art-wishlist'
+    },
     '.nav-button[data-page="active-downloads"]': {
         title: 'Downloads',
         description: 'Centralized view of every download across the entire app. Shows live status for all tracks from Sync, Discover, Artists, Search, and Wishlist in one place.',
@@ -108,6 +128,16 @@ const HELPER_CONTENT = {
             'Badge on the nav button shows active download count from any page',
             'Clear Completed button removes finished items from the list'
         ]
+    },
+    '.nav-button[data-page="tools"]': {
+        title: 'Tools',
+        description: 'Database and maintenance operations live here now: scans, backups, cleanup jobs, cache work, and repair tools.',
+        tips: [
+            'Library Maintenance is the hero section at the top of the page',
+            'Use this page for scans, backups, and repair jobs',
+            'The dashboard keeps only a compact link card'
+        ],
+        docsId: 'dashboard'
     },
     '.nav-button[data-page="playlist-explorer"]': {
         title: 'Playlist Explorer',
@@ -208,7 +238,7 @@ const HELPER_CONTENT = {
 
     '#watchlist-button': {
         title: 'Watchlist',
-        description: 'Artists you\'re following for new releases. SoulSync periodically scans for new albums and singles from these artists and adds them to your Wishlist for download.',
+        description: 'Artists you\'re following for new releases. Click to open the Watchlist page, where SoulSync scans for new albums and singles and sends matches to your Wishlist for download.',
         tips: [
             'Add artists from the Artists page or Library page',
             'Badge shows total watched artist count',
@@ -219,10 +249,10 @@ const HELPER_CONTENT = {
     },
     '#wishlist-button': {
         title: 'Wishlist',
-        description: 'Tracks queued for download. Failed downloads, watchlist new releases, and manually added tracks all land here. Process the wishlist to retry downloads.',
+        description: 'Tracks queued for download. Click to open the Wishlist page, where failed downloads, watchlist discoveries, and manual adds all land for retry.',
         tips: [
             'Badge shows total wishlist track count',
-            'Click to open the wishlist modal with all pending tracks',
+            'Use the page to manage all pending tracks in one place',
             'Process All starts downloading every wishlist item',
             'Tracks can be added manually or arrive from failed batch downloads'
         ],
