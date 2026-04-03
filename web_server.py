@@ -16299,6 +16299,7 @@ def _get_file_path_from_template_raw(template: str, context: dict) -> tuple:
 
     quality_value = context.get('quality', '')
     disc_value = f"{context.get('disc_number', 1):02d}"
+    disc_value_raw = str(context.get('disc_number', 1))
 
     path_parts = full_path.split('/')
 
@@ -16306,9 +16307,11 @@ def _get_file_path_from_template_raw(template: str, context: dict) -> tuple:
         folder_parts = path_parts[:-1]
         filename_base = path_parts[-1]
 
+        # $discnum before $disc — longer match first
         cleaned_folders = []
         for part in folder_parts:
             part = part.replace('$quality', '')
+            part = part.replace('$discnum', '')
             part = part.replace('$disc', '')
             part = re.sub(r'\s*\[\s*\]', '', part)
             part = re.sub(r'\s*\(\s*\)', '', part)
@@ -16320,6 +16323,7 @@ def _get_file_path_from_template_raw(template: str, context: dict) -> tuple:
                 cleaned_folders.append(part)
 
         filename_base = filename_base.replace('$quality', quality_value)
+        filename_base = filename_base.replace('$discnum', disc_value_raw)
         filename_base = filename_base.replace('$disc', disc_value)
         filename_base = re.sub(r'\s*\[\s*\]', '', filename_base)
         filename_base = re.sub(r'\s*\(\s*\)', '', filename_base)
@@ -16332,6 +16336,7 @@ def _get_file_path_from_template_raw(template: str, context: dict) -> tuple:
         return folder_path, _sanitize_filename(filename_base)
     else:
         full_path = full_path.replace('$quality', quality_value)
+        full_path = full_path.replace('$discnum', disc_value_raw)
         full_path = full_path.replace('$disc', disc_value)
         full_path = re.sub(r'\s*\[\s*\]', '', full_path)
         full_path = re.sub(r'\s*\(\s*\)', '', full_path)
@@ -16775,15 +16780,18 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
     import re
     quality_value = context.get('quality', '')
     disc_value = f"{context.get('disc_number', 1):02d}"
+    disc_value_raw = str(context.get('disc_number', 1))
 
     if len(path_parts) > 1:
         folder_parts = path_parts[:-1]
         filename_base = path_parts[-1]
 
-        # Strip $quality and $disc from folder parts and clean up artifacts
+        # Strip $quality, $discnum, $disc from folder parts and clean up artifacts
+        # $discnum before $disc — longer match first to prevent partial replacement
         cleaned_folders = []
         for part in folder_parts:
             part = part.replace('$quality', '')
+            part = part.replace('$discnum', '')
             part = part.replace('$disc', '')
             part = re.sub(r'\s*\[\s*\]', '', part)   # empty []
             part = re.sub(r'\s*\(\s*\)', '', part)   # empty ()
@@ -16794,8 +16802,10 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
             if part:
                 cleaned_folders.append(part)
 
-        # Substitute $quality and $disc in filename only
+        # Substitute $quality, $discnum, $disc in filename only
+        # $discnum before $disc — longer match first
         filename_base = filename_base.replace('$quality', quality_value)
+        filename_base = filename_base.replace('$discnum', disc_value_raw)
         filename_base = filename_base.replace('$disc', disc_value)
         # Clean up empty brackets/parens from any variable that resolved to empty
         filename_base = re.sub(r'\s*\[\s*\]', '', filename_base)
@@ -16813,8 +16823,9 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
 
         return folder_path, filename
     else:
-        # Single component, treat as filename — substitute $quality and $disc
+        # Single component, treat as filename — substitute $quality, $discnum, $disc
         full_path = full_path.replace('$quality', quality_value)
+        full_path = full_path.replace('$discnum', disc_value_raw)
         full_path = full_path.replace('$disc', disc_value)
         full_path = re.sub(r'\s*\[\s*\]', '', full_path)
         full_path = re.sub(r'\s*\(\s*\)', '', full_path)
