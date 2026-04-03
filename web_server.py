@@ -20400,7 +20400,14 @@ def get_version_info():
                     "• Download orchestrator hardened — one failing client no longer kills all download sources",
                     "• Webhook THEN action — send HTTP POST to any URL (Gotify, Home Assistant, Slack, n8n) from automations",
                     "• M3U auto-export now skips albums — only generates for playlists (#241)",
-                    "• Copy Debug Info includes API call rates, Spotify rate limit state, and download client failures"
+                    "• Copy Debug Info includes API call rates, Spotify rate limit state, and download client failures",
+                    "• Discogs integration — new metadata source with enrichment worker, fallback source, search tabs, watchlist, cache",
+                    "• Discogs enriches: genres/styles (400+ taxonomy), labels, catalog numbers, bios, community ratings",
+                    "• Track provenance preserved through lossy transcoding with bit depth/sample rate/bitrate (#245)",
+                    "• spotify_public playlists use full API when authenticated, no longer overwrite discovery data",
+                    "• Watchlist backfills all sources (Spotify, iTunes, Deezer, Discogs) at start of every scan",
+                    "• Collectors edition album matching for library completion checks",
+                    "• Mobile responsive styles for rate monitor, notifications, and global search"
                 ]
             },
             {

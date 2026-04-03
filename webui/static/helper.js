@@ -3403,8 +3403,9 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.2': [
         // Newest features first
+        { title: 'Discogs Integration',                              desc: 'New metadata source — enrichment worker, fallback source, enhanced search tab, watchlist support, cache browser. Genres, styles, labels, bios, ratings from 400+ taxonomy', page: 'dashboard' },
         { title: 'Webhook THEN Action',                              desc: 'Send HTTP POST to any URL when automations complete — integrate with Gotify, Home Assistant, Slack, n8n. Configurable headers and message template', page: 'automations' },
-        { title: 'API Rate Monitor',                               desc: 'Real-time speedometer gauges for all 9 enrichment services on the Dashboard. Click any gauge for 24h history chart. Spotify shows per-endpoint breakdown', page: 'dashboard' },
+        { title: 'API Rate Monitor',                               desc: 'Real-time speedometer gauges for all enrichment services on the Dashboard. Click any gauge for 24h history chart. Spotify shows per-endpoint breakdown', page: 'dashboard' },
         { title: 'Configurable Concurrent Downloads',             desc: 'Set max simultaneous downloads per batch (1-10) in Settings. Soulseek albums stay at 1 for source reuse. Higher values speed up playlists and wishlists' },
         { title: 'Streaming Search Sources',                      desc: 'Apple Music and other slow sources now stream results progressively — see artists, albums, tracks as each loads instead of waiting for all 3' },
         { title: 'Global Search Bar',                             desc: 'Spotlight-style search from any page — press / or Ctrl+K. Full enhanced search with source tabs, library badges, and playback' },
@@ -3416,8 +3417,11 @@ const WHATS_NEW = {
         { title: 'Fix Spotify Pagination Rate Limits',           desc: 'Paginated API calls (get_artist_albums, playlist tracks) now throttled — were bypassing rate limiter and causing 429 bans during watchlist scans' },
         { title: 'Fix Track Source Info / Redownload 404',      desc: 'Source info and redownload endpoints now accept string IDs (Jellyfin GUIDs) — were rejecting non-integer IDs (#237)' },
         { title: 'Clear Matched IDs',                           desc: 'New "Clear Match" button in the manual match modal lets you undo wrong matches and revert to Not Found (#236)' },
+        { title: 'Fix spotify_public Discovery Overwrite',        desc: 'Playlist refresh no longer overwrites discovery data for public Spotify playlists — uses full API when authenticated' },
+        { title: 'Fix Track Provenance Through Transcoding',    desc: 'Download source info preserved when Blasphemy Mode converts FLAC to lossy — bit depth, sample rate, bitrate stored (#245)' },
+        { title: 'Fix Watchlist Cross-Provider Backfill',       desc: 'All metadata sources (Spotify, iTunes, Deezer, Discogs) backfilled at start of every watchlist scan' },
         { title: 'Fix Import Not Triggering DB Update',          desc: 'Import now emits batch_complete through automation engine — server scan + DB update chain works like normal downloads' },
-        { title: 'Fix Tidal Auth Crash',                        desc: 'Tidal download auth no longer crashes with NoneType error when download orchestrator failed to initialize' },
+        { title: 'Fix Tidal Auth Crash',                        desc: 'Tidal download auth no longer crashes — download orchestrator hardened with per-client isolation' },
         { title: 'Fix Hybrid Download Mode',                   desc: 'Hybrid mode now tries fallback sources when primary source results all fail quality filtering (#235)' },
         { title: 'Fix Discovery Progress Display',              desc: 'Discovery modals (YouTube, Tidal, ListenBrainz, Beatport) now show live progress instead of staying on Pending' },
         { title: 'Spotify API Rate Limit Improvements',       desc: 'Cached get_artist_albums, eliminated duplicate search calls, auth probe reduced 66%, enrichment workers auto-pause during downloads' },
