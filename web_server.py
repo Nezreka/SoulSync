@@ -10250,6 +10250,18 @@ def _check_album_completion(db, album_data: dict, artist_name: str, test_mode: b
         album_name = album_data.get('name', '')
         total_tracks = album_data.get('total_tracks', 0)
         album_id = album_data.get('id', '')
+
+        # If total_tracks is 0 (Discogs masters don't include track counts),
+        # try to fetch the real count from the source
+        if total_tracks == 0 and album_id:
+            try:
+                fallback = _get_metadata_fallback_client()
+                album_detail = fallback.get_album_tracks(str(album_id))
+                if album_detail and album_detail.get('items'):
+                    total_tracks = len(album_detail['items'])
+                    logger.debug(f"Fetched track count for '{album_name}': {total_tracks}")
+            except Exception:
+                pass
         
         print(f"🔍 Checking album: '{album_name}' ({total_tracks} tracks)")
         
