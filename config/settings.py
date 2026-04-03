@@ -83,9 +83,12 @@ class ConfigManager:
         'listenbrainz.token',
         'acoustid.api_key',
         'lastfm.api_key',
+        'lastfm.api_secret',
+        'lastfm.session_key',
         'genius.access_token',
         # Other
         'hydrabase.api_key',
+        'discogs.token',
     })
 
     def _get_fernet(self) -> Fernet:
