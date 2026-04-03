@@ -24087,8 +24087,9 @@ async function loadDashboardData() {
     // Initial load of discovery pool stats for the tool card
     loadDiscoveryPoolStats();
 
-    // Initial load of metadata cache stats
+    // Initial load of metadata cache stats + periodic refresh
     loadMetadataCacheStats();
+    setInterval(loadMetadataCacheStats, 15000);
 
     // Initial load of wishlist count
     await updateWishlistCount();
@@ -58920,9 +58921,10 @@ async function openCacheHealthModal() {
                     <div class="cache-health-card-value ${s.junk_entities > 0 ? 'warn' : ''}">${s.junk_entities}</div>
                     <div class="cache-health-card-label">Junk Entries</div>
                 </div>
-                <div class="cache-health-card">
+                <div class="cache-health-card ${s.stale_mb_nulls > 0 ? 'clickable' : ''}" ${s.stale_mb_nulls > 0 ? 'onclick="openFailedMBLookupsModal()"' : ''}>
                     <div class="cache-health-card-value ${s.stale_mb_nulls > 10 ? 'warn' : ''}">${s.stale_mb_nulls}</div>
                     <div class="cache-health-card-label">Failed MB Lookups</div>
+                    ${s.stale_mb_nulls > 0 ? '<div class="cache-health-card-action">Manage ›</div>' : ''}
                 </div>
             </div>
 
@@ -58966,6 +58968,322 @@ async function openCacheHealthModal() {
     } catch (error) {
         const body = overlay.querySelector('.cache-health-body');
         body.innerHTML = '<div class="cache-health-loading">Failed to load cache stats</div>';
+    }
+}
+
+// ── Failed MB Lookups Management Modal ──
+let _failedMBState = { items: [], total: 0, page: 1, filter: '', typeFilter: '', typeCounts: {} };
+
+async function openFailedMBLookupsModal() {
+    if (document.getElementById('failed-mb-modal-overlay')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'failed-mb-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    overlay.innerHTML = `
+        <div class="failed-mb-modal">
+            <div class="failed-mb-header">
+                <div>
+                    <h2 class="failed-mb-title">Failed MusicBrainz Lookups</h2>
+                    <p class="failed-mb-subtitle">Tracks, albums, and artists that couldn't be matched automatically</p>
+                </div>
+                <button class="watch-all-close" onclick="document.getElementById('failed-mb-modal-overlay').remove()">&times;</button>
+            </div>
+            <div class="failed-mb-toolbar">
+                <div class="failed-mb-tabs" id="failed-mb-tabs"></div>
+                <div class="failed-mb-search-row">
+                    <input type="text" id="failed-mb-search" class="failed-mb-search-input" placeholder="Filter by name...">
+                    <button class="failed-mb-btn failed-mb-btn-danger" onclick="_failedMBClearAll()">Clear All Failed</button>
+                </div>
+            </div>
+            <div class="failed-mb-body" id="failed-mb-body">
+                <div class="cache-health-loading"><div class="watch-all-loading-spinner"></div><div>Loading...</div></div>
+            </div>
+            <div class="failed-mb-footer" id="failed-mb-footer"></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Search debounce
+    const searchInput = overlay.querySelector('#failed-mb-search');
+    let searchTimer = null;
+    searchInput.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+            _failedMBState.filter = searchInput.value;
+            _failedMBState.page = 1;
+            _loadFailedMBLookups();
+        }, 300);
+    });
+
+    _failedMBState = { items: [], total: 0, page: 1, filter: '', typeFilter: '', typeCounts: {} };
+    await _loadFailedMBLookups();
+}
+
+async function _loadFailedMBLookups() {
+    const body = document.getElementById('failed-mb-body');
+    if (!body) return;
+
+    // Only fetch type_counts on first load — cache them for tab switches
+    const needCounts = Object.keys(_failedMBState.typeCounts).length === 0;
+    const params = new URLSearchParams({
+        page: _failedMBState.page,
+        limit: 50,
+    });
+    if (needCounts) params.set('counts', 'true');
+    if (_failedMBState.typeFilter) params.set('entity_type', _failedMBState.typeFilter);
+    if (_failedMBState.filter) params.set('search', _failedMBState.filter);
+
+    try {
+        const resp = await fetch(`/api/metadata-cache/failed-mb-lookups?${params}`);
+        if (!resp.ok) throw new Error('Failed to load');
+        const data = await resp.json();
+        _failedMBState.items = data.items;
+        _failedMBState.total = data.total;
+        if (data.type_counts) _failedMBState.typeCounts = data.type_counts;
+
+        // Render type filter tabs
+        const tabsEl = document.getElementById('failed-mb-tabs');
+        if (tabsEl) {
+            const allCount = Object.values(_failedMBState.typeCounts).reduce((a, b) => a + b, 0);
+            let tabsHTML = `<button class="failed-mb-tab ${!_failedMBState.typeFilter ? 'active' : ''}" onclick="_failedMBSetType('')">All (${allCount})</button>`;
+            const typeLabels = { artist: 'Artists', release: 'Albums', recording: 'Tracks' };
+            for (const [type, count] of Object.entries(_failedMBState.typeCounts)) {
+                tabsHTML += `<button class="failed-mb-tab ${_failedMBState.typeFilter === type ? 'active' : ''}" onclick="_failedMBSetType('${type}')">${typeLabels[type] || type} (${count})</button>`;
+            }
+            tabsEl.innerHTML = tabsHTML;
+        }
+
+        // Render items
+        if (data.items.length === 0) {
+            body.innerHTML = `<div class="failed-mb-empty">${_failedMBState.filter ? 'No matches for your search' : 'No failed lookups — cache is clean!'}</div>`;
+        } else {
+            const typeIcons = { artist: '🎤', release: '💿', recording: '🎵' };
+            body.innerHTML = data.items.map(item => `
+                <div class="failed-mb-item" data-id="${item.id}">
+                    <div class="failed-mb-item-icon">${typeIcons[item.entity_type] || '?'}</div>
+                    <div class="failed-mb-item-info">
+                        <div class="failed-mb-item-name">${escapeHtml(item.entity_name)}</div>
+                        ${item.artist_name ? `<div class="failed-mb-item-artist">${escapeHtml(item.artist_name)}</div>` : ''}
+                    </div>
+                    <div class="failed-mb-item-meta">
+                        <span class="failed-mb-item-type">${item.entity_type}</span>
+                        <span class="failed-mb-item-date">${item.last_updated ? new Date(item.last_updated).toLocaleDateString() : ''}</span>
+                    </div>
+                    <div class="failed-mb-item-actions">
+                        <button class="failed-mb-btn-sm failed-mb-btn-primary" onclick="_failedMBSearch(${item.id}, '${item.entity_type}', '${escapeForInlineJs(item.entity_name)}', '${escapeForInlineJs(item.artist_name || '')}')">Search MB</button>
+                        <button class="failed-mb-btn-sm failed-mb-btn-ghost" onclick="_failedMBDelete(${item.id})">Remove</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Pagination footer
+        const footer = document.getElementById('failed-mb-footer');
+        if (footer) {
+            const totalPages = Math.ceil(data.total / 50);
+            footer.innerHTML = totalPages > 1 ? `
+                <div class="failed-mb-pagination">
+                    <button class="failed-mb-btn-sm" ${_failedMBState.page <= 1 ? 'disabled' : ''} onclick="_failedMBPage(${_failedMBState.page - 1})">Prev</button>
+                    <span>Page ${_failedMBState.page} of ${totalPages} (${data.total} total)</span>
+                    <button class="failed-mb-btn-sm" ${_failedMBState.page >= totalPages ? 'disabled' : ''} onclick="_failedMBPage(${_failedMBState.page + 1})">Next</button>
+                </div>
+            ` : `<div class="failed-mb-pagination"><span>${data.total} entries</span></div>`;
+        }
+    } catch (err) {
+        body.innerHTML = '<div class="failed-mb-empty">Failed to load data</div>';
+    }
+}
+
+function _failedMBSetType(type) {
+    _failedMBState.typeFilter = type;
+    _failedMBState.page = 1;
+    _loadFailedMBLookups();
+}
+
+function _failedMBPage(page) {
+    _failedMBState.page = page;
+    _loadFailedMBLookups();
+}
+
+async function _failedMBDelete(entryId) {
+    try {
+        const resp = await fetch(`/api/metadata-cache/mb-entry/${entryId}`, { method: 'DELETE' });
+        if (resp.ok) {
+            const row = document.querySelector(`.failed-mb-item[data-id="${entryId}"]`);
+            if (row) {
+                row.style.opacity = '0';
+                setTimeout(() => {
+                    row.remove();
+                    _failedMBState.typeCounts = {};  // Force refresh counts
+                    _loadFailedMBLookups();
+                }, 200);
+            }
+        }
+    } catch (err) {
+        showToast('Failed to delete entry', 'error');
+    }
+}
+
+async function _failedMBClearAll() {
+    if (!confirm(`Clear all ${_failedMBState.total} failed lookups? They will be retried on next enrichment run.`)) return;
+    try {
+        const resp = await fetch('/api/metadata-cache/clear-musicbrainz?failed_only=true', { method: 'DELETE' });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(`Cleared ${data.cleared} failed lookups`, 'success');
+            _failedMBState.page = 1;
+            _failedMBState.typeCounts = {};  // Force refresh counts
+            _loadFailedMBLookups();
+        }
+    } catch (err) {
+        showToast('Failed to clear lookups', 'error');
+    }
+}
+
+// ── MusicBrainz Search Sub-Modal ──
+async function _failedMBSearch(entryId, entityType, entityName, artistName) {
+    // Remove existing search modal if any
+    const existing = document.getElementById('mb-search-modal-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'mb-search-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '10001';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    const typeLabels = { artist: 'Artist', release: 'Album', recording: 'Track' };
+    overlay.innerHTML = `
+        <div class="mb-search-modal">
+            <div class="mb-search-header">
+                <div>
+                    <h2 class="mb-search-title">Search MusicBrainz</h2>
+                    <p class="mb-search-subtitle">Find a match for: <strong>${escapeHtml(entityName)}</strong>${artistName ? ` by ${escapeHtml(artistName)}` : ''}</p>
+                </div>
+                <button class="watch-all-close" onclick="document.getElementById('mb-search-modal-overlay').remove()">&times;</button>
+            </div>
+            <div class="mb-search-inputs">
+                <div class="mb-search-input-row">
+                    <label>Type</label>
+                    <select id="mb-search-type" class="mb-search-select">
+                        <option value="artist" ${entityType === 'artist' ? 'selected' : ''}>Artist</option>
+                        <option value="release" ${entityType === 'release' ? 'selected' : ''}>Album / Release</option>
+                        <option value="recording" ${entityType === 'recording' ? 'selected' : ''}>Track / Recording</option>
+                    </select>
+                </div>
+                <div class="mb-search-input-row">
+                    <label>Name</label>
+                    <input type="text" id="mb-search-query" class="mb-search-input" value="${escapeHtml(entityName)}">
+                </div>
+                <div class="mb-search-input-row" id="mb-search-artist-row" ${entityType === 'artist' ? 'style="display:none"' : ''}>
+                    <label>Artist</label>
+                    <input type="text" id="mb-search-artist" class="mb-search-input" value="${escapeHtml(artistName)}">
+                </div>
+                <button class="failed-mb-btn failed-mb-btn-primary" id="mb-search-go-btn" onclick="_runMBSearch(${entryId})">Search</button>
+            </div>
+            <div class="mb-search-results" id="mb-search-results">
+                <div class="failed-mb-empty">Enter a search query and click Search</div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Toggle artist row visibility based on type
+    const typeSelect = overlay.querySelector('#mb-search-type');
+    typeSelect.addEventListener('change', () => {
+        const artistRow = overlay.querySelector('#mb-search-artist-row');
+        artistRow.style.display = typeSelect.value === 'artist' ? 'none' : '';
+    });
+
+    // Enter to search
+    overlay.querySelectorAll('.mb-search-input').forEach(input => {
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') _runMBSearch(entryId); });
+    });
+
+    // Auto-search on open
+    _runMBSearch(entryId);
+}
+
+async function _runMBSearch(entryId) {
+    const resultsEl = document.getElementById('mb-search-results');
+    const typeEl = document.getElementById('mb-search-type');
+    const queryEl = document.getElementById('mb-search-query');
+    const artistEl = document.getElementById('mb-search-artist');
+    const goBtn = document.getElementById('mb-search-go-btn');
+    if (!resultsEl || !queryEl) return;
+
+    const type = typeEl.value;
+    const query = queryEl.value.trim();
+    const artist = artistEl ? artistEl.value.trim() : '';
+    if (!query) return;
+
+    goBtn.disabled = true;
+    goBtn.textContent = 'Searching...';
+    resultsEl.innerHTML = '<div class="cache-health-loading"><div class="watch-all-loading-spinner"></div><div>Searching MusicBrainz...</div></div>';
+
+    try {
+        const params = new URLSearchParams({ type, q: query, limit: 10 });
+        if (artist && type !== 'artist') params.set('artist', artist);
+
+        const resp = await fetch(`/api/musicbrainz/search?${params}`);
+        if (!resp.ok) throw new Error('Search failed');
+        const data = await resp.json();
+
+        if (!data.results || data.results.length === 0) {
+            resultsEl.innerHTML = '<div class="failed-mb-empty">No results found. Try adjusting your search.</div>';
+            return;
+        }
+
+        resultsEl.innerHTML = data.results.map((r, i) => {
+            const scoreColor = r.score >= 90 ? '#4ade80' : r.score >= 70 ? '#fbbf24' : '#f87171';
+            let detail = '';
+            if (type === 'release') detail = [r.artist, r.date, r.track_count ? `${r.track_count} tracks` : ''].filter(Boolean).join(' · ');
+            else if (type === 'recording') detail = [r.artist, r.album].filter(Boolean).join(' · ');
+            else detail = [r.type, r.country].filter(Boolean).join(' · ');
+
+            return `
+                <div class="mb-search-result" onclick="_selectMBMatch(${entryId}, '${r.mbid}', '${escapeForInlineJs(r.name)}')">
+                    <div class="mb-search-result-score" style="color:${scoreColor}">${r.score}%</div>
+                    <div class="mb-search-result-info">
+                        <div class="mb-search-result-name">${escapeHtml(r.name)}</div>
+                        ${r.disambiguation ? `<div class="mb-search-result-disambig">${escapeHtml(r.disambiguation)}</div>` : ''}
+                        ${detail ? `<div class="mb-search-result-detail">${escapeHtml(detail)}</div>` : ''}
+                    </div>
+                    <div class="mb-search-result-mbid" title="${r.mbid}">${r.mbid.substring(0, 8)}...</div>
+                </div>
+            `;
+        }).join('');
+    } catch (err) {
+        resultsEl.innerHTML = `<div class="failed-mb-empty">Search error: ${err.message}</div>`;
+    } finally {
+        goBtn.disabled = false;
+        goBtn.textContent = 'Search';
+    }
+}
+
+async function _selectMBMatch(entryId, mbid, mbName) {
+    try {
+        const resp = await fetch('/api/metadata-cache/mb-match', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entry_id: entryId, mbid, mb_name: mbName })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(`Matched to: ${mbName}`, 'success');
+            // Close search modal, refresh list with fresh counts
+            const searchOverlay = document.getElementById('mb-search-modal-overlay');
+            if (searchOverlay) searchOverlay.remove();
+            _failedMBState.typeCounts = {};
+            _loadFailedMBLookups();
+        } else {
+            showToast(data.error || 'Failed to save match', 'error');
+        }
+    } catch (err) {
+        showToast('Failed to save match', 'error');
     }
 }
 
