@@ -246,8 +246,13 @@ class Album:
         format_name = formats[0].get('name', '').lower() if formats else ''
         descriptions = [d.lower() for d in formats[0].get('descriptions', [])] if formats else []
 
-        # Also check the comma-separated 'format' string from search/artist release endpoints
-        format_str = (release_data.get('format') or '').lower()
+        # Also check the 'format' field from search/artist release endpoints
+        # Can be a string "Vinyl, LP, Album" or a list ["Vinyl", "LP", "Album"]
+        raw_format = release_data.get('format') or ''
+        if isinstance(raw_format, list):
+            format_str = ', '.join(raw_format).lower()
+        else:
+            format_str = str(raw_format).lower()
 
         if 'single' in descriptions or 'single' in format_name or 'single' in format_str:
             album_type = 'single'
