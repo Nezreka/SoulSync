@@ -463,32 +463,49 @@ class DiscogsClient:
         return result
 
     def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
-        """Get releases by an artist."""
+        """Get releases by an artist. Prefers master releases over individual pressings."""
         data = self._api_get(f'/artists/{artist_id}/releases', {
-            'sort': 'year', 'sort_order': 'desc', 'per_page': min(limit, 100),
+            'sort': 'year', 'sort_order': 'desc', 'per_page': min(limit * 3, 200),
         })
         if not data or not data.get('releases'):
             return []
 
+        # Separate masters from individual releases — prefer masters (canonical versions)
+        masters = []
+        releases_no_master = []
+        master_titles = set()
+
+        for item in data['releases']:
+            # Skip non-main roles (appearances, features, remixes by others)
+            role = item.get('role', 'Main').lower()
+            if role not in ('main', ''):
+                continue
+
+            if item.get('type') == 'master':
+                masters.append(item)
+                master_titles.add(item.get('title', '').lower())
+            else:
+                releases_no_master.append(item)
+
+        # Use masters first, then add releases that don't have a master
+        ordered = masters + [r for r in releases_no_master if r.get('title', '').lower() not in master_titles]
+
         albums = []
         seen_titles = set()
-        for item in data['releases']:
-            try:
-                # Filter by role (only include releases where artist is main)
-                role = item.get('role', 'Main').lower()
-                if role not in ('main', ''):
-                    continue
+        allowed_types = set(album_type.split(','))
 
+        for item in ordered:
+            try:
                 album = Album.from_discogs_release(item)
 
-                # Deduplicate
-                dedup_key = album.name.lower()
+                # Deduplicate by normalized title
+                dedup_key = album.name.lower().strip()
                 if dedup_key in seen_titles:
                     continue
                 seen_titles.add(dedup_key)
 
-                # Filter by type
-                if album.album_type in album_type.split(','):
+                # Filter by requested type
+                if album.album_type in allowed_types:
                     albums.append(album)
 
                 if len(albums) >= limit:
