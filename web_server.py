@@ -43938,9 +43938,11 @@ def get_mirrored_playlists_endpoint():
         profile_id = get_current_profile_id()
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
         for pl in playlists:
-            discovered, total = database.get_mirrored_playlist_discovery_counts(pl['id'])
-            pl['discovered_count'] = discovered
-            pl['total_count'] = total
+            counts = database.get_mirrored_playlist_status_counts(pl['id'])
+            pl['discovered_count'] = counts['discovered']
+            pl['total_count'] = counts['total']
+            pl['wishlisted_count'] = counts['wishlisted']
+            pl['in_library_count'] = counts['in_library']
         return jsonify(playlists)
     except Exception as e:
         logger.error(f"Error getting mirrored playlists: {e}")

@@ -66982,7 +66982,35 @@ function initExplorer() {
     if (_explorer.initialized) return;
     _explorer.initialized = true;
     _explorer._playlists = [];
+    _explorer._activeSource = null;
 
+    _explorerLoadPlaylists();
+
+    // Listen for discovery completion to auto-refresh playlist cards
+    if (typeof socket !== 'undefined') {
+        socket.on('discovery:progress', (data) => {
+            if (!document.getElementById('playlist-explorer-page')?.classList.contains('active')) return;
+            // Match mirrored playlist discovery events
+            if (data.phase === 'discovered' || data.phase === 'sync_complete' || data.complete) {
+                // Discovery finished — refresh playlists after brief delay for DB commit
+                setTimeout(() => _explorerLoadPlaylists(), 1500);
+            }
+            // Live progress update on cards during discovery
+            if (data.id && data.id.startsWith('mirrored_')) {
+                const plId = parseInt(data.id.replace('mirrored_', ''));
+                const card = document.querySelector(`.explorer-picker-card[data-id="${plId}"]`);
+                if (card) {
+                    const meta = card.querySelector('.explorer-picker-card-meta');
+                    if (meta && data.progress != null) {
+                        meta.innerHTML = `<span class="explorer-discovering-live">Discovering... ${Math.round(data.progress)}%</span>`;
+                    }
+                }
+            }
+        });
+    }
+}
+
+function _explorerLoadPlaylists() {
     fetch('/api/mirrored-playlists')
         .then(r => r.json())
         .then(data => {
@@ -67009,24 +67037,27 @@ function initExplorer() {
                 const sourceNames = { spotify: 'Spotify', tidal: 'Tidal', deezer: 'Deezer', youtube: 'YouTube', beatport: 'Beatport', file: 'File', other: 'Other' };
                 const sources = Object.keys(groups);
                 if (sources.length <= 1) {
-                    // Only one source — no tabs needed
                     tabsEl.style.display = 'none';
                 } else {
                     tabsEl.innerHTML = sources.map((src, i) => {
                         const label = sourceNames[src] || src.charAt(0).toUpperCase() + src.slice(1);
                         const count = groups[src].length;
-                        return `<button class="explorer-picker-tab ${i === 0 ? 'active' : ''}" data-source="${src}" onclick="explorerSwitchPickerTab('${src}')">${label} <span class="explorer-picker-tab-count">${count}</span></button>`;
+                        const isActive = _explorer._activeSource === src || (!_explorer._activeSource && i === 0);
+                        return `<button class="explorer-picker-tab ${isActive ? 'active' : ''}" data-source="${src}" onclick="explorerSwitchPickerTab('${src}')">${label} <span class="explorer-picker-tab-count">${count}</span></button>`;
                     }).join('');
                 }
 
-                // Show first source
-                explorerRenderPickerCards(sources[0]);
+                // Show active or first source
+                const activeSource = _explorer._activeSource || sources[0];
+                _explorer._activeSource = activeSource;
+                explorerRenderPickerCards(activeSource);
             }
         })
         .catch(() => {});
 }
 
 function explorerSwitchPickerTab(source) {
+    _explorer._activeSource = source;
     document.querySelectorAll('.explorer-picker-tab').forEach(t => t.classList.toggle('active', t.dataset.source === source));
     explorerRenderPickerCards(source);
 }
@@ -67043,18 +67074,60 @@ function explorerRenderPickerCards(source) {
         const pct = total > 0 ? Math.round((discovered / total) * 100) : 0;
         const isReady = pct >= 50;
         const isActive = _explorer.playlistId === p.id;
+        const isFullyDiscovered = pct === 100;
+        const wasExplored = p.explored || false;
+        const wishlisted = p.wishlisted_count || 0;
+        const inLibrary = p.in_library_count || 0;
+
+        // Status badge: checkmark if explored/in-library, star if ready, % if needs discovery
+        let statusBadge = '';
+        if (inLibrary > 0 && inLibrary >= total * 0.8) {
+            statusBadge = '<div class="explorer-picker-card-badge downloaded" title="Most tracks in library">&#10003;</div>';
+        } else if (wasExplored) {
+            statusBadge = '<div class="explorer-picker-card-badge explored" title="Already explored">&#10003;</div>';
+        } else if (wishlisted > 0) {
+            statusBadge = '<div class="explorer-picker-card-badge wishlisted" title="Tracks wishlisted">&#9829;</div>';
+        } else if (isFullyDiscovered) {
+            statusBadge = '<div class="explorer-picker-card-badge ready" title="Ready to explore">&#9733;</div>';
+        } else if (!isReady) {
+            statusBadge = `<div class="explorer-picker-card-badge needs-discovery" title="Needs discovery (${pct}%)">${pct}%</div>`;
+        }
+
+        // Meta line with status indicators
+        let metaHTML;
+        const statusParts = [];
+        if (inLibrary > 0) statusParts.push(`<span class="explorer-picker-in-library">${inLibrary} in library</span>`);
+        if (wishlisted > 0) statusParts.push(`<span class="explorer-picker-wishlisted">${wishlisted} wishlisted</span>`);
+
+        if (isFullyDiscovered) {
+            metaHTML = `${total} tracks &middot; <span class="explorer-picker-discovered">Fully discovered</span>`;
+        } else if (isReady) {
+            metaHTML = `${total} tracks &middot; ${pct}% discovered`;
+        } else {
+            metaHTML = `${total} tracks &middot; <span class="explorer-picker-not-ready">${pct}% discovered</span>`;
+        }
+        if (statusParts.length > 0) {
+            metaHTML += `<br>${statusParts.join(' &middot; ')}`;
+        }
+
+        // Discover button for undiscovered playlists (replaces redirect to Sync)
+        const discoverBtn = !isReady ? `<button class="explorer-picker-discover-btn" onclick="event.stopPropagation(); explorerStartDiscovery(${p.id})" title="Start discovery">Discover</button>` : '';
+
         return `
-            <div class="explorer-picker-card ${isActive ? 'active' : ''} ${!isReady ? 'not-ready' : ''}"
+            <div class="explorer-picker-card ${isActive ? 'active' : ''} ${!isReady ? 'not-ready' : ''} ${wasExplored ? 'explored' : ''}"
                  data-id="${p.id}"
-                 onclick="${isReady ? `explorerSelectPlaylist(${p.id}, this)` : `explorerRedirectToDiscover(${p.id})`}">
+                 onclick="${isReady ? `explorerSelectPlaylist(${p.id}, this)` : ''}">
                 <div class="explorer-picker-card-art">
                     ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="explorer-picker-card-art-placeholder">&#9835;</div>'}
                 </div>
                 <div class="explorer-picker-card-info">
-                    <div class="explorer-picker-card-name">${p.name || 'Untitled'}</div>
-                    <div class="explorer-picker-card-meta">${total} tracks &middot; ${isReady ? `${pct}% discovered` : `<span class="explorer-picker-not-ready">${pct}% — needs discovery</span>`}</div>
+                    <div class="explorer-picker-card-name-row">
+                        <div class="explorer-picker-card-name">${p.name || 'Untitled'}</div>
+                        ${statusBadge}
+                    </div>
+                    <div class="explorer-picker-card-meta">${metaHTML}</div>
+                    ${discoverBtn ? `<div class="explorer-picker-card-actions">${discoverBtn}</div>` : ''}
                 </div>
-                ${isReady ? '' : '<div class="explorer-picker-card-lock" title="Less than 50% discovered — click to go discover">&#128274;</div>'}
             </div>
         `;
     }).join('');
@@ -67069,11 +67142,57 @@ function explorerSelectPlaylist(id, el) {
 function explorerRedirectToDiscover(playlistId) {
     showToast('This playlist needs more tracks discovered before exploring. Redirecting to Sync...', 'info');
     navigateToPage('sync');
-    // Switch to mirrored tab after page loads
     setTimeout(() => {
         const mirroredBtn = document.querySelector('.sync-tab-button[data-tab="mirrored"]');
         if (mirroredBtn) mirroredBtn.click();
     }, 200);
+}
+
+async function explorerStartDiscovery(playlistId) {
+    const card = document.querySelector(`.explorer-picker-card[data-id="${playlistId}"]`);
+    const btn = card?.querySelector('.explorer-picker-discover-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Starting...'; }
+
+    try {
+        if (typeof discoverMirroredPlaylist === 'function') {
+            await discoverMirroredPlaylist(playlistId);
+            if (btn) { btn.disabled = false; btn.textContent = 'Open'; btn.title = 'Reopen discovery modal'; }
+
+            // Poll for card updates while discovery is in progress
+            _explorerStartDiscoveryPoller(playlistId);
+        } else {
+            explorerRedirectToDiscover(playlistId);
+        }
+    } catch (err) {
+        showToast(`Discovery failed: ${err.message}`, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Discover'; }
+    }
+}
+
+function _explorerStartDiscoveryPoller(playlistId) {
+    // Poll every 5s to refresh playlist cards until this playlist is ready
+    if (_explorer._discoveryPoller) clearInterval(_explorer._discoveryPoller);
+    _explorer._discoveryPoller = setInterval(async () => {
+        // Stop polling if Explorer page isn't active
+        if (!document.getElementById('playlist-explorer-page')?.classList.contains('active')) {
+            clearInterval(_explorer._discoveryPoller);
+            _explorer._discoveryPoller = null;
+            return;
+        }
+        // Check if the mirrored playlist state shows discovery is done
+        const tempHash = `mirrored_${playlistId}`;
+        const state = youtubePlaylistStates[tempHash];
+        const isDone = state && (state.phase === 'discovered' || state.phase === 'sync_complete');
+
+        // Refresh cards from API
+        await _explorerLoadPlaylists();
+
+        // Stop polling once discovery is complete
+        if (isDone) {
+            clearInterval(_explorer._discoveryPoller);
+            _explorer._discoveryPoller = null;
+        }
+    }, 5000);
 }
 
 function explorerSetMode(mode) {
@@ -67174,6 +67293,31 @@ async function explorerBuildTree() {
         if (actionBar) actionBar.style.display = 'flex';
         if (progress) progress.style.display = 'none';
         _explorerUpdateCount();
+
+        // Mark playlist as explored (persists in session for badge display)
+        const exploredPl = _explorer._playlists.find(p => p.id === playlistId);
+        if (exploredPl) {
+            exploredPl.explored = true;
+            // Update card badge without full re-render
+            const card = document.querySelector(`.explorer-picker-card[data-id="${playlistId}"]`);
+            if (card) {
+                card.classList.add('explored');
+                const oldBadge = card.querySelector('.explorer-picker-card-badge');
+                const badgeHTML = '<div class="explorer-picker-card-badge explored" title="Already explored">&#10003;</div>';
+                if (oldBadge) {
+                    oldBadge.outerHTML = badgeHTML;
+                } else {
+                    // Insert badge into the name row
+                    const nameRow = card.querySelector('.explorer-picker-card-name-row');
+                    if (nameRow) {
+                        nameRow.insertAdjacentHTML('beforeend', badgeHTML);
+                    }
+                }
+                // Remove discover button if present (no longer needed)
+                const discoverBtn = card.querySelector('.explorer-picker-card-actions');
+                if (discoverBtn) discoverBtn.remove();
+            }
+        }
 
         // Draw all connections now that the tree is stable
         setTimeout(() => _explorerRedrawAllConnections(true), 100);
