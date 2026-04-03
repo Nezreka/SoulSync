@@ -16129,9 +16129,36 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             if isinstance(_ext, dict) and _ext.get('itunes_artist_id'):
                 _itunes_aid = _ext['itunes_artist_id']
 
+        # Resolve album-level artist name for $albumartist.
+        # Per-track spotify_artist may vary on collab albums or after artist name changes.
+        # Prefer stable album-level sources so all tracks land in the same folder.
+        _artist_name = spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name
+        _album_artist_name = _artist_name  # default: same as track artist
+
+        # Build album-level artists list for collab mode resolution.
+        # Using album-level artists (instead of per-track _artists) ensures collab mode
+        # produces the SAME result for every track, preventing folder/tag splits.
+        _album_artists_for_collab = None  # None = fall back to per-track _artists
+        _explicit_artist_ctx = track_info.get('_explicit_artist_context') if isinstance(track_info, dict) else None
+        if isinstance(_explicit_artist_ctx, dict) and _explicit_artist_ctx.get('name'):
+            _album_artist_name = _explicit_artist_ctx['name']
+            _album_artists_for_collab = [_explicit_artist_ctx]
+        elif isinstance(_explicit_artist_ctx, str) and _explicit_artist_ctx:
+            _album_artist_name = _explicit_artist_ctx
+            _album_artists_for_collab = [{'name': _explicit_artist_ctx}]
+        else:
+            _sa_artists = _spotify_album.get('artists', []) if _spotify_album else []
+            if _sa_artists:
+                _first_sa = _sa_artists[0]
+                if isinstance(_first_sa, dict) and _first_sa.get('name'):
+                    _album_artist_name = _first_sa['name']
+                elif isinstance(_first_sa, str) and _first_sa:
+                    _album_artist_name = _first_sa
+                _album_artists_for_collab = _sa_artists
+
         template_context = {
-            'artist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
-            'albumartist': spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name,
+            'artist': _artist_name,
+            'albumartist': _album_artist_name,
             'album': album_info['album_name'],
             'title': clean_track_name,
             'track_number': track_number,
@@ -16139,7 +16166,7 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
             'year': year,
             'quality': context.get('_audio_quality', ''),
             'albumtype': album_type_display,
-            '_artists_list': _artists,
+            '_artists_list': _album_artists_for_collab if _album_artists_for_collab else _artists,
             '_itunes_artist_id': _itunes_aid,
         }
         spotify_album = context.get('spotify_album', {})
@@ -16162,8 +16189,8 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
                 os.makedirs(os.path.join(transfer_dir, folder_path), exist_ok=True)
             return final_path, True
         else:
-            # Fallback
-            artist_name_sanitized = _sanitize_filename(template_context['artist'])
+            # Fallback — use albumartist for folder consistency (same as template)
+            artist_name_sanitized = _sanitize_filename(template_context['albumartist'])
             album_name_sanitized = _sanitize_filename(album_info['album_name'])
             artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
             album_folder_name = f"{artist_name_sanitized} - {album_name_sanitized}"
@@ -17112,12 +17139,42 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
         metadata['artist'] = artist.get('name', '')
         print(f"🎵 Metadata: Using primary artist: '{metadata['artist']}'")
 
-    # Resolve album_artist for collab albums (match folder path logic)
+    # Resolve album_artist for consistent tagging across all tracks in an album.
+    # Priority: 1) explicit batch artist context (same artist for whole album)
+    #           2) album-level artists from spotify_album
+    #           3) context-level artist (spotify_artist parameter)
+    #           4) collab mode first-artist resolution (per-track, last resort)
+    # Using album-level artist prevents media server album splits when an artist
+    # changed names (Kanye West → Ye) and Spotify returns different per-track artists.
     _raw_album_artist = artist.get('name', '')
+    _track_info_ctx = context.get('track_info', {}) or {}
+    _explicit_aa = _track_info_ctx.get('_explicit_artist_context') if isinstance(_track_info_ctx, dict) else None
+
+    # Build album-level artists list for collab mode resolution.
+    # Using album-level artists (instead of per-track) ensures collab mode produces
+    # the SAME album_artist tag for every track, preventing media server album splits.
+    _album_artists_for_collab = None
+    if isinstance(_explicit_aa, dict) and _explicit_aa.get('name'):
+        _raw_album_artist = _explicit_aa['name']
+        _album_artists_for_collab = [_explicit_aa]
+    elif isinstance(_explicit_aa, str) and _explicit_aa:
+        _raw_album_artist = _explicit_aa
+        _album_artists_for_collab = [{'name': _explicit_aa}]
+    elif spotify_album and isinstance(spotify_album, dict):
+        _sa_aa = spotify_album.get('artists', [])
+        if _sa_aa:
+            _first_aa = _sa_aa[0]
+            if isinstance(_first_aa, dict) and _first_aa.get('name'):
+                _raw_album_artist = _first_aa['name']
+            elif isinstance(_first_aa, str) and _first_aa:
+                _raw_album_artist = _first_aa
+            _album_artists_for_collab = _sa_aa
+
     collab_mode = config_manager.get('file_organization.collab_artist_mode', 'first')
     if collab_mode == 'first' and _raw_album_artist:
         original_search = context.get("original_search_result", {})
-        _ctx_artists = original_search.get('artists') or context.get('track_info', {}).get('artists') or []
+        # Prefer album-level artists for collab resolution (consistent per album)
+        _ctx_artists = _album_artists_for_collab or original_search.get('artists') or _track_info_ctx.get('artists') or []
         if len(_ctx_artists) > 1:
             # Multiple artist objects (Spotify) — use first
             first = _ctx_artists[0]
@@ -17125,7 +17182,7 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
         elif len(_ctx_artists) == 1 and (',' in _raw_album_artist or ' & ' in _raw_album_artist):
             # Single combined string (iTunes) — resolve via artist ID
             _aid = str(artist.get('id', ''))
-            _src = original_search.get('_source') or context.get('track_info', {}).get('_source', '')
+            _src = original_search.get('_source') or _track_info_ctx.get('_source', '')
             if _aid.isdigit() and _src != 'deezer':
                 try:
                     from core.itunes_client import iTunesClient
@@ -25726,12 +25783,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                 if total_discs > 1:
                     print(f"💿 [Multi-Disc] Detected {total_discs} discs for album '{batch_album_context.get('name')}'")
 
-            # Pre-compute total_discs per album for wishlist tracks (grouped by album ID)
+            # Pre-compute per-album data for wishlist tracks (grouped by album ID)
             # Wishlist tracks aren't batch_is_album but each track has disc_number in spotify_data
             wishlist_album_disc_counts = {}
+            wishlist_album_artist_map = {}  # album_id -> resolved artist context (consistent per album)
             if playlist_id == 'wishlist':
                 import json as _json
-                # First pass: collect disc_number from stored spotify_data
+                # First pass: collect disc_number and resolve ONE artist per album
                 for t in tracks_json:
                     sp_data = t.get('spotify_data', {})
                     if isinstance(sp_data, str):
@@ -25746,6 +25804,36 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         wishlist_album_disc_counts[album_id] = max(
                             wishlist_album_disc_counts.get(album_id, 1), disc_num
                         )
+                        # Resolve album-level artist once per album (first track wins)
+                        if album_id not in wishlist_album_artist_map:
+                            _wl_source = t.get('source_info') or {}
+                            if isinstance(_wl_source, str):
+                                try:
+                                    _wl_source = _json.loads(_wl_source)
+                                except:
+                                    _wl_source = {}
+                            _wl_album = album_val if isinstance(album_val, dict) else {}
+                            _wl_album_artists = _wl_album.get('artists', [])
+                            # Priority: watchlist artist > album artists > track artists
+                            if _wl_source.get('watchlist_artist_name'):
+                                wishlist_album_artist_map[album_id] = {
+                                    'name': _wl_source['watchlist_artist_name'],
+                                    'id': _wl_source.get('watchlist_artist_id', '')
+                                }
+                            elif _wl_source.get('artist_name'):
+                                wishlist_album_artist_map[album_id] = {'name': _wl_source['artist_name']}
+                            elif _wl_album_artists:
+                                _fa = _wl_album_artists[0]
+                                wishlist_album_artist_map[album_id] = _fa if isinstance(_fa, dict) else {'name': str(_fa)}
+                            else:
+                                _wl_track_artists = sp_data.get('artists', [])
+                                if _wl_track_artists:
+                                    _fa = _wl_track_artists[0]
+                                    wishlist_album_artist_map[album_id] = _fa if isinstance(_fa, dict) else {'name': str(_fa)}
+                                else:
+                                    wishlist_album_artist_map[album_id] = {'name': t.get('artist', 'Unknown Artist')}
+                            print(f"🔗 [Wishlist Album Grouping] Album '{_wl_album.get('name', album_id)}' → artist: '{wishlist_album_artist_map[album_id].get('name', '?')}'")
+
 
 
             for res in missing_tracks:
@@ -25780,45 +25868,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
 
                     # We need at least an album name and artist
                     if s_album and isinstance(s_album, dict) and s_album.get('name'):
-                        # Construct artist context for folder path.
-                        # Priority: 1) watchlist artist name (the artist the user monitors)
-                        #           2) album.artists[0]  3) track artists
-                        # Watchlist artist is preferred because collab singles have combined
-                        # album artists like "Y2K & Ro Ransom" — but the user is monitoring
-                        # just "Y2K", so the folder should be "Y2K".
-                        artist_ctx = {}
-                        s_album_artists = s_album.get('artists', [])
-                        source_info = track_info.get('source_info') or {}
-                        if isinstance(source_info, str):
-                            try:
-                                import json
-                                source_info = json.loads(source_info)
-                            except:
-                                source_info = {}
-
-                        if source_info.get('watchlist_artist_name'):
-                            # Best for watchlist tracks: the individual artist being monitored
-                            artist_ctx = {'name': source_info['watchlist_artist_name'],
-                                          'id': source_info.get('watchlist_artist_id', '')}
-                        elif source_info.get('artist_name'):
-                            # Other sources that set an explicit artist name
-                            artist_ctx = {'name': source_info['artist_name']}
-                        elif s_album_artists and len(s_album_artists) > 0:
-                            # Album-level artists from Spotify (may be combined for collabs)
-                            first_artist = s_album_artists[0]
-                            if isinstance(first_artist, dict):
-                                artist_ctx = first_artist
-                            else:
-                                artist_ctx = {'name': str(first_artist)}
-                        elif s_artists and len(s_artists) > 0:
-                            # Last resort: track-level artist (old wishlist entries without album artist data)
-                            first_artist = s_artists[0]
-                            if isinstance(first_artist, dict):
-                                artist_ctx = first_artist
-                            else:
-                                artist_ctx = {'name': str(first_artist)}
-                        else:
-                            # Fallback if no artist at all
+                        # Use pre-computed album-level artist for folder consistency.
+                        # All tracks from the same album get the same artist context,
+                        # preventing folder splits on collab albums (KPOP Demon Hunters, etc.)
+                        album_id_for_lookup = s_album.get('id', 'wishlist_album')
+                        artist_ctx = wishlist_album_artist_map.get(album_id_for_lookup, {})
+                        if not artist_ctx or not artist_ctx.get('name'):
+                            # Fallback: per-track resolution (shouldn't happen, but safety)
                             artist_ctx = {'name': track_info.get('artist', 'Unknown Artist')}
 
                         # Construct minimal album context
@@ -26707,7 +26763,8 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                     'image_url': album_image_url,
                     'total_tracks': explicit_album.get('total_tracks', 0),
                     'total_discs': explicit_album.get('total_discs', 1),
-                    'album_type': explicit_album.get('album_type', 'album')
+                    'album_type': explicit_album.get('album_type', 'album'),
+                    'artists': explicit_album.get('artists', [{'name': spotify_artist_context.get('name', '')}])
                 }
                 print(f"🎵 [Explicit Context] Using real album data: '{spotify_album_context['name']}' ({spotify_album_context['album_type']}, {spotify_album_context['total_discs']} disc(s))")
             else:
@@ -26725,6 +26782,10 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                 elif fallback_images and isinstance(fallback_images, list) and len(fallback_images) > 0:
                     fallback_image_url = fallback_images[0].get('url') if isinstance(fallback_images[0], dict) else None
                 spotify_artist_context = {'id': 'from_sync_modal', 'name': track.artists[0] if track.artists else 'Unknown', 'genres': []}
+                # Preserve album-level artists for consistent folder naming
+                _fallback_album_artists = fallback_album.get('artists', [])
+                if not _fallback_album_artists:
+                    _fallback_album_artists = [{'name': track.artists[0]}] if track.artists else []
                 spotify_album_context = {
                     'id': fallback_album.get('id', 'from_sync_modal'),
                     'name': fallback_album.get('name', '') or track.album,
@@ -26732,7 +26793,8 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                     'image_url': fallback_image_url,
                     'album_type': fallback_album.get('album_type', 'album'),
                     'total_tracks': fallback_album.get('total_tracks', 0),
-                    'total_discs': fallback_album.get('total_discs', 1)
+                    'total_discs': fallback_album.get('total_discs', 1),
+                    'artists': _fallback_album_artists
                 }
 
             download_payload = candidate.__dict__
