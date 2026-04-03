@@ -37718,7 +37718,7 @@ const _RATE_GAUGE_LABELS = {
 const _RATE_GAUGE_COLORS = {
     spotify: '#1DB954', itunes: '#FC3C44', deezer: '#A238FF',
     lastfm: '#D51007', genius: '#FFFF64', musicbrainz: '#BA478F',
-    audiodb: '#00BCD4', tidal: '#00FFFF', qobuz: '#FF6B35', discogs: '#333333',
+    audiodb: '#00BCD4', tidal: '#00FFFF', qobuz: '#FF6B35', discogs: '#D4A574',
 };
 
 // SVG constants — 240° arc, gap at bottom
