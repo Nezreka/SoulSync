@@ -5424,6 +5424,8 @@ class MusicDatabase:
             r'\s+special\s*edition?$': ['special', 'special edition'],
             r'\s*-\s*deluxe': ['deluxe'],
             r'\s*-\s*platinum\s*edition?': ['platinum', 'platinum edition'],
+            r'\s+collector\'?s?\s*edition?$': ['collectors', 'collectors edition'],
+            r'\s*\(collector\'?s?\s*edition?\)': ['collectors', 'collectors edition'],
             # Generic catch-alls for any edition in parens/brackets (e.g. Silver Edition, MMXI Special Edition)
             r'\s*\([^)]*\bedition\b[^)]*\)': ['edition'],
             r'\s*\[[^\]]*\bedition\b[^\]]*\]': ['edition'],

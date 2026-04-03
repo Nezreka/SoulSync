@@ -34371,6 +34371,23 @@ function updateAlbumCompletionOverlay(completionData, containerType) {
         return;
     }
 
+    // Reclassify album type if we now know the track count (Discogs lazy fetch)
+    const currentType = albumCard.dataset.albumType;
+    const expectedTracks = completionData.expected_tracks || 0;
+    if (currentType === 'album' && expectedTracks > 0 && expectedTracks <= 3) {
+        albumCard.dataset.albumType = 'single';
+        const typeEl = albumCard.querySelector('.album-card-type');
+        if (typeEl) typeEl.textContent = 'Single';
+    } else if (currentType === 'album' && expectedTracks > 3 && expectedTracks <= 6) {
+        albumCard.dataset.albumType = 'ep';
+        const typeEl = albumCard.querySelector('.album-card-type');
+        if (typeEl) typeEl.textContent = 'EP';
+    }
+    // Update stored total tracks
+    if (expectedTracks > 0) {
+        albumCard.dataset.totalTracks = expectedTracks;
+    }
+
     const overlay = albumCard.querySelector('.completion-overlay');
     if (!overlay) {
         console.warn(`Completion overlay not found for album: ${completionData.name}`);
@@ -34385,12 +34402,13 @@ function updateAlbumCompletionOverlay(completionData, containerType) {
 
     // Update overlay text and content
     const statusText = getCompletionStatusText(completionData);
-    const progressText = `${completionData.owned_tracks}/${completionData.expected_tracks}`;
+    const progressText = completionData.expected_tracks > 0
+        ? `${completionData.owned_tracks}/${completionData.expected_tracks}`
+        : '';
 
-    overlay.innerHTML = `
-        <span class="completion-status">${statusText}</span>
-        <span class="completion-progress">${progressText}</span>
-    `;
+    overlay.innerHTML = progressText
+        ? `<span class="completion-status">${statusText}</span><span class="completion-progress">${progressText}</span>`
+        : `<span class="completion-status">${statusText}</span>`;
 
     // Add tooltip with more details
     overlay.title = `${completionData.name}\n${statusText} (${completionData.completion_percentage}%)\nTracks: ${completionData.owned_tracks}/${completionData.expected_tracks}\nConfidence: ${completionData.confidence}`;
@@ -42227,7 +42245,8 @@ function createReleaseCard(release) {
             }
         }
     } else {
-        completionText.textContent = "Missing";
+        const totalTr = release.total_tracks || release.track_completion?.total_tracks || 0;
+        completionText.textContent = totalTr > 0 ? `Missing (${totalTr} tracks)` : "Not in library";
         completionText.className = "completion-text missing";
         completionFill.className += " missing";
         completionFill.style.width = "0%";
