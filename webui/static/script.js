@@ -38782,7 +38782,7 @@ async function showWatchlistModal() {
                             if (artist.itunes_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-itunes">iTunes</span>');
                             if (artist.deezer_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-deezer">Deezer</span>');
                             if (artist.discogs_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-discogs">Discogs</span>');
-                            const artistPrimaryId = artist.spotify_artist_id || artist.itunes_artist_id || artist.deezer_artist_id;
+                            const artistPrimaryId = artist.spotify_artist_id || artist.itunes_artist_id || artist.deezer_artist_id || artist.discogs_artist_id;
                             return `
                             <div class="watchlist-artist-card"
                                  data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}"
@@ -39278,7 +39278,7 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
             return;
         }
 
-        const { config, artist, recent_releases, spotify_artist_id, itunes_artist_id, deezer_artist_id } = data;
+        const { config, artist, recent_releases, spotify_artist_id, itunes_artist_id, deezer_artist_id, discogs_artist_id } = data;
 
         // Remove existing overlay if any
         const existing = document.querySelector('.watchlist-artist-detail-overlay');
@@ -39407,13 +39407,15 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
             const activeSrc = (currentMusicSourceName || '').toLowerCase();
             if (activeSrc.includes('spotify') && spotify_artist_id) {
                 discogId = spotify_artist_id; source = 'spotify';
+            } else if (activeSrc.includes('discogs') && discogs_artist_id) {
+                discogId = discogs_artist_id; source = 'discogs';
             } else if (activeSrc.includes('deezer') && deezer_artist_id) {
                 discogId = deezer_artist_id; source = 'deezer';
             } else if (itunes_artist_id) {
                 discogId = itunes_artist_id; source = 'itunes';
             } else {
-                discogId = spotify_artist_id || deezer_artist_id || itunes_artist_id;
-                source = spotify_artist_id ? 'spotify' : deezer_artist_id ? 'deezer' : 'itunes';
+                discogId = spotify_artist_id || discogs_artist_id || deezer_artist_id || itunes_artist_id;
+                source = spotify_artist_id ? 'spotify' : discogs_artist_id ? 'discogs' : deezer_artist_id ? 'deezer' : 'itunes';
             }
             if (discogId) {
                 // Close watchlist modal + detail overlay

@@ -6514,7 +6514,7 @@ class MusicDatabase:
             return False
 
     def remove_artist_from_watchlist(self, artist_id: str, profile_id: int = 1) -> bool:
-        """Remove an artist from the watchlist (checks Spotify, iTunes, and Deezer IDs)"""
+        """Remove an artist from the watchlist (checks Spotify, iTunes, Deezer, and Discogs IDs)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -6522,15 +6522,15 @@ class MusicDatabase:
                 # Get artist name for logging (check all ID columns)
                 cursor.execute("""
                     SELECT artist_name FROM watchlist_artists
-                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?) AND profile_id = ?
-                """, (artist_id, artist_id, artist_id, profile_id))
+                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?) AND profile_id = ?
+                """, (artist_id, artist_id, artist_id, artist_id, profile_id))
                 result = cursor.fetchone()
                 artist_name = result['artist_name'] if result else "Unknown"
 
                 cursor.execute("""
                     DELETE FROM watchlist_artists
-                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?) AND profile_id = ?
-                """, (artist_id, artist_id, artist_id, profile_id))
+                    WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?) AND profile_id = ?
+                """, (artist_id, artist_id, artist_id, artist_id, profile_id))
 
                 if cursor.rowcount > 0:
                     conn.commit()
@@ -6545,7 +6545,7 @@ class MusicDatabase:
             return False
 
     def is_artist_in_watchlist(self, artist_id: str, profile_id: int = 1, artist_name: str = None) -> bool:
-        """Check if an artist is currently in the watchlist (checks Spotify, iTunes, Deezer IDs and name)"""
+        """Check if an artist is currently in the watchlist (checks Spotify, iTunes, Deezer, Discogs IDs and name)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -6554,15 +6554,15 @@ class MusicDatabase:
                 if artist_name:
                     cursor.execute("""
                         SELECT 1 FROM watchlist_artists
-                        WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR LOWER(artist_name) = LOWER(?)) AND profile_id = ?
+                        WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ? OR LOWER(artist_name) = LOWER(?)) AND profile_id = ?
                         LIMIT 1
-                    """, (artist_id, artist_id, artist_id, artist_name, profile_id))
+                    """, (artist_id, artist_id, artist_id, artist_id, artist_name, profile_id))
                 else:
                     cursor.execute("""
                         SELECT 1 FROM watchlist_artists
-                        WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?) AND profile_id = ?
+                        WHERE (spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?) AND profile_id = ?
                         LIMIT 1
-                    """, (artist_id, artist_id, artist_id, profile_id))
+                    """, (artist_id, artist_id, artist_id, artist_id, profile_id))
                 result = cursor.fetchone()
 
                 return result is not None
@@ -6833,8 +6833,8 @@ class MusicDatabase:
                 cursor.execute("""
                     UPDATE watchlist_artists
                     SET image_url = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
-                """, (image_url, artist_id, artist_id, artist_id))
+                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
+                """, (image_url, artist_id, artist_id, artist_id, artist_id))
 
                 conn.commit()
                 return cursor.rowcount > 0
