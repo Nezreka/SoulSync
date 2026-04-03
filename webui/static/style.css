@@ -50757,54 +50757,77 @@ tr.tag-diff-same {
     flex-shrink: 0;
 }
 
-/* Mode toggle — segmented control */
+/* Mode toggle — pill segmented control */
 .explorer-mode-toggle {
     display: flex;
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 10px;
-    overflow: hidden;
-    position: relative;
+    padding: 3px;
+    gap: 2px;
 }
 
 .explorer-mode-btn {
-    padding: 10px 18px;
-    font-size: 12px;
+    padding: 7px 14px;
+    font-size: 11px;
     font-weight: 600;
     color: rgba(255, 255, 255, 0.4);
     background: none;
     border: none;
     cursor: pointer;
-    transition: all 0.25s;
-    position: relative;
-    z-index: 1;
+    transition: all 0.2s;
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
     letter-spacing: 0.2px;
 }
+.explorer-mode-btn svg { opacity: 0.5; transition: opacity 0.2s; }
 
 .explorer-mode-btn.active {
     color: #fff;
-    background: rgba(var(--accent-rgb), 0.25);
-    border-radius: 8px;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    background: rgba(var(--accent-rgb), 0.2);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
 }
+.explorer-mode-btn.active svg { opacity: 1; }
 
 .explorer-mode-btn:hover:not(.active) {
     color: rgba(255, 255, 255, 0.65);
+    background: rgba(255, 255, 255, 0.04);
 }
 
-/* Explore button — primary CTA */
+/* Explore button row — prominent CTA below playlist cards */
+.explorer-build-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 14px 0 4px;
+}
+
+.explorer-build-hint {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.25);
+    font-style: italic;
+}
+
 .explorer-build-btn {
-    padding: 10px 24px;
+    padding: 11px 28px;
     font-size: 13px;
     font-weight: 700;
     color: #fff;
-    background: var(--accent);
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 80%, #fff));
     border: none;
-    border-radius: 10px;
+    border-radius: 12px;
     cursor: pointer;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     letter-spacing: 0.3px;
     position: relative;
     overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.25);
 }
 
 .explorer-build-btn::after {
@@ -50813,11 +50836,12 @@ tr.tag-diff-same {
     inset: 0;
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, transparent 50%);
     border-radius: inherit;
+    pointer-events: none;
 }
 
 .explorer-build-btn:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 24px rgba(var(--accent-rgb), 0.35);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 28px rgba(var(--accent-rgb), 0.4);
     filter: brightness(1.1);
 }
 
@@ -50830,21 +50854,22 @@ tr.tag-diff-same {
     opacity: 0.5;
     cursor: default;
     filter: saturate(0.5);
+    box-shadow: none;
 }
 
-/* Action bar — sticky at top */
+/* Action bar — polished sticky toolbar */
 .explorer-action-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 20px;
-    background: rgba(18, 18, 22, 0.9);
+    gap: 10px;
+    padding: 10px 20px;
+    background: linear-gradient(180deg, rgba(18, 18, 26, 0.95) 0%, rgba(18, 18, 22, 0.95) 100%);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 12px;
+    border-radius: 14px;
     margin-bottom: 16px;
-    backdrop-filter: blur(12px);
+    backdrop-filter: blur(16px);
     position: sticky;
     top: 0;
     z-index: 20;
@@ -50856,9 +50881,15 @@ tr.tag-diff-same {
     to { opacity: 1; transform: none; }
 }
 
+.explorer-action-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .explorer-nav-hint {
     font-size: 10px;
-    color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.18);
     width: 100%;
     text-align: center;
     margin-top: 2px;
@@ -50866,44 +50897,51 @@ tr.tag-diff-same {
 
 .explorer-selection-count {
     font-size: 13px;
-    color: rgba(255, 255, 255, 0.6);
-    font-weight: 500;
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 600;
 }
 
 .explorer-action-buttons {
     display: flex;
-    gap: 8px;
+    gap: 6px;
 }
 
 .explorer-action-btn {
-    padding: 7px 16px;
+    padding: 7px 14px;
     font-size: 11px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.55);
-    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: 8px;
     cursor: pointer;
     transition: all 0.2s;
     letter-spacing: 0.2px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
 }
+.explorer-action-btn svg { opacity: 0.5; }
 
 .explorer-action-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
-    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.12);
 }
+.explorer-action-btn:hover svg { opacity: 0.8; }
 
 .explorer-action-btn.primary {
-    background: var(--accent);
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 80%, #fff));
     border-color: transparent;
     color: #fff;
     font-weight: 700;
-    padding: 8px 22px;
+    padding: 8px 20px;
     font-size: 12px;
     position: relative;
     overflow: hidden;
+    box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.2);
 }
+.explorer-action-btn.primary svg { opacity: 1; }
 
 .explorer-action-btn.primary::after {
     content: '';
@@ -50911,10 +50949,11 @@ tr.tag-diff-same {
     inset: 0;
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, transparent 50%);
     border-radius: inherit;
+    pointer-events: none;
 }
 
 .explorer-action-btn.primary:hover {
-    box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.4);
+    box-shadow: 0 6px 22px rgba(var(--accent-rgb), 0.4);
     filter: brightness(1.1);
     transform: translateY(-1px);
 }
