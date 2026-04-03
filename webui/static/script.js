@@ -34371,21 +34371,29 @@ function updateAlbumCompletionOverlay(completionData, containerType) {
         return;
     }
 
-    // Reclassify album type if we now know the track count (Discogs lazy fetch)
+    // Reclassify and move cards when track count reveals single/EP (Discogs lazy fetch)
     const currentType = albumCard.dataset.albumType;
     const expectedTracks = completionData.expected_tracks || 0;
-    if (currentType === 'album' && expectedTracks > 0 && expectedTracks <= 3) {
-        albumCard.dataset.albumType = 'single';
-        const typeEl = albumCard.querySelector('.album-card-type');
-        if (typeEl) typeEl.textContent = 'Single';
-    } else if (currentType === 'album' && expectedTracks > 3 && expectedTracks <= 6) {
-        albumCard.dataset.albumType = 'ep';
-        const typeEl = albumCard.querySelector('.album-card-type');
-        if (typeEl) typeEl.textContent = 'EP';
-    }
-    // Update stored total tracks
     if (expectedTracks > 0) {
         albumCard.dataset.totalTracks = expectedTracks;
+        let newType = currentType;
+        if (currentType === 'album' && expectedTracks <= 3) newType = 'single';
+        else if (currentType === 'album' && expectedTracks <= 6) newType = 'ep';
+
+        if (newType !== currentType) {
+            albumCard.dataset.albumType = newType;
+            const typeEl = albumCard.querySelector('.album-card-type');
+            if (typeEl) typeEl.textContent = newType === 'single' ? 'Single' : 'EP';
+
+            // Move card from albums grid to singles grid
+            const singlesGrid = document.getElementById('singles-grid');
+            const singlesSection = singlesGrid?.closest('.discography-section');
+            if (singlesGrid) {
+                albumCard.remove();
+                singlesGrid.appendChild(albumCard);
+                if (singlesSection) singlesSection.style.display = '';
+            }
+        }
     }
 
     const overlay = albumCard.querySelector('.completion-overlay');
