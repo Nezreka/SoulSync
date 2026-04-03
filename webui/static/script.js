@@ -21642,6 +21642,8 @@ async function loadMetadataCacheBrowseStats() {
         el('mcache-browse-itunes-count', itunesTotal);
         el('mcache-browse-deezer-count', deezerTotal);
         el('mcache-browse-beatport-count', beatportTotal);
+        const discogsTotal = (stats.artists?.discogs || 0) + (stats.albums?.discogs || 0) + (stats.tracks?.discogs || 0);
+        el('mcache-browse-discogs-count', discogsTotal);
         el('mcache-browse-musicbrainz-count', stats.musicbrainz_total || 0);
         el('mcache-browse-hits', stats.total_hits || 0);
         el('mcache-browse-searches', stats.searches || 0);
