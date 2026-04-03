@@ -9484,6 +9484,11 @@ def get_artist_image(artist_id):
             client = _get_deezer_client()
             image_url = client._get_artist_image_from_albums(artist_id)
             return jsonify({"success": True, "image_url": image_url})
+        elif source_override == 'discogs':
+            from core.discogs_client import DiscogsClient
+            client = DiscogsClient()
+            image_url = client._get_artist_image_from_albums(artist_id)
+            return jsonify({"success": True, "image_url": image_url})
         elif source_override == 'hydrabase':
             # Route to the plugin that sourced the data
             plugin = request.args.get('plugin', '').lower()
@@ -9556,6 +9561,12 @@ def get_artist_discography(artist_id):
                     albums = deezer_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
                     if albums:
                         active_source = 'deezer'
+                elif source_override == 'discogs':
+                    from core.discogs_client import DiscogsClient
+                    discogs_cl = DiscogsClient()
+                    albums = discogs_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                    if albums:
+                        active_source = 'discogs'
                 elif source_override == 'hydrabase':
                     plugin = request.args.get('plugin', '').lower()
                     if plugin == 'deezer':
@@ -9583,6 +9594,9 @@ def get_artist_discography(artist_id):
                             cl = iTunesClient()
                     elif source_override == 'deezer':
                         cl = _get_deezer_client()
+                    elif source_override == 'discogs':
+                        from core.discogs_client import DiscogsClient
+                        cl = DiscogsClient()
                     elif source_override == 'spotify' and spotify_available:
                         cl = spotify_client
                     else:
@@ -9851,7 +9865,7 @@ def _resolve_db_album_id(album_id, artist_id=None):
         with database._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT a.title, a.spotify_album_id, a.itunes_album_id, ar.name as artist_name
+                SELECT a.title, a.spotify_album_id, a.itunes_album_id, a.discogs_id, ar.name as artist_name
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
                 WHERE a.id = ?
@@ -9860,11 +9874,16 @@ def _resolve_db_album_id(album_id, artist_id=None):
             if not row:
                 return None
 
-            # Prefer stored external IDs
+            # Prefer stored external IDs — match the active fallback source
+            fallback = _get_metadata_fallback_source()
+            if fallback == 'discogs' and row.get('discogs_id'):
+                return row['discogs_id']
             if row['spotify_album_id']:
                 return row['spotify_album_id']
             if row['itunes_album_id']:
                 return row['itunes_album_id']
+            if row.get('discogs_id'):
+                return row['discogs_id']
 
             # No stored external ID — search by name
             album_title = row['title']
@@ -9950,6 +9969,9 @@ def get_artist_album_tracks(artist_id, album_id):
                 client = iTunesClient()
         elif source_override == 'deezer':
             client = _get_deezer_client()
+        elif source_override == 'discogs':
+            from core.discogs_client import DiscogsClient
+            client = DiscogsClient()
 
         print(f"🎵 Fetching tracks for album: {album_id} by artist: {artist_id} (source: {source_override or 'auto'})")
 
@@ -29724,6 +29746,9 @@ def get_album_tracks(album_id):
             # else: spotify (default)
         elif source_override == 'deezer':
             client = _get_deezer_client()
+        elif source_override == 'discogs':
+            from core.discogs_client import DiscogsClient
+            client = DiscogsClient()
 
         album_data = client.get_album(album_id)
         if not album_data:

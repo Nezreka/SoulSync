@@ -445,8 +445,12 @@ class DiscogsClient:
         }
 
     def get_album(self, release_id: str, include_tracks: bool = True) -> Optional[Dict[str, Any]]:
-        """Get release/album details by Discogs ID."""
-        data = self._api_get(f'/releases/{release_id}')
+        """Get release/album details by Discogs ID. Tries master first, falls back to release."""
+        # Try as master first (artist discography returns master IDs)
+        data = self._api_get(f'/masters/{release_id}')
+        if not data or not data.get('title'):
+            # Fall back to release
+            data = self._api_get(f'/releases/{release_id}')
         if not data:
             return None
 
