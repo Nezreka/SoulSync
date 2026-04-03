@@ -38781,6 +38781,7 @@ async function showWatchlistModal() {
                             if (artist.spotify_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-spotify">Spotify</span>');
                             if (artist.itunes_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-itunes">iTunes</span>');
                             if (artist.deezer_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-deezer">Deezer</span>');
+                            if (artist.discogs_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-discogs">Discogs</span>');
                             const artistPrimaryId = artist.spotify_artist_id || artist.itunes_artist_id || artist.deezer_artist_id;
                             return `
                             <div class="watchlist-artist-card"
@@ -38924,7 +38925,7 @@ function closeWatchlistModal() {
  * Populate the linked provider section in the watchlist config modal.
  * Shows which Spotify/iTunes/Deezer artist is linked and allows changing it.
  */
-function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesId, artistInfo, deezerId) {
+function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesId, artistInfo, deezerId, discogsId) {
     const section = document.getElementById('watchlist-linked-provider-section');
     const content = document.getElementById('watchlist-linked-provider-content');
     if (!section || !content) return;
@@ -38933,8 +38934,9 @@ function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesI
     const hasSpotify = !!spotifyId;
     const hasItunes = !!itunesId;
     const hasDeezer = !!deezerId;
+    const hasDiscogs = !!discogsId;
 
-    if (!hasSpotify && !hasItunes && !hasDeezer) {
+    if (!hasSpotify && !hasItunes && !hasDeezer && !hasDiscogs) {
         section.style.display = 'none';
         return;
     }
@@ -38968,6 +38970,9 @@ function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesI
     }
     if (hasDeezer) {
         html += `<span class="watchlist-provider-badge deezer">Deezer</span>`;
+    }
+    if (hasDiscogs) {
+        html += `<span class="watchlist-provider-badge discogs">Discogs</span>`;
     }
     html += `</div>`;
 
@@ -39135,10 +39140,10 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
             return;
         }
 
-        const { config, artist, spotify_artist_id, itunes_artist_id, deezer_artist_id, watchlist_name } = data;
+        const { config, artist, spotify_artist_id, itunes_artist_id, deezer_artist_id, discogs_artist_id, watchlist_name } = data;
 
         // Populate linked provider section (use DB watchlist_name for mismatch comparison)
-        _populateLinkedProviderSection(artistId, watchlist_name || artistName, spotify_artist_id, itunes_artist_id, artist, deezer_artist_id);
+        _populateLinkedProviderSection(artistId, watchlist_name || artistName, spotify_artist_id, itunes_artist_id, artist, deezer_artist_id, discogs_artist_id);
 
         // Check if global override is active
         let globalOverrideActive = false;

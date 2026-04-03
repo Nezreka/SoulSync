@@ -15244,6 +15244,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #a265e6;
 }
 
+.watchlist-source-discogs {
+    background: rgba(212, 165, 116, 0.15);
+    color: #D4A574;
+}
+
 .watchlist-card-pills {
     position: relative;
     z-index: 2;
@@ -17038,6 +17043,12 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     background: rgba(162, 56, 255, 0.15);
     color: #a238ff;
     border: 1px solid rgba(162, 56, 255, 0.3);
+}
+
+.watchlist-provider-badge.discogs {
+    background: rgba(212, 165, 116, 0.15);
+    color: #D4A574;
+    border: 1px solid rgba(212, 165, 116, 0.3);
 }
 
 .watchlist-linked-mismatch-warning {
