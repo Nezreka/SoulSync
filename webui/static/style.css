@@ -50569,11 +50569,11 @@ tr.tag-diff-same {
 
 .explorer-picker-card {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
-    padding: 8px 14px 8px 8px;
-    min-width: 200px;
-    max-width: 260px;
+    padding: 10px 14px 10px 10px;
+    min-width: 220px;
+    max-width: 280px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 12px;
@@ -50625,6 +50625,12 @@ tr.tag-diff-same {
     flex: 1;
 }
 
+.explorer-picker-card-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .explorer-picker-card-name {
     font-size: 12px;
     font-weight: 600;
@@ -50638,6 +50644,11 @@ tr.tag-diff-same {
     font-size: 10px;
     color: rgba(255, 255, 255, 0.35);
     margin-top: 2px;
+    line-height: 1.4;
+}
+
+.explorer-picker-card-actions {
+    margin-top: 6px;
 }
 
 .explorer-picker-card.not-ready {
@@ -50654,6 +50665,25 @@ tr.tag-diff-same {
     color: rgba(245, 166, 35, 0.8);
 }
 
+.explorer-picker-discovered {
+    color: rgba(74, 222, 128, 0.8);
+}
+.explorer-picker-in-library {
+    color: rgba(96, 165, 250, 0.7); font-size: 10px;
+}
+.explorer-picker-wishlisted {
+    color: rgba(244, 114, 182, 0.7); font-size: 10px;
+}
+
+.explorer-discovering-live {
+    color: rgba(96, 165, 250, 0.9);
+    animation: explorer-pulse 1.5s ease-in-out infinite;
+}
+@keyframes explorer-pulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+}
+
 .explorer-picker-card-lock {
     position: absolute;
     top: 6px;
@@ -50664,6 +50694,54 @@ tr.tag-diff-same {
 
 .explorer-picker-card {
     position: relative;
+}
+
+/* Status badges on picker cards — inline, not absolute */
+.explorer-picker-card-badge {
+    font-size: 9px; font-weight: 800; padding: 2px 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 5px; flex-shrink: 0; margin-left: auto; line-height: 1;
+}
+.explorer-picker-card-badge.explored {
+    background: rgba(74, 222, 128, 0.15); color: #4ade80;
+    border: 1px solid rgba(74, 222, 128, 0.3);
+}
+.explorer-picker-card-badge.ready {
+    background: rgba(251, 191, 36, 0.12); color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.25); font-size: 10px;
+}
+.explorer-picker-card-badge.needs-discovery {
+    background: rgba(245, 166, 35, 0.1); color: rgba(245, 166, 35, 0.7);
+    border: 1px solid rgba(245, 166, 35, 0.2);
+}
+.explorer-picker-card-badge.wishlisted {
+    background: rgba(244, 114, 182, 0.15); color: #f472b6;
+    border: 1px solid rgba(244, 114, 182, 0.3);
+}
+.explorer-picker-card-badge.downloaded {
+    background: rgba(96, 165, 250, 0.15); color: #60a5fa;
+    border: 1px solid rgba(96, 165, 250, 0.3);
+}
+.explorer-picker-card.explored {
+    border-color: rgba(74, 222, 128, 0.15);
+}
+.explorer-picker-card.explored:hover {
+    border-color: rgba(74, 222, 128, 0.3);
+}
+
+/* Discover button — inline in card info area */
+.explorer-picker-discover-btn {
+    padding: 3px 8px; border-radius: 5px; font-size: 9px; font-weight: 700;
+    background: rgba(96, 165, 250, 0.12); color: #60a5fa;
+    border: 1px solid rgba(96, 165, 250, 0.2); cursor: pointer;
+    transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.5px;
+    margin-left: auto; flex-shrink: 0;
+}
+.explorer-picker-discover-btn:hover {
+    background: rgba(96, 165, 250, 0.25);
+}
+.explorer-picker-discover-btn:disabled {
+    opacity: 0.5; cursor: default;
 }
 
 .explorer-picker-empty {
