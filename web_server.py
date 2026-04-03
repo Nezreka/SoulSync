@@ -3551,7 +3551,8 @@ def run_service_test(service, test_config):
                      return True, "Spotify connection successful!"
                  else:
                      # Using fallback metadata source
-                     fallback_name = 'Deezer' if _get_metadata_fallback_source() == 'deezer' else 'iTunes'
+                     fb_src = _get_metadata_fallback_source()
+                     fallback_name = 'Deezer' if fb_src == 'deezer' else 'Discogs' if fb_src == 'discogs' else 'iTunes'
                      if spotify_configured:
                          return True, f"{fallback_name} connection successful! (Spotify configured but not authenticated)"
                      else:
@@ -6538,7 +6539,7 @@ def spotify_disconnect():
             'rate_limit': None
         }
         _status_cache_timestamps['spotify'] = time.time()
-        fallback_label = 'Deezer' if fallback_src == 'deezer' else 'iTunes'
+        fallback_label = 'Deezer' if fallback_src == 'deezer' else 'Discogs' if fallback_src == 'discogs' else 'iTunes'
         add_activity_item("🔌", "Spotify Disconnected", f"Switched to {fallback_label} metadata source", "Now")
         return jsonify({'success': True, 'message': f'Spotify disconnected. Now using {fallback_label}.'})
     except Exception as e:
