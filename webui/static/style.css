@@ -48360,6 +48360,121 @@ tr.tag-diff-same {
 .cache-health-metric-label { font-size: 13px; color: rgba(255,255,255,0.4); }
 .cache-health-metric-value { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.8); }
 
+/* Clickable card + action link */
+.cache-health-card.clickable { cursor: pointer; transition: border-color 0.2s, transform 0.15s; }
+.cache-health-card.clickable:hover { border-color: rgba(255,255,255,0.15); transform: translateY(-1px); }
+.cache-health-card-action { font-size: 10px; color: rgba(255,255,255,0.35); margin-top: 4px; letter-spacing: 0.3px; }
+.cache-health-card.clickable:hover .cache-health-card-action { color: rgba(255,255,255,0.6); }
+
+/* ── Failed MB Lookups Modal ── */
+.failed-mb-modal {
+    background: linear-gradient(165deg, #1e1e32 0%, #181828 100%); border-radius: 16px;
+    width: 720px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06);
+}
+.failed-mb-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 22px 28px 16px;
+    background: linear-gradient(180deg, rgba(186,71,143,0.08) 0%, transparent 100%);
+    border-bottom: 1px solid rgba(255,255,255,0.06); border-radius: 16px 16px 0 0;
+}
+.failed-mb-title { font-size: 17px; font-weight: 700; color: #fff; margin: 0; letter-spacing: -0.2px; }
+.failed-mb-subtitle { font-size: 12px; color: rgba(255,255,255,0.35); margin: 4px 0 0; }
+.failed-mb-toolbar { padding: 14px 28px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.failed-mb-tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.failed-mb-tab {
+    padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.45); cursor: pointer; transition: all 0.2s;
+}
+.failed-mb-tab:hover { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.1); }
+.failed-mb-tab.active { background: rgba(186,71,143,0.15); border-color: rgba(186,71,143,0.35); color: #d584b8; }
+.failed-mb-search-row { display: flex; gap: 10px; align-items: center; }
+.failed-mb-search-input {
+    flex: 1; padding: 8px 14px; border-radius: 10px; font-size: 13px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
+    color: #fff; outline: none; transition: border-color 0.2s;
+}
+.failed-mb-search-input::placeholder { color: rgba(255,255,255,0.2); }
+.failed-mb-search-input:focus { border-color: rgba(186,71,143,0.4); background: rgba(255,255,255,0.06); }
+.failed-mb-btn {
+    padding: 8px 16px; border-radius: 10px; font-size: 12px; font-weight: 600;
+    border: none; cursor: pointer; white-space: nowrap; transition: all 0.2s;
+}
+.failed-mb-btn-primary { background: rgba(186,71,143,0.15); color: #d584b8; border: 1px solid rgba(186,71,143,0.25); }
+.failed-mb-btn-primary:hover { background: rgba(186,71,143,0.25); color: #e8a3d0; }
+.failed-mb-btn-danger { background: rgba(239,68,68,0.08); color: rgba(248,113,113,0.8); border: 1px solid rgba(239,68,68,0.15); }
+.failed-mb-btn-danger:hover { background: rgba(239,68,68,0.15); color: #f87171; }
+.failed-mb-btn-sm {
+    padding: 5px 12px; border-radius: 7px; font-size: 11px; font-weight: 600;
+    border: none; cursor: pointer; transition: all 0.2s;
+}
+.failed-mb-btn-sm.failed-mb-btn-primary { background: rgba(186,71,143,0.12); color: #d584b8; border: 1px solid rgba(186,71,143,0.2); }
+.failed-mb-btn-sm.failed-mb-btn-primary:hover { background: rgba(186,71,143,0.25); color: #e8a3d0; transform: translateY(-1px); }
+.failed-mb-btn-sm.failed-mb-btn-ghost { background: transparent; color: rgba(255,255,255,0.25); }
+.failed-mb-btn-sm.failed-mb-btn-ghost:hover { color: rgba(248,113,113,0.8); }
+.failed-mb-body {
+    flex: 1; overflow-y: auto; padding: 4px 28px;
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+.failed-mb-empty { text-align: center; padding: 48px 0; color: rgba(255,255,255,0.25); font-size: 14px; }
+.failed-mb-item {
+    display: flex; align-items: center; gap: 14px; padding: 11px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.03); transition: opacity 0.2s, background 0.15s;
+    border-radius: 8px; margin: 0 -8px;
+}
+.failed-mb-item:hover { background: rgba(255,255,255,0.02); }
+.failed-mb-item:last-child { border-bottom: none; }
+.failed-mb-item-icon { font-size: 16px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: rgba(255,255,255,0.03); flex-shrink: 0; }
+.failed-mb-item-info { flex: 1; min-width: 0; }
+.failed-mb-item-name { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.failed-mb-item-artist { font-size: 11px; color: rgba(255,255,255,0.3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.failed-mb-item-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex-shrink: 0; }
+.failed-mb-item-type { font-size: 9px; color: rgba(186,71,143,0.5); text-transform: uppercase; letter-spacing: 0.8px; font-weight: 700; }
+.failed-mb-item-date { font-size: 10px; color: rgba(255,255,255,0.15); }
+.failed-mb-item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.failed-mb-footer { padding: 14px 28px; border-top: 1px solid rgba(255,255,255,0.05); }
+.failed-mb-pagination { display: flex; justify-content: center; align-items: center; gap: 14px; font-size: 12px; color: rgba(255,255,255,0.35); }
+
+/* ── MB Search Sub-Modal ── */
+.mb-search-modal {
+    background: linear-gradient(165deg, #1e1e32 0%, #181828 100%); border-radius: 16px;
+    width: 620px; max-width: 95vw; max-height: 80vh; display: flex; flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+}
+.mb-search-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 22px 28px 14px;
+    background: linear-gradient(180deg, rgba(186,71,143,0.06) 0%, transparent 100%);
+    border-bottom: 1px solid rgba(255,255,255,0.06); border-radius: 16px 16px 0 0;
+}
+.mb-search-title { font-size: 16px; font-weight: 700; color: #fff; margin: 0; letter-spacing: -0.2px; }
+.mb-search-subtitle { font-size: 12px; color: rgba(255,255,255,0.35); margin: 4px 0 0; line-height: 1.4; }
+.mb-search-subtitle strong { color: rgba(255,255,255,0.75); }
+.mb-search-inputs { padding: 18px 28px; border-bottom: 1px solid rgba(255,255,255,0.04); display: flex; flex-direction: column; gap: 10px; }
+.mb-search-input-row { display: flex; align-items: center; gap: 12px; }
+.mb-search-input-row label { font-size: 11px; color: rgba(255,255,255,0.35); width: 48px; flex-shrink: 0; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.mb-search-input, .mb-search-select {
+    flex: 1; padding: 8px 14px; border-radius: 10px; font-size: 13px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
+    color: #fff; outline: none; transition: border-color 0.2s;
+}
+.mb-search-input:focus, .mb-search-select:focus { border-color: rgba(186,71,143,0.4); background: rgba(255,255,255,0.06); }
+.mb-search-select option { background: #1e1e32; }
+.mb-search-results { flex: 1; overflow-y: auto; padding: 8px 28px 20px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.08) transparent; }
+.mb-search-result {
+    display: flex; align-items: center; gap: 14px; padding: 12px 14px;
+    border-radius: 10px; cursor: pointer; transition: all 0.15s;
+    border: 1px solid transparent; margin-bottom: 4px;
+}
+.mb-search-result:hover { background: rgba(186,71,143,0.06); border-color: rgba(186,71,143,0.15); transform: translateY(-1px); }
+.mb-search-result-score { font-size: 13px; font-weight: 800; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: rgba(255,255,255,0.03); flex-shrink: 0; }
+.mb-search-result-info { flex: 1; min-width: 0; }
+.mb-search-result-name { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.9); }
+.mb-search-result-disambig { font-size: 11px; color: rgba(255,255,255,0.25); font-style: italic; margin-top: 3px; }
+.mb-search-result-detail { font-size: 11px; color: rgba(255,255,255,0.3); margin-top: 3px; }
+.mb-search-result-mbid { font-size: 9px; color: rgba(255,255,255,0.12); font-family: monospace; flex-shrink: 0; letter-spacing: 0.5px; }
+
 /* ── Findings Tab ── */
 .repair-findings-toolbar {
     display: flex;

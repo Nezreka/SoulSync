@@ -11929,6 +11929,7 @@ def reorganize_album_files(album_id):
                     track['_disc_number'] = disc_number
 
                 # Now do the actual moves
+                moved_dirs = {}  # src_dir → dest_dir for post-pass sidecar sweep
                 for track in tracks:
                     resolved = track.get('_resolved')
                     new_full = track.get('_new_full')
@@ -11965,13 +11966,15 @@ def reorganize_album_files(album_id):
                         # Move file
                         _safe_move_file(resolved, new_full)
 
-                        # Move sidecar files (LRC, cover.jpg, etc.)
+                        # Track source→dest directory mapping for post-pass sidecar sweep
                         src_dir = os.path.dirname(resolved)
                         dest_dir = os.path.dirname(new_full)
+                        if src_dir not in moved_dirs:
+                            moved_dirs[src_dir] = dest_dir
+
+                        # Move track-level sidecars (same filename stem as audio)
                         src_stem = os.path.splitext(os.path.basename(resolved))[0]
                         new_stem = os.path.splitext(os.path.basename(new_full))[0]
-
-                        # Track-level sidecars (same filename stem as audio)
                         for sidecar_ext in ('.lrc', '.nfo', '.txt', '.cue'):
                             sidecar_src = os.path.join(src_dir, src_stem + sidecar_ext)
                             if os.path.isfile(sidecar_src):
@@ -11981,17 +11984,6 @@ def reorganize_album_files(album_id):
                                 except Exception:
                                     pass
 
-                        # Album-level sidecars (cover art, folder images)
-                        for album_sidecar in ('cover.jpg', 'cover.jpeg', 'cover.png', 'folder.jpg', 'folder.png', 'front.jpg', 'front.png', 'album.jpg', 'album.png'):
-                            sidecar_src = os.path.join(src_dir, album_sidecar)
-                            if os.path.isfile(sidecar_src):
-                                sidecar_dst = os.path.join(dest_dir, album_sidecar)
-                                if not os.path.exists(sidecar_dst):
-                                    try:
-                                        shutil.move(sidecar_src, sidecar_dst)
-                                    except Exception:
-                                        pass
-
                         # Update DB file_path
                         bg_cursor = bg_conn.cursor()
                         bg_cursor.execute(
@@ -11999,9 +11991,6 @@ def reorganize_album_files(album_id):
                             (new_full, str(track['id']))
                         )
                         bg_conn.commit()
-
-                        # Clean up empty directories left behind
-                        _cleanup_empty_directories(transfer_dir, resolved)
 
                         with _reorganize_lock:
                             _reorganize_state['moved'] += 1
@@ -12017,6 +12006,39 @@ def reorganize_album_files(album_id):
                                 'title': track_title,
                                 'error': str(move_err)
                             })
+
+                # Post-pass: sweep source directories for leftover album-level sidecars.
+                # The per-track loop can't reliably move cover.jpg because multiple tracks
+                # share the same source dir — the first track's move may fail silently,
+                # or the file may be in a parent directory. This single pass catches them all.
+                _album_sidecars = ('cover.jpg', 'cover.jpeg', 'cover.png', 'folder.jpg',
+                                   'folder.png', 'front.jpg', 'front.png', 'album.jpg', 'album.png')
+                for src_dir, dest_dir in moved_dirs.items():
+                    if not os.path.isdir(src_dir):
+                        continue
+                    # Check if any audio files remain (don't steal sidecars from a dir that still has tracks)
+                    audio_exts = {'.flac', '.mp3', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.wma'}
+                    has_audio = any(os.path.splitext(f)[1].lower() in audio_exts
+                                    for f in os.listdir(src_dir) if os.path.isfile(os.path.join(src_dir, f)))
+                    if has_audio:
+                        continue
+                    for sidecar in _album_sidecars:
+                        sidecar_src = os.path.join(src_dir, sidecar)
+                        if os.path.isfile(sidecar_src):
+                            sidecar_dst = os.path.join(dest_dir, sidecar)
+                            if not os.path.exists(sidecar_dst):
+                                try:
+                                    shutil.move(sidecar_src, sidecar_dst)
+                                    print(f"📷 [Reorganize] Moved {sidecar} to {dest_dir}")
+                                except Exception as sc_err:
+                                    print(f"⚠️ [Reorganize] Failed to move {sidecar}: {sc_err}")
+
+                # Clean up empty directories left behind (after sidecars moved)
+                for src_dir in moved_dirs:
+                    try:
+                        _cleanup_empty_directories(transfer_dir, os.path.join(src_dir, '_'))
+                    except Exception:
+                        pass
 
             except Exception as e:
                 logger.error(f"Reorganize background error: {e}")
@@ -23706,6 +23728,195 @@ def metadata_cache_clear_musicbrainz():
     except Exception as e:
         logger.error(f"Error clearing MusicBrainz cache: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/metadata-cache/failed-mb-lookups', methods=['GET'])
+def metadata_cache_failed_mb_lookups():
+    """Get all failed MusicBrainz lookups with pagination and filtering."""
+    try:
+        entity_type = request.args.get('entity_type', '')
+        search = request.args.get('search', '').strip()
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 50))
+        offset = (page - 1) * limit
+        # Only fetch type_counts on first load (page 1, no filters) — frontend caches them
+        include_counts = request.args.get('counts', '').lower() == 'true'
+
+        database = get_database()
+        conn = database._get_connection()
+        try:
+            cursor = conn.cursor()
+            where_parts = ["musicbrainz_id IS NULL"]
+            params = []
+            if entity_type:
+                where_parts.append("entity_type = ?")
+                params.append(entity_type)
+            if search:
+                where_parts.append("(entity_name LIKE ? COLLATE NOCASE OR artist_name LIKE ? COLLATE NOCASE)")
+                params.extend([f"%{search}%", f"%{search}%"])
+
+            where_clause = f"WHERE {' AND '.join(where_parts)}"
+
+            # Single query: fetch items + use SQL window for total count
+            cursor.execute(f"""
+                SELECT id, entity_type, entity_name, artist_name, match_confidence, last_updated,
+                       COUNT(*) OVER() as _total
+                FROM musicbrainz_cache {where_clause}
+                ORDER BY last_updated DESC
+                LIMIT ? OFFSET ?
+            """, params + [limit, offset])
+
+            rows = cursor.fetchall()
+            total = rows[0]['_total'] if rows else 0
+            items = [{
+                'id': r['id'],
+                'entity_type': r['entity_type'],
+                'entity_name': r['entity_name'],
+                'artist_name': r['artist_name'] or '',
+                'confidence': r['match_confidence'] or 0,
+                'last_updated': r['last_updated'] or '',
+            } for r in rows]
+
+            result = {'items': items, 'total': total, 'page': page}
+
+            # Type counts only when requested (avoids full table scan on every tab switch)
+            if include_counts:
+                cursor.execute("""
+                    SELECT entity_type, COUNT(*) as cnt
+                    FROM musicbrainz_cache WHERE musicbrainz_id IS NULL
+                    GROUP BY entity_type
+                """)
+                result['type_counts'] = {row['entity_type']: row['cnt'] for row in cursor.fetchall()}
+
+            return jsonify(result)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error(f"Error getting failed MB lookups: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/metadata-cache/mb-entry/<int:entry_id>', methods=['DELETE'])
+def metadata_cache_delete_mb_entry(entry_id):
+    """Delete a single MusicBrainz cache entry by ID."""
+    try:
+        database = get_database()
+        conn = database._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM musicbrainz_cache WHERE id = ?", (entry_id,))
+            conn.commit()
+            return jsonify({"success": True, "deleted": cursor.rowcount})
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error(f"Error deleting MB cache entry: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/musicbrainz/search', methods=['GET'])
+def musicbrainz_search_api():
+    """Search MusicBrainz for manual matching. Returns raw results."""
+    try:
+        entity_type = request.args.get('type', 'artist')  # artist, release, recording
+        query = request.args.get('q', '').strip()
+        artist = request.args.get('artist', '').strip()
+        limit = min(int(request.args.get('limit', 10)), 20)
+
+        if not query:
+            return jsonify({"error": "Missing query parameter 'q'"}), 400
+
+        mb_svc = mb_worker.mb_service if mb_worker else None
+        if not mb_svc:
+            return jsonify({"error": "MusicBrainz service not available"}), 503
+
+        mb_client = mb_svc.mb_client
+        results = []
+
+        if entity_type == 'artist':
+            raw = mb_client.search_artist(query, limit=limit)
+            for r in raw:
+                results.append({
+                    'mbid': r.get('id', ''),
+                    'name': r.get('name', ''),
+                    'disambiguation': r.get('disambiguation', ''),
+                    'score': r.get('score', 0),
+                    'type': r.get('type', ''),
+                    'country': r.get('country', ''),
+                })
+        elif entity_type == 'release':
+            raw = mb_client.search_release(query, artist_name=artist or None, limit=limit)
+            for r in raw:
+                artist_credit = ', '.join(a.get('name', '') for a in r.get('artist-credit', []) if isinstance(a, dict))
+                results.append({
+                    'mbid': r.get('id', ''),
+                    'name': r.get('title', ''),
+                    'artist': artist_credit,
+                    'disambiguation': r.get('disambiguation', ''),
+                    'score': r.get('score', 0),
+                    'date': r.get('date', ''),
+                    'country': r.get('country', ''),
+                    'track_count': r.get('track-count', 0),
+                })
+        elif entity_type == 'recording':
+            raw = mb_client.search_recording(query, artist_name=artist or None, limit=limit)
+            for r in raw:
+                artist_credit = ', '.join(a.get('name', '') for a in r.get('artist-credit', []) if isinstance(a, dict))
+                releases = r.get('releases', [])
+                first_release = releases[0].get('title', '') if releases else ''
+                results.append({
+                    'mbid': r.get('id', ''),
+                    'name': r.get('title', ''),
+                    'artist': artist_credit,
+                    'disambiguation': r.get('disambiguation', ''),
+                    'score': r.get('score', 0),
+                    'album': first_release,
+                    'length': r.get('length', 0),
+                })
+        else:
+            return jsonify({"error": f"Unknown entity type: {entity_type}"}), 400
+
+        return jsonify({"results": results, "total": len(results)})
+    except Exception as e:
+        logger.error(f"Error searching MusicBrainz: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/metadata-cache/mb-match', methods=['POST'])
+def metadata_cache_save_mb_match():
+    """Save a manual MusicBrainz match for a failed lookup."""
+    try:
+        data = request.get_json()
+        entry_id = data.get('entry_id')
+        mbid = data.get('mbid', '').strip()
+        mb_name = data.get('mb_name', '').strip()
+
+        if not entry_id or not mbid:
+            return jsonify({"success": False, "error": "Missing entry_id or mbid"}), 400
+
+        database = get_database()
+        conn = database._get_connection()
+        try:
+            cursor = conn.cursor()
+            # Update the failed entry with the user-selected MBID
+            cursor.execute("""
+                UPDATE musicbrainz_cache
+                SET musicbrainz_id = ?, match_confidence = 100, metadata_json = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (mbid, json.dumps({'name': mb_name, 'manual_match': True}), entry_id))
+            conn.commit()
+
+            if cursor.rowcount == 0:
+                return jsonify({"success": False, "error": "Entry not found"}), 404
+
+            logger.info(f"Manual MB match: entry {entry_id} → {mbid} ({mb_name})")
+            return jsonify({"success": True})
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error(f"Error saving MB match: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 # ===============================
 # == QUALITY SCANNER           ==

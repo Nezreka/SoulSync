@@ -1492,6 +1492,8 @@ class MusicDatabase:
             
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_entity ON musicbrainz_cache (entity_type, entity_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_mbid ON musicbrainz_cache (musicbrainz_id)")
+            # Partial index for failed lookups — speeds up the management modal queries
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_failed ON musicbrainz_cache (entity_type, last_updated) WHERE musicbrainz_id IS NULL")
             
             if columns_added:
                 logger.info("🎉 MusicBrainz migration completed successfully")

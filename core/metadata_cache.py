@@ -685,7 +685,8 @@ class MetadataCache:
             return 0
 
     def get_health_stats(self) -> dict:
-        """Return cache health statistics for the repair dashboard."""
+        """Return cache health statistics for the repair dashboard.
+        Consolidated into fewer queries for faster modal open."""
         try:
             db = self._get_db()
             conn = db._get_connection()
@@ -693,69 +694,59 @@ class MetadataCache:
                 cursor = conn.cursor()
                 stats = {}
 
-                # Total counts
-                cursor.execute("SELECT COUNT(*) FROM metadata_cache_entities")
-                stats['total_entities'] = cursor.fetchone()[0]
+                # Query 1: Main entity stats in one pass (was 7 separate queries)
+                junk_names = "', '".join(self._JUNK_NAMES - {''})
+                cursor.execute(f"""
+                    SELECT
+                        COUNT(*) as total,
+                        SUM(CASE WHEN (name IS NULL OR TRIM(name) = '' OR LOWER(TRIM(name)) IN ('{junk_names}'))
+                             AND entity_id NOT LIKE '%\\_features' ESCAPE '\\'
+                             AND entity_id NOT LIKE '%\\_tracks' ESCAPE '\\'
+                             THEN 1 ELSE 0 END) as junk,
+                        SUM(CASE WHEN julianday('now') - julianday(updated_at) > ttl_days - 1 THEN 1 ELSE 0 END) as exp_24h,
+                        SUM(CASE WHEN julianday('now') - julianday(updated_at) > ttl_days - 7 THEN 1 ELSE 0 END) as exp_7d,
+                        ROUND(AVG(julianday('now') - julianday(updated_at)), 1) as avg_age,
+                        COALESCE(SUM(access_count), 0) as total_hits
+                    FROM metadata_cache_entities
+                """)
+                row = cursor.fetchone()
+                stats['total_entities'] = row[0] or 0
+                stats['junk_entities'] = row[1] or 0
+                stats['expiring_24h'] = row[2] or 0
+                stats['expiring_7d'] = row[3] or 0
+                stats['avg_age_days'] = row[4] or 0
+                stats['total_access_hits'] = row[5] or 0
 
+                # Query 2: Group counts (source + type in one pass)
+                cursor.execute("""
+                    SELECT source, entity_type, COUNT(*) as cnt
+                    FROM metadata_cache_entities GROUP BY source, entity_type
+                """)
+                by_source = {}
+                by_type = {}
+                for r in cursor.fetchall():
+                    by_source[r[0]] = by_source.get(r[0], 0) + r[2]
+                    by_type[r[1]] = by_type.get(r[1], 0) + r[2]
+                stats['by_source'] = by_source
+                stats['by_type'] = by_type
+
+                # Query 3: Search count
                 cursor.execute("SELECT COUNT(*) FROM metadata_cache_searches")
                 stats['total_searches'] = cursor.fetchone()[0]
 
-                # Junk entity count
-                junk_names = "', '".join(self._JUNK_NAMES - {''})
-                cursor.execute(f"""
-                    SELECT COUNT(*) FROM metadata_cache_entities
-                    WHERE (name IS NULL OR TRIM(name) = '' OR LOWER(TRIM(name)) IN ('{junk_names}'))
-                      AND entity_id NOT LIKE '%\\_features' ESCAPE '\\'
-                      AND entity_id NOT LIKE '%\\_tracks' ESCAPE '\\'
-                """)
-                stats['junk_entities'] = cursor.fetchone()[0]
-
-                # By source
-                cursor.execute("""
-                    SELECT source, COUNT(*) FROM metadata_cache_entities GROUP BY source
-                """)
-                stats['by_source'] = {row[0]: row[1] for row in cursor.fetchall()}
-
-                # By entity type
-                cursor.execute("""
-                    SELECT entity_type, COUNT(*) FROM metadata_cache_entities GROUP BY entity_type
-                """)
-                stats['by_type'] = {row[0]: row[1] for row in cursor.fetchall()}
-
-                # Expiring soon
-                cursor.execute("""
-                    SELECT COUNT(*) FROM metadata_cache_entities
-                    WHERE julianday('now') - julianday(updated_at) > ttl_days - 1
-                """)
-                stats['expiring_24h'] = cursor.fetchone()[0]
-
-                cursor.execute("""
-                    SELECT COUNT(*) FROM metadata_cache_entities
-                    WHERE julianday('now') - julianday(updated_at) > ttl_days - 7
-                """)
-                stats['expiring_7d'] = cursor.fetchone()[0]
-
-                # Average age
-                cursor.execute("""
-                    SELECT AVG(julianday('now') - julianday(updated_at)) FROM metadata_cache_entities
-                """)
-                avg = cursor.fetchone()[0]
-                stats['avg_age_days'] = round(avg, 1) if avg else 0
-
-                # MusicBrainz stats
+                # Query 4: MusicBrainz stats (separate table)
                 try:
-                    cursor.execute("SELECT COUNT(*) FROM musicbrainz_cache")
-                    stats['total_musicbrainz'] = cursor.fetchone()[0]
-                    cursor.execute("SELECT COUNT(*) FROM musicbrainz_cache WHERE musicbrainz_id IS NULL")
-                    stats['stale_mb_nulls'] = cursor.fetchone()[0]
+                    cursor.execute("""
+                        SELECT COUNT(*) as total,
+                               SUM(CASE WHEN musicbrainz_id IS NULL THEN 1 ELSE 0 END) as failed
+                        FROM musicbrainz_cache
+                    """)
+                    mb = cursor.fetchone()
+                    stats['total_musicbrainz'] = mb[0] or 0
+                    stats['stale_mb_nulls'] = mb[1] or 0
                 except Exception:
                     stats['total_musicbrainz'] = 0
                     stats['stale_mb_nulls'] = 0
-
-                # Total access hits
-                cursor.execute("SELECT SUM(access_count) FROM metadata_cache_entities")
-                hits = cursor.fetchone()[0]
-                stats['total_access_hits'] = hits or 0
 
                 return stats
             finally:
