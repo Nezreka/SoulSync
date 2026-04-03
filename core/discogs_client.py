@@ -8,6 +8,7 @@ Rate limits: 25 req/min unauthenticated, 60 req/min with personal token.
 API docs: https://www.discogs.com/developers
 """
 
+import re
 import time
 import threading
 import requests
@@ -330,6 +331,15 @@ class DiscogsClient:
     def is_configured(self) -> bool:
         return True  # Works without auth
 
+    @staticmethod
+    def _normalize_name(name: str) -> str:
+        """Normalize a name for comparison — lowercase, strip parentheticals and punctuation."""
+        name = name.lower().strip()
+        name = re.sub(r'\s*\(.*?\)\s*', ' ', name)
+        name = re.sub(r'[^\w\s]', '', name)
+        name = re.sub(r'\s+', ' ', name).strip()
+        return name
+
     # --- Core API Methods ---
 
     @rate_limited
@@ -463,7 +473,11 @@ class DiscogsClient:
         return result
 
     def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
-        """Get releases by an artist. Prefers master releases over individual pressings."""
+        """Get releases by an artist. Prefers master releases, filters features."""
+        # First get the artist name for feature filtering
+        artist_data = self._api_get(f'/artists/{artist_id}')
+        artist_name = artist_data.get('name', '').lower() if artist_data else ''
+
         data = self._api_get(f'/artists/{artist_id}/releases', {
             'sort': 'year', 'sort_order': 'desc', 'per_page': min(limit * 3, 200),
         })
@@ -476,10 +490,22 @@ class DiscogsClient:
         master_titles = set()
 
         for item in data['releases']:
-            # Skip non-main roles (appearances, features, remixes by others)
+            # Skip non-main roles
             role = item.get('role', 'Main').lower()
             if role not in ('main', ''):
                 continue
+
+            # Filter out features — only include releases where this artist is the PRIMARY artist
+            # "Beyoncé Feat. Kendrick Lamar" → primary is Beyoncé, skip
+            # "Kendrick Lamar Feat. Rihanna" → primary is Kendrick, keep
+            release_artist = item.get('artist', '')
+            if artist_name and release_artist:
+                # Get the primary artist (before any Feat./Ft./&)
+                primary = re.split(r'\s+(?:feat\.?|ft\.?|featuring)\s+', release_artist, flags=re.IGNORECASE)[0]
+                primary = re.split(r'\s*[&,]\s*', primary)[0].strip()
+                # Check if our artist is the primary
+                if self._normalize_name(primary) != self._normalize_name(artist_name):
+                    continue
 
             if item.get('type') == 'master':
                 masters.append(item)
