@@ -36572,6 +36572,7 @@ def get_watchlist_artists():
                 "image_url": artist.image_url,  # Cached during watchlist scans
                 "itunes_artist_id": artist.itunes_artist_id,  # For iTunes-only artists
                 "deezer_artist_id": getattr(artist, 'deezer_artist_id', None),
+                "discogs_artist_id": getattr(artist, 'discogs_artist_id', None),
                 "include_albums": artist.include_albums,
                 "include_eps": artist.include_eps,
                 "include_singles": artist.include_singles,
@@ -37531,10 +37532,10 @@ def watchlist_artist_config(artist_id):
                        include_live, include_remixes, include_acoustic, include_compilations,
                        artist_name, image_url, spotify_artist_id, itunes_artist_id,
                        last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id,
-                       lookback_days
+                       lookback_days, discogs_artist_id
                 FROM watchlist_artists
-                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
-            """, (artist_id, artist_id, artist_id))
+                WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
+            """, (artist_id, artist_id, artist_id, artist_id))
             result = cursor.fetchone()
             conn.close()
 
@@ -37546,6 +37547,7 @@ def watchlist_artist_config(artist_id):
             spotify_id = result[9]  # spotify_artist_id from query
             itunes_id = result[10]  # itunes_artist_id from query
             deezer_id = result[14]  # deezer_artist_id from query
+            discogs_id = result[16]  # discogs_artist_id from query
 
             # Get artist info from Spotify (only for Spotify artists)
             artist_info = None
@@ -37644,6 +37646,7 @@ def watchlist_artist_config(artist_id):
                 "spotify_artist_id": spotify_id,
                 "itunes_artist_id": itunes_id,
                 "deezer_artist_id": deezer_id,
+                "discogs_artist_id": discogs_id,
                 "watchlist_name": result[7],  # Original stored watchlist artist name
             })
 
