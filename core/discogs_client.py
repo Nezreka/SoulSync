@@ -527,44 +527,17 @@ class DiscogsClient:
 
         for item in ordered:
             try:
-                # For master releases, fetch detail to get tracklist and proper metadata
-                if item.get('type') == 'master':
-                    master_detail = self._api_get(f'/masters/{item["id"]}')
-                    if master_detail:
-                        # Merge master detail into the item for better parsing
-                        tracklist = [t for t in master_detail.get('tracklist', [])
-                                     if t.get('type_', '') == 'track' or not t.get('type_')]
-                        item['_track_count'] = len(tracklist)
-                        # Carry over genres/styles from master
-                        if master_detail.get('genres'):
-                            item['genre'] = master_detail['genres']
-                        if master_detail.get('styles'):
-                            item['style'] = master_detail['styles']
-                        if master_detail.get('images'):
-                            primary = next((img for img in master_detail['images'] if img.get('type') == 'primary'), None)
-                            item['cover_image'] = (primary or master_detail['images'][0]).get('uri')
-
                 album = Album.from_discogs_release(item)
 
-                # Override track count from master detail if available
-                if item.get('_track_count'):
-                    album = Album(
-                        id=album.id, name=album.name, artists=album.artists,
-                        release_date=album.release_date, total_tracks=item['_track_count'],
-                        album_type=album.album_type, image_url=album.image_url or item.get('cover_image'),
-                        external_urls=album.external_urls,
-                    )
-                    # Re-evaluate album type with actual track count
-                    if album.total_tracks <= 3:
-                        album = Album(id=album.id, name=album.name, artists=album.artists,
-                                      release_date=album.release_date, total_tracks=album.total_tracks,
-                                      album_type='single', image_url=album.image_url, external_urls=album.external_urls)
-                    elif album.total_tracks <= 6:
-                        album = Album(id=album.id, name=album.name, artists=album.artists,
-                                      release_date=album.release_date, total_tracks=album.total_tracks,
-                                      album_type='ep', image_url=album.image_url, external_urls=album.external_urls)
+                # Use thumb from release list as image
+                thumb = item.get('thumb') or item.get('cover_image') or ''
+                if thumb and 'spacer.gif' not in thumb and not album.image_url:
+                    album = Album(id=album.id, name=album.name, artists=album.artists,
+                                  release_date=album.release_date, total_tracks=album.total_tracks,
+                                  album_type=album.album_type, image_url=thumb,
+                                  external_urls=album.external_urls)
 
-                # Deduplicate by normalized title
+                # Deduplicate by normalized title (but keep deluxe/special editions as separate)
                 dedup_key = album.name.lower().strip()
                 if dedup_key in seen_titles:
                     continue
@@ -580,6 +553,85 @@ class DiscogsClient:
                 logger.debug(f"Error parsing Discogs artist release: {e}")
 
         return albums
+
+    def get_album_tracks(self, release_id: str) -> Optional[Dict[str, Any]]:
+        """Get album tracks by Discogs release or master ID. Returns Spotify-compatible format."""
+        # Try as master first (master IDs are used in artist discography)
+        data = self._api_get(f'/masters/{release_id}')
+        if not data or not data.get('tracklist'):
+            # Fall back to release
+            data = self._api_get(f'/releases/{release_id}')
+        if not data or not data.get('tracklist'):
+            return None
+
+        # Get album image
+        image_url = None
+        images = data.get('images', [])
+        if images:
+            primary = next((img for img in images if img.get('type') == 'primary'), None)
+            image_url = (primary or images[0]).get('uri')
+
+        album_info = {
+            'id': str(data.get('id', release_id)),
+            'name': data.get('title', ''),
+            'images': [{'url': image_url, 'height': 600, 'width': 600}] if image_url else [],
+            'release_date': str(data.get('year', '')) if data.get('year') else '',
+        }
+
+        # Get artists
+        artists_list = []
+        if data.get('artists'):
+            artists_list = [{'name': a.get('name', '')} for a in data['artists'] if a.get('name')]
+        if not artists_list:
+            artists_list = [{'name': 'Unknown Artist'}]
+
+        tracks = []
+        track_num = 0
+        disc_num = 1
+        for t in data['tracklist']:
+            if t.get('type_') == 'heading':
+                disc_num += 1
+                continue
+            if t.get('type_', '') not in ('track', ''):
+                continue
+
+            track_num += 1
+
+            # Parse duration
+            duration_ms = 0
+            dur_str = t.get('duration', '')
+            if dur_str and ':' in dur_str:
+                parts = dur_str.split(':')
+                try:
+                    duration_ms = (int(parts[0]) * 60 + int(parts[1])) * 1000
+                except (ValueError, IndexError):
+                    pass
+
+            # Per-track artists or fall back to release artists
+            track_artists = artists_list
+            if t.get('artists'):
+                track_artists = [{'name': a.get('name', '')} for a in t['artists'] if a.get('name')]
+
+            tracks.append({
+                'id': f"{release_id}_t{track_num}",
+                'name': t.get('title', ''),
+                'artists': track_artists,
+                'album': album_info,
+                'duration_ms': duration_ms,
+                'track_number': track_num,
+                'disc_number': disc_num if disc_num > 1 else 1,
+                'explicit': False,
+                'uri': f"discogs:track:{release_id}_{track_num}",
+                'external_urls': {},
+                '_source': 'discogs',
+            })
+
+        return {
+            'items': tracks,
+            'total': len(tracks),
+            'limit': len(tracks),
+            'next': None,
+        }
 
     def _get_artist_image_from_albums(self, artist_id: str) -> Optional[str]:
         """Get artist image by fetching their first album's cover art.
