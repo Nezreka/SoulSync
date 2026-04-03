@@ -523,6 +523,8 @@ body {
         0 2px 8px rgba(0, 0, 0, 0.3),
         inset 0 1px 0 rgba(255, 255, 255, 0.07);
     position: relative;
+    min-height: 120px;
+    flex-shrink: 0;
 }
 
 .media-player:hover {
