@@ -18045,10 +18045,11 @@ def _embed_source_ids(audio_file, metadata: dict):
     except Exception as e:
         print(f"⚠️ Error embedding source IDs (non-fatal): {e}")
 
-def _download_cover_art(album_info: dict, target_dir: str):
+def _download_cover_art(album_info: dict, target_dir: str, context: dict = None):
     """Downloads cover.jpg into the specified directory.
     Tries Cover Art Archive first (high-res) if MusicBrainz release ID is available
-    (set by _enhance_file_metadata during post-processing), falls back to source URL."""
+    (set by _enhance_file_metadata during post-processing), falls back to source URL.
+    Accepts optional context to extract image URL from spotify_album when album_info lacks it."""
     if not config_manager.get('metadata_enhancement.cover_art_download', True):
         return
     try:
@@ -18077,6 +18078,17 @@ def _download_cover_art(album_info: dict, target_dir: str):
         # Fallback to Spotify/iTunes/Deezer URL (typically 640x640)
         if not image_data:
             art_url = album_info.get('album_image_url')
+            # If album_info lacks the URL, try the context's spotify_album
+            if not art_url and context:
+                spotify_album = context.get('spotify_album') or {}
+                art_url = spotify_album.get('image_url')
+                # Also try images array (raw Spotify API format)
+                if not art_url:
+                    images = spotify_album.get('images', [])
+                    if images and isinstance(images, list) and len(images) > 0:
+                        art_url = images[0].get('url') if isinstance(images[0], dict) else None
+                if art_url:
+                    print(f"📷 Using cover art URL from spotify_album context")
             if not art_url:
                 print("📷 No cover art URL available for download.")
                 return
@@ -19538,7 +19550,7 @@ def _post_process_matched_download(context_key, context, file_path):
             if os.path.exists(final_path):
                 print(f"✅ [Pre-Move] Source already gone and destination exists - another thread completed transfer: {os.path.basename(final_path)}")
                 # Still do cover art + lyrics since the other thread might not have finished those
-                _download_cover_art(album_info, os.path.dirname(final_path))
+                _download_cover_art(album_info, os.path.dirname(final_path), context)
                 _generate_lrc_file(final_path, context, spotify_artist, album_info)
                 return
             else:
@@ -19566,7 +19578,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 if found_variant:
                     print(f"✅ [Pre-Move] Source gone but found variant in destination (stream processor handled it): {os.path.basename(found_variant)}")
                     context['_final_processed_path'] = found_variant
-                    _download_cover_art(album_info, expected_dir)
+                    _download_cover_art(album_info, expected_dir, context)
                     _generate_lrc_file(found_variant, context, spotify_artist, album_info)
                     return
                 else:
@@ -19591,7 +19603,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 new_fmt = os.path.splitext(final_path)[1]
                 print(f"✅ [Enhance] Replaced in-place ({old_fmt} → {new_fmt}): {os.path.basename(final_path)}")
 
-        _download_cover_art(album_info, os.path.dirname(final_path))
+        _download_cover_art(album_info, os.path.dirname(final_path), context)
 
         # 4. Generate LRC lyrics file at final location (elegant addition)
         _generate_lrc_file(final_path, context, spotify_artist, album_info)
@@ -20001,7 +20013,7 @@ def _execute_retag(group_id, album_id):
 
             # Download cover art to album directory
             try:
-                _download_cover_art(album_info, os.path.dirname(current_file_path))
+                _download_cover_art(album_info, os.path.dirname(current_file_path), context)
             except Exception as cover_err:
                 print(f"⚠️ [Retag] Cover art download failed: {cover_err}")
 
