@@ -7260,13 +7260,23 @@ class MusicDatabase:
             logger.error(f"Error checking similar artists freshness: {e}")
             return False  # Default to re-fetching on error
 
-    def get_top_similar_artists(self, limit: int = 50, profile_id: int = 1) -> List[SimilarArtist]:
-        """Get top similar artists excluding watchlist artists, with cycling support"""
+    def get_top_similar_artists(self, limit: int = 50, profile_id: int = 1, require_source: str = None) -> List[SimilarArtist]:
+        """Get top similar artists excluding watchlist artists, with cycling support.
+        require_source: if set ('spotify','itunes','deezer'), only returns artists with that source ID."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                cursor.execute("""
+                # Build source filter
+                source_filter = ''
+                if require_source == 'spotify':
+                    source_filter = "AND sa.similar_artist_spotify_id IS NOT NULL AND sa.similar_artist_spotify_id != ''"
+                elif require_source == 'itunes':
+                    source_filter = "AND sa.similar_artist_itunes_id IS NOT NULL AND sa.similar_artist_itunes_id != ''"
+                elif require_source == 'deezer':
+                    source_filter = "AND sa.similar_artist_deezer_id IS NOT NULL AND sa.similar_artist_deezer_id != ''"
+
+                cursor.execute(f"""
                     SELECT
                         MAX(sa.id) as id,
                         MAX(sa.source_artist_id) as source_artist_id,
@@ -7287,7 +7297,7 @@ class MusicDatabase:
                         OR (sa.similar_artist_deezer_id IS NOT NULL AND sa.similar_artist_deezer_id = wa.deezer_artist_id)
                         OR LOWER(sa.similar_artist_name) = LOWER(wa.artist_name)
                     ) AND wa.profile_id = ?
-                    WHERE wa.id IS NULL AND sa.profile_id = ?
+                    WHERE wa.id IS NULL AND sa.profile_id = ? {source_filter}
                     GROUP BY sa.similar_artist_name
                     ORDER BY
                         CASE WHEN MAX(sa.last_featured) IS NULL THEN 0 ELSE 1 END,

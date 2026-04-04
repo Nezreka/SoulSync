@@ -39021,7 +39021,8 @@ def get_discover_hero():
         # Get top similar artists (excluding watchlist, cycled by last_featured)
         # Fetch more than needed since strict source filtering may drop many
         pid = get_current_profile_id()
-        similar_artists = database.get_top_similar_artists(limit=200, profile_id=pid)
+        print(f"[Discover Hero] Profile ID: {pid}, Active source: {active_source}")
+        similar_artists = database.get_top_similar_artists(limit=200, profile_id=pid, require_source=active_source)
 
         # FALLBACK: If no similar artists exist, use watchlist artists for Hero section
         if not similar_artists:
@@ -39067,15 +39068,8 @@ def get_discover_hero():
             print(f"[Discover Hero] Returning {len(hero_artists)} watchlist artists as fallback")
             return jsonify({"success": True, "artists": hero_artists, "source": active_source, "fallback": "watchlist"})
 
-        # Filter to artists that have the appropriate ID for the active source
-        valid_artists = []
-        for artist in similar_artists:
-            if active_source == 'spotify' and artist.similar_artist_spotify_id:
-                valid_artists.append(artist)
-            elif active_source == 'deezer' and getattr(artist, 'similar_artist_deezer_id', None):
-                valid_artists.append(artist)
-            elif active_source == 'itunes' and artist.similar_artist_itunes_id:
-                valid_artists.append(artist)
+        # Artists are already filtered by source in SQL — no post-filter needed
+        valid_artists = list(similar_artists)
 
         # FALLBACK: If no valid artists for fallback source, try to resolve IDs on-the-fly
         if active_source in ('itunes', 'deezer') and not valid_artists:
@@ -39198,20 +39192,14 @@ def get_discover_similar_artists():
         database = get_database()
         active_source = _get_active_discovery_source()
 
-        similar_artists = database.get_top_similar_artists(limit=200, profile_id=get_current_profile_id())
+        similar_artists = database.get_top_similar_artists(limit=200, profile_id=get_current_profile_id(), require_source=active_source)
 
         if not similar_artists:
             return jsonify({"success": True, "artists": [], "source": active_source, "count": 0})
 
-        # Filter to artists with valid ID for active source (strict — no cross-source)
+        # Artists already filtered by source in SQL
         result_artists = []
         for artist in similar_artists:
-            if active_source == 'spotify' and not artist.similar_artist_spotify_id:
-                continue
-            if active_source == 'deezer' and not getattr(artist, 'similar_artist_deezer_id', None) and not artist.similar_artist_itunes_id:
-                continue
-            if active_source == 'itunes' and not artist.similar_artist_itunes_id:
-                continue
 
             if active_source == 'spotify':
                 artist_id = artist.similar_artist_spotify_id
