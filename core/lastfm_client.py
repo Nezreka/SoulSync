@@ -252,6 +252,83 @@ class LastFMClient:
         logger.debug(f"No artist found for query: {artist_name}")
         return None
 
+    def get_authenticated_username(self) -> Optional[str]:
+        """Get the username of the authenticated Last.fm user via signed user.getInfo call."""
+        if not self.api_key or not self.api_secret or not self.session_key:
+            return None
+        try:
+            params = {
+                'method': 'user.getInfo',
+                'api_key': self.api_key,
+                'sk': self.session_key,
+                'format': 'json'
+            }
+            params['api_sig'] = self._sign_request({k: v for k, v in params.items() if k != 'format'})
+            response = self.session.get(self.BASE_URL, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            username = data.get('user', {}).get('name')
+            if username:
+                logger.info(f"Last.fm authenticated user: {username}")
+            return username
+        except Exception as e:
+            logger.error(f"Error getting Last.fm username: {e}")
+            return None
+
+    @rate_limited
+    def get_user_top_artists(self, username: str, period: str = 'overall', limit: int = 200) -> list:
+        """Fetch user's top artists from Last.fm.
+        Args:
+            username: Last.fm username
+            period: overall|7day|1month|3month|6month|12month
+            limit: max artists to return
+        Returns:
+            List of dicts with name, playcount, image_url
+        """
+        if not username:
+            return []
+        try:
+            artists = []
+            page = 1
+            per_page = min(limit, 200)
+            while len(artists) < limit:
+                data = self._make_request('user.getTopArtists', {
+                    'user': username,
+                    'period': period,
+                    'limit': str(per_page),
+                    'page': str(page)
+                })
+                if not data:
+                    break
+                items = data.get('topartists', {}).get('artist', [])
+                if not items:
+                    break
+                for a in items:
+                    image_url = None
+                    images = a.get('image', [])
+                    for img in reversed(images):  # largest first
+                        if img.get('#text'):
+                            image_url = img['#text']
+                            break
+                    artists.append({
+                        'name': a.get('name', ''),
+                        'playcount': int(a.get('playcount', 0)),
+                        'image_url': image_url,
+                    })
+                    if len(artists) >= limit:
+                        break
+                # Check if more pages exist
+                total_pages = int(data.get('topartists', {}).get('@attr', {}).get('totalPages', 1))
+                if page >= total_pages:
+                    break
+                page += 1
+
+            logger.info(f"Retrieved {len(artists)} top artists from Last.fm for {username}")
+            return artists
+        except Exception as e:
+            logger.error(f"Error fetching Last.fm top artists: {e}")
+            return []
+
     @rate_limited
     def get_artist_info(self, artist_name: str) -> Optional[Dict[str, Any]]:
         """

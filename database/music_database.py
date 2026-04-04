@@ -1184,6 +1184,33 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dab_name ON discovery_artist_blacklist (artist_name COLLATE NOCASE)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dab_spotify ON discovery_artist_blacklist (spotify_artist_id)")
 
+            # Liked artists pool — aggregated followed/liked artists from connected services
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS liked_artists_pool (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    artist_name TEXT NOT NULL,
+                    normalized_name TEXT NOT NULL,
+                    spotify_artist_id TEXT,
+                    itunes_artist_id TEXT,
+                    deezer_artist_id TEXT,
+                    discogs_artist_id TEXT,
+                    image_url TEXT,
+                    genres TEXT,
+                    source_services TEXT DEFAULT '[]',
+                    active_source_id TEXT,
+                    active_source TEXT,
+                    match_status TEXT DEFAULT 'pending',
+                    on_watchlist INTEGER DEFAULT 0,
+                    profile_id INTEGER DEFAULT 1,
+                    last_fetched_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(profile_id, normalized_name)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lap_profile ON liked_artists_pool (profile_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lap_status ON liked_artists_pool (profile_id, match_status)")
+
             logger.info("Discovery tables created successfully")
 
         except Exception as e:
@@ -8712,6 +8739,291 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting discovery blacklist names: {e}")
             return set()
+
+    # ==================== Liked Artists Pool Methods ====================
+
+    @staticmethod
+    def _normalize_artist_name(name: str) -> str:
+        """Normalize artist name for deduplication. Lowercases, strips diacritics,
+        removes 'the ' prefix, collapses whitespace."""
+        import unicodedata
+        if not name:
+            return ''
+        n = unicodedata.normalize('NFKD', name)
+        n = ''.join(c for c in n if not unicodedata.combining(c))
+        n = n.lower().strip()
+        if n.startswith('the '):
+            n = n[4:]
+        # Handle "Artist, The" format (Last.fm)
+        if n.endswith(', the'):
+            n = n[:-5]
+        n = ' '.join(n.split())  # collapse whitespace
+        return n
+
+    # Known placeholder/default images that should be treated as "no image"
+    _PLACEHOLDER_IMAGES = {
+        '2a96cbd8b46e442fc41c2b86b821562f',  # Last.fm default star
+    }
+
+    @classmethod
+    def _is_placeholder_image(cls, url: str) -> bool:
+        """Check if an image URL is a known service placeholder."""
+        if not url:
+            return True
+        return any(ph in url for ph in cls._PLACEHOLDER_IMAGES)
+
+    def upsert_liked_artist(self, artist_name: str, source_service: str,
+                            source_id: str = None, source_id_type: str = None,
+                            image_url: str = None, genres: list = None,
+                            profile_id: int = 1) -> bool:
+        """Insert or merge a liked artist into the pool. Deduplicates by normalized name."""
+        try:
+            import json
+            # Reject known placeholder images
+            if self._is_placeholder_image(image_url):
+                image_url = None
+            normalized = self._normalize_artist_name(artist_name)
+            if not normalized:
+                return False
+
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Check if exists to merge source_services
+            cursor.execute(
+                "SELECT id, source_services FROM liked_artists_pool WHERE profile_id = ? AND normalized_name = ?",
+                (profile_id, normalized)
+            )
+            existing = cursor.fetchone()
+
+            if existing:
+                # Merge source into existing entry
+                current_sources = json.loads(existing['source_services'] or '[]')
+                if source_service not in current_sources:
+                    current_sources.append(source_service)
+
+                # Build SET clause with COALESCE for IDs and image
+                set_parts = [
+                    "source_services = ?",
+                    "updated_at = CURRENT_TIMESTAMP",
+                    "last_fetched_at = CURRENT_TIMESTAMP",
+                ]
+                params = [json.dumps(current_sources)]
+
+                if source_id and source_id_type:
+                    col = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id',
+                           'deezer': 'deezer_artist_id', 'discogs': 'discogs_artist_id'}.get(source_id_type)
+                    if col:
+                        set_parts.append(f"{col} = COALESCE({col}, ?)")
+                        params.append(source_id)
+                if image_url:
+                    set_parts.append("image_url = COALESCE(image_url, ?)")
+                    params.append(image_url)
+                if genres:
+                    set_parts.append("genres = COALESCE(genres, ?)")
+                    params.append(json.dumps(genres))
+
+                params.extend([profile_id, normalized])
+                cursor.execute(
+                    f"UPDATE liked_artists_pool SET {', '.join(set_parts)} WHERE profile_id = ? AND normalized_name = ?",
+                    params
+                )
+            else:
+                # New entry
+                sources_json = json.dumps([source_service])
+                id_cols = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id',
+                           'deezer': 'deezer_artist_id', 'discogs': 'discogs_artist_id'}
+                col_values = {v: None for v in id_cols.values()}
+                if source_id and source_id_type and source_id_type in id_cols:
+                    col_values[id_cols[source_id_type]] = source_id
+
+                cursor.execute("""
+                    INSERT INTO liked_artists_pool
+                    (artist_name, normalized_name, spotify_artist_id, itunes_artist_id,
+                     deezer_artist_id, discogs_artist_id, image_url, genres,
+                     source_services, profile_id, last_fetched_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    artist_name, normalized, col_values['spotify_artist_id'],
+                    col_values['itunes_artist_id'], col_values['deezer_artist_id'],
+                    col_values['discogs_artist_id'], image_url,
+                    json.dumps(genres) if genres else None, sources_json, profile_id
+                ))
+
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error upserting liked artist '{artist_name}': {e}")
+            return False
+
+    def get_liked_artists(self, profile_id: int = 1, limit: int = None,
+                          random: bool = False, matched_only: bool = True,
+                          page: int = 1, per_page: int = 50,
+                          search: str = None, source_filter: str = None,
+                          sort: str = 'name',
+                          require_source_id: str = None,
+                          require_image: bool = False) -> dict:
+        """Get liked artists from the pool. Returns {artists: [...], total: N}.
+        require_source_id: column name like 'spotify_artist_id' — only return artists with this ID set.
+        require_image: if True, only return artists with a non-empty image_url."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            where = ["profile_id = ?"]
+            params = [profile_id]
+            if matched_only:
+                where.append("match_status = 'matched'")
+            if require_source_id:
+                where.append(f"{require_source_id} IS NOT NULL AND {require_source_id} != ''")
+            if require_image:
+                where.append("image_url IS NOT NULL AND image_url != ''")
+            if search:
+                where.append("artist_name LIKE ? COLLATE NOCASE")
+                params.append(f"%{search}%")
+            if source_filter:
+                where.append("source_services LIKE ?")
+                params.append(f'%"{source_filter}"%')
+
+            where_clause = " AND ".join(where)
+
+            cursor.execute(f"SELECT COUNT(*) FROM liked_artists_pool WHERE {where_clause}", params)
+            total = cursor.fetchone()[0]
+
+            order = "RANDOM()" if random else {
+                'name': 'artist_name COLLATE NOCASE',
+                'recent': 'created_at DESC',
+                'source': 'source_services, artist_name COLLATE NOCASE'
+            }.get(sort, 'artist_name COLLATE NOCASE')
+
+            query_limit = limit if limit else per_page
+            offset = (page - 1) * per_page if not limit else 0
+
+            cursor.execute(f"""
+                SELECT * FROM liked_artists_pool
+                WHERE {where_clause}
+                ORDER BY {order}
+                LIMIT ? OFFSET ?
+            """, params + [query_limit, offset])
+
+            import json
+            artists = []
+            for r in cursor.fetchall():
+                d = dict(r)
+                d['source_services'] = json.loads(d['source_services'] or '[]')
+                d['genres'] = json.loads(d['genres']) if d['genres'] else []
+                artists.append(d)
+
+            return {'artists': artists, 'total': total}
+        except Exception as e:
+            logger.error(f"Error getting liked artists: {e}")
+            return {'artists': [], 'total': 0}
+
+    def get_liked_artists_last_fetch(self, profile_id: int = 1):
+        """Get the most recent fetch timestamp."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT MAX(last_fetched_at) FROM liked_artists_pool WHERE profile_id = ?",
+                (profile_id,)
+            )
+            row = cursor.fetchone()
+            return row[0] if row and row[0] else None
+        except Exception:
+            return None
+
+    def update_liked_artist_match(self, pool_id: int, active_source: str = None,
+                                  active_source_id: str = None, image_url: str = None,
+                                  all_ids: dict = None) -> bool:
+        """Mark a liked artist as matched. Stores all discovered source IDs, not just active.
+        all_ids: optional dict like {'spotify_artist_id': '...', 'itunes_artist_id': '...'}"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            set_parts = ["match_status = 'matched'", "updated_at = CURRENT_TIMESTAMP"]
+            params = []
+
+            if active_source and active_source_id:
+                set_parts.append("active_source = ?")
+                set_parts.append("active_source_id = ?")
+                params.extend([active_source, active_source_id])
+
+            # Store all discovered source IDs (COALESCE preserves existing values)
+            if all_ids:
+                for col in ('spotify_artist_id', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id'):
+                    val = all_ids.get(col)
+                    if val:
+                        set_parts.append(f"{col} = COALESCE({col}, ?)")
+                        params.append(str(val))
+
+            # Update image — replace if current is NULL or empty string
+            if image_url:
+                set_parts.append("image_url = CASE WHEN image_url IS NULL OR image_url = '' THEN ? ELSE image_url END")
+                params.append(image_url)
+
+            params.append(pool_id)
+            cursor.execute(f"UPDATE liked_artists_pool SET {', '.join(set_parts)} WHERE id = ?", params)
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating liked artist match: {e}")
+            return False
+
+    def sync_liked_artists_watchlist_flags(self, profile_id: int = 1) -> int:
+        """Batch-update on_watchlist flags by checking against watchlist_artists.
+        Uses case-insensitive artist_name comparison (not normalized_name) to avoid
+        normalization mismatches like 'The Beatles' vs 'beatles'."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            # Reset all, then set matches
+            cursor.execute(
+                "UPDATE liked_artists_pool SET on_watchlist = 0 WHERE profile_id = ?",
+                (profile_id,)
+            )
+            cursor.execute("""
+                UPDATE liked_artists_pool SET on_watchlist = 1
+                WHERE profile_id = ? AND EXISTS (
+                    SELECT 1 FROM watchlist_artists wa
+                    WHERE wa.profile_id = liked_artists_pool.profile_id
+                      AND wa.artist_name = liked_artists_pool.artist_name COLLATE NOCASE
+                )
+            """, (profile_id,))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error syncing liked artists watchlist flags: {e}")
+            return 0
+
+    def get_liked_artists_pending_match(self, profile_id: int = 1, limit: int = 50) -> list:
+        """Get artists that haven't been matched to the active source yet."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM liked_artists_pool
+                WHERE profile_id = ? AND match_status = 'pending'
+                ORDER BY created_at
+                LIMIT ?
+            """, (profile_id, limit))
+            import json
+            return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting pending liked artists: {e}")
+            return []
+
+    def clear_liked_artists(self, profile_id: int = 1) -> int:
+        """Clear all liked artists for a profile."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM liked_artists_pool WHERE profile_id = ?", (profile_id,))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error clearing liked artists: {e}")
+            return 0
 
     # ==================== Track Download Provenance Methods ====================
 

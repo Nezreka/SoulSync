@@ -223,20 +223,40 @@ class DeezerClient:
             'User-Agent': 'SoulSync/1.0',
             'Accept': 'application/json'
         })
-        logger.info("Deezer client initialized")
+        self._access_token = None
+        self._load_token()
+        logger.info("Deezer client initialized" + (" (authenticated)" if self._access_token else " (public)"))
+
+    def _load_token(self):
+        """Load OAuth access token from config if available."""
+        try:
+            from config.settings import config_manager
+            self._access_token = config_manager.get('deezer.access_token', None)
+        except Exception:
+            self._access_token = None
+
+    def is_user_authenticated(self) -> bool:
+        """Check if we have a Deezer OAuth user token (for favorites, playlists, etc.)"""
+        return bool(self._access_token)
 
     def is_authenticated(self) -> bool:
         """Deezer public API requires no authentication — always available"""
         return True
 
     def reload_config(self):
-        """Reload configuration (no-op for Deezer since no auth required)"""
-        pass
+        """Reload configuration — refresh OAuth token from config."""
+        self._load_token()
 
     def _api_get(self, endpoint: str, params: dict = None, timeout: int = 15) -> Optional[Dict[str, Any]]:
-        """Generic GET request to Deezer API with error handling"""
+        """Generic GET request to Deezer API with error handling.
+        Includes OAuth access_token when available for user-level endpoints."""
         try:
             url = f"{self.BASE_URL}/{endpoint.lstrip('/')}"
+            if params is None:
+                params = {}
+            # Include access token for authenticated requests
+            if self._access_token and 'access_token' not in params:
+                params['access_token'] = self._access_token
             response = self.session.get(url, params=params, timeout=timeout)
 
             if response.status_code != 200:
@@ -634,6 +654,45 @@ class DeezerClient:
         if artist_data:
             return artist_data.get('picture_xl') or artist_data.get('picture_big') or artist_data.get('picture_medium')
         return None
+
+    # ==================== User Methods (require OAuth) ====================
+
+    @rate_limited
+    def get_user_favorite_artists(self, limit: int = 200) -> list:
+        """Fetch user's favorite artists from Deezer. Requires OAuth access token.
+        Returns list of dicts with deezer_id, name, image_url."""
+        if not self._access_token:
+            logger.debug("Deezer not user-authenticated — cannot fetch favorites")
+            return []
+        try:
+            artists = []
+            index = 0
+            while len(artists) < limit:
+                data = self._api_get('user/me/artists', params={
+                    'limit': min(100, limit - len(artists)),
+                    'index': index
+                })
+                if not data or 'data' not in data:
+                    break
+                items = data['data']
+                if not items:
+                    break
+                for a in items:
+                    artists.append({
+                        'deezer_id': str(a.get('id', '')),
+                        'name': a.get('name', ''),
+                        'image_url': a.get('picture_xl') or a.get('picture_big') or a.get('picture_medium', ''),
+                    })
+                if not data.get('next'):
+                    break
+                index += len(items)
+                time.sleep(0.3)  # Extra breathing room
+
+            logger.info(f"Retrieved {len(artists)} favorite artists from Deezer")
+            return artists
+        except Exception as e:
+            logger.error(f"Error fetching Deezer favorite artists: {e}")
+            return []
 
     # ==================== Stub Methods (match iTunesClient interface) ====================
 

@@ -5666,11 +5666,17 @@ async function loadSettingsData() {
         document.getElementById('spotify-redirect-uri').value = settings.spotify?.redirect_uri || 'http://127.0.0.1:8888/callback';
         document.getElementById('spotify-callback-display').textContent = settings.spotify?.redirect_uri || 'http://127.0.0.1:8888/callback';
 
-        // Populate Tidal settings  
+        // Populate Tidal settings
         document.getElementById('tidal-client-id').value = settings.tidal?.client_id || '';
         document.getElementById('tidal-client-secret').value = settings.tidal?.client_secret || '';
         document.getElementById('tidal-redirect-uri').value = settings.tidal?.redirect_uri || 'http://127.0.0.1:8889/tidal/callback';
         document.getElementById('tidal-callback-display').textContent = settings.tidal?.redirect_uri || 'http://127.0.0.1:8889/tidal/callback';
+
+        // Populate Deezer OAuth settings
+        document.getElementById('deezer-app-id').value = settings.deezer?.app_id || '';
+        document.getElementById('deezer-app-secret').value = settings.deezer?.app_secret || '';
+        document.getElementById('deezer-redirect-uri').value = settings.deezer?.redirect_uri || 'http://127.0.0.1:8008/deezer/callback';
+        document.getElementById('deezer-callback-display').textContent = settings.deezer?.redirect_uri || 'http://127.0.0.1:8008/deezer/callback';
 
         // Add event listeners to update display URLs when input changes
         document.getElementById('spotify-redirect-uri').addEventListener('input', function () {
@@ -5679,6 +5685,10 @@ async function loadSettingsData() {
 
         document.getElementById('tidal-redirect-uri').addEventListener('input', function () {
             document.getElementById('tidal-callback-display').textContent = this.value || 'http://127.0.0.1:8889/tidal/callback';
+        });
+
+        document.getElementById('deezer-redirect-uri').addEventListener('input', function () {
+            document.getElementById('deezer-callback-display').textContent = this.value || 'http://127.0.0.1:8008/deezer/callback';
         });
 
         // Populate Plex settings
@@ -6868,6 +6878,9 @@ async function saveSettings(quiet = false) {
             tags: _collectServiceTags('musicbrainz')
         },
         deezer: {
+            app_id: document.getElementById('deezer-app-id').value,
+            app_secret: document.getElementById('deezer-app-secret').value,
+            redirect_uri: document.getElementById('deezer-redirect-uri').value,
             embed_tags: document.getElementById('embed-deezer').checked,
             tags: _collectServiceTags('deezer')
         },
@@ -7513,6 +7526,20 @@ async function authenticateTidal() {
     } catch (error) {
         console.error('Error authenticating Tidal:', error);
         showToast('Failed to start Tidal authentication', 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+async function authenticateDeezer() {
+    try {
+        showLoadingOverlay('Saving credentials and starting Deezer authentication...');
+        await saveSettings();
+        showToast('Deezer authentication started', 'success');
+        window.open('/auth/deezer', '_blank');
+    } catch (error) {
+        console.error('Error authenticating Deezer:', error);
+        showToast('Failed to start Deezer authentication', 'error');
     } finally {
         hideLoadingOverlay();
     }
@@ -50990,6 +51017,7 @@ async function loadDiscoverPage() {
     // Load all sections
     await Promise.all([
         loadDiscoverHero(),
+        loadYourArtists(),
         loadSpotifyLibrarySection(),
         loadDiscoverRecentReleases(),
         loadSeasonalContent(),  // Seasonal discovery
@@ -54933,6 +54961,465 @@ async function unblockDiscoveryArtist(id, name) {
 }
 
 // Backwards compat — called during page init but now a no-op (modal handles it)
+// ── Your Artists (Liked Artists Pool) ──
+
+async function loadYourArtists() {
+    const section = document.getElementById('your-artists-section');
+    const carousel = document.getElementById('your-artists-carousel');
+    const subtitle = document.getElementById('your-artists-subtitle');
+    if (!section || !carousel) return;
+
+    try {
+        const resp = await fetch('/api/discover/your-artists');
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        if (!data.artists || data.artists.length === 0) {
+            if (data.stale) {
+                // First load — show section with loading state, poll until ready
+                section.style.display = '';
+                if (subtitle) subtitle.textContent = 'Discovering your artists across connected services...';
+                carousel.innerHTML = `
+                    <div class="ya-loading">
+                        <div class="watch-all-loading-spinner"></div>
+                        <span>Fetching and matching artists from your services...</span>
+                    </div>
+                `;
+                _pollYourArtists();
+            } else {
+                section.style.display = 'none';
+            }
+            return;
+        }
+
+        // Show section
+        section.style.display = '';
+
+        // Update subtitle with source info
+        const sources = new Set();
+        data.artists.forEach(a => (a.source_services || []).forEach(s => sources.add(s)));
+        const sourceNames = { spotify: 'Spotify', lastfm: 'Last.fm', tidal: 'Tidal', deezer: 'Deezer' };
+        const sourceList = [...sources].map(s => sourceNames[s] || s).join(' and ');
+        if (subtitle) subtitle.textContent = `Artists you follow on ${sourceList || 'your music services'}`;
+
+        if (data.stale) {
+            if (subtitle) subtitle.textContent += ' (updating...)';
+            _pollYourArtists();
+        }
+
+        // Store for modal access and render carousel cards
+        window._yaArtists = {};
+        data.artists.forEach(a => { window._yaArtists[a.id] = a; });
+        carousel.innerHTML = data.artists.map(a => _renderYourArtistCard(a)).join('');
+
+    } catch (err) {
+        console.error('Error loading Your Artists:', err);
+    }
+}
+
+function _pollYourArtists() {
+    // Poll every 5s until artists appear, then stop
+    if (window._yaPoller) clearInterval(window._yaPoller);
+    let attempts = 0;
+    window._yaPoller = setInterval(async () => {
+        attempts++;
+        if (attempts > 60) { clearInterval(window._yaPoller); window._yaPoller = null; return; }
+        try {
+            const resp = await fetch('/api/discover/your-artists');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data.artists && data.artists.length > 0) {
+                clearInterval(window._yaPoller);
+                window._yaPoller = null;
+                loadYourArtists(); // Re-render with real data
+            }
+        } catch (e) {}
+    }, 5000);
+}
+
+function _renderYourArtistCard(artist) {
+    const _esc = (s) => escapeHtml(s || '');
+    const img = artist.image_url || '';
+
+    // Build metadata source badges (same pattern as library page)
+    const badges = [];
+    if (artist.spotify_artist_id) badges.push({ logo: SPOTIFY_LOGO_URL, fb: 'SP', title: 'Spotify' });
+    if (artist.itunes_artist_id) badges.push({ logo: ITUNES_LOGO_URL, fb: 'IT', title: 'Apple Music' });
+    if (artist.deezer_artist_id) badges.push({ logo: DEEZER_LOGO_URL, fb: 'Dz', title: 'Deezer' });
+    if (artist.discogs_artist_id) badges.push({ logo: DISCOGS_LOGO_URL, fb: 'DC', title: 'Discogs' });
+    const badgeHTML = badges.map(b =>
+        `<div class="ya-badge" title="${b.title}">${b.logo ? `<img src="${b.logo}" onerror="this.parentNode.textContent='${b.fb}'">` : `<span>${b.fb}</span>`}</div>`
+    ).join('');
+
+    // Origin dots (which services the artist came from)
+    const sources = artist.source_services || [];
+    const sourceColors = { spotify: '#1DB954', lastfm: '#D51007', tidal: '#00FFFF', deezer: '#A238FF' };
+    const originDots = sources.map(s =>
+        `<span class="ya-origin-dot" style="background:${sourceColors[s] || '#666'}" title="From ${s}"></span>`
+    ).join('');
+
+    const watchlistClass = artist.on_watchlist ? 'active' : '';
+    const hasId = artist.active_source_id && artist.active_source_id !== '';
+
+    // Navigate to artist page (name click)
+    const navAction = hasId
+        ? `event.stopPropagation(); navigateToPage('artists'); setTimeout(() => selectArtistForDetail({id:'${escapeForInlineJs(artist.active_source_id)}', name:'${escapeForInlineJs(artist.artist_name)}', image_url:'${escapeForInlineJs(img)}'}), 200)`
+        : '';
+
+    // Open info modal (card body click) — pass pool ID so we can look up all data
+    const infoAction = hasId
+        ? `openYourArtistInfoModal(${artist.id})`
+        : '';
+
+    // Deezer fallback for images
+    const deezerFb = artist.deezer_artist_id ? `onerror="if(!this.dataset.tried){this.dataset.tried='1';this.src='https://api.deezer.com/artist/${artist.deezer_artist_id}/image?size=big'}else{this.style.display='none';this.nextElementSibling.style.display='flex'}"` : `onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"`;
+
+    return `
+        <div class="ya-card" ${infoAction ? `onclick="${infoAction}"` : ''}>
+            <div class="ya-card-img">
+                ${img ? `<img src="${img}" alt="" loading="lazy" ${deezerFb}>` : ''}
+                <div class="ya-card-placeholder" ${img ? 'style="display:none"' : ''}>&#9835;</div>
+            </div>
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-badges">${badgeHTML}</div>
+            <button class="ya-watchlist-btn ${watchlistClass}" title="${artist.on_watchlist ? 'On watchlist' : 'Add to watchlist'}"
+                    onclick="event.stopPropagation(); toggleYourArtistWatchlist(${artist.id}, '${escapeForInlineJs(artist.artist_name)}', '${escapeForInlineJs(artist.active_source_id || '')}', '${escapeForInlineJs(artist.active_source || '')}', this)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="${artist.on_watchlist ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                </svg>
+            </button>
+            <div class="ya-card-info">
+                <div class="ya-card-info-row">
+                    <div class="ya-origin-dots">${originDots}</div>
+                </div>
+                <div class="ya-card-name" ${navAction ? `onclick="${navAction}"` : ''}>${_esc(artist.artist_name)}</div>
+            </div>
+        </div>
+    `;
+}
+
+async function openYourArtistInfoModal(poolId) {
+    const pool = (window._yaArtists || {})[poolId];
+    if (!pool) return;
+
+    const artistId = pool.active_source_id;
+    const artistName = pool.artist_name;
+    const imageUrl = pool.image_url || '';
+
+    const existing = document.getElementById('ya-info-modal-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ya-info-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '10001';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    // Build matched source badges from pool data
+    const _mb = (logo, fb, title) => `<div class="ya-info-badge" title="${title}">${logo ? `<img src="${logo}" onerror="this.parentNode.textContent='${fb}'">` : `<span>${fb}</span>`}</div>`;
+    const matchBadges = [];
+    if (pool.spotify_artist_id) matchBadges.push(_mb(SPOTIFY_LOGO_URL, 'SP', 'Matched on Spotify'));
+    if (pool.itunes_artist_id) matchBadges.push(_mb(ITUNES_LOGO_URL, 'IT', 'Matched on Apple Music'));
+    if (pool.deezer_artist_id) matchBadges.push(_mb(DEEZER_LOGO_URL, 'Dz', 'Matched on Deezer'));
+    if (pool.discogs_artist_id) matchBadges.push(_mb(DISCOGS_LOGO_URL, 'DC', 'Matched on Discogs'));
+
+    // Origin info
+    const sources = pool.source_services || [];
+    const sourceNames = { spotify: 'Spotify', lastfm: 'Last.fm', tidal: 'Tidal', deezer: 'Deezer' };
+    const originText = sources.map(s => sourceNames[s] || s).join(', ');
+
+    overlay.innerHTML = `
+        <div class="ya-info-modal">
+            <button class="watch-all-close" onclick="document.getElementById('ya-info-modal-overlay').remove()">&times;</button>
+            <div class="ya-info-hero">
+                <div class="ya-info-hero-bg" ${imageUrl ? `style="background-image:url('${escapeHtml(imageUrl)}')"` : ''}></div>
+                <div class="ya-info-hero-content">
+                    <div class="ya-info-hero-img">
+                        ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="">` : '<div class="ya-info-img-fallback">&#9835;</div>'}
+                    </div>
+                    <div class="ya-info-hero-text">
+                        <h2 class="ya-info-name">${escapeHtml(artistName)}</h2>
+                        <div class="ya-info-badges">${matchBadges.join('')}</div>
+                        ${originText ? `<div class="ya-info-origin">Followed on ${escapeHtml(originText)}</div>` : ''}
+                    </div>
+                </div>
+            </div>
+            <div class="ya-info-body" id="ya-info-body">
+                <div class="cache-health-loading"><div class="watch-all-loading-spinner"></div><div>Loading artist info...</div></div>
+            </div>
+            <div class="ya-info-footer" id="ya-info-footer"></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Fetch enrichment data
+    try {
+        const resp = await fetch(`/api/discover/your-artists/info/${artistId}?name=${encodeURIComponent(artistName)}`);
+        const artist = resp.ok ? await resp.json() : {};
+        const bodyEl = document.getElementById('ya-info-body');
+        const footerEl = document.getElementById('ya-info-footer');
+
+        const genres = artist.genres || [];
+        const bio = artist.summary || '';
+        const listeners = artist.lastfm_listeners || artist.followers || 0;
+        const playcount = artist.lastfm_playcount || 0;
+        const popularity = artist.popularity || 0;
+
+        let bodyHTML = '';
+
+        // Stats
+        if (listeners || playcount || popularity) {
+            bodyHTML += `<div class="ya-info-stats">
+                ${listeners ? `<div class="ya-info-stat"><span class="ya-info-stat-value">${Number(listeners).toLocaleString()}</span><span class="ya-info-stat-label">listeners</span></div>` : ''}
+                ${playcount ? `<div class="ya-info-stat"><span class="ya-info-stat-value">${Number(playcount).toLocaleString()}</span><span class="ya-info-stat-label">plays</span></div>` : ''}
+                ${popularity ? `<div class="ya-info-stat"><span class="ya-info-stat-value">${popularity}</span><span class="ya-info-stat-label">popularity</span></div>` : ''}
+            </div>`;
+        }
+
+        // Genres
+        if (genres.length > 0) {
+            bodyHTML += `<div class="ya-info-section">
+                <div class="ya-info-genres">${genres.map(g => `<span class="ya-info-genre">${escapeHtml(g)}</span>`).join('')}</div>
+            </div>`;
+        }
+
+        // Bio
+        if (bio) {
+            const cleanBio = bio.replace(/<a[^>]*>.*?<\/a>/gi, '').replace(/<[^>]+>/g, '').trim();
+            if (cleanBio) {
+                bodyHTML += `<div class="ya-info-section">
+                    <div class="ya-info-section-title">About</div>
+                    <div class="ya-info-bio">${escapeHtml(cleanBio.length > 600 ? cleanBio.substring(0, 600) + '...' : cleanBio)}</div>
+                </div>`;
+            }
+        }
+
+        if (!bodyHTML) bodyHTML = '<div class="ya-info-empty">No additional info available</div>';
+        if (bodyEl) bodyEl.innerHTML = bodyHTML;
+
+        // Footer
+        if (footerEl) {
+            const watchBtn = pool.on_watchlist
+                ? `<button class="ya-header-btn" onclick="toggleYourArtistWatchlist(${pool.id}, '${escapeForInlineJs(artistName)}', '${escapeForInlineJs(artistId)}', '${escapeForInlineJs(pool.active_source || '')}', this); this.textContent='Done'; this.disabled=true">Remove from Watchlist</button>`
+                : `<button class="ya-header-btn" onclick="toggleYourArtistWatchlist(${pool.id}, '${escapeForInlineJs(artistName)}', '${escapeForInlineJs(artistId)}', '${escapeForInlineJs(pool.active_source || '')}', this); this.textContent='Added!'; this.disabled=true">Add to Watchlist</button>`;
+            footerEl.innerHTML = `
+                ${watchBtn}
+                <button class="ya-header-btn ya-viewall-btn" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove(); navigateToPage('artists'); setTimeout(() => selectArtistForDetail({id:'${escapeForInlineJs(artistId)}', name:'${escapeForInlineJs(artistName)}', image_url:'${escapeForInlineJs(imageUrl)}'}), 200)">
+                    <span>View Discography</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                </button>
+            `;
+        }
+    } catch (err) {
+        const bodyEl = document.getElementById('ya-info-body');
+        if (bodyEl) bodyEl.innerHTML = `<div class="ya-info-empty">Could not load artist info</div>`;
+    }
+}
+
+async function toggleYourArtistWatchlist(poolId, artistName, sourceId, source, btnEl) {
+    const isWatched = btnEl && btnEl.classList.contains('active');
+    try {
+        if (isWatched) {
+            const resp = await fetch('/api/watchlist/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artist_id: sourceId })
+            });
+            if (resp.ok) {
+                if (btnEl) {
+                    btnEl.classList.remove('active');
+                    const svg = btnEl.querySelector('svg');
+                    if (svg) svg.setAttribute('fill', 'none');
+                }
+                showToast(`Removed ${artistName} from watchlist`, 'info');
+                // Sync card eye icon
+                _syncYaCardWatchlist(poolId, false);
+            }
+        } else {
+            const resp = await fetch('/api/watchlist/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ artist_id: sourceId, artist_name: artistName, source: source })
+            });
+            if (resp.ok) {
+                if (btnEl) {
+                    btnEl.classList.add('active');
+                    const svg = btnEl.querySelector('svg');
+                    if (svg) svg.setAttribute('fill', 'currentColor');
+                }
+                showToast(`Added ${artistName} to watchlist`, 'success');
+                _syncYaCardWatchlist(poolId, true);
+            }
+        }
+    } catch (err) {
+        showToast('Failed to update watchlist', 'error');
+    }
+}
+
+function _syncYaCardWatchlist(poolId, watched) {
+    // Sync the card's eye icon with watchlist state (covers modal → card sync)
+    document.querySelectorAll('.ya-card .ya-watchlist-btn').forEach(btn => {
+        const card = btn.closest('.ya-card');
+        if (!card) return;
+        // Match by onclick containing the poolId
+        const onclick = btn.getAttribute('onclick') || '';
+        if (onclick.includes(`(${poolId},`)) {
+            if (watched) {
+                btn.classList.add('active');
+                const svg = btn.querySelector('svg');
+                if (svg) svg.setAttribute('fill', 'currentColor');
+            } else {
+                btn.classList.remove('active');
+                const svg = btn.querySelector('svg');
+                if (svg) svg.setAttribute('fill', 'none');
+            }
+        }
+    });
+    // Update pool data
+    if (window._yaArtists && window._yaArtists[poolId]) {
+        window._yaArtists[poolId].on_watchlist = watched ? 1 : 0;
+    }
+}
+
+async function refreshYourArtists() {
+    const btn = document.getElementById('your-artists-refresh-btn');
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+    const subtitle = document.getElementById('your-artists-subtitle');
+    if (subtitle) subtitle.textContent = 'Refreshing from your services...';
+
+    try {
+        await fetch('/api/discover/your-artists/refresh?clear=true', { method: 'POST' });
+        // Poll until done
+        let attempts = 0;
+        const poll = setInterval(async () => {
+            attempts++;
+            if (attempts > 60) { clearInterval(poll); return; } // 5 min max
+            try {
+                const resp = await fetch('/api/discover/your-artists');
+                const data = await resp.json();
+                if (!data.stale && data.artists && data.artists.length > 0) {
+                    clearInterval(poll);
+                    loadYourArtists();
+                    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+                    showToast(`Found ${data.total} artists from your services`, 'success');
+                }
+            } catch (e) {}
+        }, 5000);
+    } catch (err) {
+        showToast('Failed to start refresh', 'error');
+        if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+    }
+}
+
+async function openYourArtistsModal() {
+    const existing = document.getElementById('your-artists-modal-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'your-artists-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    overlay.innerHTML = `
+        <div class="ya-modal">
+            <div class="ya-modal-header">
+                <div>
+                    <h2 class="ya-modal-title">Your Artists</h2>
+                    <p class="ya-modal-subtitle" id="ya-modal-subtitle">Loading...</p>
+                </div>
+                <button class="watch-all-close" onclick="document.getElementById('your-artists-modal-overlay').remove()">&times;</button>
+            </div>
+            <div class="ya-modal-toolbar">
+                <input type="text" id="ya-modal-search" class="ya-modal-search" placeholder="Search artists...">
+                <div class="ya-modal-filters">
+                    <button class="ya-filter-btn active" data-source="" onclick="_yaFilterSource('')">All</button>
+                    <button class="ya-filter-btn" data-source="spotify" onclick="_yaFilterSource('spotify')">Spotify</button>
+                    <button class="ya-filter-btn" data-source="tidal" onclick="_yaFilterSource('tidal')">Tidal</button>
+                    <button class="ya-filter-btn" data-source="lastfm" onclick="_yaFilterSource('lastfm')">Last.fm</button>
+                    <button class="ya-filter-btn" data-source="deezer" onclick="_yaFilterSource('deezer')">Deezer</button>
+                </div>
+                <select class="ya-modal-sort" id="ya-modal-sort" onchange="_yaLoadModal()">
+                    <option value="name">A-Z</option>
+                    <option value="recent">Recently Added</option>
+                    <option value="source">By Source</option>
+                </select>
+            </div>
+            <div class="ya-modal-body" id="ya-modal-body">
+                <div class="cache-health-loading"><div class="watch-all-loading-spinner"></div><div>Loading...</div></div>
+            </div>
+            <div class="ya-modal-footer" id="ya-modal-footer"></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Search debounce
+    let searchTimer = null;
+    overlay.querySelector('#ya-modal-search').addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => _yaLoadModal(), 300);
+    });
+
+    window._yaModalState = { page: 1, source: '', sort: 'name' };
+    _yaLoadModal();
+}
+
+function _yaFilterSource(source) {
+    window._yaModalState.source = source;
+    window._yaModalState.page = 1;
+    document.querySelectorAll('.ya-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.source === source));
+    _yaLoadModal();
+}
+
+async function _yaLoadModal() {
+    const body = document.getElementById('ya-modal-body');
+    const footer = document.getElementById('ya-modal-footer');
+    const subtitle = document.getElementById('ya-modal-subtitle');
+    if (!body) return;
+
+    const state = window._yaModalState || { page: 1, source: '', sort: 'name' };
+    const search = document.getElementById('ya-modal-search')?.value || '';
+    const sort = document.getElementById('ya-modal-sort')?.value || 'name';
+    state.sort = sort;
+
+    const params = new URLSearchParams({ page: state.page, per_page: 60, sort: state.sort });
+    if (state.source) params.set('source', state.source);
+    if (search) params.set('search', search);
+
+    try {
+        const resp = await fetch(`/api/discover/your-artists/all?${params}`);
+        const data = await resp.json();
+
+        if (subtitle) subtitle.textContent = `${data.total} artists matched`;
+
+        if (!data.artists || data.artists.length === 0) {
+            body.innerHTML = '<div class="failed-mb-empty">No artists found</div>';
+            if (footer) footer.innerHTML = '';
+            return;
+        }
+
+        // Store for info modal access
+        if (!window._yaArtists) window._yaArtists = {};
+        data.artists.forEach(a => { window._yaArtists[a.id] = a; });
+        body.innerHTML = `<div class="ya-modal-grid">${data.artists.map(a => _renderYourArtistCard(a)).join('')}</div>`;
+
+        // Pagination
+        const totalPages = Math.ceil(data.total / 60);
+        if (footer && totalPages > 1) {
+            footer.innerHTML = `
+                <div class="failed-mb-pagination">
+                    <button class="failed-mb-btn-sm" ${state.page <= 1 ? 'disabled' : ''} onclick="window._yaModalState.page--; _yaLoadModal()">Prev</button>
+                    <span>Page ${state.page} of ${totalPages}</span>
+                    <button class="failed-mb-btn-sm" ${state.page >= totalPages ? 'disabled' : ''} onclick="window._yaModalState.page++; _yaLoadModal()">Next</button>
+                </div>
+            `;
+        } else if (footer) {
+            footer.innerHTML = '';
+        }
+    } catch (err) {
+        body.innerHTML = '<div class="failed-mb-empty">Failed to load</div>';
+    }
+}
+
 function loadDiscoveryBlacklist() {}
 
 async function loadDiscoveryShuffle() {
