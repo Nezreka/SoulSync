@@ -55009,6 +55009,7 @@ async function loadYourArtists() {
 
         // Store for modal access and render carousel cards
         window._yaArtists = {};
+        window._yaActiveSource = data.active_source || 'spotify';
         data.artists.forEach(a => { window._yaArtists[a.id] = a; });
         carousel.innerHTML = data.artists.map(a => _renderYourArtistCard(a)).join('');
 
@@ -55194,6 +55195,36 @@ async function openYourArtistInfoModal(poolId) {
             }
         }
 
+        // Related artists from map connections
+        const related = pool._related || [];
+        if (related.length > 0) {
+            const relLabel = pool.on_watchlist ? 'Similar Artists' : 'Connected To';
+            bodyHTML += `<div class="ya-info-section">
+                <div class="ya-info-section-title">${relLabel}</div>
+                <div class="ya-info-related">
+                    ${related.slice(0, 12).map(r => {
+                        const rImg = r.image_url || '';
+                        const rType = r.type === 'watchlist';
+                        return `<div class="ya-info-related-item" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); setTimeout(() => openYourArtistInfoModal_direct(${JSON.stringify({
+                            id: r.id, name: r.name, image_url: rImg,
+                            spotify_id: r.spotify_id || '', itunes_id: r.itunes_id || '',
+                            deezer_id: r.deezer_id || '', discogs_id: r.discogs_id || '',
+                            type: r.type
+                        }).replace(/"/g, '&quot;')}), 100)">
+                            <div class="ya-info-related-img">
+                                ${rImg ? `<img src="${escapeHtml(rImg)}" alt="">` : '<span>&#9835;</span>'}
+                            </div>
+                            <div class="ya-info-related-text">
+                                <div class="ya-info-related-name">${escapeHtml(r.name)}</div>
+                                ${rType ? '<div class="ya-info-related-badge">★ Watchlist</div>' : ''}
+                            </div>
+                        </div>`;
+                    }).join('')}
+                    ${related.length > 12 ? `<div class="ya-info-related-more">+${related.length - 12} more</div>` : ''}
+                </div>
+            </div>`;
+        }
+
         if (!bodyHTML) bodyHTML = '<div class="ya-info-empty">No additional info available</div>';
         if (bodyEl) bodyEl.innerHTML = bodyHTML;
 
@@ -55204,7 +55235,7 @@ async function openYourArtistInfoModal(poolId) {
                 : `<button class="ya-header-btn" onclick="toggleYourArtistWatchlist(${pool.id}, '${escapeForInlineJs(artistName)}', '${escapeForInlineJs(artistId)}', '${escapeForInlineJs(pool.active_source || '')}', this); this.textContent='Added!'; this.disabled=true">Add to Watchlist</button>`;
             footerEl.innerHTML = `
                 ${watchBtn}
-                <button class="ya-header-btn ya-viewall-btn" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove(); navigateToPage('artists'); setTimeout(() => selectArtistForDetail({id:'${escapeForInlineJs(artistId)}', name:'${escapeForInlineJs(artistName)}', image_url:'${escapeForInlineJs(imageUrl)}'}), 200)">
+                <button class="ya-header-btn ya-viewall-btn" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove(); navigateToPage('artists'); setTimeout(() => selectArtistForDetail({id:'${escapeForInlineJs(artistId)}', name:'${escapeForInlineJs(artistName)}', image_url:'${escapeForInlineJs(imageUrl)}'}, {source:'${escapeForInlineJs(pool.active_source || '')}'}), 200)">
                     <span>View Discography</span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
                 </button>
@@ -55888,18 +55919,166 @@ function _artMapRender() {
         oc.height * z / s
     );
 
-    // Draw hover highlight on main canvas (only 1 node, very fast)
-    if (_artMap.hoveredNode) {
+    // ── Interactive overlay (drawn on main canvas, not buffer) ──
+    const cFade = _artMap._constellationFade || 0;
+    if (cFade > 0 && (_artMap.hoveredNode || _artMap._constellationCache)) {
+        const n = _artMap.hoveredNode || (_artMap._constellationCache ? (_artMap._nodeById || {})[_artMap._constellationCache.nodeId] : null);
+        if (!n) { _artMap._constellationFade = 0; _artMap._constellationCache = null; }
+        if (n) {
+        ctx.save();
+        ctx.translate(_artMap.offsetX, _artMap.offsetY);
+        ctx.scale(z, z);
+
+        // Cache connected node lookup (don't recompute every frame)
+        if (!_artMap._constellationCache || _artMap._constellationCache.nodeId !== n.id) {
+            const connectedIds = new Set();
+            if (n.type === 'watchlist') {
+                for (const e of _artMap.edges) {
+                    if (e.source === n.id) connectedIds.add(e.target);
+                }
+            } else {
+                const sourceIds = new Set();
+                for (const e of _artMap.edges) {
+                    if (e.target === n.id) sourceIds.add(e.source);
+                }
+                for (const sid of sourceIds) {
+                    connectedIds.add(sid);
+                    for (const e of _artMap.edges) {
+                        if (e.source === sid) connectedIds.add(e.target);
+                    }
+                }
+            }
+            const nById = _artMap._nodeById || {};
+            _artMap._constellationCache = {
+                nodeId: n.id,
+                nodes: [n, ...[...connectedIds].map(id => nById[id]).filter(Boolean)],
+            };
+        }
+
+        const highlightNodes = _artMap._constellationCache.nodes;
+
+        if (highlightNodes.length > 1) {
+            // Semi-transparent dark overlay on entire visible area
+            ctx.save();
+            ctx.resetTransform();
+            ctx.globalAlpha = 0.6 * cFade;
+            ctx.fillStyle = '#0a0a14';
+            ctx.fillRect(0, 0, _artMap.canvas.width, _artMap.canvas.height);
+            ctx.globalAlpha = 1;
+            ctx.restore();
+
+            // Draw glowing connection lines
+            for (const cn of highlightNodes) {
+                if (cn === n) continue;
+                ctx.beginPath();
+                ctx.moveTo(n.x, n.y);
+                ctx.lineTo(cn.x, cn.y);
+                // Gradient line
+                const lineGrad = ctx.createLinearGradient(n.x, n.y, cn.x, cn.y);
+                lineGrad.addColorStop(0, `rgba(138,43,226,${0.5 * cFade})`);
+                lineGrad.addColorStop(1, `rgba(138,43,226,${0.15 * cFade})`);
+                ctx.strokeStyle = lineGrad;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+
+            // Redraw highlighted nodes on top
+            ctx.globalAlpha = cFade;
+            for (const hn of highlightNodes) {
+                const r = hn.radius;
+                const isW = hn.type === 'watchlist';
+                const isHov = hn === n;
+
+                // Glow
+                if (isHov) {
+                    ctx.beginPath();
+                    ctx.arc(hn.x, hn.y, r + 8, 0, Math.PI * 2);
+                    ctx.strokeStyle = 'rgba(138,43,226,0.4)';
+                    ctx.lineWidth = 6;
+                    ctx.stroke();
+                }
+
+                // Circle + image
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(hn.x, hn.y, r, 0, Math.PI * 2);
+                ctx.closePath();
+                ctx.clip();
+
+                const img = _artMap.images[hn.id];
+                if (img) {
+                    ctx.drawImage(img, hn.x - r, hn.y - r, r * 2, r * 2);
+                    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+                    ctx.fillRect(hn.x - r, hn.y - r, r * 2, r * 2);
+                } else {
+                    ctx.fillStyle = isW ? '#1a0a30' : '#141420';
+                    ctx.fillRect(hn.x - r, hn.y - r, r * 2, r * 2);
+                }
+                ctx.restore();
+
+                // Border
+                ctx.beginPath();
+                ctx.arc(hn.x, hn.y, r, 0, Math.PI * 2);
+                ctx.strokeStyle = isHov ? 'rgba(255,255,255,0.7)' : isW ? 'rgba(138,43,226,0.5)' : 'rgba(255,255,255,0.3)';
+                ctx.lineWidth = isHov ? 3 : 1.5;
+                ctx.stroke();
+
+                // Name
+                const fontSize = isW ? Math.max(14, r * 0.14) : Math.max(8, r * 0.3);
+                ctx.font = `${isW ? '700' : '600'} ${fontSize}px system-ui`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = '#fff';
+                const maxC = isW ? 20 : 12;
+                const label = hn.name.length > maxC ? hn.name.substring(0, maxC - 1) + '…' : hn.name;
+                ctx.fillText(label, hn.x, hn.y);
+            }
+            ctx.globalAlpha = 1;
+        } else {
+            // Single node, no connections
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, n.radius + 4, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+
+        ctx.restore();
+        } // end if(n)
+    } else if (_artMap.hoveredNode && !_artMap._constellationActive) {
+        // Pre-constellation: just show a simple highlight ring (instant, no delay)
         const n = _artMap.hoveredNode;
         ctx.save();
         ctx.translate(_artMap.offsetX, _artMap.offsetY);
         ctx.scale(z, z);
         ctx.beginPath();
-        ctx.arc(n.x, n.y, n.radius + 4, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-        ctx.lineWidth = 3;
+        ctx.arc(n.x, n.y, n.radius + 3, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 2;
         ctx.stroke();
         ctx.restore();
+    }
+
+    // Click ripple animation
+    if (_artMap._ripple) {
+        const rip = _artMap._ripple;
+        const elapsed = performance.now() - rip.start;
+        const progress = elapsed / 400; // 400ms duration
+        if (progress < 1) {
+            ctx.save();
+            ctx.translate(_artMap.offsetX, _artMap.offsetY);
+            ctx.scale(z, z);
+            const ripR = rip.radius + rip.radius * progress * 0.5;
+            ctx.beginPath();
+            ctx.arc(rip.x, rip.y, ripR, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(138,43,226,${0.5 * (1 - progress)})`;
+            ctx.lineWidth = 3 * (1 - progress);
+            ctx.stroke();
+            ctx.restore();
+            requestAnimationFrame(() => _artMapRender());
+        } else {
+            _artMap._ripple = null;
+        }
     }
 }
 
@@ -55969,6 +56148,22 @@ function _artMapShowTooltip(e, node) {
     tip.style.top = y + 'px';
 }
 
+function _artMapAnimateConstellation() {
+    if (_artMap._constellationActive && _artMap._constellationFade < 1) {
+        _artMap._constellationFade = Math.min(1, (_artMap._constellationFade || 0) + 0.08);
+        _artMapRender();
+        requestAnimationFrame(_artMapAnimateConstellation);
+    } else if (!_artMap._constellationActive && _artMap._constellationFade > 0) {
+        _artMap._constellationFade = Math.max(0, _artMap._constellationFade - 0.1);
+        _artMapRender();
+        if (_artMap._constellationFade > 0) {
+            requestAnimationFrame(_artMapAnimateConstellation);
+        } else {
+            _artMap._constellationCache = null;
+        }
+    }
+}
+
 function _artMapSetupInteraction(canvas) {
     let isPanning = false, panStartX = 0, panStartY = 0;
 
@@ -55989,25 +56184,14 @@ function _artMapSetupInteraction(canvas) {
     let clickStart = null;
 
     canvas.addEventListener('mousedown', (e) => {
-        const { nx, ny } = _artMapScreenToWorld(e, canvas);
-        const node = _artMapHitTest(nx, ny);
         clickStart = { x: e.clientX, y: e.clientY, time: Date.now() };
-        if (node) {
-            _artMap.dragNode = node;
-        } else {
-            isPanning = true;
-            panStartX = e.clientX;
-            panStartY = e.clientY;
-        }
+        isPanning = true;
+        panStartX = e.clientX;
+        panStartY = e.clientY;
     });
 
     canvas.addEventListener('mousemove', (e) => {
-        if (_artMap.dragNode) {
-            const { nx, ny } = _artMapScreenToWorld(e, canvas);
-            _artMap.dragNode.x = nx;
-            _artMap.dragNode.y = ny;
-            _artMapRender();
-        } else if (isPanning) {
+        if (isPanning) {
             _artMap.offsetX += e.clientX - panStartX;
             _artMap.offsetY += e.clientY - panStartY;
             panStartX = e.clientX;
@@ -56019,30 +56203,59 @@ function _artMapSetupInteraction(canvas) {
             _artMap.hoveredNode = _artMapHitTest(nx, ny);
             canvas.style.cursor = _artMap.hoveredNode ? 'pointer' : 'grab';
             _artMapShowTooltip(e, _artMap.hoveredNode);
-            if (prev !== _artMap.hoveredNode) _artMapRender();
+            if (prev !== _artMap.hoveredNode) {
+                // Reset constellation highlight timer
+                clearTimeout(_artMap._constellationTimer);
+                if (_artMap._constellationActive) {
+                    _artMap._constellationActive = false;
+                    _artMapAnimateConstellation(); // fade out
+                }
+                if (_artMap.hoveredNode) {
+                    // Delay constellation effect by 800ms of sustained hover
+                    _artMap._constellationTimer = setTimeout(() => {
+                        if (_artMap.hoveredNode) {
+                            _artMap._constellationActive = true;
+                            _artMap._constellationFade = 0;
+                            _artMap._constellationCache = null;
+                            _artMapAnimateConstellation();
+                        }
+                    }, 800);
+                }
+                _artMapRender();
+            }
         }
     });
 
     canvas.addEventListener('mouseup', (e) => {
         const wasDrag = clickStart && (Math.abs(e.clientX - clickStart.x) > 5 || Math.abs(e.clientY - clickStart.y) > 5);
-        if (_artMap.dragNode && !wasDrag) {
-            // It was a click, not a drag — open info modal
-            const node = _artMap.dragNode;
-            _artMap.dragNode = null;
-            if (node.spotify_id || node.itunes_id || node.deezer_id) {
-                openYourArtistInfoModal_direct(node);
-            }
-        } else {
-            _artMap.dragNode = null;
-        }
         isPanning = false;
+
+        if (!wasDrag && clickStart) {
+            // It was a click — find the node under cursor
+            const { nx, ny } = _artMapScreenToWorld(e, canvas);
+            const node = _artMapHitTest(nx, ny);
+            if (node) {
+                _artMap._ripple = { x: node.x, y: node.y, radius: node.radius, start: performance.now() };
+                _artMapRender();
+                if (node.spotify_id || node.itunes_id || node.deezer_id) {
+                    setTimeout(() => openYourArtistInfoModal_direct(node), 200);
+                }
+            }
+        }
+
         clickStart = null;
         _artMapShowTooltip(e, null);
     });
 
     canvas.addEventListener('mouseleave', () => {
         _artMapShowTooltip(null, null);
-        if (_artMap.hoveredNode) { _artMap.hoveredNode = null; _artMapRender(); }
+        clearTimeout(_artMap._constellationTimer);
+        if (_artMap._constellationActive) {
+            _artMap._constellationActive = false;
+            _artMapAnimateConstellation();
+        }
+        _artMap.hoveredNode = null;
+        _artMapRender();
     });
 
     // Touch support — single finger pan, pinch to zoom
@@ -56134,19 +56347,41 @@ function _artMapHitTest(wx, wy) {
 }
 
 async function openYourArtistInfoModal_direct(node) {
-    // Create a pool-like object from the map node for the info modal
+    // Determine best source ID — prefer active metadata source
+    let bestId = '', bestSource = '';
+    // Check what the active source is
+    const activeSource = window._yaActiveSource || 'spotify';
+    const sourceOrder = activeSource === 'spotify' ? ['spotify_id','itunes_id','deezer_id','discogs_id']
+        : activeSource === 'itunes' ? ['itunes_id','spotify_id','deezer_id','discogs_id']
+        : activeSource === 'deezer' ? ['deezer_id','spotify_id','itunes_id','discogs_id']
+        : ['spotify_id','itunes_id','deezer_id','discogs_id'];
+    const sourceMap = {spotify_id:'spotify', itunes_id:'itunes', deezer_id:'deezer', discogs_id:'discogs'};
+    for (const key of sourceOrder) {
+        if (node[key]) { bestId = node[key]; bestSource = sourceMap[key]; break; }
+    }
+
+    // Gather connected artists from the map edges
+    const related = [];
+    const nById = _artMap._nodeById || {};
+    if (node.type === 'watchlist') {
+        _artMap.edges.forEach(e => { if (e.source === node.id && nById[e.target]) related.push(nById[e.target]); });
+    } else {
+        _artMap.edges.forEach(e => { if (e.target === node.id && nById[e.source]) related.push(nById[e.source]); });
+    }
+
     const poolEntry = {
         id: node.id,
         artist_name: node.name,
-        active_source_id: node.spotify_id || node.itunes_id || node.deezer_id || '',
-        active_source: node.spotify_id ? 'spotify' : node.itunes_id ? 'itunes' : node.deezer_id ? 'deezer' : '',
+        active_source_id: bestId,
+        active_source: bestSource,
         image_url: node.image_url || '',
         spotify_artist_id: node.spotify_id || '',
         itunes_artist_id: node.itunes_id || '',
         deezer_artist_id: node.deezer_id || '',
-        discogs_artist_id: '',
+        discogs_artist_id: node.discogs_id || '',
         source_services: [],
         on_watchlist: node.type === 'watchlist' ? 1 : 0,
+        _related: related,
     };
     if (!window._yaArtists) window._yaArtists = {};
     window._yaArtists[node.id] = poolEntry;
