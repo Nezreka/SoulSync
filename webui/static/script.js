@@ -55660,7 +55660,7 @@ async function openArtistMap() {
         loadingEl.innerHTML = `
             <div class="artist-map-loading-content">
                 <div class="watch-all-loading-spinner"></div>
-                <div class="artist-map-loading-text">Building map — ${_artMap.placed.length} artists</div>
+                <div class="artist-map-loading-text" id="artmap-loading-text">Placing ${_artMap.placed.length} artists on the map...</div>
             </div>
         `;
         container.appendChild(loadingEl);
@@ -55777,6 +55777,8 @@ function closeArtistMap() {
     const container = document.getElementById('artist-map-container');
     if (container) container.style.display = 'none';
     if (_artMap.animFrame) cancelAnimationFrame(_artMap.animFrame);
+    if (_artMap._keyHandler) window.removeEventListener('keydown', _artMap._keyHandler);
+    _artMapHideContextMenu();
 
     // Restore discover sections
     document.querySelectorAll('#discover-page > .discover-container > *:not(#artist-map-container)').forEach(el => {
@@ -55826,11 +55828,12 @@ function _artMapRebuildBuffer() {
         placed.forEach(n => { _artMap._nodeById[n.id] = n; });
     }
     // Draw ALL nodes — similar first (background), watchlist on top
-    // Two passes for z-order
+    const hideSimilar = _artMap._hideSimilar || false;
     for (let pass = 0; pass < 2; pass++) {
         const isWatchlistPass = pass === 1;
         for (const n of visible) {
             if ((n.type === 'watchlist') !== isWatchlistPass) continue;
+            if (hideSimilar && n.type !== 'watchlist') continue;
             const op = n.opacity || 0;
             if (op < 0.01) continue;
             const r = n.radius;
@@ -56164,6 +56167,20 @@ function _artMapAnimateConstellation() {
     }
 }
 
+function artMapToggleSimilar() {
+    _artMap._hideSimilar = !_artMap._hideSimilar;
+    _artMap.dirty = true;
+    _artMapRender();
+    const btn = document.getElementById('artmap-toggle-similar');
+    if (btn) btn.style.opacity = _artMap._hideSimilar ? '0.4' : '1';
+    showToast(_artMap._hideSimilar ? 'Showing watchlist only' : 'Showing all artists', 'info', 1500);
+}
+
+function _artMapHideContextMenu() {
+    const m = document.getElementById('artist-map-context');
+    if (m) m.style.display = 'none';
+}
+
 function _artMapSetupInteraction(canvas) {
     let isPanning = false, panStartX = 0, panStartY = 0;
 
@@ -56182,6 +56199,71 @@ function _artMapSetupInteraction(canvas) {
     }, { passive: false });
 
     let clickStart = null;
+
+    // Keyboard shortcuts
+    function _artMapKeyHandler(e) {
+        if (!document.getElementById('artist-map-container') || document.getElementById('artist-map-container').style.display === 'none') return;
+        if (e.target.tagName === 'INPUT') return; // don't intercept search typing
+        if (e.key === 'Escape') { closeArtistMap(); e.preventDefault(); }
+        else if (e.key === '=' || e.key === '+') { artMapZoom(1.3); e.preventDefault(); }
+        else if (e.key === '-') { artMapZoom(0.7); e.preventDefault(); }
+        else if (e.key === '0') { artMapFitToView(); e.preventDefault(); }
+        else if (e.key === 'f' || e.key === 'F') { artMapFitToView(); e.preventDefault(); }
+        else if (e.key === 's' || e.key === 'S') {
+            const input = document.getElementById('artist-map-search');
+            if (input) { input.focus(); e.preventDefault(); }
+        }
+        else if (e.key === 'h' || e.key === 'H') {
+            // Toggle similar artists visibility
+            _artMap._hideSimilar = !_artMap._hideSimilar;
+            _artMap.dirty = true;
+            _artMapRender();
+        }
+    }
+    window.addEventListener('keydown', _artMapKeyHandler);
+    _artMap._keyHandler = _artMapKeyHandler;
+
+    // Right-click context menu
+    canvas.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const { nx, ny } = _artMapScreenToWorld(e, canvas);
+        const node = _artMapHitTest(nx, ny);
+        if (!node) { _artMapHideContextMenu(); return; }
+
+        const menu = document.getElementById('artist-map-context') || (() => {
+            const m = document.createElement('div');
+            m.id = 'artist-map-context';
+            m.className = 'artmap-context-menu';
+            document.getElementById('artist-map-container').appendChild(m);
+            return m;
+        })();
+
+        const hasId = node.spotify_id || node.itunes_id || node.deezer_id;
+        const activeSource = window._yaActiveSource || 'spotify';
+        const bestId = node[activeSource + '_id'] || node.spotify_id || node.itunes_id || node.deezer_id || '';
+        const bestSource = node[activeSource + '_id'] ? activeSource : node.spotify_id ? 'spotify' : node.itunes_id ? 'itunes' : 'deezer';
+
+        menu.innerHTML = `
+            <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); ${hasId ? `openYourArtistInfoModal_direct(${JSON.stringify(node).replace(/"/g, '&quot;')})` : ''}">
+                <span>&#9432;</span> Artist Info
+            </div>
+            <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); navigateToPage('artists'); setTimeout(() => selectArtistForDetail({id:'${escapeForInlineJs(bestId)}',name:'${escapeForInlineJs(node.name)}',image_url:'${escapeForInlineJs(node.image_url || '')}'},{source:'${bestSource}'}), 200)">
+                <span>&#128191;</span> View Discography
+            </div>
+            <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); toggleYourArtistWatchlist(0,'${escapeForInlineJs(node.name)}','${escapeForInlineJs(bestId)}','${bestSource}',null)">
+                <span>&#128065;</span> ${node.type === 'watchlist' ? 'On Watchlist' : 'Add to Watchlist'}
+            </div>
+            ${node.spotify_id ? `<div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); window.open('https://open.spotify.com/artist/${node.spotify_id}','_blank')"><span>&#127925;</span> Open on Spotify</div>` : ''}
+        `;
+        menu.style.display = 'block';
+        menu.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
+        menu.style.top = Math.min(e.clientY, window.innerHeight - 200) + 'px';
+
+        // Close on next click anywhere
+        setTimeout(() => {
+            window.addEventListener('click', _artMapHideContextMenu, { once: true });
+        }, 10);
+    });
 
     canvas.addEventListener('mousedown', (e) => {
         clickStart = { x: e.clientX, y: e.clientY, time: Date.now() };

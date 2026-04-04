@@ -3079,6 +3079,9 @@
                             <div class="artist-map-search">
                                 <input type="text" id="artist-map-search" placeholder="Search artists..." oninput="artMapSearch(this.value)">
                             </div>
+                            <button class="artist-map-zoom-btn" id="artmap-toggle-similar" onclick="artMapToggleSimilar()" title="Toggle similar artists (H)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r="0.5" fill="currentColor"/></svg>
+                            </button>
                             <div class="artist-map-zoom-controls">
                                 <button class="artist-map-zoom-btn" onclick="artMapZoom(1.3)" title="Zoom in">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>

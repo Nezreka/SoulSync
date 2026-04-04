@@ -29780,6 +29780,21 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-size: 14px; color: rgba(255,255,255,0.5); font-weight: 500;
 }
 
+/* Context menu */
+.artmap-context-menu {
+    display: none; position: fixed; z-index: 30;
+    background: rgba(20,20,32,0.95); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px; min-width: 180px; overflow: hidden;
+    backdrop-filter: blur(12px); box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.artmap-ctx-item {
+    padding: 10px 14px; font-size: 13px; color: rgba(255,255,255,0.7);
+    cursor: pointer; display: flex; align-items: center; gap: 8px;
+    transition: background 0.1s;
+}
+.artmap-ctx-item:hover { background: rgba(138,43,226,0.12); color: #fff; }
+.artmap-ctx-item span { font-size: 14px; width: 18px; text-align: center; }
+
 /* Loading state */
 .ya-loading {
     display: flex; align-items: center; gap: 12px; padding: 30px 20px;
