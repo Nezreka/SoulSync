@@ -56200,6 +56200,14 @@ function artMapShowShortcuts() {
     document.body.appendChild(overlay);
 }
 
+function openArtistMapGenre() {
+    showToast('Genre Map coming soon', 'info');
+}
+
+function openArtistMapExplorer() {
+    showToast('Artist Explorer coming soon', 'info');
+}
+
 function artMapToggleSimilar() {
     _artMap._hideSimilar = !_artMap._hideSimilar;
     _artMap.dirty = true;
