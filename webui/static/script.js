@@ -56167,6 +56167,39 @@ function _artMapAnimateConstellation() {
     }
 }
 
+function artMapShowShortcuts() {
+    const existing = document.getElementById('artmap-shortcuts-overlay');
+    if (existing) { existing.remove(); return; }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'artmap-shortcuts-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '10002';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    overlay.innerHTML = `
+        <div class="artmap-shortcuts-modal">
+            <div class="artmap-shortcuts-header">
+                <h3>Keyboard Shortcuts</h3>
+                <button class="watch-all-close" onclick="document.getElementById('artmap-shortcuts-overlay').remove()">&times;</button>
+            </div>
+            <div class="artmap-shortcuts-grid">
+                <div class="artmap-shortcut"><kbd>Esc</kbd><span>Close map</span></div>
+                <div class="artmap-shortcut"><kbd>+</kbd> / <kbd>-</kbd><span>Zoom in / out</span></div>
+                <div class="artmap-shortcut"><kbd>F</kbd><span>Fit to view</span></div>
+                <div class="artmap-shortcut"><kbd>S</kbd><span>Focus search</span></div>
+                <div class="artmap-shortcut"><kbd>H</kbd><span>Toggle similar artists</span></div>
+                <div class="artmap-shortcut"><kbd>Scroll</kbd><span>Zoom at cursor</span></div>
+                <div class="artmap-shortcut"><kbd>Click</kbd><span>Artist info</span></div>
+                <div class="artmap-shortcut"><kbd>Right-click</kbd><span>Context menu</span></div>
+                <div class="artmap-shortcut"><kbd>Drag</kbd><span>Pan around</span></div>
+                <div class="artmap-shortcut"><kbd>Hover 1s</kbd><span>Show connections</span></div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+}
+
 function artMapToggleSimilar() {
     _artMap._hideSimilar = !_artMap._hideSimilar;
     _artMap.dirty = true;
@@ -56187,7 +56220,7 @@ function _artMapSetupInteraction(canvas) {
     canvas.addEventListener('wheel', (e) => {
         e.preventDefault();
         const delta = e.deltaY > 0 ? 0.9 : 1.1;
-        const newZoom = Math.max(0.1, Math.min(5, _artMap.zoom * delta));
+        const newZoom = Math.max(0.02, Math.min(5, _artMap.zoom * delta));
         // Zoom toward mouse
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
@@ -56253,7 +56286,6 @@ function _artMapSetupInteraction(canvas) {
             <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); toggleYourArtistWatchlist(0,'${escapeForInlineJs(node.name)}','${escapeForInlineJs(bestId)}','${bestSource}',null)">
                 <span>&#128065;</span> ${node.type === 'watchlist' ? 'On Watchlist' : 'Add to Watchlist'}
             </div>
-            ${node.spotify_id ? `<div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); window.open('https://open.spotify.com/artist/${node.spotify_id}','_blank')"><span>&#127925;</span> Open on Spotify</div>` : ''}
         `;
         menu.style.display = 'block';
         menu.style.left = Math.min(e.clientX, window.innerWidth - 200) + 'px';
@@ -56266,6 +56298,7 @@ function _artMapSetupInteraction(canvas) {
     });
 
     canvas.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return; // left button only
         clickStart = { x: e.clientX, y: e.clientY, time: Date.now() };
         isPanning = true;
         panStartX = e.clientX;
@@ -56309,6 +56342,7 @@ function _artMapSetupInteraction(canvas) {
     });
 
     canvas.addEventListener('mouseup', (e) => {
+        if (e.button !== 0) return; // left button only
         const wasDrag = clickStart && (Math.abs(e.clientX - clickStart.x) > 5 || Math.abs(e.clientY - clickStart.y) > 5);
         isPanning = false;
 
