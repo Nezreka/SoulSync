@@ -29654,6 +29654,106 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .ya-info-empty { text-align: center; padding: 30px 0; color: rgba(255,255,255,0.2); font-size: 13px; }
 .ya-info-footer { padding: 16px 24px; border-top: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: center; gap: 10px; }
 
+/* ── Artist Map ── */
+.discover-hero-artist-map-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 16px; border-radius: 10px; font-size: 12px; font-weight: 600;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.6); cursor: pointer; transition: all 0.2s;
+}
+.discover-hero-artist-map-btn:hover {
+    background: rgba(138,43,226,0.15); border-color: rgba(138,43,226,0.3);
+    color: #fff; transform: translateY(-1px);
+}
+.artist-map-container {
+    position: fixed; inset: 0; z-index: 100;
+    background: #0a0a14; flex-direction: column;
+}
+.artist-map-toolbar {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 20px; background: rgba(20,20,32,0.95);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    backdrop-filter: blur(12px); z-index: 1;
+}
+.artist-map-back-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.6); cursor: pointer; transition: all 0.2s;
+}
+.artist-map-back-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.artist-map-title { font-size: 16px; font-weight: 700; color: #fff; flex: 1; }
+.artist-map-stats { font-size: 12px; color: rgba(255,255,255,0.35); flex: 1; text-align: right; }
+.artist-map-zoom-controls { display: flex; gap: 4px; }
+.artist-map-zoom-btn {
+    width: 32px; height: 32px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.6);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+}
+.artist-map-zoom-btn:hover { background: rgba(255,255,255,0.1); color: #fff; border-color: rgba(255,255,255,0.15); }
+
+/* Search */
+.artist-map-search { position: relative; }
+.artist-map-search input {
+    padding: 6px 12px; border-radius: 8px; font-size: 12px; width: 180px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    color: #fff; outline: none; transition: border-color 0.2s;
+}
+.artist-map-search input::placeholder { color: rgba(255,255,255,0.25); }
+.artist-map-search input:focus { border-color: rgba(138,43,226,0.4); }
+.artist-map-search-results {
+    display: none; position: absolute; top: 50px; right: 60px; z-index: 20;
+    background: rgba(20,20,32,0.95); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; min-width: 220px; max-height: 300px; overflow-y: auto;
+    backdrop-filter: blur(12px); box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.artist-map-search-item {
+    padding: 10px 14px; font-size: 13px; color: rgba(255,255,255,0.7);
+    cursor: pointer; display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.artist-map-search-item:last-child { border-bottom: none; }
+.artist-map-search-item:hover { background: rgba(138,43,226,0.1); color: #fff; }
+.artist-map-search-type { font-size: 11px; width: 16px; text-align: center; }
+.artist-map-search-type.watchlist { color: #fbbf24; }
+.artist-map-search-type.similar { color: rgba(255,255,255,0.3); }
+
+/* Tooltip */
+.artist-map-tooltip {
+    display: none; position: fixed; z-index: 30; pointer-events: none;
+    padding: 10px 14px; border-radius: 12px;
+    background: rgba(20,20,32,0.95); border: 1px solid rgba(255,255,255,0.1);
+    color: #fff; backdrop-filter: blur(12px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    max-width: 280px;
+}
+.artmap-tip-row { display: flex; align-items: center; gap: 10px; }
+.artmap-tip-img { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: rgba(255,255,255,0.04); }
+.artmap-tip-img-fallback { display: flex; align-items: center; justify-content: center; font-size: 18px; color: rgba(255,255,255,0.1); }
+.artmap-tip-info { min-width: 0; }
+.artmap-tip-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.artmap-tip-badge { display: inline-block; font-size: 9px; font-weight: 700; color: #fbbf24; margin-top: 2px; }
+.artmap-tip-genres { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.artmap-tip-genres span {
+    font-size: 9px; padding: 2px 6px; border-radius: 4px;
+    background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5);
+    text-transform: capitalize;
+}
+#artist-map-canvas { flex: 1; display: block; cursor: grab; }
+#artist-map-canvas:active { cursor: grabbing; }
+#artist-map-loading {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(10,10,20,0.9); backdrop-filter: blur(8px);
+}
+.artist-map-loading-content {
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.artist-map-loading-text {
+    font-size: 14px; color: rgba(255,255,255,0.5); font-weight: 500;
+}
+
 /* Loading state */
 .ya-loading {
     display: flex; align-items: center; gap: 12px; padding: 30px 20px;

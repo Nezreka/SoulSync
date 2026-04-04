@@ -41053,6 +41053,145 @@ def get_your_artist_info(artist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/discover/artist-map', methods=['GET'])
+def get_artist_map_data():
+    """Get watchlist artists + their similar artists for the force-directed artist map."""
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+
+        # Get all watchlist artists
+        conn = database._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id,
+                   discogs_artist_id, image_url
+            FROM watchlist_artists WHERE profile_id = ?
+        """, (profile_id,))
+        watchlist_rows = cursor.fetchall()
+
+        nodes = []  # {id, name, image_url, type: 'watchlist'|'similar', genres, size}
+        edges = []  # {source, target, weight}
+        seen_names = {}  # normalized_name → node index
+
+        def _norm(name):
+            return (name or '').lower().strip()
+
+        # Add watchlist artists as anchor nodes
+        for wa in watchlist_rows:
+            w = dict(wa)
+            norm = _norm(w['artist_name'])
+            if norm in seen_names:
+                continue
+            idx = len(nodes)
+            seen_names[norm] = idx
+            # Get image — prefer HTTP URLs
+            img = w.get('image_url', '') or ''
+            if img and not img.startswith('http'):
+                img = ''
+            nodes.append({
+                'id': idx,
+                'name': w['artist_name'],
+                'image_url': img,
+                'type': 'watchlist',
+                'genres': [],
+                'spotify_id': w.get('spotify_artist_id', ''),
+                'itunes_id': w.get('itunes_artist_id', ''),
+                'deezer_id': w.get('deezer_artist_id', ''),
+                'source_db_id': str(w['id']),
+            })
+
+        # Get all similar artists for all watchlist artists
+        watchlist_ids = [dict(wa)['spotify_artist_id'] or dict(wa)['itunes_artist_id'] or str(dict(wa)['id']) for wa in watchlist_rows]
+        if watchlist_ids:
+            placeholders = ','.join(['?'] * len(watchlist_ids))
+            cursor.execute(f"""
+                SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id,
+                       similar_artist_itunes_id, similar_artist_deezer_id,
+                       similarity_rank, occurrence_count, image_url, genres, popularity
+                FROM similar_artists
+                WHERE profile_id = ? AND source_artist_id IN ({placeholders})
+                ORDER BY similarity_rank ASC
+            """, [profile_id] + watchlist_ids)
+
+            for row in cursor.fetchall():
+                r = dict(row)
+                sim_norm = _norm(r['similar_artist_name'])
+
+                # Find or create similar artist node
+                if sim_norm not in seen_names:
+                    idx = len(nodes)
+                    seen_names[sim_norm] = idx
+                    img = r.get('image_url', '') or ''
+                    if img and not img.startswith('http'):
+                        img = ''
+                    genres = []
+                    if r.get('genres'):
+                        try:
+                            genres = json.loads(r['genres'])
+                        except Exception:
+                            pass
+                    nodes.append({
+                        'id': idx,
+                        'name': r['similar_artist_name'],
+                        'image_url': img,
+                        'type': 'similar',
+                        'genres': genres,
+                        'spotify_id': r.get('similar_artist_spotify_id', ''),
+                        'itunes_id': r.get('similar_artist_itunes_id', ''),
+                        'deezer_id': r.get('similar_artist_deezer_id', ''),
+                        'rank': r.get('similarity_rank', 5),
+                        'occurrence': r.get('occurrence_count', 1),
+                        'popularity': r.get('popularity', 0),
+                    })
+
+                sim_idx = seen_names[sim_norm]
+
+                # Find the watchlist node that sourced this similar artist
+                source_norm = None
+                for wa in watchlist_rows:
+                    w = dict(wa)
+                    sid = w.get('spotify_artist_id') or w.get('itunes_artist_id') or str(w['id'])
+                    if sid == r['source_artist_id']:
+                        source_norm = _norm(w['artist_name'])
+                        break
+
+                if source_norm and source_norm in seen_names:
+                    source_idx = seen_names[source_norm]
+                    # Weight: inverse of rank (rank 1 = strongest connection)
+                    weight = max(1, 11 - (r.get('similarity_rank', 5)))
+                    edges.append({
+                        'source': source_idx,
+                        'target': sim_idx,
+                        'weight': weight,
+                    })
+
+        # Also check if any similar artists ARE watchlist artists (cross-links)
+        # These create extra connections between watchlist nodes
+        for i, node in enumerate(nodes):
+            if node['type'] == 'similar':
+                # Check if this similar artist is also a watchlist artist
+                for j, wnode in enumerate(nodes):
+                    if wnode['type'] == 'watchlist' and i != j:
+                        if _norm(node['name']) == _norm(wnode['name']):
+                            # Merge: upgrade the similar node to watchlist
+                            node['type'] = 'watchlist'
+                            break
+
+        return jsonify({
+            'success': True,
+            'nodes': nodes,
+            'edges': edges,
+            'watchlist_count': sum(1 for n in nodes if n['type'] == 'watchlist'),
+            'similar_count': sum(1 for n in nodes if n['type'] == 'similar'),
+        })
+    except Exception as e:
+        logger.error(f"Error getting artist map data: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/discover/build-playlist/search-artists', methods=['GET'])
 def search_artists_for_playlist():
     """Search for artists to use as seeds for custom playlist building"""

@@ -55422,6 +55422,737 @@ async function _yaLoadModal() {
 
 function loadDiscoveryBlacklist() {}
 
+// ── Artist Map — Circle-packed staged canvas visualization ──
+const _artMap = {
+    placed: [],
+    edges: [],
+    images: {},
+    canvas: null, ctx: null,
+    offscreen: null, offCtx: null, // offscreen buffer for fast pan/zoom
+    width: 0, height: 0,
+    offsetX: 0, offsetY: 0, zoom: 0.15,
+    hoveredNode: null, animFrame: null,
+    dirty: true, // true = need to rebuild offscreen buffer
+    WATCHLIST_R: 320,
+    BUFFER: 8,
+};
+
+async function openArtistMap() {
+    const container = document.getElementById('artist-map-container');
+    if (!container) return;
+
+    // Hide discover sections, show map
+    document.querySelectorAll('#discover-page > .discover-container > *:not(#artist-map-container)').forEach(el => {
+        el._prevDisplay = el.style.display;
+        el.style.display = 'none';
+    });
+    container.style.display = 'flex';
+
+    const canvas = document.getElementById('artist-map-canvas');
+    _artMap.canvas = canvas;
+    _artMap.ctx = canvas.getContext('2d');
+    _artMap.width = container.clientWidth;
+    _artMap.height = container.clientHeight - 50;
+    canvas.width = _artMap.width * window.devicePixelRatio;
+    canvas.height = _artMap.height * window.devicePixelRatio;
+    canvas.style.width = _artMap.width + 'px';
+    canvas.style.height = _artMap.height + 'px';
+    _artMap.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    _artMap.offsetX = _artMap.width / 2;
+    _artMap.offsetY = _artMap.height / 2;
+    _artMap.placed = [];
+    _artMap.images = {};
+    _artMap._nodeById = null;
+
+    // Loading screen
+    _artMap.ctx.fillStyle = '#0a0a14';
+    _artMap.ctx.fillRect(0, 0, _artMap.width, _artMap.height);
+    _artMap.ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    _artMap.ctx.font = '14px system-ui';
+    _artMap.ctx.textAlign = 'center';
+    _artMap.ctx.fillText('Building artist map...', _artMap.width / 2, _artMap.height / 2);
+
+    try {
+        const resp = await fetch('/api/discover/artist-map');
+        const data = await resp.json();
+        if (!data.success || !data.nodes.length) {
+            _artMap.ctx.fillText('No watchlist artists. Add artists to your watchlist first.', _artMap.width / 2, _artMap.height / 2 + 30);
+            return;
+        }
+
+        document.getElementById('artist-map-stats').textContent =
+            `${data.watchlist_count} watchlist · ${data.similar_count} similar`;
+
+        _artMap.edges = data.edges;
+        const WR = _artMap.WATCHLIST_R;
+        const BUF = _artMap.BUFFER;
+
+        // ── PHASE 1: Place watchlist artists with guaranteed no-overlap ──
+        const wNodes = data.nodes.filter(n => n.type === 'watchlist');
+        // Minimum center-to-center distance between watchlist nodes
+        const minCenterDist = WR * 3.5; // WR*2 for radii + WR*1.5 gap — similar artists fill the gaps via spiral packing
+
+        // Place watchlist nodes in a spiral — deterministic, guaranteed spacing
+        wNodes.forEach((n, i) => {
+            n.radius = WR;
+            n.opacity = 0;
+            if (i === 0) {
+                n.x = 0; n.y = 0;
+            } else {
+                // Golden angle spiral for even distribution
+                const angle = i * 2.399963; // golden angle in radians
+                const r = minCenterDist * Math.sqrt(i) * 0.7;
+                n.x = Math.cos(angle) * r;
+                n.y = Math.sin(angle) * r;
+            }
+        });
+
+        // Post-process: push apart any watchlist nodes that ended up too close
+        for (let pass = 0; pass < 50; pass++) {
+            let moved = false;
+            for (let i = 0; i < wNodes.length; i++) {
+                for (let j = i + 1; j < wNodes.length; j++) {
+                    const dx = wNodes[j].x - wNodes[i].x;
+                    const dy = wNodes[j].y - wNodes[i].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    if (dist < minCenterDist) {
+                        const push = (minCenterDist - dist) / 2 + 1;
+                        const nx = (dx / dist) * push;
+                        const ny = (dy / dist) * push;
+                        wNodes[i].x -= nx; wNodes[i].y -= ny;
+                        wNodes[j].x += nx; wNodes[j].y += ny;
+                        moved = true;
+                    }
+                }
+            }
+            if (!moved) break;
+        }
+
+        wNodes.forEach(n => { _artMap.placed.push(n); });
+
+        // ── PHASE 2: Place similar artists around their source watchlist nodes ──
+        const sNodes = data.nodes.filter(n => n.type === 'similar');
+        sNodes.forEach(n => {
+            const occ = n.occurrence || 1;
+            const rank = n.rank || 5;
+            // Bigger overall: min 25% of WR, max 55%, scaled by relevance
+            n.radius = Math.min(WR * 0.55, Math.max(WR * 0.25, WR * 0.2 + occ * WR * 0.06 + (10 - rank) * WR * 0.025));
+        });
+        sNodes.sort((a, b) => b.radius - a.radius);
+
+        // Build edge lookup: target_id → source node (O(1) instead of .find())
+        const edgeMap = {};
+        _artMap.edges.forEach(e => { edgeMap[e.target] = e.source; });
+        const nodeById = {};
+        _artMap.placed.forEach(n => { nodeById[n.id] = n; });
+
+        // Spatial grid for fast collision detection
+        // Cell size must cover the largest possible bubble diameter + buffer
+        const CELL = WR * 2 + BUF * 2;
+        const grid = {};
+        function _gridKey(x, y) { return `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`; }
+        function _gridAdd(n) {
+            const k = _gridKey(n.x, n.y);
+            if (!grid[k]) grid[k] = [];
+            grid[k].push(n);
+        }
+        function _gridCheck(x, y, r) {
+            const cx = Math.floor(x / CELL);
+            const cy = Math.floor(y / CELL);
+            // Search wider radius to catch large watchlist bubbles
+            for (let dx = -3; dx <= 3; dx++) {
+                for (let dy = -3; dy <= 3; dy++) {
+                    const cell = grid[`${cx + dx},${cy + dy}`];
+                    if (!cell) continue;
+                    for (const p of cell) {
+                        const ddx = x - p.x, ddy = y - p.y;
+                        const minD = r + p.radius + BUF;
+                        if (ddx * ddx + ddy * ddy < minD * minD) return true;
+                    }
+                }
+            }
+            return false;
+        }
+        // Add watchlist nodes to grid
+        _artMap.placed.forEach(n => _gridAdd(n));
+
+        // Place similar nodes with spatial grid collision
+        for (const sn of sNodes) {
+            const srcId = edgeMap[sn.id];
+            const src = srcId != null ? nodeById[srcId] : null;
+            const cx = src ? src.x : 0;
+            const cy = src ? src.y : 0;
+            const startDist = (src ? src.radius : WR) + sn.radius + BUF;
+
+            let placed = false;
+            for (let dist = startDist; dist < startDist + WR * 3; dist += sn.radius * 0.5) {
+                const steps = Math.max(8, Math.floor(dist * 0.1));
+                const off = Math.random() * Math.PI * 2;
+                for (let a = 0; a < steps; a++) {
+                    const angle = off + (a / steps) * Math.PI * 2;
+                    const tx = cx + Math.cos(angle) * dist;
+                    const ty = cy + Math.sin(angle) * dist;
+                    if (!_gridCheck(tx, ty, sn.radius)) {
+                        sn.x = tx; sn.y = ty; sn.opacity = 0;
+                        _artMap.placed.push(sn);
+                        nodeById[sn.id] = sn;
+                        _gridAdd(sn);
+                        placed = true;
+                        break;
+                    }
+                }
+                if (placed) break;
+            }
+        }
+
+        // Auto-zoom to fit all nodes
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        _artMap.placed.forEach(n => {
+            minX = Math.min(minX, n.x - n.radius);
+            maxX = Math.max(maxX, n.x + n.radius);
+            minY = Math.min(minY, n.y - n.radius);
+            maxY = Math.max(maxY, n.y + n.radius);
+        });
+        const mapW = maxX - minX + 200;
+        const mapH = maxY - minY + 200;
+        _artMap.zoom = Math.min(_artMap.width / mapW, _artMap.height / mapH, 1);
+        _artMap.offsetX = _artMap.width / 2 - ((minX + maxX) / 2) * _artMap.zoom;
+        _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
+
+        // Setup interaction
+        _artMapSetupInteraction(canvas);
+
+        // ── PHASE 3: Set all visible, build buffer, render ──
+        // Show loading overlay while buffer builds
+        const loadingEl = document.createElement('div');
+        loadingEl.id = 'artist-map-loading';
+        loadingEl.innerHTML = `
+            <div class="artist-map-loading-content">
+                <div class="watch-all-loading-spinner"></div>
+                <div class="artist-map-loading-text">Building map — ${_artMap.placed.length} artists</div>
+            </div>
+        `;
+        container.appendChild(loadingEl);
+
+        // Defer heavy work so loading overlay renders first
+        setTimeout(async () => {
+            _artMap.placed.forEach(n => { n.opacity = 1; });
+
+            // Load images in parallel using createImageBitmap (non-blocking)
+            const loadingText = container.querySelector('.artist-map-loading-text');
+            const imgNodes = _artMap.placed.filter(n => n.image_url);
+            let loaded = 0;
+
+            if (loadingText) loadingText.textContent = `Loading ${imgNodes.length} artist images...`;
+
+            // Batch image loading — 20 concurrent fetches
+            const CONCURRENT = 20;
+            let idx = 0;
+
+            async function loadNextBatch() {
+                const batch = [];
+                while (idx < imgNodes.length && batch.length < CONCURRENT) {
+                    const n = imgNodes[idx++];
+                    if (_artMap.images[n.id]) { loaded++; continue; }
+                    batch.push(
+                        fetch(n.image_url, { mode: 'cors' })
+                            .then(r => r.ok ? r.blob() : null)
+                            .then(blob => blob ? createImageBitmap(blob) : null)
+                            .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
+                            .catch(() => {})
+                            .finally(() => {
+                                loaded++;
+                                if (loadingText && loaded % 50 === 0) {
+                                    loadingText.textContent = `Loading images... ${loaded}/${imgNodes.length}`;
+                                }
+                            })
+                    );
+                }
+                if (batch.length) await Promise.all(batch);
+                if (idx < imgNodes.length) return loadNextBatch();
+            }
+
+            await loadNextBatch();
+
+            // Build buffer and render
+            if (loadingText) loadingText.textContent = 'Rendering map...';
+            await new Promise(r => setTimeout(r, 20)); // let text update render
+
+            _artMap.dirty = true;
+            _artMapRender();
+
+            const le = document.getElementById('artist-map-loading');
+            if (le) le.remove();
+        }, 50);
+
+    } catch (err) {
+        console.error('Artist map error:', err);
+    }
+}
+
+function artMapZoom(factor) {
+    const cx = _artMap.width / 2;
+    const cy = _artMap.height / 2;
+    const targetZoom = Math.max(0.02, Math.min(3, _artMap.zoom * factor));
+    const targetOX = cx - (cx - _artMap.offsetX) * (targetZoom / _artMap.zoom);
+    const targetOY = cy - (cy - _artMap.offsetY) * (targetZoom / _artMap.zoom);
+    _artMapAnimateTo(targetZoom, targetOX, targetOY);
+}
+
+function artMapFitToView() {
+    if (!_artMap.placed.length) return;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    _artMap.placed.forEach(n => {
+        if ((n.opacity || 0) < 0.01) return;
+        minX = Math.min(minX, n.x - n.radius);
+        maxX = Math.max(maxX, n.x + n.radius);
+        minY = Math.min(minY, n.y - n.radius);
+        maxY = Math.max(maxY, n.y + n.radius);
+    });
+    const mapW = maxX - minX + 100;
+    const mapH = maxY - minY + 100;
+    const targetZoom = Math.min(_artMap.width / mapW, _artMap.height / mapH, 1);
+    const targetOX = _artMap.width / 2 - ((minX + maxX) / 2) * targetZoom;
+    const targetOY = _artMap.height / 2 - ((minY + maxY) / 2) * targetZoom;
+    _artMapAnimateTo(targetZoom, targetOX, targetOY);
+}
+
+function _artMapAnimateTo(targetZoom, targetOX, targetOY) {
+    if (_artMap._animating) cancelAnimationFrame(_artMap._animating);
+    const startZoom = _artMap.zoom;
+    const startOX = _artMap.offsetX;
+    const startOY = _artMap.offsetY;
+    const duration = 250;
+    const start = performance.now();
+
+    function step(now) {
+        const t = Math.min(1, (now - start) / duration);
+        // Ease out cubic
+        const e = 1 - Math.pow(1 - t, 3);
+        _artMap.zoom = startZoom + (targetZoom - startZoom) * e;
+        _artMap.offsetX = startOX + (targetOX - startOX) * e;
+        _artMap.offsetY = startOY + (targetOY - startOY) * e;
+        _artMapRender(); // blit only, no rebuild
+        if (t < 1) {
+            _artMap._animating = requestAnimationFrame(step);
+        } else {
+            _artMap._animating = null;
+        }
+    }
+    _artMap._animating = requestAnimationFrame(step);
+}
+
+function closeArtistMap() {
+    const container = document.getElementById('artist-map-container');
+    if (container) container.style.display = 'none';
+    if (_artMap.animFrame) cancelAnimationFrame(_artMap.animFrame);
+
+    // Restore discover sections
+    document.querySelectorAll('#discover-page > .discover-container > *:not(#artist-map-container)').forEach(el => {
+        el.style.display = el._prevDisplay !== undefined ? el._prevDisplay : '';
+    });
+}
+
+// No force simulation — layout is pre-computed via circle packing
+
+function _artMapRebuildBuffer() {
+    /**Render ALL nodes once to offscreen canvas. Only called on data changes, not pan/zoom.**/
+    const placed = _artMap.placed;
+    if (!placed.length) return;
+
+    const visible = placed.filter(n => (n.opacity || 0) > 0.01);
+    if (!visible.length) return;
+
+    // World bounds
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    visible.forEach(n => {
+        minX = Math.min(minX, n.x - n.radius - 10);
+        maxX = Math.max(maxX, n.x + n.radius + 10);
+        minY = Math.min(minY, n.y - n.radius - 10);
+        maxY = Math.max(maxY, n.y + n.radius + 10);
+    });
+
+    const bw = maxX - minX;
+    const bh = maxY - minY;
+    // Fixed scale — high enough for reasonable quality, capped for memory
+    const scale = Math.min(0.5, 8192 / Math.max(bw, bh));
+
+    if (!_artMap.offscreen) _artMap.offscreen = document.createElement('canvas');
+    const oc = _artMap.offscreen;
+    oc.width = Math.ceil(bw * scale);
+    oc.height = Math.ceil(bh * scale);
+    const octx = oc.getContext('2d');
+    _artMap._bufferScale = scale;
+    _artMap._bufferMinX = minX;
+    _artMap._bufferMinY = minY;
+
+    octx.scale(scale, scale);
+    octx.translate(-minX, -minY);
+
+    // Draw edges (only between visible nodes)
+    if (!_artMap._nodeById) {
+        _artMap._nodeById = {};
+        placed.forEach(n => { _artMap._nodeById[n.id] = n; });
+    }
+    // Draw ALL nodes — similar first (background), watchlist on top
+    // Two passes for z-order
+    for (let pass = 0; pass < 2; pass++) {
+        const isWatchlistPass = pass === 1;
+        for (const n of visible) {
+            if ((n.type === 'watchlist') !== isWatchlistPass) continue;
+            const op = n.opacity || 0;
+            if (op < 0.01) continue;
+            const r = n.radius;
+            const isW = n.type === 'watchlist';
+            octx.globalAlpha = op;
+
+            // Watchlist glow ring
+            if (isW) {
+                octx.beginPath();
+                octx.arc(n.x, n.y, r + 4, 0, Math.PI * 2);
+                octx.strokeStyle = 'rgba(138,43,226,0.25)';
+                octx.lineWidth = 5;
+                octx.stroke();
+            }
+
+            // Circle clip + image
+            octx.save();
+            octx.beginPath();
+            octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+            octx.closePath();
+            octx.clip();
+
+            const img = _artMap.images[n.id];
+            if (img) {
+                octx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
+                // Dark overlay for text readability
+                octx.fillStyle = 'rgba(0,0,0,0.45)';
+                octx.fillRect(n.x - r, n.y - r, r * 2, r * 2);
+            } else {
+                octx.fillStyle = isW ? '#1a0a30' : '#141420';
+                octx.fillRect(n.x - r, n.y - r, r * 2, r * 2);
+            }
+            octx.restore();
+
+            // Border
+            octx.beginPath();
+            octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+            octx.strokeStyle = isW ? 'rgba(138,43,226,0.4)' : 'rgba(255,255,255,0.08)';
+            octx.lineWidth = isW ? 2 : 0.5;
+            octx.stroke();
+
+            // Name — CENTERED in bubble, shown on ALL nodes
+            const fontSize = isW ? Math.max(16, r * 0.14) : Math.max(8, r * 0.3);
+            octx.font = `${isW ? '700' : '600'} ${fontSize}px system-ui`;
+            octx.textAlign = 'center';
+            octx.textBaseline = 'middle';
+            octx.fillStyle = '#fff';
+            const maxC = isW ? 20 : 12;
+            const label = n.name.length > maxC ? n.name.substring(0, maxC - 1) + '…' : n.name;
+            octx.fillText(label, n.x, n.y);
+        }
+    }
+
+    octx.globalAlpha = 1;
+
+    _artMap.dirty = false;
+}
+
+function _artMapRender() {
+    /**Blit offscreen buffer to screen canvas with pan/zoom. Near-zero cost.**/
+    const ctx = _artMap.ctx;
+    const w = _artMap.width;
+    const h = _artMap.height;
+
+    ctx.fillStyle = '#0a0a14';
+    ctx.fillRect(0, 0, w, h);
+
+    if (_artMap.dirty || !_artMap.offscreen) _artMapRebuildBuffer();
+    if (!_artMap.offscreen) return;
+
+    const oc = _artMap.offscreen;
+    const s = _artMap._bufferScale;
+    const mx = _artMap._bufferMinX;
+    const my = _artMap._bufferMinY;
+    const z = _artMap.zoom;
+
+    // Blit offscreen buffer: the buffer was drawn with scale(s) + translate(-minX,-minY)
+    // So buffer pixel (bx,by) corresponds to world (bx/s + minX, by/s + minY)
+    // Screen position of world (wx,wy) = offsetX + wx*zoom, offsetY + wy*zoom
+    // Therefore buffer origin on screen = offsetX + minX*zoom, offsetY + minY*zoom
+    // And buffer is drawn at size (bufferWidth * zoom/s, bufferHeight * zoom/s)
+    ctx.drawImage(oc,
+        _artMap.offsetX + mx * z,
+        _artMap.offsetY + my * z,
+        oc.width * z / s,
+        oc.height * z / s
+    );
+
+    // Draw hover highlight on main canvas (only 1 node, very fast)
+    if (_artMap.hoveredNode) {
+        const n = _artMap.hoveredNode;
+        ctx.save();
+        ctx.translate(_artMap.offsetX, _artMap.offsetY);
+        ctx.scale(z, z);
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.radius + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
+function artMapSearch(query) {
+    const results = document.getElementById('artist-map-search-results');
+    if (!results) return;
+    if (!query || query.length < 2) { results.style.display = 'none'; return; }
+
+    const q = query.toLowerCase();
+    const matches = _artMap.placed.filter(n => (n.opacity || 0) > 0.5 && n.name.toLowerCase().includes(q)).slice(0, 8);
+
+    if (!matches.length) { results.style.display = 'none'; return; }
+
+    results.style.display = 'block';
+    results.innerHTML = matches.map(n =>
+        `<div class="artist-map-search-item" onclick="artMapZoomToNode(${n.id})">
+            <span class="artist-map-search-type ${n.type}">${n.type === 'watchlist' ? '★' : '○'}</span>
+            ${escapeHtml(n.name)}
+        </div>`
+    ).join('');
+}
+
+function artMapZoomToNode(nodeId) {
+    const n = _artMap.placed.find(p => p.id === nodeId);
+    if (!n) return;
+    // Zoom to show this node centered, at a comfortable zoom level
+    const targetZoom = Math.max(0.3, Math.min(1, 200 / n.radius));
+    const targetOX = _artMap.width / 2 - n.x * targetZoom;
+    const targetOY = _artMap.height / 2 - n.y * targetZoom;
+    _artMapAnimateTo(targetZoom, targetOX, targetOY);
+    // Highlight briefly after animation
+    setTimeout(() => { _artMap.hoveredNode = n; _artMapRender(); }, 300);
+    setTimeout(() => { _artMap.hoveredNode = null; _artMapRender(); }, 2500);
+    // Close search
+    const results = document.getElementById('artist-map-search-results');
+    if (results) results.style.display = 'none';
+    const input = document.getElementById('artist-map-search');
+    if (input) input.value = '';
+}
+
+function _artMapShowTooltip(e, node) {
+    const tip = document.getElementById('artist-map-tooltip');
+    if (!tip) return;
+    if (!node) { tip.style.display = 'none'; return; }
+
+    const img = node.image_url ? `<img class="artmap-tip-img" src="${escapeHtml(node.image_url)}" alt="">` : '<div class="artmap-tip-img artmap-tip-img-fallback">&#9835;</div>';
+    const genres = (node.genres || []).slice(0, 3);
+    const genreHTML = genres.length ? `<div class="artmap-tip-genres">${genres.map(g => `<span>${escapeHtml(g)}</span>`).join('')}</div>` : '';
+    const typeLabel = node.type === 'watchlist' ? '<span class="artmap-tip-badge">★ Watchlist</span>' : '';
+
+    tip.innerHTML = `
+        <div class="artmap-tip-row">
+            ${img}
+            <div class="artmap-tip-info">
+                <div class="artmap-tip-name">${escapeHtml(node.name)}</div>
+                ${typeLabel}
+                ${genreHTML}
+            </div>
+        </div>
+    `;
+    tip.style.display = 'block';
+
+    // Position — keep on screen
+    const x = Math.min(e.clientX + 16, window.innerWidth - tip.offsetWidth - 10);
+    const y = Math.min(e.clientY - 10, window.innerHeight - tip.offsetHeight - 10);
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+}
+
+function _artMapSetupInteraction(canvas) {
+    let isPanning = false, panStartX = 0, panStartY = 0;
+
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? 0.9 : 1.1;
+        const newZoom = Math.max(0.1, Math.min(5, _artMap.zoom * delta));
+        // Zoom toward mouse
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        _artMap.offsetX = mx - (mx - _artMap.offsetX) * (newZoom / _artMap.zoom);
+        _artMap.offsetY = my - (my - _artMap.offsetY) * (newZoom / _artMap.zoom);
+        _artMap.zoom = newZoom;
+        _artMapRender();
+    }, { passive: false });
+
+    let clickStart = null;
+
+    canvas.addEventListener('mousedown', (e) => {
+        const { nx, ny } = _artMapScreenToWorld(e, canvas);
+        const node = _artMapHitTest(nx, ny);
+        clickStart = { x: e.clientX, y: e.clientY, time: Date.now() };
+        if (node) {
+            _artMap.dragNode = node;
+        } else {
+            isPanning = true;
+            panStartX = e.clientX;
+            panStartY = e.clientY;
+        }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+        if (_artMap.dragNode) {
+            const { nx, ny } = _artMapScreenToWorld(e, canvas);
+            _artMap.dragNode.x = nx;
+            _artMap.dragNode.y = ny;
+            _artMapRender();
+        } else if (isPanning) {
+            _artMap.offsetX += e.clientX - panStartX;
+            _artMap.offsetY += e.clientY - panStartY;
+            panStartX = e.clientX;
+            panStartY = e.clientY;
+            _artMapRender();
+        } else {
+            const { nx, ny } = _artMapScreenToWorld(e, canvas);
+            const prev = _artMap.hoveredNode;
+            _artMap.hoveredNode = _artMapHitTest(nx, ny);
+            canvas.style.cursor = _artMap.hoveredNode ? 'pointer' : 'grab';
+            _artMapShowTooltip(e, _artMap.hoveredNode);
+            if (prev !== _artMap.hoveredNode) _artMapRender();
+        }
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+        const wasDrag = clickStart && (Math.abs(e.clientX - clickStart.x) > 5 || Math.abs(e.clientY - clickStart.y) > 5);
+        if (_artMap.dragNode && !wasDrag) {
+            // It was a click, not a drag — open info modal
+            const node = _artMap.dragNode;
+            _artMap.dragNode = null;
+            if (node.spotify_id || node.itunes_id || node.deezer_id) {
+                openYourArtistInfoModal_direct(node);
+            }
+        } else {
+            _artMap.dragNode = null;
+        }
+        isPanning = false;
+        clickStart = null;
+        _artMapShowTooltip(e, null);
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        _artMapShowTooltip(null, null);
+        if (_artMap.hoveredNode) { _artMap.hoveredNode = null; _artMapRender(); }
+    });
+
+    // Touch support — single finger pan, pinch to zoom
+    let lastTouches = null;
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        lastTouches = [...e.touches];
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (!lastTouches) return;
+        const touches = [...e.touches];
+
+        if (touches.length === 1 && lastTouches.length === 1) {
+            // Pan
+            _artMap.offsetX += touches[0].clientX - lastTouches[0].clientX;
+            _artMap.offsetY += touches[0].clientY - lastTouches[0].clientY;
+            _artMapRender();
+        } else if (touches.length === 2 && lastTouches.length === 2) {
+            // Pinch zoom
+            const prevDist = Math.hypot(lastTouches[1].clientX - lastTouches[0].clientX, lastTouches[1].clientY - lastTouches[0].clientY);
+            const curDist = Math.hypot(touches[1].clientX - touches[0].clientX, touches[1].clientY - touches[0].clientY);
+            const factor = curDist / prevDist;
+            const cx = (touches[0].clientX + touches[1].clientX) / 2;
+            const cy = (touches[0].clientY + touches[1].clientY) / 2;
+            const newZoom = Math.max(0.02, Math.min(3, _artMap.zoom * factor));
+            _artMap.offsetX = cx - (cx - _artMap.offsetX) * (newZoom / _artMap.zoom);
+            _artMap.offsetY = cy - (cy - _artMap.offsetY) * (newZoom / _artMap.zoom);
+            _artMap.zoom = newZoom;
+            _artMap.dirty = true;
+            _artMapRender();
+        }
+        lastTouches = touches;
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        // Tap to click
+        if (lastTouches && lastTouches.length === 1 && e.changedTouches.length === 1) {
+            const t = e.changedTouches[0];
+            const rect = canvas.getBoundingClientRect();
+            const wx = (t.clientX - rect.left - _artMap.offsetX) / _artMap.zoom;
+            const wy = (t.clientY - rect.top - _artMap.offsetY) / _artMap.zoom;
+            const node = _artMapHitTest(wx, wy);
+            if (node && (node.spotify_id || node.itunes_id || node.deezer_id)) {
+                openYourArtistInfoModal_direct(node);
+            }
+        }
+        lastTouches = null;
+    }, { passive: false });
+
+    // Handle resize
+    window.addEventListener('resize', () => {
+        const container = document.getElementById('artist-map-container');
+        if (!container || container.style.display === 'none') return;
+        _artMap.width = container.clientWidth;
+        _artMap.height = container.clientHeight - 50;
+        canvas.width = _artMap.width * window.devicePixelRatio;
+        canvas.height = _artMap.height * window.devicePixelRatio;
+        canvas.style.width = _artMap.width + 'px';
+        canvas.style.height = _artMap.height + 'px';
+        _artMap.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    });
+}
+
+function _artMapScreenToWorld(e, canvas) {
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    // Inverse of: translate(offsetX, offsetY) → scale(zoom)
+    return {
+        nx: (sx - _artMap.offsetX) / _artMap.zoom,
+        ny: (sy - _artMap.offsetY) / _artMap.zoom,
+    };
+}
+
+function _artMapHitTest(wx, wy) {
+    // Check watchlist first (drawn on top), then similar
+    const sorted = [..._artMap.placed].sort((a, b) =>
+        (b.type === 'watchlist' ? 1 : 0) - (a.type === 'watchlist' ? 1 : 0));
+    for (const n of sorted) {
+        if ((n.opacity || 0) < 0.3) continue;
+        const dx = wx - n.x;
+        const dy = wy - n.y;
+        if (dx * dx + dy * dy <= n.radius * n.radius) return n;
+    }
+    return null;
+}
+
+async function openYourArtistInfoModal_direct(node) {
+    // Create a pool-like object from the map node for the info modal
+    const poolEntry = {
+        id: node.id,
+        artist_name: node.name,
+        active_source_id: node.spotify_id || node.itunes_id || node.deezer_id || '',
+        active_source: node.spotify_id ? 'spotify' : node.itunes_id ? 'itunes' : node.deezer_id ? 'deezer' : '',
+        image_url: node.image_url || '',
+        spotify_artist_id: node.spotify_id || '',
+        itunes_artist_id: node.itunes_id || '',
+        deezer_artist_id: node.deezer_id || '',
+        discogs_artist_id: '',
+        source_services: [],
+        on_watchlist: node.type === 'watchlist' ? 1 : 0,
+    };
+    if (!window._yaArtists) window._yaArtists = {};
+    window._yaArtists[node.id] = poolEntry;
+    openYourArtistInfoModal(node.id);
+}
+
 async function loadDiscoveryShuffle() {
     try {
         const container = document.getElementById('personalized-discovery-shuffle');
