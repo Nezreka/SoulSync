@@ -29680,16 +29680,97 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 .ya-info-footer { padding: 16px 24px; border-top: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: center; gap: 10px; }
 
-/* ── Artist Map ── */
-.discover-hero-artist-map-btn {
-    display: flex; align-items: center; gap: 6px;
-    padding: 8px 16px; border-radius: 10px; font-size: 12px; font-weight: 600;
-    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.6); cursor: pointer; transition: all 0.2s;
+/* ── Artist Map Hub ── */
+.artmap-hub {
+    position: relative; border-radius: 16px; overflow: hidden;
+    margin-bottom: 24px;
+    border: 1px solid rgba(255,255,255,0.06);
 }
-.discover-hero-artist-map-btn:hover {
-    background: rgba(138,43,226,0.15); border-color: rgba(138,43,226,0.3);
-    color: #fff; transform: translateY(-1px);
+.artmap-hub-bg {
+    position: absolute; inset: 0; z-index: 0;
+    background: linear-gradient(135deg, #0d0d1a 0%, #1a0a2e 30%, #0a1628 60%, #0d0d1a 100%);
+}
+.artmap-hub-bg::after {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 30% 50%, rgba(138,43,226,0.08) 0%, transparent 60%),
+                radial-gradient(ellipse at 70% 50%, rgba(59,130,246,0.06) 0%, transparent 60%);
+}
+/* Animated dot grid overlay */
+.artmap-hub-bg::before {
+    content: ''; position: absolute; inset: 0; z-index: 1;
+    background-image: radial-gradient(rgba(138,43,226,0.15) 1px, transparent 1px);
+    background-size: 24px 24px;
+    opacity: 0.3;
+    animation: artmap-dots-drift 20s linear infinite;
+}
+@keyframes artmap-dots-drift {
+    0% { background-position: 0 0; }
+    100% { background-position: 24px 48px; }
+}
+.artmap-hub-content {
+    position: relative; z-index: 1; padding: 28px 32px;
+}
+.artmap-hub-header {
+    display: flex; align-items: center; gap: 14px; margin-bottom: 20px;
+}
+.artmap-hub-icon { color: rgba(138,43,226,0.7); }
+.artmap-hub-title {
+    font-size: 20px; font-weight: 800; color: #fff; margin: 0;
+    letter-spacing: -0.3px;
+}
+.artmap-hub-subtitle {
+    font-size: 13px; color: rgba(255,255,255,0.35); margin: 2px 0 0;
+}
+.artmap-hub-cards {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+}
+@media (max-width: 768px) {
+    .artmap-hub-cards { grid-template-columns: 1fr; }
+}
+.artmap-hub-card {
+    display: flex; align-items: center; gap: 14px;
+    padding: 18px 20px; border-radius: 14px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    cursor: pointer; transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+    position: relative; overflow: hidden;
+}
+.artmap-hub-card::before {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(135deg, rgba(138,43,226,0.06) 0%, transparent 50%);
+    opacity: 0; transition: opacity 0.25s;
+}
+.artmap-hub-card:hover {
+    border-color: rgba(138,43,226,0.25);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3), 0 0 20px rgba(138,43,226,0.08);
+}
+.artmap-hub-card:hover::before { opacity: 1; }
+.artmap-hub-card-icon {
+    width: 52px; height: 52px; border-radius: 12px;
+    background: rgba(138,43,226,0.1); border: 1px solid rgba(138,43,226,0.15);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; color: rgba(138,43,226,0.7);
+    transition: all 0.25s;
+}
+.artmap-hub-card:hover .artmap-hub-card-icon {
+    background: rgba(138,43,226,0.15); color: rgba(138,43,226,0.9);
+    transform: scale(1.05);
+}
+.artmap-hub-card-text { flex: 1; min-width: 0; position: relative; z-index: 1; }
+.artmap-hub-card-text h3 {
+    font-size: 15px; font-weight: 700; color: #fff; margin: 0;
+}
+.artmap-hub-card-text p {
+    font-size: 11px; color: rgba(255,255,255,0.3); margin: 4px 0 0;
+    line-height: 1.4;
+}
+.artmap-hub-card-arrow {
+    color: rgba(255,255,255,0.15); flex-shrink: 0;
+    transition: all 0.2s; position: relative; z-index: 1;
+}
+.artmap-hub-card:hover .artmap-hub-card-arrow {
+    color: rgba(138,43,226,0.6); transform: translateX(4px);
 }
 .artist-map-container {
     position: fixed; inset: 0; z-index: 100;
