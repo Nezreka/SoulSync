@@ -41178,6 +41178,64 @@ def get_artist_map_data():
                             node['type'] = 'watchlist'
                             break
 
+        # ── Backfill from metadata cache: batch-lookup all node names across all sources ──
+        # Single query to get ALL cached artist entries matching ANY node name
+        try:
+            all_names = list(set(_norm(n['name']) for n in nodes if n.get('name')))
+            if all_names:
+                # Build case-insensitive IN clause via temp matching
+                # Lightweight query — no raw_json (can be huge)
+                cursor.execute("""
+                    SELECT entity_id, source, name, image_url, genres, popularity
+                    FROM metadata_cache_entities
+                    WHERE entity_type = 'artist'
+                """)
+                cache_rows = cursor.fetchall()
+
+                # Index cache by normalized name → {source: {id, image_url, genres}}
+                cache_by_name = {}
+                for cr in cache_rows:
+                    cn = _norm(cr['name'] or '')
+                    if cn not in cache_by_name:
+                        cache_by_name[cn] = {}
+                    source = cr['source']
+                    genres = []
+                    if cr['genres']:
+                        try:
+                            genres = json.loads(cr['genres']) if isinstance(cr['genres'], str) else []
+                        except Exception:
+                            pass
+                    cache_by_name[cn][source] = {
+                        'id': cr['entity_id'],
+                        'image_url': cr['image_url'] or '',
+                        'genres': genres,
+                    }
+
+                # Apply cache data to nodes
+                source_id_map = {'spotify': 'spotify_id', 'itunes': 'itunes_id', 'deezer': 'deezer_id', 'discogs': 'discogs_id'}
+                for n in nodes:
+                    nn = _norm(n['name'])
+                    cached = cache_by_name.get(nn)
+                    if not cached:
+                        continue
+                    for source, field in source_id_map.items():
+                        if not n.get(field) and source in cached:
+                            n[field] = cached[source]['id']
+                    # Backfill image if missing or local path
+                    if not n.get('image_url') or not n['image_url'].startswith('http'):
+                        for source in ('spotify', 'deezer', 'itunes'):
+                            if source in cached and cached[source].get('image_url', '').startswith('http'):
+                                n['image_url'] = cached[source]['image_url']
+                                break
+                    # Backfill genres if missing
+                    if not n.get('genres') or len(n.get('genres', [])) == 0:
+                        for source in ('spotify', 'deezer', 'itunes', 'discogs'):
+                            if source in cached and cached[source].get('genres'):
+                                n['genres'] = cached[source]['genres'][:5]
+                                break
+        except Exception as cache_err:
+            logger.debug(f"Artist map cache backfill error: {cache_err}")
+
         return jsonify({
             'success': True,
             'nodes': nodes,
