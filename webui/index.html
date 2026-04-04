@@ -3063,6 +3063,28 @@
                         </div>
                     </div>
 
+                    <!-- Your Artists Section -->
+                    <div class="discover-section" id="your-artists-section" style="display: none;">
+                        <div class="discover-section-header">
+                            <div>
+                                <h2 class="discover-section-title">Your Artists</h2>
+                                <p class="discover-section-subtitle" id="your-artists-subtitle">Artists you follow across your music services</p>
+                            </div>
+                            <div class="discover-section-actions">
+                                <button class="ya-header-btn ya-refresh-btn" id="your-artists-refresh-btn" onclick="refreshYourArtists()" title="Refresh from services">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                                </button>
+                                <button class="ya-header-btn ya-viewall-btn" onclick="openYourArtistsModal()">
+                                    <span>View All</span>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="discover-carousel" id="your-artists-carousel">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
                     <!-- Spotify Library Section -->
                     <div class="discover-section" id="spotify-library-section" style="display: none;">
                         <div class="discover-section-header">
@@ -3880,6 +3902,34 @@
                                     </div>
                                 </div>
 
+
+                                <!-- Deezer OAuth Auth -->
+                                <div class="api-service-frame">
+                                    <h4 class="service-title deezer-title">Deezer (Favorites & Playlists)</h4>
+                                    <div class="form-group">
+                                        <label>App ID:</label>
+                                        <input type="text" id="deezer-app-id" placeholder="Deezer App ID">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>App Secret:</label>
+                                        <input type="password" id="deezer-app-secret" placeholder="Deezer App Secret">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Redirect URI:</label>
+                                        <input type="text" id="deezer-redirect-uri"
+                                            placeholder="http://127.0.0.1:8008/deezer/callback">
+                                    </div>
+                                    <div class="callback-info">
+                                        <div class="callback-label">Current Redirect URI:</div>
+                                        <div class="callback-url" id="deezer-callback-display">
+                                            http://127.0.0.1:8008/deezer/callback</div>
+                                        <div class="callback-help">Add this URL to your Deezer app at developers.deezer.com</div>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="auth-button" onclick="authenticateDeezer()">🔐
+                                            Authenticate</button>
+                                    </div>
+                                </div>
 
                                 <!-- Qobuz Metadata/Enrichment Auth -->
                                 <div class="api-service-frame">

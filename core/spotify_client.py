@@ -529,7 +529,7 @@ class SpotifyClient:
                 client_id=config['client_id'],
                 client_secret=config['client_secret'],
                 redirect_uri=config.get('redirect_uri', "http://127.0.0.1:8888/callback"),
-                scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
+                scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
                 cache_path='config/.spotify_cache'
             )
             
@@ -1018,6 +1018,56 @@ class SpotifyClient:
             logger.error(f"Error fetching playlist {playlist_id}: {e}")
             return None
     
+    @rate_limited
+    def get_followed_artists(self) -> list:
+        """Fetch all artists the user follows on Spotify.
+        Returns list of dicts with id, name, image_url, genres.
+        Requires user-follow-read scope — returns empty list on 403."""
+        if not self.is_spotify_authenticated():
+            return []
+        try:
+            artists = []
+            after = None
+            while True:
+                results = self.sp.current_user_followed_artists(limit=50, after=after)
+                if not results or 'artists' not in results:
+                    break
+                items = results['artists'].get('items', [])
+                if not items:
+                    break
+                for a in items:
+                    image_url = a['images'][0]['url'] if a.get('images') else None
+                    artists.append({
+                        'spotify_id': a['id'],
+                        'name': a['name'],
+                        'image_url': image_url,
+                        'genres': a.get('genres', []),
+                    })
+                # Cursor-based pagination
+                cursors = results['artists'].get('cursors', {})
+                after = cursors.get('after')
+                if not after:
+                    break
+                # Throttle pagination
+                _pi = _get_min_api_interval()
+                with _api_call_lock:
+                    elapsed = time.time() - _last_api_call_time
+                    if elapsed < _pi:
+                        time.sleep(_pi - elapsed)
+                    globals()['_last_api_call_time'] = time.time()
+                from core.api_call_tracker import api_call_tracker
+                api_call_tracker.record_call('spotify', endpoint='get_followed_artists_page')
+
+            logger.info(f"Retrieved {len(artists)} followed artists from Spotify")
+            return artists
+        except Exception as e:
+            if '403' in str(e) or 'Forbidden' in str(e):
+                logger.warning("Spotify user-follow-read scope not granted — re-authorize to see followed artists")
+                return []
+            _detect_and_set_rate_limit(e, 'get_followed_artists')
+            logger.error(f"Error fetching followed artists: {e}")
+            return []
+
     @rate_limited
     def search_tracks(self, query: str, limit: int = 10) -> List[Track]:
         """Search for tracks - falls back to configured metadata source if Spotify not authenticated"""

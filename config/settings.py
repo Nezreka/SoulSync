@@ -86,6 +86,10 @@ class ConfigManager:
         'lastfm.api_secret',
         'lastfm.session_key',
         'genius.access_token',
+        # Deezer OAuth
+        'deezer.app_id',
+        'deezer.app_secret',
+        'deezer.access_token',
         # Other
         'hydrabase.api_key',
         'discogs.token',

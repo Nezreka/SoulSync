@@ -3403,6 +3403,10 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     '2.2': [
         // Newest features first
+        { title: 'Your Artists on Discover',                         desc: 'Aggregates liked/followed artists from Spotify, Tidal, Last.fm, and Deezer. Auto-matched to all metadata sources. Click for artist info modal with bio, genres, stats, and watchlist toggle', page: 'discover' },
+        { title: 'Deezer OAuth',                                     desc: 'Full Deezer OAuth integration for user favorites and playlists. Configure in Settings → Connections' },
+        { title: 'Failed MB Lookups Manager',                        desc: 'Browse, search, and manually match failed MusicBrainz lookups from the Cache Health modal. Search MusicBrainz directly and save matches' },
+        { title: 'Explorer: Discover + Badges + Auto-Refresh',      desc: 'Trigger discovery directly from Explorer, status badges (explored/wishlisted/downloaded), auto-refresh when discovery completes', page: 'playlist-explorer' },
         { title: 'Fix Album Folder Splitting',                       desc: 'Collab albums and artist name changes no longer scatter tracks across multiple folders — $albumartist now uses album-level artist consistently' },
         { title: 'Fix Watchlist Rate Limiting',                      desc: 'Watchlist scans now fetch only newest albums instead of full discography (~90% fewer API calls). Configurable API interval in settings. Better Retry-After header extraction' },
         { title: 'Discogs Integration',                              desc: 'New metadata source — enrichment worker, fallback source, enhanced search tab, watchlist support, cache browser. Genres, styles, labels, bios, ratings from 400+ taxonomy', page: 'dashboard' },

@@ -6632,6 +6632,100 @@ def tidal_callback():
         return f"<h1>❌ An Error Occurred</h1><p>An unexpected error occurred during the authentication process: {e}</p>", 500
 
 
+# --- Deezer OAuth ---
+
+@app.route('/auth/deezer')
+def auth_deezer():
+    """Initialize Deezer OAuth flow. Redirects user to Deezer authorization page."""
+    try:
+        app_id = config_manager.get('deezer.app_id', '')
+        redirect_uri = config_manager.get('deezer.redirect_uri', 'http://127.0.0.1:8008/deezer/callback')
+
+        if not app_id:
+            return "<h1>Deezer App ID not configured</h1><p>Go to Settings → Connections and enter your Deezer App ID first.</p>", 400
+
+        perms = 'basic_access,email,offline_access,manage_library,listening_history'
+        import urllib.parse
+        auth_url = f"https://connect.deezer.com/oauth/auth.php?app_id={app_id}&redirect_uri={urllib.parse.quote(redirect_uri)}&perms={perms}"
+
+        host = request.host.split(':')[0]
+        return f"""
+        <html><body style="font-family:system-ui;max-width:600px;margin:40px auto;padding:20px;background:#111;color:#eee">
+            <h1>🎵 Deezer Authorization</h1>
+            <p>Click the link below to authorize SoulSync with your Deezer account:</p>
+            <p><a href="{auth_url}" style="color:#A238FF;font-size:18px">Authorize on Deezer →</a></p>
+            <hr style="border-color:#333">
+            <p style="color:#888;font-size:13px">If running remotely, replace <code>127.0.0.1</code> in the redirect URI with <code>{host}</code></p>
+        </body></html>
+        """
+    except Exception as e:
+        return f"<h1>Error</h1><p>{e}</p>", 500
+
+
+@app.route('/deezer/callback')
+def deezer_callback():
+    """Handle Deezer OAuth callback — exchange code for access token."""
+    auth_code = request.args.get('code')
+    error_reason = request.args.get('error_reason', '')
+
+    if not auth_code:
+        return f"<h1>Deezer Authentication Failed</h1><p>{error_reason or 'No authorization code received.'}</p>", 400
+
+    try:
+        app_id = config_manager.get('deezer.app_id', '')
+        app_secret = config_manager.get('deezer.app_secret', '')
+
+        if not app_id or not app_secret:
+            return "<h1>Missing Credentials</h1><p>Deezer App ID or Secret not configured.</p>", 400
+
+        # Exchange code for token — simple GET request (Deezer's unique approach)
+        token_url = f"https://connect.deezer.com/oauth/access_token.php?app_id={app_id}&secret={app_secret}&code={auth_code}"
+        resp = requests.get(token_url, timeout=15)
+
+        if resp.status_code != 200:
+            return f"<h1>Token Exchange Failed</h1><p>Deezer returned status {resp.status_code}</p>", 400
+
+        # Deezer returns: access_token=TOKEN&expires=SECONDS (URL-encoded, not JSON)
+        import urllib.parse
+        token_data = dict(urllib.parse.parse_qsl(resp.text))
+        access_token = token_data.get('access_token')
+
+        if not access_token:
+            # Try JSON format (some Deezer API versions)
+            try:
+                json_data = resp.json()
+                access_token = json_data.get('access_token')
+            except Exception:
+                pass
+
+        if not access_token:
+            return f"<h1>No Access Token</h1><p>Deezer response: {resp.text[:200]}</p>", 400
+
+        # Save token to config (encrypted at rest)
+        config_manager.set('deezer.access_token', access_token)
+
+        # Reload the global deezer client to pick up the token
+        global deezer_client
+        if deezer_client:
+            deezer_client.reload_config()
+        else:
+            from core.deezer_client import DeezerClient
+            deezer_client = DeezerClient()
+
+        add_activity_item("✅", "Deezer Auth Complete", "Deezer account connected via OAuth", "Now")
+        logger.info("Deezer OAuth authentication successful")
+
+        return """
+        <html><body style="font-family:system-ui;max-width:600px;margin:40px auto;padding:20px;background:#111;color:#eee;text-align:center">
+            <h1>✅ Deezer Authentication Successful!</h1>
+            <p>Your Deezer account is now connected. You can close this window.</p>
+        </body></html>
+        """
+    except Exception as e:
+        logger.error(f"Deezer OAuth callback error: {e}")
+        return f"<h1>Error</h1><p>{e}</p>", 500
+
+
 # --- Beatport Data API ---
 
 @app.route('/api/beatport/hero-tracks')
@@ -40365,6 +40459,599 @@ def remove_discovery_artist_blacklist(blacklist_id):
         return jsonify({"success": success})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+# ── Your Artists (Liked Artists Pool) ──
+
+@app.route('/api/discover/your-artists', methods=['GET'])
+def get_your_artists():
+    """Get liked artists for the Discover carousel (20 random matched on active source)."""
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+
+        # Determine active source column — only show artists with THIS source's ID
+        active_source = 'spotify'
+        if spotify_client and spotify_client.is_spotify_authenticated():
+            active_source = 'spotify'
+        else:
+            fb = _get_metadata_fallback_source()
+            if fb:
+                active_source = fb
+        active_col = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id',
+                      'deezer': 'deezer_artist_id', 'discogs': 'discogs_artist_id'}.get(active_source, 'spotify_artist_id')
+
+        # Check if refresh needed (>24h stale or empty)
+        last_fetch = database.get_liked_artists_last_fetch(profile_id)
+        stale = True
+        if last_fetch:
+            from datetime import datetime, timedelta
+            try:
+                if isinstance(last_fetch, str):
+                    last_dt = datetime.fromisoformat(last_fetch.replace('Z', '+00:00'))
+                else:
+                    last_dt = last_fetch
+                stale = (datetime.now() - last_dt.replace(tzinfo=None)) > timedelta(hours=24)
+            except Exception:
+                stale = True
+
+        if stale:
+            _trigger_your_artists_refresh(profile_id)
+
+        database.sync_liked_artists_watchlist_flags(profile_id)
+
+        # Only return artists matched to the active source
+        result = database.get_liked_artists(
+            profile_id=profile_id, limit=20, random=True, matched_only=True,
+            require_source_id=active_col
+        )
+        result['stale'] = stale
+        result['success'] = True
+        result['active_source'] = active_source
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error getting your artists: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/your-artists/all', methods=['GET'])
+def get_your_artists_all():
+    """Get all liked artists for the View All modal (paginated)."""
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 50))
+        search = request.args.get('search', '').strip()
+        source_filter = request.args.get('source', '').strip()
+        sort = request.args.get('sort', 'name')
+
+        # Same active source filtering as carousel
+        active_source = 'spotify'
+        if spotify_client and spotify_client.is_spotify_authenticated():
+            active_source = 'spotify'
+        else:
+            fb = _get_metadata_fallback_source()
+            if fb:
+                active_source = fb
+        active_col = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id',
+                      'deezer': 'deezer_artist_id', 'discogs': 'discogs_artist_id'}.get(active_source, 'spotify_artist_id')
+
+        database.sync_liked_artists_watchlist_flags(profile_id)
+        result = database.get_liked_artists(
+            profile_id=profile_id, matched_only=True,
+            page=page, per_page=per_page,
+            search=search, source_filter=source_filter or None,
+            sort=sort, require_source_id=active_col
+        )
+        result['success'] = True
+        result['active_source'] = active_source
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error getting all your artists: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/your-artists/refresh', methods=['POST'])
+def refresh_your_artists():
+    """Force-trigger a fetch + match cycle for liked artists. ?clear=true wipes pool first."""
+    try:
+        profile_id = get_current_profile_id()
+        if request.args.get('clear', '').lower() == 'true':
+            database = get_database()
+            cleared = database.clear_liked_artists(profile_id)
+            print(f"🎵 [Your Artists] Cleared {cleared} entries before refresh")
+        _trigger_your_artists_refresh(profile_id)
+        return jsonify({"success": True, "message": "Refresh started"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+_your_artists_refresh_lock = threading.Lock()
+_your_artists_refreshing = False
+
+def _trigger_your_artists_refresh(profile_id: int):
+    """Start background fetch + match if not already running."""
+    global _your_artists_refreshing
+    if _your_artists_refreshing:
+        return
+    with _your_artists_refresh_lock:
+        if _your_artists_refreshing:
+            return
+        _your_artists_refreshing = True
+
+    def _run():
+        global _your_artists_refreshing
+        try:
+            _fetch_and_match_liked_artists(profile_id)
+        except Exception as e:
+            logger.error(f"Your artists refresh failed: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            _your_artists_refreshing = False
+
+    threading.Thread(target=_run, daemon=True, name="YourArtistsRefresh").start()
+
+
+def _fetch_and_match_liked_artists(profile_id: int):
+    """Background worker: fetch from services, deduplicate, match to active source."""
+    database = get_database()
+    fetched = 0
+
+    # 1. Fetch from Spotify (followed artists)
+    try:
+        if spotify_client and spotify_client.is_spotify_authenticated():
+            print("🎵 [Your Artists] Fetching followed artists from Spotify...")
+            artists = spotify_client.get_followed_artists()
+            for a in artists:
+                database.upsert_liked_artist(
+                    artist_name=a['name'], source_service='spotify',
+                    source_id=a['spotify_id'], source_id_type='spotify',
+                    image_url=a.get('image_url'), genres=a.get('genres'),
+                    profile_id=profile_id
+                )
+            fetched += len(artists)
+            print(f"🎵 [Your Artists] Fetched {len(artists)} from Spotify")
+    except Exception as e:
+        logger.error(f"[Your Artists] Spotify fetch error: {e}")
+
+    # 2. Fetch from Tidal (favorite artists)
+    try:
+        if tidal_client and hasattr(tidal_client, 'get_favorite_artists'):
+            tidal_auth = tidal_client._ensure_valid_token() if hasattr(tidal_client, '_ensure_valid_token') else False
+            if tidal_auth:
+                print("🎵 [Your Artists] Fetching favorite artists from Tidal...")
+                artists = tidal_client.get_favorite_artists(limit=200)
+                for a in artists:
+                    database.upsert_liked_artist(
+                        artist_name=a['name'], source_service='tidal',
+                        image_url=a.get('image_url'), profile_id=profile_id
+                    )
+                fetched += len(artists)
+                print(f"🎵 [Your Artists] Fetched {len(artists)} from Tidal")
+    except Exception as e:
+        logger.error(f"[Your Artists] Tidal fetch error: {e}")
+
+    # 3. Fetch from Last.fm (top artists)
+    try:
+        lastfm_key = config_manager.get('lastfm.api_key', '')
+        lastfm_secret = config_manager.get('lastfm.api_secret', '')
+        lastfm_session = config_manager.get('lastfm.session_key', '')
+        print(f"🎵 [Your Artists] Last.fm credentials: key={'yes' if lastfm_key else 'NO'}, secret={'yes' if lastfm_secret else 'NO'}, session={'yes' if lastfm_session else 'NO'}")
+        if lastfm_key and lastfm_secret and lastfm_session:
+            from core.lastfm_client import LastFMClient
+            lfm = LastFMClient(api_key=lastfm_key, api_secret=lastfm_secret, session_key=lastfm_session)
+            username = lfm.get_authenticated_username()
+            print(f"🎵 [Your Artists] Last.fm username resolved: {username or 'NONE'}")
+            if username:
+                print(f"🎵 [Your Artists] Fetching top artists from Last.fm ({username})...")
+                artists = lfm.get_user_top_artists(username, period='overall', limit=200)
+                for a in artists:
+                    database.upsert_liked_artist(
+                        artist_name=a['name'], source_service='lastfm',
+                        image_url=a.get('image_url'), profile_id=profile_id
+                    )
+                fetched += len(artists)
+                print(f"🎵 [Your Artists] Fetched {len(artists)} from Last.fm")
+    except Exception as e:
+        logger.error(f"[Your Artists] Last.fm fetch error: {e}")
+
+    # 4. Fetch from Deezer (favorite artists — requires OAuth)
+    try:
+        deezer_cl = _get_deezer_client()
+        if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
+            print("🎵 [Your Artists] Fetching favorite artists from Deezer...")
+            artists = deezer_cl.get_user_favorite_artists(limit=200)
+            for a in artists:
+                database.upsert_liked_artist(
+                    artist_name=a['name'], source_service='deezer',
+                    source_id=a.get('deezer_id'), source_id_type='deezer',
+                    image_url=a.get('image_url'), profile_id=profile_id
+                )
+            fetched += len(artists)
+            print(f"🎵 [Your Artists] Fetched {len(artists)} from Deezer")
+    except Exception as e:
+        logger.error(f"[Your Artists] Deezer fetch error: {e}")
+
+    print(f"🎵 [Your Artists] Total fetched: {fetched}")
+
+    # 5. Match pending artists to active source
+    _match_liked_artists_to_all_sources(database, profile_id)
+
+
+def _match_liked_artists_to_all_sources(database, profile_id: int):
+    """Match pending liked artists to ALL metadata sources (Spotify, iTunes, Deezer, Discogs).
+    Uses the same matching pattern as the watchlist scanner: DB-first, then API search
+    with fuzzy name matching. Stores all resolved IDs so source switching works instantly."""
+    pending = database.get_liked_artists_pending_match(profile_id, limit=200)
+    if not pending:
+        return
+
+    # Source → column mapping
+    source_cols = {
+        'spotify': 'spotify_artist_id',
+        'itunes': 'itunes_artist_id',
+        'deezer': 'deezer_artist_id',
+        'discogs': 'discogs_artist_id',
+    }
+    id_cols = list(source_cols.values())
+
+    # Reject known placeholder images and local server paths
+    _placeholder_hashes = {'2a96cbd8b46e442fc41c2b86b821562f'}
+    def _valid_image(url):
+        if not url or not url.strip():
+            return None
+        if any(ph in url for ph in _placeholder_hashes):
+            return None
+        # Reject local media server paths (Plex/Jellyfin) — not loadable in browser
+        if url.startswith('/') or url.startswith('\\'):
+            return None
+        if not url.startswith('http'):
+            return None
+        return url
+
+    # Build search clients for each source
+    from core.deezer_client import DeezerClient
+    search_clients = {}
+    if spotify_client and spotify_client.is_spotify_authenticated():
+        search_clients['spotify'] = spotify_client
+    try:
+        from core.itunes_client import iTunesClient
+        search_clients['itunes'] = iTunesClient()
+    except Exception:
+        pass
+    try:
+        search_clients['deezer'] = DeezerClient()
+    except Exception:
+        pass
+    try:
+        from core.discogs_client import DiscogsClient
+        dc = DiscogsClient()
+        # Only use Discogs if token is configured
+        from config.settings import config_manager as _cm
+        if _cm.get('discogs.token', ''):
+            search_clients['discogs'] = dc
+    except Exception:
+        pass
+
+    # Reuse watchlist scanner's fuzzy matching logic
+    from core.watchlist_scanner import WatchlistScanner
+    _normalize = WatchlistScanner._normalize_artist_name
+
+    def _best_match(results, artist_name):
+        """Pick best match from search results using name similarity (same as watchlist scanner)."""
+        if not results:
+            return None
+        # Exact normalized match
+        for r in results:
+            if _normalize(r.name) == _normalize(artist_name):
+                return r
+        # Fuzzy scoring
+        best = None
+        best_sim = 0
+        for r in results:
+            # Simple normalized comparison
+            n1 = _normalize(artist_name)
+            n2 = _normalize(r.name)
+            if n1 == n2:
+                return r
+            # Levenshtein-style similarity
+            max_len = max(len(n1), len(n2))
+            if max_len == 0:
+                continue
+            distance = sum(1 for a, b in zip(n1, n2) if a != b) + abs(len(n1) - len(n2))
+            sim = (max_len - distance) / max_len
+            if sim > best_sim:
+                best_sim = sim
+                best = r
+        if best and best_sim >= 0.85:
+            return best
+        return None
+
+    api_calls = 0
+    matched = 0
+
+    for entry in pending:
+        name = entry['artist_name']
+        pool_id = entry['id']
+        harvested_ids = {}
+        best_image = None
+
+        # Pre-load existing IDs from the entry itself
+        for col in id_cols:
+            if entry.get(col):
+                harvested_ids[col] = entry[col]
+
+        # --- DB STRATEGIES (free, no API calls) ---
+
+        # 1. Library artists table
+        try:
+            conn = database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1", (name,))
+            row = cursor.fetchone()
+            if row:
+                r = dict(row)
+                for col in id_cols:
+                    if r.get(col) and col not in harvested_ids:
+                        harvested_ids[col] = str(r[col])
+                if _valid_image(r.get('thumb_url')):
+                    best_image = r['thumb_url']
+        except Exception:
+            pass
+
+        # 2. Watchlist artists
+        try:
+            conn = database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM watchlist_artists WHERE artist_name = ? COLLATE NOCASE AND profile_id = ? LIMIT 1",
+                (name, profile_id)
+            )
+            row = cursor.fetchone()
+            if row:
+                wl = dict(row)
+                for col in id_cols:
+                    if wl.get(col) and col not in harvested_ids:
+                        harvested_ids[col] = str(wl[col])
+                if _valid_image(wl.get('image_url')) and not best_image:
+                    best_image = wl['image_url']
+        except Exception:
+            pass
+
+        # 3. Metadata cache (all sources)
+        try:
+            conn = database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT entity_id, source, image_url FROM metadata_cache_entities WHERE entity_type = 'artist' AND name = ? COLLATE NOCASE",
+                (name,)
+            )
+            for row in cursor.fetchall():
+                col = source_cols.get(row['source'])
+                if col and col not in harvested_ids:
+                    harvested_ids[col] = row['entity_id']
+                if _valid_image(row['image_url']) and not best_image:
+                    best_image = row['image_url']
+        except Exception:
+            pass
+
+        # --- API STRATEGIES (search each missing source) ---
+        # Same pattern as watchlist scanner's _backfill_missing_ids
+        for source, col in source_cols.items():
+            if col in harvested_ids:
+                continue  # Already have this source's ID
+            client = search_clients.get(source)
+            if not client:
+                continue
+            if api_calls >= 200:  # Hard cap per refresh cycle
+                break
+            try:
+                results = client.search_artists(name, limit=5)
+                best = _best_match(results, name)
+                if best:
+                    harvested_ids[col] = best.id
+                    if hasattr(best, 'image_url') and _valid_image(best.image_url) and not best_image:
+                        best_image = best.image_url
+                api_calls += 1
+                time.sleep(0.4)  # Rate limit breathing room
+            except Exception as e:
+                logger.debug(f"[Your Artists] {source} search failed for '{name}': {e}")
+                api_calls += 1
+
+        # Save all harvested IDs
+        if harvested_ids:
+            # Determine best active source/ID — prefer Spotify, then iTunes, Deezer, Discogs
+            resolved_source = None
+            resolved_id = None
+            for src in ('spotify', 'itunes', 'deezer', 'discogs'):
+                col = source_cols[src]
+                if col in harvested_ids:
+                    resolved_source = src
+                    resolved_id = harvested_ids[col]
+                    break
+
+            database.update_liked_artist_match(
+                pool_id, active_source=resolved_source, active_source_id=resolved_id,
+                image_url=best_image, all_ids=harvested_ids
+            )
+            matched += 1
+
+    database.sync_liked_artists_watchlist_flags(profile_id)
+    print(f"🎵 [Your Artists] Matched {matched}/{len(pending)} artists to {len(search_clients)} sources ({api_calls} API calls)")
+
+    # Image backfill: fetch images for matched artists that have IDs but no image
+    _backfill_liked_artist_images(database, profile_id, search_clients)
+
+
+def _backfill_liked_artist_images(database, profile_id: int, search_clients: dict):
+    """Fetch images for matched artists missing artwork using their stored source IDs."""
+    try:
+        conn = database._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, artist_name, spotify_artist_id, itunes_artist_id, deezer_artist_id
+            FROM liked_artists_pool
+            WHERE profile_id = ? AND match_status = 'matched'
+              AND (image_url IS NULL OR image_url = ''
+                   OR image_url LIKE '%2a96cbd8b46e442fc41c2b86b821562f%'
+                   OR image_url NOT LIKE 'http%')
+            LIMIT 100
+        """, (profile_id,))
+        rows = cursor.fetchall()
+        if not rows:
+            return
+
+        print(f"🖼️ [Your Artists] Backfilling images for {len(rows)} artists...")
+        filled = 0
+
+        for row in rows:
+            r = dict(row)
+            image_url = None
+
+            # Try Spotify artist lookup (has best images)
+            if r.get('spotify_artist_id') and 'spotify' in search_clients:
+                try:
+                    sp = search_clients['spotify']
+                    if hasattr(sp, 'sp') and sp.sp:
+                        artist_data = sp.sp.artist(r['spotify_artist_id'])
+                        if artist_data and artist_data.get('images'):
+                            image_url = artist_data['images'][0]['url']
+                except Exception:
+                    pass
+
+            # Try Deezer (direct image URL from ID)
+            if not image_url and r.get('deezer_artist_id'):
+                image_url = f"https://api.deezer.com/artist/{r['deezer_artist_id']}/image?size=big"
+
+            if image_url:
+                try:
+                    cursor2 = conn.cursor()
+                    cursor2.execute(
+                        "UPDATE liked_artists_pool SET image_url = ? WHERE id = ?",
+                        (image_url, r['id'])
+                    )
+                    filled += 1
+                except Exception:
+                    pass
+                time.sleep(0.3)
+
+        conn.commit()
+        if filled:
+            print(f"🖼️ [Your Artists] Backfilled {filled}/{len(rows)} artist images")
+    except Exception as e:
+        logger.debug(f"[Your Artists] Image backfill error: {e}")
+
+
+@app.route('/api/discover/your-artists/info/<artist_id>', methods=['GET'])
+def get_your_artist_info(artist_id):
+    """Get artist info for the Your Artists info modal. Checks library, cache, then API."""
+    try:
+        artist_name = request.args.get('name', '')
+        result = {'name': artist_name, 'success': True}
+
+        # 1. Try library DB (has enrichment data)
+        try:
+            database = get_database()
+            conn = database._get_connection()
+            cursor = conn.cursor()
+            # Check by various ID columns
+            cursor.execute("""
+                SELECT * FROM artists WHERE id = ? OR spotify_artist_id = ? OR itunes_artist_id = ?
+                OR deezer_id = ? OR discogs_id = ? LIMIT 1
+            """, (artist_id, artist_id, artist_id, artist_id, artist_id))
+            row = cursor.fetchone()
+            if row:
+                r = dict(row)
+                result.update({
+                    'name': r.get('name', artist_name),
+                    'genres': json.loads(r['genres']) if r.get('genres') else [],
+                    'summary': r.get('summary', ''),
+                    'image_url': r.get('thumb_url', ''),
+                    'spotify_artist_id': r.get('spotify_artist_id'),
+                    'musicbrainz_id': r.get('musicbrainz_id'),
+                    'deezer_id': r.get('deezer_id'),
+                    'itunes_artist_id': r.get('itunes_artist_id'),
+                    'discogs_id': r.get('discogs_id'),
+                    'lastfm_url': r.get('lastfm_url'),
+                    'tidal_id': r.get('tidal_id'),
+                    'lastfm_listeners': r.get('lastfm_listeners', 0),
+                    'lastfm_playcount': r.get('lastfm_playcount', 0),
+                })
+                return jsonify(result)
+        except Exception:
+            pass
+
+        # 2. Try metadata cache
+        try:
+            conn = database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT raw_json, image_url FROM metadata_cache_entities
+                WHERE entity_type = 'artist' AND entity_id = ? LIMIT 1
+            """, (artist_id,))
+            row = cursor.fetchone()
+            if row and row['raw_json']:
+                cached = json.loads(row['raw_json'])
+                result.update({
+                    'name': cached.get('name', artist_name),
+                    'genres': cached.get('genres', []),
+                    'image_url': row['image_url'] or cached.get('image_url', ''),
+                    'popularity': cached.get('popularity', 0),
+                    'followers': cached.get('followers', {}).get('total', 0) if isinstance(cached.get('followers'), dict) else cached.get('followers', 0),
+                })
+                return jsonify(result)
+        except Exception:
+            pass
+
+        # 3. Try Spotify API directly (genres, image, followers)
+        try:
+            if spotify_client and spotify_client.is_spotify_authenticated() and not artist_id.isdigit():
+                artist_data = spotify_client.sp.artist(artist_id)
+                if artist_data:
+                    result.update({
+                        'name': artist_data.get('name', artist_name),
+                        'genres': artist_data.get('genres', []),
+                        'image_url': artist_data['images'][0]['url'] if artist_data.get('images') else '',
+                        'spotify_artist_id': artist_data.get('id'),
+                        'popularity': artist_data.get('popularity', 0),
+                        'followers': artist_data.get('followers', {}).get('total', 0),
+                    })
+        except Exception as e:
+            logger.debug(f"Spotify artist lookup failed for {artist_id}: {e}")
+
+        # 4. Last.fm: bio, listeners, playcount (always try — has the best artist bios)
+        try:
+            _lfm_name = result.get('name') or artist_name
+            if _lfm_name and lastfm_worker and lastfm_worker.client:
+                lfm_info = lastfm_worker.client.get_artist_info(_lfm_name)
+                if lfm_info:
+                    bio = lfm_info.get('bio', {})
+                    if isinstance(bio, dict):
+                        summary = bio.get('summary', '')
+                    else:
+                        summary = str(bio) if bio else ''
+                    if summary and not result.get('summary'):
+                        result['summary'] = summary
+                    stats = lfm_info.get('stats', {})
+                    if stats:
+                        result['lastfm_listeners'] = int(stats.get('listeners', 0))
+                        result['lastfm_playcount'] = int(stats.get('playcount', 0))
+                    if not result.get('genres'):
+                        tags = lfm_info.get('tags', {}).get('tag', [])
+                        if tags:
+                            result['genres'] = [t.get('name', '') for t in tags[:5] if isinstance(t, dict)]
+                    lfm_url = lfm_info.get('url')
+                    if lfm_url:
+                        result['lastfm_url'] = lfm_url
+        except Exception as e:
+            logger.debug(f"Last.fm artist info failed for {artist_name}: {e}")
+
+        # 5. Return combined info
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/discover/build-playlist/search-artists', methods=['GET'])
 def search_artists_for_playlist():
