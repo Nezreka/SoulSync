@@ -29696,40 +29696,80 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     background: #0a0a14; flex-direction: column;
 }
 .artist-map-toolbar {
-    display: flex; align-items: center; gap: 16px;
-    padding: 10px 20px; background: rgba(20,20,32,0.95);
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-    backdrop-filter: blur(12px); z-index: 1;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px; background: linear-gradient(180deg, rgba(14,14,22,0.98) 0%, rgba(14,14,22,0.92) 100%);
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    backdrop-filter: blur(16px); z-index: 1; gap: 12px;
 }
-.artist-map-back-btn {
-    display: flex; align-items: center; gap: 6px;
-    padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
-    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
-    color: rgba(255,255,255,0.6); cursor: pointer; transition: all 0.2s;
-}
-.artist-map-back-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
-.artist-map-title { font-size: 16px; font-weight: 700; color: #fff; flex: 1; }
-.artist-map-stats { font-size: 12px; color: rgba(255,255,255,0.35); flex: 1; text-align: right; }
-.artist-map-zoom-controls { display: flex; gap: 4px; }
-.artist-map-zoom-btn {
-    width: 32px; height: 32px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);
-    background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.6);
+
+/* Left: back + brand + stats */
+.artmap-nav-left { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.artmap-back {
+    width: 34px; height: 34px; border-radius: 10px; border: none;
+    background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.5);
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     transition: all 0.15s;
 }
-.artist-map-zoom-btn:hover { background: rgba(255,255,255,0.1); color: #fff; border-color: rgba(255,255,255,0.15); }
+.artmap-back:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.artmap-brand { display: flex; align-items: center; gap: 6px; }
+.artmap-brand-icon { color: rgba(138,43,226,0.7); }
+.artmap-brand-text { font-size: 15px; font-weight: 700; color: #fff; letter-spacing: -0.3px; }
+.artmap-stats { font-size: 11px; color: rgba(255,255,255,0.25); font-weight: 500; }
 
-/* Search */
-.artist-map-search { position: relative; }
-.artist-map-search input {
-    padding: 6px 12px; border-radius: 8px; font-size: 12px; width: 180px;
-    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
-    color: #fff; outline: none; transition: border-color 0.2s;
+/* Center: search */
+.artmap-nav-center { flex: 1; display: flex; justify-content: center; max-width: 320px; margin: 0 auto; }
+.artmap-search-wrap {
+    position: relative; width: 100%;
 }
-.artist-map-search input::placeholder { color: rgba(255,255,255,0.25); }
-.artist-map-search input:focus { border-color: rgba(138,43,226,0.4); }
+.artmap-search-icon {
+    position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+    color: rgba(255,255,255,0.2); pointer-events: none;
+}
+.artmap-search-wrap input {
+    width: 100%; padding: 7px 12px 7px 32px; border-radius: 10px; font-size: 12px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+    color: #fff; outline: none; transition: all 0.2s;
+}
+.artmap-search-wrap input::placeholder { color: rgba(255,255,255,0.2); }
+.artmap-search-wrap input:focus { border-color: rgba(138,43,226,0.4); background: rgba(255,255,255,0.06); }
+
+/* Right: tools */
+.artmap-nav-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.artmap-tool-btn {
+    height: 32px; padding: 0 10px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.03);
+    color: rgba(255,255,255,0.45); cursor: pointer;
+    display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+    transition: all 0.15s; white-space: nowrap;
+}
+.artmap-tool-btn:hover { background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.8); border-color: rgba(255,255,255,0.1); }
+.artmap-tool-btn span { display: none; }
+@media (min-width: 900px) { .artmap-tool-btn span { display: inline; } }
+.artmap-zoom-group { display: flex; gap: 2px; background: rgba(255,255,255,0.02); border-radius: 8px; padding: 1px; }
+.artmap-tool-btn.artmap-zoom { border: none; background: none; width: 30px; padding: 0; justify-content: center; border-radius: 6px; }
+.artmap-tool-btn.artmap-zoom:hover { background: rgba(255,255,255,0.06); }
+
+/* Shortcuts modal */
+.artmap-shortcuts-modal {
+    background: rgba(20,20,32,0.95); border-radius: 14px; width: 340px; max-width: 90vw;
+    backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+}
+.artmap-shortcuts-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 20px 12px; border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.artmap-shortcuts-header h3 { font-size: 15px; font-weight: 700; color: #fff; margin: 0; }
+.artmap-shortcuts-grid { padding: 12px 20px 16px; display: flex; flex-direction: column; gap: 6px; }
+.artmap-shortcut { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; }
+.artmap-shortcut kbd {
+    display: inline-block; padding: 2px 8px; border-radius: 5px; font-size: 11px; font-weight: 600;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    color: rgba(255,255,255,0.6); font-family: system-ui; min-width: 24px; text-align: center;
+}
+.artmap-shortcut span { font-size: 12px; color: rgba(255,255,255,0.4); }
 .artist-map-search-results {
-    display: none; position: absolute; top: 50px; right: 60px; z-index: 20;
+    display: none; position: absolute; top: 50px; left: 50%; transform: translateX(-50%); z-index: 20;
     background: rgba(20,20,32,0.95); border: 1px solid rgba(255,255,255,0.08);
     border-radius: 10px; min-width: 220px; max-height: 300px; overflow-y: auto;
     backdrop-filter: blur(12px); box-shadow: 0 8px 24px rgba(0,0,0,0.5);
