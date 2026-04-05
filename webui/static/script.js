@@ -55225,10 +55225,10 @@ async function openYourArtistInfoModal(poolId) {
 
     // Fetch enrichment data (with timeout)
     try {
-        if (!artistId) throw new Error('No source ID');
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000);
-        const resp = await fetch(`/api/discover/your-artists/info/${artistId}?name=${encodeURIComponent(artistName)}`, { signal: controller.signal });
+        const lookupId = artistId || encodeURIComponent(artistName);
+        const resp = await fetch(`/api/discover/your-artists/info/${lookupId}?name=${encodeURIComponent(artistName)}`, { signal: controller.signal });
         clearTimeout(timeout);
         const artist = resp.ok ? await resp.json() : {};
         const bodyEl = document.getElementById('ya-info-body');
@@ -55320,6 +55320,7 @@ async function openYourArtistInfoModal(poolId) {
             `;
         }
     } catch (err) {
+        console.error('[Artist Info] Error loading artist info:', err);
         const bodyEl = document.getElementById('ya-info-body');
         if (bodyEl) bodyEl.innerHTML = `<div class="ya-info-empty">Could not load artist info</div>`;
     }
