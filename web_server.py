@@ -18181,15 +18181,33 @@ def _download_cover_art(album_info: dict, target_dir: str, context: dict = None)
         return
     try:
         cover_path = os.path.join(target_dir, "cover.jpg")
+        release_mbid = album_info.get('musicbrainz_release_id') if album_info else None
+        prefer_caa = config_manager.get('metadata_enhancement.prefer_caa_art', False)
+
+        # If cover.jpg exists but we now have a CAA MBID, check if we should upgrade
         if os.path.exists(cover_path):
-            return
+            if release_mbid and prefer_caa:
+                try:
+                    existing_size = os.path.getsize(cover_path)
+                    # Typical Spotify/iTunes cover is ~50-150KB at 640x640
+                    # CAA covers are usually 300KB+ at 1200x1200
+                    if existing_size > 200_000:
+                        return  # Already high-res, skip
+                    # Low-res cover exists — try to upgrade from CAA
+                    is_upgrade = True
+                    print(f"🔄 Existing cover.jpg is {existing_size // 1024}KB — attempting CAA upgrade...")
+                except Exception:
+                    return
+            else:
+                return
+        else:
+            is_upgrade = False
 
         image_data = None
 
         # Try Cover Art Archive first (often 1200x1200+, original quality) — opt-in
         # The MBID is stored in album_info by _enhance_file_metadata before this is called
-        release_mbid = album_info.get('musicbrainz_release_id')
-        if release_mbid and config_manager.get('metadata_enhancement.prefer_caa_art', False):
+        if release_mbid and prefer_caa:
             try:
                 caa_url = f"https://coverartarchive.org/release/{release_mbid}/front"
                 req = urllib.request.Request(caa_url, headers={'Accept': 'image/*'})
@@ -18201,6 +18219,11 @@ def _download_cover_art(album_info: dict, target_dir: str, context: dict = None)
                     image_data = None
             except Exception:
                 image_data = None
+
+        # If upgrading and CAA failed, keep existing cover — don't overwrite with same low-res
+        if is_upgrade and not image_data:
+            print(f"📷 CAA upgrade failed — keeping existing cover.jpg")
+            return
 
         # Fallback to Spotify/iTunes/Deezer URL (typically 640x640)
         if not image_data:
@@ -36702,13 +36725,16 @@ def reset_pin_via_credential():
         if not matched:
             return jsonify({'success': False, 'error': 'Credential does not match any configured service'}), 401
 
-        # Credential verified — clear admin PIN and disable launch lock
+        # Credential verified — clear PIN for the requested profile (default: admin)
         database = get_database()
-        database.update_profile(1, pin_hash=None)
-        config_manager.set('security.require_pin_on_launch', False)
+        target_profile = data.get('profile_id', 1)
+        database.update_profile(target_profile, pin_hash=None)
+        # If clearing admin PIN, also disable launch lock
+        if target_profile == 1:
+            config_manager.set('security.require_pin_on_launch', False)
         session['launch_pin_verified'] = True
 
-        return jsonify({'success': True, 'message': 'PIN cleared and lock screen disabled. You can set a new PIN in Settings.'})
+        return jsonify({'success': True, 'message': 'PIN cleared. You can set a new PIN in Settings.'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
