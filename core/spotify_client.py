@@ -103,6 +103,19 @@ def _set_global_rate_limit(retry_after_seconds, endpoint_name, has_real_header=F
                 f"(expires {time.strftime('%H:%M:%S', time.localtime(new_until))}) "
                 f"triggered by {endpoint_name}"
             )
+            # Record event for debug diagnostics
+            try:
+                from core.api_call_tracker import api_call_tracker
+                escalated = _rate_limit_hit_count > 1
+                api_call_tracker.record_event(
+                    'spotify', 'rate_limit_ban',
+                    endpoint=endpoint_name,
+                    duration=retry_after_seconds,
+                    detail=f'{"escalation #" + str(_rate_limit_hit_count) if escalated else "initial"}'
+                         f'{", real Retry-After" if has_real_header else ", estimated"}'
+                )
+            except Exception:
+                pass
 
 
 def _is_globally_rate_limited():

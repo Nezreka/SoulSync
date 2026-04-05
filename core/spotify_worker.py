@@ -49,8 +49,8 @@ class SpotifyWorker:
         # Name matching threshold
         self.name_similarity_threshold = 0.80
 
-        # Rate limiting (SpotifyClient already rate-limits at 200ms between API calls)
-        self.inter_item_sleep = 0.5       # Between top-level items
+        # Rate limiting (SpotifyClient already rate-limits at 350ms between API calls)
+        self.inter_item_sleep = 1.5       # Between top-level items (each can trigger 5+ paginated calls)
         self.batch_inter_item_sleep = 0.1  # Between local matches within a batch (no API calls)
 
         # Daily budget — caps how many items this worker processes per calendar day
@@ -491,10 +491,13 @@ class SpotifyWorker:
         spotify_artist_id = item['spotify_artist_id']
         artist_name = item['artist_name']
 
-        # 1 API call: get all albums for this artist from Spotify
+        # Fetch albums with pagination cap — Spotify returns 10/page, so max_pages=5
+        # gives 50 albums (newest first). Avoids 20+ paginated calls for prolific artists
+        # (e.g., 217 albums = 22 API calls without cap, vs 5 with cap)
         try:
             spotify_albums = self.client.get_artist_albums(
-                spotify_artist_id, album_type='album,single,compilation', limit=50
+                spotify_artist_id, album_type='album,single,compilation', limit=50,
+                max_pages=5
             )
         except Exception as e:
             logger.error(f"Failed to get Spotify albums for artist '{artist_name}': {e}")
