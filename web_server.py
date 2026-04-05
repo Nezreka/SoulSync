@@ -37822,16 +37822,22 @@ def start_watchlist_scan():
                 scanner = WatchlistScanner(metadata_service=metadata_service)
                 
                 # PROACTIVE ID BACKFILLING (cross-provider support)
-                # Before scanning, ensure all artists have IDs for the current provider
+                # Before scanning, ensure all artists have IDs for ALL available sources
+                providers_to_backfill = ['itunes', 'deezer']
+                if spotify_client and spotify_client.is_spotify_authenticated():
+                    providers_to_backfill.append('spotify')
                 try:
-                    active_provider = metadata_service.get_active_provider()
-                    print(f"🔍 Checking for missing {active_provider} IDs in watchlist...")
-                    scanner._backfill_missing_ids(watchlist_artists, active_provider)
-                except Exception as backfill_error:
-                    print(f"⚠️ Error during ID backfilling: {backfill_error}")
-                    import traceback
-                    traceback.print_exc()
-                    # Continue with scan even if backfilling fails
+                    if config_manager.get('discogs.token', ''):
+                        providers_to_backfill.append('discogs')
+                except Exception:
+                    pass
+                for _bf_provider in providers_to_backfill:
+                    try:
+                        print(f"🔍 Checking for missing {_bf_provider} IDs in watchlist...")
+                        scanner._backfill_missing_ids(watchlist_artists, _bf_provider)
+                    except Exception as backfill_error:
+                        print(f"⚠️ Error during {_bf_provider} ID backfilling: {backfill_error}")
+                        # Continue with next provider
 
                 # IMAGE BACKFILL — fix watchlist artists with missing images
                 # Uses DB-only lookups (metadata cache + album art) — no API calls
