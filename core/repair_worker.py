@@ -815,6 +815,7 @@ class RepairWorker:
             'incomplete_album': self._fix_incomplete_album,
             'path_mismatch': self._fix_path_mismatch,
             'missing_lossy_copy': self._fix_missing_lossy_copy,
+            'unwanted_content': self._fix_unwanted_content,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1277,6 +1278,73 @@ class RepairWorker:
         if file_deleted:
             msg += ' (file deleted)'
         return {'success': True, 'action': 'removed_single', 'message': msg}
+
+    def _fix_unwanted_content(self, entity_type, entity_id, file_path, details):
+        """Remove unwanted content (live, commentary, interview, spoken word) from library."""
+        track_info = details.get('track', {})
+        track_id = track_info.get('id') or entity_id
+        track_path = track_info.get('file_path') or file_path
+        type_label = details.get('type_label', 'Unwanted')
+
+        if not track_id:
+            return {'success': False, 'error': 'No track ID to remove'}
+
+        # Remove from DB
+        conn = None
+        album_id = track_info.get('album_id')
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
+            conn.commit()
+            removed = cursor.rowcount
+
+            # Check if album is now empty — clean it up too
+            if removed and album_id:
+                cursor.execute("SELECT COUNT(*) FROM tracks WHERE album_id = ?", (album_id,))
+                remaining = cursor.fetchone()[0]
+                if remaining == 0:
+                    cursor.execute("DELETE FROM albums WHERE id = ?", (album_id,))
+                    conn.commit()
+                    logger.info("Cleaned up empty album (id=%s) after removing last track", album_id)
+        except Exception as e:
+            return {'success': False, 'error': f'DB error: {e}'}
+        finally:
+            if conn:
+                conn.close()
+
+        if removed == 0:
+            return {'success': True, 'action': 'already_removed', 'message': 'Track was already removed'}
+
+        # Delete file from disk
+        file_deleted = False
+        if track_path:
+            download_folder = None
+            if self._config_manager:
+                download_folder = self._config_manager.get('soulseek.download_path', '')
+            try:
+                resolved = _resolve_file_path(track_path, self.transfer_folder, download_folder)
+                if resolved and os.path.exists(resolved):
+                    os.remove(resolved)
+                    file_deleted = True
+                    # Clean up empty parent directories
+                    transfer_norm = os.path.normpath(self.transfer_folder)
+                    parent = os.path.dirname(resolved)
+                    for _ in range(3):
+                        if (parent and os.path.isdir(parent)
+                                and os.path.normpath(parent) != transfer_norm
+                                and not os.listdir(parent)):
+                            os.rmdir(parent)
+                            parent = os.path.dirname(parent)
+                        else:
+                            break
+            except OSError:
+                pass  # Best effort — DB entry already removed
+
+        msg = f'{type_label} track removed from library'
+        if file_deleted:
+            msg += ' (file deleted)'
+        return {'success': True, 'action': 'removed_content', 'message': msg}
 
     def _fix_mbid_mismatch(self, entity_type, entity_id, file_path, details):
         """Remove the mismatched MusicBrainz recording ID from the audio file."""

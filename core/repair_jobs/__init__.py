@@ -41,6 +41,7 @@ _JOB_MODULES = [
     'core.repair_jobs.single_album_dedup',
     'core.repair_jobs.lossy_converter',
     'core.repair_jobs.album_tag_consistency',
+    'core.repair_jobs.live_commentary_cleaner',
 ]
 
 
