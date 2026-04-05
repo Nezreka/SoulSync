@@ -39716,6 +39716,19 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin-top: 12px;
 }
 
+.profile-pin-forgot {
+    display: block;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 12px;
+    margin-top: 10px;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.profile-pin-forgot:hover {
+    color: rgba(138, 43, 226, 0.8);
+}
+
 /* Profile Management Panel */
 .profile-manage-panel {
     position: fixed;

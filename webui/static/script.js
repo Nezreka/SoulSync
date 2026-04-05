@@ -1210,6 +1210,75 @@ async function submitRecoveryCredential() {
     btn.textContent = 'Verify & Reset PIN';
 }
 
+// ── Profile PIN Forgot Recovery ────────────────────────────────────────
+function showProfileForgotPin() {
+    const dialog = document.getElementById('profile-pin-dialog');
+    const content = dialog.querySelector('.profile-pin-content');
+
+    // Store the profile ID we're recovering for
+    const profileName = document.getElementById('profile-pin-name').textContent;
+
+    // Replace dialog content with recovery form
+    content.dataset.prevHtml = content.innerHTML;
+    content.innerHTML = `
+        <p style="color:#fff;font-size:14px;font-weight:600;margin-bottom:4px">Reset PIN for ${profileName}</p>
+        <p style="color:rgba(255,255,255,0.5);font-size:12px;margin-bottom:12px">Enter any configured API credential<br>(Spotify secret, Plex token, etc.)</p>
+        <input type="password" id="profile-recovery-input" class="profile-pin-input" maxlength="200" placeholder="Paste API credential" autocomplete="off">
+        <div class="profile-pin-buttons">
+            <button id="profile-recovery-cancel" class="profile-pin-cancel">Back</button>
+            <button id="profile-recovery-submit" class="profile-pin-submit">Verify & Reset</button>
+        </div>
+        <p id="profile-recovery-error" class="profile-pin-error" style="display:none"></p>
+    `;
+    setTimeout(() => document.getElementById('profile-recovery-input').focus(), 100);
+
+    document.getElementById('profile-recovery-cancel').onclick = () => {
+        content.innerHTML = content.dataset.prevHtml;
+    };
+
+    document.getElementById('profile-recovery-submit').onclick = async () => {
+        const input = document.getElementById('profile-recovery-input');
+        const error = document.getElementById('profile-recovery-error');
+        const credential = input.value.trim();
+        if (!credential) return;
+
+        const btn = document.getElementById('profile-recovery-submit');
+        btn.disabled = true;
+        btn.textContent = 'Verifying...';
+        error.style.display = 'none';
+
+        try {
+            const res = await fetch('/api/profiles/reset-pin-via-credential', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ credential, profile_id: dialog._profileId || 1 })
+            });
+            const data = await res.json();
+            if (data.success) {
+                dialog.style.display = 'none';
+                content.innerHTML = content.dataset.prevHtml;
+                showToast('PIN cleared. You can set a new one in Settings.', 'success');
+                // Re-try selecting the profile (now PIN-free)
+                if (dialog._profileId) selectProfile(dialog._profileId);
+            } else {
+                error.textContent = data.error || 'Credential not recognized';
+                error.style.display = 'block';
+                input.value = '';
+                input.focus();
+            }
+        } catch (e) {
+            error.textContent = 'Connection error';
+            error.style.display = 'block';
+        }
+        btn.disabled = false;
+        btn.textContent = 'Verify & Reset';
+    };
+
+    document.getElementById('profile-recovery-input').onkeydown = (e) => {
+        if (e.key === 'Enter') document.getElementById('profile-recovery-submit').click();
+    };
+}
+
 function showProfilePicker(profiles, canCancel = false) {
     const overlay = document.getElementById('profile-picker-overlay');
     const grid = document.getElementById('profile-picker-grid');
@@ -1309,6 +1378,7 @@ function showPinDialog(profile) {
     nameEl.textContent = profile.name;
     input.value = '';
     errorEl.style.display = 'none';
+    dialog._profileId = profile.id;
     dialog.style.display = 'flex';
     setTimeout(() => input.focus(), 100);
 
