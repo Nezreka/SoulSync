@@ -38629,10 +38629,14 @@ def watchlist_artist_link_provider(artist_id):
             return jsonify({"success": False, "error": "No data provided"}), 400
 
         new_provider_id = data.get('provider_id', '').strip()
-        provider = data.get('provider', '').strip()  # 'spotify', 'itunes', or 'deezer'
+        provider = data.get('provider', '').strip()
 
-        if not new_provider_id or provider not in ('spotify', 'itunes', 'deezer'):
-            return jsonify({"success": False, "error": "Missing provider or provider_id"}), 400
+        valid_providers = ('spotify', 'itunes', 'deezer', 'discogs')
+        if provider not in valid_providers:
+            return jsonify({"success": False, "error": f"Invalid provider. Must be one of: {', '.join(valid_providers)}"}), 400
+
+        # Empty provider_id = clear the match for this source
+        is_clear = not new_provider_id
 
         conn = sqlite3.connect(str(database.database_path))
         cursor = conn.cursor()
@@ -38653,22 +38657,27 @@ def watchlist_artist_link_provider(artist_id):
         artist_name = row[1]
 
         # Check for duplicate — another watchlist artist already has this provider ID
-        col_map = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id', 'deezer': 'deezer_artist_id'}
+        col_map = {'spotify': 'spotify_artist_id', 'itunes': 'itunes_artist_id', 'deezer': 'deezer_artist_id', 'discogs': 'discogs_artist_id'}
         col = col_map[provider]
-        cursor.execute(f"SELECT id, artist_name FROM watchlist_artists WHERE {col} = ? AND id != ?",
-                       (new_provider_id, watchlist_row_id))
-        duplicate = cursor.fetchone()
-        if duplicate:
-            conn.close()
-            return jsonify({"success": False, "error": f"Another watchlist artist ('{duplicate[1]}') already has this {provider} ID"}), 409
 
+        if not is_clear:
+            cursor.execute(f"SELECT id, artist_name FROM watchlist_artists WHERE {col} = ? AND id != ?",
+                           (new_provider_id, watchlist_row_id))
+            duplicate = cursor.fetchone()
+            if duplicate:
+                conn.close()
+                return jsonify({"success": False, "error": f"Another watchlist artist ('{duplicate[1]}') already has this {provider} ID"}), 409
+
+        # Set to new ID or NULL (clear)
+        update_val = new_provider_id if not is_clear else None
         cursor.execute(f"UPDATE watchlist_artists SET {col} = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                       (new_provider_id, watchlist_row_id))
+                       (update_val, watchlist_row_id))
 
         conn.commit()
         conn.close()
 
-        print(f"✅ Manually linked watchlist artist '{artist_name}' to {provider} ID: {new_provider_id}")
+        action = 'Cleared' if is_clear else 'Linked'
+        print(f"✅ {action} watchlist artist '{artist_name}' {provider} ID: {new_provider_id or 'NULL'}")
 
         return jsonify({
             "success": True,

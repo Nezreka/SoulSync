@@ -39105,194 +39105,162 @@ function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesI
     const content = document.getElementById('watchlist-linked-provider-content');
     if (!section || !content) return;
 
-    // Determine which providers are linked
-    const hasSpotify = !!spotifyId;
-    const hasItunes = !!itunesId;
-    const hasDeezer = !!deezerId;
-    const hasDiscogs = !!discogsId;
-
-    if (!hasSpotify && !hasItunes && !hasDeezer && !hasDiscogs) {
-        section.style.display = 'none';
-        return;
-    }
-
     section.style.display = '';
 
-    // Build linked artist display — show a card for each linked provider
-    // The artist info from the API is for the currently active provider
-    const linkedName = artistInfo?.name || artistName;
-    const linkedImage = artistInfo?.image_url || '';
-    const nameMatches = linkedName.toLowerCase().trim() === artistName.toLowerCase().trim();
+    const sources = [
+        { key: 'spotify', label: 'Spotify', icon: '🟢', id: spotifyId || '', color: '#1db954' },
+        { key: 'itunes', label: 'Apple Music', icon: '🔴', id: itunesId || '', color: '#fc3c44' },
+        { key: 'deezer', label: 'Deezer', icon: '🟣', id: deezerId || '', color: '#a238ff' },
+        { key: 'discogs', label: 'Discogs', icon: '🟤', id: discogsId || '', color: '#b08968' },
+    ];
 
-    let html = `<div class="watchlist-linked-artist-card">`;
-
-    if (linkedImage) {
-        html += `<img src="${linkedImage}" alt="" class="watchlist-linked-artist-img">`;
-    } else {
-        html += `<div class="watchlist-linked-artist-img-placeholder">🎵</div>`;
+    let html = '<div class="wl-linked-sources">';
+    for (const src of sources) {
+        const matched = !!src.id;
+        const shortId = src.id ? (src.id.length > 16 ? src.id.substring(0, 14) + '...' : src.id) : '';
+        html += `
+            <div class="wl-linked-row ${matched ? 'matched' : 'unmatched'}" data-source="${src.key}">
+                <span class="wl-linked-icon">${src.icon}</span>
+                <span class="wl-linked-label">${src.label}</span>
+                <span class="wl-linked-status">${matched
+                    ? `<span class="wl-linked-id" title="${escapeHtml(src.id)}">${shortId}</span>`
+                    : '<span class="wl-linked-none">Not matched</span>'
+                }</span>
+                <button class="wl-linked-fix-btn" onclick="_openSourceSearch('${src.key}', '${escapeForInlineJs(artistId)}', '${escapeForInlineJs(artistName)}')">${matched ? 'Fix' : 'Match'}</button>
+                ${matched ? `<button class="wl-linked-clear-btn" onclick="_clearSourceMatch('${src.key}', '${escapeForInlineJs(artistId)}', '${escapeForInlineJs(artistName)}')" title="Clear this match">&times;</button>` : ''}
+            </div>`;
     }
+    html += '</div>';
 
-    html += `<div class="watchlist-linked-artist-info">`;
-    html += `<div class="watchlist-linked-artist-name">${escapeHtml(linkedName)}</div>`;
-
-    // Show provider badges
-    html += `<div class="watchlist-linked-artist-providers">`;
-    if (hasSpotify) {
-        html += `<span class="watchlist-provider-badge spotify">Spotify</span>`;
-    }
-    if (hasItunes) {
-        html += `<span class="watchlist-provider-badge itunes">iTunes</span>`;
-    }
-    if (hasDeezer) {
-        html += `<span class="watchlist-provider-badge deezer">Deezer</span>`;
-    }
-    if (hasDiscogs) {
-        html += `<span class="watchlist-provider-badge discogs">Discogs</span>`;
-    }
-    html += `</div>`;
-
-    // Show mismatch warning if linked name differs from watchlist name
-    if (!nameMatches) {
-        html += `<div class="watchlist-linked-mismatch-warning">
-            ⚠️ Name differs from watchlist entry "<strong>${escapeHtml(artistName)}</strong>"
-        </div>`;
-    }
-
-    html += `</div>`; // close info
-
-    html += `<button class="watchlist-linked-change-btn" id="watchlist-linked-change-btn" title="Change linked artist">Change</button>`;
-    html += `</div>`; // close card
-
-    // Search UI (hidden by default)
-    html += `<div class="watchlist-linked-search" id="watchlist-linked-search" style="display:none">
-        <div class="watchlist-linked-search-input-row">
-            <input type="text" id="watchlist-linked-search-input" class="watchlist-linked-search-input"
-                   placeholder="Search for the correct artist..." value="${escapeHtml(artistName)}">
-            <button class="watchlist-linked-search-btn" id="watchlist-linked-search-go">Search</button>
+    // Per-source search panel (hidden, populated on Fix/Match click)
+    html += `<div class="wl-linked-search-panel" id="wl-linked-search-panel" style="display:none">
+        <div class="wl-linked-search-header">
+            <span id="wl-linked-search-title">Search</span>
+            <button class="wl-linked-search-close" onclick="document.getElementById('wl-linked-search-panel').style.display='none'">&times;</button>
         </div>
-        <div class="watchlist-linked-search-results" id="watchlist-linked-search-results"></div>
+        <div class="wl-linked-search-input-row">
+            <input type="text" id="wl-linked-search-input" class="watchlist-linked-search-input"
+                   placeholder="Search..." value="${escapeHtml(artistName)}">
+            <button class="watchlist-linked-search-btn" id="wl-linked-search-go">Search</button>
+        </div>
+        <div class="wl-linked-search-results" id="wl-linked-search-results"></div>
     </div>`;
 
     content.innerHTML = html;
-
-    // Wire up Change button
-    document.getElementById('watchlist-linked-change-btn').onclick = () => {
-        document.getElementById('watchlist-linked-search').style.display = '';
-        const input = document.getElementById('watchlist-linked-search-input');
-        input.focus();
-        input.select();
-    };
-
-    // Wire up search
-    const doSearch = () => _searchLinkedProviderArtists(artistId, artistName);
-    document.getElementById('watchlist-linked-search-go').onclick = doSearch;
-    document.getElementById('watchlist-linked-search-input').onkeydown = (e) => {
-        if (e.key === 'Enter') doSearch();
-    };
 }
 
 /**
- * Search for artists to link to a watchlist entry.
+ * Open per-source search panel for fixing a specific provider match.
  */
-async function _searchLinkedProviderArtists(currentArtistId, watchlistName) {
-    const input = document.getElementById('watchlist-linked-search-input');
-    const resultsContainer = document.getElementById('watchlist-linked-search-results');
-    const query = input?.value?.trim();
-    if (!query || !resultsContainer) return;
+function _openSourceSearch(sourceKey, artistId, artistName) {
+    const panel = document.getElementById('wl-linked-search-panel');
+    if (!panel) return;
+    const labels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs' };
+    document.getElementById('wl-linked-search-title').textContent = `Search ${labels[sourceKey] || sourceKey}`;
+    const input = document.getElementById('wl-linked-search-input');
+    input.value = artistName;
+    document.getElementById('wl-linked-search-results').innerHTML = '';
+    panel.style.display = '';
+    panel.dataset.source = sourceKey;
+    panel.dataset.artistId = artistId;
+    panel.dataset.artistName = artistName;
+    input.focus();
+    input.select();
 
-    resultsContainer.innerHTML = '<div style="padding:12px;color:#888;text-align:center">Searching...</div>';
+    const doSearch = () => _searchSourceArtists(sourceKey, artistId);
+    document.getElementById('wl-linked-search-go').onclick = doSearch;
+    input.onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
+}
+
+async function _searchSourceArtists(sourceKey, watchlistArtistId) {
+    const input = document.getElementById('wl-linked-search-input');
+    const container = document.getElementById('wl-linked-search-results');
+    const query = input?.value?.trim();
+    if (!query || !container) return;
+
+    container.innerHTML = '<div style="padding:12px;color:#888;text-align:center">Searching...</div>';
 
     try {
-        // Use match/search to find artists (returns genres, popularity, image)
-        const response = await fetch('/api/match/search', {
+        const response = await fetch('/api/library/search-service', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: query, context: 'artist' })
+            body: JSON.stringify({ service: sourceKey, entity_type: 'artist', query })
         });
         const data = await response.json();
+        if (!data.success) throw new Error(data.error);
 
         const results = data.results || [];
-        if (results.length === 0) {
-            resultsContainer.innerHTML = '<div style="padding:12px;color:#888;text-align:center">No artists found</div>';
+        if (!results.length) {
+            container.innerHTML = '<div style="padding:12px;color:#888;text-align:center">No artists found</div>';
             return;
         }
 
         let html = '';
-        for (const r of results.slice(0, 8)) {
-            const a = r.artist || r;
-            const img = a.image_url || '';
-            const genres = (a.genres || []).slice(0, 2).join(', ');
-            const pop = a.popularity || 0;
-            const followers = a.followers || 0;
-            const popMeta = pop > 0 ? `Pop: ${pop}` : followers > 0 ? `${followers.toLocaleString()} fans` : '';
-            html += `<div class="watchlist-linked-search-result" data-id="${a.id}" data-name="${escapeHtml(a.name)}">
-                ${img ? `<img src="${img}" alt="" class="watchlist-linked-result-img">` :
+        for (const r of results) {
+            html += `<div class="watchlist-linked-search-result" data-id="${escapeHtml(r.id)}" data-name="${escapeHtml(r.name)}">
+                ${r.image ? `<img src="${r.image}" alt="" class="watchlist-linked-result-img">` :
                     `<div class="watchlist-linked-result-img-placeholder">🎵</div>`}
                 <div class="watchlist-linked-result-info">
-                    <div class="watchlist-linked-result-name">${escapeHtml(a.name)}</div>
-                    <div class="watchlist-linked-result-meta">${genres ? escapeHtml(genres) : ''}${genres && popMeta ? ' · ' : ''}${popMeta}</div>
+                    <div class="watchlist-linked-result-name">${escapeHtml(r.name)}</div>
+                    <div class="watchlist-linked-result-meta">${escapeHtml(r.extra || '')}</div>
                 </div>
                 <button class="watchlist-linked-select-btn">Select</button>
             </div>`;
         }
+        container.innerHTML = html;
 
-        resultsContainer.innerHTML = html;
-
-        // Wire up select buttons
-        resultsContainer.querySelectorAll('.watchlist-linked-search-result').forEach(el => {
+        container.querySelectorAll('.watchlist-linked-search-result').forEach(el => {
             el.querySelector('.watchlist-linked-select-btn').onclick = async (e) => {
                 e.stopPropagation();
-                const newId = el.dataset.id;
-                const newName = el.dataset.name;
-                await _linkProviderArtist(currentArtistId, newId, newName);
+                await _linkSourceArtist(sourceKey, watchlistArtistId, el.dataset.id, el.dataset.name);
             };
         });
-
     } catch (err) {
-        console.error('Error searching for linked artist:', err);
-        resultsContainer.innerHTML = '<div style="padding:12px;color:#f44;text-align:center">Search error</div>';
+        console.error(`Error searching ${sourceKey}:`, err);
+        container.innerHTML = '<div style="padding:12px;color:#f44;text-align:center">Search error</div>';
     }
 }
 
-/**
- * Link a watchlist artist to a new provider artist.
- */
-async function _linkProviderArtist(currentArtistId, newProviderId, newProviderName) {
-    // Determine provider from active metadata source
-    // Spotify IDs are alphanumeric (e.g. "4Z8W4fKeB5YxbusRsdQVPb"), iTunes/Deezer are numeric
-    let provider;
-    if (/^\d+$/.test(newProviderId)) {
-        // Numeric ID — check configured fallback source to distinguish iTunes from Deezer
-        const fallbackSrc = document.getElementById('metadata-fallback-source')?.value || 'itunes';
-        provider = fallbackSrc === 'deezer' ? 'deezer' : 'itunes';
-    } else {
-        provider = 'spotify';
-    }
-
+async function _linkSourceArtist(sourceKey, watchlistArtistId, newId, newName) {
     try {
-        const response = await fetch(`/api/watchlist/artist/${currentArtistId}/link-provider`, {
+        const response = await fetch(`/api/watchlist/artist/${watchlistArtistId}/link-provider`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ provider_id: newProviderId, provider: provider })
+            body: JSON.stringify({ provider_id: newId, provider: sourceKey })
         });
-
         const data = await response.json();
         if (!data.success) {
-            showToast(`Failed to link artist: ${data.error}`, 'error');
+            showToast(`Failed to link: ${data.error}`, 'error');
             return;
         }
-
-        showToast(`Linked to "${newProviderName}" on ${provider}`, 'success');
-
-        // Close and reopen the config modal with the new ID to refresh everything
+        showToast(`Linked to "${newName}" on ${sourceKey}`, 'success');
+        // Refresh the modal
+        const panel = document.getElementById('wl-linked-search-panel');
+        const artistName = panel?.dataset?.artistName || newName;
         closeWatchlistArtistConfigModal();
-        setTimeout(() => {
-            openWatchlistArtistConfigModal(newProviderId, newProviderName);
-        }, 300);
-
+        setTimeout(() => openWatchlistArtistConfigModal(watchlistArtistId, artistName), 300);
     } catch (err) {
-        console.error('Error linking provider artist:', err);
         showToast('Failed to link artist', 'error');
+    }
+}
+
+async function _clearSourceMatch(sourceKey, watchlistArtistId, artistName) {
+    try {
+        const response = await fetch(`/api/watchlist/artist/${watchlistArtistId}/link-provider`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ provider_id: '', provider: sourceKey })
+        });
+        const data = await response.json();
+        if (!data.success) {
+            showToast(`Failed to clear: ${data.error}`, 'error');
+            return;
+        }
+        showToast(`Cleared ${sourceKey} match`, 'success');
+        closeWatchlistArtistConfigModal();
+        setTimeout(() => openWatchlistArtistConfigModal(watchlistArtistId, artistName), 300);
+    } catch (err) {
+        showToast('Failed to clear match', 'error');
     }
 }
 
