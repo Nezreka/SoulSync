@@ -16298,6 +16298,30 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     padding: 8px 0;
 }
 
+.wishlist-load-more-btn {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    margin-top: 12px;
+    background: rgba(138, 43, 226, 0.1);
+    border: 1px solid rgba(138, 43, 226, 0.3);
+    color: rgba(255, 255, 255, 0.7);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+
+.wishlist-load-more-btn:hover {
+    background: rgba(138, 43, 226, 0.2);
+    color: #fff;
+}
+
+.wishlist-load-more-btn:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
 .wishlist-album-card {
     background: linear-gradient(135deg, rgba(26, 26, 26, 0.95) 0%, rgba(18, 18, 18, 0.98) 100%);
     border: 1px solid rgba(255, 255, 255, 0.08);
