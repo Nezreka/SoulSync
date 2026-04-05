@@ -24851,59 +24851,65 @@ def get_valid_candidates(results, spotify_track, query):
         return []
 
     # Streaming sources (YouTube, Tidal, Qobuz, HiFi, Deezer) return structured API results
-    # with proper artist/title metadata — bypass Soulseek filename-parsing matching engine
-    # but still verify artist+title match to avoid wrong-track downloads (e.g. same title, different artist)
+    # with proper artist/title metadata — score using the same matching engine as Soulseek
     _streaming_sources = ("youtube", "tidal", "qobuz", "hifi", "deezer_dl")
     if results[0].username in _streaming_sources:
         source_label = results[0].username.replace('_dl', '').title()
 
-        # Verify artist/title against expected track before trusting
-        expected_artists = [a.lower().strip() for a in (spotify_track.artists or [])] if spotify_track else []
-        expected_title = matching_engine.normalize_string(spotify_track.name) if spotify_track and spotify_track.name else ''
+        expected_artists = spotify_track.artists if spotify_track else []
+        expected_title = spotify_track.name if spotify_track else ''
+        expected_duration = spotify_track.duration_ms if spotify_track else 0
 
-        from difflib import SequenceMatcher
-        verified = []
+        # Detect if the expected track is a specific version (live, remix, acoustic, etc.)
+        expected_title_lower = (expected_title or '').lower()
+        _version_keywords = ['remix', 'live', 'acoustic', 'instrumental', 'radio edit',
+                             'extended', 'slowed', 'sped up', 'reverb', 'karaoke']
+        expected_is_version = any(kw in expected_title_lower for kw in _version_keywords)
+
+        scored = []
         for r in results:
-            r_artist = matching_engine.normalize_string(r.artist or '')
-            r_title = matching_engine.normalize_string(r.title or '')
+            # Score using matching engine's generic scorer (same weights as Soulseek)
+            confidence, match_type = matching_engine.score_track_match(
+                source_title=expected_title,
+                source_artists=expected_artists,
+                source_duration_ms=expected_duration,
+                candidate_title=r.title or '',
+                candidate_artists=[r.artist] if r.artist else [],
+                candidate_duration_ms=r.duration or 0,
+            )
 
-            # Title must be a reasonable match
-            if expected_title and r_title:
-                title_sim = SequenceMatcher(None, expected_title, r_title).ratio()
-            else:
-                title_sim = 0.5  # No title to compare — allow through
-
-            # Artist must overlap with at least one expected artist
-            artist_match = False
-            if not expected_artists:
-                artist_match = True  # No artist info — can't filter
-            else:
-                r_artist_norm = r_artist.lower()
-                for exp_artist in expected_artists:
-                    exp_norm = matching_engine.normalize_string(exp_artist)
-                    if not exp_norm or not r_artist_norm:
-                        continue
-                    # Check substring containment or similarity
-                    if exp_norm in r_artist_norm or r_artist_norm in exp_norm:
-                        artist_match = True
+            # Version detection penalty — reject live/remix/acoustic when expecting original
+            r_title_lower = (r.title or '').lower()
+            is_wrong_version = False
+            if not expected_is_version:
+                # Expecting original — penalize versions
+                for kw in _version_keywords:
+                    if kw in r_title_lower and kw not in expected_title_lower:
+                        confidence *= 0.4  # Heavy penalty
+                        is_wrong_version = True
                         break
-                    artist_sim = SequenceMatcher(None, exp_norm, r_artist_norm).ratio()
-                    if artist_sim >= 0.6:
-                        artist_match = True
+            else:
+                # Expecting specific version — penalize results that don't have it
+                for kw in _version_keywords:
+                    if kw in expected_title_lower and kw not in r_title_lower:
+                        confidence *= 0.5
+                        is_wrong_version = True
                         break
 
-            if title_sim >= 0.5 and artist_match:
-                r.confidence = title_sim
-                r.version_type = 'original'
-                verified.append(r)
+            r.confidence = confidence
+            r.version_type = 'wrong_version' if is_wrong_version else match_type
+            if confidence >= 0.55:
+                scored.append(r)
 
-        if verified:
-            # Sort by confidence (best title match first)
-            verified.sort(key=lambda x: x.confidence, reverse=True)
-            print(f"🎵 [{source_label}] Streaming source — {len(verified)}/{len(results)} candidates passed artist/title verification")
-            return verified
+        if scored:
+            # Sort by confidence (best match first)
+            scored.sort(key=lambda x: x.confidence, reverse=True)
+            best = scored[0]
+            print(f"🎵 [{source_label}] {len(scored)}/{len(results)} candidates passed validation "
+                  f"(best: {best.confidence:.2f} '{best.artist} - {best.title}')")
+            return scored
         else:
-            print(f"⚠️ [{source_label}] No streaming results matched expected artist/title — falling through to matching engine")
+            print(f"⚠️ [{source_label}] No streaming results passed validation (threshold: 0.55) — falling through to matching engine")
             # Fall through to standard matching engine below
 
     # Uses the existing, powerful matching engine for scoring (Soulseek P2P results)

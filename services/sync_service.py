@@ -629,7 +629,7 @@ class PlaylistSyncService:
                 query = self.matching_engine.generate_download_query(match_result.spotify_track)
                 logger.info(f"Attempting to download: {query}")
                 
-                download_id = await self.soulseek_client.search_and_download_best(query)
+                download_id = await self.soulseek_client.search_and_download_best(query, expected_track=match_result.spotify_track)
                 
                 if download_id:
                     downloaded_count += 1
