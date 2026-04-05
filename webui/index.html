@@ -3166,7 +3166,16 @@
                                 </button>
                             </div>
                         </div>
-                        <canvas id="artist-map-canvas"></canvas>
+                        <div class="artmap-content-row">
+                            <div class="artmap-genre-sidebar" id="artmap-genre-sidebar" style="display:none;">
+                                <div class="artmap-genre-sidebar-header">
+                                    <span>Genres</span>
+                                    <input type="text" class="artmap-genre-sidebar-search" placeholder="Filter..." oninput="_filterGenreSidebar(this.value)">
+                                </div>
+                                <div class="artmap-genre-sidebar-list" id="artmap-genre-sidebar-list"></div>
+                            </div>
+                            <canvas id="artist-map-canvas"></canvas>
+                        </div>
                         <div class="artist-map-tooltip" id="artist-map-tooltip"></div>
                         <div class="artist-map-search-results" id="artist-map-search-results"></div>
                     </div>

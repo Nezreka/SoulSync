@@ -55153,9 +55153,13 @@ async function openYourArtistInfoModal(poolId) {
     `;
     document.body.appendChild(overlay);
 
-    // Fetch enrichment data
+    // Fetch enrichment data (with timeout)
     try {
-        const resp = await fetch(`/api/discover/your-artists/info/${artistId}?name=${encodeURIComponent(artistName)}`);
+        if (!artistId) throw new Error('No source ID');
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const resp = await fetch(`/api/discover/your-artists/info/${artistId}?name=${encodeURIComponent(artistName)}`, { signal: controller.signal });
+        clearTimeout(timeout);
         const artist = resp.ok ? await resp.json() : {};
         const bodyEl = document.getElementById('ya-info-body');
         const footerEl = document.getElementById('ya-info-footer');
@@ -55235,6 +55239,10 @@ async function openYourArtistInfoModal(poolId) {
                 : `<button class="ya-header-btn" onclick="toggleYourArtistWatchlist(${pool.id}, '${escapeForInlineJs(artistName)}', '${escapeForInlineJs(artistId)}', '${escapeForInlineJs(pool.active_source || '')}', this); this.textContent='Added!'; this.disabled=true">Add to Watchlist</button>`;
             footerEl.innerHTML = `
                 ${watchBtn}
+                <button class="ya-header-btn" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove(); openArtistMapExplorerDirect('${escapeForInlineJs(artistName)}')">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <span>Explore</span>
+                </button>
                 <button class="ya-header-btn ya-viewall-btn" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove(); navigateToPage('artists'); setTimeout(() => selectArtistForDetail({id:'${escapeForInlineJs(artistId)}', name:'${escapeForInlineJs(artistName)}', image_url:'${escapeForInlineJs(imageUrl)}'}, {source:'${escapeForInlineJs(pool.active_source || '')}'}), 200)">
                     <span>View Discography</span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
@@ -55686,11 +55694,8 @@ async function openArtistMap() {
                     const n = imgNodes[idx++];
                     if (_artMap.images[n.id]) { loaded++; continue; }
                     batch.push(
-                        fetch(n.image_url, { mode: 'cors' })
-                            .then(r => r.ok ? r.blob() : null)
-                            .then(blob => blob ? createImageBitmap(blob) : null)
+                        _artMapLoadImage(n.image_url)
                             .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
-                            .catch(() => {})
                             .finally(() => {
                                 loaded++;
                                 if (loadingText && loaded % 50 === 0) {
@@ -55768,6 +55773,8 @@ function _artMapAnimateTo(targetZoom, targetOX, targetOY) {
             _artMap._animating = requestAnimationFrame(step);
         } else {
             _artMap._animating = null;
+            _artMap.dirty = true;
+            _artMapRender(); // rebuild at final zoom level
         }
     }
     _artMap._animating = requestAnimationFrame(step);
@@ -55776,6 +55783,8 @@ function _artMapAnimateTo(targetZoom, targetOX, targetOY) {
 function closeArtistMap() {
     const container = document.getElementById('artist-map-container');
     if (container) container.style.display = 'none';
+    const sidebar = document.getElementById('artmap-genre-sidebar');
+    if (sidebar) sidebar.style.display = 'none';
     if (_artMap.animFrame) cancelAnimationFrame(_artMap.animFrame);
     if (_artMap._keyHandler) window.removeEventListener('keydown', _artMap._keyHandler);
     _artMapHideContextMenu();
@@ -55807,8 +55816,9 @@ function _artMapRebuildBuffer() {
 
     const bw = maxX - minX;
     const bh = maxY - minY;
-    // Fixed scale — high enough for reasonable quality, capped for memory
-    const scale = Math.min(0.5, 8192 / Math.max(bw, bh));
+    // Scale based on zoom — higher zoom = higher res buffer, capped for memory
+    const z = _artMap.zoom || 0.1;
+    const scale = Math.min(z * 2, 1.0, 10240 / Math.max(bw, bh));
 
     if (!_artMap.offscreen) _artMap.offscreen = document.createElement('canvas');
     const oc = _artMap.offscreen;
@@ -55822,25 +55832,100 @@ function _artMapRebuildBuffer() {
     octx.scale(scale, scale);
     octx.translate(-minX, -minY);
 
-    // Draw edges (only between visible nodes)
+    // Build node lookup
     if (!_artMap._nodeById) {
         _artMap._nodeById = {};
         placed.forEach(n => { _artMap._nodeById[n.id] = n; });
     }
-    // Draw ALL nodes — similar first (background), watchlist on top
+
+    // Draw edges (connection lines between related nodes)
+    if (_artMap.edges && _artMap.edges.length > 0) {
+        octx.lineWidth = 1;
+        octx.strokeStyle = 'rgba(138,43,226,0.08)';
+        octx.beginPath();
+        for (const edge of _artMap.edges) {
+            const s = _artMap._nodeById[edge.source];
+            const t = _artMap._nodeById[edge.target];
+            if (!s || !t || (s.opacity || 0) < 0.05 || (t.opacity || 0) < 0.05) continue;
+            octx.moveTo(s.x, s.y);
+            octx.lineTo(t.x, t.y);
+        }
+        octx.stroke();
+    }
+
+    // Draw ALL nodes — genre labels first, similar next, watchlist on top
     const hideSimilar = _artMap._hideSimilar || false;
-    for (let pass = 0; pass < 2; pass++) {
-        const isWatchlistPass = pass === 1;
+    // Pass 0: genre labels, Pass 1: similar/ring2, Pass 2: watchlist/center/ring1
+    for (let pass = 0; pass < 3; pass++) {
         for (const n of visible) {
-            if ((n.type === 'watchlist') !== isWatchlistPass) continue;
-            if (hideSimilar && n.type !== 'watchlist') continue;
+            if (pass === 0 && n._isLabel) { /* draw */ }
+            else if (pass === 1 && !n._isLabel && n.type !== 'watchlist' && n.type !== 'center' && n.ring !== 1) { /* draw */ }
+            else if (pass === 2 && !n._isLabel && (n.type === 'watchlist' || n.type === 'center' || n.ring === 1)) { /* draw */ }
+            else continue;
+            if (hideSimilar && n.type !== 'watchlist' && n.type !== 'center' && !n._isLabel) continue;
             const op = n.opacity || 0;
             if (op < 0.01) continue;
             const r = n.radius;
-            const isW = n.type === 'watchlist';
+            const isW = n.type === 'watchlist' || n.type === 'center';
             octx.globalAlpha = op;
 
-            // Watchlist glow ring
+            // Genre label node — transparent circle with large text
+            if (n._isLabel) {
+                octx.globalAlpha = 0.6;
+                octx.beginPath();
+                octx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+                octx.fillStyle = 'rgba(138,43,226,0.04)';
+                octx.fill();
+                octx.strokeStyle = 'rgba(138,43,226,0.08)';
+                octx.lineWidth = 1;
+                octx.stroke();
+                const labelSize = Math.max(12, n.radius * 0.25);
+                octx.font = `800 ${labelSize}px system-ui`;
+                octx.textAlign = 'center';
+                octx.textBaseline = 'middle';
+                octx.fillStyle = 'rgba(138,43,226,0.35)';
+                octx.fillText(n.name, n.x, n.y - labelSize * 0.3);
+                octx.font = `500 ${labelSize * 0.5}px system-ui`;
+                octx.fillStyle = 'rgba(255,255,255,0.15)';
+                octx.fillText(`${n._count || 0} artists`, n.x, n.y + labelSize * 0.5);
+                octx.globalAlpha = 1;
+                continue;
+            }
+
+            // Render quality based on node size in buffer pixels
+            const rScaled = r * scale;
+            const isSmall = rScaled < 8;
+            const isTiny = rScaled < 3;
+
+            // Tiny nodes: just a colored dot (no clip, no image, no text)
+            if (isTiny) {
+                octx.beginPath();
+                octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+                octx.fillStyle = isW ? '#6b21a8' : '#2a2a40';
+                octx.fill();
+                continue;
+            }
+
+            // Small nodes: filled circle + border, no image clip
+            if (isSmall) {
+                octx.beginPath();
+                octx.arc(n.x, n.y, r, 0, Math.PI * 2);
+                const img = _artMap.images[n.id];
+                if (img) {
+                    octx.save(); octx.clip();
+                    octx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
+                    octx.restore();
+                } else {
+                    octx.fillStyle = isW ? '#1a0a30' : '#141420';
+                    octx.fill();
+                }
+                octx.strokeStyle = isW ? 'rgba(138,43,226,0.3)' : 'rgba(255,255,255,0.06)';
+                octx.lineWidth = isW ? 1.5 : 0.5;
+                octx.stroke();
+                continue;
+            }
+
+            // Full quality: glow + clip + image + text
             if (isW) {
                 octx.beginPath();
                 octx.arc(n.x, n.y, r + 4, 0, Math.PI * 2);
@@ -55849,7 +55934,6 @@ function _artMapRebuildBuffer() {
                 octx.stroke();
             }
 
-            // Circle clip + image
             octx.save();
             octx.beginPath();
             octx.arc(n.x, n.y, r, 0, Math.PI * 2);
@@ -55859,7 +55943,6 @@ function _artMapRebuildBuffer() {
             const img = _artMap.images[n.id];
             if (img) {
                 octx.drawImage(img, n.x - r, n.y - r, r * 2, r * 2);
-                // Dark overlay for text readability
                 octx.fillStyle = 'rgba(0,0,0,0.45)';
                 octx.fillRect(n.x - r, n.y - r, r * 2, r * 2);
             } else {
@@ -55868,14 +55951,12 @@ function _artMapRebuildBuffer() {
             }
             octx.restore();
 
-            // Border
             octx.beginPath();
             octx.arc(n.x, n.y, r, 0, Math.PI * 2);
             octx.strokeStyle = isW ? 'rgba(138,43,226,0.4)' : 'rgba(255,255,255,0.08)';
             octx.lineWidth = isW ? 2 : 0.5;
             octx.stroke();
 
-            // Name — CENTERED in bubble, shown on ALL nodes
             const fontSize = isW ? Math.max(16, r * 0.14) : Math.max(8, r * 0.3);
             octx.font = `${isW ? '700' : '600'} ${fontSize}px system-ui`;
             octx.textAlign = 'center';
@@ -56200,12 +56281,654 @@ function artMapShowShortcuts() {
     document.body.appendChild(overlay);
 }
 
-function openArtistMapGenre() {
-    showToast('Genre Map coming soon', 'info');
+async function openArtistMapGenre() {
+    // Show picker immediately — uses lightweight genre list endpoint
+    const genre = await _showGenrePickerModal();
+    if (!genre) return;
+    _openGenreMapWithSelection(genre);
 }
 
-function openArtistMapExplorer() {
-    showToast('Artist Explorer coming soon', 'info');
+async function _showGenrePickerModal() {
+    return new Promise(resolve => {
+        const existing = document.getElementById('artmap-genre-picker');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'artmap-genre-picker';
+        overlay.className = 'modal-overlay';
+        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+
+        overlay.innerHTML = `
+            <div class="artmap-genre-picker-modal">
+                <div class="artmap-genre-picker-header">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><line x1="2" y1="12" x2="22" y2="12"/>
+                    </svg>
+                    <div>
+                        <h3>Select a Genre</h3>
+                        <p>Choose a genre to explore its artists</p>
+                    </div>
+                </div>
+                <input type="text" class="artmap-genre-picker-search" placeholder="Filter genres..." oninput="_filterGenrePicker(this.value)">
+                <div class="artmap-genre-picker-list" id="artmap-genre-picker-list">
+                    <div class="cache-health-loading"><div class="watch-all-loading-spinner"></div><div>Loading genres...</div></div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        // Use cached data or fetch
+        const renderGenreList = (data) => {
+            if (!data?.success || !data?.genres?.length) {
+                document.getElementById('artmap-genre-picker-list').innerHTML = '<div class="ya-info-empty">No genres found</div>';
+                return;
+            }
+            const list = document.getElementById('artmap-genre-picker-list');
+            list.innerHTML = data.genres.map(g => `
+                <div class="artmap-genre-picker-item" data-genre="${escapeHtml(g.name)}" onclick="document.getElementById('artmap-genre-picker')._resolve('${escapeForInlineJs(g.name)}')">
+                    <div class="artmap-genre-picker-name">${escapeHtml(g.name)}</div>
+                    <div class="artmap-genre-picker-count">${g.count} artists</div>
+                </div>
+            `).join('');
+        };
+
+        if (window._artMapGenreList) {
+            renderGenreList(window._artMapGenreList);
+        } else {
+            fetch('/api/discover/artist-map/genre-list')
+                .then(r => r.json())
+                .then(data => { window._artMapGenreList = data; renderGenreList(data); })
+                .catch(() => { document.getElementById('artmap-genre-picker-list').innerHTML = '<div class="ya-info-empty">Error loading genres</div>'; });
+        }
+
+        overlay._resolve = (genre) => { overlay.remove(); resolve(genre); };
+    });
+}
+
+function _switchGenre(genre) {
+    _artMap._skipSectionToggle = true;
+    _openGenreMapWithSelection(genre);
+}
+
+function _filterGenreSidebar(query) {
+    const q = query.toLowerCase();
+    document.querySelectorAll('.artmap-genre-sidebar-item').forEach(el => {
+        el.style.display = el.dataset.genre.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+
+async function _changeGenre() {
+    const genre = await _showGenrePickerModal();
+    if (!genre) return;
+    _artMap._skipSectionToggle = true;
+    _openGenreMapWithSelection(genre);
+}
+
+function _filterGenrePicker(query) {
+    const q = query.toLowerCase();
+    document.querySelectorAll('.artmap-genre-picker-item').forEach(el => {
+        el.style.display = el.dataset.genre.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+
+async function _openGenreMapWithSelection(selectedGenre) {
+    const container = document.getElementById('artist-map-container');
+    if (!container) return;
+
+    const skipToggle = _artMap._skipSectionToggle;
+    _artMap._skipSectionToggle = false;
+
+    if (!skipToggle) {
+        document.querySelectorAll('#discover-page > .discover-container > *:not(#artist-map-container)').forEach(el => {
+            el._prevDisplay = el.style.display;
+            el.style.display = 'none';
+        });
+    }
+    container.style.display = 'flex';
+
+    // Show + populate genre sidebar
+    const sidebar = document.getElementById('artmap-genre-sidebar');
+    const genreListData = window._artMapGenreList || window._artMapGenreData;
+    if (sidebar && genreListData?.genres) {
+        sidebar.style.display = 'flex';
+        const list = document.getElementById('artmap-genre-sidebar-list');
+        if (list) {
+            list.innerHTML = genreListData.genres.map(g => `
+                <div class="artmap-genre-sidebar-item ${g.name === selectedGenre ? 'active' : ''}"
+                     data-genre="${escapeHtml(g.name)}"
+                     onclick="_switchGenre('${escapeForInlineJs(g.name)}')">
+                    <span class="artmap-genre-sidebar-name">${escapeHtml(g.name)}</span>
+                    <span class="artmap-genre-sidebar-count">${g.count}</span>
+                </div>
+            `).join('');
+        }
+    }
+
+    const canvas = document.getElementById('artist-map-canvas');
+    const contentRow = canvas.parentElement;
+    _artMap.canvas = canvas;
+    _artMap.ctx = canvas.getContext('2d');
+    _artMap.width = canvas.clientWidth || (container.clientWidth - (sidebar?.offsetWidth || 0));
+    _artMap.height = contentRow?.clientHeight || (container.clientHeight - 50);
+    canvas.width = _artMap.width * window.devicePixelRatio;
+    canvas.height = _artMap.height * window.devicePixelRatio;
+    canvas.style.width = _artMap.width + 'px';
+    canvas.style.height = _artMap.height + 'px';
+    _artMap.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    _artMap.offsetX = _artMap.width / 2;
+    _artMap.offsetY = _artMap.height / 2;
+    _artMap.placed = [];
+    _artMap.edges = [];
+    _artMap.images = {};
+    _artMap._nodeById = null;
+    _artMap.dirty = true;
+
+    // Show loading
+    const loadingEl = document.createElement('div');
+    loadingEl.id = 'artist-map-loading';
+    loadingEl.innerHTML = `<div class="artist-map-loading-content"><div class="watch-all-loading-spinner"></div><div class="artist-map-loading-text" id="artmap-genre-loading-text">Loading genre map...</div></div>`;
+    container.appendChild(loadingEl);
+
+    // Update toolbar
+    document.querySelector('.artmap-brand-text').textContent = 'Genre Map';
+    document.getElementById('artist-map-stats').textContent = 'Loading...';
+
+    try {
+        // Use cached data from picker or fetch fresh
+        const data = window._artMapGenreData || await fetch('/api/discover/artist-map/genres').then(r => r.json());
+        const loadingText = document.getElementById('artmap-genre-loading-text');
+        if (!data.success || !data.nodes.length) {
+            if (loadingText) loadingText.textContent = 'No artists with genre data found.';
+            return;
+        }
+
+        // Find the selected genre + closely related genres (high artist overlap)
+        const allGenres = data.genres;
+        const primary = allGenres.find(g => g.name === selectedGenre);
+        if (!primary) {
+            if (loadingText) loadingText.textContent = `Genre "${selectedGenre}" not found.`;
+            return;
+        }
+        const primarySet = new Set(primary.artist_ids);
+
+        // Find up to 4 related genres by artist overlap
+        const related = allGenres
+            .filter(g => g.name !== selectedGenre)
+            .map(g => {
+                const overlap = g.artist_ids.filter(id => primarySet.has(id)).length;
+                return { ...g, overlap };
+            })
+            .filter(g => g.overlap > primarySet.size * 0.1) // At least 10% overlap
+            .sort((a, b) => b.overlap - a.overlap)
+            .slice(0, 4);
+
+        const genres = [primary, ...related];
+        const totalArtists = genres.reduce((sum, g) => sum + g.artist_ids.length, 0);
+
+        document.getElementById('artist-map-stats').innerHTML =
+            `<span class="artmap-genre-change" onclick="event.stopPropagation(); _changeGenre()" title="Change genre">${escapeHtml(selectedGenre)} ▾</span> · ${genres.length} genre${genres.length > 1 ? 's' : ''} · ${totalArtists} artists`;
+
+        const WR = _artMap.WATCHLIST_R;
+        const BUF = _artMap.BUFFER;
+
+        const maxPerGenre = 500;
+        const nodeR = WR * 0.2;
+
+        // Calculate actual cluster radius for each genre based on ring count
+        function getClusterRadius(artistCount) {
+            const count = Math.min(artistCount, maxPerGenre);
+            let ringDist = WR + nodeR * 2 + BUF;
+            let placed = 0;
+            while (placed < count) {
+                const circ = 2 * Math.PI * ringDist;
+                const inRing = Math.max(1, Math.floor(circ / (nodeR * 2 + BUF)));
+                placed += Math.min(inRing, count - placed);
+                ringDist += nodeR * 2 + BUF;
+            }
+            return ringDist;
+        }
+
+        // Pre-compute cluster radii
+        genres.forEach(g => { g._clusterR = getClusterRadius(g.artist_ids.length); });
+
+        // Golden spiral placement
+        genres.forEach((g, i) => {
+            if (i === 0) { g._cx = 0; g._cy = 0; }
+            else {
+                const angle = i * 2.399963;
+                const r = g._clusterR * Math.sqrt(i) * 0.9;
+                g._cx = Math.cos(angle) * r;
+                g._cy = Math.sin(angle) * r;
+            }
+        });
+
+        // Push apart using actual cluster radii — no overlap possible
+        for (let pass = 0; pass < 80; pass++) {
+            let moved = false;
+            for (let i = 0; i < genres.length; i++) {
+                for (let j = i + 1; j < genres.length; j++) {
+                    const dx = genres[j]._cx - genres[i]._cx;
+                    const dy = genres[j]._cy - genres[i]._cy;
+                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    const minDist = genres[i]._clusterR + genres[j]._clusterR + BUF * 4;
+                    if (dist < minDist) {
+                        const push = (minDist - dist) / 2 + 1;
+                        genres[i]._cx -= (dx / dist) * push; genres[i]._cy -= (dy / dist) * push;
+                        genres[j]._cx += (dx / dist) * push; genres[j]._cy += (dy / dist) * push;
+                        moved = true;
+                    }
+                }
+            }
+            if (!moved) break;
+        }
+
+        let placedCount = 0;
+
+        // Place genre labels as big watchlist-style bubbles
+        for (const g of genres) {
+            _artMap.placed.push({
+                id: `genre_${g.name}`, name: g.name.toUpperCase(),
+                x: g._cx, y: g._cy, radius: WR, opacity: 1,
+                type: 'genre_label', image_url: '', genres: [g.name],
+                _isLabel: true, _count: g.count
+            });
+        }
+
+        // Place artists in concentric rings — deterministic O(1) per node, handles 10K+ instantly
+        let genreIdx = 0;
+
+        async function placeGenreArtists() {
+            for (; genreIdx < genres.length; genreIdx++) {
+                const genre = genres[genreIdx];
+                const artists = genre.artist_ids.slice(0, maxPerGenre);
+                const sorted = artists.map(nid => data.nodes[nid]).filter(Boolean).sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+
+                let ringDist = WR + nodeR * 2 + BUF;
+                let ringNum = 0;
+                let placed = 0;
+
+                while (placed < sorted.length) {
+                    const circumference = 2 * Math.PI * ringDist;
+                    const nodesInRing = Math.max(1, Math.floor(circumference / (nodeR * 2 + BUF)));
+                    const count = Math.min(nodesInRing, sorted.length - placed);
+                    const angleStep = (2 * Math.PI) / nodesInRing;
+                    const angleOffset = ringNum * 0.618;
+
+                    for (let i = 0; i < count; i++) {
+                        const n = sorted[placed + i];
+                        if (!n) continue;
+                        const isW = n.type === 'watchlist' || n.type === 'center';
+                        const r = isW ? nodeR * 1.5 : nodeR;
+                        const angle = angleOffset + i * angleStep;
+
+                        _artMap.placed.push({
+                            id: placedCount + 1000, _origId: n.id, name: n.name,
+                            x: genre._cx + Math.cos(angle) * ringDist,
+                            y: genre._cy + Math.sin(angle) * ringDist,
+                            radius: r, opacity: 1,
+                            type: isW ? 'watchlist' : 'similar',
+                            image_url: n.image_url || '', genres: n.genres || [],
+                            spotify_id: n.spotify_id || '', itunes_id: n.itunes_id || '',
+                            deezer_id: n.deezer_id || '', discogs_id: n.discogs_id || '',
+                        });
+                        placedCount++;
+                    }
+                    placed += count;
+                    ringDist += nodeR * 2 + BUF;
+                    ringNum++;
+                }
+
+                if (loadingText) loadingText.textContent = `Placing artists... ${genreIdx + 1}/${genres.length} genres (${placedCount} placed)`;
+                if (genreIdx % 5 === 0) await new Promise(r => setTimeout(r, 0));
+            }
+        }
+        await placeGenreArtists();
+
+        // Build edges: connect artists that appear in multiple genre clusters
+        _artMap.edges = [];
+        const artistNodes = {};
+        _artMap.placed.forEach(n => {
+            if (n._origId != null) {
+                if (!artistNodes[n._origId]) artistNodes[n._origId] = [];
+                artistNodes[n._origId].push(n.id);
+            }
+        });
+        Object.values(artistNodes).forEach(ids => {
+            if (ids.length > 1) {
+                for (let i = 0; i < ids.length - 1; i++) {
+                    _artMap.edges.push({ source: ids[i], target: ids[i + 1], weight: 5 });
+                }
+            }
+        });
+
+        _artMap._nodeById = {};
+        _artMap.placed.forEach(n => { _artMap._nodeById[n.id] = n; });
+
+        // Auto-zoom
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        _artMap.placed.forEach(n => {
+            minX = Math.min(minX, n.x - n.radius);
+            maxX = Math.max(maxX, n.x + n.radius);
+            minY = Math.min(minY, n.y - n.radius);
+            maxY = Math.max(maxY, n.y + n.radius);
+        });
+        const mapW = maxX - minX + 200, mapH = maxY - minY + 200;
+        _artMap.zoom = Math.min(_artMap.width / mapW, _artMap.height / mapH, 1);
+        _artMap.offsetX = _artMap.width / 2 - ((minX + maxX) / 2) * _artMap.zoom;
+        _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
+
+        _artMapSetupInteraction(canvas);
+
+        // Load images + render
+        if (loadingText) loadingText.textContent = `Rendering ${placedCount} artists...`;
+
+        setTimeout(async () => {
+            const imgNodes = _artMap.placed.filter(n => n.image_url && !n._isLabel);
+            let loaded = 0;
+            const CONCURRENT = 20;
+            let idx = 0;
+            async function loadBatch() {
+                const batch = [];
+                while (idx < imgNodes.length && batch.length < CONCURRENT) {
+                    const n = imgNodes[idx++];
+                    batch.push(_artMapLoadImage(n.image_url)
+                        .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
+                        .finally(() => { loaded++; }));
+                }
+                if (batch.length) await Promise.all(batch);
+                if (idx < imgNodes.length) return loadBatch();
+            }
+            await loadBatch();
+            _artMap.dirty = true;
+            _artMapRender();
+            const le = document.getElementById('artist-map-loading');
+            if (le) le.remove();
+        }, 50);
+
+        _artMap.dirty = true;
+        _artMapRender();
+
+    } catch (err) {
+        console.error('Genre map error:', err);
+        const lt = container.querySelector('.artist-map-loading-text');
+        if (lt) lt.textContent = 'Error loading genre map';
+    }
+}
+
+function openArtistMapExplorerDirect(name) {
+    if (!name) return;
+    // Already in map — just reload with new data, don't re-hide sections
+    _artMap._skipSectionToggle = true;
+    _openArtistMapExplorerWithName(name);
+}
+
+async function openArtistMapExplorer() {
+    const name = await _showArtistMapSearchPrompt();
+    if (!name) return;
+    _openArtistMapExplorerWithName(name);
+}
+
+async function _openArtistMapExplorerWithName(name) {
+
+    const container = document.getElementById('artist-map-container');
+    if (!container) return;
+
+    const skipToggle = _artMap._skipSectionToggle;
+    _artMap._skipSectionToggle = false;
+
+    if (!skipToggle) {
+        document.querySelectorAll('#discover-page > .discover-container > *:not(#artist-map-container)').forEach(el => {
+            el._prevDisplay = el.style.display;
+            el.style.display = 'none';
+        });
+    }
+    container.style.display = 'flex';
+
+    const canvas = document.getElementById('artist-map-canvas');
+    _artMap.canvas = canvas;
+    _artMap.ctx = canvas.getContext('2d');
+    _artMap.width = container.clientWidth;
+    _artMap.height = container.clientHeight - 50;
+    canvas.width = _artMap.width * window.devicePixelRatio;
+    canvas.height = _artMap.height * window.devicePixelRatio;
+    canvas.style.width = _artMap.width + 'px';
+    canvas.style.height = _artMap.height + 'px';
+    _artMap.ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    _artMap.offsetX = _artMap.width / 2;
+    _artMap.offsetY = _artMap.height / 2;
+    _artMap.placed = [];
+    _artMap.edges = [];
+    _artMap.images = {};
+    _artMap._nodeById = null;
+    _artMap.dirty = true;
+
+    const loadingEl = document.createElement('div');
+    loadingEl.id = 'artist-map-loading';
+    loadingEl.innerHTML = `<div class="artist-map-loading-content"><div class="watch-all-loading-spinner"></div><div class="artist-map-loading-text">Exploring ${escapeHtml(name)}...</div></div>`;
+    container.appendChild(loadingEl);
+
+    document.querySelector('.artmap-brand-text').textContent = 'Artist Explorer';
+
+    try {
+        const resp = await fetch(`/api/discover/artist-map/explore?name=${encodeURIComponent(name.trim())}`);
+        const data = await resp.json();
+        if (!data.success || !data.nodes.length) {
+            const lt = document.querySelector('.artist-map-loading-text');
+            if (lt) {
+                lt.textContent = resp.status === 404
+                    ? `"${name}" doesn't appear to be a real artist. Try a different name.`
+                    : `No data found for "${name}". Try a different artist.`;
+            }
+            setTimeout(() => {
+                const le = document.getElementById('artist-map-loading');
+                if (le) le.remove();
+                closeArtistMap();
+            }, 2500);
+            return;
+        }
+
+        const ring1Count = data.nodes.filter(n => n.ring === 1).length;
+        const ring2Count = data.nodes.filter(n => n.ring === 2).length;
+        document.getElementById('artist-map-stats').textContent =
+            `${data.center} · ${ring1Count} similar · ${ring2Count} extended`;
+
+        _artMap.edges = data.edges;
+        const WR = _artMap.WATCHLIST_R;
+        const BUF = _artMap.BUFFER;
+
+        // Layout: center node at origin, ring 1 in circle around it, ring 2 around ring 1
+        const centerNode = data.nodes[0];
+        centerNode.x = 0; centerNode.y = 0;
+        centerNode.radius = WR * 1.2; // Extra large center
+        centerNode.opacity = 1;
+        centerNode.type = 'center';
+        _artMap.placed.push(centerNode);
+
+        const CELL = WR * 2 + BUF * 2;
+        const grid = {};
+        function _gk(x, y) { return `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`; }
+        function _ga(n) { const k = _gk(n.x, n.y); if (!grid[k]) grid[k] = []; grid[k].push(n); }
+        function _gc(x, y, r) {
+            const cx = Math.floor(x / CELL), cy = Math.floor(y / CELL);
+            for (let dx = -3; dx <= 3; dx++) for (let dy = -3; dy <= 3; dy++) {
+                const cell = grid[`${cx+dx},${cy+dy}`];
+                if (!cell) continue;
+                for (const p of cell) {
+                    const ddx = x-p.x, ddy = y-p.y;
+                    if (ddx*ddx+ddy*ddy < (r+p.radius+BUF)*(r+p.radius+BUF)) return true;
+                }
+            }
+            return false;
+        }
+        _ga(centerNode);
+
+        // Place ring 1 in a circle
+        const ring1 = data.nodes.filter(n => n.ring === 1);
+        const ring1Dist = WR * 2.5;
+        ring1.forEach((n, i) => {
+            const angle = (i / ring1.length) * Math.PI * 2;
+            const rank = n.rank || 5;
+            n.radius = WR * 0.4 + (10 - rank) * WR * 0.03;
+            n.opacity = 1;
+
+            // Find non-colliding position near ideal
+            let placed = false;
+            for (let dist = ring1Dist; dist < ring1Dist + WR * 3; dist += n.radius * 0.5) {
+                for (let ao = 0; ao < 6; ao++) {
+                    const a = angle + (ao * 0.1 * (ao % 2 ? 1 : -1));
+                    const tx = Math.cos(a) * dist;
+                    const ty = Math.sin(a) * dist;
+                    if (!_gc(tx, ty, n.radius)) {
+                        n.x = tx; n.y = ty;
+                        _artMap.placed.push(n);
+                        _ga(n);
+                        placed = true;
+                        break;
+                    }
+                }
+                if (placed) break;
+            }
+        });
+
+        // Place ring 2 around their ring 1 sources
+        const ring2 = data.nodes.filter(n => n.ring === 2);
+        const nodeById = {};
+        _artMap.placed.forEach(n => { nodeById[n.id] = n; });
+
+        ring2.forEach(n => {
+            // Find the ring 1 node that connects to this
+            const edge = data.edges.find(e => e.target === n.id);
+            const src = edge ? nodeById[edge.source] : null;
+            const cx = src ? src.x : 0;
+            const cy = src ? src.y : 0;
+
+            n.radius = WR * 0.2 + (n.popularity || 0) / 100 * WR * 0.1;
+            n.opacity = 1;
+
+            const startDist = (src ? src.radius : WR) + n.radius + BUF;
+            let placed = false;
+            for (let dist = startDist; dist < startDist + WR * 2; dist += n.radius * 0.5) {
+                const steps = Math.max(8, Math.floor(dist * 0.08));
+                const off = Math.random() * Math.PI * 2;
+                for (let a = 0; a < steps; a++) {
+                    const angle = off + (a / steps) * Math.PI * 2;
+                    const tx = cx + Math.cos(angle) * dist;
+                    const ty = cy + Math.sin(angle) * dist;
+                    if (!_gc(tx, ty, n.radius)) {
+                        n.x = tx; n.y = ty;
+                        _artMap.placed.push(n);
+                        _ga(n);
+                        placed = true;
+                        break;
+                    }
+                }
+                if (placed) break;
+            }
+        });
+
+        // Build node lookup for edges
+        _artMap._nodeById = {};
+        _artMap.placed.forEach(n => { _artMap._nodeById[n.id] = n; });
+
+        // Auto-zoom
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        _artMap.placed.forEach(n => {
+            minX = Math.min(minX, n.x - n.radius);
+            maxX = Math.max(maxX, n.x + n.radius);
+            minY = Math.min(minY, n.y - n.radius);
+            maxY = Math.max(maxY, n.y + n.radius);
+        });
+        const mapW = maxX - minX + 200, mapH = maxY - minY + 200;
+        _artMap.zoom = Math.min(_artMap.width / mapW, _artMap.height / mapH, 1);
+        _artMap.offsetX = _artMap.width / 2 - ((minX + maxX) / 2) * _artMap.zoom;
+        _artMap.offsetY = _artMap.height / 2 - ((minY + maxY) / 2) * _artMap.zoom;
+
+        _artMapSetupInteraction(canvas);
+
+        // Load images
+        const loadingText = container.querySelector('.artist-map-loading-text');
+        if (loadingText) loadingText.textContent = `Loading ${_artMap.placed.length} artists...`;
+
+        setTimeout(async () => {
+            const imgNodes = _artMap.placed.filter(n => n.image_url);
+            let loaded = 0;
+            const CONCURRENT = 20;
+            let idx = 0;
+            async function loadBatch() {
+                const batch = [];
+                while (idx < imgNodes.length && batch.length < CONCURRENT) {
+                    const n = imgNodes[idx++];
+                    batch.push(_artMapLoadImage(n.image_url)
+                        .then(bmp => { if (bmp) _artMap.images[n.id] = bmp; })
+                        .finally(() => { loaded++; }));
+                }
+                if (batch.length) await Promise.all(batch);
+                if (idx < imgNodes.length) return loadBatch();
+            }
+            await loadBatch();
+            _artMap.dirty = true;
+            _artMapRender();
+            const le = document.getElementById('artist-map-loading');
+            if (le) le.remove();
+        }, 50);
+
+        _artMap.dirty = true;
+        _artMapRender();
+
+    } catch (err) {
+        console.error('Artist explorer error:', err);
+        const lt = container.querySelector('.artist-map-loading-text');
+        if (lt) lt.textContent = 'Error loading explorer';
+    }
+}
+
+function _showArtistMapSearchPrompt() {
+    return new Promise(resolve => {
+        const existing = document.getElementById('artmap-search-prompt');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'artmap-search-prompt';
+        overlay.className = 'modal-overlay';
+        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+
+        overlay.innerHTML = `
+            <div class="artmap-search-prompt-modal">
+                <div class="artmap-search-prompt-header">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        <line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+                    </svg>
+                    <div>
+                        <h3>Artist Explorer</h3>
+                        <p>Enter an artist to explore their connections</p>
+                    </div>
+                </div>
+                <input type="text" id="artmap-explore-input" class="artmap-explore-input" placeholder="Artist name..." autofocus>
+                <div class="artmap-search-prompt-actions">
+                    <button class="ya-header-btn" onclick="document.getElementById('artmap-search-prompt').remove()">Cancel</button>
+                    <button class="ya-header-btn ya-viewall-btn" id="artmap-explore-go">
+                        <span>Explore</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        const input = overlay.querySelector('#artmap-explore-input');
+        const goBtn = overlay.querySelector('#artmap-explore-go');
+
+        const submit = () => {
+            const val = input.value.trim();
+            overlay.remove();
+            resolve(val || null);
+        };
+
+        goBtn.onclick = submit;
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+        setTimeout(() => input.focus(), 50);
+    });
 }
 
 function artMapToggleSimilar() {
@@ -56217,12 +56940,30 @@ function artMapToggleSimilar() {
     showToast(_artMap._hideSimilar ? 'Showing watchlist only' : 'Showing all artists', 'info', 1500);
 }
 
+function _artMapLoadImage(url) {
+    // Try direct CORS fetch first (zero server load, works for Spotify/iTunes/Discogs)
+    return fetch(url, { mode: 'cors' })
+        .then(r => r.ok ? r.blob() : Promise.reject('not ok'))
+        .then(b => createImageBitmap(b))
+        .catch(() => {
+            // Fallback: server proxy for CDNs without CORS headers
+            return fetch('/api/image-proxy?url=' + encodeURIComponent(url))
+                .then(r => r.ok ? r.blob() : null)
+                .then(b => b ? createImageBitmap(b) : null)
+                .catch(() => null);
+        });
+}
+
 function _artMapHideContextMenu() {
     const m = document.getElementById('artist-map-context');
     if (m) m.style.display = 'none';
 }
 
 function _artMapSetupInteraction(canvas) {
+    // Prevent stacking listeners on repeated opens
+    if (canvas._artMapListenersAttached) return;
+    canvas._artMapListenersAttached = true;
+
     let isPanning = false, panStartX = 0, panStartY = 0;
 
     canvas.addEventListener('wheel', (e) => {
@@ -56236,7 +56977,10 @@ function _artMapSetupInteraction(canvas) {
         _artMap.offsetX = mx - (mx - _artMap.offsetX) * (newZoom / _artMap.zoom);
         _artMap.offsetY = my - (my - _artMap.offsetY) * (newZoom / _artMap.zoom);
         _artMap.zoom = newZoom;
-        _artMapRender();
+        _artMapRender(); // fast blit
+        // Debounce hi-res rebuild after zoom settles
+        clearTimeout(_artMap._zoomRebuild);
+        _artMap._zoomRebuild = setTimeout(() => { _artMap.dirty = true; _artMapRender(); }, 300);
     }, { passive: false });
 
     let clickStart = null;
@@ -56269,7 +57013,7 @@ function _artMapSetupInteraction(canvas) {
         e.preventDefault();
         const { nx, ny } = _artMapScreenToWorld(e, canvas);
         const node = _artMapHitTest(nx, ny);
-        if (!node) { _artMapHideContextMenu(); return; }
+        if (!node || node._isLabel) { _artMapHideContextMenu(); return; }
 
         const menu = document.getElementById('artist-map-context') || (() => {
             const m = document.createElement('div');
@@ -56484,14 +57228,20 @@ async function openYourArtistInfoModal_direct(node) {
         if (node[key]) { bestId = node[key]; bestSource = sourceMap[key]; break; }
     }
 
-    // Gather connected artists from the map edges
+    // Gather ALL connected artists from map edges (both directions)
     const related = [];
+    const relatedIds = new Set();
     const nById = _artMap._nodeById || {};
-    if (node.type === 'watchlist') {
-        _artMap.edges.forEach(e => { if (e.source === node.id && nById[e.target]) related.push(nById[e.target]); });
-    } else {
-        _artMap.edges.forEach(e => { if (e.target === node.id && nById[e.source]) related.push(nById[e.source]); });
-    }
+    _artMap.edges.forEach(e => {
+        if (e.source === node.id && nById[e.target] && !relatedIds.has(e.target)) {
+            related.push(nById[e.target]);
+            relatedIds.add(e.target);
+        }
+        if (e.target === node.id && nById[e.source] && !relatedIds.has(e.source)) {
+            related.push(nById[e.source]);
+            relatedIds.add(e.source);
+        }
+    });
 
     const poolEntry = {
         id: node.id,
