@@ -23189,12 +23189,16 @@ def get_wishlist_tracks():
                 if limit and len(filtered_tracks) >= limit:
                     break
 
-            print(f"📊 Wishlist filter: {len(filtered_tracks)}/{len(sanitized_tracks)} tracks in '{category}' category (limit: {limit or 'none'})")
-            return jsonify({"tracks": filtered_tracks, "category": category})
+            # Count total in category (quick scan — no heavy processing, just classification)
+            total_in_category = sum(1 for t in sanitized_tracks if _classify_wishlist_track(t) == category)
+
+            print(f"📊 Wishlist filter: {len(filtered_tracks)}/{total_in_category} tracks in '{category}' category (limit: {limit or 'none'})")
+            return jsonify({"tracks": filtered_tracks, "category": category, "total": total_in_category})
 
         # Apply limit to non-filtered results
+        total_count = len(sanitized_tracks)
         result_tracks = sanitized_tracks[:limit] if limit else sanitized_tracks
-        return jsonify({"tracks": result_tracks})
+        return jsonify({"tracks": result_tracks, "total": total_count})
     except Exception as e:
         print(f"Error getting wishlist tracks: {e}")
         return jsonify({"error": str(e)}), 500

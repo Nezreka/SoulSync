@@ -13201,12 +13201,18 @@ async function selectWishlistCategory(category) {
 
         tracksList.innerHTML = '<div class="loading-indicator">Loading tracks...</div>';
 
-        const response = await fetch(`/api/wishlist/tracks?category=${category}`);
+        const _wlPageSize = window._wlNextLimit || 200;
+        window._wlNextLimit = null;
+        const response = await fetch(`/api/wishlist/tracks?category=${category}&limit=${_wlPageSize}`);
         const data = await response.json();
 
         if (!response.ok) throw new Error(data.error || 'Failed to fetch tracks');
 
         const tracks = data.tracks || [];
+        const totalAvailable = data.total || tracks.length;
+        window._wlCategory = category;
+        window._wlOffset = tracks.length;
+        window._wlTotal = totalAvailable;
 
         if (tracks.length === 0) {
             tracksList.innerHTML = '<div class="empty-state">No tracks in this category</div>';
@@ -13333,6 +13339,10 @@ async function selectWishlistCategory(category) {
             albumsHTML += '</div>';
 
             tracksList.innerHTML = albumsHTML;
+            if (totalAvailable > tracks.length) {
+                tracksList.insertAdjacentHTML('beforeend',
+                    `<button class="wishlist-load-more-btn" onclick="loadMoreWishlistTracks()">Load More (${tracks.length} of ${totalAvailable})</button>`);
+            }
             _attachWishlistDelegation(tracksList);
 
         } else {
@@ -13393,6 +13403,10 @@ async function selectWishlistCategory(category) {
             });
 
             tracksList.innerHTML = tracksHTML;
+            if (totalAvailable > tracks.length) {
+                tracksList.insertAdjacentHTML('beforeend',
+                    `<button class="wishlist-load-more-btn" onclick="loadMoreWishlistTracks()">Load More (${tracks.length} of ${totalAvailable})</button>`);
+            }
             _attachWishlistDelegation(tracksList);
         }
 
@@ -13400,6 +13414,16 @@ async function selectWishlistCategory(category) {
         console.error('Error loading category tracks:', error);
         showToast(`Failed to load tracks: ${error.message}`, 'error');
     }
+}
+
+async function loadMoreWishlistTracks() {
+    const btn = document.querySelector('.wishlist-load-more-btn');
+    if (btn) { btn.textContent = 'Loading...'; btn.disabled = true; }
+    // Increase page size and reload
+    window._wlOffset = (window._wlOffset || 200) + 200;
+    // Override the page size for this reload
+    window._wlNextLimit = window._wlOffset;
+    selectWishlistCategory(window._wlCategory);
 }
 
 function _attachWishlistDelegation(container) {
