@@ -6716,7 +6716,7 @@ def spotify_callback():
                     cache_path=f'config/.spotify_cache_profile_{profile_id_from_state}',
                     state=f'profile_{profile_id_from_state}'
                 )
-                token_info = auth_manager.get_access_token(auth_code, as_dict=True)
+                token_info = auth_manager.get_access_token(auth_code)
                 if token_info:
                     # Invalidate cached profile client so it gets recreated with new tokens
                     with _profile_spotify_lock:
@@ -6739,7 +6739,7 @@ def spotify_callback():
             cache_path='config/.spotify_cache'
         )
 
-        token_info = auth_manager.get_access_token(auth_code, as_dict=True)
+        token_info = auth_manager.get_access_token(auth_code)
 
         if token_info:
             # CRITICAL: update the GLOBAL spotify_client, not a local variable
@@ -47652,7 +47652,7 @@ def start_oauth_callback_servers():
                         )
 
                         # Extract the authorization code and exchange it for tokens
-                        token_info = auth_manager.get_access_token(auth_code, as_dict=True)
+                        token_info = auth_manager.get_access_token(auth_code)
 
                         if token_info:
                             # Reinitialize the global client with new tokens
