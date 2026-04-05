@@ -3,9 +3,11 @@ Centralized API call tracker for all enrichment services.
 
 Tracks actual API calls (not items processed) with rolling timestamps
 for real-time rate monitoring and minute-bucketed history for 24-hour graphs.
-Thread-safe, no persistence (resets on restart).
+Thread-safe, persists 24h history to disk on shutdown and restores on startup.
 """
 
+import json
+import os
 import threading
 import time
 from collections import deque, defaultdict
@@ -46,6 +48,9 @@ SERVICE_ORDER = [
 ]
 
 
+_PERSIST_PATH = os.path.join('database', 'api_call_history.json')
+
+
 class ApiCallTracker:
     """Centralized tracker for actual API calls across all enrichment services."""
 
@@ -60,6 +65,13 @@ class ApiCallTracker:
         self._minute_history = defaultdict(lambda: deque(maxlen=1440))
         self._current_minute_counts = defaultdict(int)
         self._current_minute_ts = {}
+
+        # Rate limit event log — records bans, peaks, escalations
+        # Each entry: {ts, event, service, endpoint, duration, detail}
+        self._events = deque(maxlen=200)
+
+        # Restore persisted history from disk
+        self._load()
 
     def record_call(self, service_key, endpoint=None):
         """Record an API call. Called from rate_limited decorators.
@@ -103,6 +115,94 @@ class ApiCallTracker:
             self._current_minute_counts[key] = 1
         else:
             self._current_minute_counts[key] += 1
+
+    def record_event(self, service_key, event_type, detail='', endpoint='', duration=0):
+        """Record a rate limit event (ban, escalation, cooldown, etc.).
+        Called from spotify_client.py when rate limits are detected."""
+        with self._lock:
+            self._events.append({
+                'ts': time.time(),
+                'event': event_type,
+                'service': service_key,
+                'endpoint': endpoint,
+                'duration': duration,
+                'detail': detail,
+            })
+
+    def get_events(self, since=None):
+        """Get rate limit events, optionally filtered by timestamp."""
+        cutoff = since or (time.time() - 86400)
+        with self._lock:
+            return [e for e in self._events if e['ts'] >= cutoff]
+
+    def get_debug_summary(self):
+        """Build a comprehensive debug summary for Copy Debug Info.
+        Includes 24h totals, peaks, rate limit events, and per-endpoint breakdown."""
+        now = time.time()
+        cutoff_24h = now - 86400
+        summary = {}
+
+        with self._lock:
+            for svc in SERVICE_ORDER:
+                # 24h total calls
+                total = 0
+                peak_cpm = 0
+                peak_ts = 0
+                for ts, count in self._minute_history.get(svc, []):
+                    if ts >= cutoff_24h:
+                        total += count
+                        if count > peak_cpm:
+                            peak_cpm = count
+                            peak_ts = ts
+                # Include current minute
+                cur_ts = self._current_minute_ts.get(svc)
+                cur_count = self._current_minute_counts.get(svc, 0)
+                if cur_ts and cur_ts >= cutoff_24h:
+                    total += cur_count
+                    if cur_count > peak_cpm:
+                        peak_cpm = cur_count
+                        peak_ts = cur_ts
+
+                if total == 0:
+                    continue
+
+                entry = {
+                    'total_24h': total,
+                    'peak_cpm': peak_cpm,
+                    'limit_cpm': RATE_LIMITS.get(svc, 60),
+                }
+                if peak_ts:
+                    entry['peak_at'] = time.strftime('%Y-%m-%d %H:%M', time.localtime(peak_ts))
+                summary[svc] = entry
+
+                # Spotify per-endpoint breakdown
+                if svc == 'spotify':
+                    ep_totals = {}
+                    for key in list(self._minute_history.keys()):
+                        if key.startswith('spotify:'):
+                            ep_name = key[8:]
+                            ep_total = sum(c for ts, c in self._minute_history[key] if ts >= cutoff_24h)
+                            cur = self._current_minute_counts.get(key, 0)
+                            ep_total += cur
+                            if ep_total > 0:
+                                ep_totals[ep_name] = ep_total
+                    if ep_totals:
+                        summary[svc]['endpoints'] = ep_totals
+
+            # Rate limit events
+            events = [e for e in self._events if e['ts'] >= cutoff_24h]
+
+        if events:
+            summary['_rate_limit_events'] = [{
+                'time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(e['ts'])),
+                'event': e['event'],
+                'service': e['service'],
+                'endpoint': e.get('endpoint', ''),
+                'duration': e.get('duration', 0),
+                'detail': e.get('detail', ''),
+            } for e in events[-20:]]  # Last 20 events
+
+        return summary
 
     def get_calls_per_minute(self, service_key):
         """Get current calls/minute rate from last 60 seconds."""
@@ -159,6 +259,55 @@ class ApiCallTracker:
 
             result[svc] = entry
         return result
+
+
+    def save(self):
+        """Persist 24h minute history to disk. Call on shutdown."""
+        try:
+            now = time.time()
+            cutoff = now - 86400
+            data = {}
+            with self._lock:
+                for key, hist in self._minute_history.items():
+                    entries = [[ts, count] for ts, count in hist if ts >= cutoff]
+                    # Include current in-progress minute
+                    cur_ts = self._current_minute_ts.get(key)
+                    cur_count = self._current_minute_counts.get(key, 0)
+                    if cur_ts is not None and cur_count > 0 and cur_ts >= cutoff:
+                        entries.append([cur_ts, cur_count])
+                    if entries:
+                        data[key] = entries
+                events = [dict(e) for e in self._events if e['ts'] >= cutoff]
+            with open(_PERSIST_PATH, 'w') as f:
+                json.dump({'ts': now, 'history': data, 'events': events}, f)
+        except Exception as e:
+            print(f"[ApiCallTracker] Failed to save history: {e}")
+
+    def _load(self):
+        """Restore 24h minute history from disk. Called on init."""
+        try:
+            if not os.path.exists(_PERSIST_PATH):
+                return
+            with open(_PERSIST_PATH, 'r') as f:
+                raw = json.load(f)
+            saved_ts = raw.get('ts', 0)
+            # Only restore if saved within last 24h
+            if time.time() - saved_ts > 86400:
+                return
+            history = raw.get('history', {})
+            events = raw.get('events', [])
+            cutoff = time.time() - 86400
+            with self._lock:
+                for key, entries in history.items():
+                    for ts, count in entries:
+                        if ts >= cutoff:
+                            self._minute_history[key].append((ts, count))
+                for e in events:
+                    if e.get('ts', 0) >= cutoff:
+                        self._events.append(e)
+            print(f"[ApiCallTracker] Restored history for {len(history)} services, {len(events)} events")
+        except Exception as e:
+            print(f"[ApiCallTracker] Failed to load history: {e}")
 
 
 # Singleton instance

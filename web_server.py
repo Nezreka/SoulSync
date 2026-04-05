@@ -3243,6 +3243,14 @@ def signal_handler(signum, frame):
     except Exception as e:
         print(f"⚠️ Error stopping automation engine: {e}")
 
+    # Persist API call history
+    try:
+        from core.api_call_tracker import api_call_tracker
+        api_call_tracker.save()
+        print("💾 API call history saved")
+    except Exception as e:
+        print(f"⚠️ Error saving API call history: {e}")
+
     # Shutdown executor to prevent new tasks
     try:
         print("🛑 Shutting down missing_download_executor...")
@@ -3253,6 +3261,14 @@ def signal_handler(signum, frame):
     sys.exit(0)
 
 # Register cleanup handlers
+def _atexit_save_history():
+    try:
+        from core.api_call_tracker import api_call_tracker
+        api_call_tracker.save()
+    except Exception:
+        pass
+
+atexit.register(_atexit_save_history)
 atexit.register(cleanup_monitor)
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
@@ -4801,11 +4817,13 @@ def get_debug_info():
     elif not soulseek_client:
         info['download_client_failures'] = ['ALL (orchestrator failed to initialize)']
 
-    # API rate monitor — current calls/min per service + Spotify rate limit state
+    # API rate monitor — current calls/min, 24h totals, peaks, rate limit events
     try:
         from core.api_call_tracker import api_call_tracker
         rates = api_call_tracker.get_all_rates()
         info['api_rates'] = rates
+        # Rich 24h debug summary with peaks, totals, per-endpoint breakdown, events
+        info['api_debug_summary'] = api_call_tracker.get_debug_summary()
         # Spotify rate limit details
         if spotify_client:
             rl_info = spotify_client.get_rate_limit_info()
@@ -4821,6 +4839,7 @@ def get_debug_info():
                 info['spotify_rate_limit'] = {'active': False}
     except Exception:
         info['api_rates'] = {}
+        info['api_debug_summary'] = {}
         info['spotify_rate_limit'] = {'active': False}
 
     # Database size
@@ -6723,13 +6742,21 @@ def spotify_callback():
         token_info = auth_manager.get_access_token(auth_code, as_dict=True)
 
         if token_info:
+            # CRITICAL: update the GLOBAL spotify_client, not a local variable
+            global spotify_client
             spotify_client = SpotifyClient()
             if spotify_client.is_authenticated():
+                # Clear any active rate limit ban and post-ban cooldown
+                # so Spotify is immediately usable after re-auth
+                from core.spotify_client import _clear_rate_limit
+                _clear_rate_limit()
+                spotify_client._invalidate_auth_cache()
                 # Invalidate status cache so next poll picks up the new connection
                 _status_cache_timestamps['spotify'] = 0
                 # Refresh enrichment worker's client so it picks up new auth
                 if spotify_enrichment_worker and hasattr(spotify_enrichment_worker, 'client'):
                     spotify_enrichment_worker.client.reload_config()
+                    spotify_enrichment_worker.client._invalidate_auth_cache()
                 add_activity_item("✅", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
                 return "<h1>Spotify Authentication Successful!</h1><p>You can close this window.</p>"
             else:
@@ -47633,11 +47660,16 @@ def start_oauth_callback_servers():
                             spotify_client = SpotifyClient()
 
                             if spotify_client.is_authenticated():
+                                # Clear rate limit ban + post-ban cooldown so Spotify is usable immediately
+                                from core.spotify_client import _clear_rate_limit
+                                _clear_rate_limit()
+                                spotify_client._invalidate_auth_cache()
                                 # Invalidate status cache so next poll picks up the new connection
                                 _status_cache_timestamps['spotify'] = 0
                                 # Refresh enrichment worker's client so it picks up new auth
                                 if spotify_enrichment_worker and hasattr(spotify_enrichment_worker, 'client'):
                                     spotify_enrichment_worker.client.reload_config()
+                                    spotify_enrichment_worker.client._invalidate_auth_cache()
                                 add_activity_item("✅", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
                                 self.send_response(200)
                                 self.send_header('Content-type', 'text/html')
