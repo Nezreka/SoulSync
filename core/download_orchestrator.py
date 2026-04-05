@@ -217,34 +217,80 @@ class DownloadOrchestrator:
         # Fallback: empty results
         return ([], [])
 
-    async def search_and_download_best(self, query: str) -> Optional[str]:
+    async def search_and_download_best(self, query: str, expected_track=None) -> Optional[str]:
         """
         Search and automatically download the best result.
         Supports Hybrid mode (uses configured source priority).
-        
+
         Args:
             query: Search query string
-            
+            expected_track: Optional SpotifyTrack for match validation (title/artist/duration)
+
         Returns:
             Download ID (str) or None if failed
         """
         # 1. Search using configured mode/hybrid logic
         results = await self.search(query)
-        
+
         # Unpack tuple (tracks, albums) - defensive handling
         if isinstance(results, tuple):
             tracks = results[0]
         else:
             tracks = results # Should not happen based on search() return type, but safe
-            
+
         if not tracks:
             logger.warning(f"No results found for: {query}")
             return None
 
-        # 2. Filter using Soulseek's quality preferences (Soulseek only)
-        # Streaming sources (YouTube/Tidal/Qobuz) handle quality internally
-        is_streaming = tracks[0].username in ('youtube', 'tidal', 'qobuz', 'hifi') if tracks else False
-        if is_streaming:
+        # 2. Filter and validate results
+        _streaming_sources = ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl')
+        is_streaming = tracks[0].username in _streaming_sources if tracks else False
+
+        if is_streaming and expected_track:
+            # Score streaming results against expected track metadata
+            from core.matching_engine import MusicMatchingEngine
+            me = MusicMatchingEngine()
+
+            expected_title = expected_track.name if hasattr(expected_track, 'name') else ''
+            expected_artists = expected_track.artists if hasattr(expected_track, 'artists') else []
+            expected_duration = expected_track.duration_ms if hasattr(expected_track, 'duration_ms') else 0
+
+            expected_title_lower = (expected_title or '').lower()
+            _version_kw = ['remix', 'live', 'acoustic', 'instrumental', 'radio edit',
+                           'extended', 'slowed', 'sped up', 'reverb', 'karaoke']
+            expected_is_version = any(kw in expected_title_lower for kw in _version_kw)
+
+            scored = []
+            for r in tracks:
+                confidence, _ = me.score_track_match(
+                    source_title=expected_title,
+                    source_artists=expected_artists,
+                    source_duration_ms=expected_duration,
+                    candidate_title=r.title or '',
+                    candidate_artists=[r.artist] if r.artist else [],
+                    candidate_duration_ms=r.duration or 0,
+                )
+                # Version penalty
+                r_title_lower = (r.title or '').lower()
+                if not expected_is_version:
+                    for kw in _version_kw:
+                        if kw in r_title_lower and kw not in expected_title_lower:
+                            confidence *= 0.4
+                            break
+
+                if confidence >= 0.55:
+                    r._match_confidence = confidence
+                    scored.append(r)
+
+            if scored:
+                scored.sort(key=lambda x: x._match_confidence, reverse=True)
+                filtered_results = scored
+                logger.info(f"🎵 Streaming validation: {len(scored)}/{len(tracks)} passed "
+                            f"(best: {scored[0]._match_confidence:.2f})")
+            else:
+                logger.warning(f"⚠️ No streaming results passed validation for: {query}")
+                return None
+        elif is_streaming:
             filtered_results = tracks
         else:
             filtered_results = self.soulseek.filter_results_by_quality_preference(tracks) if self.soulseek else tracks
@@ -255,13 +301,13 @@ class DownloadOrchestrator:
 
         # 3. Download the best match
         best_result = filtered_results[0]
-        
+
         quality_info = f"{best_result.quality.upper()}"
         if best_result.bitrate:
             quality_info += f" {best_result.bitrate}kbps"
 
         logger.info(f"Downloading best match: {best_result.filename} ({quality_info}) from {best_result.username}")
-        
+
         # Use orchestrator's download method to route correctly
         return await self.download(best_result.username, best_result.filename, best_result.size)
 
