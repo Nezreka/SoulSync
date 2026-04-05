@@ -8392,6 +8392,16 @@ function initializeSearchModeToggle() {
                         }
                     }, delay);
                     delay += 30;
+                } else if (tr && tr.in_wishlist) {
+                    setTimeout(() => {
+                        if (!card.querySelector('.enh-item-wishlist-badge')) {
+                            const badge = document.createElement('div');
+                            badge.className = 'enh-item-wishlist-badge';
+                            badge.textContent = 'In Wishlist';
+                            card.appendChild(badge);
+                        }
+                    }, delay);
+                    delay += 30;
                 }
             });
         } catch (e) {
@@ -17509,6 +17519,14 @@ async function _gsLibraryCheck() {
                         playBtn.replaceWith(newBtn);
                     }
                 }
+            } else if (tr && tr.in_wishlist) {
+                if (!el.querySelector('.gsearch-item-badge')) {
+                    const badge = document.createElement('span');
+                    badge.className = 'gsearch-item-badge gsearch-wishlist-badge';
+                    badge.textContent = 'In Wishlist';
+                    badge.style.marginRight = '4px';
+                    el.querySelector('.gsearch-track-dur')?.before(badge);
+                }
             }
         });
     } catch (e) {
@@ -23026,6 +23044,31 @@ const TOOL_HELP_CONTENT = {
                 <li>Stores the best match with confidence score in the discovery cache</li>
                 <li>Already-discovered tracks are skipped for efficiency</li>
             </ol>
+        `
+    },
+    'auto-playlist_pipeline': {
+        title: 'Playlist Pipeline',
+        content: `
+            <h4>What does this action do?</h4>
+            <p>Runs the full playlist lifecycle in one automation — no signal wiring needed. Executes four phases sequentially:</p>
+            <ol>
+                <li><strong>Refresh</strong> — Re-fetches playlist tracks from the source platform (Spotify, Tidal, YouTube, Deezer)</li>
+                <li><strong>Discover</strong> — Matches each track to official metadata (Spotify/iTunes/Deezer IDs)</li>
+                <li><strong>Sync</strong> — Pushes the playlist to your media server (Plex, Jellyfin, Navidrome)</li>
+                <li><strong>Download Missing</strong> — Queues unmatched tracks to the wishlist for automatic download</li>
+            </ol>
+
+            <h4>Configuration</h4>
+            <ul>
+                <li><strong>Playlist:</strong> Select a specific mirrored playlist, or check "Process all" to run the pipeline for every mirrored playlist</li>
+                <li><strong>Skip wishlist:</strong> Check this to skip the download phase (useful if you only want to sync, not download)</li>
+            </ul>
+
+            <h4>How the re-sync loop works</h4>
+            <p>Set this on a schedule (e.g., every 6 hours). Between runs, the wishlist processor downloads missing tracks in the background. On the next pipeline run, those newly downloaded tracks will match during the sync phase — so your server playlist gets more complete with each cycle until fully synced.</p>
+
+            <h4>Replaces</h4>
+            <p>This single automation replaces the 4-automation signal chain pattern (Refresh → signal → Discover → signal → Sync → signal → Download). No signals, no chaining, no room for misconfiguration.</p>
         `
     },
     'auto-notify_only': {
@@ -43506,6 +43549,7 @@ function renderArtistMetaPanel(artist) {
             { id: 'spotify', label: 'Spotify', icon: '🟢' },
             { id: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
             { id: 'deezer', label: 'Deezer', icon: '🟣' },
+            { id: 'discogs', label: 'Discogs', icon: '🟤' },
             { id: 'audiodb', label: 'AudioDB', icon: '🔵' },
             { id: 'itunes', label: 'iTunes', icon: '🔴' },
             { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
@@ -43985,9 +44029,11 @@ function renderExpandedAlbumHeader(album) {
             { id: 'spotify', label: 'Spotify', icon: '🟢' },
             { id: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
             { id: 'deezer', label: 'Deezer', icon: '🟣' },
+            { id: 'discogs', label: 'Discogs', icon: '🟤' },
             { id: 'audiodb', label: 'AudioDB', icon: '🔵' },
             { id: 'itunes', label: 'iTunes', icon: '🔴' },
             { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
+            { id: 'genius', label: 'Genius', icon: '🟡' },
         ].forEach(svc => {
             const item = document.createElement('div');
             item.className = 'enhanced-enrich-menu-item';
@@ -65574,6 +65620,7 @@ const _autoIcons = {
     clean_search_history: '\uD83D\uDDD1\uFE0F',
     clean_completed_downloads: '\u2705',
     full_cleanup: '\uD83E\uDDF9',
+    playlist_pipeline: '\uD83D\uDE80',
 };
 
 // --- Inspiration Templates ---
@@ -65582,54 +65629,17 @@ const _autoIcons = {
 // ── Automation Hub: One-Click Pipeline Groups ──
 const AUTO_HUB_GROUPS = [
     {
-        id: 'release-radar', icon: '📡', name: 'Release Radar Sync',
-        desc: 'Auto-sync your Release Radar playlist every Friday. Refreshes from Spotify, discovers metadata, syncs to your media server, and downloads missing tracks.',
-        category: 'Sync', badge: '4 automations', color: '#1db954',
+        id: 'playlist-pipeline', icon: '🚀', name: 'Playlist Pipeline (All-in-One)',
+        desc: 'Single automation that runs the full playlist lifecycle: refresh → discover → sync → download missing. No signal wiring needed.',
+        category: 'Sync', badge: '1 automation', color: '#8b5cf6',
         steps: [
             { label: 'Refresh', icon: '🔄', type: 'action' },
             { label: 'Discover', icon: '🔍', type: 'action' },
-            { label: 'Sync', icon: '📋', type: 'action' },
+            { label: 'Sync', icon: '🔗', type: 'action' },
             { label: 'Download', icon: '📥', type: 'action' },
         ],
         automations: [
-            { name: 'Release Radar — Refresh', trigger_type: 'weekly_time', trigger_config: { days: ['friday'], time: '18:00' }, action_type: 'refresh_mirrored', action_config: { all: true }, then_actions: [{ type: 'fire_signal', config: { signal_name: 'rr_refreshed' } }], group_name: 'Release Radar' },
-            { name: 'Release Radar — Discover', trigger_type: 'signal_received', trigger_config: { signal_name: 'rr_refreshed' }, action_type: 'discover_playlist', action_config: { all: true }, then_actions: [{ type: 'fire_signal', config: { signal_name: 'rr_discovered' } }], group_name: 'Release Radar' },
-            { name: 'Release Radar — Sync', trigger_type: 'signal_received', trigger_config: { signal_name: 'rr_discovered' }, action_type: 'sync_playlist', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'rr_synced' } }], group_name: 'Release Radar' },
-            { name: 'Release Radar — Download', trigger_type: 'signal_received', trigger_config: { signal_name: 'rr_synced' }, action_type: 'process_wishlist', action_config: {}, then_actions: [], group_name: 'Release Radar', needs_notify: true },
-        ]
-    },
-    {
-        id: 'discovery-weekly', icon: '🎵', name: 'Discovery Weekly Sync',
-        desc: 'Capture your Discover Weekly every Monday before Spotify replaces it. Refreshes, discovers, syncs, and downloads the full playlist.',
-        category: 'Sync', badge: '4 automations', color: '#6366f1',
-        steps: [
-            { label: 'Refresh', icon: '🔄', type: 'action' },
-            { label: 'Discover', icon: '🔍', type: 'action' },
-            { label: 'Sync', icon: '📋', type: 'action' },
-            { label: 'Download', icon: '📥', type: 'action' },
-        ],
-        automations: [
-            { name: 'Discovery Weekly — Refresh', trigger_type: 'weekly_time', trigger_config: { days: ['monday'], time: '06:00' }, action_type: 'refresh_mirrored', action_config: { all: true }, then_actions: [{ type: 'fire_signal', config: { signal_name: 'dw_refreshed' } }], group_name: 'Discovery Weekly' },
-            { name: 'Discovery Weekly — Discover', trigger_type: 'signal_received', trigger_config: { signal_name: 'dw_refreshed' }, action_type: 'discover_playlist', action_config: { all: true }, then_actions: [{ type: 'fire_signal', config: { signal_name: 'dw_discovered' } }], group_name: 'Discovery Weekly' },
-            { name: 'Discovery Weekly — Sync', trigger_type: 'signal_received', trigger_config: { signal_name: 'dw_discovered' }, action_type: 'sync_playlist', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'dw_synced' } }], group_name: 'Discovery Weekly' },
-            { name: 'Discovery Weekly — Download', trigger_type: 'signal_received', trigger_config: { signal_name: 'dw_synced' }, action_type: 'process_wishlist', action_config: {}, then_actions: [], group_name: 'Discovery Weekly', needs_notify: true },
-        ]
-    },
-    {
-        id: 'playlist-auto-sync', icon: '🔄', name: 'Playlist Auto-Sync',
-        desc: 'Keep all mirrored playlists in sync. Refreshes every 6 hours, then discovers, syncs, and downloads any new tracks.',
-        category: 'Sync', badge: '4 automations', color: '#06b6d4',
-        steps: [
-            { label: 'Refresh', icon: '🔄', type: 'action' },
-            { label: 'Discover', icon: '🔍', type: 'action' },
-            { label: 'Sync', icon: '📋', type: 'action' },
-            { label: 'Download', icon: '📥', type: 'action' },
-        ],
-        automations: [
-            { name: 'Playlist Sync — Refresh', trigger_type: 'schedule', trigger_config: { interval: 6, unit: 'hours' }, action_type: 'refresh_mirrored', action_config: { all: true }, then_actions: [{ type: 'fire_signal', config: { signal_name: 'ps_refreshed' } }], group_name: 'Playlist Auto-Sync' },
-            { name: 'Playlist Sync — Discover', trigger_type: 'signal_received', trigger_config: { signal_name: 'ps_refreshed' }, action_type: 'discover_playlist', action_config: { all: true }, then_actions: [{ type: 'fire_signal', config: { signal_name: 'ps_discovered' } }], group_name: 'Playlist Auto-Sync' },
-            { name: 'Playlist Sync — Sync', trigger_type: 'signal_received', trigger_config: { signal_name: 'ps_discovered' }, action_type: 'sync_playlist', action_config: {}, then_actions: [{ type: 'fire_signal', config: { signal_name: 'ps_synced' } }], group_name: 'Playlist Auto-Sync' },
-            { name: 'Playlist Sync — Download', trigger_type: 'signal_received', trigger_config: { signal_name: 'ps_synced' }, action_type: 'process_wishlist', action_config: {}, then_actions: [], group_name: 'Playlist Auto-Sync', needs_notify: true },
+            { name: 'Playlist Pipeline', trigger_type: 'schedule', trigger_config: { interval: 6, unit: 'hours' }, action_type: 'playlist_pipeline', action_config: { all: true }, then_actions: [], group_name: 'Playlist Pipeline' },
         ]
     },
     {
@@ -65910,6 +65920,7 @@ const AUTO_HUB_REFERENCE = {
     ],
     actions: [
         { group: 'Downloads & Sync', items: [
+            { type: 'playlist_pipeline', label: 'Playlist Pipeline', desc: 'Full lifecycle: refresh → discover → sync → download missing' },
             { type: 'process_wishlist', label: 'Process Wishlist', desc: 'Download all pending wishlist items' },
             { type: 'refresh_mirrored', label: 'Refresh Mirrored', desc: 'Refresh all mirrored playlists from their sources' },
             { type: 'sync_playlist', label: 'Sync Playlist', desc: 'Sync a specific playlist to your library' },
@@ -66848,7 +66859,8 @@ function _autoFormatAction(type) {
         backup_database: 'Backup Database',
         refresh_beatport_cache: 'Refresh Beatport Cache', clean_search_history: 'Clean Search History',
         clean_completed_downloads: 'Clean Completed Downloads',
-        full_cleanup: 'Full Cleanup' };
+        full_cleanup: 'Full Cleanup',
+        playlist_pipeline: 'Playlist Pipeline' };
     return labels[type] || type || 'Unknown';
 }
 function _autoFormatNotify(type) {
@@ -67083,6 +67095,14 @@ const _RESULT_DISPLAY_MAP = {
         { key: 'quarantine_removed', label: 'Quarantine Removed' },
         { key: 'staging_removed', label: 'Staging Dirs Removed' },
         { key: 'total_removed', label: 'Total Items Removed' },
+    ],
+    'playlist_pipeline': [
+        { key: 'playlists_refreshed', label: 'Refreshed' },
+        { key: 'tracks_discovered', label: 'Discovered' },
+        { key: 'tracks_synced', label: 'Synced' },
+        { key: 'sync_skipped', label: 'Skipped', hideZero: true },
+        { key: 'wishlist_queued', label: 'Wishlist Queued' },
+        { key: 'duration_seconds', label: 'Duration (s)' },
     ],
 };
 
@@ -67563,6 +67583,23 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
             <label><input type="checkbox" id="cfg-${slotKey}-all"${allChecked} onchange="_autoTogglePlaylistSelect('${slotKey}')"> Discover all mirrored playlists</label>
         </div>`;
     }
+    if (blockType === 'playlist_pipeline') {
+        const allChecked = config.all ? ' checked' : '';
+        const skipWishlistChecked = config.skip_wishlist ? ' checked' : '';
+        return `<div class="config-row">
+            <label>Playlist</label>
+            <select id="cfg-${slotKey}-playlist_id" class="mirrored-playlist-select" data-value="${_escAttr(config.playlist_id || '')}">
+                <option value="">Loading...</option>
+            </select>
+        </div>
+        <div class="config-row">
+            <label><input type="checkbox" id="cfg-${slotKey}-all"${allChecked} onchange="_autoTogglePlaylistSelect('${slotKey}')"> Process all mirrored playlists</label>
+        </div>
+        <div class="config-row">
+            <label><input type="checkbox" id="cfg-${slotKey}-skip_wishlist"${skipWishlistChecked}> Skip wishlist processing</label>
+        </div>
+        <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Runs 4 phases: Refresh → Discover → Sync → Download Missing</div>`;
+    }
     // Shared variable tags builder for notification types
     function _notifyVarHtml(slotKey) {
         let allVars = ['time', 'name', 'run_count', 'status'];
@@ -67856,6 +67893,15 @@ function _readPlacedConfig(slotKey) {
         return {
             playlist_id: document.getElementById('cfg-' + slotKey + '-playlist_id')?.value || '',
             all: allCb ? allCb.checked : false,
+        };
+    }
+    if (type === 'playlist_pipeline') {
+        const allCb = document.getElementById('cfg-' + slotKey + '-all');
+        const skipWl = document.getElementById('cfg-' + slotKey + '-skip_wishlist');
+        return {
+            playlist_id: document.getElementById('cfg-' + slotKey + '-playlist_id')?.value || '',
+            all: allCb ? allCb.checked : false,
+            skip_wishlist: skipWl ? skipWl.checked : false,
         };
     }
     if (type === 'signal_received' || type === 'fire_signal') {
