@@ -984,9 +984,223 @@ def _register_automation_handlers():
         return {'status': 'started', 'playlist_count': str(len(playlists)), 'playlists': names,
                 '_manages_own_progress': True}
 
+    # --- Playlist Pipeline: single automation for full lifecycle ---
+    _pipeline_running = False
+
+    def _pipeline_guard():
+        return _pipeline_running
+
+    def _auto_playlist_pipeline(config):
+        """Full playlist lifecycle: refresh → discover → sync → wishlist.
+        Runs all 4 phases sequentially in one automation, reporting progress throughout."""
+        nonlocal _pipeline_running
+        _pipeline_running = True
+        automation_id = config.get('_automation_id')
+        pipeline_start = time.time()
+
+        try:
+            db = get_database()
+            playlist_id = config.get('playlist_id')
+            process_all = config.get('all', False)
+            skip_wishlist = config.get('skip_wishlist', False)
+
+            # Resolve playlists
+            if process_all:
+                playlists = db.get_mirrored_playlists()
+            elif playlist_id:
+                p = db.get_mirrored_playlist(int(playlist_id))
+                playlists = [p] if p else []
+            else:
+                _pipeline_running = False
+                return {'status': 'error', 'error': 'No playlist specified'}
+
+            playlists = [pl for pl in playlists if pl.get('source', '') not in ('file', 'beatport')]
+            if not playlists:
+                _pipeline_running = False
+                return {'status': 'error', 'error': 'No refreshable playlists found'}
+
+            pl_names = ', '.join(p.get('name', '?') for p in playlists[:3])
+            if len(playlists) > 3:
+                pl_names += f' (+{len(playlists) - 3} more)'
+
+            _update_automation_progress(automation_id, progress=2,
+                phase=f'Pipeline: {len(playlists)} playlist(s)',
+                log_line=f'Starting pipeline for: {pl_names}', log_type='info')
+
+            # ── PHASE 1: REFRESH ──────────────────────────────────────────
+            _update_automation_progress(automation_id, progress=3,
+                phase='Phase 1/4: Refreshing playlists...',
+                log_line='Phase 1: Refresh', log_type='info')
+
+            refresh_config = dict(config)
+            refresh_config['_automation_id'] = None  # Don't let sub-handler hijack pipeline progress
+            refresh_result = _auto_refresh_mirrored(refresh_config)
+            refreshed = int(refresh_result.get('refreshed', 0))
+            refresh_errors = int(refresh_result.get('errors', 0))
+
+            _update_automation_progress(automation_id, progress=25,
+                phase='Phase 1/4: Refresh complete',
+                log_line=f'Phase 1 done: {refreshed} refreshed, {refresh_errors} errors',
+                log_type='success' if refresh_errors == 0 else 'warning')
+
+            # ── PHASE 2: DISCOVER ─────────────────────────────────────────
+            _update_automation_progress(automation_id, progress=26,
+                phase='Phase 2/4: Discovering metadata...',
+                log_line='Phase 2: Discover', log_type='info')
+
+            # Reload playlists (refresh may have updated them)
+            if process_all:
+                disc_playlists = db.get_mirrored_playlists()
+            else:
+                disc_playlists = [db.get_mirrored_playlist(int(playlist_id))]
+            disc_playlists = [p for p in disc_playlists if p]
+
+            # Run discovery in a thread and wait for it
+            disc_done = threading.Event()
+            disc_result = {'discovered': 0, 'failed': 0, 'skipped': 0, 'total': 0}
+
+            def _disc_wrapper(pls):
+                try:
+                    # The worker updates automation_progress internally,
+                    # but we pass None so it doesn't conflict with our pipeline progress
+                    _run_playlist_discovery_worker(pls, automation_id=None)
+                except Exception as e:
+                    print(f"[Pipeline] Discovery error: {e}")
+                finally:
+                    disc_done.set()
+
+            threading.Thread(target=_disc_wrapper, args=(disc_playlists,), daemon=True,
+                             name='pipeline-discover').start()
+
+            # Poll for completion with progress updates
+            poll_start = time.time()
+            while not disc_done.wait(timeout=3):
+                elapsed = int(time.time() - poll_start)
+                _update_automation_progress(automation_id, progress=min(26 + elapsed // 4, 54),
+                    phase=f'Phase 2/4: Discovering... ({elapsed}s)')
+                if elapsed > 3600:  # 1hr safety timeout
+                    _update_automation_progress(automation_id,
+                        log_line='Discovery timed out after 1 hour', log_type='warning')
+                    break
+
+            _update_automation_progress(automation_id, progress=55,
+                phase='Phase 2/4: Discovery complete',
+                log_line='Phase 2 done: discovery complete', log_type='success')
+
+            # ── PHASE 3: SYNC ─────────────────────────────────────────────
+            _update_automation_progress(automation_id, progress=56,
+                phase='Phase 3/4: Syncing to server...',
+                log_line='Phase 3: Sync', log_type='info')
+
+            total_synced = 0
+            total_skipped = 0
+            sync_errors = 0
+
+            for pl_idx, pl in enumerate(playlists):
+                pl_id = pl.get('id')
+                if not pl_id:
+                    continue
+
+                # Build sync config for this playlist (reuse existing sync handler)
+                sync_config = {
+                    'playlist_id': str(pl_id),
+                    '_automation_id': None,  # Don't let sync handler hijack our progress
+                }
+                sync_result = _auto_sync_playlist(sync_config)
+                sync_status = sync_result.get('status', '')
+
+                if sync_status == 'started':
+                    # Sync launched a background thread — wait for it
+                    sync_id = f"auto_mirror_{pl_id}"
+                    sync_poll_start = time.time()
+                    while time.time() - sync_poll_start < 600:  # 10 min per playlist max
+                        if sync_id in sync_states and sync_states[sync_id].get('status') in ('finished', 'complete', 'error', 'failed'):
+                            break
+                        time.sleep(2)
+                        elapsed = int(time.time() - sync_poll_start)
+                        sub_progress = 56 + ((pl_idx + 1) / max(1, len(playlists))) * 29
+                        _update_automation_progress(automation_id, progress=min(int(sub_progress), 84),
+                            phase=f'Phase 3/4: Syncing "{pl.get("name", "")}" ({elapsed}s)')
+
+                    # Check result
+                    ss = sync_states.get(sync_id, {})
+                    ss_result = ss.get('result', ss.get('progress', {}))
+                    matched = ss_result.get('matched_tracks', 0) if isinstance(ss_result, dict) else 0
+                    total_synced += int(matched) if matched else 0
+                    _update_automation_progress(automation_id,
+                        log_line=f'Synced "{pl.get("name", "")}": {matched} tracks matched',
+                        log_type='success')
+
+                elif sync_status == 'skipped':
+                    total_skipped += 1
+                    reason = sync_result.get('reason', 'unchanged')
+                    _update_automation_progress(automation_id,
+                        log_line=f'Skipped "{pl.get("name", "")}": {reason}',
+                        log_type='skip')
+                elif sync_status == 'error':
+                    sync_errors += 1
+                    _update_automation_progress(automation_id,
+                        log_line=f'Sync error "{pl.get("name", "")}": {sync_result.get("reason", "unknown")}',
+                        log_type='error')
+
+            _update_automation_progress(automation_id, progress=85,
+                phase='Phase 3/4: Sync complete',
+                log_line=f'Phase 3 done: {total_synced} matched, {total_skipped} skipped, {sync_errors} errors',
+                log_type='success' if sync_errors == 0 else 'warning')
+
+            # ── PHASE 4: WISHLIST ─────────────────────────────────────────
+            wishlist_queued = 0
+            if not skip_wishlist:
+                _update_automation_progress(automation_id, progress=86,
+                    phase='Phase 4/4: Processing wishlist...',
+                    log_line='Phase 4: Wishlist', log_type='info')
+
+                try:
+                    if not is_wishlist_actually_processing() and not is_watchlist_actually_scanning():
+                        _process_wishlist_automatically(automation_id=None)
+                        _update_automation_progress(automation_id,
+                            log_line='Wishlist processing triggered', log_type='success')
+                        wishlist_queued = 1
+                    else:
+                        _update_automation_progress(automation_id,
+                            log_line='Wishlist/watchlist already running — skipped', log_type='skip')
+                except Exception as e:
+                    _update_automation_progress(automation_id,
+                        log_line=f'Wishlist error: {e}', log_type='warning')
+            else:
+                _update_automation_progress(automation_id, progress=86,
+                    log_line='Phase 4: Wishlist skipped (disabled)', log_type='skip')
+
+            # ── COMPLETE ──────────────────────────────────────────────────
+            duration = int(time.time() - pipeline_start)
+            _update_automation_progress(automation_id, status='finished', progress=100,
+                phase='Pipeline complete',
+                log_line=f'Pipeline finished in {duration // 60}m {duration % 60}s',
+                log_type='success')
+
+            _pipeline_running = False
+            return {
+                'status': 'completed',
+                '_manages_own_progress': True,
+                'playlists_refreshed': str(refreshed),
+                'tracks_discovered': 'completed',
+                'tracks_synced': str(total_synced),
+                'sync_skipped': str(total_skipped),
+                'wishlist_queued': str(wishlist_queued),
+                'duration_seconds': str(duration),
+            }
+
+        except Exception as e:
+            _pipeline_running = False
+            _update_automation_progress(automation_id, status='error', progress=100,
+                phase='Pipeline error',
+                log_line=f'Pipeline failed: {e}', log_type='error')
+            return {'status': 'error', 'error': str(e), '_manages_own_progress': True}
+
     automation_engine.register_action_handler('refresh_mirrored', _auto_refresh_mirrored)
     automation_engine.register_action_handler('sync_playlist', _auto_sync_playlist)
     automation_engine.register_action_handler('discover_playlist', _auto_discover_playlist)
+    automation_engine.register_action_handler('playlist_pipeline', _auto_playlist_pipeline, _pipeline_guard)
 
     # --- Phase 3 action handlers ---
 
@@ -5633,6 +5847,14 @@ def get_automation_blocks():
                  {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"},
                  {"key": "all", "type": "checkbox", "label": "Discover all mirrored playlists", "default": False}
              ]},
+            {"type": "playlist_pipeline", "label": "Playlist Pipeline", "icon": "rocket",
+             "description": "Full lifecycle: refresh → discover → sync → download missing. One automation for the entire flow.",
+             "available": True,
+             "config_fields": [
+                 {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"},
+                 {"key": "all", "type": "checkbox", "label": "Process all mirrored playlists", "default": False},
+                 {"key": "skip_wishlist", "type": "checkbox", "label": "Skip wishlist processing", "default": False},
+             ]},
             {"type": "notify_only", "label": "Notify Only", "icon": "bell", "description": "No action — just send notification", "available": True},
             # Phase 3 actions
             {"type": "start_database_update", "label": "Update Database", "icon": "database",
@@ -7671,6 +7893,44 @@ def enhanced_search_library_check():
                 if r[0] not in owned_tracks:  # Keep first match only
                     owned_tracks[r[0]] = {'track_id': r[1], 'file_path': r[2], 'title': r[3], 'artist_name': r[4], 'album_title': r[5], 'album_thumb_url': r[6]}
 
+            # Build wishlist lookup set — track name|||artist
+            wishlist_keys = set()
+            try:
+                profile_id = get_current_profile_id()
+                cursor.execute("SELECT spotify_data FROM wishlist_tracks WHERE profile_id = ?", (profile_id,))
+                for wr in cursor.fetchall():
+                    try:
+                        wd = json.loads(wr[0]) if isinstance(wr[0], str) else {}
+                        wname = (wd.get('name') or '').lower()
+                        wartists = wd.get('artists', [])
+                        if wartists:
+                            wa = wartists[0].get('name', '') if isinstance(wartists[0], dict) else str(wartists[0])
+                        else:
+                            wa = ''
+                        if wname:
+                            wishlist_keys.add(wname + '|||' + wa.lower().strip())
+                    except Exception:
+                        pass
+            except Exception:
+                # profile_id column may not exist on older DBs — try without it
+                try:
+                    cursor.execute("SELECT spotify_data FROM wishlist_tracks")
+                    for wr in cursor.fetchall():
+                        try:
+                            wd = json.loads(wr[0]) if isinstance(wr[0], str) else {}
+                            wname = (wd.get('name') or '').lower()
+                            wartists = wd.get('artists', [])
+                            if wartists:
+                                wa = wartists[0].get('name', '') if isinstance(wartists[0], dict) else str(wartists[0])
+                            else:
+                                wa = ''
+                            if wname:
+                                wishlist_keys.add(wname + '|||' + wa.lower().strip())
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
             # O(1) lookups per item
             album_results = []
             for a in albums:
@@ -7691,6 +7951,7 @@ def enhanced_search_library_check():
             track_results = []
             for t in tracks:
                 key = (t.get('name', '').lower() + '|||' + t.get('artist', '').split(',')[0].strip().lower())
+                in_wishlist = key in wishlist_keys
                 match = owned_tracks.get(key)
                 if match:
                     # Resolve thumb URL
@@ -7698,9 +7959,9 @@ def enhanced_search_library_check():
                     if thumb and not thumb.startswith('http') and _plex_base and thumb.startswith('/'):
                         thumb = f"{_plex_base}{thumb}?X-Plex-Token={_plex_token}" if _plex_token else f"{_plex_base}{thumb}"
                     match['album_thumb_url'] = thumb
-                    track_results.append({'in_library': True, **match})
+                    track_results.append({'in_library': True, 'in_wishlist': in_wishlist, **match})
                 else:
-                    track_results.append({'in_library': False})
+                    track_results.append({'in_library': False, 'in_wishlist': in_wishlist})
         finally:
             conn.close()
 
@@ -13072,6 +13333,24 @@ def _search_service(service, entity_type, query):
                     artist_name = result.get('artist', {}).get('name', '') if isinstance(result.get('artist'), dict) else ''
                 return [{'id': str(result.get('id', '')), 'name': result.get('title', ''),
                          'image': None, 'extra': artist_name}]
+        return []
+
+    elif service == 'discogs':
+        if not discogs_worker or not discogs_worker.client:
+            raise ValueError("Discogs worker not initialized")
+        client = discogs_worker.client
+        if entity_type == 'artist':
+            items = client.search_artists(query, limit=8)
+            return [{'id': str(a.id), 'name': a.name, 'image': a.image_url,
+                     'extra': ', '.join(a.genres[:3]) if a.genres else ''} for a in items]
+        elif entity_type == 'album':
+            items = client.search_albums(query, limit=8)
+            return [{'id': str(a.id), 'name': a.name, 'image': a.image_url,
+                     'extra': f"{', '.join(a.artists)} · {a.release_date or ''}"} for a in items]
+        elif entity_type == 'track':
+            items = client.search_tracks(query, limit=8)
+            return [{'id': str(t.id), 'name': t.name, 'image': t.image_url,
+                     'extra': f"{', '.join(t.artists)} · {t.album or ''}"} for t in items]
         return []
 
     elif service == 'audiodb':

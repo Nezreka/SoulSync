@@ -5390,6 +5390,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     flex-shrink: 0;
 }
 
+.gsearch-wishlist-badge {
+    background: rgba(251,191,36,0.12); color: #fbbf24;
+}
+
 .gsearch-loading {
     text-align: center; padding: 24px; font-size: 12px; color: rgba(255,255,255,0.2);
 }
@@ -33033,6 +33037,31 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .enh-compact-item.track-item .enh-item-lib-badge {
+    position: static;
+    flex-shrink: 0;
+    margin-left: auto;
+    font-size: 9px;
+}
+
+.enh-item-wishlist-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: rgba(251, 191, 36, 0.85);
+    color: #1a1a2e;
+    padding: 3px 7px;
+    z-index: 5;
+    animation: libBadgeFadeIn 0.3s ease;
+    border-radius: 6px;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.enh-compact-item.track-item .enh-item-wishlist-badge {
     position: static;
     flex-shrink: 0;
     margin-left: auto;
