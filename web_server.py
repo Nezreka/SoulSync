@@ -530,9 +530,14 @@ def _register_automation_handlers():
         finally:
             _scan_library_automation_id = None
 
-    cross_guard = lambda: is_wishlist_actually_processing() or is_watchlist_actually_scanning()
-    automation_engine.register_action_handler('process_wishlist', _auto_process_wishlist, cross_guard)
-    automation_engine.register_action_handler('scan_watchlist', _auto_scan_watchlist, cross_guard)
+    # Self-guards only — prevent duplicate runs of the same operation,
+    # but allow wishlist processing and watchlist scanning to run concurrently.
+    # Downloads use bandwidth (Soulseek/Tidal/etc), scans use API calls — different resources.
+    # The per-call rate limiter handles any API contention during post-processing.
+    automation_engine.register_action_handler('process_wishlist', _auto_process_wishlist,
+        guard_fn=lambda: is_wishlist_actually_processing())
+    automation_engine.register_action_handler('scan_watchlist', _auto_scan_watchlist,
+        guard_fn=lambda: is_watchlist_actually_scanning())
     automation_engine.register_action_handler('scan_library', _auto_scan_library,
         lambda: _scan_library_automation_id is not None)
 
@@ -1156,14 +1161,14 @@ def _register_automation_handlers():
                     log_line='Phase 4: Wishlist', log_type='info')
 
                 try:
-                    if not is_wishlist_actually_processing() and not is_watchlist_actually_scanning():
+                    if not is_wishlist_actually_processing():
                         _process_wishlist_automatically(automation_id=None)
                         _update_automation_progress(automation_id,
                             log_line='Wishlist processing triggered', log_type='success')
                         wishlist_queued = 1
                     else:
                         _update_automation_progress(automation_id,
-                            log_line='Wishlist/watchlist already running — skipped', log_type='skip')
+                            log_line='Wishlist already running — skipped', log_type='skip')
                 except Exception as e:
                     _update_automation_progress(automation_id,
                         log_line=f'Wishlist error: {e}', log_type='warning')
@@ -22279,18 +22284,12 @@ def _process_wishlist_automatically(automation_id=None):
 
         # Check conditions and set flag
         should_skip_already_running = False
-        should_skip_watchlist_conflict = False
 
         with wishlist_timer_lock:
             # Re-check inside lock to handle race conditions
             if wishlist_auto_processing:
                 print("⚠️ [Auto-Wishlist] Already processing (race condition check), skipping.")
                 should_skip_already_running = True
-
-            # Check if watchlist scan is currently running (using smart detection)
-            elif is_watchlist_actually_scanning():
-                print("👁️ Watchlist scan in progress, skipping automatic wishlist processing to avoid conflicts.")
-                should_skip_watchlist_conflict = True
 
             else:
                 # Set flag and timestamp
@@ -22299,7 +22298,7 @@ def _process_wishlist_automatically(automation_id=None):
                 wishlist_auto_processing_timestamp = time.time()
                 print(f"🔒 [Auto-Wishlist] Flag set at timestamp {wishlist_auto_processing_timestamp}")
 
-        if should_skip_already_running or should_skip_watchlist_conflict:
+        if should_skip_already_running:
             return
         
         # Use app context for database operations
@@ -37777,10 +37776,6 @@ def start_watchlist_scan():
             }), 400
         
         logger.info(f"Starting watchlist scan with {active_provider} provider")
-
-        # Check if wishlist auto-processing is currently running (using smart detection)
-        if is_wishlist_actually_processing():
-            return jsonify({"success": False, "error": "Wishlist auto-processing is currently running. Please wait for it to complete before starting a watchlist scan."}), 409
 
         # Check if watchlist is already scanning
         if is_watchlist_actually_scanning():
