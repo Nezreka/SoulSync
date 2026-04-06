@@ -245,7 +245,7 @@ def get_spotify_client_for_profile(profile_id=None):
             client_id=creds['client_id'],
             client_secret=creds['client_secret'],
             redirect_uri=creds.get('redirect_uri', 'http://127.0.0.1:8888/callback'),
-            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
+            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
             cache_path=f'config/.spotify_cache_profile_{profile_id}'
         )
 
@@ -6403,7 +6403,7 @@ def auth_spotify():
                         client_id=creds['client_id'],
                         client_secret=creds['client_secret'],
                         redirect_uri=redirect_uri,
-                        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
+                        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
                         cache_path=f'config/.spotify_cache_profile_{profile_id_int}',
                         state=f'profile_{profile_id_int}'
                     )
@@ -6724,7 +6724,7 @@ def spotify_callback():
                     client_id=creds['client_id'],
                     client_secret=creds['client_secret'],
                     redirect_uri=redirect_uri,
-                    scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
+                    scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
                     cache_path=f'config/.spotify_cache_profile_{profile_id_from_state}',
                     state=f'profile_{profile_id_from_state}'
                 )
@@ -6747,7 +6747,7 @@ def spotify_callback():
             client_id=config['client_id'],
             client_secret=config['client_secret'],
             redirect_uri=configured_uri,
-            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
+            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
             cache_path='config/.spotify_cache'
         )
 
@@ -6757,7 +6757,7 @@ def spotify_callback():
             # CRITICAL: update the GLOBAL spotify_client, not a local variable
             global spotify_client
             spotify_client = SpotifyClient()
-            if spotify_client.is_authenticated():
+            if spotify_client.is_spotify_authenticated():
                 # Clear any active rate limit ban and post-ban cooldown
                 # so Spotify is immediately usable after re-auth
                 from core.spotify_client import _clear_rate_limit
@@ -47692,7 +47692,7 @@ def start_oauth_callback_servers():
                             client_id=config['client_id'],
                             client_secret=config['client_secret'],
                             redirect_uri=configured_uri,
-                            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
+                            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
                             cache_path='config/.spotify_cache'
                         )
 
@@ -47704,7 +47704,7 @@ def start_oauth_callback_servers():
                             global spotify_client
                             spotify_client = SpotifyClient()
 
-                            if spotify_client.is_authenticated():
+                            if spotify_client.is_spotify_authenticated():
                                 # Clear rate limit ban + post-ban cooldown so Spotify is usable immediately
                                 from core.spotify_client import _clear_rate_limit
                                 _clear_rate_limit()
