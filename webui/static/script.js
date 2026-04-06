@@ -21081,15 +21081,36 @@ function renderHistoryEntry(entry) {
         badge = `<span class="library-history-badge import">${escapeHtml(sourceName)}</span>`;
     }
 
+    // AcoustID badge
+    let acoustidBadge = '';
+    if (entry.acoustid_result) {
+        const _aidColors = { pass: '#4caf50', fail: '#ef5350', skip: '#ff9800', disabled: '#666', error: '#ef5350' };
+        const _aidLabels = { pass: 'Verified', fail: 'Failed', skip: 'Skipped', disabled: 'Off', error: 'Error' };
+        const color = _aidColors[entry.acoustid_result] || '#666';
+        const label = _aidLabels[entry.acoustid_result] || entry.acoustid_result;
+        acoustidBadge = `<span class="library-history-badge" style="border-color:${color};color:${color}">AcoustID: ${label}</span>`;
+    }
+
     const meta = [entry.artist_name, entry.album_name].filter(Boolean).join(' — ');
+
+    // Source provenance detail line
+    let sourceDetail = '';
+    if (entry.event_type === 'download' && (entry.source_filename || entry.source_track_title)) {
+        const parts = [];
+        if (entry.source_filename) parts.push(`File: ${escapeHtml(entry.source_filename)}`);
+        else if (entry.source_track_title) parts.push(`Source track: ${escapeHtml(entry.source_track_title)}`);
+        if (entry.source_track_id) parts.push(`ID: ${escapeHtml(entry.source_track_id)}`);
+        sourceDetail = `<div class="library-history-entry-source">${parts.join(' · ')}</div>`;
+    }
 
     return `<div class="library-history-entry">
         ${thumb}
         <div class="library-history-entry-text">
             <div class="library-history-entry-title">${escapeHtml(entry.title || 'Unknown')}</div>
             <div class="library-history-entry-meta">${escapeHtml(meta)}</div>
+            ${sourceDetail}
         </div>
-        ${badge}
+        ${badge}${acoustidBadge}
         <div class="library-history-entry-time">${formatHistoryTime(entry.created_at)}</div>
     </div>`;
 }

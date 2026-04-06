@@ -1910,6 +1910,19 @@ def _record_library_history_download(context):
             if isinstance(album_info, dict):
                 thumb_url = album_info.get('album_image_url', '')
 
+        # Source provenance — what file/track was actually downloaded
+        source_filename = search_result.get('filename', '')
+        # Track ID: try search result first, then track_info (Spotify ID used for streaming lookups)
+        source_track_id = (search_result.get('track_id', '')
+                           or search_result.get('id', '')
+                           or ti.get('id', ''))
+        # Source track title: only save if it differs from expected title (otherwise it's just noise)
+        _src_title = search_result.get('title', '') or search_result.get('name', '')
+        source_track_title = _src_title if _src_title and _src_title != title else ''
+
+        # AcoustID verification result
+        acoustid_result = context.get('_acoustid_result', '')
+
         db = get_database()
         db.add_library_history_entry(
             event_type='download',
@@ -1919,7 +1932,11 @@ def _record_library_history_download(context):
             quality=quality,
             file_path=file_path,
             thumb_url=thumb_url,
-            download_source=download_source
+            download_source=download_source,
+            source_track_id=source_track_id,
+            source_track_title=source_track_title,
+            source_filename=source_filename,
+            acoustid_result=acoustid_result
         )
     except Exception:
         pass  # Non-critical, never block download flow
@@ -19588,6 +19605,7 @@ def _post_process_matched_download(context_key, context, file_path):
                         context
                     )
                     print(f"🔍 AcoustID verification result: {verification_result.value} - {verification_msg}")
+                    context['_acoustid_result'] = verification_result.value
 
                     if verification_result == VerificationResult.FAIL:
                         # Move to quarantine instead of Transfer
@@ -19629,11 +19647,14 @@ def _post_process_matched_download(context_key, context, file_path):
                         return  # NEVER continue processing a known-wrong file
                 else:
                     print(f"⚠️ AcoustID verification skipped: missing track/artist info")
+                    context['_acoustid_result'] = 'skip'
             else:
                 print(f"ℹ️ AcoustID verification not available: {available_reason}")
+                context['_acoustid_result'] = 'disabled'
         except Exception as verify_error:
             # Any verification error should NOT block the download - fail open
             print(f"⚠️ AcoustID verification error (continuing normally): {verify_error}")
+            context['_acoustid_result'] = 'error'
         # --- END ACOUSTID VERIFICATION ---
 
         # --- SIMPLE DOWNLOAD HANDLING ---
@@ -20887,6 +20908,17 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "📋 Download History — Source Provenance",
+                "description": "Download history now tracks the original source file info for every download",
+                "features": [
+                    "• Source filename, track ID, and original track title saved with each download",
+                    "• AcoustID verification result (Verified/Failed/Skipped/Off) shown as a badge per entry",
+                    "• Source details displayed in monospace under each history entry for easy debugging",
+                    "• Settings Connections tab redesigned with collapsible accordion services and brand-colored dots"
+                ],
+                "usage_note": "Click 'Download History' on the Dashboard to see source provenance for new downloads."
+            },
             {
                 "title": "🗺️ Artist Map — Visualize Your Music Universe",
                 "description": "Three interactive canvas-based visualization modes on the Discover page",
