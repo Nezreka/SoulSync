@@ -9446,6 +9446,22 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(120, 160, 230, 0.2);
 }
 
+.history-source-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 16px;
+}
+
+.history-source-chip {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 12px;
+    border: 1px solid;
+    background: rgba(255, 255, 255, 0.03);
+}
+
 .library-history-entry-time {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.25);
