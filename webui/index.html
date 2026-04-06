@@ -109,7 +109,6 @@
                             <option value="automations">Automations</option>
                             <option value="active-downloads">Downloads</option>
                             <option value="library">Library</option>
-                            <option value="tools">Tools</option>
                             <option value="stats">Listening Stats</option>
                             <option value="playlist-explorer">Playlist Explorer</option>
                             <option value="import">Import</option>
@@ -126,7 +125,6 @@
                             <label><input type="checkbox" value="automations" checked> Automations</label>
                             <label><input type="checkbox" value="active-downloads" checked> Downloads</label>
                             <label><input type="checkbox" value="library" checked> Library</label>
-                            <label><input type="checkbox" value="tools" checked> Tools</label>
                             <label><input type="checkbox" value="stats" checked> Listening Stats</label>
                             <label><input type="checkbox" value="playlist-explorer" checked> Playlist Explorer</label>
                             <label><input type="checkbox" value="import" checked> Import</label>
@@ -2152,51 +2150,56 @@
 
             <!-- Active Downloads Page -->
             <div class="page{% if initial_client_page == 'active-downloads' %} active{% endif %}" id="active-downloads-page">
-                <div class="adl-container">
-                    <div class="adl-header">
-                        <h2 class="adl-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Downloads</h2>
-                        <div class="adl-controls">
-                            <div class="adl-filter-pills" id="adl-filter-pills">
-                                <button class="adl-pill active" data-filter="all" onclick="adlSetFilter('all')">All</button>
-                                <button class="adl-pill" data-filter="active" onclick="adlSetFilter('active')">Active</button>
-                                <button class="adl-pill" data-filter="queued" onclick="adlSetFilter('queued')">Queued</button>
-                                <button class="adl-pill" data-filter="completed" onclick="adlSetFilter('completed')">Completed</button>
-                                <button class="adl-pill" data-filter="failed" onclick="adlSetFilter('failed')">Failed</button>
+                <div class="adl-layout">
+                    <!-- Left: download list -->
+                    <div class="adl-main">
+                        <div class="adl-container">
+                            <div class="adl-header">
+                                <h2 class="adl-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Downloads</h2>
+                                <div class="adl-controls">
+                                    <div class="adl-filter-pills" id="adl-filter-pills">
+                                        <button class="adl-pill active" data-filter="all" onclick="adlSetFilter('all')">All</button>
+                                        <button class="adl-pill" data-filter="active" onclick="adlSetFilter('active')">Active</button>
+                                        <button class="adl-pill" data-filter="queued" onclick="adlSetFilter('queued')">Queued</button>
+                                        <button class="adl-pill" data-filter="completed" onclick="adlSetFilter('completed')">Completed</button>
+                                        <button class="adl-pill" data-filter="failed" onclick="adlSetFilter('failed')">Failed</button>
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:10px;">
+                                        <span class="adl-count" id="adl-count"></span>
+                                        <button class="adl-clear-btn" id="adl-clear-btn" onclick="adlClearCompleted()" style="display:none">Clear Completed</button>
+                                    </div>
+                                </div>
                             </div>
-                            <div style="display:flex;align-items:center;gap:10px;">
-                                <span class="adl-count" id="adl-count"></span>
-                                <button class="adl-clear-btn" id="adl-clear-btn" onclick="adlClearCompleted()" style="display:none">Clear Completed</button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="adl-list" id="adl-list">
-                        <div class="adl-empty" id="adl-empty">No downloads yet. Start one from Search, Sync, Discover, or Library.</div>
-                    </div>
-                </div>
-                <!-- Right: batch context panel -->
-                <div class="adl-batch-panel" id="adl-batch-panel">
-                    <div class="adl-batch-panel-header">
-                        <h3 class="adl-batch-panel-title">Batches</h3>
-                        <div class="adl-batch-panel-header-actions">
-                            <button class="library-history-btn" onclick="openLibraryHistoryModal()" title="View full download + import history">Download History</button>
-                            <button class="adl-batch-panel-collapse" id="adl-batch-collapse" onclick="adlToggleBatchPanel()" title="Toggle batch panel">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="adl-batch-active" id="adl-batch-active">
-                        <!-- Active batch cards rendered by JS -->
-                    </div>
-                    <div class="adl-batch-history-section" id="adl-batch-history-section" style="display:none">
-                        <div class="adl-batch-history-header" onclick="adlToggleBatchHistory()">
-                            <span>Recent History</span>
-                            <div class="adl-batch-history-header-actions">
-                                <button class="library-history-btn" onclick="event.stopPropagation();openLibraryHistoryModal()" title="View full download + import history">Download History</button>
-                                <svg class="adl-batch-history-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                            <div class="adl-list" id="adl-list">
+                                <div class="adl-empty" id="adl-empty">No downloads yet. Start one from Search, Sync, Discover, or Library.</div>
                             </div>
                         </div>
-                        <div class="adl-batch-history-list" id="adl-batch-history-list">
-                            <!-- Completed batch history rendered by JS -->
+                    </div>
+                    <!-- Right: batch context panel -->
+                    <div class="adl-batch-panel" id="adl-batch-panel">
+                        <div class="adl-batch-panel-header">
+                            <h3 class="adl-batch-panel-title">Batches</h3>
+                            <div class="adl-batch-panel-header-actions">
+                                <button class="library-history-btn" onclick="openLibraryHistoryModal()" title="View full download + import history">Download History</button>
+                                <button class="adl-batch-panel-collapse" id="adl-batch-collapse" onclick="adlToggleBatchPanel()" title="Toggle batch panel">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="adl-batch-active" id="adl-batch-active">
+                            <!-- Active batch cards rendered by JS -->
+                        </div>
+                        <div class="adl-batch-history-section" id="adl-batch-history-section" style="display:none">
+                            <div class="adl-batch-history-header" onclick="adlToggleBatchHistory()">
+                                <span>Recent History</span>
+                                <div class="adl-batch-history-header-actions">
+                                    <button class="library-history-btn" onclick="event.stopPropagation();openLibraryHistoryModal()" title="View full download + import history">Download History</button>
+                                    <svg class="adl-batch-history-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                                </div>
+                            </div>
+                            <div class="adl-batch-history-list" id="adl-batch-history-list">
+                                <!-- Completed batch history rendered by JS -->
+                            </div>
                         </div>
                     </div>
                 </div>
