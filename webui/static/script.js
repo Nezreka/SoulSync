@@ -5555,6 +5555,12 @@ function toggleStgService(el) {
     const service = el.closest('.stg-service');
     if (service) service.classList.toggle('expanded');
 }
+function toggleAllServiceAccordions(btn) {
+    const services = document.querySelectorAll('#settings-page .stg-service');
+    const allExpanded = Array.from(services).every(s => s.classList.contains('expanded'));
+    services.forEach(s => s.classList.toggle('expanded', !allExpanded));
+    btn.textContent = allExpanded ? 'Expand All' : 'Collapse All';
+}
 
 // ── Hybrid source priority list (drag-and-drop) ──
 const HYBRID_SOURCES = [
