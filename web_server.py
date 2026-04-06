@@ -19877,12 +19877,7 @@ def _post_process_matched_download(context_key, context, file_path):
             print(f"\n🎯 EXPLICIT ALBUM DOWNLOAD - preserving Spotify album name: '{album_info.get('album_name', 'None')}'")
             print(f"   Skipping smart grouping (not needed for explicit album downloads)\n")
 
-        # 1. Get transfer path and create artist directory
-        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-        artist_name_sanitized = _sanitize_filename(spotify_artist["name"])
-        artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
-        os.makedirs(artist_dir, exist_ok=True)
-        
+        # 1. Get transfer path (directory creation handled by _build_final_path_for_track)
         file_ext = os.path.splitext(file_path)[1]
         context['_audio_quality'] = _get_audio_quality_string(file_path)
         if context['_audio_quality']:
