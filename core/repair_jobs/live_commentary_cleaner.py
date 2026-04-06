@@ -87,6 +87,14 @@ class LiveCommentaryCleanerJob(RepairJob):
     }
     auto_fix = False
 
+    def _get_settings(self, context: JobContext) -> dict:
+        if not context.config_manager:
+            return self.default_settings.copy()
+        cfg = context.config_manager.get(f'repair.jobs.{self.job_id}.settings', {})
+        merged = self.default_settings.copy()
+        merged.update(cfg)
+        return merged
+
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
