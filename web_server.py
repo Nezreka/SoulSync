@@ -19513,18 +19513,9 @@ def _post_process_matched_download(context_key, context, file_path):
         # --- ACOUSTID VERIFICATION ---
         # Optional verification that downloaded audio matches expected track.
         # Only runs if enabled and configured. Fails gracefully (skips on any error).
-        # Skip for trusted API sources (Tidal, Qobuz, Deezer, HiFi) — files are
-        # downloaded by exact track ID from official APIs, guaranteed to be correct.
-        # Only Soulseek (P2P, mislabeled files) and YouTube (extracted audio) need verification.
-        _download_username = (
-            context.get('original_search_result', {}).get('username', '') or
-            context.get('search_result', {}).get('username', '') or
-            context.get('_download_username', '')
-        )
-        _trusted_sources = ('tidal', 'qobuz', 'hifi', 'deezer_dl')
-        _skip_acoustid = _download_username in _trusted_sources
-        if _skip_acoustid:
-            print(f"⏭️ Skipping AcoustID verification — trusted API source ({_download_username})")
+        # Runs for ALL download sources — streaming APIs can return wrong versions
+        # (live, remix, cover) despite downloading by track ID.
+        _skip_acoustid = False
 
         try:
             from core.acoustid_verification import AcoustIDVerification, VerificationResult
