@@ -1874,6 +1874,12 @@ def _emit_track_downloaded(context):
 def _record_library_history_download(context):
     """Record a completed download to the library_history table. Non-blocking."""
     try:
+        # Determine download source
+        search_result = context.get('original_search_result') or context.get('search_result') or {}
+        username = search_result.get('username', context.get('_download_username', ''))
+        _svc_map = {'youtube': 'YouTube', 'tidal': 'Tidal', 'qobuz': 'Qobuz', 'hifi': 'HiFi', 'deezer_dl': 'Deezer'}
+        download_source = _svc_map.get(username, 'Soulseek')
+
         ti = context.get('track_info') or context.get('search_result') or {}
         artist_name = ''
         artists = ti.get('artists', [])
@@ -1912,7 +1918,8 @@ def _record_library_history_download(context):
             album_name=album_name,
             quality=quality,
             file_path=file_path,
-            thumb_url=thumb_url
+            thumb_url=thumb_url,
+            download_source=download_source
         )
     except Exception:
         pass  # Non-critical, never block download flow

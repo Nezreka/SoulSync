@@ -496,11 +496,19 @@ class MusicDatabase:
                     server_source TEXT,
                     file_path TEXT,
                     thumb_url TEXT,
+                    download_source TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_event_type ON library_history (event_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_created_at ON library_history (created_at DESC)")
+
+            # Migration: add download_source column
+            cursor.execute("PRAGMA table_info(library_history)")
+            lh_cols = {c[1] for c in cursor.fetchall()}
+            if 'download_source' not in lh_cols:
+                cursor.execute("ALTER TABLE library_history ADD COLUMN download_source TEXT")
+                logger.info("Added download_source column to library_history")
 
             # Sync history table — tracks the last 100 sync operations with cached context for re-trigger
             cursor.execute("""
@@ -9600,16 +9608,17 @@ class MusicDatabase:
     # ── Library History ─────────────────────────────────────────────────
 
     def add_library_history_entry(self, event_type, title, artist_name=None, album_name=None,
-                                  quality=None, server_source=None, file_path=None, thumb_url=None):
+                                  quality=None, server_source=None, file_path=None, thumb_url=None,
+                                  download_source=None):
         """Record a download or import event to the library history table."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO library_history (event_type, title, artist_name, album_name,
-                                             quality, server_source, file_path, thumb_url)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (event_type, title, artist_name, album_name, quality, server_source, file_path, thumb_url))
+                                             quality, server_source, file_path, thumb_url, download_source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (event_type, title, artist_name, album_name, quality, server_source, file_path, thumb_url, download_source))
             conn.commit()
             return True
         except Exception as e:
@@ -9645,7 +9654,7 @@ class MusicDatabase:
             return [], 0
 
     def get_library_history_stats(self):
-        """Return counts per event_type: {downloads: int, imports: int}."""
+        """Return counts per event_type and per download_source."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -9656,10 +9665,25 @@ class MusicDatabase:
                     stats['downloads'] = row['cnt']
                 elif row['event_type'] == 'import':
                     stats['imports'] = row['cnt']
+
+            # Per-source breakdown for downloads
+            source_counts = {}
+            try:
+                cursor.execute("""
+                    SELECT download_source, COUNT(*) as cnt FROM library_history
+                    WHERE event_type = 'download' AND download_source IS NOT NULL AND download_source != ''
+                    GROUP BY download_source ORDER BY cnt DESC
+                """)
+                for row in cursor.fetchall():
+                    source_counts[row['download_source']] = row['cnt']
+            except Exception:
+                pass
+            stats['source_counts'] = source_counts
+
             return stats
         except Exception as e:
             logger.debug(f"Error getting library history stats: {e}")
-            return {'downloads': 0, 'imports': 0}
+            return {'downloads': 0, 'imports': 0, 'source_counts': {}}
 
     # ── Sync History ──────────────────────────────────────────────
 
