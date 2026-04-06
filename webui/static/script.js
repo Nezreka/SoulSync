@@ -62225,9 +62225,29 @@ async function fixAllMatchingFindings() {
     const jobId = jobFilter ? jobFilter.value : '';
     const severity = severityFilter ? severityFilter.value : '';
 
-    // Mass orphan safety gate
-    if (_isMassOrphanFix(jobId, _repairFindingsTotal)) {
-        if (!await showWitnessMeDialog(_repairFindingsTotal)) return;
+    // If fixing orphan files, prompt for action FIRST (staging vs delete)
+    let fixAction = null;
+    if (jobId === 'orphan_file_detector' || _isMassOrphanFix(jobId, _repairFindingsTotal)) {
+        fixAction = await _promptOrphanAction();
+        if (!fixAction) return;
+        // Confirm before proceeding
+        if (fixAction === 'delete' && _repairFindingsTotal > 50) {
+            if (!await showWitnessMeDialog(_repairFindingsTotal)) return;
+        } else if (fixAction === 'delete') {
+            if (!await showConfirmDialog({
+                title: 'Delete Orphan Files',
+                message: `Permanently delete ${_repairFindingsTotal} orphan files from disk? This cannot be undone.`,
+                confirmText: 'Delete',
+                destructive: true
+            })) return;
+        } else if (fixAction === 'staging') {
+            if (!await showConfirmDialog({
+                title: 'Move to Staging',
+                message: `Move ${_repairFindingsTotal} orphan files to the staging folder? Files are NOT deleted — you can review and import them from staging.`,
+                confirmText: 'Move All to Staging',
+                destructive: false
+            })) return;
+        }
     } else {
         const scopeLabel = jobId ? jobId.replace(/_/g, ' ') : 'all jobs';
         if (!await showConfirmDialog({
@@ -62236,13 +62256,6 @@ async function fixAllMatchingFindings() {
             confirmText: 'Fix All',
             destructive: true
         })) return;
-    }
-
-    // If fixing orphan files, prompt for action
-    let fixAction = null;
-    if (jobId === 'orphan_file_detector') {
-        fixAction = await _promptOrphanAction();
-        if (!fixAction) return;
     }
 
     showToast(`Fixing ${_repairFindingsTotal} findings...`, 'info');
@@ -62367,7 +62380,7 @@ function _promptOrphanAction() {
             <div style="background:#1e1e2e;border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:28px;max-width:380px;width:90%;text-align:center;">
                 <div style="font-size:1.1em;font-weight:600;color:#fff;margin-bottom:8px;">Orphan File Action</div>
                 <div style="font-size:0.88em;color:rgba(255,255,255,0.6);margin-bottom:20px;">
-                    What would you like to do with this file?
+                    Choose how to handle orphan files. Staging is safe and reversible.
                 </div>
                 <div style="display:flex;gap:10px;justify-content:center;">
                     <button id="_orphan-staging" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(29,185,84,0.4);background:rgba(29,185,84,0.15);color:#1db954;font-weight:600;cursor:pointer;font-family:inherit;">
@@ -62436,24 +62449,23 @@ async function bulkFixFindings() {
     if (_repairSelectedFindings.size === 0) return;
     const ids = Array.from(_repairSelectedFindings);
 
-    // Mass orphan safety gate — check if selected findings include mass-orphan flagged cards
+    // If any selected findings are orphan files, prompt for action FIRST
     const selectedOrphanCards = ids.filter(id => {
         const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
         return card && card.dataset.jobId === 'orphan_file_detector';
     });
-    if (selectedOrphanCards.length > MASS_ORPHAN_THRESHOLD) {
-        const hasMassFlag = ids.some(id => {
-            const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
-            return card && card.dataset.massOrphan === 'true';
-        });
-        if (hasMassFlag && !await showWitnessMeDialog(selectedOrphanCards.length)) return;
-    }
-
-    // If any selected findings are orphan files, prompt for action once
     let orphanFixAction = null;
     if (selectedOrphanCards.length > 0) {
         orphanFixAction = await _promptOrphanAction();
         if (!orphanFixAction) return;
+        // Only show scary dialog for mass deletion, not staging
+        if (orphanFixAction === 'delete' && selectedOrphanCards.length > MASS_ORPHAN_THRESHOLD) {
+            const hasMassFlag = ids.some(id => {
+                const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
+                return card && card.dataset.massOrphan === 'true';
+            });
+            if (hasMassFlag && !await showWitnessMeDialog(selectedOrphanCards.length)) return;
+        }
     }
 
     let fixed = 0, failed = 0, lastError = '';
