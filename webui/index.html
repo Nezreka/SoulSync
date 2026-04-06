@@ -4235,15 +4235,16 @@
                                 <div class="api-service-frame">
                                     <h4 class="service-title" style="color: #e8e8e8;">Metadata Source</h4>
                                     <div class="form-group">
-                                        <label>Fallback Source:</label>
+                                        <label>Primary Source:</label>
                                         <select id="metadata-fallback-source">
+                                            <option value="spotify">Spotify</option>
                                             <option value="itunes">iTunes / Apple Music</option>
                                             <option value="deezer">Deezer</option>
                                             <option value="discogs">Discogs</option>
                                         </select>
                                     </div>
                                     <div class="callback-info">
-                                        <div class="callback-help">When Spotify is not connected, this source provides artist, album, and track metadata. Discogs requires a personal token configured above.</div>
+                                        <div class="callback-help">The primary source for artist, album, and track metadata. Spotify requires authentication above. Discogs requires a personal token.</div>
                                     </div>
                                 </div>
 
