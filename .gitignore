@@ -10,5 +10,15 @@ __pycache__/
 # Encryption key (generated per-instance, lives next to database)
 .encryption_key
 
+# User-specific files (auto-created by the app if missing)
+config/config.json
+database/music_library.db
+database/music_library.db-shm
+database/music_library.db-wal
+database/music_library.db.backup_*
+database/api_call_history.json
+logs/*.log
+logs/*.log.*
+
 # Auto-downloaded binaries
 bin/
