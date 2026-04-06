@@ -9423,6 +9423,16 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin-top: 2px;
 }
 
+.library-history-entry-source {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.25);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+    font-family: monospace;
+}
+
 .library-history-badge {
     font-size: 10px;
     font-weight: 600;

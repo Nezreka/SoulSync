@@ -509,6 +509,10 @@ class MusicDatabase:
             if 'download_source' not in lh_cols:
                 cursor.execute("ALTER TABLE library_history ADD COLUMN download_source TEXT")
                 logger.info("Added download_source column to library_history")
+            for _col in ['source_track_id', 'source_track_title', 'source_filename', 'acoustid_result']:
+                if _col not in lh_cols:
+                    cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
+                    logger.info(f"Added {_col} column to library_history")
 
             # Sync history table — tracks the last 100 sync operations with cached context for re-trigger
             cursor.execute("""
@@ -9617,16 +9621,19 @@ class MusicDatabase:
 
     def add_library_history_entry(self, event_type, title, artist_name=None, album_name=None,
                                   quality=None, server_source=None, file_path=None, thumb_url=None,
-                                  download_source=None):
+                                  download_source=None, source_track_id=None, source_track_title=None,
+                                  source_filename=None, acoustid_result=None):
         """Record a download or import event to the library history table."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO library_history (event_type, title, artist_name, album_name,
-                                             quality, server_source, file_path, thumb_url, download_source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (event_type, title, artist_name, album_name, quality, server_source, file_path, thumb_url, download_source))
+                                             quality, server_source, file_path, thumb_url, download_source,
+                                             source_track_id, source_track_title, source_filename, acoustid_result)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (event_type, title, artist_name, album_name, quality, server_source, file_path, thumb_url,
+                  download_source, source_track_id, source_track_title, source_filename, acoustid_result))
             conn.commit()
             return True
         except Exception as e:
