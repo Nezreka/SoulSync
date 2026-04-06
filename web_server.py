@@ -17042,8 +17042,32 @@ def _create_lossy_copy(final_path):
                     from mutagen import File as MutagenFile
                     from mutagen.flac import FLAC as MutagenFLAC
                     source_audio = MutagenFLAC(final_path)
+                    pic = None
                     if source_audio and source_audio.pictures:
                         pic = source_audio.pictures[0]
+
+                    # Fallback: read cover.jpg from the same directory
+                    if not pic:
+                        cover_path = os.path.join(os.path.dirname(final_path), 'cover.jpg')
+                        if os.path.isfile(cover_path):
+                            try:
+                                from mutagen.flac import Picture
+                                with open(cover_path, 'rb') as f:
+                                    img_data = f.read()
+                                pic = Picture()
+                                pic.type = 3  # Cover (front)
+                                pic.mime = 'image/jpeg'
+                                pic.desc = 'Cover'
+                                pic.width = 0
+                                pic.height = 0
+                                pic.depth = 0
+                                pic.colors = 0
+                                pic.data = img_data
+                                print(f"🎨 [Lossy Copy] Using cover.jpg as art source (FLAC had no embedded art)")
+                            except Exception:
+                                pass
+
+                    if pic:
                         dest_audio = MutagenFile(out_path)
                         if dest_audio is not None:
                             if codec == 'opus':
