@@ -25,8 +25,9 @@ class DuplicateDetectorJob(RepairJob):
         'Settings:\n'
         '- Title Similarity: How closely titles must match to be considered duplicates (0.0 - 1.0)\n'
         '- Artist Similarity: How closely artist names must match (0.0 - 1.0)\n'
-        '- Ignore Cross-Album: When enabled, tracks on different albums are not flagged as duplicates '
-        '(keeps your albums complete even if the same song appears on multiple albums)'
+        '- Ignore Cross-Album: When enabled, tracks on different albums are not flagged as duplicates. '
+        'Turn this OFF if you have duplicate downloads filed under different album entries — '
+        'this is the most common cause of missed duplicates from re-downloads'
     )
     icon = 'repair-icon-duplicate'
     default_enabled = False
@@ -34,7 +35,7 @@ class DuplicateDetectorJob(RepairJob):
     default_settings = {
         'title_similarity': 0.85,
         'artist_similarity': 0.80,
-        'ignore_cross_album': True,
+        'ignore_cross_album': False,
     }
     auto_fix = False
 
