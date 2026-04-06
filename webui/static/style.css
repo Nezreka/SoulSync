@@ -51081,6 +51081,119 @@ tr.tag-diff-same {
     transform: translateX(16px);
 }
 
+/* ── Settings Accordion Services — visual upgrade ── */
+#settings-page .api-service-frame.stg-service {
+    overflow: hidden;
+    transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s, border-left-color 0.3s;
+}
+#settings-page .api-service-frame.stg-service:hover {
+    transform: none;
+}
+
+#settings-page .stg-service > .stg-service-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 18px;
+    cursor: pointer;
+    transition: background 0.2s ease, padding-left 0.25s ease;
+    user-select: none;
+}
+#settings-page .stg-service > .stg-service-header:hover {
+    background: rgba(255, 255, 255, 0.035);
+    padding-left: 22px;
+}
+
+/* Override service-title styles inside accordion header */
+#settings-page .stg-service .stg-service-header .service-title {
+    padding: 0 !important;
+    margin: 0 !important;
+    border-bottom: none !important;
+    font-size: 0.88em !important;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.7);
+    letter-spacing: 0.02em;
+    text-transform: none;
+    flex: 1;
+    transition: color 0.2s;
+}
+#settings-page .stg-service:hover .stg-service-header .service-title,
+#settings-page .stg-service.expanded .stg-service-header .service-title {
+    color: rgba(255, 255, 255, 0.95);
+}
+
+/* Brand color dot */
+#settings-page .stg-service-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: currentColor;
+    opacity: 0.45;
+    transition: opacity 0.25s, transform 0.25s, box-shadow 0.25s;
+}
+#settings-page .stg-service:hover .stg-service-dot {
+    opacity: 0.75;
+}
+#settings-page .stg-service.expanded .stg-service-dot {
+    opacity: 1;
+    transform: scale(1.25);
+    box-shadow: 0 0 8px currentColor;
+}
+
+/* Chevron */
+#settings-page .stg-service > .stg-service-header > .stg-service-chevron {
+    color: rgba(255, 255, 255, 0.2);
+    font-size: 1.1em;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.25s;
+    flex-shrink: 0;
+    margin-left: auto;
+    line-height: 1;
+}
+#settings-page .stg-service.expanded > .stg-service-header > .stg-service-chevron {
+    transform: rotate(90deg);
+    color: var(--accent-color, #1db954);
+}
+
+/* Collapsible body */
+#settings-page .stg-service > .stg-service-body {
+    display: none;
+    padding: 0 0 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.03);
+}
+#settings-page .stg-service.expanded > .stg-service-body {
+    display: block;
+    animation: stgSlideIn 0.25s ease-out;
+}
+
+/* Expanded state — accent left border + slightly brighter bg */
+#settings-page .api-service-frame.stg-service.expanded {
+    border-left: 2px solid rgba(var(--accent-rgb, 29, 185, 84), 0.4);
+    background: rgba(255, 255, 255, 0.025);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+/* Expand All / Collapse All toggle button */
+#settings-page .stg-accordion-toggle {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 0.72em;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 6px;
+    transition: color 0.2s, background 0.2s, border-color 0.2s;
+    margin-left: auto;
+    letter-spacing: 0.03em;
+    font-family: inherit;
+}
+#settings-page .stg-accordion-toggle:hover {
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
 /* ── Accent color picker ── */
 #settings-page .accent-color-selector {
     display: flex;
@@ -51121,6 +51234,9 @@ tr.tag-diff-same {
     #settings-page .api-service-frame .form-group { padding: 8px 12px !important; }
     #settings-page .api-service-frame .callback-info { padding: 2px 12px 10px; }
     #settings-page .api-service-frame .form-actions { padding: 4px 12px 12px; }
+    /* Accordion headers */
+    #settings-page .stg-service > .stg-service-header { padding: 12px 14px; }
+    #settings-page .stg-service > .stg-service-body { padding: 0 0 8px; }
     /* Save button */
     #settings-page .settings-actions { padding: 16px 8px; }
     #settings-page .settings-actions .save-button { width: 100%; }

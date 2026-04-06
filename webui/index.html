@@ -3952,7 +3952,7 @@
                         <div class="settings-left-column">
                             <!-- API Configuration -->
                             <div class="settings-group" data-stg="connections">
-                                <h3>API Configuration</h3>
+                                <h3>API Configuration <button class="stg-accordion-toggle" onclick="toggleAllServiceAccordions(this)">Expand All</button></h3>
 
                                 <!-- Metadata Source Selection (first — tells user what they're configuring for) -->
                                 <div class="api-service-frame">
@@ -3972,305 +3972,371 @@
                                 </div>
 
                                 <!-- Spotify Settings -->
-                                <div class="api-service-frame">
-                                    <h4 class="service-title spotify-title">Spotify</h4>
-                                    <div class="form-group">
-                                        <label>Client ID:</label>
-                                        <input type="text" id="spotify-client-id" placeholder="Spotify Client ID">
+                                <div class="api-service-frame stg-service">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #1DB954;"></span>
+                                        <h4 class="service-title spotify-title">Spotify</h4>
+                                        <span class="stg-service-chevron">›</span>
                                     </div>
-                                    <div class="form-group">
-                                        <label>Client Secret:</label>
-                                        <input type="password" id="spotify-client-secret"
-                                            placeholder="Spotify Client Secret">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Redirect URI:</label>
-                                        <input type="text" id="spotify-redirect-uri"
-                                            placeholder="http://127.0.0.1:8888/callback">
-                                    </div>
-                                    <div class="callback-info">
-                                        <div class="callback-label">Current Redirect URI:</div>
-                                        <div class="callback-url" id="spotify-callback-display">
-                                            http://127.0.0.1:8888/callback</div>
-                                        <div class="callback-help">Add this URL to your Spotify app's 'Redirect URIs' in
-                                            the Spotify Developer Dashboard</div>
-                                    </div>
-                                    <div class="form-actions">
-                                        <button class="auth-button" onclick="authenticateSpotify()">🔐
-                                            Authenticate</button>
-                                        <button class="auth-button disconnect-button" id="spotify-disconnect-btn"
-                                            onclick="disconnectSpotify()" style="display: none;">🔌
-                                            Disconnect</button>
-                                        <button class="auth-button disconnect-button"
-                                            onclick="clearSpotifyCacheAndFallback()"
-                                            title="Clear Spotify token cache and switch to your configured fallback metadata source">🗑️
-                                            Clear Cache &amp; Use Fallback</button>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>Client ID:</label>
+                                            <input type="text" id="spotify-client-id" placeholder="Spotify Client ID">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Client Secret:</label>
+                                            <input type="password" id="spotify-client-secret"
+                                                placeholder="Spotify Client Secret">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Redirect URI:</label>
+                                            <input type="text" id="spotify-redirect-uri"
+                                                placeholder="http://127.0.0.1:8888/callback">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-label">Current Redirect URI:</div>
+                                            <div class="callback-url" id="spotify-callback-display">
+                                                http://127.0.0.1:8888/callback</div>
+                                            <div class="callback-help">Add this URL to your Spotify app's 'Redirect URIs' in
+                                                the Spotify Developer Dashboard</div>
+                                        </div>
+                                        <div class="form-actions">
+                                            <button class="auth-button" onclick="authenticateSpotify()">🔐
+                                                Authenticate</button>
+                                            <button class="auth-button disconnect-button" id="spotify-disconnect-btn"
+                                                onclick="disconnectSpotify()" style="display: none;">🔌
+                                                Disconnect</button>
+                                            <button class="auth-button disconnect-button"
+                                                onclick="clearSpotifyCacheAndFallback()"
+                                                title="Clear Spotify token cache and switch to your configured fallback metadata source">🗑️
+                                                Clear Cache &amp; Use Fallback</button>
+                                        </div>
                                     </div>
                                 </div>
 
                                 <!-- iTunes Settings -->
-                                <div class="api-service-frame">
-                                    <h4 class="service-title itunes-title">iTunes / Apple Music</h4>
-                                    <div class="form-group">
-                                        <label>Storefront Country:</label>
-                                        <select id="itunes-country">
-                                            <option value="US">United States (US)</option>
-                                            <option value="GB">United Kingdom (GB)</option>
-                                            <option value="CA">Canada (CA)</option>
-                                            <option value="AU">Australia (AU)</option>
-                                            <option value="DE">Germany (DE)</option>
-                                            <option value="FR">France (FR)</option>
-                                            <option value="JP">Japan (JP)</option>
-                                            <option value="KR">South Korea (KR)</option>
-                                            <option value="BR">Brazil (BR)</option>
-                                            <option value="SE">Sweden (SE)</option>
-                                            <option value="NL">Netherlands (NL)</option>
-                                            <option value="IT">Italy (IT)</option>
-                                            <option value="ES">Spain (ES)</option>
-                                            <option value="MX">Mexico (MX)</option>
-                                            <option value="IN">India (IN)</option>
-                                            <option value="RU">Russia (RU)</option>
-                                        </select>
+                                <div class="api-service-frame stg-service">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #fc3c44;"></span>
+                                        <h4 class="service-title itunes-title">iTunes / Apple Music</h4>
+                                        <span class="stg-service-chevron">›</span>
                                     </div>
-                                    <div class="callback-info">
-                                        <div class="callback-help">Sets the primary Apple Music storefront. Region-specific albums are auto-searched across other storefronts as fallback.</div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>Storefront Country:</label>
+                                            <select id="itunes-country">
+                                                <option value="US">United States (US)</option>
+                                                <option value="GB">United Kingdom (GB)</option>
+                                                <option value="CA">Canada (CA)</option>
+                                                <option value="AU">Australia (AU)</option>
+                                                <option value="DE">Germany (DE)</option>
+                                                <option value="FR">France (FR)</option>
+                                                <option value="JP">Japan (JP)</option>
+                                                <option value="KR">South Korea (KR)</option>
+                                                <option value="BR">Brazil (BR)</option>
+                                                <option value="SE">Sweden (SE)</option>
+                                                <option value="NL">Netherlands (NL)</option>
+                                                <option value="IT">Italy (IT)</option>
+                                                <option value="ES">Spain (ES)</option>
+                                                <option value="MX">Mexico (MX)</option>
+                                                <option value="IN">India (IN)</option>
+                                                <option value="RU">Russia (RU)</option>
+                                            </select>
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Sets the primary Apple Music storefront. Region-specific albums are auto-searched across other storefronts as fallback.</div>
+                                        </div>
                                     </div>
                                 </div>
 
                                 <!-- Deezer OAuth Auth -->
-                                <div class="api-service-frame">
-                                    <h4 class="service-title deezer-title">Deezer (Favorites & Playlists)</h4>
-                                    <div class="form-group">
-                                        <label>App ID:</label>
-                                        <input type="text" id="deezer-app-id" placeholder="Deezer App ID">
+                                <div class="api-service-frame stg-service">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #A238FF;"></span>
+                                        <h4 class="service-title deezer-title">Deezer (Favorites & Playlists)</h4>
+                                        <span class="stg-service-chevron">›</span>
                                     </div>
-                                    <div class="form-group">
-                                        <label>App Secret:</label>
-                                        <input type="password" id="deezer-app-secret" placeholder="Deezer App Secret">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Redirect URI:</label>
-                                        <input type="text" id="deezer-redirect-uri"
-                                            placeholder="http://127.0.0.1:8008/deezer/callback">
-                                    </div>
-                                    <div class="callback-info">
-                                        <div class="callback-label">Current Redirect URI:</div>
-                                        <div class="callback-url" id="deezer-callback-display">
-                                            http://127.0.0.1:8008/deezer/callback</div>
-                                        <div class="callback-help">Add this URL to your Deezer app at developers.deezer.com</div>
-                                    </div>
-                                    <div class="form-actions">
-                                        <button class="auth-button" onclick="authenticateDeezer()">🔐
-                                            Authenticate</button>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>App ID:</label>
+                                            <input type="text" id="deezer-app-id" placeholder="Deezer App ID">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>App Secret:</label>
+                                            <input type="password" id="deezer-app-secret" placeholder="Deezer App Secret">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Redirect URI:</label>
+                                            <input type="text" id="deezer-redirect-uri"
+                                                placeholder="http://127.0.0.1:8008/deezer/callback">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-label">Current Redirect URI:</div>
+                                            <div class="callback-url" id="deezer-callback-display">
+                                                http://127.0.0.1:8008/deezer/callback</div>
+                                            <div class="callback-help">Add this URL to your Deezer app at developers.deezer.com</div>
+                                        </div>
+                                        <div class="form-actions">
+                                            <button class="auth-button" onclick="authenticateDeezer()">🔐
+                                                Authenticate</button>
+                                        </div>
                                     </div>
                                 </div>
 
                                 <!-- Discogs Settings -->
-                                <div class="api-service-frame">
-                                    <h4 class="service-title" style="color: #333;">Discogs</h4>
-                                    <div class="form-group">
-                                        <label>Personal Access Token:</label>
-                                        <input type="password" id="discogs-token"
-                                            placeholder="Discogs Personal Access Token">
+                                <div class="api-service-frame stg-service">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #e0d4b8;"></span>
+                                        <h4 class="service-title">Discogs</h4>
+                                        <span class="stg-service-chevron">›</span>
                                     </div>
-                                    <div class="callback-info">
-                                        <div class="callback-help">Get your free token from <a
-                                                href="https://www.discogs.com/settings/developers" target="_blank"
-                                                style="color: #ffff64;">Discogs Developer Settings</a></div>
-                                        <div class="callback-help">Click "Generate new token" — no app registration needed. Provides 60 req/min and cover art in search results.</div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>Personal Access Token:</label>
+                                            <input type="password" id="discogs-token"
+                                                placeholder="Discogs Personal Access Token">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Get your free token from <a
+                                                    href="https://www.discogs.com/settings/developers" target="_blank"
+                                                    style="color: #ffff64;">Discogs Developer Settings</a></div>
+                                            <div class="callback-help">Click "Generate new token" — no app registration needed. Provides 60 req/min and cover art in search results.</div>
+                                        </div>
                                     </div>
                                 </div>
 
                                 <!-- Tidal Playlist/Metadata Auth -->
-                                <div class="api-service-frame">
-                                    <h4 class="service-title tidal-title">Tidal (Playlists & Metadata)</h4>
-                                    <div class="form-group">
-                                        <label>Client ID:</label>
-                                        <input type="text" id="tidal-client-id" placeholder="Tidal Client ID">
+                                <div class="api-service-frame stg-service">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #ff6600;"></span>
+                                        <h4 class="service-title tidal-title">Tidal (Playlists & Metadata)</h4>
+                                        <span class="stg-service-chevron">›</span>
                                     </div>
-                                    <div class="form-group">
-                                        <label>Client Secret:</label>
-                                        <input type="password" id="tidal-client-secret"
-                                            placeholder="Tidal Client Secret">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Redirect URI:</label>
-                                        <input type="text" id="tidal-redirect-uri"
-                                            placeholder="http://127.0.0.1:8889/tidal/callback">
-                                    </div>
-                                    <div class="callback-info">
-                                        <div class="callback-label">Current Redirect URI:</div>
-                                        <div class="callback-url" id="tidal-callback-display">
-                                            http://127.0.0.1:8889/tidal/callback</div>
-                                        <div class="callback-help">Add this URL to your Tidal app configuration</div>
-                                    </div>
-                                    <div class="form-actions">
-                                        <button class="auth-button" onclick="authenticateTidal()">🔐
-                                            Authenticate</button>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>Client ID:</label>
+                                            <input type="text" id="tidal-client-id" placeholder="Tidal Client ID">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Client Secret:</label>
+                                            <input type="password" id="tidal-client-secret"
+                                                placeholder="Tidal Client Secret">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Redirect URI:</label>
+                                            <input type="text" id="tidal-redirect-uri"
+                                                placeholder="http://127.0.0.1:8889/tidal/callback">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-label">Current Redirect URI:</div>
+                                            <div class="callback-url" id="tidal-callback-display">
+                                                http://127.0.0.1:8889/tidal/callback</div>
+                                            <div class="callback-help">Add this URL to your Tidal app configuration</div>
+                                        </div>
+                                        <div class="form-actions">
+                                            <button class="auth-button" onclick="authenticateTidal()">🔐
+                                                Authenticate</button>
+                                        </div>
                                     </div>
                                 </div>
 
                                 <!-- Qobuz Metadata/Enrichment Auth -->
-                                <div class="api-service-frame">
-                                    <h4 class="service-title qobuz-title">Qobuz (Metadata & Enrichment)</h4>
-                                    <div id="qobuz-connection-logged-in" style="display: none; margin-bottom: 8px;">
-                                        <span id="qobuz-connection-user-info" class="setting-help-text" style="color: #4caf50;"></span>
-                                        <button class="auth-button" onclick="logoutQobuz()" style="margin-left: 8px;">
-                                            Disconnect
-                                        </button>
+                                <div class="api-service-frame stg-service">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #4285f4;"></span>
+                                        <h4 class="service-title qobuz-title">Qobuz (Metadata & Enrichment)</h4>
+                                        <span class="stg-service-chevron">›</span>
                                     </div>
-                                    <div id="qobuz-connection-form">
-                                        <div class="form-group">
-                                            <label>Email:</label>
-                                            <input type="email" id="qobuz-connection-email" class="form-input"
-                                                placeholder="Qobuz email" autocomplete="email">
-                                        </div>
-                                        <div class="form-group">
-                                            <label>Password:</label>
-                                            <input type="password" id="qobuz-connection-password" class="form-input"
-                                                placeholder="Qobuz password" autocomplete="current-password">
-                                        </div>
-                                        <div class="form-actions">
-                                            <button class="auth-button" id="qobuz-connection-login-btn" onclick="loginQobuzFromConnections()">
-                                                Connect Qobuz
+                                    <div class="stg-service-body">
+                                        <div id="qobuz-connection-logged-in" style="display: none; margin-bottom: 8px;">
+                                            <span id="qobuz-connection-user-info" class="setting-help-text" style="color: #4caf50;"></span>
+                                            <button class="auth-button" onclick="logoutQobuz()" style="margin-left: 8px;">
+                                                Disconnect
                                             </button>
-                                            <span id="qobuz-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
                                         </div>
-                                    </div>
-                                    <div class="setting-help-text" style="margin-top: 6px;">
-                                        Connects Qobuz for metadata enrichment (ISRC, labels, copyright). Also used for downloads if Qobuz is your download source.
+                                        <div id="qobuz-connection-form">
+                                            <div class="form-group">
+                                                <label>Email:</label>
+                                                <input type="email" id="qobuz-connection-email" class="form-input"
+                                                    placeholder="Qobuz email" autocomplete="email">
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Password:</label>
+                                                <input type="password" id="qobuz-connection-password" class="form-input"
+                                                    placeholder="Qobuz password" autocomplete="current-password">
+                                            </div>
+                                            <div class="form-actions">
+                                                <button class="auth-button" id="qobuz-connection-login-btn" onclick="loginQobuzFromConnections()">
+                                                    Connect Qobuz
+                                                </button>
+                                                <span id="qobuz-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                            </div>
+                                        </div>
+                                        <div class="setting-help-text" style="margin-top: 6px;">
+                                            Connects Qobuz for metadata enrichment (ISRC, labels, copyright). Also used for downloads if Qobuz is your download source.
+                                        </div>
                                     </div>
                                 </div>
 
                                 <!-- Last.fm Settings -->
-                                <div class="api-service-frame">
-                                    <h4 class="service-title lastfm-title">Last.fm</h4>
-                                    <div class="form-group">
-                                        <label>API Key:</label>
-                                        <input type="password" id="lastfm-api-key"
-                                            placeholder="Last.fm API Key">
+                                <div class="api-service-frame stg-service">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #d51007;"></span>
+                                        <h4 class="service-title lastfm-title">Last.fm</h4>
+                                        <span class="stg-service-chevron">›</span>
                                     </div>
-                                    <div class="form-group">
-                                        <label>API Secret:</label>
-                                        <input type="password" id="lastfm-api-secret"
-                                            placeholder="Last.fm API Secret (required for scrobbling)">
-                                    </div>
-                                    <div class="callback-info">
-                                        <div class="callback-help">Get your API key and secret from <a
-                                                href="https://www.last.fm/api/account/create" target="_blank"
-                                                style="color: #d51007;">Last.fm API Account</a></div>
-                                        <div class="callback-help">API key: used for metadata enrichment. API secret: required for scrobbling.</div>
-                                    </div>
-                                    <div class="form-group" style="margin-top: 12px;">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="lastfm-scrobble-enabled">
-                                            Scrobble plays to Last.fm
-                                        </label>
-                                    </div>
-                                    <div class="form-actions" id="lastfm-scrobble-actions">
-                                        <button class="test-button" onclick="authorizeLastfmScrobbling()">Authorize Scrobbling</button>
-                                        <span class="setting-help-text" id="lastfm-scrobble-status"></span>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>API Key:</label>
+                                            <input type="password" id="lastfm-api-key"
+                                                placeholder="Last.fm API Key">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>API Secret:</label>
+                                            <input type="password" id="lastfm-api-secret"
+                                                placeholder="Last.fm API Secret (required for scrobbling)">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Get your API key and secret from <a
+                                                    href="https://www.last.fm/api/account/create" target="_blank"
+                                                    style="color: #d51007;">Last.fm API Account</a></div>
+                                            <div class="callback-help">API key: used for metadata enrichment. API secret: required for scrobbling.</div>
+                                        </div>
+                                        <div class="form-group" style="margin-top: 12px;">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="lastfm-scrobble-enabled">
+                                                Scrobble plays to Last.fm
+                                            </label>
+                                        </div>
+                                        <div class="form-actions" id="lastfm-scrobble-actions">
+                                            <button class="test-button" onclick="authorizeLastfmScrobbling()">Authorize Scrobbling</button>
+                                            <span class="setting-help-text" id="lastfm-scrobble-status"></span>
+                                        </div>
                                     </div>
                                 </div>
 
                                 <!-- Genius Settings -->
-                                <div class="api-service-frame">
-                                    <h4 class="service-title genius-title">Genius</h4>
-                                    <div class="form-group">
-                                        <label>Client Access Token:</label>
-                                        <input type="password" id="genius-access-token"
-                                            placeholder="Genius Client Access Token">
+                                <div class="api-service-frame stg-service">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #ffff64;"></span>
+                                        <h4 class="service-title genius-title">Genius</h4>
+                                        <span class="stg-service-chevron">›</span>
                                     </div>
-                                    <div class="callback-info">
-                                        <div class="callback-help">Get your token from <a
-                                                href="https://genius.com/api-clients" target="_blank"
-                                                style="color: #ffff64;">Genius API Clients</a></div>
-                                        <div class="callback-help">Generate a "Client Access Token" — no OAuth flow needed.</div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>Client Access Token:</label>
+                                            <input type="password" id="genius-access-token"
+                                                placeholder="Genius Client Access Token">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Get your token from <a
+                                                    href="https://genius.com/api-clients" target="_blank"
+                                                    style="color: #ffff64;">Genius API Clients</a></div>
+                                            <div class="callback-help">Generate a "Client Access Token" — no OAuth flow needed.</div>
+                                        </div>
                                     </div>
                                 </div>
 
                                 <!-- AcoustID Settings -->
-                                <div class="api-service-frame">
-                                    <h4 class="service-title acoustid-title">AcoustID Verification</h4>
-                                    <div class="form-group" style="margin-bottom: 12px;">
-                                        <label class="checkbox-label"
-                                            style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                                            <input type="checkbox" id="acoustid-enabled"
-                                                style="width: 16px; height: 16px;">
-                                            <span>Enable Download Verification</span>
-                                        </label>
-                                        <div style="color: #888; font-size: 0.8em; margin-top: 4px; margin-left: 24px;">
-                                            Verifies downloaded audio matches expected track using fingerprints
+                                <div class="api-service-frame stg-service">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #ba55d3;"></span>
+                                        <h4 class="service-title acoustid-title">AcoustID Verification</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group" style="margin-bottom: 12px;">
+                                            <label class="checkbox-label"
+                                                style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                                <input type="checkbox" id="acoustid-enabled"
+                                                    style="width: 16px; height: 16px;">
+                                                <span>Enable Download Verification</span>
+                                            </label>
+                                            <div style="color: #888; font-size: 0.8em; margin-top: 4px; margin-left: 24px;">
+                                                Verifies downloaded audio matches expected track using fingerprints
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>API Key:</label>
-                                        <input type="password" id="acoustid-api-key" placeholder="AcoustID API Key">
-                                    </div>
-                                    <div class="callback-info">
-                                        <div class="callback-help">Get your free API key from <a
-                                                href="https://acoustid.org/new-application" target="_blank"
-                                                style="color: #ba55d3;">AcoustID Applications</a></div>
-                                        <div class="callback-help"
-                                            style="opacity: 0.7; font-size: 0.85em; margin-top: 4px;">
-                                            The fpcalc fingerprint tool is automatically downloaded if needed.
-                                            Failed verifications move files to Quarantine folder.
+                                        <div class="form-group">
+                                            <label>API Key:</label>
+                                            <input type="password" id="acoustid-api-key" placeholder="AcoustID API Key">
                                         </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Get your free API key from <a
+                                                    href="https://acoustid.org/new-application" target="_blank"
+                                                    style="color: #ba55d3;">AcoustID Applications</a></div>
+                                            <div class="callback-help"
+                                                style="opacity: 0.7; font-size: 0.85em; margin-top: 4px;">
+                                                The fpcalc fingerprint tool is automatically downloaded if needed.
+                                                Failed verifications move files to Quarantine folder.
+                                            </div>
+                                        </div>
+                                        <button class="test-button" onclick="clearQuarantine()" style="margin-top: 10px; background: rgba(255,82,82,0.15); border-color: rgba(255,82,82,0.3); color: #ff5252;">Clear Quarantine</button>
                                     </div>
-                                    <button class="test-button" onclick="clearQuarantine()" style="margin-top: 10px; background: rgba(255,82,82,0.15); border-color: rgba(255,82,82,0.3); color: #ff5252;">Clear Quarantine</button>
                                 </div>
 
                                 <!-- ListenBrainz Settings -->
-                                <div class="api-service-frame">
-                                    <h4 class="service-title listenbrainz-title">ListenBrainz</h4>
-                                    <div class="form-group">
-                                        <label>API Base URL:</label>
-                                        <input type="text" id="listenbrainz-base-url"
-                                            placeholder="Leave empty for official (api.listenbrainz.org)">
+                                <div class="api-service-frame stg-service">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #eb743b;"></span>
+                                        <h4 class="service-title listenbrainz-title">ListenBrainz</h4>
+                                        <span class="stg-service-chevron">›</span>
                                     </div>
-                                    <div class="form-group">
-                                        <label>User Token:</label>
-                                        <input type="password" id="listenbrainz-token"
-                                            placeholder="ListenBrainz User Token">
-                                    </div>
-                                    <div class="callback-info">
-                                        <div class="callback-help">Get your token from <a
-                                                href="https://listenbrainz.org/profile/" target="_blank"
-                                                style="color: #eb743b;">ListenBrainz Settings</a></div>
-                                        <div class="callback-help">Self-hosted? Enter your server URL (e.g. http://localhost:8093)</div>
-                                    </div>
-                                    <div class="form-group" style="margin-top: 12px;">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="listenbrainz-scrobble-enabled">
-                                            Scrobble plays to ListenBrainz
-                                        </label>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>API Base URL:</label>
+                                            <input type="text" id="listenbrainz-base-url"
+                                                placeholder="Leave empty for official (api.listenbrainz.org)">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>User Token:</label>
+                                            <input type="password" id="listenbrainz-token"
+                                                placeholder="ListenBrainz User Token">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Get your token from <a
+                                                    href="https://listenbrainz.org/profile/" target="_blank"
+                                                    style="color: #eb743b;">ListenBrainz Settings</a></div>
+                                            <div class="callback-help">Self-hosted? Enter your server URL (e.g. http://localhost:8093)</div>
+                                        </div>
+                                        <div class="form-group" style="margin-top: 12px;">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="listenbrainz-scrobble-enabled">
+                                                Scrobble plays to ListenBrainz
+                                            </label>
+                                        </div>
                                     </div>
                                 </div>
 
                                 <!-- Hydrabase P2P Metadata -->
-                                <div class="api-service-frame" data-stg="connections">
-                                    <h4 class="service-title" style="color: #00b4d8;">Hydrabase</h4>
-                                    <input type="hidden" id="hydrabase-enabled" value="false">
-                                    <div class="form-group">
-                                        <label>WebSocket URL:</label>
-                                        <input type="text" id="hydrabase-url" placeholder="ws://localhost:4545">
+                                <div class="api-service-frame stg-service" data-stg="connections">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #00b4d8;"></span>
+                                        <h4 class="service-title">Hydrabase</h4>
+                                        <span class="stg-service-chevron">›</span>
                                     </div>
-                                    <div class="form-group">
-                                        <label>API Key:</label>
-                                        <input type="password" id="hydrabase-api-key" placeholder="Hydrabase API Key">
-                                    </div>
-                                    <div class="form-group" style="margin-bottom: 8px;">
-                                        <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 0;">
-                                            <input type="checkbox" id="hydrabase-auto-connect" style="width: 16px; height: 16px;">
-                                            <span>Auto-connect on startup</span>
-                                        </label>
-                                    </div>
-                                    <div class="callback-info">
-                                        <div class="callback-help">P2P metadata network. When enabled and connected, replaces Spotify/iTunes as the primary metadata source for searches.</div>
-                                    </div>
-                                    <div class="form-actions">
-                                        <button class="test-button" id="hydrabase-connect-btn" onclick="toggleHydrabaseFromSettings()">Connect</button>
-                                        <span id="hydrabase-settings-status" style="font-size: 0.82em; color: rgba(255,255,255,0.4); margin-left: 8px;"></span>
+                                    <div class="stg-service-body">
+                                        <input type="hidden" id="hydrabase-enabled" value="false">
+                                        <div class="form-group">
+                                            <label>WebSocket URL:</label>
+                                            <input type="text" id="hydrabase-url" placeholder="ws://localhost:4545">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>API Key:</label>
+                                            <input type="password" id="hydrabase-api-key" placeholder="Hydrabase API Key">
+                                        </div>
+                                        <div class="form-group" style="margin-bottom: 8px;">
+                                            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 0;">
+                                                <input type="checkbox" id="hydrabase-auto-connect" style="width: 16px; height: 16px;">
+                                                <span>Auto-connect on startup</span>
+                                            </label>
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">P2P metadata network. When enabled and connected, replaces Spotify/iTunes as the primary metadata source for searches.</div>
+                                        </div>
+                                        <div class="form-actions">
+                                            <button class="test-button" id="hydrabase-connect-btn" onclick="toggleHydrabaseFromSettings()">Connect</button>
+                                            <span id="hydrabase-settings-status" style="font-size: 0.82em; color: rgba(255,255,255,0.4); margin-left: 8px;"></span>
+                                        </div>
                                     </div>
                                 </div>
 
