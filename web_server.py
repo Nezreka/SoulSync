@@ -4424,13 +4424,19 @@ def get_status():
             if is_rate_limited or cooldown_remaining > 0:
                 # During rate limit or post-ban cooldown, skip the auth probe entirely.
                 # Probing Spotify here would reset the rate limit timer.
-                music_source = _get_metadata_fallback_source()  # App uses fallback during ban
+                music_source = _get_metadata_fallback_source()
+                if music_source == 'spotify':
+                    music_source = 'deezer'  # Spotify rate limited — can't use it
                 spotify_response_time = 0
             else:
                 spotify_start = time.time()
                 spotify_connected = spotify_client.is_spotify_authenticated() if spotify_client else False
                 spotify_response_time = (time.time() - spotify_start) * 1000
-                music_source = 'spotify' if spotify_connected else _get_metadata_fallback_source()
+                # Use whatever the user configured as primary metadata source
+                music_source = _get_metadata_fallback_source()
+                # If user selected spotify but it's not authed, fall back
+                if music_source == 'spotify' and not spotify_connected:
+                    music_source = 'deezer'
 
             _status_cache['spotify'] = {
                 'connected': True,  # Always true — iTunes fallback is always available
@@ -5981,7 +5987,7 @@ def test_connection_endpoint():
         current_time = time.time()
         if service == 'spotify':
             _status_cache['spotify']['connected'] = True
-            _status_cache['spotify']['source'] = 'spotify' if (spotify_client and spotify_client.is_spotify_authenticated()) else _get_metadata_fallback_source()
+            _status_cache['spotify']['source'] = _get_metadata_fallback_source()
             _status_cache_timestamps['spotify'] = current_time
             print("✅ Updated Spotify status cache after successful test")
         elif service in ['plex', 'jellyfin', 'navidrome']:
@@ -6031,7 +6037,7 @@ def test_dashboard_connection_endpoint():
         current_time = time.time()
         if service == 'spotify':
             _status_cache['spotify']['connected'] = True
-            _status_cache['spotify']['source'] = 'spotify' if (spotify_client and spotify_client.is_spotify_authenticated()) else _get_metadata_fallback_source()
+            _status_cache['spotify']['source'] = _get_metadata_fallback_source()
             _status_cache_timestamps['spotify'] = current_time
             print("✅ Updated Spotify status cache after successful dashboard test")
         elif service in ['plex', 'jellyfin', 'navidrome']:
@@ -7698,23 +7704,22 @@ def enhanced_search():
                 hydrabase_worker.enqueue(query, 'albums')
                 hydrabase_worker.enqueue(query, 'artists')
 
-            # Search primary source synchronously — use is_spotify_authenticated()
-            # (is_authenticated() always returns True because fallback is always available)
-            if spotify_client and spotify_client.is_spotify_authenticated():
-                try:
-                    primary_results = _enhanced_search_source(query, spotify_client)
-                    primary_source = "spotify"
-                except Exception as e:
-                    logger.debug(f"Spotify search failed: {e}")
+            # Search using the user's configured primary metadata source
+            fb_source = _get_metadata_fallback_source()
+            try:
+                primary_results = _enhanced_search_source(query, _get_metadata_fallback_client())
+                primary_source = fb_source
+            except Exception as e:
+                logger.debug(f"Primary source ({fb_source}) search failed: {e}")
 
-            # If Spotify unavailable, use configured fallback as primary
-            if primary_results is empty_source:
-                fb_source = _get_metadata_fallback_source()
-                try:
-                    primary_results = _enhanced_search_source(query, _get_metadata_fallback_client())
-                    primary_source = fb_source
-                except Exception as e:
-                    logger.debug(f"Fallback ({fb_source}) search failed: {e}")
+            # If primary source failed and it wasn't Spotify, try Spotify as fallback
+            if primary_results is empty_source and fb_source != 'spotify':
+                if spotify_client and spotify_client.is_spotify_authenticated():
+                    try:
+                        primary_results = _enhanced_search_source(query, spotify_client)
+                        primary_source = "spotify"
+                    except Exception as e:
+                        logger.debug(f"Spotify fallback search failed: {e}")
 
         # Determine which alternate sources are available (for frontend to fetch async)
         spotify_available = bool(spotify_client and spotify_client.is_spotify_authenticated())
@@ -32748,16 +32753,22 @@ def _get_deezer_client():
     return _deezer_client_instance
 
 def _get_metadata_fallback_source():
-    """Get the configured metadata fallback source ('itunes', 'deezer', 'discogs', or 'hydrabase')."""
+    """Get the configured primary metadata source.
+    Returns 'spotify', 'itunes', 'deezer', 'discogs', or 'hydrabase'."""
     try:
         return config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
     except Exception:
-        return 'itunes'
+        return 'deezer'
 
 def _get_metadata_fallback_client():
-    """Get the active metadata fallback client based on settings.
-    Returns an iTunesClient, DeezerClient, DiscogsClient, or HydrabaseClient instance with identical interfaces."""
+    """Get the active metadata client based on settings.
+    Returns a SpotifyClient, iTunesClient, DeezerClient, DiscogsClient, or HydrabaseClient instance."""
     source = _get_metadata_fallback_source()
+    if source == 'spotify':
+        if spotify_client and spotify_client.is_spotify_authenticated():
+            return spotify_client
+        # Spotify selected but not authed — fall back to deezer
+        return _get_deezer_client()
     if source == 'deezer':
         return _get_deezer_client()
     if source == 'discogs':
@@ -32765,7 +32776,6 @@ def _get_metadata_fallback_client():
         if token:
             from core.discogs_client import DiscogsClient
             return DiscogsClient(token=token)
-        # No token — fall back to iTunes
         from core.itunes_client import iTunesClient
         return iTunesClient()
     if source == 'hydrabase':
@@ -39499,11 +39509,13 @@ metadata_update_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=
 def _get_active_discovery_source():
     """
     Determine which music source is active for discovery.
-    Returns 'spotify' if Spotify is authenticated, otherwise the configured fallback.
+    Returns the user's configured primary metadata source.
+    If the selected source requires auth and isn't available, falls back.
     """
-    if spotify_client and spotify_client.is_spotify_authenticated():
-        return 'spotify'
-    return _get_metadata_fallback_source()
+    source = _get_metadata_fallback_source()
+    if source == 'spotify' and not (spotify_client and spotify_client.is_spotify_authenticated()):
+        return 'deezer'
+    return source
 
 
 @app.route('/api/discover/hero', methods=['GET'])
