@@ -7658,7 +7658,8 @@ def enhanced_search():
     try:
         # Search local database for artists (always)
         database = get_database()
-        db_artists_objs = database.search_artists(query, limit=5)
+        active_server = config_manager.get_active_media_server()
+        db_artists_objs = database.search_artists(query, limit=5, server_source=active_server)
 
         db_artists = []
         for artist in db_artists_objs:
@@ -14217,10 +14218,37 @@ def sync_artist_library(artist_id):
             """, (db_artist_id,))
             tracks = cursor.fetchall()
 
-            # Get artist name for logging
-            cursor.execute("SELECT name FROM artists WHERE id = ?", (db_artist_id,))
+            # Get current artist info
+            cursor.execute("SELECT name, server_source FROM artists WHERE id = ?", (db_artist_id,))
             artist_row = cursor.fetchone()
             artist_name = artist_row['name'] if artist_row else f'ID {db_artist_id}'
+            server_source = artist_row['server_source'] if artist_row else None
+
+            # Re-fetch artist name from media server (catches renames in Plex/Jellyfin/Navidrome)
+            name_updated = False
+            if server_source:
+                try:
+                    server_artist = None
+                    if server_source == 'plex' and plex_client and plex_client.server:
+                        try:
+                            server_artist = plex_client.server.fetchItem(int(db_artist_id))
+                        except Exception:
+                            pass
+                    elif server_source in ('jellyfin', 'navidrome'):
+                        media_client = {'jellyfin': jellyfin_client, 'navidrome': navidrome_client}.get(server_source)
+                        if media_client and hasattr(media_client, 'get_artist_by_id'):
+                            server_artist = media_client.get_artist_by_id(str(db_artist_id))
+
+                    if server_artist and hasattr(server_artist, 'title') and server_artist.title:
+                        new_name = server_artist.title
+                        if new_name != artist_name:
+                            cursor.execute("UPDATE artists SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                           (new_name, db_artist_id))
+                            print(f"🔄 [Artist Sync] Name updated: '{artist_name}' → '{new_name}'")
+                            artist_name = new_name
+                            name_updated = True
+                except Exception as e:
+                    print(f"⚠️ [Artist Sync] Could not refresh name from {server_source}: {e}")
 
             stale_tracks = []
             valid_tracks = 0
@@ -14264,6 +14292,7 @@ def sync_artist_library(artist_id):
             return jsonify({
                 "success": True,
                 "artist_name": artist_name,
+                "name_updated": name_updated,
                 "valid_tracks": valid_tracks,
                 "stale_removed": len(stale_tracks),
                 "empty_albums_removed": empty_albums_removed

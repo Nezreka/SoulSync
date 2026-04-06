@@ -4706,18 +4706,26 @@ class MusicDatabase:
             logger.error(f"Error getting tracks for album {album_id}: {e}")
             return []
     
-    def search_artists(self, query: str, limit: int = 50) -> List[DatabaseArtist]:
-        """Search artists by name"""
+    def search_artists(self, query: str, limit: int = 50, server_source: str = None) -> List[DatabaseArtist]:
+        """Search artists by name, optionally filtered by server source."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT * FROM artists 
-                WHERE name LIKE ? 
-                ORDER BY name 
-                LIMIT ?
-            """, (f"%{query}%", limit))
+
+            if server_source:
+                cursor.execute("""
+                    SELECT * FROM artists
+                    WHERE name LIKE ? AND server_source = ?
+                    ORDER BY name
+                    LIMIT ?
+                """, (f"%{query}%", server_source, limit))
+            else:
+                cursor.execute("""
+                    SELECT * FROM artists
+                    WHERE name LIKE ?
+                    ORDER BY name
+                    LIMIT ?
+                """, (f"%{query}%", limit))
             
             rows = cursor.fetchall()
             

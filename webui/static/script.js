@@ -17317,7 +17317,7 @@ function _gsRender(data) {
         h += tracks.map(t => {
             const ar = t.artist || (t.artists ? t.artists.join(', ') : '');
             const dur = t.duration_ms ? `${Math.floor(t.duration_ms / 60000)}:${String(Math.floor((t.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
-            return `<div class="gsearch-track" onclick="_gsClickTrack('${_escToast(ar).replace(/'/g, "\\'")}', '${_escToast(t.name).replace(/'/g, "\\'")}')"><div class="gsearch-item-art" style="width:32px;height:32px;border-radius:6px">${t.image_url ? `<img src="${t.image_url}" loading="lazy">` : '🎵'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(t.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${t.album ? ` · ${_escToast(t.album)}` : ''}</div></div><div class="gsearch-track-dur">${dur}</div><button class="gsearch-play-btn" onclick="event.stopPropagation(); _gsPlayTrack('${_escToast(t.name).replace(/'/g, "\\'")}', '${_escToast(ar).replace(/'/g, "\\'")}', '${_escToast(t.album || '').replace(/'/g, "\\'")}')" title="Stream">▶</button></div>`;
+            return `<div class="gsearch-track" onclick="_gsClickTrack('${_escToast(ar).replace(/'/g, "\\'")}', '${_escToast(t.name).replace(/'/g, "\\'")}', '${_escToast(t.album || '').replace(/'/g, "\\'")}', '${_escToast(t.id || '').replace(/'/g, "\\'")}', '${_escToast(t.image_url || '').replace(/'/g, "\\'")}', ${t.duration_ms || 0})"><div class="gsearch-item-art" style="width:32px;height:32px;border-radius:6px">${t.image_url ? `<img src="${t.image_url}" loading="lazy">` : '🎵'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(t.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${t.album ? ` · ${_escToast(t.album)}` : ''}</div></div><div class="gsearch-track-dur">${dur}</div><button class="gsearch-play-btn" onclick="event.stopPropagation(); _gsPlayTrack('${_escToast(t.name).replace(/'/g, "\\'")}', '${_escToast(ar).replace(/'/g, "\\'")}', '${_escToast(t.album || '').replace(/'/g, "\\'")}')" title="Stream">▶</button></div>`;
         }).join('');
         h += '</div>';
     } else if (loading.has('tracks')) {
@@ -17428,13 +17428,43 @@ async function _gsClickAlbum(albumId, albumName, artistName, imageUrl, source) {
     }
 }
 
-function _gsClickTrack(artistName, trackName) {
+async function _gsClickTrack(artistName, trackName, albumName, trackId, imageUrl, durationMs) {
     _gsDeactivate();
-    navigateToPage('downloads');
-    setTimeout(() => {
-        const input = document.getElementById('enhanced-search-input');
-        if (input) { input.value = `${artistName} ${trackName}`.trim(); input.dispatchEvent(new Event('input')); }
-    }, 300);
+
+    // Build enriched track + open download modal directly (same as enhanced search)
+    const virtualPlaylistId = `gsearch_track_${trackId || (artistName + '_' + trackName).replace(/\s/g, '_')}`;
+    const enrichedTrack = {
+        id: trackId || '',
+        name: trackName,
+        artists: [artistName],
+        album: { name: albumName || '', id: null, album_type: 'single', images: imageUrl ? [{ url: imageUrl }] : [], total_tracks: 1 },
+        duration_ms: durationMs || 0,
+        image_url: imageUrl || '',
+    };
+    const albumObject = {
+        name: albumName || '', id: null, album_type: 'single',
+        images: imageUrl ? [{ url: imageUrl }] : [],
+        artists: [{ name: artistName }], total_tracks: 1,
+    };
+    const artistObject = { id: null, name: artistName };
+    const playlistName = `${artistName} - ${trackName}`;
+
+    try {
+        showLoadingOverlay('Loading track...');
+        await openDownloadMissingModalForArtistAlbum(
+            virtualPlaylistId, playlistName, [enrichedTrack], albumObject, artistObject, false
+        );
+    } catch (e) {
+        console.error('Error opening track download:', e);
+        // Fallback: navigate to enhanced search
+        navigateToPage('downloads');
+        setTimeout(() => {
+            const input = document.getElementById('enhanced-search-input');
+            if (input) { input.value = `${artistName} ${trackName}`.trim(); input.dispatchEvent(new Event('input')); }
+        }, 300);
+    } finally {
+        hideLoadingOverlay();
+    }
 }
 
 async function _gsPlayTrack(trackName, artistName, albumName) {
