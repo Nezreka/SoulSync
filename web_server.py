@@ -57,7 +57,14 @@ if not pp_logger.handlers:
     _pp_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     pp_logger.addHandler(_pp_handler)
     pp_logger.propagate = False
-from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack, _is_globally_rate_limited as _spotify_rate_limited
+from core.spotify_client import (
+    SpotifyClient,
+    Playlist as SpotifyPlaylist,
+    Track as SpotifyTrack,
+    SPOTIFY_USER_SCOPE,
+    _is_globally_rate_limited as _spotify_rate_limited,
+    get_spotify_cache_path,
+)
 from core.plex_client import PlexClient
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
@@ -245,8 +252,8 @@ def get_spotify_client_for_profile(profile_id=None):
             client_id=creds['client_id'],
             client_secret=creds['client_secret'],
             redirect_uri=creds.get('redirect_uri', 'http://127.0.0.1:8888/callback'),
-            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
-            cache_path=f'config/.spotify_cache_profile_{profile_id}'
+            scope=SPOTIFY_USER_SCOPE,
+            cache_path=get_spotify_cache_path(profile_id)
         )
 
         # Create a bare SpotifyClient and immediately set the profile-specific
@@ -6397,14 +6404,15 @@ def auth_spotify():
                 db = get_database()
                 creds = db.get_profile_spotify(profile_id_int)
                 if creds and creds.get('client_id'):
+                    from core.spotify_client import get_spotify_cache_path
                     from spotipy.oauth2 import SpotifyOAuth
                     redirect_uri = creds.get('redirect_uri') or config_manager.get_spotify_config().get('redirect_uri', 'http://127.0.0.1:8888/callback')
                     auth_manager = SpotifyOAuth(
                         client_id=creds['client_id'],
                         client_secret=creds['client_secret'],
                         redirect_uri=redirect_uri,
-                        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
-                        cache_path=f'config/.spotify_cache_profile_{profile_id_int}',
+                        scope=SPOTIFY_USER_SCOPE,
+                        cache_path=get_spotify_cache_path(profile_id_int),
                         state=f'profile_{profile_id_int}'
                     )
                     auth_url = auth_manager.get_authorize_url()
@@ -6710,7 +6718,7 @@ def spotify_callback():
             pass
 
     try:
-        from core.spotify_client import SpotifyClient
+        from core.spotify_client import SpotifyClient, get_spotify_cache_path
         from spotipy.oauth2 import SpotifyOAuth
         from config.settings import config_manager
 
@@ -6724,8 +6732,8 @@ def spotify_callback():
                     client_id=creds['client_id'],
                     client_secret=creds['client_secret'],
                     redirect_uri=redirect_uri,
-                    scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
-                    cache_path=f'config/.spotify_cache_profile_{profile_id_from_state}',
+                    scope=SPOTIFY_USER_SCOPE,
+                    cache_path=get_spotify_cache_path(profile_id_from_state),
                     state=f'profile_{profile_id_from_state}'
                 )
                 token_info = auth_manager.get_access_token(auth_code)
@@ -6747,8 +6755,8 @@ def spotify_callback():
             client_id=config['client_id'],
             client_secret=config['client_secret'],
             redirect_uri=configured_uri,
-            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
-            cache_path='config/.spotify_cache'
+            scope=SPOTIFY_USER_SCOPE,
+            cache_path=get_spotify_cache_path()
         )
 
         token_info = auth_manager.get_access_token(auth_code)
@@ -6757,12 +6765,12 @@ def spotify_callback():
             # CRITICAL: update the GLOBAL spotify_client, not a local variable
             global spotify_client
             spotify_client = SpotifyClient()
-            if spotify_client.is_authenticated():
-                # Clear any active rate limit ban and post-ban cooldown
-                # so Spotify is immediately usable after re-auth
-                from core.spotify_client import _clear_rate_limit
-                _clear_rate_limit()
-                spotify_client._invalidate_auth_cache()
+            # Clear any active rate limit ban and post-ban cooldown before validation,
+            # otherwise a fresh re-auth can still look unauthenticated during cooldown.
+            from core.spotify_client import _clear_rate_limit
+            _clear_rate_limit()
+            spotify_client._invalidate_auth_cache()
+            if spotify_client.is_spotify_authenticated():
                 # Invalidate status cache so next poll picks up the new connection
                 _status_cache_timestamps['spotify'] = 0
                 # Refresh enrichment worker's client so it picks up new auth
@@ -6772,7 +6780,7 @@ def spotify_callback():
                 add_activity_item("✅", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
                 return "<h1>Spotify Authentication Successful!</h1><p>You can close this window.</p>"
             else:
-                raise Exception("Token exchange succeeded but authentication validation failed")
+                raise Exception("Token exchange succeeded but Spotify is still not authenticated")
         else:
             raise Exception("Failed to exchange authorization code for access token")
     except Exception as e:
@@ -47678,7 +47686,7 @@ def start_oauth_callback_servers():
 
                     # Manually trigger the token exchange using spotipy's auth manager
                     try:
-                        from core.spotify_client import SpotifyClient
+                        from core.spotify_client import SpotifyClient, get_spotify_cache_path
                         from spotipy.oauth2 import SpotifyOAuth
                         from config.settings import config_manager
 
@@ -47692,8 +47700,8 @@ def start_oauth_callback_servers():
                             client_id=config['client_id'],
                             client_secret=config['client_secret'],
                             redirect_uri=configured_uri,
-                            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email",
-                            cache_path='config/.spotify_cache'
+                            scope=SPOTIFY_USER_SCOPE,
+                            cache_path=get_spotify_cache_path()
                         )
 
                         # Extract the authorization code and exchange it for tokens
@@ -47704,11 +47712,12 @@ def start_oauth_callback_servers():
                             global spotify_client
                             spotify_client = SpotifyClient()
 
-                            if spotify_client.is_authenticated():
-                                # Clear rate limit ban + post-ban cooldown so Spotify is usable immediately
-                                from core.spotify_client import _clear_rate_limit
-                                _clear_rate_limit()
-                                spotify_client._invalidate_auth_cache()
+                            # Clear rate limit ban + post-ban cooldown before validation.
+                            from core.spotify_client import _clear_rate_limit
+                            _clear_rate_limit()
+                            spotify_client._invalidate_auth_cache()
+
+                            if spotify_client.is_spotify_authenticated():
                                 # Invalidate status cache so next poll picks up the new connection
                                 _status_cache_timestamps['spotify'] = 0
                                 # Refresh enrichment worker's client so it picks up new auth
@@ -47721,7 +47730,7 @@ def start_oauth_callback_servers():
                                 self.end_headers()
                                 self.wfile.write(b'<h1>Spotify Authentication Successful!</h1><p>You can close this window.</p>')
                             else:
-                                raise Exception("Token exchange succeeded but authentication validation failed")
+                                raise Exception("Token exchange succeeded but Spotify is still not authenticated")
                         else:
                             raise Exception("Failed to exchange authorization code for access token")
                     except Exception as e:

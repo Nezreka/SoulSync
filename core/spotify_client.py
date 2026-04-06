@@ -3,6 +3,7 @@ from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
 from typing import Dict, List, Optional, Any
 import time
 import threading
+from pathlib import Path
 from functools import wraps
 from dataclasses import dataclass
 from utils.logging_config import get_logger
@@ -56,6 +57,17 @@ _ESCALATION_WINDOW = 3600   # 1 hour — if re-limited within this, escalate
 _ESCALATION_MAX = 14400     # 4 hours max ban
 _BASE_UNKNOWN_BAN = 1800    # 30 min default when Retry-After header is missing
 _BASE_MAX_RETRIES_BAN = 14400  # 4 hours default when spotipy exhausted all retries (severe rate limit)
+SPOTIFY_USER_SCOPE = (
+    "user-library-read user-read-private playlist-read-private "
+    "playlist-read-collaborative user-read-email user-follow-read"
+)
+
+def get_spotify_cache_path(profile_id: Optional[int] = None) -> str:
+    """Return an absolute cache path so OAuth tokens persist regardless of process CWD."""
+    cache_dir = Path(config_manager.base_dir) / "config"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_name = ".spotify_cache" if not profile_id or profile_id == 1 else f".spotify_cache_profile_{profile_id}"
+    return str(cache_dir / cache_name)
 
 class SpotifyRateLimitError(Exception):
     """Raised when Spotify API calls are blocked due to active global rate limit ban."""
@@ -542,8 +554,8 @@ class SpotifyClient:
                 client_id=config['client_id'],
                 client_secret=config['client_secret'],
                 redirect_uri=config.get('redirect_uri', "http://127.0.0.1:8888/callback"),
-                scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
-                cache_path='config/.spotify_cache'
+                scope=SPOTIFY_USER_SCOPE,
+                cache_path=get_spotify_cache_path()
             )
             
             self.sp = spotipy.Spotify(auth_manager=auth_manager, retries=0, requests_timeout=15)
@@ -633,7 +645,7 @@ class SpotifyClient:
                 logger.warning(f"Auth probe rate limited — activating {ban_duration}s global ban")
                 result = True
             else:
-                logger.debug(f"Spotify authentication check failed: {e}")
+                logger.warning(f"Spotify authentication check failed: {type(e).__name__}: {e}")
                 result = False
 
         with self._auth_cache_lock:
@@ -644,16 +656,16 @@ class SpotifyClient:
 
     def disconnect(self):
         """Disconnect Spotify: clear client, delete cache, invalidate auth cache, clear rate limit"""
-        import os
         self.sp = None
         self.user_id = None
         self._invalidate_auth_cache()
         _clear_rate_limit()
 
-        cache_path = 'config/.spotify_cache'
+        cache_path = get_spotify_cache_path()
         try:
-            if os.path.exists(cache_path):
-                os.remove(cache_path)
+            cache_file = Path(cache_path)
+            if cache_file.exists():
+                cache_file.unlink()
                 logger.info("Deleted Spotify cache file")
         except Exception as e:
             logger.warning(f"Failed to delete Spotify cache: {e}")
