@@ -19,8 +19,8 @@ SoulSync bridges streaming services to your media server with automated discover
 1. **Monitors artists** → Automatically detects new releases from your watchlist
 2. **Generates playlists** → Release Radar, Discovery Weekly, Seasonal, Decade/Genre mixes, Cache-powered discovery
 3. **Downloads missing tracks** → From Soulseek, Deezer, Tidal, Qobuz, HiFi, YouTube, or any combination via Hybrid mode
-4. **Verifies downloads** → AcoustID fingerprinting for P2P sources (skipped for trusted API sources)
-5. **Enriches metadata** → 9 enrichment workers (Spotify, MusicBrainz, iTunes, Deezer, AudioDB, Last.fm, Genius, Tidal, Qobuz)
+4. **Verifies downloads** → AcoustID fingerprinting for all download sources
+5. **Enriches metadata** → 10 enrichment workers (Spotify, MusicBrainz, iTunes, Deezer, Discogs, AudioDB, Last.fm, Genius, Tidal, Qobuz)
 6. **Tags consistently** → Picard-style MusicBrainz release preflight ensures all album tracks get the same release ID
 7. **Organizes files** → Custom templates for clean folder structures
 8. **Syncs media server** → Plex, Jellyfin, or Navidrome stay updated automatically
@@ -100,20 +100,21 @@ SoulSync bridges streaming services to your media server with automated discover
 ### Audio Verification
 
 **AcoustID Fingerprinting** (optional) — Verifies downloaded files match expected tracks
-- Automatically skipped for trusted API sources (Deezer, Tidal, Qobuz, HiFi)
-- Only runs for P2P (Soulseek) and extracted audio (YouTube) where mislabeling is possible
+- Runs for all download sources (Soulseek, Tidal, Qobuz, HiFi, Deezer, YouTube)
+- Catches wrong versions (live, remix, cover) even from streaming API sources
 - Fail-open design: verification errors never block downloads
 
 ### Metadata & Enrichment
 
-**9 Background Enrichment Workers**: Spotify, MusicBrainz, iTunes, Deezer, AudioDB, Last.fm, Genius, Tidal, Qobuz
+**10 Background Enrichment Workers**: Spotify, MusicBrainz, iTunes, Deezer, Discogs, AudioDB, Last.fm, Genius, Tidal, Qobuz
 - Each worker independently processes artists, albums, and tracks
 - Pause/resume controls on dashboard, auto-pause during database scans
 - Error items don't auto-retry in infinite loops (fixed in v2.1)
 
-**Dual-Source Metadata**
-- Primary: Spotify — richer data, discovery features, playlist sync
-- Fallback: iTunes/Apple Music or Deezer — configurable, no authentication required
+**Multi-Source Metadata**
+- Primary source selectable: Spotify, iTunes/Apple Music, Deezer, or Discogs
+- Spotify no longer auto-overrides — user chooses their preferred source in Settings
+- Spotify auth still enables playlists, followed artists, and enrichment
 - MusicBrainz enrichment with Picard-style album consistency
 
 **Post-Processing Tag Embedding**
@@ -127,7 +128,7 @@ SoulSync bridges streaming services to your media server with automated discover
 - Unicode and accent handling (KoЯn, Bjork, A$AP Rocky)
 - Fuzzy matching with weighted confidence scoring (title, artist, duration)
 - Album variation detection (Deluxe, Remastered, Taylor's Version, etc.)
-- Streaming source results bypass filename-matching engine (API results trusted directly)
+- Streaming source match validation: same confidence scoring applied to Tidal/Qobuz/HiFi/Deezer results as Soulseek
 - Short title protection: prevents "Love" from matching "Loveless"
 
 ### Automation
@@ -136,7 +137,8 @@ SoulSync bridges streaming services to your media server with automated discover
 - **Triggers**: Schedule, Daily/Weekly Time, Track Downloaded, Batch Complete, Playlist Changed, Discovery Complete, Signal Received, and 10+ more
 - **Actions**: Process Wishlist, Scan Watchlist, Refresh Mirrored, Discover Playlist, Sync Playlist, Scan Library, Database Update, Quality Scan, Full Cleanup, and more
 - **Then Actions**: Fire Signal (chain automations), Discord, Telegram, Pushbullet notifications
-- **Pipelines**: 11 pre-built one-click pipeline deployments (Release Radar, Discovery Weekly, Nightly Operations, etc.)
+- **Playlist Pipeline**: Single automation for full playlist lifecycle — refresh → discover → sync → download missing. No signal wiring needed.
+- **Pipelines**: Pre-built one-click pipeline deployments (New Music, Nightly Operations, etc.)
 - **Signal Chains**: playlist_id forwarded from events to action handlers for proper chain execution
 
 **Watchlist** — Monitor unlimited artists with per-artist configuration
@@ -168,7 +170,7 @@ SoulSync bridges streaming services to your media server with automated discover
 - Bulk operations, sortable columns, multi-disc support
 
 **Library Maintenance** — 10+ automated repair jobs
-- Track Number, Dead Files, Duplicates, Metadata Gaps, Album Completeness, Missing Cover Art, AcoustID Scanner, Orphan Files, Fake Lossless, Library Reorganize, Lossy Converter, MBID Mismatch, Album Tag Consistency
+- Track Number, Dead Files, Duplicates, Metadata Gaps, Album Completeness, Missing Cover Art, AcoustID Scanner, Orphan Files, Fake Lossless, Library Reorganize, Lossy Converter, MBID Mismatch, Album Tag Consistency, Live/Commentary Cleaner
 - Enrichment workers auto-pause during database scans
 - One-click Fix All with findings dashboard
 
