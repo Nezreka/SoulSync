@@ -1916,9 +1916,18 @@ def _record_library_history_download(context):
         source_track_id = (search_result.get('track_id', '')
                            or search_result.get('id', '')
                            or ti.get('id', ''))
-        # Source track title: only save if it differs from expected title (otherwise it's just noise)
-        _src_title = search_result.get('title', '') or search_result.get('name', '')
-        source_track_title = _src_title if _src_title and _src_title != title else ''
+
+        # Source title/artist — what the download source said the track was.
+        # For Soulseek: parsed from the peer's filename by TrackResult._parse_filename_metadata()
+        # For Tidal/YouTube/Qobuz: from the streaming API's own metadata
+        # These live on the candidate's original fields, NOT the spotify_clean_* fields
+        source_track_title = search_result.get('title', '') or search_result.get('name', '')
+        source_artist = search_result.get('artist', '')
+        # For streaming sources, track ID is encoded in filename as "id||display_name"
+        if source_filename and '||' in source_filename and username in ('tidal', 'youtube', 'qobuz', 'hifi', 'deezer_dl'):
+            _stream_id = source_filename.split('||')[0]
+            if _stream_id and not source_track_id:
+                source_track_id = _stream_id
 
         # AcoustID verification result
         acoustid_result = context.get('_acoustid_result', '')
@@ -1936,7 +1945,8 @@ def _record_library_history_download(context):
             source_track_id=source_track_id,
             source_track_title=source_track_title,
             source_filename=source_filename,
-            acoustid_result=acoustid_result
+            acoustid_result=acoustid_result,
+            source_artist=source_artist
         )
     except Exception:
         pass  # Non-critical, never block download flow
