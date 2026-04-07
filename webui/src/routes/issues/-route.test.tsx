@@ -179,7 +179,11 @@ describe('issues route', () => {
     });
 
     fireEvent.click(await screen.findByRole('button', { name: /wrong cover art/i }));
-    expect(screen.getByLabelText(/title/i)).toHaveValue('Wrong Cover Art: Album Name');
+    const titleInput = screen.getByLabelText(/title/i);
+    expect(titleInput).toHaveValue('Wrong Cover Art: Album Name');
+    fireEvent.change(titleInput, { target: { value: 'Custom report title' } });
+    fireEvent.click(screen.getByRole('button', { name: /missing tracks/i }));
+    expect(titleInput).toHaveValue('Custom report title');
     fireEvent.click(screen.getByRole('button', { name: /submit issue/i }));
 
     await waitFor(() => {
