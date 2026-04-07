@@ -1,6 +1,16 @@
 # SoulSync WebUI Dockerfile
 # Multi-architecture support for AMD64 and ARM64
 
+FROM node:24-slim AS webui-builder
+
+WORKDIR /app/webui
+
+COPY webui/package.json webui/package-lock.json ./
+RUN npm ci
+
+COPY webui/ ./
+RUN npm run build
+
 # Stage 1: Builder — install Python dependencies with compilation tools
 FROM python:3.11-slim AS builder
 
@@ -54,6 +64,7 @@ RUN useradd --create-home --shell /bin/bash --uid 1000 soulsync
 # in tools/), it gets counted twice in the image. Cin caught this on
 # 2026-05-08 — see the .dockerignore comment for the same incident.
 COPY --chown=soulsync:soulsync . .
+COPY --chown=soulsync:soulsync --from=webui-builder /app/webui/static/dist /app/webui/static/dist
 
 # Create runtime mount-point directories the app expects to exist.
 # NOTE: /app/data is for database FILES, /app/database is the Python package
