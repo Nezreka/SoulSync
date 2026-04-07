@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
-    {{ react_assets_for('router', 'head')|safe }}
+    {{ vite_assets('head')|safe }}
 </head>
 
 <body>
@@ -7822,8 +7822,7 @@
 
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js', v=static_v) }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-    {{ react_assets_for('router', 'body')|safe }}
-    {{ react_assets_for('issues', 'body')|safe }}
+    {{ vite_assets('body')|safe }}
     <script src="{{ url_for('static', filename='setup-wizard.js', v=static_v) }}"></script>
     <!-- Split modules (was: script.js) — core.js must load first, init.js last -->
     <script src="{{ url_for('static', filename='core.js', v=static_v) }}"></script>
