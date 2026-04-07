@@ -900,10 +900,15 @@ class WatchlistScanner:
                         filtered_albums.append(album)
 
                 logger.info(f"Filtered {len(albums)} albums to {len(filtered_albums)} released after {cutoff_timestamp}")
-                return filtered_albums
+                albums = filtered_albums
 
-            # Return all albums if no cutoff (lookback_period = 'all')
-            return albums
+            # Skip future/unreleased albums — no real audio available yet
+            now = datetime.now(timezone.utc)
+            released = [a for a in albums if not self._is_future_release(a, now)]
+            skipped = len(albums) - len(released)
+            if skipped:
+                logger.info(f"Skipped {skipped} future/unreleased albums (will be picked up after release)")
+            return released
 
         except Exception as e:
             logger.error(f"Error getting discography for artist {spotify_artist_id}: {e}")
@@ -982,10 +987,15 @@ class WatchlistScanner:
                         filtered_albums.append(album)
 
                 logger.info(f"Filtered {len(albums)} albums to {len(filtered_albums)} released after {cutoff_timestamp}")
-                return filtered_albums
+                albums = filtered_albums
 
-            # Return all albums if no cutoff (lookback_period = 'all')
-            return albums
+            # Skip future/unreleased albums — no real audio available yet
+            now = datetime.now(timezone.utc)
+            released = [a for a in albums if not self._is_future_release(a, now)]
+            skipped = len(albums) - len(released)
+            if skipped:
+                logger.info(f"Skipped {skipped} future/unreleased albums (will be picked up after release)")
+            return released
 
         except Exception as e:
             logger.error(f"Error getting discography for artist {artist_id}: {e}")
@@ -1284,6 +1294,28 @@ class WatchlistScanner:
         except Exception as e:
             logger.warning(f"Error comparing album date {album.release_date} with timestamp {timestamp}: {e}")
             return True  # Include if we can't determine
+
+    def _is_future_release(self, album, now: datetime) -> bool:
+        """Check if an album's release date is in the future. Returns False for unknown dates (safe default)."""
+        try:
+            if not album.release_date:
+                return False  # Unknown date — assume released
+            release_date_str = album.release_date
+            if len(release_date_str) == 4:
+                album_date = datetime(int(release_date_str), 1, 1, tzinfo=timezone.utc)
+            elif len(release_date_str) == 7:
+                year, month = release_date_str.split('-')
+                album_date = datetime(int(year), int(month), 1, tzinfo=timezone.utc)
+            elif len(release_date_str) == 10:
+                album_date = datetime.strptime(release_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            elif 'T' in release_date_str:
+                date_part = release_date_str.split('T')[0]
+                album_date = datetime.strptime(date_part, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            else:
+                return False  # Can't parse — assume released
+            return album_date > now
+        except Exception:
+            return False  # Error — assume released
 
     def _should_include_release(self, track_count: int, watchlist_artist: WatchlistArtist) -> bool:
         """
