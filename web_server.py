@@ -372,21 +372,13 @@ def _log_rejected_socketio_origin():
     )
 
 # --- WebUI asset injection ---
-_webui_react_manifest = None
-_webui_react_manifest_mtime = None
-_webui_react_manifest_path = Path(base_dir) / 'webui' / 'static' / 'dist' / '.vite' / 'manifest.json'
+_webui_vite_manifest = None
+_webui_vite_manifest_mtime = None
+_webui_vite_entry = 'src/app/main.tsx'
+_webui_vite_manifest_path = Path(base_dir) / 'webui' / 'static' / 'dist' / '.vite' / 'manifest.json'
 _webui_vite_dev = os.environ.get('SOULSYNC_WEBUI_VITE_DEV', '').lower() in ('1', 'true', 'yes', 'on')
 _webui_vite_url = os.environ.get('SOULSYNC_WEBUI_VITE_URL', 'http://127.0.0.1:5173').rstrip('/')
 _webui_vite_base = '/static/dist/'
-
-_webui_react_apps = {
-    'router': {
-        'entry': 'src/app/main.tsx',
-        'dev_entry': 'src/app/main.tsx',
-        'mount_id': None,
-        'mount_class': None,
-    },
-}
 
 _webui_client_route_map = {
     '/dashboard': 'dashboard',
@@ -449,53 +441,52 @@ def _should_serve_webui_spa(pathname: str) -> bool:
     return not normalized.startswith(excluded_prefixes)
 
 
-def _load_webui_react_manifest():
-    global _webui_react_manifest, _webui_react_manifest_mtime
+def _webui_vite_dev_asset_url(asset_path: str) -> str:
+    return f'{_webui_vite_url}{_webui_vite_base.rstrip("/")}/{asset_path.lstrip("/")}'
+
+
+def _load_webui_vite_manifest():
+    global _webui_vite_manifest, _webui_vite_manifest_mtime
 
     manifest_mtime = None
-    if _webui_react_manifest_path.exists():
+    if _webui_vite_manifest_path.exists():
         try:
-            manifest_mtime = _webui_react_manifest_path.stat().st_mtime
+            manifest_mtime = _webui_vite_manifest_path.stat().st_mtime
         except OSError:
             manifest_mtime = None
 
-    if _webui_react_manifest is not None and manifest_mtime == _webui_react_manifest_mtime:
-        return _webui_react_manifest
+    if _webui_vite_manifest is not None and manifest_mtime == _webui_vite_manifest_mtime:
+        return _webui_vite_manifest
 
-    if _webui_react_manifest_path.exists():
+    if _webui_vite_manifest_path.exists():
         try:
-            with _webui_react_manifest_path.open('r', encoding='utf-8') as handle:
-                _webui_react_manifest = json.load(handle)
-            _webui_react_manifest_mtime = manifest_mtime
+            with _webui_vite_manifest_path.open('r', encoding='utf-8') as handle:
+                _webui_vite_manifest = json.load(handle)
+            _webui_vite_manifest_mtime = manifest_mtime
         except Exception as exc:
             logger.warning(f"Failed to load webui manifest: {exc}")
-            _webui_react_manifest = {}
-            _webui_react_manifest_mtime = manifest_mtime
+            _webui_vite_manifest = {}
+            _webui_vite_manifest_mtime = manifest_mtime
     else:
-        _webui_react_manifest = {}
-        _webui_react_manifest_mtime = None
-    return _webui_react_manifest
+        _webui_vite_manifest = {}
+        _webui_vite_manifest_mtime = None
+    return _webui_vite_manifest
 
 
-def _build_webui_react_assets(app_name='issues', placement='body'):
-    app_config = _webui_react_apps.get(app_name)
-    if not app_config:
-        return ''
-
+def _build_webui_vite_assets(placement='body'):
     if placement not in ('head', 'body'):
         return ''
 
     if _webui_vite_dev:
         if placement == 'head':
             return ''
-        vite_base_url = f'{_webui_vite_url}{_webui_vite_base.rstrip("/")}'
         return '\n'.join([
-                f'<script type="module" src="{vite_base_url}/@vite/client"></script>',
-                f'<script type="module" src="{vite_base_url}/{app_config["dev_entry"]}"></script>',
-            ])
+            f'<script type="module" src="{_webui_vite_dev_asset_url("@vite/client")}"></script>',
+            f'<script type="module" src="{_webui_vite_dev_asset_url(_webui_vite_entry)}"></script>',
+        ])
 
-    manifest = _load_webui_react_manifest()
-    entry = manifest.get(app_config['entry'])
+    manifest = _load_webui_vite_manifest()
+    entry = manifest.get(_webui_vite_entry)
     if not entry:
         return ''
 
@@ -506,30 +497,15 @@ def _build_webui_react_assets(app_name='issues', placement='body'):
         return '\n'.join(head_assets)
 
     entry_file = entry.get('file')
+    if not entry_file:
+        return ''
     return f'<script type="module" src="{url_for("static", filename=f"dist/{entry_file}")}"></script>'
-
-
-def _build_webui_react_root(app_name='issues'):
-    app_config = _webui_react_apps.get(app_name)
-    if not app_config:
-        return ''
-
-    mount_id = app_config.get('mount_id', f'{app_name}-app-root')
-    mount_class = app_config.get('mount_class', f'{app_name}-app-root')
-    if not mount_id:
-        return ''
-    return f'<div id="{mount_id}" class="{mount_class}" data-react-app="{app_name}"></div>'
 
 
 @app.context_processor
 def inject_webui_assets():
     return {
-        'react_assets_for': lambda app_name='issues', placement='body': _build_webui_react_assets(app_name, placement),
-        'react_root': lambda app_name='issues': _build_webui_react_root(app_name),
-        # Transitional aliases for older templates while the route contract settles.
-        'react_head_assets': lambda app_name='issues': _build_webui_react_assets(app_name, 'head'),
-        'react_body_assets': lambda app_name='issues': _build_webui_react_assets(app_name, 'body'),
-        'react_mount': lambda app_name='issues': _build_webui_react_root(app_name),
+        'vite_assets': _build_webui_vite_assets,
     }
 
 # --- Profile Context (before_request hook) ---
