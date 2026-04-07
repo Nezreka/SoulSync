@@ -16914,6 +16914,7 @@ function showToast(message, type = 'success', helpSection = null) {
 }
 
 function _escToast(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function _escAttr(s) { return _escToast(s).replace(/'/g, "\\'").replace(/\n/g, ' ').replace(/\r/g, ''); }
 
 function _updateNotifBadge() {
     const badge = document.getElementById('notif-bell-badge');
@@ -17279,13 +17280,13 @@ function _gsRender(data) {
 
     if (dbArtists.length) {
         h += '<div class="gsearch-section-header">📚 In Your Library</div><div class="gsearch-grid">';
-        h += dbArtists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escToast(a.name).replace(/'/g, "\\'")}', true)"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></div>`).join('');
+        h += dbArtists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escAttr(a.name)}', true)"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">Library</div></div></div>`).join('');
         h += '</div>';
     }
 
     if (artists.length) {
         h += `<div class="gsearch-section-header">🎤 Artists <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-grid" id="gsearch-artists-grid">`;
-        h += artists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escToast(a.name).replace(/'/g, "\\'")}', false)" ${!a.image_url ? `data-artist-id="${a.id}" data-needs-image="true"` : ''}><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div></div></div>`).join('');
+        h += artists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escAttr(a.name)}', false)" ${!a.image_url ? `data-artist-id="${a.id}" data-needs-image="true"` : ''}><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div></div></div>`).join('');
         h += '</div>';
     } else if (loading.has('artists')) {
         h += `<div class="gsearch-section-header">🎤 Artists <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-section-loading"><div class="server-search-spinner" style="width:14px;height:14px"></div> Loading artists...</div>`;
@@ -17299,7 +17300,7 @@ function _gsRender(data) {
             const ar = a.artist || (a.artists ? a.artists.join(', ') : '');
             const yr = a.release_date ? a.release_date.substring(0, 4) : '';
             const img = (a.image_url || '').replace(/'/g, "\\'");
-            return `<div class="gsearch-item" onclick="_gsClickAlbum('${a.id}', '${_escToast(a.name).replace(/'/g, "\\'")}', '${_escToast(ar).replace(/'/g, "\\'")}', '${img}', '${activeSrc}')"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '💿'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${yr ? ` · ${yr}` : ''}</div></div></div>`;
+            return `<div class="gsearch-item" onclick="_gsClickAlbum('${a.id}', '${_escAttr(a.name)}', '${_escAttr(ar)}', '${img}', '${activeSrc}')"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '💿'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${yr ? ` · ${yr}` : ''}</div></div></div>`;
         }).join('');
         h += '</div>';
     }
@@ -17313,7 +17314,7 @@ function _gsRender(data) {
         h += singles.map(a => {
             const ar = a.artist || (a.artists ? a.artists.join(', ') : '');
             const img = (a.image_url || '').replace(/'/g, "\\'");
-            return `<div class="gsearch-item" onclick="_gsClickAlbum('${a.id}', '${_escToast(a.name).replace(/'/g, "\\'")}', '${_escToast(ar).replace(/'/g, "\\'")}', '${img}', '${activeSrc}')"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '🎶'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}</div></div></div>`;
+            return `<div class="gsearch-item" onclick="_gsClickAlbum('${a.id}', '${_escAttr(a.name)}', '${_escAttr(ar)}', '${img}', '${activeSrc}')"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '🎶'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}</div></div></div>`;
         }).join('');
         h += '</div>';
     }
@@ -17323,7 +17324,7 @@ function _gsRender(data) {
         h += tracks.map(t => {
             const ar = t.artist || (t.artists ? t.artists.join(', ') : '');
             const dur = t.duration_ms ? `${Math.floor(t.duration_ms / 60000)}:${String(Math.floor((t.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
-            return `<div class="gsearch-track" onclick="_gsClickTrack('${_escToast(ar).replace(/'/g, "\\'")}', '${_escToast(t.name).replace(/'/g, "\\'")}', '${_escToast(t.album || '').replace(/'/g, "\\'")}', '${_escToast(t.id || '').replace(/'/g, "\\'")}', '${_escToast(t.image_url || '').replace(/'/g, "\\'")}', ${t.duration_ms || 0})"><div class="gsearch-item-art" style="width:32px;height:32px;border-radius:6px">${t.image_url ? `<img src="${t.image_url}" loading="lazy">` : '🎵'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(t.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${t.album ? ` · ${_escToast(t.album)}` : ''}</div></div><div class="gsearch-track-dur">${dur}</div><button class="gsearch-play-btn" onclick="event.stopPropagation(); _gsPlayTrack('${_escToast(t.name).replace(/'/g, "\\'")}', '${_escToast(ar).replace(/'/g, "\\'")}', '${_escToast(t.album || '').replace(/'/g, "\\'")}')" title="Stream">▶</button></div>`;
+            return `<div class="gsearch-track" onclick="_gsClickTrack('${_escAttr(ar)}', '${_escAttr(t.name)}', '${_escAttr(t.album || '')}', '${_escAttr(t.id || '')}', '${_escAttr(t.image_url || '')}', ${t.duration_ms || 0})"><div class="gsearch-item-art" style="width:32px;height:32px;border-radius:6px">${t.image_url ? `<img src="${t.image_url}" loading="lazy">` : '🎵'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(t.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${t.album ? ` · ${_escToast(t.album)}` : ''}</div></div><div class="gsearch-track-dur">${dur}</div><button class="gsearch-play-btn" onclick="event.stopPropagation(); _gsPlayTrack('${_escAttr(t.name)}', '${_escAttr(ar)}', '${_escAttr(t.album || '')}')" title="Stream">▶</button></div>`;
         }).join('');
         h += '</div>';
     } else if (loading.has('tracks')) {
@@ -17428,6 +17429,20 @@ async function _gsClickAlbum(albumId, albumName, artistName, imageUrl, source) {
 
         await openDownloadMissingModalForArtistAlbum(virtualPlaylistId, `[${artistName}] ${albumData.name}`, enrichedTracks, albumObj, artistObj, false);
 
+        // Register download bubble (same pattern as enhanced search)
+        registerSearchDownload(
+            {
+                id: albumData.id,
+                name: albumData.name,
+                artist: artistName,
+                image_url: albumData.images?.[0]?.url || imageUrl || null,
+                images: albumData.images || []
+            },
+            'album',
+            virtualPlaylistId,
+            artistName
+        );
+
     } catch (e) {
         hideLoadingOverlay();
         showToast('Failed to load album: ' + e.message, 'error');
@@ -17459,6 +17474,20 @@ async function _gsClickTrack(artistName, trackName, albumName, trackId, imageUrl
         showLoadingOverlay('Loading track...');
         await openDownloadMissingModalForArtistAlbum(
             virtualPlaylistId, playlistName, [enrichedTrack], albumObject, artistObject, false
+        );
+
+        // Register download bubble (same pattern as enhanced search)
+        registerSearchDownload(
+            {
+                id: trackId || '',
+                name: trackName,
+                artist: artistName,
+                image_url: imageUrl || null,
+                images: imageUrl ? [{ url: imageUrl }] : []
+            },
+            'track',
+            virtualPlaylistId,
+            artistName
         );
     } catch (e) {
         console.error('Error opening track download:', e);
@@ -55153,7 +55182,7 @@ async function _dblLoadList() {
             <div class="discover-blacklist-item">
                 <span class="discover-blacklist-name">${_escToast(e.artist_name)}</span>
                 <span class="discover-blacklist-date">${e.created_at ? new Date(e.created_at).toLocaleDateString() : ''}</span>
-                <button class="discover-blacklist-remove" onclick="unblockDiscoveryArtist(${e.id}, '${_escToast(e.artist_name).replace(/'/g, "\\'")}')" title="Unblock">✕</button>
+                <button class="discover-blacklist-remove" onclick="unblockDiscoveryArtist(${e.id}, '${_escAttr(e.artist_name)}')" title="Unblock">✕</button>
             </div>
         `).join('');
     } catch (e) {

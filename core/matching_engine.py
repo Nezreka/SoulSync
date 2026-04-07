@@ -269,7 +269,11 @@ class MusicMatchingEngine:
                 cand_artist_normalized = self.normalize_string(raw_cand_artist)
                 cand_artist_cleaned = self.clean_artist(raw_cand_artist)
                 # Check containment (e.g., "drake" in "drake 21 savage")
-                if src_artist and src_artist in cand_artist_normalized:
+                # Skip for very short names (≤2 chars) — "b" matches everything
+                if src_artist and len(src_artist) > 2 and src_artist in cand_artist_normalized:
+                    best_artist_score = 1.0
+                    break
+                elif src_artist and src_artist == cand_artist_normalized:
                     best_artist_score = 1.0
                     break
                 score = self.similarity_score(src_artist, cand_artist_cleaned)
@@ -604,8 +608,12 @@ class MusicMatchingEngine:
         best_artist_similarity = 0.0
 
         for artist in spotify_artists_norm:
-            if artist in slskd_filename_norm:
+            # Skip containment for very short names (≤2 chars) — "b" matches everything
+            if artist and len(artist) > 2 and artist in slskd_filename_norm:
                 artist_score = 1.0  # Perfect match if any artist is found
+                break
+            elif artist and len(artist) <= 2 and re.search(r'\b' + re.escape(artist) + r'\b', slskd_filename_norm):
+                artist_score = 1.0
                 break
             else:
                 # Try similarity matching as fallback for misspellings/variations
