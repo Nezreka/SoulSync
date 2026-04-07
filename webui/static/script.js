@@ -21177,7 +21177,12 @@ function renderHistoryEntry(entry) {
 function formatHistoryTime(isoStr) {
     if (!isoStr) return '';
     try {
-        const date = new Date(isoStr);
+        // SQLite CURRENT_TIMESTAMP is UTC but lacks timezone marker — append Z
+        let normalized = isoStr;
+        if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(normalized) && !normalized.includes('Z') && !normalized.includes('+')) {
+            normalized = normalized.replace(' ', 'T') + 'Z';
+        }
+        const date = new Date(normalized);
         const now = new Date();
         const diffMs = now - date;
         const diffMins = Math.floor(diffMs / 60000);
