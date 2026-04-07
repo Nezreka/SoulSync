@@ -12982,7 +12982,7 @@ def library_play_track():
         print(f"❌ Error playing library track: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
-_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz')}
+_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')}
 
 @app.route('/api/library/enrich', methods=['POST'])
 def library_enrich_entity():
@@ -13008,7 +13008,7 @@ def library_enrich_entity():
         if entity_type not in ('artist', 'album', 'track'):
             return jsonify({"success": False, "error": "entity_type must be artist, album, or track"}), 400
 
-        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz')
+        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')
         if service not in valid_services:
             return jsonify({"success": False, "error": f"service must be one of: {', '.join(valid_services)}"}), 400
 
@@ -13173,6 +13173,17 @@ def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
         elif entity_type == 'track':
             qobuz_enrichment_worker._process_track(entity_id, name, artist_name, item)
         return {"success": True, "message": f"Qobuz lookup complete for {entity_type}"}
+
+    elif service == 'discogs':
+        if not discogs_worker:
+            return {"success": False, "error": "Discogs worker not initialized"}
+        item = {'type': entity_type, 'id': entity_id, 'name': name}
+        if entity_type in ('album', 'track'):
+            item['artist'] = artist_name
+        if entity_type == 'track':
+            return {"success": False, "error": "Discogs does not support track-level enrichment"}
+        discogs_worker._process_item(item)
+        return {"success": True, "message": f"Discogs lookup complete for {entity_type}"}
 
     else:
         return {"success": False, "error": f"Unknown service: {service}"}
