@@ -21093,25 +21093,55 @@ function renderHistoryEntry(entry) {
 
     const meta = [entry.artist_name, entry.album_name].filter(Boolean).join(' — ');
 
-    // Source provenance detail line
+    // Source provenance — expected vs downloaded
     let sourceDetail = '';
-    if (entry.event_type === 'download' && (entry.source_filename || entry.source_track_title)) {
-        const parts = [];
-        if (entry.source_filename) parts.push(`File: ${escapeHtml(entry.source_filename)}`);
-        else if (entry.source_track_title) parts.push(`Source track: ${escapeHtml(entry.source_track_title)}`);
-        if (entry.source_track_id) parts.push(`ID: ${escapeHtml(entry.source_track_id)}`);
-        sourceDetail = `<div class="library-history-entry-source">${parts.join(' · ')}</div>`;
+    if (entry.event_type === 'download') {
+        const lines = [];
+        // Expected line (what we asked for)
+        if (entry.title || entry.artist_name) {
+            lines.push(`<span class="lh-prov-label">Expected:</span> ${escapeHtml(entry.title || '?')} <span class="lh-prov-dim">by</span> ${escapeHtml(entry.artist_name || '?')}`);
+        }
+        // Downloaded line (what the source provided)
+        const srcTitle = entry.source_track_title || '';
+        const srcArtist = entry.source_artist || '';
+        if (srcTitle || srcArtist) {
+            const isMismatch = (srcTitle && entry.title && srcTitle.toLowerCase() !== entry.title.toLowerCase())
+                            || (srcArtist && entry.artist_name && srcArtist.toLowerCase() !== entry.artist_name.toLowerCase());
+            const mismatchClass = isMismatch ? ' lh-prov-mismatch' : '';
+            lines.push(`<span class="lh-prov-label">Downloaded:</span> <span class="${mismatchClass}">${escapeHtml(srcTitle || '?')} <span class="lh-prov-dim">by</span> ${escapeHtml(srcArtist || '?')}</span>`);
+        }
+        // Source file + ID line
+        if (entry.source_filename || entry.source_track_id) {
+            const fileParts = [];
+            if (entry.source_filename) fileParts.push(`<span class="lh-prov-label">File:</span> ${escapeHtml(entry.source_filename)}`);
+            if (entry.source_track_id) fileParts.push(`<span class="lh-prov-label">${entry.source_filename ? '' : 'Source '}ID:</span> ${escapeHtml(entry.source_track_id)}`);
+            lines.push(fileParts.join(` <span class="lh-prov-dim">·</span> `));
+        }
+        if (lines.length > 0) {
+            sourceDetail = `<div class="library-history-entry-source">${lines.join('<br>')}</div>`;
+        }
     }
 
-    return `<div class="library-history-entry">
+    const hasDetails = sourceDetail || acoustidBadge;
+    const expandIndicator = hasDetails ? `<span class="lh-expand-btn">&#x25BE;</span>` : '';
+
+    return `<div class="library-history-entry${hasDetails ? ' lh-expandable' : ''}" ${hasDetails ? 'onclick="this.classList.toggle(\'lh-expanded\')"' : ''}>
         ${thumb}
-        <div class="library-history-entry-text">
-            <div class="library-history-entry-title">${escapeHtml(entry.title || 'Unknown')}</div>
-            <div class="library-history-entry-meta">${escapeHtml(meta)}</div>
-            ${sourceDetail}
+        <div class="library-history-entry-content">
+            <div class="library-history-entry-row1">
+                <div class="library-history-entry-text">
+                    <div class="library-history-entry-title">${escapeHtml(entry.title || 'Unknown')}</div>
+                    <div class="library-history-entry-meta">${escapeHtml(meta)}</div>
+                </div>
+                <div class="library-history-entry-badges">${badge}</div>
+                <div class="library-history-entry-time">${formatHistoryTime(entry.created_at)}</div>
+                ${expandIndicator}
+            </div>
+            ${hasDetails ? `<div class="library-history-entry-details">
+                ${sourceDetail}
+                ${acoustidBadge ? `<div class="library-history-entry-badges" style="margin-top:4px">${acoustidBadge}</div>` : ''}
+            </div>` : ''}
         </div>
-        ${badge}${acoustidBadge}
-        <div class="library-history-entry-time">${formatHistoryTime(entry.created_at)}</div>
     </div>`;
 }
 
