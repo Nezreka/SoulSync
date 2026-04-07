@@ -32982,6 +32982,75 @@ def _get_metadata_fallback_client():
     from core.itunes_client import iTunesClient
     return iTunesClient()
 
+@app.route('/api/deezer/arl-status', methods=['GET'])
+def get_deezer_arl_status():
+    """Check if Deezer ARL is configured and authenticated."""
+    try:
+        deezer_dl = None
+        if soulseek_client and hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl:
+            deezer_dl = soulseek_client.deezer_dl
+        if deezer_dl and deezer_dl.is_authenticated():
+            user_data = deezer_dl._user_data or {}
+            return jsonify({
+                'authenticated': True,
+                'user_name': user_data.get('BLOG_NAME', 'Unknown'),
+                'user_id': user_data.get('USER_ID'),
+            })
+        return jsonify({'authenticated': False})
+    except Exception as e:
+        return jsonify({'authenticated': False, 'error': str(e)})
+
+
+@app.route('/api/deezer/arl-playlists', methods=['GET'])
+def get_deezer_arl_playlists():
+    """Fetch user playlists via Deezer ARL authentication (like /api/spotify/playlists)."""
+    try:
+        deezer_dl = None
+        if soulseek_client and hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl:
+            deezer_dl = soulseek_client.deezer_dl
+        if not deezer_dl or not deezer_dl.is_authenticated():
+            return jsonify({'error': 'Deezer ARL not authenticated. Configure your ARL token in Settings > Downloads.'}), 401
+
+        playlists = deezer_dl.get_user_playlists()
+
+        # Add sync_status field to match Spotify format
+        playlist_data = []
+        for p in playlists:
+            playlist_data.append({
+                'id': p['id'],
+                'name': p['name'],
+                'owner': p.get('owner', ''),
+                'track_count': p.get('track_count', 0),
+                'image_url': p.get('image_url', ''),
+                'sync_status': 'Never Synced',
+            })
+
+        print(f"🎵 Loaded {len(playlist_data)} Deezer user playlists via ARL")
+        return jsonify(playlist_data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/deezer/arl-playlist/<playlist_id>', methods=['GET'])
+def get_deezer_arl_playlist_tracks(playlist_id):
+    """Fetch full playlist with tracks via ARL (like /api/spotify/playlist/<id>)."""
+    try:
+        deezer_dl = None
+        if soulseek_client and hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl:
+            deezer_dl = soulseek_client.deezer_dl
+        if not deezer_dl or not deezer_dl.is_authenticated():
+            return jsonify({'error': 'Deezer ARL not authenticated.'}), 401
+
+        playlist = deezer_dl.get_playlist_tracks(playlist_id)
+        if not playlist:
+            return jsonify({'error': 'Playlist not found or unable to access.'}), 404
+
+        print(f"🎵 Loaded {len(playlist.get('tracks', []))} tracks from Deezer playlist: {playlist.get('name')}")
+        return jsonify(playlist)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/deezer/playlist/<playlist_id>', methods=['GET'])
 def get_deezer_playlist(playlist_id):
     """Fetch a Deezer playlist by ID or URL"""

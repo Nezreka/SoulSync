@@ -58,6 +58,8 @@ let tidalPlaylistStates = {}; // Key: playlist_id, Value: playlist state with ph
 let tidalPlaylistsLoaded = false;
 let deezerPlaylists = [];
 let deezerPlaylistStates = {};
+let deezerArlPlaylists = [];
+let deezerArlPlaylistsLoaded = false;
 
 // --- Beatport Chart State Management (Similar to YouTube/Tidal) ---
 let beatportChartStates = {}; // Key: chart_hash, Value: chart state with phases
@@ -15742,7 +15744,11 @@ async function startPlaylistSync(playlistId) {
         const trackFetchStart = Date.now();
         console.log(`🔄 [${new Date().toTimeString().split(' ')[0]}] Cache miss - fetching tracks for playlist ${playlistId}`);
         try {
-            const response = await fetch(`/api/spotify/playlist/${playlistId}`);
+            // Use the right endpoint based on playlist source
+            const fetchUrl = playlistId.startsWith('deezer_arl_')
+                ? `/api/deezer/arl-playlist/${playlistId.replace('deezer_arl_', '')}`
+                : `/api/spotify/playlist/${playlistId}`;
+            const response = await fetch(fetchUrl);
             const fullPlaylist = await response.json();
             if (fullPlaylist.error) throw new Error(fullPlaylist.error);
             tracks = fullPlaylist.tracks;
@@ -15785,7 +15791,7 @@ async function startPlaylistSync(playlistId) {
         showToast(`Sync started for "${playlist.name}"`, 'success');
 
         // Show initial sync state in modal if open
-        const modal = document.getElementById('playlist-details-modal');
+        const modal = document.getElementById('playlist-details-modal') || document.getElementById('deezer-arl-playlist-details-modal');
         if (modal && modal.style.display !== 'none') {
             const statusDisplay = document.getElementById(`modal-sync-status-${playlist.id}`);
             if (statusDisplay) {
@@ -15853,7 +15859,7 @@ function startSyncPolling(playlistId) {
                 stopSyncPolling(playlistId);
                 updateCardToDefault(playlistId, state);
                 // Also update the modal if it's open
-                closePlaylistDetailsModal(); // Close modal on completion/error
+                closePlaylistDetailsModal(); closeDeezerArlPlaylistDetailsModal(); // Close modal on completion/error
             }
         } catch (error) {
             console.error(`❌ Error polling sync status for ${playlistId}:`, error);
@@ -16071,7 +16077,7 @@ function updateCardToDefault(playlistId, finalState = null) {
 
 // Update the modal's sync progress display (matches GUI functionality)
 function updateModalSyncProgress(playlistId, progress) {
-    const modal = document.getElementById('playlist-details-modal');
+    const modal = document.getElementById('playlist-details-modal') || document.getElementById('deezer-arl-playlist-details-modal');
     if (modal && modal.style.display !== 'none') {
         console.log(`📊 Updating modal sync progress for ${playlistId}:`, progress);
 
@@ -26350,6 +26356,237 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
 
 
 // ===================================================================
+// DEEZER ARL PLAYLIST MANAGEMENT (Spotify-identical pattern)
+// ===================================================================
+
+async function loadDeezerArlPlaylists() {
+    const container = document.getElementById('deezer-arl-playlist-container');
+    const refreshBtn = document.getElementById('deezer-arl-refresh-btn');
+
+    container.innerHTML = `<div class="playlist-placeholder">🔄 Loading playlists...</div>`;
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = '🔄 Loading...';
+
+    try {
+        const response = await fetch('/api/deezer/arl-playlists');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to fetch Deezer playlists');
+        }
+        deezerArlPlaylists = await response.json();
+        renderDeezerArlPlaylists();
+        deezerArlPlaylistsLoaded = true;
+
+    } catch (error) {
+        container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
+        showToast(`Error loading Deezer playlists: ${error.message}`, 'error');
+    } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄 Refresh';
+    }
+}
+
+function renderDeezerArlPlaylists() {
+    const container = document.getElementById('deezer-arl-playlist-container');
+    if (deezerArlPlaylists.length === 0) {
+        container.innerHTML = `<div class="playlist-placeholder">No Deezer playlists found.</div>`;
+        return;
+    }
+
+    container.innerHTML = deezerArlPlaylists.map(p => {
+        const arlId = `deezer_arl_${p.id}`;
+        let statusClass = 'status-never-synced';
+        if (p.sync_status && p.sync_status.startsWith('Synced')) statusClass = 'status-synced';
+
+        return `
+        <div class="playlist-card deezer-arl-playlist-card" data-playlist-id="${arlId}">
+            <div class="playlist-card-main">
+                <div class="playlist-card-content">
+                    <div class="playlist-card-name">${escapeHtml(p.name)}</div>
+                    <div class="playlist-card-info">
+                        <span>${p.track_count} tracks</span> •
+                        <span class="playlist-card-status ${statusClass}">${p.sync_status || 'Never Synced'}</span>
+                    </div>
+                    <div class="sync-progress-indicator" id="progress-${arlId}"></div>
+                </div>
+                <div class="playlist-card-actions">
+                    <button id="action-btn-${arlId}" onclick="openDeezerArlPlaylistDetailsModal(event, '${p.id}')">Sync / Download</button>
+                    <button id="progress-btn-${arlId}" class="view-progress-btn hidden" onclick="handleDeezerArlViewProgressClick(event, '${p.id}')">
+                        View Progress
+                    </button>
+                </div>
+            </div>
+        </div>
+        `;
+    }).join('');
+}
+
+function handleDeezerArlViewProgressClick(event, playlistId) {
+    event.stopPropagation();
+    const arlPlaylistId = `deezer_arl_${playlistId}`;
+    const process = activeDownloadProcesses[arlPlaylistId];
+    if (process && process.modalElement) {
+        process.modalElement.style.display = 'flex';
+    }
+}
+
+async function openDeezerArlPlaylistDetailsModal(event, playlistId) {
+    event.stopPropagation();
+
+    const playlist = deezerArlPlaylists.find(p => String(p.id) === String(playlistId));
+    if (!playlist) return;
+
+    const arlPlaylistId = `deezer_arl_${playlistId}`;
+    showLoadingOverlay(`Loading playlist: ${playlist.name}...`);
+
+    try {
+        if (playlistTrackCache[arlPlaylistId]) {
+            const fullPlaylist = { ...playlist, id: arlPlaylistId, tracks: playlistTrackCache[arlPlaylistId] };
+            showDeezerArlPlaylistDetailsModal(fullPlaylist, playlistId);
+        } else {
+            const response = await fetch(`/api/deezer/arl-playlist/${playlistId}`);
+            const fullPlaylist = await response.json();
+            if (fullPlaylist.error) throw new Error(fullPlaylist.error);
+
+            playlistTrackCache[arlPlaylistId] = fullPlaylist.tracks;
+
+            // Auto-mirror
+            mirrorPlaylist('deezer', playlistId, fullPlaylist.name, fullPlaylist.tracks.map(t => ({
+                track_name: t.name,
+                artist_name: (t.artists && t.artists[0]) ? (typeof t.artists[0] === 'object' ? t.artists[0].name : t.artists[0]) : '',
+                album_name: t.album ? (typeof t.album === 'object' ? t.album.name : t.album) : '',
+                duration_ms: t.duration_ms || 0,
+                source_track_id: t.id || ''
+            })), { description: fullPlaylist.description, owner: fullPlaylist.owner, image_url: fullPlaylist.image_url });
+
+            showDeezerArlPlaylistDetailsModal({ ...fullPlaylist, id: arlPlaylistId }, playlistId);
+        }
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+function showDeezerArlPlaylistDetailsModal(playlist, originalDeezerPlaylistId) {
+    let modal = document.getElementById('deezer-arl-playlist-details-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'deezer-arl-playlist-details-modal';
+        modal.className = 'modal-overlay';
+        document.body.appendChild(modal);
+    }
+
+    const playlistId = playlist.id;
+    const activeProcess = activeDownloadProcesses[playlistId];
+    const hasCompletedProcess = activeProcess && activeProcess.status === 'complete';
+    const isSyncing = !!activeSyncPollers[playlistId];
+
+    modal.innerHTML = `
+        <div class="modal-container playlist-modal">
+            <div class="playlist-modal-header">
+                <div class="playlist-header-content">
+                    <h2>${escapeHtml(playlist.name)}</h2>
+                    <div class="playlist-quick-info">
+                        <span class="playlist-track-count">${playlist.track_count || (playlist.tracks ? playlist.tracks.length : 0)} tracks</span>
+                        <span class="playlist-owner">by ${escapeHtml(playlist.owner || '')}</span>
+                    </div>
+                    <div class="playlist-modal-sync-status" id="modal-sync-status-${playlistId}" style="display: none;">
+                        <span class="sync-stat total-tracks">♪ <span id="modal-total-${playlistId}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat matched-tracks">✓ <span id="modal-matched-${playlistId}">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat failed-tracks">✗ <span id="modal-failed-${playlistId}">0</span></span>
+                        <span class="sync-stat percentage">(<span id="modal-percentage-${playlistId}">0</span>%)</span>
+                    </div>
+                </div>
+                <span class="playlist-modal-close" onclick="closeDeezerArlPlaylistDetailsModal()">&times;</span>
+            </div>
+
+            <div class="playlist-modal-body">
+                ${playlist.description ? `<div class="playlist-description">${escapeHtml(playlist.description)}</div>` : ''}
+
+                <div class="playlist-tracks-container">
+                    <div class="playlist-tracks-list">
+                        ${(playlist.tracks || []).map((track, index) => `
+                            <div class="playlist-track-item">
+                                <span class="playlist-track-number">${index + 1}</span>
+                                <div class="playlist-track-info">
+                                    <div class="playlist-track-name">${escapeHtml(track.name)}</div>
+                                    <div class="playlist-track-artists">${formatArtists(track.artists)}</div>
+                                </div>
+                                <div class="playlist-track-duration">${formatDuration(track.duration_ms)}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+
+            <div class="playlist-modal-footer">
+                <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeDeezerArlPlaylistDetailsModal()">Close</button>
+                <button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="closeDeezerArlPlaylistDetailsModal(); openDownloadMissingModal('${playlistId}')">
+                    ${hasCompletedProcess ? '📊 View Download Results' : '📥 Download Missing Tracks'}
+                </button>
+                <button id="sync-btn-${playlistId}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlistId}')" ${isSyncing ? 'disabled' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>
+            </div>
+        </div>
+    `;
+
+    // Store playlist in spotifyPlaylists-compatible format for openDownloadMissingModal
+    if (!spotifyPlaylists.find(p => p.id === playlistId)) {
+        spotifyPlaylists.push({
+            id: playlistId,
+            name: playlist.name,
+            track_count: playlist.tracks ? playlist.tracks.length : 0,
+            image_url: playlist.image_url || '',
+            owner: playlist.owner || '',
+        });
+    }
+
+    modal.style.display = 'flex';
+}
+
+function closeDeezerArlPlaylistDetailsModal() {
+    const modal = document.getElementById('deezer-arl-playlist-details-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function updateDeezerArlPlaylistCardUI(playlistId) {
+    const arlPlaylistId = `deezer_arl_${playlistId}`;
+    const process = activeDownloadProcesses[arlPlaylistId];
+    const progressBtn = document.getElementById(`progress-btn-${arlPlaylistId}`);
+    const actionBtn = document.getElementById(`action-btn-${arlPlaylistId}`);
+    const card = document.querySelector(`.playlist-card[data-playlist-id="${arlPlaylistId}"]`);
+
+    if (!progressBtn || !actionBtn) return;
+
+    if (process && process.status === 'running') {
+        progressBtn.classList.remove('hidden');
+        progressBtn.textContent = 'View Progress';
+        progressBtn.style.backgroundColor = '';
+        actionBtn.textContent = '📥 Downloading...';
+        actionBtn.disabled = true;
+        if (card) card.classList.remove('download-complete');
+    } else if (process && process.status === 'complete') {
+        progressBtn.classList.remove('hidden');
+        progressBtn.textContent = '📋 View Results';
+        progressBtn.style.backgroundColor = '#28a745';
+        progressBtn.style.color = 'white';
+        actionBtn.textContent = '✅ Ready for Review';
+        actionBtn.disabled = false;
+        if (card) card.classList.add('download-complete');
+    } else {
+        progressBtn.classList.add('hidden');
+        progressBtn.style.backgroundColor = '';
+        progressBtn.style.color = '';
+        actionBtn.textContent = 'Sync / Download';
+        actionBtn.disabled = false;
+        if (card) card.classList.remove('download-complete');
+    }
+}
+
+
+// ===================================================================
 // DEEZER PLAYLIST MANAGEMENT (URL-input like YouTube, reuses YouTube modal)
 // ===================================================================
 
@@ -27347,6 +27584,19 @@ function initializeSyncPage() {
                 syncContentArea.style.gridTemplateColumns = '1fr';
             }
 
+            // Auto-load Deezer ARL playlists on first tab activation
+            if (tabId === 'deezer' && !deezerArlPlaylistsLoaded) {
+                // Check ARL status first
+                fetch('/api/deezer/arl-status').then(r => r.json()).then(data => {
+                    const container = document.getElementById('deezer-arl-playlist-container');
+                    if (data.authenticated) {
+                        loadDeezerArlPlaylists();
+                    } else if (container) {
+                        container.innerHTML = `<div class="playlist-placeholder">Deezer ARL not configured. Add your ARL token in Settings &gt; Downloads to see your playlists here.</div>`;
+                    }
+                }).catch(() => {});
+            }
+
             // Auto-load mirrored playlists on first tab activation
             if (tabId === 'mirrored' && !mirroredPlaylistsLoaded) {
                 loadMirroredPlaylists();
@@ -27380,7 +27630,14 @@ function initializeSyncPage() {
         tidalRefreshBtn.addEventListener('click', loadTidalPlaylists);
     }
 
-    // Logic for the Deezer parse button
+    // Logic for the Deezer ARL refresh button
+    const deezerArlRefreshBtn = document.getElementById('deezer-arl-refresh-btn');
+    if (deezerArlRefreshBtn) {
+        deezerArlRefreshBtn.removeEventListener('click', loadDeezerArlPlaylists);
+        deezerArlRefreshBtn.addEventListener('click', loadDeezerArlPlaylists);
+    }
+
+    // Logic for the Deezer Link parse button
     const deezerParseBtn = document.getElementById('deezer-parse-btn');
     if (deezerParseBtn) {
         deezerParseBtn.addEventListener('click', loadDeezerPlaylist);
