@@ -1,3 +1,4 @@
+import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -17,6 +18,20 @@ import {
 import styles from './issue-detail-modal.module.css';
 
 const ISSUE_DOMAIN_QUERY_KEY = ['issues'] as const;
+
+interface ReportIssueFormValues {
+  category: string;
+  description: string;
+  priority: IssuePriority;
+  title: string;
+}
+
+const DEFAULT_REPORT_ISSUE_VALUES: ReportIssueFormValues = {
+  category: '',
+  description: '',
+  priority: 'normal',
+  title: '',
+};
 
 export function IssueDomainHost() {
   const bridge = useShellBridge();
@@ -71,6 +86,7 @@ export function IssueDomainHost() {
 
   return createPortal(
     <ReportIssueModal
+      key={`${reportPayload.entityType}:${reportPayload.entityId}`}
       payload={reportPayload}
       profileId={profileId}
       onClose={() => setReportPayload(null)}
@@ -94,13 +110,6 @@ function ReportIssueModal({
   payload: IssueReportPayload;
   profileId: number;
 }) {
-  const [selectedCategory, setSelectedCategory] = useState('');
-  const [selectedPriority, setSelectedPriority] = useState<IssuePriority>('normal');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [titleEdited, setTitleEdited] = useState(false);
-  const [error, setError] = useState('');
-
   const categories = useMemo(
     () => getIssueCategoriesForEntity(payload.entityType),
     [payload.entityType],
@@ -109,26 +118,15 @@ function ReportIssueModal({
     payload.entityType === 'track' ? 'Track' : payload.entityType === 'album' ? 'Album' : 'Artist';
 
   const createMutation = useMutation({
-    mutationFn: async () => {
-      if (!profileId) throw new Error('Profile is still loading');
-      if (!selectedCategory) throw new Error('Please select an issue category');
-      const trimmedTitle = title.trim();
-      if (!trimmedTitle) throw new Error('Please provide a title for the issue');
-
+    mutationFn: async (values: ReportIssueFormValues) => {
       await createIssue(profileId, {
         entity_type: payload.entityType,
         entity_id: String(payload.entityId),
-        category: selectedCategory,
-        title: trimmedTitle,
-        description: description.trim(),
-        priority: selectedPriority,
+        category: values.category,
+        title: values.title,
+        description: values.description,
+        priority: values.priority,
       });
-    },
-    onError: (mutationError) => {
-      const message =
-        mutationError instanceof Error ? mutationError.message : 'Failed to submit issue';
-      setError(message);
-      notify(message, 'error');
     },
     onSuccess: () => {
       notify('Issue reported successfully', 'success');
@@ -136,13 +134,28 @@ function ReportIssueModal({
     },
   });
 
-  function selectCategory(category: string) {
-    setSelectedCategory(category);
-    setError('');
-    if (!titleEdited) {
-      setTitle(createDefaultIssueTitle(category, payload.entityName));
-    }
-  }
+  const form = useForm({
+    defaultValues: DEFAULT_REPORT_ISSUE_VALUES,
+    validators: {
+      onSubmit: ({ value }) => validateReportIssueForm(profileId, value),
+    },
+    onSubmit: async ({ value, formApi }) => {
+      const normalizedValues = normalizeReportIssueFormValues(value);
+
+      createMutation.reset();
+      formApi.setErrorMap({ onSubmit: undefined });
+
+      try {
+        await createMutation.mutateAsync(normalizedValues);
+      } catch (mutationError) {
+        const message =
+          mutationError instanceof Error ? mutationError.message : 'Failed to submit issue';
+        formApi.setErrorMap({ onSubmit: message });
+        notify(message, 'error');
+        throw mutationError;
+      }
+    },
+  });
 
   return (
     <div
@@ -152,9 +165,14 @@ function ReportIssueModal({
       aria-labelledby="report-issue-title"
       onClick={onClose}
     >
-      <div
+      <form
         className={`${styles.modal} ${styles.reportIssueModal}`}
         onClick={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void form.handleSubmit().catch(() => undefined);
+        }}
       >
         <div className={styles.modalHeader}>
           <h3 className={styles.modalHeaderTitle} id="report-issue-title">
@@ -184,70 +202,123 @@ function ReportIssueModal({
           <div className={styles.issueDetailSection}>
             <label className={styles.issueDetailSectionTitle}>What's the problem?</label>
             <div className={styles.reportIssueCategoryGrid}>
-              {categories.map(([category, meta]) => (
-                <button
-                  key={category}
-                  className={`${styles.reportIssueCategoryCard} ${
-                    selectedCategory === category ? styles.reportIssueCategoryCardSelected : ''
-                  }`}
-                  type="button"
-                  onClick={() => selectCategory(category)}
-                >
-                  <div className={styles.reportIssueCategoryIcon}>{meta.icon}</div>
-                  <div className={styles.reportIssueCategoryLabel}>{meta.label}</div>
-                  <div className={styles.reportIssueCategoryDesc}>{meta.description}</div>
-                </button>
-              ))}
+              <form.Field name="category">
+                {(field) =>
+                  categories.map(([category, meta]) => (
+                    <button
+                      key={category}
+                      className={`${styles.reportIssueCategoryCard} ${
+                        field.state.value === category
+                          ? styles.reportIssueCategoryCardSelected
+                          : ''
+                      }`}
+                      type="button"
+                      onClick={() => {
+                        field.handleChange(category);
+                        createMutation.reset();
+                        form.setErrorMap({ onSubmit: undefined });
+                        if (!form.getFieldMeta('title')?.isTouched) {
+                          form.setFieldValue(
+                            'title',
+                            createDefaultIssueTitle(category, payload.entityName),
+                            { dontUpdateMeta: true },
+                          );
+                        }
+                      }}
+                    >
+                      <div className={styles.reportIssueCategoryIcon}>{meta.icon}</div>
+                      <div className={styles.reportIssueCategoryLabel}>{meta.label}</div>
+                      <div className={styles.reportIssueCategoryDesc}>{meta.description}</div>
+                    </button>
+                  ))
+                }
+              </form.Field>
             </div>
           </div>
 
-          {selectedCategory ? (
-            <div className={styles.issueDetailSection}>
-              <label className={styles.issueDetailSectionTitle} htmlFor="report-issue-title-input">
-                Title
-              </label>
-              <input
-                className={styles.reportIssueInput}
-                id="report-issue-title-input"
-                maxLength={200}
-                onChange={(event) => {
-                  setTitle(event.target.value);
-                  setTitleEdited(true);
-                }}
-                placeholder="Brief summary of the issue..."
-                value={title}
-              />
-              <label className={styles.issueDetailSectionTitle} htmlFor="report-issue-desc-input">
-                Details
-              </label>
-              <textarea
-                className={styles.issueDetailResponseTextarea}
-                id="report-issue-desc-input"
-                maxLength={2000}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="Provide more details about what's wrong..."
-                rows={4}
-                value={description}
-              />
-              <div className={styles.reportIssuePriorityRow} aria-label="Priority">
-                {(['low', 'normal', 'high'] as const).map((priority) => (
-                  <button
-                    key={priority}
-                    className={`${styles.reportIssuePriorityButton} ${
-                      selectedPriority === priority ? styles.reportIssuePriorityButtonSelected : ''
-                    }`}
-                    type="button"
-                    onClick={() => setSelectedPriority(priority)}
-                  >
-                    {priority[0].toUpperCase()}
-                    {priority.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
+          <form.Subscribe selector={(state) => state.values.category}>
+            {(selectedCategory) =>
+              selectedCategory ? (
+                <div className={styles.issueDetailSection}>
+                  <form.Field name="title">
+                    {(field) => (
+                      <>
+                        <label
+                          className={styles.issueDetailSectionTitle}
+                          htmlFor="report-issue-title-input"
+                        >
+                          Title
+                        </label>
+                        <input
+                          className={styles.reportIssueInput}
+                          id="report-issue-title-input"
+                          maxLength={200}
+                          onBlur={field.handleBlur}
+                          onChange={(event) => {
+                            field.handleChange(event.target.value);
+                            createMutation.reset();
+                            form.setErrorMap({ onSubmit: undefined });
+                          }}
+                          placeholder="Brief summary of the issue..."
+                          value={field.state.value}
+                        />
+                      </>
+                    )}
+                  </form.Field>
+                  <form.Field name="description">
+                    {(field) => (
+                      <>
+                        <label
+                          className={styles.issueDetailSectionTitle}
+                          htmlFor="report-issue-desc-input"
+                        >
+                          Details
+                        </label>
+                        <textarea
+                          className={styles.issueDetailResponseTextarea}
+                          id="report-issue-desc-input"
+                          maxLength={2000}
+                          onBlur={field.handleBlur}
+                          onChange={(event) => field.handleChange(event.target.value)}
+                          placeholder="Provide more details about what's wrong..."
+                          rows={4}
+                          value={field.state.value}
+                        />
+                      </>
+                    )}
+                  </form.Field>
+                  <form.Field name="priority">
+                    {(field) => (
+                      <div className={styles.reportIssuePriorityRow} aria-label="Priority">
+                        {(['low', 'normal', 'high'] as const).map((priority) => (
+                          <button
+                            key={priority}
+                            className={`${styles.reportIssuePriorityButton} ${
+                              field.state.value === priority
+                                ? styles.reportIssuePriorityButtonSelected
+                                : ''
+                            }`}
+                            type="button"
+                            onClick={() => field.handleChange(priority)}
+                          >
+                            {priority[0].toUpperCase()}
+                            {priority.slice(1)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </form.Field>
+                </div>
+              ) : null
+            }
+          </form.Subscribe>
 
-          {error ? <div className={styles.reportIssueError}>{error}</div> : null}
+          <form.Subscribe selector={(state) => state.errors}>
+            {(errors) => {
+              const error = getReportIssueFormError(errors);
+              return error ? <div className={styles.reportIssueError}>{error}</div> : null;
+            }}
+          </form.Subscribe>
         </div>
 
         <div className={styles.modalFooter}>
@@ -258,18 +329,58 @@ function ReportIssueModal({
           >
             Cancel
           </button>
-          <button
-            className={`${styles.modalButton} ${styles.modalButtonPrimary}`}
-            type="button"
-            disabled={!selectedCategory || createMutation.isPending}
-            onClick={() => createMutation.mutate()}
+          <form.Subscribe
+            selector={(state) => ({
+              category: state.values.category,
+              isSubmitting: state.isSubmitting,
+              title: state.values.title,
+            })}
           >
-            {createMutation.isPending ? 'Submitting...' : 'Submit Issue'}
-          </button>
+            {(state) => {
+              const isSubmitting = state.isSubmitting || createMutation.isPending;
+              return (
+                <button
+                  className={`${styles.modalButton} ${styles.modalButtonPrimary}`}
+                  type="submit"
+                  disabled={!state.category || !state.title.trim() || isSubmitting}
+                >
+                  {isSubmitting ? 'Submitting...' : 'Submit Issue'}
+                </button>
+              );
+            }}
+          </form.Subscribe>
         </div>
-      </div>
+      </form>
     </div>
   );
+}
+
+function normalizeReportIssueFormValues(values: ReportIssueFormValues): ReportIssueFormValues {
+  return {
+    category: values.category,
+    description: values.description.trim(),
+    priority: values.priority,
+    title: values.title.trim(),
+  };
+}
+
+function validateReportIssueForm(
+  profileId: number,
+  values: ReportIssueFormValues,
+): string | undefined {
+  const normalizedValues = normalizeReportIssueFormValues(values);
+  if (!profileId) return 'Profile is still loading';
+  if (!normalizedValues.category) return 'Please select an issue category';
+  if (!normalizedValues.title) return 'Please provide a title for the issue';
+  return undefined;
+}
+
+function getReportIssueFormError(errors: Array<unknown>): string {
+  const error = errors.find(Boolean);
+  if (!error) return '';
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 function notify(message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') {
