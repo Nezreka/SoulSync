@@ -8,6 +8,7 @@ import type {
   IssueDetailResponse,
   IssueListResponse,
   IssueRecord,
+  CreateIssuePayload,
   IssuesSearch,
   IssueSnapshot,
 } from './-issues.types';
@@ -101,6 +102,17 @@ function createIssueHeaders(profileId: number, extra?: HeadersInit): Headers {
   return headers;
 }
 
+export function getIssueCategoriesForEntity(entityType: IssueRecord['entity_type']) {
+  return Object.entries(ISSUE_CATEGORY_META).filter(([, category]) =>
+    category.applies.includes(entityType),
+  );
+}
+
+export function createDefaultIssueTitle(category: string, entityName: string): string {
+  const label = ISSUE_CATEGORY_META[category]?.label || 'Issue';
+  return `${label}: ${entityName || 'Unknown'}`;
+}
+
 export function normalizeIssuesSearch(search: IssuesSearch | undefined): Required<IssuesSearch> {
   const status = search?.status;
   const category = search?.category;
@@ -181,6 +193,33 @@ export async function updateIssue(
   if (!payload.success) {
     throw new Error(payload.error || 'Failed to update issue');
   }
+}
+
+export async function createIssue(
+  profileId: number,
+  payload: CreateIssuePayload,
+): Promise<IssueRecord | null> {
+  const response = await parseJsonResponse<{
+    success: boolean;
+    issue?: IssueRecord;
+    error?: string;
+  }>(
+    apiClient.post('issues', {
+      headers: createIssueHeaders(profileId, { 'Content-Type': 'application/json' }),
+      json: {
+        entity_type: payload.entity_type,
+        entity_id: String(payload.entity_id),
+        category: payload.category,
+        title: payload.title,
+        description: payload.description || '',
+        priority: payload.priority || 'normal',
+      },
+    }),
+  );
+  if (!response.success) {
+    throw new Error(response.error || 'Failed to submit issue');
+  }
+  return response.issue ?? null;
 }
 
 export async function deleteIssue(profileId: number, issueId: number): Promise<void> {

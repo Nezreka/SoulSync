@@ -63,14 +63,14 @@ function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
 
 describe('createAppRouter', () => {
   beforeEach(() => {
-    window.SoulSyncIssueActions = {};
+    vi.stubGlobal('fetch', mockIssuesFetch());
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     window.SoulSyncWebShellBridge = undefined;
-    window.SoulSyncIssueActions = undefined;
+    window.SoulSyncIssueDomain = undefined;
   });
 
   it('creates one shared query client and applies router defaults', () => {
@@ -87,7 +87,6 @@ describe('createAppRouter', () => {
 
   it('renders migrated React routes directly and updates shell chrome', async () => {
     window.SoulSyncWebShellBridge = createShellBridge();
-    vi.stubGlobal('fetch', mockIssuesFetch());
 
     const queryClient = createAppQueryClient();
     const history = createMemoryHistory({ initialEntries: ['/issues'] });
