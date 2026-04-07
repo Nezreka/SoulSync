@@ -236,6 +236,137 @@ class DeezerDownloadClient:
         labels = {'flac': 'FLAC (Lossless)', 'mp3_320': 'MP3 320kbps', 'mp3_128': 'MP3 128kbps'}
         return labels.get(self._quality, 'MP3 320kbps')
 
+    # ─── User Playlists (ARL-authenticated) ─────────────────────
+
+    def get_user_playlists(self) -> list:
+        """Fetch the authenticated user's playlists via Deezer public API with ARL cookies."""
+        if not self._authenticated or not self._user_data:
+            return []
+        user_id = self._user_data.get('USER_ID')
+        if not user_id:
+            return []
+
+        playlists = []
+        index = 0
+        while True:
+            try:
+                resp = self._session.get(
+                    f'https://api.deezer.com/user/{user_id}/playlists',
+                    params={'index': index, 'limit': 100},
+                    timeout=15
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if 'error' in data:
+                    logger.warning(f"Deezer playlists error: {data['error']}")
+                    break
+                items = data.get('data', [])
+                if not items:
+                    break
+                for p in items:
+                    playlists.append({
+                        'id': str(p.get('id', '')),
+                        'name': p.get('title', ''),
+                        'track_count': p.get('nb_tracks', 0),
+                        'image_url': p.get('picture_medium', ''),
+                        'owner': p.get('creator', {}).get('name', ''),
+                        'description': p.get('description', ''),
+                    })
+                if not data.get('next'):
+                    break
+                index += len(items)
+            except Exception as e:
+                logger.error(f"Error fetching user playlists at index {index}: {e}")
+                break
+
+        logger.info(f"Fetched {len(playlists)} user playlists from Deezer")
+        return playlists
+
+    def get_playlist_tracks(self, playlist_id: str) -> Optional[dict]:
+        """Fetch full playlist details with tracks via public API (ARL cookies grant private access)."""
+        try:
+            resp = self._session.get(
+                f'https://api.deezer.com/playlist/{playlist_id}',
+                timeout=15
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if 'error' in data:
+                logger.error(f"Deezer playlist error: {data['error']}")
+                return None
+
+            total_tracks = data.get('nb_tracks', 0)
+            raw_tracks = data.get('tracks', {}).get('data', [])
+
+            # Paginate if needed
+            while len(raw_tracks) < total_tracks:
+                idx = len(raw_tracks)
+                page_resp = self._session.get(
+                    f'https://api.deezer.com/playlist/{playlist_id}/tracks',
+                    params={'index': idx, 'limit': 400},
+                    timeout=15
+                )
+                page_resp.raise_for_status()
+                page_data = page_resp.json()
+                if 'error' in page_data:
+                    break
+                page_tracks = page_data.get('data', [])
+                if not page_tracks:
+                    break
+                raw_tracks.extend(page_tracks)
+
+            # Batch-fetch release dates for unique albums
+            album_ids = set()
+            for t in raw_tracks:
+                aid = t.get('album', {}).get('id')
+                if aid:
+                    album_ids.add(str(aid))
+            album_release_dates = {}
+            for aid in album_ids:
+                try:
+                    time.sleep(0.3)  # Respect rate limits
+                    a_resp = self._session.get(f'https://api.deezer.com/album/{aid}', timeout=10)
+                    if a_resp.ok:
+                        a_data = a_resp.json()
+                        album_release_dates[aid] = a_data.get('release_date', '')
+                except Exception:
+                    pass
+
+            tracks = []
+            for i, t in enumerate(raw_tracks, start=1):
+                artist_name = t.get('artist', {}).get('name', 'Unknown Artist')
+                album_data = t.get('album', {})
+                album_cover = album_data.get('cover_medium') or album_data.get('cover_small') or ''
+                album_id = str(album_data.get('id', ''))
+                tracks.append({
+                    'id': str(t.get('id', '')),
+                    'name': t.get('title', ''),
+                    'artists': [{'name': artist_name}],
+                    'album': {
+                        'name': album_data.get('title', ''),
+                        'images': [{'url': album_cover}] if album_cover else [],
+                        'release_date': album_release_dates.get(album_id, ''),
+                        'album_type': 'album',
+                        'total_tracks': total_tracks,
+                        'id': album_id,
+                    },
+                    'duration_ms': t.get('duration', 0) * 1000,
+                    'track_number': i,
+                })
+
+            return {
+                'id': str(data.get('id', '')),
+                'name': data.get('title', ''),
+                'description': data.get('description', ''),
+                'track_count': total_tracks,
+                'image_url': data.get('picture_medium', ''),
+                'owner': data.get('creator', {}).get('name', ''),
+                'tracks': tracks,
+            }
+        except Exception as e:
+            logger.error(f"Error fetching playlist {playlist_id}: {e}")
+            return None
+
     # ─── Track Info ──────────────────────────────────────────────
 
     def _get_track_data(self, track_id: str) -> Optional[dict]:

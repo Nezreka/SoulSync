@@ -1145,6 +1145,9 @@
                             <button class="sync-tab-button" data-tab="deezer">
                                 <span class="tab-icon deezer-icon"></span> Deezer
                             </button>
+                            <button class="sync-tab-button" data-tab="deezer-link">
+                                <span class="tab-icon deezer-icon"></span> Deezer Link
+                            </button>
                             <button class="sync-tab-button" data-tab="youtube">
                                 <span class="tab-icon youtube-icon"></span> YouTube
                             </button>
@@ -1181,8 +1184,19 @@
                             </div>
                         </div>
 
-                        <!-- Deezer Tab Content -->
+                        <!-- Deezer Tab Content (ARL User Playlists) -->
                         <div class="sync-tab-content" id="deezer-tab-content">
+                            <div class="playlist-header">
+                                <h3>Your Deezer Playlists</h3>
+                                <button class="refresh-button deezer" id="deezer-arl-refresh-btn">🔄 Refresh</button>
+                            </div>
+                            <div class="playlist-scroll-container" id="deezer-arl-playlist-container">
+                                <div class="playlist-placeholder">Click 'Refresh' to load your Deezer playlists.</div>
+                            </div>
+                        </div>
+
+                        <!-- Deezer Link Tab Content (URL Import) -->
+                        <div class="sync-tab-content" id="deezer-link-tab-content">
                             <div class="youtube-input-section">
                                 <input type="text" id="deezer-url-input"
                                     placeholder="Paste Deezer Playlist URL...">
