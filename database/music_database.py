@@ -7905,7 +7905,7 @@ class MusicDatabase:
                 'server_source': server_source
             }
 
-    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1) -> Dict[str, Any]:
+    def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "") -> Dict[str, Any]:
         """
         Get artists for the library page with search, filtering, and pagination
 
@@ -7915,6 +7915,7 @@ class MusicDatabase:
             page: Page number (1-based)
             limit: Number of results per page
             watchlist_filter: Filter by watchlist status ("all", "watched", "unwatched")
+            source_filter: Filter by metadata source match (e.g. "spotify", "!spotify" for unmatched)
 
         Returns:
             Dict containing artists list, pagination info, and total count
@@ -7939,6 +7940,29 @@ class MusicDatabase:
                         # Specific letter
                         where_conditions.append("UPPER(SUBSTR(name, 1, 1)) = UPPER(?)")
                         params.append(letter)
+
+                # Metadata source filter — match or exclude by enrichment source
+                if source_filter:
+                    _source_columns = {
+                        'spotify': 'a.spotify_artist_id',
+                        'musicbrainz': 'a.musicbrainz_id',
+                        'deezer': 'a.deezer_id',
+                        'discogs': 'a.discogs_id',
+                        'audiodb': 'a.audiodb_id',
+                        'itunes': 'a.itunes_artist_id',
+                        'lastfm': 'a.lastfm_url',
+                        'genius': 'a.genius_url',
+                        'tidal': 'a.tidal_id',
+                        'qobuz': 'a.qobuz_id',
+                    }
+                    negate = source_filter.startswith('!')
+                    key = source_filter.lstrip('!')
+                    col = _source_columns.get(key)
+                    if col:
+                        if negate:
+                            where_conditions.append(f"({col} IS NULL OR {col} = '')")
+                        else:
+                            where_conditions.append(f"({col} IS NOT NULL AND {col} != '')")
 
                 # Get active server for filtering
                 from config.settings import config_manager
