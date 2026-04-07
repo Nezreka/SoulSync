@@ -9365,6 +9365,7 @@ def get_library_artists():
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 75))
         watchlist_filter = request.args.get('watchlist', 'all')
+        source_filter = request.args.get('source_filter', '')
 
         # Get database instance
         database = get_database()
@@ -9376,7 +9377,8 @@ def get_library_artists():
             page=page,
             limit=limit,
             watchlist_filter=watchlist_filter,
-            profile_id=get_current_profile_id()
+            profile_id=get_current_profile_id(),
+            source_filter=source_filter
         )
 
         # Fix image URLs for all artists

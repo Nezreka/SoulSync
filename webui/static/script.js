@@ -41208,7 +41208,8 @@ const libraryPageState = {
     currentPage: 1,
     limit: 75,
     debounceTimer: null,
-    watchlistFilter: "all"
+    watchlistFilter: "all",
+    sourceFilter: ""
 };
 
 function initializeLibraryPage() {
@@ -41220,6 +41221,9 @@ function initializeLibraryPage() {
 
         // Initialize watchlist filter
         initializeWatchlistFilter();
+
+        // Initialize metadata source filter
+        initializeSourceFilter();
 
         // Initialize alphabet selector
         initializeAlphabetSelector();
@@ -41302,6 +41306,16 @@ function initializeWatchlistFilter() {
     });
 }
 
+function initializeSourceFilter() {
+    const select = document.getElementById('library-source-filter');
+    if (!select) return;
+    select.addEventListener('change', () => {
+        libraryPageState.sourceFilter = select.value;
+        libraryPageState.currentPage = 1;
+        loadLibraryArtists();
+    });
+}
+
 function initializeAlphabetSelector() {
     const alphabetButtons = document.querySelectorAll(".alphabet-btn");
 
@@ -41355,6 +41369,7 @@ async function loadLibraryArtists() {
             limit: libraryPageState.limit,
             watchlist: libraryPageState.watchlistFilter
         });
+        if (libraryPageState.sourceFilter) params.set('source_filter', libraryPageState.sourceFilter);
 
         // Fetch artists from API
         const response = await fetch(`/api/library/artists?${params}`);

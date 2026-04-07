@@ -21798,6 +21798,44 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     padding: 8px 0;
 }
 
+.library-source-filter {
+    display: flex;
+    justify-content: center;
+    padding: 0 0 4px;
+}
+.library-source-filter-select {
+    padding: 6px 30px 6px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='rgba(255,255,255,0.35)' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    font-weight: 500;
+    font-family: inherit;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s;
+    min-width: 140px;
+}
+.library-source-filter-select:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.8);
+}
+.library-source-filter-select:focus {
+    border-color: rgba(var(--accent-rgb), 0.4);
+    outline: none;
+}
+.library-source-filter-select option,
+.library-source-filter-select optgroup {
+    background: #1a1a1e;
+    color: #fff;
+}
+
 .watchlist-filter-btn {
     padding: 6px 16px;
     border: 1px solid rgba(255, 255, 255, 0.1);
