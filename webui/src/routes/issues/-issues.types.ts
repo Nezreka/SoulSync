@@ -1,4 +1,6 @@
 export type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'dismissed';
+export type IssueEntityType = 'track' | 'album' | 'artist';
+export type IssuePriority = 'low' | 'normal' | 'high';
 
 export interface IssueSnapshot {
   [key: string]: unknown;
@@ -12,12 +14,30 @@ export interface IssueSnapshot {
   spotify_album_id?: string;
   spotify_artist_id?: string;
   spotify_track_id?: string;
+  artist_id?: string | number;
+  album_id?: string | number;
+  track_number?: string | number;
+  duration?: string | number;
+  format?: string;
+  bitrate?: string | number;
+  bpm?: string | number;
+  quality?: string;
+  file_path?: string;
+  tracks?: Array<Record<string, unknown>>;
+  artist_musicbrainz_id?: string;
+  musicbrainz_release_id?: string;
+  musicbrainz_recording_id?: string;
+  artist_deezer_id?: string;
+  album_deezer_id?: string;
+  track_deezer_id?: string;
+  artist_tidal_id?: string;
+  album_tidal_id?: string;
 }
 
 export interface IssueRecord {
   id: number;
   profile_id: number;
-  entity_type: 'track' | 'album' | 'artist';
+  entity_type: IssueEntityType;
   entity_id: string;
   category: string;
   title: string;
@@ -65,4 +85,27 @@ export interface IssueCountsResponse {
 export interface IssuesSearch {
   category?: string;
   status?: IssueStatus | 'all';
+}
+
+export interface CreateIssuePayload {
+  entity_type: IssueEntityType;
+  entity_id: string;
+  category: string;
+  title: string;
+  description?: string;
+  priority?: IssuePriority;
+}
+
+export interface IssueReportPayload {
+  entityType: IssueEntityType;
+  entityId: string | number;
+  entityName: string;
+  artistName?: string;
+  albumTitle?: string;
+}
+
+export interface IssueDomainBridge {
+  openReportIssue: (payload: IssueReportPayload) => void;
+  refresh: () => void;
+  closeReportIssue?: () => void;
 }

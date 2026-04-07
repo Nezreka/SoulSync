@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import type { ShellBridge, ShellPageId } from '@/platform/shell/bridge';
@@ -36,15 +36,15 @@ function renderIssuesRoute() {
   return render(<AppRouterProvider router={router} queryClient={queryClient} />);
 }
 
-const shellActions = {
-  downloadAlbum: vi.fn(),
-  addToWishlist: vi.fn(),
+const workflowActions = {
+  openDownloadMissingAlbum: vi.fn(),
+  openAddToWishlistAlbum: vi.fn(),
 };
 
 describe('issues route', () => {
   beforeEach(() => {
-    shellActions.downloadAlbum.mockReset();
-    shellActions.addToWishlist.mockReset();
+    workflowActions.openDownloadMissingAlbum.mockReset();
+    workflowActions.openAddToWishlistAlbum.mockReset();
     window.SoulSyncWebShellBridge = createShellBridge();
     vi.stubGlobal(
       'fetch',
@@ -107,10 +107,22 @@ describe('issues route', () => {
             },
           });
         }
+        if (url.includes('/api/spotify/album/abc123')) {
+          return createResponse({
+            id: 'abc123',
+            name: 'Album Name',
+            album_type: 'album',
+            images: [{ url: 'https://example.com/thumb.jpg' }],
+            total_tracks: 1,
+            artists: [{ name: 'Artist' }],
+            tracks: [{ id: 'track-1', name: 'Track 1' }],
+          });
+        }
         return createResponse({ success: true });
       }) as unknown as typeof fetch,
     );
-    vi.stubGlobal('SoulSyncIssueActions', shellActions);
+    vi.stubGlobal('SoulSyncWorkflowActions', workflowActions);
+    vi.stubGlobal('showToast', vi.fn());
   });
 
   afterEach(() => {
@@ -139,10 +151,41 @@ describe('issues route', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
-  it('invokes the legacy adapter for admin downloads', async () => {
+  it('invokes the shared workflow adapter for admin downloads', async () => {
     renderIssuesRoute();
     fireEvent.click(await screen.findByTestId('issue-card-7'));
     fireEvent.click(await screen.findByRole('button', { name: /download album/i }));
-    expect(shellActions.downloadAlbum).toHaveBeenCalledWith('abc123', 'Artist', 'Album Name');
+    await waitFor(() => expect(workflowActions.openDownloadMissingAlbum).toHaveBeenCalled());
+    expect(workflowActions.openDownloadMissingAlbum).toHaveBeenCalledWith(
+      expect.objectContaining({
+        virtualPlaylistId: 'issue_download_abc123',
+        playlistName: '[Artist] Album Name',
+      }),
+    );
+  });
+
+  it('opens the global React issue composer through the domain bridge', async () => {
+    const fetchMock = vi.mocked(fetch);
+    renderIssuesRoute();
+    await waitFor(() => expect(window.SoulSyncIssueDomain).toBeDefined());
+
+    act(() => {
+      window.SoulSyncIssueDomain?.openReportIssue({
+        entityType: 'album',
+        entityId: 15,
+        entityName: 'Album Name',
+        artistName: 'Artist',
+      });
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: /wrong cover art/i }));
+    expect(screen.getByLabelText(/title/i)).toHaveValue('Wrong Cover Art: Album Name');
+    fireEvent.click(screen.getByRole('button', { name: /submit issue/i }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([request]) => request instanceof Request && request.method === 'POST'),
+      ).toBe(true);
+    });
   });
 });

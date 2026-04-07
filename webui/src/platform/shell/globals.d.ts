@@ -1,10 +1,20 @@
 import type { ShellProfileContext, ShellRouteDefinition, ShellPageId } from './bridge';
+import type {
+  DownloadMissingAlbumWorkflowInput,
+  WishlistAlbumWorkflowInput,
+} from '@/platform/workflows/album-workflows';
+import type { IssueDomainBridge } from '@/routes/issues/-issues.types';
 
 declare global {
   interface Window {
-    SoulSyncIssueActions?: {
-      addToWishlist?: (albumId: string, artistName: string, albumName: string) => void;
-      downloadAlbum?: (albumId: string, artistName: string, albumName: string) => void;
+    showToast?: (message: string, type?: string, durationOrContext?: number | string) => void;
+    SoulSyncIssueDomain?: IssueDomainBridge;
+    SoulSyncWorkflowActions?: {
+      openDownloadMissingAlbum: (
+        input: DownloadMissingAlbumWorkflowInput,
+      ) => void | Promise<void>;
+      openAddToWishlistAlbum: (input: WishlistAlbumWorkflowInput) => void | Promise<void>;
+      notify?: (message: string, type?: string) => void;
     };
     SoulSyncWebRouter?: {
       routeManifest: ShellRouteDefinition[];
