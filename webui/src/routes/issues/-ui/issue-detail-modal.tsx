@@ -1,6 +1,11 @@
 import { useMutation } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
+import {
+  launchAlbumDownloadWorkflow,
+  launchAlbumWishlistWorkflow,
+} from '@/platform/workflows/album-workflows';
+
 import type { IssueRecord } from '../-issues.types';
 
 import {
@@ -15,13 +20,6 @@ import {
   updateIssue,
 } from '../-issues.helpers';
 import styles from './issue-detail-modal.module.css';
-
-function getStatusClassName(status: string) {
-  if (status === 'in_progress') return styles.issueStatusProgress;
-  if (status === 'resolved') return styles.issueStatusResolved;
-  if (status === 'dismissed') return styles.issueStatusDismissed;
-  return styles.issueStatusOpen;
-}
 
 export function IssueDetailModal({
   error,
@@ -65,6 +63,18 @@ export function IssueDetailModal({
     onSuccess: async () => {
       onMutationSuccess();
     },
+  });
+
+  const downloadWorkflowMutation = useMutation({
+    mutationFn: launchAlbumDownloadWorkflow,
+    onError: notifyWorkflowError,
+    onSuccess: onClose,
+  });
+
+  const wishlistWorkflowMutation = useMutation({
+    mutationFn: launchAlbumWishlistWorkflow,
+    onError: notifyWorkflowError,
+    onSuccess: onClose,
   });
 
   const statusButtons = useMemo(() => {
@@ -166,9 +176,15 @@ export function IssueDetailModal({
   const issueCategoryLabel = issue
     ? ISSUE_CATEGORY_META[issue.category]?.label || issue.category
     : '';
-
-  const downloadAlbum = window.SoulSyncIssueActions?.downloadAlbum;
-  const addToWishlist = window.SoulSyncIssueActions?.addToWishlist;
+  const externalLinks = getExternalLinks(snapshot);
+  const trackMetaItems = getTrackMetaItems(snapshot);
+  const trackRows = Array.isArray(snapshot.tracks) ? snapshot.tracks : [];
+  const albumWorkflowInput = {
+    spotifyAlbumId: String(snapshot.spotify_album_id || ''),
+    artistName: String(snapshot.artist_name || ''),
+    albumName: String(snapshot.album_title || snapshot.title || ''),
+    source: 'issue',
+  };
 
   return (
     <div
@@ -313,43 +329,137 @@ export function IssueDetailModal({
                       {formatIssueDate(issue.created_at)}
                     </span>
                   </div>
+                  {issue.updated_at ? (
+                    <div className={styles.issueMetaItem}>
+                      <span className={styles.issueMetaIcon}>U</span>
+                      <span className={styles.issueMetaLabel}>Updated</span>
+                      <span className={styles.issueMetaValue}>
+                        {formatIssueDate(issue.updated_at)}
+                      </span>
+                    </div>
+                  ) : null}
+                  {issue.resolved_at ? (
+                    <div className={styles.issueMetaItem}>
+                      <span className={styles.issueMetaIcon}>R</span>
+                      <span className={styles.issueMetaLabel}>Resolved</span>
+                      <span className={styles.issueMetaValue}>
+                        {formatIssueDate(issue.resolved_at)}
+                      </span>
+                    </div>
+                  ) : null}
+                  {issue.resolved_by ? (
+                    <div className={styles.issueMetaItem}>
+                      <span className={styles.issueMetaIcon}>A</span>
+                      <span className={styles.issueMetaLabel}>Resolver</span>
+                      <span className={styles.issueMetaValue}>{issue.resolved_by}</span>
+                    </div>
+                  ) : null}
+                  {issue.reporter_name ? (
+                    <div className={styles.issueMetaItem}>
+                      <span className={styles.issueMetaIcon}>P</span>
+                      <span className={styles.issueMetaLabel}>Reporter</span>
+                      <span className={styles.issueMetaValue}>{issue.reporter_name}</span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
+
+              {externalLinks.length > 0 ? (
+                <div className={styles.issueDetailSection}>
+                  <div className={styles.issueDetailSectionTitle}>External Links</div>
+                  <div className={styles.issueExternalLinks}>
+                    {externalLinks.map((link) => (
+                      <a
+                        key={link.url}
+                        className={styles.issueExternalLink}
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {link.label}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {trackMetaItems.length > 0 ? (
+                <div className={styles.issueDetailSection}>
+                  <div className={styles.issueDetailSectionTitle}>Track Details</div>
+                  <div className={styles.issueDetailMetaGrid}>
+                    {trackMetaItems.map((item) => (
+                      <div className={styles.issueMetaItem} key={item.label}>
+                        <span className={styles.issueMetaIcon}>{item.icon}</span>
+                        <span className={styles.issueMetaLabel}>{item.label}</span>
+                        <span className={styles.issueMetaValue}>{item.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {snapshot.file_path ? (
+                <div className={styles.issueDetailSection}>
+                  <div className={styles.issueDetailSectionTitle}>File Path</div>
+                  <div className={styles.issueDetailFilepath}>{String(snapshot.file_path)}</div>
+                </div>
+              ) : null}
+
+              {trackRows.length > 0 ? (
+                <div className={styles.issueDetailSection}>
+                  <div className={styles.issueDetailSectionTitle}>
+                    Track Listing ({trackRows.length} tracks)
+                  </div>
+                  <div className={styles.issueDetailTracklist}>
+                    {trackRows.map((track, index) => {
+                      const format = String(track.format || '').toUpperCase();
+                      const bitrate = track.bitrate ? `${track.bitrate}k` : '';
+                      const duration = formatDuration(track.duration);
+                      return (
+                        <div
+                          className={styles.issueDetailTracklistRow}
+                          key={String(track.id || `${track.title}-${index}`)}
+                        >
+                          <span className={styles.issueDetailTracklistNum}>
+                            {String(track.track_number || index + 1)}
+                          </span>
+                          <span className={styles.issueDetailTracklistTitle}>
+                            {String(track.title || 'Unknown')}
+                          </span>
+                          <span className={styles.issueDetailTracklistDur}>{duration}</span>
+                          <span className={styles.issueDetailTracklistMeta}>
+                            {format ? <span className={styles.issueTrackBadge}>{format}</span> : null}
+                            {bitrate ? (
+                              <span className={styles.issueTrackBadge}>{bitrate}</span>
+                            ) : null}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
 
               {issue.entity_type !== 'artist' && isAdmin && (
                 <div className={styles.issueDetailSection}>
                   <div className={styles.issueDetailSectionTitle}>Admin Actions</div>
                   <div className={styles.issueActionButtons}>
-                    {downloadAlbum && (
-                      <button
-                        className={`${styles.issueActionButton} ${styles.issueActionDownload}`}
-                        type="button"
-                        onClick={() =>
-                          downloadAlbum(
-                            String(snapshot.spotify_album_id || ''),
-                            String(snapshot.artist_name || ''),
-                            String(snapshot.album_title || snapshot.title || ''),
-                          )
-                        }
-                      >
-                        Download Album
-                      </button>
-                    )}
-                    {addToWishlist && (
-                      <button
-                        className={`${styles.issueActionButton} ${styles.issueActionWishlist}`}
-                        type="button"
-                        onClick={() =>
-                          addToWishlist(
-                            String(snapshot.spotify_album_id || ''),
-                            String(snapshot.artist_name || ''),
-                            String(snapshot.album_title || snapshot.title || ''),
-                          )
-                        }
-                      >
-                        Add to Wishlist
-                      </button>
-                    )}
+                    <button
+                      className={`${styles.issueActionButton} ${styles.issueActionDownload}`}
+                      type="button"
+                      disabled={downloadWorkflowMutation.isPending}
+                      onClick={() => downloadWorkflowMutation.mutate(albumWorkflowInput)}
+                    >
+                      {downloadWorkflowMutation.isPending ? 'Loading...' : 'Download Album'}
+                    </button>
+                    <button
+                      className={`${styles.issueActionButton} ${styles.issueActionWishlist}`}
+                      type="button"
+                      disabled={wishlistWorkflowMutation.isPending}
+                      onClick={() => wishlistWorkflowMutation.mutate(albumWorkflowInput)}
+                    >
+                      {wishlistWorkflowMutation.isPending ? 'Loading...' : 'Add to Wishlist'}
+                    </button>
                   </div>
                 </div>
               )}
@@ -365,6 +475,13 @@ export function IssueDetailModal({
                   />
                 </div>
               )}
+
+              {!isAdmin && issue.admin_response ? (
+                <div className={styles.issueDetailSection}>
+                  <div className={styles.issueDetailSectionTitle}>Admin Response</div>
+                  <div className={styles.issueDetailAdminResponse}>{issue.admin_response}</div>
+                </div>
+              ) : null}
             </>
           ) : null}
         </div>
@@ -400,4 +517,110 @@ export function IssueDetailModal({
       </div>
     </div>
   );
+}
+
+function getStatusClassName(status: string) {
+  if (status === 'in_progress') return styles.issueStatusProgress;
+  if (status === 'resolved') return styles.issueStatusResolved;
+  if (status === 'dismissed') return styles.issueStatusDismissed;
+  return styles.issueStatusOpen;
+}
+
+function notifyWorkflowError(error: unknown) {
+  const message = error instanceof Error ? error.message : 'Workflow failed';
+  window.showToast?.(message, 'error');
+}
+
+function formatDuration(value: unknown): string {
+  const duration = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(duration) || duration <= 0) return '';
+  const seconds = duration > 10000 ? Math.floor(duration / 1000) : Math.floor(duration);
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+  return `${minutes}:${String(remaining).padStart(2, '0')}`;
+}
+
+function getExternalLinks(snapshot: ReturnType<typeof parseSnapshot>) {
+  const links: Array<{ label: string; url: string }> = [];
+  if (snapshot.spotify_artist_id) {
+    links.push({
+      label: 'Spotify Artist',
+      url: `https://open.spotify.com/artist/${snapshot.spotify_artist_id}`,
+    });
+  }
+  if (snapshot.spotify_album_id) {
+    links.push({
+      label: 'Spotify Album',
+      url: `https://open.spotify.com/album/${snapshot.spotify_album_id}`,
+    });
+  }
+  if (snapshot.spotify_track_id) {
+    links.push({
+      label: 'Spotify Track',
+      url: `https://open.spotify.com/track/${snapshot.spotify_track_id}`,
+    });
+  }
+  if (snapshot.artist_musicbrainz_id) {
+    links.push({
+      label: 'MusicBrainz Artist',
+      url: `https://musicbrainz.org/artist/${snapshot.artist_musicbrainz_id}`,
+    });
+  }
+  if (snapshot.musicbrainz_release_id) {
+    links.push({
+      label: 'MusicBrainz Release',
+      url: `https://musicbrainz.org/release/${snapshot.musicbrainz_release_id}`,
+    });
+  }
+  if (snapshot.musicbrainz_recording_id) {
+    links.push({
+      label: 'MusicBrainz Recording',
+      url: `https://musicbrainz.org/recording/${snapshot.musicbrainz_recording_id}`,
+    });
+  }
+  if (snapshot.artist_deezer_id) {
+    links.push({
+      label: 'Deezer Artist',
+      url: `https://www.deezer.com/artist/${snapshot.artist_deezer_id}`,
+    });
+  }
+  if (snapshot.album_deezer_id) {
+    links.push({
+      label: 'Deezer Album',
+      url: `https://www.deezer.com/album/${snapshot.album_deezer_id}`,
+    });
+  }
+  if (snapshot.track_deezer_id) {
+    links.push({
+      label: 'Deezer Track',
+      url: `https://www.deezer.com/track/${snapshot.track_deezer_id}`,
+    });
+  }
+  if (snapshot.artist_tidal_id) {
+    links.push({
+      label: 'Tidal Artist',
+      url: `https://listen.tidal.com/artist/${snapshot.artist_tidal_id}`,
+    });
+  }
+  if (snapshot.album_tidal_id) {
+    links.push({
+      label: 'Tidal Album',
+      url: `https://listen.tidal.com/album/${snapshot.album_tidal_id}`,
+    });
+  }
+  return links;
+}
+
+function getTrackMetaItems(snapshot: ReturnType<typeof parseSnapshot>) {
+  const items: Array<{ icon: string; label: string; value: string }> = [];
+  if (snapshot.track_number) {
+    items.push({ icon: '#', label: 'Track', value: String(snapshot.track_number) });
+  }
+  const duration = formatDuration(snapshot.duration);
+  if (duration) items.push({ icon: 'T', label: 'Duration', value: duration });
+  if (snapshot.format) items.push({ icon: 'F', label: 'Format', value: String(snapshot.format) });
+  if (snapshot.bitrate) items.push({ icon: 'B', label: 'Bitrate', value: `${snapshot.bitrate} kbps` });
+  if (snapshot.bpm) items.push({ icon: 'M', label: 'BPM', value: String(snapshot.bpm) });
+  if (snapshot.quality) items.push({ icon: 'Q', label: 'Quality', value: String(snapshot.quality) });
+  return items;
 }
