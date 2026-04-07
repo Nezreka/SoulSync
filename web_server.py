@@ -24127,6 +24127,116 @@ def download_backup_endpoint(filename):
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================
+# == DATABASE MAINTENANCE      ==
+# ===============================
+
+@app.route('/api/database/maintenance/info', methods=['GET'])
+def database_maintenance_info():
+    """Get database size, free pages, and auto_vacuum mode."""
+    try:
+        import sqlite3
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        c.execute('PRAGMA page_count'); total_pages = c.fetchone()[0]
+        c.execute('PRAGMA freelist_count'); free_pages = c.fetchone()[0]
+        c.execute('PRAGMA page_size'); page_size = c.fetchone()[0]
+        c.execute('PRAGMA auto_vacuum'); auto_vacuum = c.fetchone()[0]
+        conn.close()
+
+        total_bytes = total_pages * page_size
+        free_bytes = free_pages * page_size
+        auto_vacuum_labels = {0: 'None', 1: 'Full', 2: 'Incremental'}
+
+        return jsonify({
+            'success': True,
+            'total_size': total_bytes,
+            'total_size_display': f'{total_bytes / 1024 / 1024:.1f} MB',
+            'free_pages': free_pages,
+            'free_size': free_bytes,
+            'free_size_display': f'{free_bytes / 1024 / 1024:.1f} MB',
+            'bloat_percent': round(free_pages / total_pages * 100, 1) if total_pages > 0 else 0,
+            'auto_vacuum': auto_vacuum,
+            'auto_vacuum_label': auto_vacuum_labels.get(auto_vacuum, 'Unknown'),
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/database/maintenance/vacuum', methods=['POST'])
+def database_vacuum():
+    """Run VACUUM to compact the database. Locks DB during operation."""
+    try:
+        import sqlite3, time
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+
+        # Get size before
+        size_before = os.path.getsize(db_path)
+
+        conn = sqlite3.connect(db_path)
+        start = time.time()
+        conn.execute('VACUUM')
+        elapsed = time.time() - start
+        conn.close()
+
+        size_after = os.path.getsize(db_path)
+        saved = size_before - size_after
+
+        logger.info(f"Database VACUUM completed in {elapsed:.1f}s — saved {saved / 1024 / 1024:.1f} MB")
+        return jsonify({
+            'success': True,
+            'elapsed_seconds': round(elapsed, 1),
+            'size_before': size_before,
+            'size_after': size_after,
+            'saved_bytes': saved,
+            'saved_display': f'{saved / 1024 / 1024:.1f} MB',
+        })
+    except Exception as e:
+        logger.error(f"Database VACUUM failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/database/maintenance/enable-incremental-vacuum', methods=['POST'])
+def enable_incremental_vacuum():
+    """Enable incremental auto_vacuum. Requires a full VACUUM to activate."""
+    try:
+        import sqlite3, time
+        db_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
+
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        c.execute('PRAGMA auto_vacuum')
+        current = c.fetchone()[0]
+
+        if current == 2:
+            conn.close()
+            return jsonify({'success': True, 'message': 'Incremental vacuum is already enabled', 'already_enabled': True})
+
+        size_before = os.path.getsize(db_path)
+
+        # Set incremental mode and VACUUM to activate it
+        c.execute('PRAGMA auto_vacuum = INCREMENTAL')
+        start = time.time()
+        conn.execute('VACUUM')
+        elapsed = time.time() - start
+        conn.close()
+
+        size_after = os.path.getsize(db_path)
+        saved = size_before - size_after
+
+        logger.info(f"Incremental auto_vacuum enabled in {elapsed:.1f}s — saved {saved / 1024 / 1024:.1f} MB")
+        return jsonify({
+            'success': True,
+            'message': 'Incremental vacuum enabled',
+            'elapsed_seconds': round(elapsed, 1),
+            'saved_display': f'{saved / 1024 / 1024:.1f} MB',
+        })
+    except Exception as e:
+        logger.error(f"Failed to enable incremental vacuum: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ===============================
 # == METADATA CACHE API        ==
 # ===============================
 

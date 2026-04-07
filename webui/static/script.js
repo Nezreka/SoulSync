@@ -5549,6 +5549,10 @@ function switchSettingsTab(tab) {
     if (typeof updateDownloadSourceUI === 'function') {
         try { updateDownloadSourceUI(); } catch(e) {}
     }
+    // Load DB maintenance info when switching to Advanced tab
+    if (tab === 'advanced' && typeof loadDbMaintenanceInfo === 'function') {
+        try { loadDbMaintenanceInfo(); } catch(e) {}
+    }
 }
 
 function toggleStgService(el) {
@@ -6586,6 +6590,85 @@ async function toggleHydrabaseFromSettings() {
     } catch (e) {
         if (statusEl) statusEl.textContent = 'Error';
         showToast('Hydrabase connection error', 'error');
+    }
+}
+
+// ── Database Maintenance ──
+async function loadDbMaintenanceInfo() {
+    try {
+        const resp = await fetch('/api/database/maintenance/info');
+        const data = await resp.json();
+        if (!data.success) return;
+        const sizeEl = document.getElementById('db-size-display');
+        const freeEl = document.getElementById('db-freepages-display');
+        const vacEl = document.getElementById('db-autovacuum-display');
+        if (sizeEl) sizeEl.textContent = data.total_size_display;
+        if (freeEl) freeEl.textContent = data.free_pages > 0
+            ? `${data.free_pages.toLocaleString()} (${data.free_size_display} reclaimable)`
+            : 'None — database is fully compacted';
+        if (vacEl) vacEl.textContent = data.auto_vacuum_label;
+        // Hide enable button if already incremental
+        const incBtn = document.getElementById('db-incvacuum-btn');
+        if (incBtn && data.auto_vacuum === 2) {
+            incBtn.textContent = 'Incremental Vacuum Enabled';
+            incBtn.disabled = true;
+            incBtn.style.opacity = '0.5';
+        }
+    } catch (e) { console.error('Error loading DB maintenance info:', e); }
+}
+
+async function runDatabaseVacuum() {
+    const btn = document.getElementById('db-vacuum-btn');
+    const status = document.getElementById('db-vacuum-status');
+    if (!confirm('This will compact the database by rewriting it. The database will be locked during this operation. For large databases this may take over a minute. Continue?')) return;
+    btn.disabled = true;
+    btn.textContent = 'Compacting...';
+    if (status) { status.style.display = 'block'; status.style.background = 'rgba(255,255,255,0.04)'; status.style.color = 'rgba(255,255,255,0.6)'; status.textContent = 'Running VACUUM — this may take a while...'; }
+    try {
+        const resp = await fetch('/api/database/maintenance/vacuum', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(`Database compacted in ${data.elapsed_seconds}s — saved ${data.saved_display}`, 'success');
+            if (status) { status.style.color = '#4caf50'; status.textContent = `Done in ${data.elapsed_seconds}s. Saved ${data.saved_display}.`; }
+            loadDbMaintenanceInfo();
+        } else {
+            showToast('Vacuum failed: ' + (data.error || 'Unknown error'), 'error');
+            if (status) { status.style.color = '#ef5350'; status.textContent = 'Failed: ' + (data.error || 'Unknown error'); }
+        }
+    } catch (e) {
+        showToast('Vacuum failed: ' + e.message, 'error');
+        if (status) { status.style.color = '#ef5350'; status.textContent = 'Failed: ' + e.message; }
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Compact Database (VACUUM)';
+    }
+}
+
+async function enableIncrementalVacuum() {
+    const btn = document.getElementById('db-incvacuum-btn');
+    const status = document.getElementById('db-vacuum-status');
+    if (!confirm('This will enable incremental vacuum mode. It requires a one-time full VACUUM to activate, which locks the database and may take over a minute on large databases. Continue?')) return;
+    btn.disabled = true;
+    btn.textContent = 'Enabling...';
+    if (status) { status.style.display = 'block'; status.style.background = 'rgba(255,255,255,0.04)'; status.style.color = 'rgba(255,255,255,0.6)'; status.textContent = 'Enabling incremental vacuum — this may take a while...'; }
+    try {
+        const resp = await fetch('/api/database/maintenance/enable-incremental-vacuum', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            const msg = data.already_enabled ? 'Already enabled' : `Enabled in ${data.elapsed_seconds}s — saved ${data.saved_display}`;
+            showToast(msg, 'success');
+            if (status) { status.style.color = '#4caf50'; status.textContent = msg; }
+            loadDbMaintenanceInfo();
+        } else {
+            showToast('Failed: ' + (data.error || 'Unknown error'), 'error');
+            if (status) { status.style.color = '#ef5350'; status.textContent = 'Failed: ' + (data.error || 'Unknown error'); }
+        }
+    } catch (e) {
+        showToast('Failed: ' + e.message, 'error');
+        if (status) { status.style.color = '#ef5350'; status.textContent = 'Failed: ' + e.message; }
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Enable Incremental Vacuum';
     }
 }
 

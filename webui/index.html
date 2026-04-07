@@ -5566,6 +5566,34 @@
                                     faster updates but more server load.</div>
                             </div>
 
+                            <!-- Database Maintenance -->
+                            <div class="settings-group" data-stg="advanced">
+                                <h3>Database Maintenance</h3>
+
+                                <div class="form-group" id="db-maintenance-info">
+                                    <label>Database Size:</label>
+                                    <span id="db-size-display" class="readonly-field">Loading...</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Free Pages:</label>
+                                    <span id="db-freepages-display" class="readonly-field">Loading...</span>
+                                </div>
+                                <div class="form-group">
+                                    <label>Auto-Vacuum Mode:</label>
+                                    <span id="db-autovacuum-display" class="readonly-field">Loading...</span>
+                                </div>
+
+                                <div class="form-actions" style="flex-wrap: wrap;">
+                                    <button class="test-button" id="db-vacuum-btn" onclick="runDatabaseVacuum()">Compact Database (VACUUM)</button>
+                                    <button class="test-button" id="db-incvacuum-btn" onclick="enableIncrementalVacuum()">Enable Incremental Vacuum</button>
+                                </div>
+                                <div class="help-text">
+                                    <strong>Compact Database</strong> rewrites the entire DB to reclaim unused space. Locks the database briefly — may take a minute on large databases.<br>
+                                    <strong>Incremental Vacuum</strong> enables automatic page reclamation. Requires a one-time full compact to activate. After that, freed pages are reclaimed in small batches automatically.
+                                </div>
+                                <div id="db-vacuum-status" style="display: none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 0.85em;"></div>
+                            </div>
+
 
                             <!-- Content Filter Settings -->
                             <div class="settings-group" data-stg="library">
