@@ -25257,7 +25257,6 @@ def get_valid_candidates(results, spotify_track, query):
     _streaming_sources = ("youtube", "tidal", "qobuz", "hifi", "deezer_dl")
     if results[0].username in _streaming_sources:
         source_label = results[0].username.replace('_dl', '').title()
-
         expected_artists = spotify_track.artists if spotify_track else []
         expected_title = spotify_track.name if spotify_track else ''
         expected_duration = spotify_track.duration_ms if spotify_track else 0
@@ -25298,9 +25297,37 @@ def get_valid_candidates(results, spotify_track, query):
                         is_wrong_version = True
                         break
 
+            # Artist gate — streaming APIs (Tidal/Qobuz/HiFi/Deezer) have reliable metadata,
+            # so "My Will" by "B. Starr" should never match expected "B小町".
+            # Skip for YouTube — artist is parsed from video titles and often unreliable.
+            if r.username != 'youtube':
+                from difflib import SequenceMatcher
+                import re as _re
+                _cand_artist_raw = r.artist or ''
+                _cand_artist = matching_engine.normalize_string(_cand_artist_raw)
+                _best_artist = 0.0
+                for _ea in expected_artists:
+                    _ea_norm = matching_engine.normalize_string(_ea)
+                    if not _ea_norm:
+                        continue
+                    # For short normalized names (e.g. "B小町"→"b"), containment is useless.
+                    # Compare original Unicode strings directly via similarity instead.
+                    if len(_ea_norm) <= 2:
+                        _best_artist = max(_best_artist, SequenceMatcher(None, _ea.lower(), _cand_artist_raw.lower()).ratio())
+                    elif _re.search(r'\b' + _re.escape(_ea_norm) + r'\b', _cand_artist):
+                        _best_artist = 1.0
+                        break
+                    elif _ea_norm == _cand_artist:
+                        _best_artist = 1.0
+                        break
+                    else:
+                        _best_artist = max(_best_artist, SequenceMatcher(None, _ea_norm, _cand_artist).ratio())
+                if _best_artist < 0.4 and confidence < 0.85:
+                    continue
+
             r.confidence = confidence
             r.version_type = 'wrong_version' if is_wrong_version else match_type
-            if confidence >= 0.55:
+            if confidence >= 0.60:
                 scored.append(r)
 
         if scored:
@@ -25311,8 +25338,12 @@ def get_valid_candidates(results, spotify_track, query):
                   f"(best: {best.confidence:.2f} '{best.artist} - {best.title}')")
             return scored
         else:
-            print(f"⚠️ [{source_label}] No streaming results passed validation (threshold: 0.55) — falling through to matching engine")
-            # Fall through to standard matching engine below
+            if results[0].username == 'youtube':
+                print(f"⚠️ [{source_label}] No streaming results passed validation — falling through to filename matching")
+                # YouTube artist data is unreliable, allow fallback to filename-based matching
+            else:
+                print(f"⚠️ [{source_label}] No streaming results passed validation (threshold: 0.60, artist gate: 0.40) — rejecting all candidates")
+                return []  # Tidal/Qobuz/HiFi/Deezer have structured metadata; don't fall back to filename matching
 
     # Uses the existing, powerful matching engine for scoring (Soulseek P2P results)
     _max_q = config_manager.get('soulseek.max_peer_queue', 0) or 0
