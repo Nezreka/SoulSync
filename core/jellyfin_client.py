@@ -1311,24 +1311,24 @@ class JellyfinClient:
             return False
     
     def _is_valid_guid(self, guid: str) -> bool:
-        """Validate that a string is a properly formatted GUID for Emby/Jellyfin"""
+        """Validate that a string is a properly formatted item ID for Emby/Jellyfin.
+        Jellyfin uses 32-char hex GUIDs, Emby uses integer IDs — both are valid."""
         if not guid or not isinstance(guid, str):
             return False
 
         guid = guid.strip()
-
-        # Check length (GUIDs are typically 32 hex chars + 4 hyphens = 36 chars, or 32 without hyphens)
-        if len(guid) not in [32, 36]:
+        if not guid:
             return False
 
-        # Remove hyphens for validation
-        guid_no_hyphens = guid.replace('-', '')
+        # Emby uses integer IDs (e.g. "12345") — accept any numeric string
+        if guid.isdigit():
+            return True
 
-        # Must be exactly 32 hex characters
+        # Jellyfin uses GUIDs (32 hex chars, optionally with hyphens for 36 total)
+        guid_no_hyphens = guid.replace('-', '')
         if len(guid_no_hyphens) != 32:
             return False
 
-        # All characters must be hexadecimal
         try:
             int(guid_no_hyphens, 16)
             return True
