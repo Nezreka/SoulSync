@@ -31226,6 +31226,47 @@ def hifi_status():
         return jsonify({"available": False, "error": str(e)})
 
 
+@app.route('/api/hifi/instances', methods=['GET'])
+def hifi_instances():
+    """Check availability of all HiFi API instances."""
+    import requests as req
+    try:
+        hifi = soulseek_client.hifi
+        instances = list(hifi._instances)
+        results = []
+        for url in instances:
+            entry = {'url': url, 'status': 'unknown', 'version': None, 'can_search': False, 'can_download': False}
+            try:
+                # Check root for version
+                r = req.get(f'{url}/', timeout=5, headers={'Accept': 'application/json'})
+                if r.ok:
+                    data = r.json()
+                    entry['version'] = data.get('version')
+                    entry['status'] = 'online'
+                    # Check search
+                    sr = req.get(f'{url}/search', params={'s': 'test', 'limit': 1}, timeout=5)
+                    entry['can_search'] = sr.ok
+                    # Check track (download capability)
+                    tr = req.get(f'{url}/track', params={'id': '1550546', 'quality': 'LOSSLESS'}, timeout=5)
+                    entry['can_download'] = tr.ok
+                    if not tr.ok:
+                        entry['download_error'] = f'HTTP {tr.status_code}'
+                else:
+                    entry['status'] = f'error (HTTP {r.status_code})'
+            except req.exceptions.SSLError:
+                entry['status'] = 'ssl_error'
+            except req.exceptions.ConnectTimeout:
+                entry['status'] = 'timeout'
+            except req.exceptions.ConnectionError:
+                entry['status'] = 'offline'
+            except Exception as e:
+                entry['status'] = f'error ({type(e).__name__})'
+            results.append(entry)
+        return jsonify({'instances': results, 'active': hifi._get_instance()})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ===================================================================
 # DEEZER DOWNLOAD ENDPOINTS
 # ===================================================================
