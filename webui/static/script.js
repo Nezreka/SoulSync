@@ -5894,6 +5894,14 @@ async function loadSettingsData() {
         document.getElementById('deezer-download-quality').value = settings.deezer_download?.quality || 'flac';
         document.getElementById('deezer-allow-fallback').checked = settings.deezer_download?.allow_fallback !== false;
         document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
+        // Sync ARL to connections tab field + bidirectional listeners
+        const _connArl = document.getElementById('deezer-connection-arl');
+        const _dlArl = document.getElementById('deezer-download-arl');
+        if (_connArl) _connArl.value = settings.deezer_download?.arl || '';
+        if (_connArl && _dlArl) {
+            _connArl.addEventListener('input', () => { _dlArl.value = _connArl.value; });
+            _dlArl.addEventListener('input', () => { _connArl.value = _dlArl.value; });
+        }
 
         // Populate YouTube settings
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
