@@ -5972,6 +5972,9 @@ async function loadSettingsData() {
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
 
+        // Populate Import settings
+        document.getElementById('import-replace-lower-quality').checked = settings.import?.replace_lower_quality === true;
+
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
 
@@ -7075,6 +7078,9 @@ async function saveSettings(quiet = false) {
         },
         content_filter: {
             allow_explicit: document.getElementById('allow-explicit').checked
+        },
+        import: {
+            replace_lower_quality: document.getElementById('import-replace-lower-quality').checked
         },
         lossy_copy: {
             enabled: document.getElementById('lossy-copy-enabled').checked,

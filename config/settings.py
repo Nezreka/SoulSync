@@ -461,7 +461,8 @@ class ConfigManager:
                 "poll_interval": 30
             },
             "import": {
-                "staging_path": "./Staging"
+                "staging_path": "./Staging",
+                "replace_lower_quality": False
             },
             "m3u_export": {
                 "enabled": False
