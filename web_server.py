@@ -30984,6 +30984,48 @@ def search_itunes_tracks():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/deezer/search_tracks', methods=['GET'])
+def search_deezer_tracks():
+    """Search for tracks on Deezer - used by discovery fix modal when Deezer is the source"""
+    try:
+        track_q = request.args.get('track', '').strip()
+        artist_q = request.args.get('artist', '').strip()
+        legacy_query = request.args.get('query', '').strip()
+        limit = int(request.args.get('limit', 20))
+
+        if track_q or artist_q:
+            parts = []
+            if track_q:
+                parts.append(track_q)
+            if artist_q:
+                parts.append(artist_q)
+            query = ' '.join(parts)
+        elif legacy_query:
+            query = legacy_query
+        else:
+            return jsonify({"error": "Query parameter is required"}), 400
+
+        from core.deezer_client import DeezerClient
+        client = _get_deezer_client()
+        tracks = client.search_tracks(query, limit=limit)
+
+        tracks_dict = [{
+            'id': t.id,
+            'name': t.name,
+            'artists': t.artists,
+            'album': t.album,
+            'duration_ms': t.duration_ms,
+            'image_url': getattr(t, 'image_url', None),
+            'source': 'deezer'
+        } for t in tracks]
+
+        return jsonify({'tracks': tracks_dict})
+
+    except Exception as e:
+        print(f"❌ Error searching Deezer tracks: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/itunes/album/<album_id>', methods=['GET'])
 def get_itunes_album_tracks(album_id):
     """Fetches full track details for a specific iTunes album."""
