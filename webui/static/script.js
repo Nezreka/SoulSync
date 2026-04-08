@@ -63005,6 +63005,11 @@ async function fixRepairFinding(id, findingType) {
         fixAction = await _promptOrphanAction();
         if (!fixAction) return; // User cancelled
     }
+    // Dead files: re-download or just remove from DB
+    if (findingType === 'dead_file') {
+        fixAction = await _promptDeadFileAction();
+        if (!fixAction) return;
+    }
 
     const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
     const fixBtn = card ? card.querySelector('.repair-finding-btn.fix') : null;
@@ -63073,6 +63078,39 @@ function _promptOrphanAction() {
     });
 }
 
+function _promptDeadFileAction() {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'display:flex;align-items:center;justify-content:center;z-index:10000;';
+        overlay.innerHTML = `
+            <div style="background:#1e1e2e;border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:28px;max-width:420px;width:90%;text-align:center;">
+                <div style="font-size:1.1em;font-weight:600;color:#fff;margin-bottom:8px;">Dead File Action</div>
+                <div style="font-size:0.88em;color:rgba(255,255,255,0.6);margin-bottom:20px;">
+                    This track's file no longer exists on disk. Choose how to handle it.
+                </div>
+                <div style="display:flex;gap:10px;justify-content:center;">
+                    <button id="_dead-redownload" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(29,185,84,0.4);background:rgba(29,185,84,0.15);color:#1db954;font-weight:600;cursor:pointer;font-family:inherit;">
+                        Re-download
+                    </button>
+                    <button id="_dead-remove" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.1);color:#ef4444;font-weight:500;cursor:pointer;font-family:inherit;">
+                        Remove from DB
+                    </button>
+                </div>
+                <button id="_dead-cancel" style="margin-top:12px;padding:6px 16px;border:none;background:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:0.82em;font-family:inherit;">
+                    Cancel
+                </button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('#_dead-redownload').onclick = () => { overlay.remove(); resolve('redownload'); };
+        overlay.querySelector('#_dead-remove').onclick = () => { overlay.remove(); resolve('remove'); };
+        overlay.querySelector('#_dead-cancel').onclick = () => { overlay.remove(); resolve(null); };
+        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+    });
+}
+
 async function resolveRepairFinding(id) {
     try {
         await fetch(`/api/repair/findings/${id}/resolve`, { method: 'POST' });
@@ -63137,15 +63175,29 @@ async function bulkFixFindings() {
         }
     }
 
+    // If any selected findings are dead files, prompt for action
+    const selectedDeadCards = ids.filter(id => {
+        const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
+        return card && card.dataset.jobId === 'dead_file_cleaner';
+    });
+    let deadFixAction = null;
+    if (selectedDeadCards.length > 0) {
+        deadFixAction = await _promptDeadFileAction();
+        if (!deadFixAction) return;
+    }
+
     let fixed = 0, failed = 0, lastError = '';
     showToast(`Fixing ${ids.length} findings...`, 'info');
 
     for (const id of ids) {
         try {
-            // Determine if this finding is an orphan that needs the action
+            // Determine if this finding needs a specific action
             const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
             const isOrphan = card && card.dataset.jobId === 'orphan_file_detector';
-            const body = isOrphan && orphanFixAction ? { fix_action: orphanFixAction } : {};
+            const isDead = card && card.dataset.jobId === 'dead_file_cleaner';
+            let body = {};
+            if (isOrphan && orphanFixAction) body = { fix_action: orphanFixAction };
+            else if (isDead && deadFixAction) body = { fix_action: deadFixAction };
 
             const response = await fetch(`/api/repair/findings/${id}/fix`, {
                 method: 'POST',
