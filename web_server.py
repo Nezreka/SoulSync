@@ -51719,9 +51719,6 @@ if __name__ == '__main__':
     # Add startup activity
     add_activity_item("🚀", "System Started", "SoulSync Web UI Server initialized", "Now")
 
-    # Add a test activity to verify the system is working
-    add_activity_item("🔧", "Debug Test", "Activity feed system test", "Now")
-
     # Start WebSocket background emitters
     print("🔧 Starting WebSocket background emitters...")
     # Phase 1: Global pollers
