@@ -4125,6 +4125,18 @@
                                             <button class="auth-button" onclick="authenticateDeezer()">🔐
                                                 Authenticate</button>
                                         </div>
+                                        <div class="callback-info" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px;">
+                                            <div class="callback-help" style="margin-bottom: 8px;">Or use an <strong>ARL token</strong> for playlist access and downloads (no OAuth app needed):</div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>ARL Token:</label>
+                                            <input type="password" id="deezer-connection-arl"
+                                                placeholder="Paste your ARL cookie token here">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Log into <a href="https://www.deezer.com" target="_blank" style="color: #A238FF;">deezer.com</a>
+                                                → DevTools (F12) → Application → Cookies → copy the <code>arl</code> value. Provides playlist access + downloads.</div>
+                                        </div>
                                     </div>
                                 </div>
 
