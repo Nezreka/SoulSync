@@ -5693,6 +5693,25 @@
                             </div>
 
 
+                            <!-- Music Library Paths -->
+                            <div class="settings-group" data-stg="library">
+                                <h3>📂 Music Library Paths</h3>
+
+                                <div class="help-text" style="margin-bottom: 12px;">
+                                    Tell SoulSync where your music files live. Required for tag writing, streaming, and file detection
+                                    when your media server stores files at a different path than SoulSync can see.
+                                    <strong>Docker users:</strong> mount your music folder(s) into the SoulSync container with read-write access,
+                                    then add the <em>container-side</em> path here (e.g. <code>/music</code>).
+                                </div>
+
+                                <div id="music-paths-list"></div>
+
+                                <div class="form-actions" style="margin-top: 8px;">
+                                    <button class="test-button" onclick="addMusicPathRow()">+ Add Path</button>
+                                </div>
+                            </div>
+
+
                             <!-- Content Filter Settings -->
                             <div class="settings-group" data-stg="library">
                                 <h3>🔞 Content Filter</h3>
