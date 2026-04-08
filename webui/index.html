@@ -4232,6 +4232,25 @@
                                         <div class="setting-help-text" style="margin-top: 6px;">
                                             Connects Qobuz for metadata enrichment (ISRC, labels, copyright). Also used for downloads if Qobuz is your download source.
                                         </div>
+                                        <div class="callback-info" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px;">
+                                            <div class="callback-help" style="margin-bottom: 8px;"><strong>Alternative: Auth Token</strong> — If email/password login fails (CAPTCHA), paste your token directly:</div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Auth Token:</label>
+                                            <input type="password" id="qobuz-connection-token" class="form-input"
+                                                placeholder="Paste your Qobuz auth token here">
+                                        </div>
+                                        <div class="form-actions">
+                                            <button class="auth-button" id="qobuz-token-login-btn" onclick="loginQobuzWithToken()">
+                                                Connect with Token
+                                            </button>
+                                            <span id="qobuz-token-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">To get your token: log into <a href="https://play.qobuz.com" target="_blank" style="color: #4285f4;">play.qobuz.com</a>
+                                                → DevTools (F12) → Network tab → find any request to <code>www.qobuz.com/api.json</code>
+                                                → look in the request headers for <code>X-User-Auth-Token</code> → copy that value.</div>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -4788,6 +4807,23 @@
                                         </div>
                                         <div class="setting-help-text" style="margin-top: 6px;">
                                             Requires a paid Qobuz subscription. Streams are DRM-free.
+                                        </div>
+                                        <div class="callback-info" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px;">
+                                            <div class="callback-help" style="margin-bottom: 8px;"><strong>Alternative: Auth Token</strong> — If email/password login fails (CAPTCHA), paste your token directly:</div>
+                                        </div>
+                                        <input type="password" id="qobuz-download-token" class="form-input"
+                                            placeholder="Paste your Qobuz auth token here"
+                                            style="margin-bottom: 8px;">
+                                        <div class="form-actions">
+                                            <button class="auth-button" id="qobuz-download-token-btn" onclick="loginQobuzWithTokenFromDownloads()">
+                                                Connect with Token
+                                            </button>
+                                            <span id="qobuz-download-token-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">To get your token: log into <a href="https://play.qobuz.com" target="_blank" style="color: #4285f4;">play.qobuz.com</a>
+                                                → DevTools (F12) → Network tab → find any request to <code>www.qobuz.com/api.json</code>
+                                                → look for <code>X-User-Auth-Token</code> in the request headers → copy that value.</div>
                                         </div>
                                     </div>
                                 </div>

@@ -31465,6 +31465,28 @@ def qobuz_auth_login():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/qobuz/auth/token', methods=['POST'])
+def qobuz_auth_token():
+    """Login to Qobuz with a pasted user_auth_token (bypasses CAPTCHA)."""
+    try:
+        data = request.get_json()
+        token = data.get('token', '').strip()
+
+        if not token:
+            return jsonify({"success": False, "error": "Auth token required"}), 400
+
+        qobuz = soulseek_client.qobuz
+        result = qobuz.login_with_token(token)
+
+        if result['status'] == 'success':
+            return jsonify({"success": True, **result})
+        else:
+            return jsonify({"success": False, "error": result.get('message', 'Token login failed')}), 400
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/qobuz/auth/status', methods=['GET'])
 def qobuz_auth_status():
     """Check if Qobuz client is authenticated."""
