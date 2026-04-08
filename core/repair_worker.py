@@ -823,9 +823,36 @@ class RepairWorker:
         return handler(entity_type, entity_id, file_path, details)
 
     def _fix_dead_file(self, entity_type, entity_id, file_path, details):
-        """Add dead file track to wishlist for re-download, then remove the dead DB entry."""
+        """Fix a dead file reference. Action depends on details['_fix_action']:
+           'redownload' (default) — add to wishlist + remove DB entry
+           'remove' — just remove the dead DB entry without re-downloading
+        """
         if not entity_id:
             return {'success': False, 'error': 'No track ID associated with this finding'}
+
+        fix_action = details.get('_fix_action', 'redownload')
+
+        # Simple removal — just delete the dead track record
+        if fix_action == 'remove':
+            conn = None
+            try:
+                conn = self.db._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT title FROM tracks WHERE id = ?", (entity_id,))
+                row = cursor.fetchone()
+                track_name = row['title'] if row else 'Unknown'
+                cursor.execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+                conn.commit()
+                return {'success': True, 'action': 'removed',
+                        'message': f'Removed "{track_name}" from database'}
+            except Exception as e:
+                logger.error("Dead file removal failed for track %s: %s", entity_id, e)
+                return {'success': False, 'error': str(e)}
+            finally:
+                if conn:
+                    conn.close()
+
+        # Default: re-download flow
         conn = None
         try:
             conn = self.db._get_connection()
