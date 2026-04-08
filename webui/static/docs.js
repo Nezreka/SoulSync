@@ -79,7 +79,7 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Soulseek (slskd)</strong></td><td>Download source &mdash; P2P network, best for lossless and rare music</td><td>URL + API key</td></tr>
                         <tr><td><strong>YouTube</strong></td><td>Download source &mdash; audio extraction via yt-dlp</td><td>None (optional cookies browser)</td></tr>
                         <tr><td><strong>Tidal</strong></td><td>Download source + playlist import + enrichment</td><td>OAuth &mdash; Client ID + Secret</td></tr>
-                        <tr><td><strong>Qobuz</strong></td><td>Download source + enrichment</td><td>Username + Password (app ID auto-fetched)</td></tr>
+                        <tr><td><strong>Qobuz</strong></td><td>Download source + enrichment</td><td>Username + Password, or Auth Token (from browser DevTools)</td></tr>
                         <tr><td><strong>HiFi</strong></td><td>Download source &mdash; free lossless via community API</td><td>None</td></tr>
                         <tr><td><strong>Deezer</strong></td><td>Download source + metadata fallback + user playlists</td><td>ARL cookie token</td></tr>
                         <tr><td><strong>Discogs</strong></td><td>Enrichment &mdash; genres, styles, labels, catalog numbers, community ratings</td><td>Personal Access Token (free)</td></tr>
@@ -1395,7 +1395,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Tidal</strong> &mdash; Client ID + Secret, then Authenticate via OAuth</li>
                     <li><strong>Last.fm</strong> &mdash; API key from last.fm/api</li>
                     <li><strong>Genius</strong> &mdash; Access token from genius.com/api-clients</li>
-                    <li><strong>Qobuz</strong> &mdash; Username + Password (app ID is auto-fetched)</li>
+                    <li><strong>Qobuz</strong> &mdash; Username + Password (app ID auto-fetched), or paste an Auth Token from browser DevTools if login fails due to CAPTCHA</li>
                     <li><strong>HiFi</strong> &mdash; No credentials needed, uses community-run API instances. Test Connection to verify.</li>
                     <li><strong>Deezer</strong> &mdash; ARL cookie token from your browser (log into deezer.com &rarr; DevTools &rarr; Cookies &rarr; copy <code>arl</code>). Used for downloads AND user playlist access.</li>
                     <li><strong>Discogs</strong> &mdash; Personal Access Token from discogs.com/settings/developers (free, no app registration needed). Provides genres, styles, labels, catalog numbers, and community ratings.</li>
@@ -1460,6 +1460,9 @@ const DOCS_SECTIONS = [
                     <li><strong>Path Templates</strong> &mdash; Configure how files are organized in your library. The default template is <code>Artist/Album/TrackNum - Title.ext</code></li>
                     <li><strong>Log Level</strong> &mdash; Set the application log verbosity (DEBUG, INFO, WARNING, ERROR) from the Settings page. Changes take effect immediately without restart. Useful for troubleshooting issues.</li>
                     <li><strong>WebSocket</strong> &mdash; Real-time status updates are delivered via WebSocket. All downloads, enrichment progress, scan status, and system events push to the UI without polling.</li>
+                    <li><strong>Music Library Paths</strong> &mdash; In Settings &gt; Library, add folder paths where your music files live. Required for tag writing, streaming, and file detection when your media server stores files at a different path than SoulSync can see. Docker users: mount your music folder(s) with read-write access, then add the container-side path.</li>
+                    <li><strong>Replace Lower Quality on Import</strong> &mdash; Opt-in toggle in Settings &gt; Library. When importing from Staging, if a track already exists at lower quality (e.g. MP3), it gets replaced with the higher quality version (e.g. FLAC). Disabled by default.</li>
+                    <li><strong>HiFi Instance Health</strong> &mdash; In Settings &gt; Downloads &gt; HiFi, click "Check All Instances" to see which community API instances are online, searchable, or able to download.</li>
                 </ul>
             </div>
             <div class="docs-subsection" id="set-db-maintenance">

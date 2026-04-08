@@ -20974,15 +20974,74 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
-                "title": "📋 Download History — Source Provenance",
-                "description": "Download history now tracks the original source file info for every download",
+                "title": "🎵 Deezer User Playlists — Browse & Download Your Library",
+                "description": "New Deezer tab on the Sync page shows your personal playlists via ARL token — same flow as Spotify",
                 "features": [
-                    "• Source filename, track ID, and original track title saved with each download",
-                    "• AcoustID verification result (Verified/Failed/Skipped/Off) shown as a badge per entry",
-                    "• Source details displayed in monospace under each history entry for easy debugging",
-                    "• Settings Connections tab redesigned with collapsible accordion services and brand-colored dots"
+                    "• Click Refresh to load all your Deezer playlists with track counts",
+                    "• Click any playlist to view tracks, then Download Missing or Sync — no discovery step needed",
+                    "• Existing Deezer URL import moved to 'Deezer Link' tab (unchanged)",
+                    "• ARL token field added to Connections tab alongside Downloads tab with bidirectional sync",
+                    "• Album release dates fetched for proper $year template variable support"
+                ],
+                "usage_note": "Configure your ARL token in Settings > Connections or Downloads, then open the Deezer tab on the Sync page."
+            },
+            {
+                "title": "🔒 Qobuz Token Auth — CAPTCHA Bypass",
+                "description": "Qobuz added reCAPTCHA to their login — token auth lets you paste your session token directly",
+                "features": [
+                    "• New 'Auth Token' field on both Connections and Downloads tabs for Qobuz",
+                    "• Log into play.qobuz.com in your browser, copy X-User-Auth-Token from DevTools, paste it in",
+                    "• Bypasses the CAPTCHA entirely — existing email/password login still works if your session is active",
+                    "• Token is validated and saved as a normal session — identical to email/password login"
+                ],
+                "usage_note": "If Qobuz email/password login fails, use the Auth Token field instead."
+            },
+            {
+                "title": "🛡️ Streaming Source Matching — Artist Gate",
+                "description": "Tidal, Qobuz, HiFi, and Deezer downloads no longer match to wrong artists",
+                "features": [
+                    "• Artist similarity gate rejects candidates below 0.4 match threshold",
+                    "• Streaming source threshold raised from 0.55 to 0.60",
+                    "• No more fallback to lenient Soulseek filename matcher for structured API sources",
+                    "• Fixed single-char artist containment bug (e.g. 'B小町' no longer matches 'B.B. King')",
+                    "• YouTube and Soulseek matching completely unchanged"
+                ],
+                "usage_note": "Downloads from official sources are now much more accurate. Check Download History for verification details."
+            },
+            {
+                "title": "📋 Download History — Source Provenance",
+                "description": "Collapsible download history with full source tracking and AcoustID verification badges",
+                "features": [
+                    "• Expected vs Downloaded comparison — shows what you asked for vs what the source provided",
+                    "• Mismatched downloads highlighted in red for easy identification",
+                    "• AcoustID verification badge per entry: Verified (green), Failed (red), Skipped (orange), Off (gray)",
+                    "• Source filename, track ID, and artist saved with every download",
+                    "• Click anywhere on an entry to expand/collapse details"
                 ],
                 "usage_note": "Click 'Download History' on the Dashboard to see source provenance for new downloads."
+            },
+            {
+                "title": "🔧 Fixes & Improvements",
+                "description": "Bug fixes, quality of life improvements, and new settings",
+                "features": [
+                    "• Artist names no longer stored as lowercase — fixed static method shadowing instance method. Run a database update to fix existing names.",
+                    "• Watchlist scanner skips future/unreleased albums — no more garbage downloads from albums not yet out",
+                    "• Playlist sync tracks now tagged with correct track numbers instead of always 01",
+                    "• Emby playlist sync fixed — integer IDs now accepted alongside Jellyfin GUIDs",
+                    "• Discovery fix search now tries all metadata sources (Spotify → Deezer → iTunes) with automatic fallback",
+                    "• Album completeness scanner skips zero-track albums to prevent auto-fill errors",
+                    "• Global search string escaping fixed — albums with newlines in metadata no longer crash",
+                    "• Download history timestamps fixed — no longer always showing 'Just now'",
+                    "• Discogs added to enrichment service whitelist — Enrich button now works for Discogs",
+                    "• Settings Connections tab redesigned with collapsible accordion services and brand-colored dots",
+                    "• Metadata source filter on Library page — filter artists by matched/unmatched to any service",
+                    "• Database Maintenance UI — VACUUM and incremental vacuum in Settings > Advanced",
+                    "• Music Library Paths setting — configure where your music files live for tag writing and file detection",
+                    "• Replace lower quality files on import — opt-in toggle in Settings > Library",
+                    "• HiFi API instance health check in Settings > Downloads",
+                    "• Debug test activity feed message removed from startup",
+                    "• Global search downloads now create bubble snapshots on Dashboard and Search page"
+                ]
             },
             {
                 "title": "🗺️ Artist Map — Visualize Your Music Universe",
