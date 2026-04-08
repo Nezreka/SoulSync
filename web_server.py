@@ -15745,20 +15745,28 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
         # Fallback: Use original data with basic cleaning
         print("⚠️ No good Spotify match found, using original data")
         fallback_title = _clean_track_title_web(original_search.get('title', 'Unknown Track'), artist_name)
-        
+
+        # Preserve track_number from context if available (playlist sync tracks have it)
+        _ctx_track_number = (original_search.get('track_number')
+                             or context.get('track_info', {}).get('track_number')
+                             or 1)
+
         return {
             'is_album': False,
             'clean_track_name': fallback_title,
             'album_name': fallback_title,
-            'track_number': 1,
+            'track_number': _ctx_track_number,
             'confidence': 0.0,
             'source': 'fallback_original'
         }
-        
+
     except Exception as e:
         print(f"❌ Error in _detect_album_info_web: {e}")
         clean_title = _clean_track_title_web(context.get("original_search_result", {}).get('title', 'Unknown'), artist.get('name', ''))
-        return {'is_album': False, 'clean_track_name': clean_title, 'album_name': clean_title, 'track_number': 1}
+        _err_tn = (context.get("original_search_result", {}).get('track_number')
+                   or context.get('track_info', {}).get('track_number')
+                   or 1)
+        return {'is_album': False, 'clean_track_name': clean_title, 'album_name': clean_title, 'track_number': _err_tn}
 
 
 
