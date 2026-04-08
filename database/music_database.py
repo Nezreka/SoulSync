@@ -8797,7 +8797,7 @@ class MusicDatabase:
     # ==================== Liked Artists Pool Methods ====================
 
     @staticmethod
-    def _normalize_artist_name(name: str) -> str:
+    def _normalize_artist_name_for_dedup(name: str) -> str:
         """Normalize artist name for deduplication. Lowercases, strips diacritics,
         removes 'the ' prefix, collapses whitespace."""
         import unicodedata
@@ -8836,7 +8836,7 @@ class MusicDatabase:
             # Reject known placeholder images
             if self._is_placeholder_image(image_url):
                 image_url = None
-            normalized = self._normalize_artist_name(artist_name)
+            normalized = self._normalize_artist_name_for_dedup(artist_name)
             if not normalized:
                 return False
 
