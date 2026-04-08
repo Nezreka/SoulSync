@@ -153,6 +153,11 @@ class AlbumCompletenessJob(RepairJob):
                     context.update_progress(i + 1, total)
                 continue
 
+            # Skip albums with zero local tracks — nothing to auto-fill from
+            if actual_count == 0:
+                result.skipped += 1
+                continue
+
             # Skip albums below minimum completion percentage
             # (filters out "1 track from a playlist import" false positives)
             if min_completion_pct > 0 and expected_total > 0:
