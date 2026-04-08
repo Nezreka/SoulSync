@@ -18414,44 +18414,54 @@ async function searchDiscoveryFix() {
         return;
     }
 
-    // Determine discovery source from state
-    const identifier = currentDiscoveryFix.identifier;
-    const state = listenbrainzPlaylistStates[identifier] || youtubePlaylistStates[identifier];
-    const discoverySource = state?.discovery_source || state?.discoverySource || 'spotify';
-    const useFallback = discoverySource !== 'spotify';
-
     const resultsContainer = fixModalOverlay.querySelector('#fix-modal-results');
-    const sourceLabel = discoverySource === 'spotify' ? 'Spotify' : discoverySource === 'deezer' ? 'Deezer' : 'iTunes';
-    resultsContainer.innerHTML = `<div class="loading">🔍 Searching ${sourceLabel}...</div>`;
+
+    // Build search params
+    const params = new URLSearchParams();
+    if (trackInput) params.set('track', trackInput);
+    if (artistInput) params.set('artist', artistInput);
+    if (!trackInput && !artistInput) {
+        resultsContainer.innerHTML = '<div class="no-results">Enter a track name or artist.</div>';
+        return;
+    }
+    params.set('limit', '50');
+
+    // Use the user's active metadata source first, then fall back to others
+    const activeSource = (currentMusicSourceName || 'Spotify').toLowerCase();
+    const allSources = [
+        { key: 'spotify', endpoint: '/api/spotify/search_tracks', label: 'Spotify' },
+        { key: 'deezer', endpoint: '/api/deezer/search_tracks', label: 'Deezer' },
+        { key: 'itunes', endpoint: '/api/itunes/search_tracks', label: 'iTunes' },
+    ];
+    // Put the active source first, keep others as fallbacks
+    const activeIdx = allSources.findIndex(s => activeSource.includes(s.key));
+    const searchSources = activeIdx > 0
+        ? [allSources[activeIdx], ...allSources.filter((_, i) => i !== activeIdx)]
+        : allSources;
+
+    resultsContainer.innerHTML = `<div class="loading">🔍 Searching ${searchSources[0].label}...</div>`;
 
     try {
-        // Build search params — send track and artist separately for field-specific filtering
-        const params = new URLSearchParams();
-        if (trackInput) params.set('track', trackInput);
-        if (artistInput) params.set('artist', artistInput);
-        if (!trackInput && !artistInput) {
-            resultsContainer.innerHTML = '<div class="no-results">Enter a track name or artist.</div>';
-            return;
+        for (let i = 0; i < searchSources.length; i++) {
+            const source = searchSources[i];
+            try {
+                const response = await fetch(`${source.endpoint}?${params.toString()}`);
+                const data = await response.json();
+
+                if (data.tracks && data.tracks.length > 0) {
+                    renderDiscoveryFixResults(data.tracks, fixModalOverlay);
+                    return;
+                }
+                // No results from this source — show next source status if there is one
+                if (i < searchSources.length - 1) {
+                    resultsContainer.innerHTML = `<div class="loading">🔍 Trying ${searchSources[i + 1].label}...</div>`;
+                }
+            } catch (e) {
+                console.warn(`Discovery fix search failed on ${source.label}: ${e.message}`);
+            }
         }
-        params.set('limit', '50');
-
-        // Call appropriate search API based on discovery source
-        const searchEndpoint = useFallback ? '/api/itunes/search_tracks' : '/api/spotify/search_tracks';
-        const response = await fetch(`${searchEndpoint}?${params.toString()}`);
-        const data = await response.json();
-
-        if (data.error) {
-            resultsContainer.innerHTML = `<div class="error-message">❌ ${data.error}</div>`;
-            return;
-        }
-
-        if (!data.tracks || data.tracks.length === 0) {
-            resultsContainer.innerHTML = '<div class="no-results">No matches found. Try different search terms.</div>';
-            return;
-        }
-
-        // Render results (same format for both Spotify and iTunes)
-        renderDiscoveryFixResults(data.tracks, fixModalOverlay);
+        // All sources exhausted
+        resultsContainer.innerHTML = '<div class="no-results">No matches found on any source. Try different search terms.</div>';
 
     } catch (error) {
         console.error('Search error:', error);
