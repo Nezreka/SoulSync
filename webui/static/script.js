@@ -7738,6 +7738,45 @@ async function testHiFiConnection() {
     }
 }
 
+async function checkHiFiInstances() {
+    const panel = document.getElementById('hifi-instances-panel');
+    const btn = document.getElementById('hifi-instances-check-btn');
+    if (!panel) return;
+    panel.style.display = 'block';
+    panel.innerHTML = '<div style="color: rgba(255,255,255,0.4); font-size: 0.85em; padding: 8px 0;">Checking instances...</div>';
+    if (btn) { btn.disabled = true; btn.textContent = 'Checking...'; }
+    try {
+        const resp = await fetch('/api/hifi/instances');
+        const data = await resp.json();
+        if (!data.instances || data.instances.length === 0) {
+            panel.innerHTML = '<div style="color: #ff9800; font-size: 0.85em;">No instances configured.</div>';
+            return;
+        }
+        const _statusIcon = (inst) => {
+            if (inst.can_download) return '<span style="color:#4caf50">● Download</span>';
+            if (inst.can_search) return '<span style="color:#ff9800">● Search only</span>';
+            if (inst.status === 'online') return '<span style="color:#ff9800">● Online (limited)</span>';
+            if (inst.status === 'ssl_error') return '<span style="color:#f44336">● SSL error</span>';
+            if (inst.status === 'timeout') return '<span style="color:#f44336">● Timeout</span>';
+            if (inst.status === 'offline') return '<span style="color:#f44336">● Offline</span>';
+            return `<span style="color:#f44336">● ${escapeHtml(inst.status)}</span>`;
+        };
+        panel.innerHTML = data.instances.map(inst => {
+            const isActive = inst.url === data.active;
+            const ver = inst.version ? ` v${inst.version}` : '';
+            const activeTag = isActive ? ' <span style="color:rgb(var(--accent-rgb));font-weight:600;font-size:0.75em;">(ACTIVE)</span>' : '';
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:0.82em;">
+                <span style="color:rgba(255,255,255,0.6);font-family:monospace;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(inst.url)}${ver}${activeTag}</span>
+                <span style="flex-shrink:0;margin-left:12px;">${_statusIcon(inst)}</span>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        panel.innerHTML = `<div style="color:#f44336;font-size:0.85em;">Error checking instances: ${escapeHtml(e.message)}</div>`;
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Check All Instances'; }
+    }
+}
+
 async function testDeezerDownloadConnection() {
     const statusEl = document.getElementById('deezer-download-status');
     if (!statusEl) return;
