@@ -5969,6 +5969,10 @@ async function loadSettingsData() {
         document.getElementById('lossy-copy-options').style.display =
             settings.lossy_copy?.enabled ? 'block' : 'none';
 
+        // Populate Music Library Paths
+        const _musicPaths = settings.library?.music_paths || [];
+        renderMusicPaths(_musicPaths);
+
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
 
@@ -6606,6 +6610,49 @@ async function toggleHydrabaseFromSettings() {
     }
 }
 
+// ── Music Library Paths ──
+function renderMusicPaths(paths) {
+    const container = document.getElementById('music-paths-list');
+    if (!container) return;
+    if (!paths || paths.length === 0) {
+        container.innerHTML = '<div style="color: rgba(255,255,255,0.3); font-size: 0.85em; padding: 4px 0;">No paths configured. Click "Add Path" to add your music folder(s).</div>';
+        return;
+    }
+    container.innerHTML = paths.map((p, i) => `
+        <div class="form-group music-path-row" style="margin-bottom: 4px;">
+            <input type="text" class="music-path-input" value="${escapeHtml(p)}" placeholder="/music or C:\\Music" style="flex:1;">
+            <button class="test-button" onclick="this.closest('.music-path-row').remove()" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
+        </div>
+    `).join('');
+}
+
+function addMusicPathRow() {
+    const container = document.getElementById('music-paths-list');
+    if (!container) return;
+    // Clear the "no paths" message if present
+    const placeholder = container.querySelector('div[style*="color: rgba"]');
+    if (placeholder && !container.querySelector('.music-path-row')) placeholder.remove();
+    const row = document.createElement('div');
+    row.className = 'form-group music-path-row';
+    row.style.marginBottom = '4px';
+    row.innerHTML = `
+        <input type="text" class="music-path-input" value="" placeholder="/music or C:\\Music" style="flex:1;">
+        <button class="test-button" onclick="this.closest('.music-path-row').remove()" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
+    `;
+    container.appendChild(row);
+    row.querySelector('input').focus();
+}
+
+function collectMusicPaths() {
+    const inputs = document.querySelectorAll('.music-path-input');
+    const paths = [];
+    inputs.forEach(input => {
+        const val = input.value.trim();
+        if (val) paths.push(val);
+    });
+    return paths;
+}
+
 // ── Database Maintenance ──
 async function loadDbMaintenanceInfo() {
     try {
@@ -7078,6 +7125,9 @@ async function saveSettings(quiet = false) {
         },
         content_filter: {
             allow_explicit: document.getElementById('allow-explicit').checked
+        },
+        library: {
+            music_paths: collectMusicPaths()
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked

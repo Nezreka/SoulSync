@@ -460,6 +460,9 @@ class ConfigManager:
                 "enabled": True,
                 "poll_interval": 30
             },
+            "library": {
+                "music_paths": []
+            },
             "import": {
                 "staging_path": "./Staging",
                 "replace_lower_quality": False

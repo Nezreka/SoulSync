@@ -12913,6 +12913,18 @@ def _resolve_library_file_path(file_path):
     except Exception:
         pass
 
+    # Check user-configured music library paths (Settings > Library)
+    try:
+        music_paths = config_manager.get('library.music_paths', [])
+        if isinstance(music_paths, list):
+            for p in music_paths:
+                if p and isinstance(p, str):
+                    resolved_p = docker_resolve_path(p.strip())
+                    if resolved_p:
+                        library_dirs.add(resolved_p)
+    except Exception:
+        pass
+
     path_parts = file_path.replace('\\', '/').split('/')
 
     # Try progressively shorter path suffixes against each candidate directory
