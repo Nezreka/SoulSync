@@ -20076,15 +20076,37 @@ def _post_process_matched_download(context_key, context, file_path):
                 has_metadata = existing_file is not None and len(existing_file.tags or {}) > 2  # More than basic tags
 
                 if has_metadata and not is_enhance_download:
-                    print(f"⚠️ [Protection] Existing file already has metadata enhancement - skipping overwrite: {os.path.basename(final_path)}")
-                    print(f"🗑️ [Protection] Removing redundant download file: {os.path.basename(file_path)}")
-                    try:
-                        os.remove(file_path)  # Remove the redundant file
-                    except FileNotFoundError:
-                        print(f"⚠️ [Protection] Could not remove redundant file (already gone): {file_path}")
-                    except Exception as e:
-                        print(f"⚠️ [Protection] Error removing redundant file: {e}")
-                    return  # Don't overwrite the good file
+                    # Check if incoming file is higher quality and setting is enabled
+                    _replace_lower = config_manager.get('import.replace_lower_quality', False)
+                    if _replace_lower:
+                        _existing_tier = _get_quality_tier_from_extension(final_path)
+                        _incoming_tier = _get_quality_tier_from_extension(file_path)
+                        if _incoming_tier[1] < _existing_tier[1]:
+                            # Incoming is higher quality (lower tier number) — replace
+                            print(f"🔄 [Quality Replace] Replacing {_existing_tier[0]} with {_incoming_tier[0]}: {os.path.basename(final_path)}")
+                            try:
+                                os.remove(final_path)
+                            except Exception as e:
+                                print(f"⚠️ [Quality Replace] Could not remove existing file: {e}")
+                        else:
+                            print(f"⚠️ [Protection] Existing file is same or better quality ({_existing_tier[0]} vs {_incoming_tier[0]}) - skipping: {os.path.basename(final_path)}")
+                            try:
+                                os.remove(file_path)
+                            except FileNotFoundError:
+                                pass
+                            except Exception as e:
+                                print(f"⚠️ [Protection] Error removing redundant file: {e}")
+                            return
+                    else:
+                        print(f"⚠️ [Protection] Existing file already has metadata enhancement - skipping overwrite: {os.path.basename(final_path)}")
+                        print(f"🗑️ [Protection] Removing redundant download file: {os.path.basename(file_path)}")
+                        try:
+                            os.remove(file_path)
+                        except FileNotFoundError:
+                            print(f"⚠️ [Protection] Could not remove redundant file (already gone): {file_path}")
+                        except Exception as e:
+                            print(f"⚠️ [Protection] Error removing redundant file: {e}")
+                        return  # Don't overwrite the good file
                 elif is_enhance_download:
                     # ENHANCE BYPASS: Allow overwrite — backup original, then remove to allow move
                     print(f"🔄 [Enhance] Quality enhance mode — replacing existing file: {os.path.basename(final_path)}")
