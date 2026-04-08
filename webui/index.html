@@ -194,11 +194,11 @@
 
             <!-- Navigation Section -->
             <nav class="sidebar-nav">
-                <button class="nav-button{% if initial_nav_page == 'dashboard' %} active{% endif %}" data-page="dashboard">
+                <button class="nav-button" data-page="dashboard">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="4" rx="1"/><rect x="3" y="14" width="7" height="4" rx="1"/><rect x="14" y="11" width="7" height="7" rx="1"/><line x1="5" y1="20" x2="5" y2="22"/><line x1="8" y1="19" x2="8" y2="22"/></svg></span>
                     <span class="nav-text">Dashboard</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'sync' %} active{% endif %}" data-page="sync">
+                <button class="nav-button" data-page="sync">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></span>
                     <span class="nav-text">Sync</span>
                 </button>
@@ -206,11 +206,11 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><polyline points="8 11 11 14 14 11"/></svg></span>
                     <span class="nav-text">Search</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'discover' %} active{% endif %}" data-page="discover">
+                <button class="nav-button" data-page="discover">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" opacity="0.2" stroke="currentColor"/></svg></span>
                     <span class="nav-text">Discover</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'playlist-explorer' %} active{% endif %}" data-page="playlist-explorer">
+                <button class="nav-button" data-page="playlist-explorer">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="12" x2="5" y2="18"/><line x1="12" y1="12" x2="19" y2="18"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="12" x2="12" y2="18"/><circle cx="12" cy="19" r="2"/></svg></span>
                     <span class="nav-text">Explorer</span>
                 </button>
@@ -253,16 +253,16 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
                     <span class="nav-text">Settings</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'issues' %} active{% endif %}" data-page="issues">
+                <button class="nav-button" data-page="issues">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span>
                     <span class="nav-text">Issues</span>
                     <span class="issues-nav-badge hidden" id="issues-nav-badge">0</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'help' %} active{% endif %}" data-page="help">
+                <button class="nav-button" data-page="help">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
                     <span class="nav-text">Help & Docs</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'hydrabase' %} active{% endif %}" data-page="hydrabase" id="hydrabase-nav" style="display: none;">
+                <button class="nav-button" data-page="hydrabase" id="hydrabase-nav" style="display: none;">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span>
                     <span class="nav-text">Hydrabase</span>
                 </button>
@@ -306,10 +306,10 @@
         <div class="main-content">
             <!-- Global particle canvas for page background animations -->
             <canvas id="page-particles-canvas"></canvas>
-            <div id="webui-react-root" class="page{% if initial_react_page %} active{% endif %}" data-react-app="router"></div>
+            <div id="webui-react-root" class="page" data-react-app="router"></div>
 
             <!-- Dashboard Page -->
-            <div class="page{% if initial_client_page == 'dashboard' %} active{% endif %}" id="dashboard-page">
+            <div class="page" id="dashboard-page">
                 <div class="dashboard-container">
                     <div class="dashboard-header">
                         <div class="header-text">
@@ -840,7 +840,7 @@
             </div>
 
             <!-- Main container for the Sync page -->
-            <div class="page{% if initial_client_page == 'sync' %} active{% endif %}" id="sync-page">
+            <div class="page" id="sync-page">
                 <!-- Header -->
                 <div class="sync-header">
                     <div class="sync-header-row">
@@ -2098,7 +2098,7 @@
                 </div>
             </div>
             <!-- Automations Page -->
-            <div class="page{% if initial_client_page == 'automations' %} active{% endif %}" id="automations-page">
+            <div class="page" id="automations-page">
                 <!-- List View -->
                 <div class="automations-list-view" id="automations-list-view">
                     <div class="automations-container">
@@ -2200,7 +2200,7 @@
             </div>
 
             <!-- Library Page -->
-            <div class="page{% if initial_client_page == 'library' %} active{% endif %}" id="library-page">
+            <div class="page" id="library-page">
                 <div class="library-container">
                     <!-- Header -->
                     <div class="library-header">
@@ -2346,7 +2346,7 @@
             </div>
 
             <!-- Artist Detail Page -->
-            <div class="page{% if initial_client_page == 'artist-detail' %} active{% endif %}" id="artist-detail-page">
+            <div class="page" id="artist-detail-page">
                 <div class="page-header">
                     <button class="back-btn" id="artist-detail-back-btn">
                         <span>← Back to Library</span>
@@ -2667,7 +2667,7 @@
             </div>
 
             <!-- Discover Page -->
-            <div class="page{% if initial_client_page == 'discover' %} active{% endif %}" id="discover-page">
+            <div class="page" id="discover-page">
                 <div class="discover-container">
                     <!-- Hero Section -->
                     <div class="discover-hero">
@@ -3565,7 +3565,7 @@
             </div>
 
             <!-- Playlist Explorer Page -->
-            <div class="page{% if initial_client_page == 'playlist-explorer' %} active{% endif %}" id="playlist-explorer-page">
+            <div class="page" id="playlist-explorer-page">
                 <div class="explorer-container">
                     <!-- Header (compact) -->
                     <div class="dashboard-header" style="margin-bottom: 12px;">
@@ -3668,7 +3668,7 @@
             </div>
 
             <!-- Settings Page -->
-            <div class="page{% if initial_client_page == 'settings' %} active{% endif %}" id="settings-page">
+            <div class="page" id="settings-page">
                 <div class="dashboard-header">
                     <div class="header-text">
                         <h2 class="header-title"><img src="/static/settings.png" class="page-header-icon" alt=""><span>Settings</span></h2>
@@ -5828,7 +5828,7 @@
             </div>
 
             <!-- Hydrabase Page (Dev Mode Only) -->
-            <div class="page{% if initial_client_page == 'hydrabase' %} active{% endif %}" id="hydrabase-page">
+            <div class="page" id="hydrabase-page">
                 <div class="page-header">
                     <h2><img src="/static/hydrabase.png?v=1" class="page-header-icon" alt=""><span>Hydrabase</span></h2>
                     <div style="display: flex; align-items: center; gap: 12px;">
@@ -5926,7 +5926,7 @@
             </div>
 
             <!-- Stats Page -->
-            <div class="page{% if initial_client_page == 'stats' %} active{% endif %}" id="stats-page">
+            <div class="page" id="stats-page">
                 <div class="stats-container">
                     <div class="stats-header">
                         <div class="stats-header-title">
@@ -6055,7 +6055,7 @@
             </div>
 
             <!-- Import Page -->
-            <div class="page{% if initial_client_page == 'import' %} active{% endif %}" id="import-page">
+            <div class="page" id="import-page">
                 <div class="import-page-container">
             <!-- Header with staging info -->
             <div class="import-page-header">
@@ -6208,7 +6208,7 @@
             </div>
 
             <!-- Help & Docs Page -->
-            <div class="page{% if initial_client_page == 'help' %} active{% endif %}" id="help-page">
+            <div class="page" id="help-page">
                 <div class="docs-layout">
                     <nav class="docs-sidebar" id="docs-sidebar">
                         <div class="docs-sidebar-header">
