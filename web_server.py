@@ -421,7 +421,6 @@ def _resolve_webui_initial_react_page(page_id: str | None) -> str | None:
         return page_id
     return None
 
-
 def _should_serve_webui_spa(pathname: str) -> bool:
     normalized = pathname.rstrip('/') or '/'
     excluded_exact_paths = {'/callback', '/status'}
@@ -432,6 +431,7 @@ def _should_serve_webui_spa(pathname: str) -> bool:
         '/deezer/',
         '/socket.io',
         '/static',
+        '/stream',
         '/tidal/',
     )
 
@@ -3456,13 +3456,7 @@ from core.connection_detect import run_detection
 
 @app.route('/')
 def index():
-    initial_page = _resolve_webui_initial_page(request.path)
-    return render_template(
-        'index.html',
-        initial_client_page=initial_page,
-        initial_nav_page=_resolve_webui_initial_nav_page(initial_page),
-        initial_react_page=_resolve_webui_initial_react_page(initial_page),
-    )
+    return render_template('index.html')
 
 
 @app.route('/sw.js')
