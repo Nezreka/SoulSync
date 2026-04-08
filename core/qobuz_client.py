@@ -446,6 +446,64 @@ class QobuzClient:
             traceback.print_exc()
             return {'status': 'error', 'message': self._auth_error}
 
+    def login_with_token(self, token: str) -> Dict[str, Any]:
+        """
+        Login to Qobuz with a user_auth_token pasted from the browser.
+        Bypasses email/password login (and any CAPTCHA) entirely.
+        """
+        self._auth_error = None
+        try:
+            # Step 1: Extract app credentials if we don't have them
+            if not self.app_id or not self.app_secret:
+                if not self._extract_app_credentials():
+                    self._auth_error = 'Could not extract Qobuz app credentials. Qobuz may have updated their web player.'
+                    return {'status': 'error', 'message': self._auth_error}
+
+            # Step 2: Set the token and validate it
+            self.user_auth_token = token.strip()
+            self.session.headers['X-App-Id'] = self.app_id
+            self.session.headers['X-User-Auth-Token'] = self.user_auth_token
+
+            resp = self.session.get(
+                QOBUZ_API_BASE + 'user/get',
+                params={'user_id': 'me'},
+                timeout=15,
+            )
+
+            if resp.status_code != 200:
+                self.user_auth_token = None
+                self.session.headers.pop('X-User-Auth-Token', None)
+                self._auth_error = f'Invalid token (HTTP {resp.status_code})'
+                return {'status': 'error', 'message': self._auth_error}
+
+            data = resp.json()
+            self.user_info = data
+
+            # Check subscription
+            subscription = data.get('credential', {})
+            sub_label = subscription.get('label', 'Unknown')
+
+            # Save session
+            self._save_session()
+
+            display_name = data.get('display_name', data.get('email', 'unknown'))
+            logger.info(f"Qobuz token login successful: {display_name} (plan: {sub_label})")
+
+            return {
+                'status': 'success',
+                'message': f'Logged in as {display_name}',
+                'user': {
+                    'display_name': display_name,
+                    'subscription': sub_label,
+                    'email': data.get('email', ''),
+                },
+            }
+
+        except Exception as e:
+            self._auth_error = str(e)
+            logger.error(f"Qobuz token login failed: {e}")
+            return {'status': 'error', 'message': self._auth_error}
+
     def logout(self):
         """Clear Qobuz session."""
         self.user_auth_token = None

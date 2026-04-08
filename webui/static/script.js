@@ -7983,6 +7983,86 @@ async function loginQobuzFromConnections() {
     }
 }
 
+async function loginQobuzWithToken() {
+    const btn = document.getElementById('qobuz-token-login-btn');
+    const statusEl = document.getElementById('qobuz-token-status');
+    const token = document.getElementById('qobuz-connection-token').value.trim();
+
+    if (!token) {
+        showToast('Please paste your Qobuz auth token', 'warning');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Connecting...';
+    if (statusEl) statusEl.textContent = '';
+
+    try {
+        const resp = await fetch('/api/qobuz/auth/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token }),
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            showToast('Qobuz connected via token!', 'success');
+            document.getElementById('qobuz-connection-token').value = '';
+            checkQobuzAuthStatus();
+        } else {
+            if (statusEl) { statusEl.textContent = data.error || 'Token login failed'; statusEl.style.color = '#ff5555'; }
+            showToast(data.error || 'Qobuz token login failed', 'error');
+        }
+    } catch (error) {
+        console.error('Qobuz token login error:', error);
+        if (statusEl) { statusEl.textContent = 'Connection error'; statusEl.style.color = '#ff5555'; }
+        showToast('Failed to connect to Qobuz', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Connect with Token';
+    }
+}
+
+async function loginQobuzWithTokenFromDownloads() {
+    const btn = document.getElementById('qobuz-download-token-btn');
+    const statusEl = document.getElementById('qobuz-download-token-status');
+    const token = document.getElementById('qobuz-download-token').value.trim();
+
+    if (!token) {
+        showToast('Please paste your Qobuz auth token', 'warning');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Connecting...';
+    if (statusEl) statusEl.textContent = '';
+
+    try {
+        const resp = await fetch('/api/qobuz/auth/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token }),
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            showToast('Qobuz connected via token!', 'success');
+            document.getElementById('qobuz-download-token').value = '';
+            checkQobuzAuthStatus();
+        } else {
+            if (statusEl) { statusEl.textContent = data.error || 'Token login failed'; statusEl.style.color = '#ff5555'; }
+            showToast(data.error || 'Qobuz token login failed', 'error');
+        }
+    } catch (error) {
+        console.error('Qobuz token login error:', error);
+        if (statusEl) { statusEl.textContent = 'Connection error'; statusEl.style.color = '#ff5555'; }
+        showToast('Failed to connect to Qobuz', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Connect with Token';
+    }
+}
+
 async function loginQobuz() {
     const btn = document.getElementById('qobuz-login-btn');
     const statusEl = document.getElementById('qobuz-auth-status');
