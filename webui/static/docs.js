@@ -45,7 +45,7 @@ const DOCS_SECTIONS = [
         content: () => `
             <div class="docs-subsection" id="gs-overview">
                 <h3 class="docs-subsection-title">Overview</h3>
-                <p class="docs-text">SoulSync is a self-hosted music download, sync, and library management platform. It connects to <strong>Spotify</strong>, <strong>Apple Music/iTunes</strong>, <strong>Deezer</strong>, <strong>Tidal</strong>, <strong>Qobuz</strong>, <strong>YouTube</strong>, and <strong>Beatport</strong> for metadata, and downloads from <strong>Soulseek</strong>, <strong>YouTube</strong>, <strong>Tidal</strong>, <strong>Qobuz</strong>, <strong>HiFi</strong>, and <strong>Deezer</strong>. Your library is served through <strong>Plex</strong>, <strong>Jellyfin</strong>, or <strong>Navidrome</strong>.</p>
+                <p class="docs-text">SoulSync is a self-hosted music download, sync, and library management platform. It connects to <strong>Spotify</strong>, <strong>Apple Music/iTunes</strong>, <strong>Deezer</strong>, <strong>Discogs</strong>, <strong>Tidal</strong>, <strong>Qobuz</strong>, <strong>YouTube</strong>, and <strong>Beatport</strong> for metadata, and downloads from <strong>Soulseek</strong>, <strong>YouTube</strong>, <strong>Tidal</strong>, <strong>Qobuz</strong>, <strong>HiFi</strong>, and <strong>Deezer</strong>. Your library is served through <strong>Plex</strong>, <strong>Jellyfin/Emby</strong>, or <strong>Navidrome</strong>.</p>
                 ${docsImg('gs-overview.jpg', 'SoulSync dashboard overview')}
                 <div class="docs-features">
                     <div class="docs-feature-card"><h4>&#x1F3B5; Download Music</h4><p>Search and download tracks in FLAC, MP3, and more from 6 sources (Soulseek, YouTube, Tidal, Qobuz, HiFi, Deezer), with automatic metadata tagging and file organization.</p></div>
@@ -81,9 +81,10 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Tidal</strong></td><td>Download source + playlist import + enrichment</td><td>OAuth &mdash; Client ID + Secret</td></tr>
                         <tr><td><strong>Qobuz</strong></td><td>Download source + enrichment</td><td>Username + Password (app ID auto-fetched)</td></tr>
                         <tr><td><strong>HiFi</strong></td><td>Download source &mdash; free lossless via community API</td><td>None</td></tr>
-                        <tr><td><strong>Deezer</strong></td><td>Download source + metadata fallback</td><td>ARL cookie token</td></tr>
+                        <tr><td><strong>Deezer</strong></td><td>Download source + metadata fallback + user playlists</td><td>ARL cookie token</td></tr>
+                        <tr><td><strong>Discogs</strong></td><td>Enrichment &mdash; genres, styles, labels, catalog numbers, community ratings</td><td>Personal Access Token (free)</td></tr>
                         <tr><td><strong>Plex</strong></td><td>Media server &mdash; library scanning, metadata sync, audio streaming</td><td>URL + Token</td></tr>
-                        <tr><td><strong>Jellyfin</strong></td><td>Media server &mdash; library scanning, audio streaming</td><td>URL + API Key</td></tr>
+                        <tr><td><strong>Jellyfin / Emby</strong></td><td>Media server &mdash; library scanning, playlist sync, audio streaming</td><td>URL + API Key</td></tr>
                         <tr><td><strong>Navidrome</strong></td><td>Media server &mdash; auto-detects changes, audio streaming</td><td>URL + Username + Password</td></tr>
                         <tr><td><strong>Last.fm</strong></td><td>Enrichment &mdash; listener stats, tags, bios, similar artists</td><td>API Key</td></tr>
                         <tr><td><strong>Genius</strong></td><td>Enrichment &mdash; lyrics, descriptions, alternate names</td><td>Access Token</td></tr>
@@ -459,6 +460,8 @@ const DOCS_SECTIONS = [
         icon: '/static/dashboard.jpg',
         children: [
             { id: 'dash-overview', title: 'Overview & Stats' },
+            { id: 'dash-history', title: 'Download History' },
+            { id: 'dash-global-search', title: 'Global Search' },
             { id: 'dash-workers', title: 'Enrichment Workers' },
             { id: 'dash-tools', title: 'Tool Cards' },
             { id: 'dash-retag', title: 'Retag Tool' },
@@ -472,6 +475,28 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">The dashboard is your command center. At the top you'll see <strong>service status indicators</strong> for Spotify, your media server, and Soulseek &mdash; showing connected/disconnected state at a glance. Below that, stat cards display your library totals: artists, albums, tracks, and total library size.</p>
                 <p class="docs-text">Stats update in real-time via WebSocket &mdash; no page refresh needed.</p>
                 ${docsImg('dash-overview.jpg', 'Dashboard overview')}
+            </div>
+            <div class="docs-subsection" id="dash-history">
+                <h3 class="docs-subsection-title">Download History</h3>
+                <p class="docs-text">Click <strong>Download History</strong> in the Recent Activity section to view a persistent log of every downloaded and imported track. Each entry is a collapsible card &mdash; click to expand and reveal source provenance details.</p>
+                <ul class="docs-list">
+                    <li><strong>Expected vs Downloaded</strong> &mdash; Shows what you asked for and what the source actually provided. Mismatches are highlighted in red.</li>
+                    <li><strong>Source file</strong> &mdash; The original filename from the peer (Soulseek) or internal ID (streaming sources)</li>
+                    <li><strong>AcoustID badge</strong> &mdash; Color-coded verification result: Verified (green), Failed (red), Skipped (orange), Off (gray)</li>
+                    <li><strong>Source badges</strong> &mdash; Download source (Soulseek/Tidal/Qobuz/YouTube/HiFi/Deezer) and quality (FLAC/MP3/etc.)</li>
+                    <li><strong>Tabs</strong> &mdash; Switch between Downloads and Server Imports. Source breakdown bar shows counts per download source.</li>
+                </ul>
+            </div>
+            <div class="docs-subsection" id="dash-global-search">
+                <h3 class="docs-subsection-title">Global Search</h3>
+                <p class="docs-text">The search bar at the top of every page is the <strong>Global Search</strong>. Type any artist, album, or track name to search across all configured metadata sources. Results appear in a dropdown organized by category.</p>
+                <ul class="docs-list">
+                    <li><strong>Library artists</strong> &mdash; Artists already in your library (shown first with a "Library" badge)</li>
+                    <li><strong>Artists</strong> &mdash; External artist results from Spotify/iTunes/Deezer</li>
+                    <li><strong>Albums &amp; Singles</strong> &mdash; Click to open the download modal directly</li>
+                    <li><strong>Tracks</strong> &mdash; Click to open the download modal, or use the play button to stream</li>
+                    <li>Downloads started from Global Search create <strong>download bubbles</strong> on the Dashboard and Search page, same as Enhanced Search</li>
+                </ul>
             </div>
             <div class="docs-subsection" id="dash-workers">
                 <h3 class="docs-subsection-title">Enrichment Workers</h3>
@@ -544,8 +569,31 @@ const DOCS_SECTIONS = [
                     <li><strong>Duplicate Cleaner</strong> &mdash; Identifies duplicate tracks by comparing title, artist, album, and duration. Lets you review duplicates and choose which version to keep (typically the higher-quality one). Frees disk space by removing redundant files.</li>
                     <li><strong>Database Updater</strong> &mdash; Refreshes your library database by scanning your media server. <strong>Incremental</strong> mode only adds new content; <strong>Full Refresh</strong> rebuilds the entire database. <strong>Deep Scan</strong> performs a full comparison without losing any enrichment data from services.</li>
                     <li><strong>Metadata Updater</strong> &mdash; Triggers all enrichment workers simultaneously with reset flags, forcing them to re-check every item in your library against all connected services (MusicBrainz, Spotify, iTunes, Last.fm, Deezer, AudioDB, Genius, Tidal, Qobuz). Useful after connecting a new service or when metadata seems incomplete.</li>
-                    <li><strong>Repair Worker</strong> &mdash; Background service that scans recently downloaded folders and repairs track metadata. It reads album IDs from file tags, fetches official tracklists from Spotify or MusicBrainz, and fixes incorrect or missing track numbers. Runs automatically after batch downloads complete and can be paused/resumed from the dashboard.</li>
+                    <li><strong>Repair Worker</strong> &mdash; Background service with 16 automated repair jobs. Open <strong>Library Maintenance</strong> from the dashboard to view all jobs, enable/disable them, and trigger manual runs. Each job runs on a configurable schedule and creates findings that can be reviewed and fixed individually or in bulk.</li>
                 </ul>
+                <p class="docs-text"><strong>Repair Jobs:</strong></p>
+                <table class="docs-table">
+                    <thead><tr><th>Job</th><th>What It Does</th></tr></thead>
+                    <tbody>
+                        <tr><td>Track Number Repair</td><td>Fixes missing or incorrect track numbers by comparing against official tracklists</td></tr>
+                        <tr><td>Orphan File Detector</td><td>Finds audio files in your transfer folder not tracked in the database. Can move to staging or delete.</td></tr>
+                        <tr><td>Dead File Cleaner</td><td>Removes database entries pointing to files that no longer exist on disk</td></tr>
+                        <tr><td>Duplicate Detector</td><td>Identifies duplicate tracks by fingerprint or metadata match</td></tr>
+                        <tr><td>AcoustID Scanner</td><td>Batch audio fingerprint verification across your library</td></tr>
+                        <tr><td>Missing Cover Art</td><td>Detects albums and tracks without embedded artwork and fetches it</td></tr>
+                        <tr><td>Metadata Gap Filler</td><td>Completes missing metadata fields (genre, year, etc.) from connected services</td></tr>
+                        <tr><td>Album Completeness</td><td>Verifies you have all tracks for each album and flags incomplete ones</td></tr>
+                        <tr><td>Fake Lossless Detector</td><td>Identifies FLAC files that don't actually contain high-frequency audio content</td></tr>
+                        <tr><td>Library Reorganize</td><td>Restructures library folders to match your configured path templates</td></tr>
+                        <tr><td>MBID Mismatch Detector</td><td>Verifies MusicBrainz IDs are still accurate and flags mismatches</td></tr>
+                        <tr><td>Single Album Dedup</td><td>Removes redundant single-track albums when the track exists on a full album</td></tr>
+                        <tr><td>Album Tag Consistency</td><td>Standardizes album tags across all tracks in the same album</td></tr>
+                        <tr><td>Live Commentary Cleaner</td><td>Detects and flags non-music content (commentary, interviews) in your library</td></tr>
+                        <tr><td>Cache Evictor</td><td>Cleans expired metadata cache entries to free database space</td></tr>
+                        <tr><td>Lossy Converter</td><td>Converts lossy files to alternative formats based on your preferences</td></tr>
+                    </tbody>
+                </table>
+                <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div><strong>Mass orphan safety:</strong> If the orphan detector flags more than 50% of files as orphans, it triggers a <strong>"Witness Me"</strong> confirmation dialog requiring you to type the phrase before any deletions proceed. This prevents accidental mass deletion from path mismatches.</div></div>
             </div>
             <div class="docs-subsection" id="dash-activity">
                 <h3 class="docs-subsection-title">Activity Feed</h3>
@@ -565,13 +613,15 @@ const DOCS_SECTIONS = [
             { id: 'sync-youtube', title: 'YouTube Playlists' },
             { id: 'sync-tidal', title: 'Tidal Playlists' },
             { id: 'sync-deezer', title: 'Deezer Playlists' },
+            { id: 'sync-deezer-link', title: 'Deezer Link' },
             { id: 'sync-listenbrainz', title: 'ListenBrainz' },
             { id: 'sync-beatport', title: 'Beatport' },
             { id: 'sync-import-file', title: 'Import from File' },
             { id: 'sync-mirrored', title: 'Mirrored Playlists' },
             { id: 'sync-history', title: 'Sync History' },
             { id: 'sync-m3u', title: 'M3U Export' },
-            { id: 'sync-discovery', title: 'Discovery Pipeline' }
+            { id: 'sync-discovery', title: 'Discovery Pipeline' },
+            { id: 'sync-explorer', title: 'Playlist Explorer' }
         ],
         content: () => `
             <div class="docs-subsection" id="sync-overview">
@@ -640,12 +690,26 @@ const DOCS_SECTIONS = [
             </div>
             <div class="docs-subsection" id="sync-deezer">
                 <h3 class="docs-subsection-title">Deezer Playlists</h3>
-                <p class="docs-text">Import Deezer playlists by URL. Paste a Deezer playlist URL, click <strong>Load Playlist</strong>, and SoulSync parses the tracks for discovery and download. Tracks go through the same discovery pipeline as YouTube and Tidal playlists.</p>
+                <p class="docs-text">If you have a <strong>Deezer ARL token</strong> configured (Settings &gt; Downloads), the Deezer tab shows all your personal playlists &mdash; identical to how Spotify playlists work. Click <strong>Refresh</strong> to load your playlists, then click any playlist to view tracks and download.</p>
                 <ul class="docs-list">
-                    <li>Paste any <code>deezer.com/playlist/...</code> URL</li>
-                    <li>Track matching uses the same fuzzy discovery pipeline</li>
-                    <li>Previously loaded URLs appear in the history bar</li>
-                    <li>Loaded playlists are mirrored for persistent state</li>
+                    <li>Requires ARL token (a browser cookie from deezer.com &mdash; configure in Settings &gt; Downloads)</li>
+                    <li>Click <strong>Sync / Download</strong> to open the playlist details modal with full track listing</li>
+                    <li>Click <strong>Download Missing Tracks</strong> to analyze your library and download what's missing</li>
+                    <li>Click <strong>Sync Playlist</strong> to sync tracks to your media server</li>
+                    <li>Tracks include full album metadata with release dates, cover art, and proper organization</li>
+                    <li>No discovery step needed &mdash; tracks go directly to download (like Spotify)</li>
+                    <li>Track data is cached after first load for instant subsequent access</li>
+                </ul>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>The ARL token is the same one used for Deezer downloads. If you already have Deezer configured as a download source, your playlists will appear automatically.</div></div>
+            </div>
+            <div class="docs-subsection" id="sync-deezer-link">
+                <h3 class="docs-subsection-title">Deezer Link</h3>
+                <p class="docs-text">Import any public Deezer playlist by URL without needing an ARL token. Paste a Deezer playlist URL, click <strong>Load Playlist</strong>, and SoulSync parses the tracks for discovery and download.</p>
+                <ul class="docs-list">
+                    <li>Paste any <code>deezer.com/playlist/...</code> URL or raw playlist ID</li>
+                    <li>Track matching uses the same fuzzy discovery pipeline as YouTube and Tidal</li>
+                    <li>Previously loaded URLs appear in the history bar for quick re-access</li>
+                    <li>Loaded playlists are automatically mirrored for persistent state</li>
                 </ul>
             </div>
             <div class="docs-subsection" id="sync-import-file">
@@ -694,6 +758,10 @@ const DOCS_SECTIONS = [
                     <li><strong>Sync</strong> the playlist &mdash; only discovered tracks are included; unmatched tracks are skipped</li>
                 </ol>
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>Chain automations for hands-free operation: Refresh Playlist &rarr; Playlist Changed &rarr; Discover &rarr; Discovery Complete &rarr; Sync</div></div>
+            </div>
+            <div class="docs-subsection" id="sync-explorer">
+                <h3 class="docs-subsection-title">Playlist Explorer</h3>
+                <p class="docs-text">A visual tree-based browser for exploring playlists across all sources. Navigate through your server playlists, Spotify playlists, and mirrored playlists in a unified interface. Click any playlist to expand and view its tracks, then download or sync directly.</p>
             </div>
         `
     },
@@ -804,7 +872,9 @@ const DOCS_SECTIONS = [
             { id: 'disc-playlists', title: 'Discovery Playlists' },
             { id: 'disc-build', title: 'Build Custom Playlist' },
             { id: 'disc-seasonal', title: 'Seasonal & Curated' },
-            { id: 'disc-timemachine', title: 'Time Machine' }
+            { id: 'disc-timemachine', title: 'Time Machine' },
+            { id: 'disc-artist-map', title: 'Artist Map' },
+            { id: 'disc-stats', title: 'Listening Stats' }
         ],
         content: () => `
             <div class="docs-subsection" id="disc-hero">
@@ -859,6 +929,27 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Time Machine</h3>
                 <p class="docs-text">Browse discovery pool content by <strong>decade</strong> &mdash; tabs from the 1950s through the 2020s. Each decade pulls top tracks from pool artists active in that era.</p>
                 ${docsImg('disc-time-machine.jpg', 'Time Machine decade browser')}
+            </div>
+            <div class="docs-subsection" id="disc-artist-map">
+                <h3 class="docs-subsection-title">Artist Map</h3>
+                <p class="docs-text">Three interactive canvas-based visualization modes for exploring artist relationships. Accessed from the Discover page.</p>
+                <ul class="docs-list">
+                    <li><strong>Watchlist Constellation</strong> &mdash; Your watched artists as large nodes with similar artists orbiting around them. Reveals connections you might not have noticed.</li>
+                    <li><strong>Genre Map</strong> &mdash; Browse all artists by genre with a sidebar picker. Ring-packed clusters, no artist cap. Great for exploring genres you don't normally listen to.</li>
+                    <li><strong>Artist Explorer</strong> &mdash; Deep-dive any artist. Ring 1 shows direct similar artists, Ring 2 shows the extended network. Exploring an unknown artist fetches similar artists in real-time and caches them.</li>
+                </ul>
+                <p class="docs-text"><strong>Controls:</strong> Mouse wheel to zoom, click to explore, hover for tooltips with genre tags. Keyboard shortcuts: <span class="docs-kbd">?</span> for help, <span class="docs-kbd">F</span> to fit view, <span class="docs-kbd">S</span> to search.</p>
+            </div>
+            <div class="docs-subsection" id="disc-stats">
+                <h3 class="docs-subsection-title">Listening Stats</h3>
+                <p class="docs-text">The Stats page shows analytics about your music library and listening activity. Requires ListenBrainz or Last.fm scrobbling to be enabled for listening data.</p>
+                <ul class="docs-list">
+                    <li><strong>Library overview</strong> &mdash; Total artists, albums, tracks, total file size, format distribution</li>
+                    <li><strong>Top artists, albums, and tracks</strong> &mdash; Ranked by play count or library presence</li>
+                    <li><strong>Genre distribution</strong> &mdash; Visual breakdown of genres across your library</li>
+                    <li><strong>Recent additions</strong> &mdash; Latest tracks and albums added to your library</li>
+                    <li><strong>Listening timeline</strong> &mdash; Activity over time when scrobbling is configured</li>
+                </ul>
             </div>
         `
     },
@@ -1079,13 +1170,16 @@ const DOCS_SECTIONS = [
             { id: 'lib-matching', title: 'Service Matching' },
             { id: 'lib-tags', title: 'Write Tags to File' },
             { id: 'lib-bulk', title: 'Bulk Operations' },
-            { id: 'lib-missing', title: 'Download Missing Tracks' }
+            { id: 'lib-missing', title: 'Download Missing Tracks' },
+            { id: 'lib-smart-delete', title: 'Smart Delete' },
+            { id: 'lib-redownload', title: 'Track Redownload' },
+            { id: 'lib-issues', title: 'Library Issues' }
         ],
         content: () => `
             <div class="docs-subsection" id="lib-standard">
                 <h3 class="docs-subsection-title">Standard View</h3>
                 <p class="docs-text">The Library page shows all artists in your collection as cards with images, album/track counts, and <strong>service badges</strong> (Spotify, MusicBrainz, Deezer, AudioDB, iTunes, Last.fm, Genius, Tidal, Qobuz) indicating which services have matched this artist.</p>
-                <p class="docs-text">Use the <strong>search bar</strong>, <strong>alphabet navigation</strong> (A&ndash;Z, #), and <strong>watchlist filter</strong> (All/Watched/Unwatched) to browse. Click any artist card to view their discography.</p>
+                <p class="docs-text">Use the <strong>search bar</strong>, <strong>alphabet navigation</strong> (A&ndash;Z, #), <strong>watchlist filter</strong> (All/Watched/Unwatched), and <strong>metadata source filter</strong> to browse. The source filter lets you find artists unmatched to a specific service (e.g. "No Discogs" shows artists missing a Discogs match) or matched to one (e.g. "Has Spotify"). Click any artist card to view their discography.</p>
                 <p class="docs-text">The artist detail page shows albums, EPs, and singles as cards with completion percentages. Filter by category, content type (live/compilations/featured), or status (owned/missing). At the top, <strong>View on</strong> buttons link to the artist on each matched external service.</p>
                 ${docsImg('lib-standard.jpg', 'Library artist grid')}
             </div>
@@ -1104,7 +1198,7 @@ const DOCS_SECTIONS = [
             </div>
             <div class="docs-subsection" id="lib-matching">
                 <h3 class="docs-subsection-title">Service Matching</h3>
-                <p class="docs-text">In the Enhanced view, each artist, album, and track shows <strong>match status chips</strong> for all 9 services. Click any chip to manually search and link the correct external ID. Run per-service enrichment from the dropdown to pull in metadata from a specific source.</p>
+                <p class="docs-text">In the Enhanced view, each artist, album, and track shows <strong>match status chips</strong> for all 10 services (Spotify, MusicBrainz, Deezer, Discogs, AudioDB, iTunes, Last.fm, Genius, Tidal, Qobuz). Click any chip to manually search and link the correct external ID. Run per-service enrichment from the <strong>Enrich</strong> dropdown to pull in metadata from a specific source.</p>
                 <p class="docs-text">Matched services show as clickable badges linking to the entity on that service's website.</p>
             </div>
             <div class="docs-subsection" id="lib-tags">
@@ -1133,6 +1227,37 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Download Missing Tracks</h3>
                 <p class="docs-text">From any album card showing missing tracks, click <strong>Download Missing</strong> to open a modal listing all tracks not in your library. Select tracks, choose a download source, and start the download. Progress is tracked per-track with status indicators.</p>
                 <p class="docs-text"><strong>Multi-Disc Albums</strong>: Albums with multiple discs are handled automatically. Tracks are organized into <code>Disc N/</code> subfolders within the album directory, preventing track number collisions (e.g., Disc 1 Track 1 vs Disc 2 Track 1). The disc structure is detected from Spotify or iTunes metadata.</p>
+            </div>
+            <div class="docs-subsection" id="lib-smart-delete">
+                <h3 class="docs-subsection-title">Smart Delete</h3>
+                <p class="docs-text">Right-click or use the delete action on any track to open the Smart Delete dialog. Three options are available:</p>
+                <ul class="docs-list">
+                    <li><strong>Remove from Library</strong> &mdash; Removes the track from SoulSync's database only. The audio file on disk is not touched. Use this if you want to clean up the database without losing files.</li>
+                    <li><strong>Delete File Too</strong> &mdash; Removes the database entry AND deletes the audio file from disk. Irreversible.</li>
+                    <li><strong>Delete &amp; Blacklist</strong> &mdash; Removes and deletes the file, then adds it to the <strong>download blacklist</strong> so it won't be re-downloaded by the wishlist or automation system.</li>
+                </ul>
+            </div>
+            <div class="docs-subsection" id="lib-redownload">
+                <h3 class="docs-subsection-title">Track Redownload</h3>
+                <p class="docs-text">Redownload a specific track from your library with a different source or quality. A 3-step wizard guides you through:</p>
+                <ol class="docs-steps">
+                    <li><strong>Choose metadata source</strong> &mdash; Confirm the correct track identity (Spotify, iTunes, or Deezer match)</li>
+                    <li><strong>Choose download source</strong> &mdash; Search across all configured download sources (Soulseek, Tidal, Qobuz, YouTube, HiFi, Deezer) and pick a specific result</li>
+                    <li><strong>Download &amp; replace</strong> &mdash; The new file replaces the existing one with updated metadata and tags</li>
+                </ol>
+            </div>
+            <div class="docs-subsection" id="lib-issues">
+                <h3 class="docs-subsection-title">Library Issues</h3>
+                <p class="docs-text">The Issues page tracks problems detected in your library by the repair worker. Issues are categorized by type and severity:</p>
+                <ul class="docs-list">
+                    <li><strong>Orphan files</strong> &mdash; Audio files in your transfer folder not tracked in the database</li>
+                    <li><strong>Dead references</strong> &mdash; Database entries pointing to files that no longer exist on disk</li>
+                    <li><strong>Duplicate tracks</strong> &mdash; Multiple copies of the same track detected by fingerprint or metadata</li>
+                    <li><strong>Missing cover art</strong> &mdash; Albums or tracks without embedded artwork</li>
+                    <li><strong>Metadata gaps</strong> &mdash; Tracks with incomplete metadata (missing genre, year, etc.)</li>
+                    <li><strong>Fake lossless</strong> &mdash; Files labeled as FLAC but with audio that doesn't actually contain high-frequency content</li>
+                </ul>
+                <p class="docs-text">Each issue can be fixed individually or in bulk. Orphan files can be moved to staging (safe, reversible) or deleted. Mass deletions (50+ files) require typing <strong>"witness me"</strong> to confirm.</p>
             </div>
         `
     },
@@ -1257,7 +1382,8 @@ const DOCS_SECTIONS = [
             { id: 'set-download', title: 'Download Settings' },
             { id: 'set-processing', title: 'Processing & Organization' },
             { id: 'set-quality', title: 'Quality Profiles' },
-            { id: 'set-other', title: 'Other Settings' }
+            { id: 'set-other', title: 'Other Settings' },
+            { id: 'set-db-maintenance', title: 'Database Maintenance' }
         ],
         content: () => `
             <div class="docs-subsection" id="set-services">
@@ -1271,9 +1397,10 @@ const DOCS_SECTIONS = [
                     <li><strong>Genius</strong> &mdash; Access token from genius.com/api-clients</li>
                     <li><strong>Qobuz</strong> &mdash; Username + Password (app ID is auto-fetched)</li>
                     <li><strong>HiFi</strong> &mdash; No credentials needed, uses community-run API instances. Test Connection to verify.</li>
-                    <li><strong>Deezer</strong> &mdash; ARL cookie token from your browser (log into deezer.com &rarr; DevTools &rarr; Cookies &rarr; copy <code>arl</code>)</li>
-                    <li><strong>AcoustID</strong> &mdash; API key from acoustid.org (enables fingerprint verification)</li>
-                    <li><strong>ListenBrainz</strong> &mdash; Base URL + token for listening history and playlist import</li>
+                    <li><strong>Deezer</strong> &mdash; ARL cookie token from your browser (log into deezer.com &rarr; DevTools &rarr; Cookies &rarr; copy <code>arl</code>). Used for downloads AND user playlist access.</li>
+                    <li><strong>Discogs</strong> &mdash; Personal Access Token from discogs.com/settings/developers (free, no app registration needed). Provides genres, styles, labels, catalog numbers, and community ratings.</li>
+                    <li><strong>AcoustID</strong> &mdash; API key from acoustid.org (enables fingerprint verification of downloaded files)</li>
+                    <li><strong>ListenBrainz</strong> &mdash; Base URL + token for listening history, scrobbling, and playlist import</li>
                 </ul>
             </div>
             <div class="docs-subsection" id="set-media">
@@ -1334,6 +1461,15 @@ const DOCS_SECTIONS = [
                     <li><strong>Log Level</strong> &mdash; Set the application log verbosity (DEBUG, INFO, WARNING, ERROR) from the Settings page. Changes take effect immediately without restart. Useful for troubleshooting issues.</li>
                     <li><strong>WebSocket</strong> &mdash; Real-time status updates are delivered via WebSocket. All downloads, enrichment progress, scan status, and system events push to the UI without polling.</li>
                 </ul>
+            </div>
+            <div class="docs-subsection" id="set-db-maintenance">
+                <h3 class="docs-subsection-title">Database Maintenance</h3>
+                <p class="docs-text">In <strong>Settings &gt; Advanced</strong>, the Database Maintenance section shows your database size, free (reclaimable) pages, and auto-vacuum mode. Two operations are available:</p>
+                <ul class="docs-list">
+                    <li><strong>Compact Database (VACUUM)</strong> &mdash; Rewrites the entire database file to reclaim unused space from deleted records. Locks the database during operation and may take over a minute on large databases. Shows elapsed time and space saved when complete.</li>
+                    <li><strong>Enable Incremental Vacuum</strong> &mdash; Switches SQLite to incremental auto-vacuum mode, which reclaims freed pages automatically in small batches. Requires a one-time full VACUUM to activate. After enabled, the button grays out. This is the recommended approach for large databases.</li>
+                </ul>
+                <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div>VACUUM requires temporary disk space equal to the database size. For a 5 GB database, ensure at least 5 GB free space before running.</div></div>
             </div>
         `
     },
