@@ -10195,7 +10195,29 @@ async function rehydrateModal(processInfo, userRequested = false) {
         return;
     }
 
-    // Handle regular Spotify playlist processes
+    // Handle Deezer ARL playlist processes — ensure playlist data is in spotifyPlaylists for modal reuse
+    if (playlist_id.startsWith('deezer_arl_') && !spotifyPlaylists.find(p => p.id === playlist_id)) {
+        const rawId = playlist_id.replace('deezer_arl_', '');
+        const deezerPlaylist = deezerArlPlaylists.find(p => String(p.id) === rawId);
+        if (deezerPlaylist) {
+            spotifyPlaylists.push({
+                id: playlist_id,
+                name: deezerPlaylist.name,
+                track_count: deezerPlaylist.track_count || 0,
+                image_url: deezerPlaylist.image_url || '',
+                owner: deezerPlaylist.owner || '',
+            });
+        } else {
+            // Playlists not loaded yet — use process info as fallback
+            spotifyPlaylists.push({
+                id: playlist_id,
+                name: playlist_name || 'Deezer Playlist',
+                track_count: 0,
+            });
+        }
+    }
+
+    // Handle regular Spotify / Deezer ARL playlist processes
     let playlistData = spotifyPlaylists.find(p => p.id === playlist_id);
     if (!playlistData) {
         console.warn(`Cannot rehydrate modal: Playlist data for ${playlist_id} not loaded.`);
@@ -11707,7 +11729,10 @@ async function openDownloadMissingModal(playlistId) {
     let tracks = playlistTrackCache[playlistId];
     if (!tracks) {
         try {
-            const response = await fetch(`/api/spotify/playlist/${playlistId}`);
+            const fetchUrl = playlistId.startsWith('deezer_arl_')
+                ? `/api/deezer/arl-playlist/${playlistId.replace('deezer_arl_', '')}`
+                : `/api/spotify/playlist/${playlistId}`;
+            const response = await fetch(fetchUrl);
             const fullPlaylist = await response.json();
             if (fullPlaylist.error) throw new Error(fullPlaylist.error);
             tracks = fullPlaylist.tracks;
@@ -26569,6 +26594,27 @@ async function loadDeezerArlPlaylists() {
         deezerArlPlaylists = await response.json();
         renderDeezerArlPlaylists();
         deezerArlPlaylistsLoaded = true;
+
+        // Check for active syncs or downloads and rehydrate UI
+        await checkForActiveProcesses();
+        for (const p of deezerArlPlaylists) {
+            const arlId = `deezer_arl_${p.id}`;
+            try {
+                const syncResp = await fetch(`/api/sync/status/${arlId}`);
+                if (syncResp.ok) {
+                    const syncState = await syncResp.json();
+                    if (syncState.status === 'syncing') {
+                        // Re-attach sync polling and update card UI
+                        if (!spotifyPlaylists.find(sp => sp.id === arlId)) {
+                            spotifyPlaylists.push({ id: arlId, name: p.name, track_count: p.track_count || 0, image_url: p.image_url || '', owner: p.owner || '' });
+                        }
+                        updateCardToSyncing(arlId, syncState.progress?.progress || 0, syncState.progress);
+                        startSyncPolling(arlId);
+                        console.log(`🔄 Rehydrated active sync for Deezer ARL playlist: ${p.name}`);
+                    }
+                }
+            } catch (e) { /* No active sync — normal */ }
+        }
 
     } catch (error) {
         container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
@@ -62894,9 +62940,12 @@ async function fixAllMatchingFindings() {
     const jobId = jobFilter ? jobFilter.value : '';
     const severity = severityFilter ? severityFilter.value : '';
 
-    // If fixing orphan files, prompt for action FIRST (staging vs delete)
+    // If fixing orphan files or dead files, prompt for action FIRST
     let fixAction = null;
-    if (jobId === 'orphan_file_detector' || _isMassOrphanFix(jobId, _repairFindingsTotal)) {
+    if (jobId === 'dead_file_cleaner') {
+        fixAction = await _promptDeadFileAction();
+        if (!fixAction) return;
+    } else if (jobId === 'orphan_file_detector' || _isMassOrphanFix(jobId, _repairFindingsTotal)) {
         fixAction = await _promptOrphanAction();
         if (!fixAction) return;
         // Confirm before proceeding
