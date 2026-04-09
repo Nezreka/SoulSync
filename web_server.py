@@ -21040,7 +21040,10 @@ def get_version_info():
                     "• Replace lower quality files on import — opt-in toggle in Settings > Library",
                     "• HiFi API instance health check in Settings > Downloads",
                     "• Debug test activity feed message removed from startup",
-                    "• Global search downloads now create bubble snapshots on Dashboard and Search page"
+                    "• Global search downloads now create bubble snapshots on Dashboard and Search page",
+                    "• Dead file findings now offer 'Remove from DB' option alongside 'Re-download' — works in bulk fix too",
+                    "• Deezer ARL sync and download modals rehydrate after page refresh",
+                    "• Deezer album data (release dates, cover art) cached in metadata cache — subsequent playlist loads are near-instant"
                 ]
             },
             {

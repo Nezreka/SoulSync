@@ -1463,6 +1463,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Music Library Paths</strong> &mdash; In Settings &gt; Library, add folder paths where your music files live. Required for tag writing, streaming, and file detection when your media server stores files at a different path than SoulSync can see. Docker users: mount your music folder(s) with read-write access, then add the container-side path.</li>
                     <li><strong>Replace Lower Quality on Import</strong> &mdash; Opt-in toggle in Settings &gt; Library. When importing from Staging, if a track already exists at lower quality (e.g. MP3), it gets replaced with the higher quality version (e.g. FLAC). Disabled by default.</li>
                     <li><strong>HiFi Instance Health</strong> &mdash; In Settings &gt; Downloads &gt; HiFi, click "Check All Instances" to see which community API instances are online, searchable, or able to download.</li>
+                    <li><strong>Dead File Fix Options</strong> &mdash; Dead file findings in Library Maintenance now prompt with two choices: "Re-download" (adds to wishlist) or "Remove from DB" (just deletes the stale record). Works for single and bulk fix.</li>
                 </ul>
             </div>
             <div class="docs-subsection" id="set-db-maintenance">
