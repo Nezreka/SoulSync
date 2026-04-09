@@ -175,33 +175,23 @@ class AcoustIDScannerJob(RepairJob):
             fp_result = acoustid_client.fingerprint_and_lookup(fpath)
         except Exception as e:
             logger.debug("Fingerprint failed for %s: %s", fname, e)
+            result.errors += 1
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'Error: {fname} — {e}',
+                    log_type='error'
+                )
             return
 
         if not fp_result or not fp_result.get('recordings'):
-            # No match — could be a very rare/new track
+            # No match — could be API error, rare track, or invalid key
+            # Don't create findings for "no match" — these flood the list
+            # and are usually not actionable. Only log for visibility.
             if context.report_progress:
                 context.report_progress(
                     log_line=f'No match: {fname}',
                     log_type='skip'
                 )
-            if context.create_finding:
-                context.create_finding(
-                    job_id=self.job_id,
-                    finding_type='acoustid_no_match',
-                    severity='info',
-                    entity_type='track',
-                    entity_id=str(expected.get('track_id') or ''),
-                    file_path=fpath,
-                    title=f'No AcoustID match: {fname}',
-                    description='File could not be identified by AcoustID fingerprint',
-                    details={
-                        'expected_title': expected['title'],
-                        'expected_artist': expected['artist'],
-                        'album_thumb_url': expected.get('album_thumb_url'),
-                        'artist_thumb_url': expected.get('artist_thumb_url'),
-                    }
-                )
-                result.findings_created += 1
             return
 
         # Check best recording match
