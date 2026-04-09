@@ -479,6 +479,22 @@ class PlexClient:
             logger.error(f"Error updating playlist '{playlist_name}': {e}")
             return False
     
+    def set_playlist_image(self, playlist_name: str, image_url: str) -> bool:
+        """Set the poster image for a playlist by downloading from a URL."""
+        if not self.ensure_connection() or not image_url:
+            return False
+        try:
+            playlist = self.server.playlist(playlist_name)
+            import requests as _req
+            img_resp = _req.get(image_url, timeout=15)
+            if img_resp.ok and img_resp.content:
+                playlist.uploadPoster(data=img_resp.content)
+                logger.info(f"Set playlist poster for '{playlist_name}'")
+                return True
+        except Exception as e:
+            logger.debug(f"Could not set playlist poster for '{playlist_name}': {e}")
+        return False
+
     def _find_track(self, title: str, artist: str, album: str) -> Optional[PlexTrack]:
         if not self.music_library:
             return None

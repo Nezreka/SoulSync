@@ -15983,7 +15983,8 @@ async function startPlaylistSync(playlistId) {
             body: JSON.stringify({
                 playlist_id: playlist.id,
                 playlist_name: playlist.name,
-                tracks: tracks // Send the full track list
+                tracks: tracks, // Send the full track list
+                image_url: playlist.image_url || ''
             })
         });
 

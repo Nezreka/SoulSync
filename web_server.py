@@ -36103,7 +36103,7 @@ def convert_youtube_results_to_spotify_tracks(discovery_results):
 
 # Add these new endpoints to the end of web_server.py
 
-def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1):
+def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1, playlist_image_url=''):
     """The actual sync function that runs in the background thread."""
     global sync_states, sync_service
 
@@ -36438,6 +36438,18 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
             }
         print(f"🏁 Sync finished for {playlist_id} - state updated")
 
+        # Set playlist poster image if available (Plex, Jellyfin, Emby)
+        if playlist_image_url and getattr(result, 'synced_tracks', 0) > 0:
+            try:
+                active_server = config_manager.get_active_media_server()
+                if active_server == 'plex' and plex_client:
+                    plex_client.set_playlist_image(playlist_name, playlist_image_url)
+                elif active_server in ('jellyfin', 'emby') and jellyfin_client:
+                    jellyfin_client.set_playlist_image(playlist_name, playlist_image_url)
+                # Navidrome doesn't support custom playlist images
+            except Exception as img_err:
+                print(f"⚠️ Could not set playlist image: {img_err}")
+
         # Record sync history completion with per-track data
         try:
             matched = getattr(result, 'matched_tracks', 0)
@@ -36536,10 +36548,11 @@ def start_playlist_sync():
     playlist_id = data.get('playlist_id')
     playlist_name = data.get('playlist_name')
     tracks_json = data.get('tracks') # Pass the full track list
+    playlist_image_url = data.get('image_url', '')
 
     if not all([playlist_id, playlist_name, tracks_json]):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
-    
+
     # Add activity for sync start
     add_activity_item("🔄", "Spotify Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks", "Now")
 
@@ -36556,7 +36569,7 @@ def start_playlist_sync():
         # Submit the task to the thread pool (capture profile_id while still in request context)
         _sync_profile_id = get_current_profile_id()
         thread_submit_time = time.time()
-        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id)
+        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id, playlist_image_url)
         active_sync_workers[playlist_id] = future
         thread_submit_duration = (time.time() - thread_submit_time) * 1000
         print(f"⏱️ [TIMING] Thread submitted at {time.strftime('%H:%M:%S')} (took {thread_submit_duration:.1f}ms)")
