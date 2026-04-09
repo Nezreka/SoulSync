@@ -33,6 +33,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set image owner to lowercase
+        id: owner
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -44,5 +48,5 @@ jobs:
           build-args: |
             COMMIT_SHA=${{ github.sha }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/soulsync:latest
-            ghcr.io/${{ github.repository_owner }}/soulsync:${{ inputs.version_tag || 'dev' }}
+            ghcr.io/${{ steps.owner.outputs.owner }}/soulsync:latest
+            ghcr.io/${{ steps.owner.outputs.owner }}/soulsync:${{ inputs.version_tag || 'dev' }}
