@@ -1496,6 +1496,37 @@ class JellyfinClient:
             logger.error(f"Error getting tracks for playlist {playlist_id}: {e}")
             return []
 
+    def set_playlist_image(self, playlist_name: str, image_url: str) -> bool:
+        """Set the poster image for a playlist by downloading from a URL."""
+        if not self.ensure_connection() or not image_url:
+            return False
+        try:
+            playlist = self.get_playlist_by_name(playlist_name)
+            if not playlist:
+                return False
+            playlist_id = playlist.get('Id') or playlist.get('id')
+            if not playlist_id:
+                return False
+            import requests as _req
+            img_resp = _req.get(image_url, timeout=15)
+            if img_resp.ok and img_resp.content:
+                content_type = img_resp.headers.get('Content-Type', 'image/jpeg')
+                upload_url = f"{self.base_url}/Items/{playlist_id}/Images/Primary"
+                upload_resp = _req.post(
+                    upload_url,
+                    headers={'X-Emby-Token': self.api_key, 'Content-Type': content_type},
+                    data=img_resp.content,
+                    timeout=15
+                )
+                if upload_resp.ok:
+                    logger.info(f"Set playlist poster for '{playlist_name}'")
+                    return True
+                else:
+                    logger.debug(f"Playlist image upload returned {upload_resp.status_code}")
+        except Exception as e:
+            logger.debug(f"Could not set playlist poster for '{playlist_name}': {e}")
+        return False
+
     def update_playlist(self, playlist_name: str, tracks) -> bool:
         """Update an existing playlist or create it if it doesn't exist"""
         if not self.ensure_connection():
