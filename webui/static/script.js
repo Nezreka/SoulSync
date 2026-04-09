@@ -4284,9 +4284,9 @@ function updateNpTrackInfo() {
             if (artUrl) {
                 sidebarArt.src = artUrl;
                 sidebarArt.style.display = '';
-                sidebarArt.onerror = () => { sidebarArt.src = ''; };
+                sidebarArt.onerror = () => { sidebarArt.src = '/static/trans2.png'; };
             } else {
-                sidebarArt.src = '';
+                sidebarArt.src = '/static/trans2.png';
             }
         }
 
@@ -4332,7 +4332,7 @@ function updateNpTrackInfo() {
         artistEl.textContent = 'Unknown Artist';
         albumEl.textContent = 'Unknown Album';
         if (artImg) artImg.classList.add('hidden');
-        if (sidebarArt) sidebarArt.src = '';
+        if (sidebarArt) sidebarArt.src = '/static/trans2.png';
         if (badgesEl) badgesEl.innerHTML = '';
         if (actionBtns) actionBtns.classList.add('hidden');
         npResetAmbientGlow();
