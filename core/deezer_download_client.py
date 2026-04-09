@@ -315,20 +315,41 @@ class DeezerDownloadClient:
                     break
                 raw_tracks.extend(page_tracks)
 
-            # Batch-fetch release dates for unique albums
+            # Batch-fetch release dates for unique albums (cache-first)
             album_ids = set()
             for t in raw_tracks:
                 aid = t.get('album', {}).get('id')
                 if aid:
                     album_ids.add(str(aid))
             album_release_dates = {}
+            try:
+                from core.metadata_cache import get_metadata_cache
+                cache = get_metadata_cache()
+            except Exception:
+                cache = None
             for aid in album_ids:
+                # Check metadata cache first
+                if cache:
+                    try:
+                        cached = cache.get_entity('deezer', 'album', aid)
+                        if cached and cached.get('release_date'):
+                            album_release_dates[aid] = cached['release_date']
+                            continue
+                    except Exception:
+                        pass
+                # Cache miss — fetch from API
                 try:
                     time.sleep(0.3)  # Respect rate limits
                     a_resp = self._session.get(f'https://api.deezer.com/album/{aid}', timeout=10)
                     if a_resp.ok:
                         a_data = a_resp.json()
                         album_release_dates[aid] = a_data.get('release_date', '')
+                        # Store in metadata cache for future use
+                        if cache:
+                            try:
+                                cache.store_entity('deezer', 'album', aid, a_data)
+                            except Exception:
+                                pass
                 except Exception:
                     pass
 
