@@ -27806,7 +27806,16 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                 elif explicit_artist_name:
                     spotify_artist_name = explicit_artist_name
                 else:
-                    spotify_artist_name = track.artists[0] if track.artists else 'Unknown Artist'
+                    # Fallback chain: track.artists -> original_search clean artist -> original_search artists
+                    if track.artists:
+                        spotify_artist_name = track.artists[0]
+                    elif enhanced_payload.get('spotify_clean_artist'):
+                        spotify_artist_name = enhanced_payload['spotify_clean_artist']
+                    elif enhanced_payload.get('artists') and isinstance(enhanced_payload.get('artists'), list) and len(enhanced_payload['artists']) > 0:
+                        artist_obj = enhanced_payload['artists'][0]
+                        spotify_artist_name = artist_obj.get('name', artist_obj) if isinstance(artist_obj, dict) else str(artist_obj)
+                    else:
+                        spotify_artist_name = 'Unknown Artist'
                 
                 spotify_artist_context = {
                     'id': explicit_artist.get('id', 'explicit_artist'),
