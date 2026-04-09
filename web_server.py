@@ -17733,6 +17733,21 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
                 _raw_album_artist = _first_aa
             _album_artists_for_collab = _sa_aa
 
+    # SPOTIFY RATE LIMIT FIX: When Spotify is rate-limited, explicit_artist_context and spotify_album
+    # may have placeholder/incomplete artist data. Use actual track artist data from original_search
+    # which comes from the download source (HiFi, Tidal, etc.) and contains real artist names.
+    if not _raw_album_artist or _raw_album_artist in ['Unknown Artist', 'Unknown', '']:
+        if 'artists' in original_search and isinstance(original_search['artists'], list) and len(original_search['artists']) > 0:
+            first_artist = original_search['artists'][0]
+            if isinstance(first_artist, dict) and first_artist.get('name'):
+                _raw_album_artist = first_artist['name']
+                if not _album_artists_for_collab:
+                    _album_artists_for_collab = [first_artist]
+            elif isinstance(first_artist, str):
+                _raw_album_artist = first_artist
+                if not _album_artists_for_collab:
+                    _album_artists_for_collab = [{'name': first_artist}]
+
     collab_mode = config_manager.get('file_organization.collab_artist_mode', 'first')
     if collab_mode == 'first' and _raw_album_artist:
         original_search = context.get("original_search_result", {})
@@ -27778,9 +27793,24 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                 if isinstance(explicit_artist, str):
                     explicit_artist = {'name': explicit_artist}
 
+                # Determine artist name with proper fallback chain:
+                # 1. explicit_artist.name (if not a placeholder like 'Unknown Artist')
+                # 2. track.artists[0] (actual track artist data from download source)
+                # 3. 'Unknown Artist' as last resort
+                explicit_artist_name = explicit_artist.get('name', '')
+                is_placeholder_name = explicit_artist_name in ['Unknown Artist', 'Unknown', '', 'Various Artists']
+                
+                if is_placeholder_name and track.artists:
+                    # Use actual track artist data instead of placeholder from rate-limited context
+                    spotify_artist_name = track.artists[0]
+                elif explicit_artist_name:
+                    spotify_artist_name = explicit_artist_name
+                else:
+                    spotify_artist_name = track.artists[0] if track.artists else 'Unknown Artist'
+                
                 spotify_artist_context = {
                     'id': explicit_artist.get('id', 'explicit_artist'),
-                    'name': explicit_artist.get('name', track.artists[0] if track.artists else 'Unknown'),
+                    'name': spotify_artist_name,
                     'genres': explicit_artist.get('genres', [])
                 }
                 # Handle both image_url formats (direct string or images array)
