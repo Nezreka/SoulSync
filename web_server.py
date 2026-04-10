@@ -16766,28 +16766,51 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
         # Per-track spotify_artist may vary on collab albums or after artist name changes.
         # Prefer stable album-level sources so all tracks land in the same folder.
         _artist_name = spotify_artist["name"] if isinstance(spotify_artist, dict) else spotify_artist.name
-        _album_artist_name = _artist_name  # default: same as track artist
+        _album_artist_name = _artist_name  # default: same as track artist (always valid)
+
+        # Placeholder names that should NEVER override a valid artist name
+        _placeholder_names = {'Unknown Artist', 'Unknown', '', 'Various Artists', 'No artist', 'MISSING'}
 
         # Build album-level artists list for collab mode resolution.
         # Using album-level artists (instead of per-track _artists) ensures collab mode
         # produces the SAME result for every track, preventing folder/tag splits.
         _album_artists_for_collab = None  # None = fall back to per-track _artists
         _explicit_artist_ctx = track_info.get('_explicit_artist_context') if isinstance(track_info, dict) else None
+
+        # Helper to check if a name is valid (non-empty and not a placeholder)
+        def _is_valid_artist_name(name):
+            if not name or not isinstance(name, str):
+                return False
+            return name.strip() and name.strip() not in _placeholder_names
+
+        # Try to get album artist from explicit context first
         if isinstance(_explicit_artist_ctx, dict) and _explicit_artist_ctx.get('name'):
-            _album_artist_name = _explicit_artist_ctx['name']
-            _album_artists_for_collab = [_explicit_artist_ctx]
+            candidate_name = _explicit_artist_ctx['name']
+            if _is_valid_artist_name(candidate_name):
+                _album_artist_name = candidate_name
+                _album_artists_for_collab = [_explicit_artist_ctx]
         elif isinstance(_explicit_artist_ctx, str) and _explicit_artist_ctx:
-            _album_artist_name = _explicit_artist_ctx
-            _album_artists_for_collab = [{'name': _explicit_artist_ctx}]
-        else:
+            if _is_valid_artist_name(_explicit_artist_ctx):
+                _album_artist_name = _explicit_artist_ctx
+                _album_artists_for_collab = [{'name': _explicit_artist_ctx}]
+
+        # Fallback to spotify_album.artists - BUT only use if name is valid and not a placeholder
+        # This prevents "Unknown Artist" or empty names from overriding the correct track artist
+        if _album_artists_for_collab is None:
             _sa_artists = _spotify_album.get('artists', []) if _spotify_album else []
             if _sa_artists:
                 _first_sa = _sa_artists[0]
+                candidate_name = None
                 if isinstance(_first_sa, dict) and _first_sa.get('name'):
-                    _album_artist_name = _first_sa['name']
+                    candidate_name = _first_sa['name']
                 elif isinstance(_first_sa, str) and _first_sa:
-                    _album_artist_name = _first_sa
-                _album_artists_for_collab = _sa_artists
+                    candidate_name = _first_sa
+
+                # Only override if we have a valid name that's not a placeholder
+                if _is_valid_artist_name(candidate_name):
+                    _album_artist_name = candidate_name
+                    _album_artists_for_collab = _sa_artists
+                # Otherwise, keep _album_artist_name = _artist_name (the track artist)
 
         template_context = {
             'artist': _artist_name,
