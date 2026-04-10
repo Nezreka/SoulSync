@@ -392,9 +392,11 @@ class DeezerClient:
         cache = get_metadata_cache()
         cached = cache.get_entity('deezer', 'track', str(track_id))
         if cached and cached.get('title'):
-            # Search results are cached with minimal data (no release_date, track_position).
-            # Only use cache if it has fields that the /track/{id} endpoint provides.
-            if 'release_date' in cached or 'track_position' in cached or 'isrc' in cached:
+            # Search results are cached with minimal data (no track_position).
+            # Only use cache if it has track_position — the key field from /track/{id}.
+            # Search results include 'isrc' and 'release_date' but NOT track_position,
+            # so those fields alone are not sufficient to distinguish full from partial data.
+            if 'track_position' in cached:
                 return self._build_enhanced_track(cached)
             # Otherwise fall through to fetch full data from API
 
