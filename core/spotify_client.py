@@ -506,11 +506,11 @@ class SpotifyClient:
 
     @property
     def _fallback_source(self) -> str:
-        """Get configured metadata fallback source ('itunes', 'deezer', or 'discogs')"""
+        """Get configured primary metadata source for internal fallback routing."""
         try:
-            return config_manager.get('metadata.fallback_source', 'itunes') or 'itunes'
+            return config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
         except Exception:
-            return 'itunes'
+            return 'deezer'
 
     @property
     def _fallback(self):

@@ -33369,11 +33369,12 @@ def _get_deezer_client():
 
 def _get_metadata_fallback_source():
     """Get the configured primary metadata source.
-    Returns 'spotify', 'itunes', 'deezer', 'discogs', or 'hydrabase'."""
-    try:
-        return config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
-    except Exception:
-        return 'deezer'
+    Returns 'spotify', 'itunes', 'deezer', 'discogs', or 'hydrabase'.
+
+    NOTE: This is a thin wrapper — canonical logic lives in core.metadata_service.get_primary_source().
+    Kept as a local function because 70+ callers reference it by name."""
+    from core.metadata_service import get_primary_source
+    return get_primary_source()
 
 def _get_metadata_fallback_client():
     """Get the active metadata client based on settings.
@@ -40240,11 +40241,11 @@ def _get_active_discovery_source():
     Determine which music source is active for discovery.
     Returns the user's configured primary metadata source.
     If the selected source requires auth and isn't available, falls back.
+
+    NOTE: Thin wrapper — canonical logic lives in core.metadata_service.get_primary_source().
     """
-    source = _get_metadata_fallback_source()
-    if source == 'spotify' and not (spotify_client and spotify_client.is_spotify_authenticated()):
-        return 'deezer'
-    return source
+    from core.metadata_service import get_primary_source
+    return get_primary_source()
 
 
 @app.route('/api/discover/hero', methods=['GET'])

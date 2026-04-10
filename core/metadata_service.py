@@ -1,9 +1,10 @@
 """
-Metadata Service - Hot-swappable Spotify/iTunes/Deezer provider
+Metadata Service - Centralized metadata source selection
 
-Automatically uses Spotify when authenticated, falls back to the configured
-fallback source (iTunes or Deezer) when not.
-Provides unified interface for all metadata operations.
+ALL metadata source decisions flow through this module. Other files import
+get_primary_source() and get_primary_client() instead of reimplementing
+the logic. This prevents bugs where different files have different defaults
+or auth checks.
 """
 
 from typing import List, Optional, Dict, Any, Literal
@@ -16,35 +17,104 @@ logger = get_logger("metadata_service")
 MetadataProvider = Literal["spotify", "itunes", "auto"]
 
 
-def _get_configured_fallback_source():
-    """Get the configured metadata fallback source ('itunes' or 'deezer')."""
+# =============================================================================
+# CANONICAL SOURCE SELECTION — all code should use these two functions
+# =============================================================================
+
+def get_primary_source() -> str:
+    """Get the user's configured primary metadata source.
+
+    Returns 'spotify', 'deezer', 'itunes', 'discogs', or 'hydrabase'.
+    If the user selected Spotify but it's not authenticated, falls back to 'deezer'.
+
+    This is THE single source of truth for "which metadata source should I use?"
+    All other modules should import this function instead of reading config directly.
+    """
     try:
         from config.settings import config_manager
-        return config_manager.get('metadata.fallback_source', 'itunes') or 'itunes'
+        source = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
     except Exception:
-        return 'itunes'
+        return 'deezer'
+
+    # Validate Spotify selection — can't use it if not authenticated
+    if source == 'spotify':
+        try:
+            import importlib
+            ws = importlib.import_module('web_server')
+            sc = getattr(ws, 'spotify_client', None)
+            if not sc or not sc.is_spotify_authenticated():
+                return 'deezer'
+        except Exception:
+            return 'deezer'
+
+    return source
 
 
-def _create_fallback_client():
-    """Create the configured fallback metadata client."""
-    source = _get_configured_fallback_source()
+def get_primary_client():
+    """Get the client object for the user's configured primary metadata source.
+
+    Returns a SpotifyClient, DeezerClient, iTunesClient, DiscogsClient,
+    or HydrabaseClient instance.
+
+    This is THE single source of truth for "which client should I call?"
+    """
+    source = get_primary_source()
+
+    if source == 'spotify':
+        try:
+            import importlib
+            ws = importlib.import_module('web_server')
+            sc = getattr(ws, 'spotify_client', None)
+            if sc and sc.is_spotify_authenticated():
+                return sc
+        except Exception:
+            pass
+        # Spotify selected but unavailable — fall back to Deezer
+        from core.deezer_client import DeezerClient
+        return DeezerClient()
+
     if source == 'deezer':
         from core.deezer_client import DeezerClient
         return DeezerClient()
+
+    if source == 'discogs':
+        try:
+            from config.settings import config_manager
+            token = config_manager.get('discogs.token', '')
+            if token:
+                from core.discogs_client import DiscogsClient
+                return DiscogsClient(token=token)
+        except Exception:
+            pass
+        return iTunesClient()
+
     if source == 'hydrabase':
         try:
-            from core.hydrabase_client import HydrabaseClient
-            # Hydrabase client is managed globally — try to import the running instance
             import importlib
-            ws_module = importlib.import_module('web_server')
-            client = getattr(ws_module, 'hydrabase_client', None)
+            ws = importlib.import_module('web_server')
+            client = getattr(ws, 'hydrabase_client', None)
             if client and client.is_connected():
                 return client
         except Exception:
             pass
-        # Hydrabase not available — fall back to iTunes
         return iTunesClient()
+
+    # Default: iTunes
     return iTunesClient()
+
+
+# =============================================================================
+# LEGACY ALIASES — kept for backward compatibility, delegate to canonical funcs
+# =============================================================================
+
+def _get_configured_fallback_source():
+    """Legacy alias for get_primary_source(). Use get_primary_source() instead."""
+    return get_primary_source()
+
+
+def _create_fallback_client():
+    """Legacy alias for get_primary_client(). Use get_primary_client() instead."""
+    return get_primary_client()
 
 
 class MetadataService:
@@ -94,10 +164,8 @@ class MetadataService:
             return "spotify"
         elif self.preferred_provider == "itunes":
             return self._fallback_source
-        else:  # auto
-            # Use is_spotify_authenticated() to check actual Spotify auth status
-            # (is_authenticated() always returns True due to fallback)
-            return "spotify" if self.spotify.is_spotify_authenticated() else self._fallback_source
+        else:  # auto — use the centralized source selection
+            return get_primary_source()
 
     def _get_client(self):
         """Get the appropriate client based on provider selection"""

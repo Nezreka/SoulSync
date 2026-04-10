@@ -30,18 +30,9 @@ ITUNES_BASE_DELAY = 1.0  # Base delay in seconds for exponential backoff
 
 
 def _get_fallback_metadata_client():
-    """Get the configured metadata fallback client (iTunes or Deezer)."""
-    try:
-        from config.settings import config_manager
-        source = config_manager.get('metadata.fallback_source', 'itunes') or 'itunes'
-        if source == 'deezer':
-            from core.deezer_client import DeezerClient
-            return DeezerClient(), 'deezer'
-        from core.itunes_client import iTunesClient
-        return iTunesClient(), 'itunes'
-    except Exception:
-        from core.itunes_client import iTunesClient
-        return iTunesClient(), 'itunes'
+    """Get the configured metadata client — delegates to centralized metadata_service."""
+    from core.metadata_service import get_primary_source, get_primary_client
+    return get_primary_client(), get_primary_source()
 
 
 def itunes_api_call_with_retry(func, *args, max_retries=ITUNES_MAX_RETRIES, **kwargs):
