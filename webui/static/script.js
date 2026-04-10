@@ -892,10 +892,30 @@ function initAccentColorListeners() {
             applyWorkerOrbsSetting(workerOrbsCheckbox.checked);
         });
     }
+
+    // Reduce effects toggle — apply immediately on change
+    const reduceEffectsCheckbox = document.getElementById('reduce-effects-enabled');
+    if (reduceEffectsCheckbox) {
+        reduceEffectsCheckbox.addEventListener('change', () => {
+            applyReduceEffects(reduceEffectsCheckbox.checked);
+        });
+    }
 }
 
-// Bootstrap accent from localStorage instantly (prevents default-color flash)
+function applyReduceEffects(enabled) {
+    if (enabled) {
+        document.body.classList.add('reduce-effects');
+    } else {
+        document.body.classList.remove('reduce-effects');
+    }
+    localStorage.setItem('soulsync-reduce-effects', enabled ? '1' : '0');
+}
+
+// Bootstrap accent and reduce-effects from localStorage instantly (prevents flash)
 (function() {
+    if (localStorage.getItem('soulsync-reduce-effects') === '1') {
+        document.body.classList.add('reduce-effects');
+    }
     const saved = localStorage.getItem('soulsync-accent');
     if (saved) applyAccentColor(saved);
     // Bootstrap particles setting from localStorage
@@ -6024,6 +6044,12 @@ async function loadSettingsData() {
         if (workerOrbsCheckbox) workerOrbsCheckbox.checked = workerOrbsEnabled;
         applyWorkerOrbsSetting(workerOrbsEnabled);
 
+        // Reduce effects toggle
+        const reduceEffects = settings.ui_appearance?.reduce_effects === true; // default false
+        const reduceCheckbox = document.getElementById('reduce-effects-enabled');
+        if (reduceCheckbox) reduceCheckbox.checked = reduceEffects;
+        applyReduceEffects(reduceEffects);
+
         // Populate Logging information (read-only)
         document.getElementById('log-level-display').textContent = settings.logging?.level || 'INFO';
         document.getElementById('log-path-display').textContent = settings.logging?.path || 'logs/app.log';
@@ -7154,7 +7180,8 @@ async function saveSettings(quiet = false) {
             accent_color: document.getElementById('accent-custom-color')?.value || '#1db954',
             sidebar_visualizer: document.getElementById('sidebar-visualizer-type')?.value || 'bars',
             particles_enabled: document.getElementById('particles-enabled')?.checked !== false,
-            worker_orbs_enabled: document.getElementById('worker-orbs-enabled')?.checked !== false
+            worker_orbs_enabled: document.getElementById('worker-orbs-enabled')?.checked !== false,
+            reduce_effects: document.getElementById('reduce-effects-enabled')?.checked === true
         },
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,
