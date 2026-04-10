@@ -636,7 +636,17 @@ class DeezerClient:
             albums.append(album)
 
         cache = get_metadata_cache()
-        entries = [(str(ad.get('id', '')), ad) for ad in data['data'] if ad.get('id')]
+        # Deezer's /artist/{id}/albums endpoint doesn't include artist info on each album.
+        # Inject it so cached album entities have artist_name for discover page display.
+        artist_stub = None
+        if albums and albums[0].artists:
+            artist_stub = {'id': int(artist_id) if artist_id.isdigit() else 0, 'name': albums[0].artists[0]}
+        entries = []
+        for ad in data['data']:
+            if ad.get('id'):
+                if artist_stub and not ad.get('artist'):
+                    ad['artist'] = artist_stub
+                entries.append((str(ad['id']), ad))
         if entries:
             cache.store_entities_bulk('deezer', 'album', entries, skip_if_exists=True)
 
