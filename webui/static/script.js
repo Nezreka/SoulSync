@@ -16296,9 +16296,13 @@ function updateCardToDefault(playlistId, finalState = null) {
 
             // Check if any tracks were added to wishlist
             const wishlistCount = finalState.progress?.wishlist_added_count || finalState.result?.wishlist_added_count || 0;
+            const unmatchedTracks = finalState.progress?.unmatched_tracks || finalState.result?.unmatched_tracks || [];
             const playlistName = card.querySelector('.playlist-card-name').textContent;
 
-            if (wishlistCount > 0) {
+            if (wishlistCount > 0 && unmatchedTracks.length > 0) {
+                const trackList = unmatchedTracks.map(t => `${t.artist} - ${t.name}`).join(', ');
+                showToast(`Sync complete for "${playlistName}". ${wishlistCount} not found in library: ${trackList}`, 'warning');
+            } else if (wishlistCount > 0) {
                 showToast(`Sync complete for "${playlistName}". Added ${wishlistCount} missing track${wishlistCount > 1 ? 's' : ''} to wishlist.`, 'success');
             } else {
                 showToast(`Sync complete for "${playlistName}"`, 'success');

@@ -36657,12 +36657,21 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
 
         # Update final state on completion
         # Convert result to JSON-serializable dict (datetime/errors can't be emitted via SocketIO)
-        # Exclude match_details — large, not needed for live status, saved to DB separately
+        # Exclude match_details (large) but include a summary of unmatched tracks
         result_dict = {
             k: (v.isoformat() if hasattr(v, 'isoformat') else v)
             for k, v in result.__dict__.items()
             if k != 'match_details'
         }
+        # Include unmatched track names so the frontend can show which tracks failed
+        match_details = getattr(result, 'match_details', None)
+        if match_details:
+            unmatched_summary = [
+                {'name': d.get('name', ''), 'artist': d.get('artist', ''), 'image_url': d.get('image_url', '')}
+                for d in match_details if d.get('status') == 'not_found'
+            ]
+            if unmatched_summary:
+                result_dict['unmatched_tracks'] = unmatched_summary
         with sync_lock:
             sync_states[playlist_id] = {
                 "status": "finished",
