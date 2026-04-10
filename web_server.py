@@ -47377,11 +47377,10 @@ def playlist_explorer_build_tree():
         if not tracks:
             return jsonify({"success": False, "error": "Playlist has no tracks"}), 400
 
-        # Determine active metadata source
-        spotify_available = spotify_client and spotify_client.is_spotify_authenticated()
-        if spotify_available:
+        # Determine active metadata source — respect user's configured primary
+        source_name = _get_active_discovery_source()
+        if source_name == 'spotify' and spotify_client and spotify_client.is_spotify_authenticated():
             active_client = spotify_client
-            source_name = 'spotify'
         else:
             active_client = _get_metadata_fallback_client()
             source_name = _get_metadata_fallback_source()

@@ -96,14 +96,16 @@ class SeasonalDiscoveryService:
         self._ensure_database_schema()
 
     def _get_source(self):
-        """Determine active music source (matches _get_active_discovery_source in web_server)"""
-        if self.spotify_client and self.spotify_client.is_spotify_authenticated():
-            return 'spotify'
+        """Determine active music source — respects user's configured primary source"""
         try:
-            from core.metadata_service import _get_configured_fallback_source
-            return _get_configured_fallback_source()
+            from config.settings import config_manager
+            source = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
+            # If user selected spotify, verify it's actually authenticated
+            if source == 'spotify' and not (self.spotify_client and self.spotify_client.is_spotify_authenticated()):
+                return 'deezer'
+            return source
         except Exception:
-            return 'itunes'
+            return 'deezer'
 
     def _ensure_database_schema(self):
         """Create seasonal content tables if they don't exist"""
