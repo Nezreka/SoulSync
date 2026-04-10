@@ -42,6 +42,7 @@ _JOB_MODULES = [
     'core.repair_jobs.lossy_converter',
     'core.repair_jobs.album_tag_consistency',
     'core.repair_jobs.live_commentary_cleaner',
+    'core.repair_jobs.unknown_artist_fixer',
 ]
 
 
