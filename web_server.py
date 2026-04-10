@@ -21084,6 +21084,32 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Metadata Pipeline Overhaul — Fix Unknown Artist & Source Selection",
+                "description": "Major fix for tracks downloading as 'Unknown Artist' and Spotify being used when Deezer/iTunes was selected",
+                "features": [
+                    "• Fixed playlist pipeline (discover → sync → wishlist → download) losing artist, track number, and album year data",
+                    "• All discovery workers now respect your configured primary metadata source instead of always using Spotify",
+                    "• Centralized metadata source selection in core/metadata_service.py — one source of truth for all features",
+                    "• Fixed Deezer metadata cache returning incomplete data (missing track_number, release_date) from search result cache",
+                    "• Sync completion toast now shows which specific tracks failed to match (not just a count)",
+                    "• New 'Fix Unknown Artists' maintenance job — scans library for Unknown Artist tracks and corrects metadata, tags, and file paths",
+                    "• One-time migration purges stale discovery and Deezer cache entries on first startup after update"
+                ],
+                "usage_note": "If you have existing Unknown Artist tracks, run the Fix Unknown Artists job from Settings > Maintenance."
+            },
+            {
+                "title": "🛡️ Matching Engine — Artist Verification Gate",
+                "description": "Prevents downloading tracks from completely wrong artists on Soulseek and YouTube",
+                "features": [
+                    "• New artist gate rejects candidates where the artist doesn't match the target (Soulseek: < 0.25, YouTube: < 0.15)",
+                    "• Fixed artist substring matching — 'muse' no longer matches 'museum', 'art' no longer matches 'heart'",
+                    "• Artist similarity now compared per path segment instead of full filename — misspelled artist names still match correctly",
+                    "• YouTube artist weight increased from 10% to 20% to reduce wrong-uploader matches",
+                    "• Seasonal discovery, personalized playlists, and playlist explorer all use configured source instead of Spotify"
+                ],
+                "usage_note": "No action needed — matching improvements apply automatically to all new downloads."
+            },
+            {
                 "title": "🎵 Deezer User Playlists — Browse & Download Your Library",
                 "description": "New Deezer tab on the Sync page shows your personal playlists via ARL token — same flow as Spotify",
                 "features": [
