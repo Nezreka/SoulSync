@@ -101,17 +101,9 @@ class PersonalizedPlaylistsService:
         self.spotify_client = spotify_client
 
     def _get_active_source(self) -> str:
-        """
-        Determine which music source is active — respects user's configured primary source.
-        """
-        try:
-            from config.settings import config_manager
-            source = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
-            if source == 'spotify' and not (self.spotify_client and hasattr(self.spotify_client, 'is_spotify_authenticated') and self.spotify_client.is_spotify_authenticated()):
-                return 'deezer'
-            return source
-        except Exception:
-            return 'deezer'
+        """Determine which music source is active — delegates to centralized metadata_service."""
+        from core.metadata_service import get_primary_source
+        return get_primary_source()
 
     def _build_track_dict(self, row, source: str) -> Dict:
         """Build a standardized track dictionary from a database row."""
