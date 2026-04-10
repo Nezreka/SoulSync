@@ -4284,9 +4284,9 @@ function updateNpTrackInfo() {
             if (artUrl) {
                 sidebarArt.src = artUrl;
                 sidebarArt.style.display = '';
-                sidebarArt.onerror = () => { sidebarArt.src = ''; };
+                sidebarArt.onerror = () => { sidebarArt.src = '/static/trans2.png'; };
             } else {
-                sidebarArt.src = '';
+                sidebarArt.src = '/static/trans2.png';
             }
         }
 
@@ -4332,7 +4332,7 @@ function updateNpTrackInfo() {
         artistEl.textContent = 'Unknown Artist';
         albumEl.textContent = 'Unknown Album';
         if (artImg) artImg.classList.add('hidden');
-        if (sidebarArt) sidebarArt.src = '';
+        if (sidebarArt) sidebarArt.src = '/static/trans2.png';
         if (badgesEl) badgesEl.innerHTML = '';
         if (actionBtns) actionBtns.classList.add('hidden');
         npResetAmbientGlow();
@@ -10195,7 +10195,29 @@ async function rehydrateModal(processInfo, userRequested = false) {
         return;
     }
 
-    // Handle regular Spotify playlist processes
+    // Handle Deezer ARL playlist processes — ensure playlist data is in spotifyPlaylists for modal reuse
+    if (playlist_id.startsWith('deezer_arl_') && !spotifyPlaylists.find(p => p.id === playlist_id)) {
+        const rawId = playlist_id.replace('deezer_arl_', '');
+        const deezerPlaylist = deezerArlPlaylists.find(p => String(p.id) === rawId);
+        if (deezerPlaylist) {
+            spotifyPlaylists.push({
+                id: playlist_id,
+                name: deezerPlaylist.name,
+                track_count: deezerPlaylist.track_count || 0,
+                image_url: deezerPlaylist.image_url || '',
+                owner: deezerPlaylist.owner || '',
+            });
+        } else {
+            // Playlists not loaded yet — use process info as fallback
+            spotifyPlaylists.push({
+                id: playlist_id,
+                name: playlist_name || 'Deezer Playlist',
+                track_count: 0,
+            });
+        }
+    }
+
+    // Handle regular Spotify / Deezer ARL playlist processes
     let playlistData = spotifyPlaylists.find(p => p.id === playlist_id);
     if (!playlistData) {
         console.warn(`Cannot rehydrate modal: Playlist data for ${playlist_id} not loaded.`);
@@ -11707,7 +11729,10 @@ async function openDownloadMissingModal(playlistId) {
     let tracks = playlistTrackCache[playlistId];
     if (!tracks) {
         try {
-            const response = await fetch(`/api/spotify/playlist/${playlistId}`);
+            const fetchUrl = playlistId.startsWith('deezer_arl_')
+                ? `/api/deezer/arl-playlist/${playlistId.replace('deezer_arl_', '')}`
+                : `/api/spotify/playlist/${playlistId}`;
+            const response = await fetch(fetchUrl);
             const fullPlaylist = await response.json();
             if (fullPlaylist.error) throw new Error(fullPlaylist.error);
             tracks = fullPlaylist.tracks;
@@ -15958,7 +15983,8 @@ async function startPlaylistSync(playlistId) {
             body: JSON.stringify({
                 playlist_id: playlist.id,
                 playlist_name: playlist.name,
-                tracks: tracks // Send the full track list
+                tracks: tracks, // Send the full track list
+                image_url: playlist.image_url || ''
             })
         });
 
@@ -26569,6 +26595,27 @@ async function loadDeezerArlPlaylists() {
         deezerArlPlaylists = await response.json();
         renderDeezerArlPlaylists();
         deezerArlPlaylistsLoaded = true;
+
+        // Check for active syncs or downloads and rehydrate UI
+        await checkForActiveProcesses();
+        for (const p of deezerArlPlaylists) {
+            const arlId = `deezer_arl_${p.id}`;
+            try {
+                const syncResp = await fetch(`/api/sync/status/${arlId}`);
+                if (syncResp.ok) {
+                    const syncState = await syncResp.json();
+                    if (syncState.status === 'syncing') {
+                        // Re-attach sync polling and update card UI
+                        if (!spotifyPlaylists.find(sp => sp.id === arlId)) {
+                            spotifyPlaylists.push({ id: arlId, name: p.name, track_count: p.track_count || 0, image_url: p.image_url || '', owner: p.owner || '' });
+                        }
+                        updateCardToSyncing(arlId, syncState.progress?.progress || 0, syncState.progress);
+                        startSyncPolling(arlId);
+                        console.log(`🔄 Rehydrated active sync for Deezer ARL playlist: ${p.name}`);
+                    }
+                }
+            } catch (e) { /* No active sync — normal */ }
+        }
 
     } catch (error) {
         container.innerHTML = `<div class="playlist-placeholder">❌ Error: ${error.message}</div>`;
@@ -62710,23 +62757,27 @@ function _renderFindingDetail(f) {
 
         case 'duplicate_tracks':
             if (!d.tracks || !d.tracks.length) return _gridRows([['Count', d.count || '?']]);
-            // Determine best copy (same logic as backend: highest bitrate, then duration)
+            // Determine best copy (same logic as backend: highest bitrate, then duration, then track number)
             const bestDup = d.tracks.reduce((best, t) => {
                 const bBr = best.bitrate || 0, tBr = t.bitrate || 0;
                 const bDur = best.duration || 0, tDur = t.duration || 0;
-                return (tBr > bBr || (tBr === bBr && tDur > bDur)) ? t : best;
+                const bTn = best.track_number || 0, tTn = t.track_number || 0;
+                return (tBr > bBr || (tBr === bBr && tDur > bDur) || (tBr === bBr && tDur === bDur && tTn > bTn)) ? t : best;
             }, d.tracks[0]);
+            const findingId = f.id;
             return media + `<div class="repair-detail-sublist">${d.tracks.map((t, i) => {
-                const isBest = t.id === bestDup.id;
-                return `<div class="repair-detail-subitem ${isBest ? 'best' : 'removable'}">
+                const tid = t.track_id || t.id;
+                const isBest = (t.id === bestDup.id);
+                return `<div class="repair-detail-subitem ${isBest ? 'best' : 'removable'}" style="cursor:pointer;" onclick="selectDuplicateToKeep(${findingId}, '${tid}')" title="Click to keep this version">
                     <strong>
                         ${isBest ? '<span class="repair-keep-badge">KEEP</span>' : '<span class="repair-remove-badge">REMOVE</span>'}
                         ${_escFinding(t.title)} by ${_escFinding(t.artist)}
                     </strong>
-                    <span>Album: ${_escFinding(t.album || 'Unknown')}${t.bitrate ? ` &middot; ${t.bitrate} kbps` : ''}${t.duration ? ` &middot; ${Math.round(t.duration)}s` : ''}</span>
+                    <span>Album: ${_escFinding(t.album || 'Unknown')}${t.bitrate ? ` &middot; ${t.bitrate} kbps` : ''}${t.duration ? ` &middot; ${Math.round(t.duration)}s` : ''}${t.track_number ? ` &middot; Track #${t.track_number}` : ''}</span>
                     ${t.file_path ? `<span class="mono">${_escFinding(t.file_path)}</span>` : ''}
                 </div>`;
-            }).join('')}</div>`;
+            }).join('')}</div>
+            <div style="color:rgba(255,255,255,0.3);font-size:11px;padding:4px 0;">Click on a version to keep it, or use "Keep Best" for auto-selection</div>`;
 
         case 'incomplete_album':
             if (d.artist) rows.push(['Artist', d.artist]);
@@ -62894,9 +62945,12 @@ async function fixAllMatchingFindings() {
     const jobId = jobFilter ? jobFilter.value : '';
     const severity = severityFilter ? severityFilter.value : '';
 
-    // If fixing orphan files, prompt for action FIRST (staging vs delete)
+    // If fixing orphan files or dead files, prompt for action FIRST
     let fixAction = null;
-    if (jobId === 'orphan_file_detector' || _isMassOrphanFix(jobId, _repairFindingsTotal)) {
+    if (jobId === 'dead_file_cleaner') {
+        fixAction = await _promptDeadFileAction();
+        if (!fixAction) return;
+    } else if (jobId === 'orphan_file_detector' || _isMassOrphanFix(jobId, _repairFindingsTotal)) {
         fixAction = await _promptOrphanAction();
         if (!fixAction) return;
         // Confirm before proceeding
@@ -62996,6 +63050,29 @@ function renderRepairFindingsPagination(total, currentPage) {
     }
     html += `<span class="repair-page-info">${total.toLocaleString()} total</span>`;
     container.innerHTML = html;
+}
+
+async function selectDuplicateToKeep(findingId, keepTrackId) {
+    if (!await showConfirmDialog({ title: 'Keep This Version', message: 'Keep this version and remove the other duplicate(s)?', confirmText: 'Keep', destructive: true })) return;
+    try {
+        const response = await fetch(`/api/repair/findings/${findingId}/fix`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fix_action: keepTrackId }),
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast(result.message || 'Duplicate resolved', 'success');
+        } else {
+            showToast(result.error || 'Failed to resolve duplicate', 'error');
+        }
+        loadRepairFindingsDashboard();
+        loadRepairFindings();
+        updateRepairStatus();
+    } catch (error) {
+        console.error('Error fixing duplicate:', error);
+        showToast('Error resolving duplicate', 'error');
+    }
 }
 
 async function fixRepairFinding(id, findingType) {
@@ -66348,7 +66425,7 @@ const _autoIcons = {
     scan_library: '\uD83D\uDD04', refresh_mirrored: '\uD83D\uDCC2', sync_playlist: '\uD83D\uDD01',
     discover_playlist: '\uD83D\uDD0D', discovery_completed: '\uD83D\uDD0D',
     notify_only: '\uD83D\uDD14', discord_webhook: '\uD83D\uDCAC', pushbullet: '\uD83D\uDD14', telegram: '\u2709\uFE0F', webhook: '\uD83C\uDF10',
-    signal_received: '\u26A1', fire_signal: '\u26A1',
+    signal_received: '\u26A1', fire_signal: '\u26A1', run_script: '\uD83D\uDCBB',
     // Phase 3
     wishlist_processing_completed: '\u2705', watchlist_scan_completed: '\u2705',
     database_update_completed: '\uD83D\uDDC4\uFE0F', download_failed: '\u274C',
@@ -67612,6 +67689,7 @@ function _autoFormatNotify(type) {
     if (type === 'pushbullet') return 'Pushbullet';
     if (type === 'telegram') return 'Telegram';
     if (type === 'fire_signal') return '\u26A1 Signal';
+    if (type === 'run_script') return '\uD83D\uDCBB Script';
     return type || '';
 }
 function _autoParseUTC(ts) {
@@ -68292,6 +68370,34 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         </div>
         <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Other automations with "Signal Received" trigger will wake up</div>`;
     }
+    if (blockType === 'run_script') {
+        const scriptName = _escAttr(config.script_name || '');
+        const timeout = config.timeout || 60;
+        // Fetch scripts list and populate
+        const selectId = `cfg-${slotKey}-script_name`;
+        setTimeout(async () => {
+            try {
+                const resp = await fetch('/api/scripts');
+                const data = await resp.json();
+                const sel = document.getElementById(selectId);
+                if (sel && data.scripts) {
+                    sel.innerHTML = '<option value="">Select a script...</option>' +
+                        data.scripts.map(s => `<option value="${_escAttr(s.name)}"${s.name === scriptName ? ' selected' : ''}>${escapeHtml(s.name)} (${s.extension})</option>`).join('');
+                }
+            } catch (e) { console.warn('Failed to load scripts:', e); }
+        }, 100);
+        return `<div class="config-row">
+            <label>Script</label>
+            <select id="${selectId}">
+                <option value="${scriptName}">${scriptName || 'Loading...'}</option>
+            </select>
+        </div>
+        <div class="config-row">
+            <label>Timeout</label>
+            <input type="number" id="cfg-${slotKey}-timeout" value="${timeout}" min="5" max="300" style="width:80px;"> seconds
+        </div>
+        <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Place scripts in the <code>scripts/</code> folder. Supported: .sh, .py, .bat, .ps1</div>`;
+    }
     if (blockType === 'scan_watchlist' || blockType === 'scan_library' || blockType === 'notify_only') {
         return '<div class="config-row" style="color:rgba(255,255,255,0.4);font-size:12px;">No configuration needed</div>';
     }
@@ -68650,6 +68756,12 @@ function _readPlacedConfig(slotKey) {
     }
     if (type === 'signal_received' || type === 'fire_signal') {
         return { signal_name: document.getElementById('cfg-' + slotKey + '-signal_name')?.value?.trim() || '' };
+    }
+    if (type === 'run_script') {
+        return {
+            script_name: document.getElementById('cfg-' + slotKey + '-script_name')?.value || '',
+            timeout: parseInt(document.getElementById('cfg-' + slotKey + '-timeout')?.value || '60') || 60,
+        };
     }
     if (type === 'discord_webhook') {
         return {

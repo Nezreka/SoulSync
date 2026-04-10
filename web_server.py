@@ -1737,6 +1737,79 @@ def _register_automation_handlers():
             '_manages_own_progress': True,
         }
 
+    def _auto_run_script(config):
+        """Execute a user script from the scripts directory."""
+        import subprocess as _sp
+        script_name = config.get('script_name', '')
+        timeout = min(int(config.get('timeout', 60)), 300)
+        automation_id = config.get('_automation_id')
+
+        if not script_name:
+            return {'status': 'error', 'error': 'No script selected'}
+
+        scripts_dir = docker_resolve_path(config_manager.get('scripts.path', './scripts'))
+        if not scripts_dir or not os.path.isdir(scripts_dir):
+            os.makedirs(scripts_dir, exist_ok=True)
+            return {'status': 'error', 'error': 'Scripts directory is empty. Add scripts to the scripts/ folder.'}
+
+        script_path = os.path.join(scripts_dir, script_name)
+        script_path = os.path.realpath(script_path)
+
+        # Security: block path traversal
+        if not script_path.startswith(os.path.realpath(scripts_dir)):
+            return {'status': 'error', 'error': 'Script path traversal blocked'}
+
+        if not os.path.isfile(script_path):
+            return {'status': 'error', 'error': f'Script not found: {script_name}'}
+
+        _update_automation_progress(automation_id, phase=f'Running {script_name}...', progress=10)
+
+        # Build environment with SoulSync context
+        env = os.environ.copy()
+        event_data = config.get('_event_data') or {}
+        env['SOULSYNC_EVENT'] = str(event_data.get('type', ''))
+        env['SOULSYNC_AUTOMATION'] = config.get('_automation_name', '')
+        env['SOULSYNC_SCRIPTS_DIR'] = scripts_dir
+
+        try:
+            # Determine how to run the script
+            if script_path.endswith('.py'):
+                cmd = ['python', script_path]
+            elif script_path.endswith('.sh'):
+                cmd = ['bash', script_path]
+            else:
+                cmd = [script_path]
+
+            result = _sp.run(
+                cmd,
+                capture_output=True, text=True, timeout=timeout,
+                cwd=scripts_dir, env=env
+            )
+
+            _update_automation_progress(automation_id, phase='Script completed', progress=100)
+
+            stdout = result.stdout[:2000] if result.stdout else ''
+            stderr = result.stderr[:1000] if result.stderr else ''
+
+            if result.returncode == 0:
+                logger.info(f"Script '{script_name}' completed (exit 0)")
+            else:
+                logger.warning(f"Script '{script_name}' exited with code {result.returncode}")
+
+            return {
+                'status': 'completed' if result.returncode == 0 else 'error',
+                'exit_code': str(result.returncode),
+                'stdout': stdout,
+                'stderr': stderr,
+                'script': script_name,
+            }
+        except _sp.TimeoutExpired:
+            _update_automation_progress(automation_id, phase='Script timed out', progress=100)
+            return {'status': 'error', 'error': f'Script timed out after {timeout}s', 'script': script_name}
+        except Exception as e:
+            return {'status': 'error', 'error': str(e), 'script': script_name}
+
+    automation_engine.register_action_handler('run_script', _auto_run_script)
     automation_engine.register_action_handler('full_cleanup', _auto_full_cleanup)
 
     automation_engine.register_action_handler('start_database_update', _auto_start_database_update,
@@ -5789,6 +5862,30 @@ def _collect_known_signals():
         pass
     return sorted(signals)
 
+@app.route('/api/scripts', methods=['GET'])
+def list_available_scripts():
+    """List executable scripts in the scripts directory."""
+    try:
+        scripts_dir = docker_resolve_path(config_manager.get('scripts.path', './scripts'))
+        if not scripts_dir or not os.path.isdir(scripts_dir):
+            return jsonify({'scripts': []})
+
+        allowed_ext = {'.sh', '.py', '.bat', '.ps1', '.rb', '.pl', '.js'}
+        scripts = []
+        for fname in sorted(os.listdir(scripts_dir)):
+            ext = os.path.splitext(fname)[1].lower()
+            fpath = os.path.join(scripts_dir, fname)
+            if os.path.isfile(fpath) and (ext in allowed_ext or os.access(fpath, os.X_OK)):
+                scripts.append({
+                    'name': fname,
+                    'extension': ext,
+                    'size': os.path.getsize(fpath),
+                })
+        return jsonify({'scripts': scripts})
+    except Exception as e:
+        return jsonify({'scripts': [], 'error': str(e)})
+
+
 @app.route('/api/automations/blocks', methods=['GET'])
 def get_automation_blocks():
     """Return available block types for the automation builder sidebar."""
@@ -5953,6 +6050,8 @@ def get_automation_blocks():
              "description": "Clear quarantine, download queue, staging folder, and search history in one sweep", "available": True},
             {"type": "deep_scan_library", "label": "Deep Scan Library", "icon": "search",
              "description": "Full library comparison without losing enrichment data", "available": True},
+            {"type": "run_script", "label": "Run Script", "icon": "terminal",
+             "description": "Execute a script from the scripts folder", "available": True},
         ],
         "notifications": [
             {"type": "discord_webhook", "label": "Discord Webhook", "icon": "message", "description": "Send a Discord notification", "available": True,
@@ -5968,6 +6067,12 @@ def get_automation_blocks():
              "description": "Fire a signal that other automations can listen for", "available": True,
              "config_fields": [
                  {"key": "signal_name", "type": "signal_input", "label": "Signal Name"}
+             ]},
+            # Run script then-action
+            {"type": "run_script", "label": "Run Script", "icon": "terminal",
+             "description": "Execute a script after the action completes", "available": True,
+             "config_fields": [
+                 {"key": "script_name", "type": "script_select", "label": "Script"}
              ]},
         ],
         "known_signals": _collect_known_signals(),
@@ -21055,7 +21160,10 @@ def get_version_info():
                     "• Replace lower quality files on import — opt-in toggle in Settings > Library",
                     "• HiFi API instance health check in Settings > Downloads",
                     "• Debug test activity feed message removed from startup",
-                    "• Global search downloads now create bubble snapshots on Dashboard and Search page"
+                    "• Global search downloads now create bubble snapshots on Dashboard and Search page",
+                    "• Dead file findings now offer 'Remove from DB' option alongside 'Re-download' — works in bulk fix too",
+                    "• Deezer ARL sync and download modals rehydrate after page refresh",
+                    "• Deezer album data (release dates, cover art) cached in metadata cache — subsequent playlist loads are near-instant"
                 ]
             },
             {
@@ -36139,7 +36247,7 @@ def convert_youtube_results_to_spotify_tracks(discovery_results):
 
 # Add these new endpoints to the end of web_server.py
 
-def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1):
+def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, profile_id=1, playlist_image_url=''):
     """The actual sync function that runs in the background thread."""
     global sync_states, sync_service
 
@@ -36474,6 +36582,18 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
             }
         print(f"🏁 Sync finished for {playlist_id} - state updated")
 
+        # Set playlist poster image if available (Plex, Jellyfin, Emby)
+        if playlist_image_url and getattr(result, 'synced_tracks', 0) > 0:
+            try:
+                active_server = config_manager.get_active_media_server()
+                if active_server == 'plex' and plex_client:
+                    plex_client.set_playlist_image(playlist_name, playlist_image_url)
+                elif active_server in ('jellyfin', 'emby') and jellyfin_client:
+                    jellyfin_client.set_playlist_image(playlist_name, playlist_image_url)
+                # Navidrome doesn't support custom playlist images
+            except Exception as img_err:
+                print(f"⚠️ Could not set playlist image: {img_err}")
+
         # Record sync history completion with per-track data
         try:
             matched = getattr(result, 'matched_tracks', 0)
@@ -36572,10 +36692,11 @@ def start_playlist_sync():
     playlist_id = data.get('playlist_id')
     playlist_name = data.get('playlist_name')
     tracks_json = data.get('tracks') # Pass the full track list
+    playlist_image_url = data.get('image_url', '')
 
     if not all([playlist_id, playlist_name, tracks_json]):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400
-    
+
     # Add activity for sync start
     add_activity_item("🔄", "Spotify Sync Started", f"'{playlist_name}' - {len(tracks_json)} tracks", "Now")
 
@@ -36592,7 +36713,7 @@ def start_playlist_sync():
         # Submit the task to the thread pool (capture profile_id while still in request context)
         _sync_profile_id = get_current_profile_id()
         thread_submit_time = time.time()
-        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id)
+        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id, playlist_image_url)
         active_sync_workers[playlist_id] = future
         thread_submit_duration = (time.time() - thread_submit_time) * 1000
         print(f"⏱️ [TIMING] Thread submitted at {time.strftime('%H:%M:%S')} (took {thread_submit_duration:.1f}ms)")
