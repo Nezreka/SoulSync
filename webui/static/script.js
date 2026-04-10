@@ -62757,23 +62757,27 @@ function _renderFindingDetail(f) {
 
         case 'duplicate_tracks':
             if (!d.tracks || !d.tracks.length) return _gridRows([['Count', d.count || '?']]);
-            // Determine best copy (same logic as backend: highest bitrate, then duration)
+            // Determine best copy (same logic as backend: highest bitrate, then duration, then track number)
             const bestDup = d.tracks.reduce((best, t) => {
                 const bBr = best.bitrate || 0, tBr = t.bitrate || 0;
                 const bDur = best.duration || 0, tDur = t.duration || 0;
-                return (tBr > bBr || (tBr === bBr && tDur > bDur)) ? t : best;
+                const bTn = best.track_number || 0, tTn = t.track_number || 0;
+                return (tBr > bBr || (tBr === bBr && tDur > bDur) || (tBr === bBr && tDur === bDur && tTn > bTn)) ? t : best;
             }, d.tracks[0]);
+            const findingId = f.id;
             return media + `<div class="repair-detail-sublist">${d.tracks.map((t, i) => {
-                const isBest = t.id === bestDup.id;
-                return `<div class="repair-detail-subitem ${isBest ? 'best' : 'removable'}">
+                const tid = t.track_id || t.id;
+                const isBest = (t.id === bestDup.id);
+                return `<div class="repair-detail-subitem ${isBest ? 'best' : 'removable'}" style="cursor:pointer;" onclick="selectDuplicateToKeep(${findingId}, '${tid}')" title="Click to keep this version">
                     <strong>
                         ${isBest ? '<span class="repair-keep-badge">KEEP</span>' : '<span class="repair-remove-badge">REMOVE</span>'}
                         ${_escFinding(t.title)} by ${_escFinding(t.artist)}
                     </strong>
-                    <span>Album: ${_escFinding(t.album || 'Unknown')}${t.bitrate ? ` &middot; ${t.bitrate} kbps` : ''}${t.duration ? ` &middot; ${Math.round(t.duration)}s` : ''}</span>
+                    <span>Album: ${_escFinding(t.album || 'Unknown')}${t.bitrate ? ` &middot; ${t.bitrate} kbps` : ''}${t.duration ? ` &middot; ${Math.round(t.duration)}s` : ''}${t.track_number ? ` &middot; Track #${t.track_number}` : ''}</span>
                     ${t.file_path ? `<span class="mono">${_escFinding(t.file_path)}</span>` : ''}
                 </div>`;
-            }).join('')}</div>`;
+            }).join('')}</div>
+            <div style="color:rgba(255,255,255,0.3);font-size:11px;padding:4px 0;">Click on a version to keep it, or use "Keep Best" for auto-selection</div>`;
 
         case 'incomplete_album':
             if (d.artist) rows.push(['Artist', d.artist]);
@@ -63046,6 +63050,29 @@ function renderRepairFindingsPagination(total, currentPage) {
     }
     html += `<span class="repair-page-info">${total.toLocaleString()} total</span>`;
     container.innerHTML = html;
+}
+
+async function selectDuplicateToKeep(findingId, keepTrackId) {
+    if (!await showConfirmDialog({ title: 'Keep This Version', message: 'Keep this version and remove the other duplicate(s)?', confirmText: 'Keep', destructive: true })) return;
+    try {
+        const response = await fetch(`/api/repair/findings/${findingId}/fix`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fix_action: keepTrackId }),
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast(result.message || 'Duplicate resolved', 'success');
+        } else {
+            showToast(result.error || 'Failed to resolve duplicate', 'error');
+        }
+        loadRepairFindingsDashboard();
+        loadRepairFindings();
+        updateRepairStatus();
+    } catch (error) {
+        console.error('Error fixing duplicate:', error);
+        showToast('Error resolving duplicate', 'error');
+    }
 }
 
 async function fixRepairFinding(id, findingType) {

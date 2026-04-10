@@ -1174,14 +1174,23 @@ class RepairWorker:
                 conn.close()
 
     def _fix_duplicates(self, entity_type, entity_id, file_path, details):
-        """Keep the best quality duplicate and remove the rest from the database."""
+        """Keep the selected or best quality duplicate and remove the rest from the database."""
         tracks = details.get('tracks', [])
         if len(tracks) < 2:
             return {'success': False, 'error': 'Not enough duplicate info to determine best copy'}
 
-        # Pick best: highest bitrate, then longest duration
-        best = max(tracks, key=lambda t: (t.get('bitrate', 0) or 0, t.get('duration', 0) or 0))
-        best_id = best.get('track_id') or best.get('id')
+        # If user specified which track to keep, use that
+        keep_id = details.get('_fix_action')
+        if keep_id:
+            best = next((t for t in tracks if str(t.get('track_id') or t.get('id')) == str(keep_id)), None)
+            if not best:
+                return {'success': False, 'error': f'Selected track ID {keep_id} not found in duplicates'}
+            best_id = keep_id
+        else:
+            # Auto-pick: highest bitrate, then longest duration, then highest track number (correct > 01)
+            best = max(tracks, key=lambda t: (t.get('bitrate', 0) or 0, t.get('duration', 0) or 0, t.get('track_number', 0) or 0))
+            best_id = best.get('track_id') or best.get('id')
+
         if not best_id:
             return {'success': False, 'error': 'Could not determine best track ID'}
 
