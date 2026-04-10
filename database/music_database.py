@@ -551,9 +551,26 @@ class MusicDatabase:
                 except Exception:
                     pass
 
+            # One-time migration: purge discovery cache entries that lack track_number.
+            # Prior versions cached discovery results without track_number/disc_number/release_date,
+            # causing incorrect file organization (all tracks as "01", missing album year).
+            # Purged entries get re-populated with complete data on next discovery.
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_discovery_cache_v2_migrated'")
+                if not cursor.fetchone():
+                    cursor.execute("DELETE FROM discovery_match_cache WHERE id IN ("
+                                   "SELECT id FROM discovery_match_cache WHERE "
+                                   "matched_data_json NOT LIKE '%track_number%')")
+                    purged = cursor.rowcount
+                    cursor.execute("CREATE TABLE _discovery_cache_v2_migrated (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                    if purged > 0:
+                        logger.info(f"Purged {purged} stale discovery cache entries (missing track_number)")
+            except Exception:
+                pass
+
             conn.commit()
             logger.info("Database initialized successfully")
-            
+
         except Exception as e:
             logger.error(f"Error initializing database: {e}")
             raise
