@@ -1737,6 +1737,79 @@ def _register_automation_handlers():
             '_manages_own_progress': True,
         }
 
+    def _auto_run_script(config):
+        """Execute a user script from the scripts directory."""
+        import subprocess as _sp
+        script_name = config.get('script_name', '')
+        timeout = min(int(config.get('timeout', 60)), 300)
+        automation_id = config.get('_automation_id')
+
+        if not script_name:
+            return {'status': 'error', 'error': 'No script selected'}
+
+        scripts_dir = docker_resolve_path(config_manager.get('scripts.path', './scripts'))
+        if not scripts_dir or not os.path.isdir(scripts_dir):
+            os.makedirs(scripts_dir, exist_ok=True)
+            return {'status': 'error', 'error': 'Scripts directory is empty. Add scripts to the scripts/ folder.'}
+
+        script_path = os.path.join(scripts_dir, script_name)
+        script_path = os.path.realpath(script_path)
+
+        # Security: block path traversal
+        if not script_path.startswith(os.path.realpath(scripts_dir)):
+            return {'status': 'error', 'error': 'Script path traversal blocked'}
+
+        if not os.path.isfile(script_path):
+            return {'status': 'error', 'error': f'Script not found: {script_name}'}
+
+        _update_automation_progress(automation_id, phase=f'Running {script_name}...', progress=10)
+
+        # Build environment with SoulSync context
+        env = os.environ.copy()
+        event_data = config.get('_event_data') or {}
+        env['SOULSYNC_EVENT'] = str(event_data.get('type', ''))
+        env['SOULSYNC_AUTOMATION'] = config.get('_automation_name', '')
+        env['SOULSYNC_SCRIPTS_DIR'] = scripts_dir
+
+        try:
+            # Determine how to run the script
+            if script_path.endswith('.py'):
+                cmd = ['python', script_path]
+            elif script_path.endswith('.sh'):
+                cmd = ['bash', script_path]
+            else:
+                cmd = [script_path]
+
+            result = _sp.run(
+                cmd,
+                capture_output=True, text=True, timeout=timeout,
+                cwd=scripts_dir, env=env
+            )
+
+            _update_automation_progress(automation_id, phase='Script completed', progress=100)
+
+            stdout = result.stdout[:2000] if result.stdout else ''
+            stderr = result.stderr[:1000] if result.stderr else ''
+
+            if result.returncode == 0:
+                logger.info(f"Script '{script_name}' completed (exit 0)")
+            else:
+                logger.warning(f"Script '{script_name}' exited with code {result.returncode}")
+
+            return {
+                'status': 'completed' if result.returncode == 0 else 'error',
+                'exit_code': str(result.returncode),
+                'stdout': stdout,
+                'stderr': stderr,
+                'script': script_name,
+            }
+        except _sp.TimeoutExpired:
+            _update_automation_progress(automation_id, phase='Script timed out', progress=100)
+            return {'status': 'error', 'error': f'Script timed out after {timeout}s', 'script': script_name}
+        except Exception as e:
+            return {'status': 'error', 'error': str(e), 'script': script_name}
+
+    automation_engine.register_action_handler('run_script', _auto_run_script)
     automation_engine.register_action_handler('full_cleanup', _auto_full_cleanup)
 
     automation_engine.register_action_handler('start_database_update', _auto_start_database_update,
@@ -5789,6 +5862,30 @@ def _collect_known_signals():
         pass
     return sorted(signals)
 
+@app.route('/api/scripts', methods=['GET'])
+def list_available_scripts():
+    """List executable scripts in the scripts directory."""
+    try:
+        scripts_dir = docker_resolve_path(config_manager.get('scripts.path', './scripts'))
+        if not scripts_dir or not os.path.isdir(scripts_dir):
+            return jsonify({'scripts': []})
+
+        allowed_ext = {'.sh', '.py', '.bat', '.ps1', '.rb', '.pl', '.js'}
+        scripts = []
+        for fname in sorted(os.listdir(scripts_dir)):
+            ext = os.path.splitext(fname)[1].lower()
+            fpath = os.path.join(scripts_dir, fname)
+            if os.path.isfile(fpath) and (ext in allowed_ext or os.access(fpath, os.X_OK)):
+                scripts.append({
+                    'name': fname,
+                    'extension': ext,
+                    'size': os.path.getsize(fpath),
+                })
+        return jsonify({'scripts': scripts})
+    except Exception as e:
+        return jsonify({'scripts': [], 'error': str(e)})
+
+
 @app.route('/api/automations/blocks', methods=['GET'])
 def get_automation_blocks():
     """Return available block types for the automation builder sidebar."""
@@ -5953,6 +6050,8 @@ def get_automation_blocks():
              "description": "Clear quarantine, download queue, staging folder, and search history in one sweep", "available": True},
             {"type": "deep_scan_library", "label": "Deep Scan Library", "icon": "search",
              "description": "Full library comparison without losing enrichment data", "available": True},
+            {"type": "run_script", "label": "Run Script", "icon": "terminal",
+             "description": "Execute a script from the scripts folder", "available": True},
         ],
         "notifications": [
             {"type": "discord_webhook", "label": "Discord Webhook", "icon": "message", "description": "Send a Discord notification", "available": True,
@@ -5968,6 +6067,12 @@ def get_automation_blocks():
              "description": "Fire a signal that other automations can listen for", "available": True,
              "config_fields": [
                  {"key": "signal_name", "type": "signal_input", "label": "Signal Name"}
+             ]},
+            # Run script then-action
+            {"type": "run_script", "label": "Run Script", "icon": "terminal",
+             "description": "Execute a script after the action completes", "available": True,
+             "config_fields": [
+                 {"key": "script_name", "type": "script_select", "label": "Script"}
              ]},
         ],
         "known_signals": _collect_known_signals(),

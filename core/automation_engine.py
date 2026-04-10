@@ -846,6 +846,14 @@ class AutomationEngine:
                         emit_data['signal_name'] = sig
                         logger.info(f"Automation '{automation.get('name')}' firing signal: {sig} (depth={chain_depth + 1})")
                         self.emit('signal:' + sig, emit_data)
+                elif t == 'run_script':
+                    handler = self._action_handlers.get('run_script')
+                    if handler:
+                        script_config = dict(c)
+                        # Pass action result as environment context
+                        script_config['_automation_name'] = automation.get('name', '')
+                        script_config['_event_data'] = {'type': 'then_action', 'result': {k: str(v) for k, v in action_result.items() if not k.startswith('_')}}
+                        handler['handler'](script_config)
             except Exception as e:
                 logger.error(f"Then-action '{item.get('type')}' failed for automation {automation.get('id')}: {e}")
 

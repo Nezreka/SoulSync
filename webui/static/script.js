@@ -66398,7 +66398,7 @@ const _autoIcons = {
     scan_library: '\uD83D\uDD04', refresh_mirrored: '\uD83D\uDCC2', sync_playlist: '\uD83D\uDD01',
     discover_playlist: '\uD83D\uDD0D', discovery_completed: '\uD83D\uDD0D',
     notify_only: '\uD83D\uDD14', discord_webhook: '\uD83D\uDCAC', pushbullet: '\uD83D\uDD14', telegram: '\u2709\uFE0F', webhook: '\uD83C\uDF10',
-    signal_received: '\u26A1', fire_signal: '\u26A1',
+    signal_received: '\u26A1', fire_signal: '\u26A1', run_script: '\uD83D\uDCBB',
     // Phase 3
     wishlist_processing_completed: '\u2705', watchlist_scan_completed: '\u2705',
     database_update_completed: '\uD83D\uDDC4\uFE0F', download_failed: '\u274C',
@@ -67662,6 +67662,7 @@ function _autoFormatNotify(type) {
     if (type === 'pushbullet') return 'Pushbullet';
     if (type === 'telegram') return 'Telegram';
     if (type === 'fire_signal') return '\u26A1 Signal';
+    if (type === 'run_script') return '\uD83D\uDCBB Script';
     return type || '';
 }
 function _autoParseUTC(ts) {
@@ -68342,6 +68343,34 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         </div>
         <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Other automations with "Signal Received" trigger will wake up</div>`;
     }
+    if (blockType === 'run_script') {
+        const scriptName = _escAttr(config.script_name || '');
+        const timeout = config.timeout || 60;
+        // Fetch scripts list and populate
+        const selectId = `cfg-${slotKey}-script_name`;
+        setTimeout(async () => {
+            try {
+                const resp = await fetch('/api/scripts');
+                const data = await resp.json();
+                const sel = document.getElementById(selectId);
+                if (sel && data.scripts) {
+                    sel.innerHTML = '<option value="">Select a script...</option>' +
+                        data.scripts.map(s => `<option value="${_escAttr(s.name)}"${s.name === scriptName ? ' selected' : ''}>${escapeHtml(s.name)} (${s.extension})</option>`).join('');
+                }
+            } catch (e) { console.warn('Failed to load scripts:', e); }
+        }, 100);
+        return `<div class="config-row">
+            <label>Script</label>
+            <select id="${selectId}">
+                <option value="${scriptName}">${scriptName || 'Loading...'}</option>
+            </select>
+        </div>
+        <div class="config-row">
+            <label>Timeout</label>
+            <input type="number" id="cfg-${slotKey}-timeout" value="${timeout}" min="5" max="300" style="width:80px;"> seconds
+        </div>
+        <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Place scripts in the <code>scripts/</code> folder. Supported: .sh, .py, .bat, .ps1</div>`;
+    }
     if (blockType === 'scan_watchlist' || blockType === 'scan_library' || blockType === 'notify_only') {
         return '<div class="config-row" style="color:rgba(255,255,255,0.4);font-size:12px;">No configuration needed</div>';
     }
@@ -68700,6 +68729,12 @@ function _readPlacedConfig(slotKey) {
     }
     if (type === 'signal_received' || type === 'fire_signal') {
         return { signal_name: document.getElementById('cfg-' + slotKey + '-signal_name')?.value?.trim() || '' };
+    }
+    if (type === 'run_script') {
+        return {
+            script_name: document.getElementById('cfg-' + slotKey + '-script_name')?.value || '',
+            timeout: parseInt(document.getElementById('cfg-' + slotKey + '-timeout')?.value || '60') || 60,
+        };
     }
     if (type === 'discord_webhook') {
         return {
