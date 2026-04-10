@@ -161,8 +161,8 @@ class RepairWorker:
     def itunes_client(self):
         if self._itunes_client is None:
             try:
-                from core.metadata_service import _create_fallback_client
-                self._itunes_client = _create_fallback_client()
+                from core.metadata_service import get_primary_client
+                self._itunes_client = get_primary_client()
             except Exception as e:
                 logger.error("Failed to initialize fallback metadata client: %s", e)
         return self._itunes_client

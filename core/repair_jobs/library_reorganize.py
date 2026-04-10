@@ -785,8 +785,8 @@ class LibraryReorganizeJob(RepairJob):
         if not search_client:
             # Try fallback (iTunes/Deezer)
             try:
-                from core.metadata_service import _create_fallback_client
-                search_client = _create_fallback_client()
+                from core.metadata_service import get_primary_client
+                search_client = get_primary_client()
                 source_name = 'fallback'
             except Exception:
                 pass
