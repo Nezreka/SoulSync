@@ -568,6 +568,23 @@ class MusicDatabase:
             except Exception:
                 pass
 
+            # One-time migration: purge Deezer album/track cache entries with missing data.
+            # Deezer's /artist/{id}/albums returns albums without artist info, and search
+            # results cache tracks without track_position — both produce bad metadata.
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_deezer_cache_v2_migrated'")
+                if not cursor.fetchone():
+                    cursor.execute("""DELETE FROM metadata_cache_entities
+                                     WHERE source = 'deezer' AND entity_type IN ('album', 'track')""")
+                    purged = cursor.rowcount
+                    cursor.execute("""DELETE FROM metadata_cache_searches
+                                     WHERE source = 'deezer' AND search_type IN ('album', 'track')""")
+                    cursor.execute("CREATE TABLE _deezer_cache_v2_migrated (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                    if purged > 0:
+                        logger.info(f"Purged {purged} stale Deezer cache entries (missing artist/track_position)")
+            except Exception:
+                pass
+
             conn.commit()
             logger.info("Database initialized successfully")
 
