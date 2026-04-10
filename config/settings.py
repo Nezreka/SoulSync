@@ -463,6 +463,10 @@ class ConfigManager:
             "library": {
                 "music_paths": []
             },
+            "scripts": {
+                "path": "./scripts",
+                "timeout": 60
+            },
             "import": {
                 "staging_path": "./Staging",
                 "replace_lower_quality": False
