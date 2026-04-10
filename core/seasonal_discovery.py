@@ -551,8 +551,8 @@ class SeasonalDiscoveryService:
                         continue
             else:
                 # Fallback metadata source (iTunes or Deezer)
-                from core.metadata_service import _create_fallback_client
-                fallback_client = _create_fallback_client()
+                from core.metadata_service import get_primary_client
+                fallback_client = get_primary_client()
 
                 for keyword in search_keywords:
                     try:

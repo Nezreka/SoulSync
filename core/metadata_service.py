@@ -140,8 +140,8 @@ class MetadataService:
         """
         self.preferred_provider = preferred_provider
         self.spotify = SpotifyClient()
-        self._fallback_source = _get_configured_fallback_source()
-        self.itunes = _create_fallback_client()  # May be iTunesClient or DeezerClient
+        self._fallback_source = get_primary_source()
+        self.itunes = get_primary_client()  # May be iTunesClient or DeezerClient
 
         self._log_initialization()
 
@@ -312,10 +312,10 @@ class MetadataService:
         logger.info("Reloading metadata service configuration")
         self.spotify.reload_config()
         # Re-create fallback client in case the setting changed
-        new_source = _get_configured_fallback_source()
+        new_source = get_primary_source()
         if new_source != self._fallback_source:
             self._fallback_source = new_source
-            self.itunes = _create_fallback_client()
+            self.itunes = get_primary_client()
         elif hasattr(self.itunes, 'reload_config'):
             self.itunes.reload_config()
         self._log_initialization()
