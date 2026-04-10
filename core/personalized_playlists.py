@@ -102,17 +102,16 @@ class PersonalizedPlaylistsService:
 
     def _get_active_source(self) -> str:
         """
-        Determine which music source is active for discovery.
-        Returns 'spotify' if Spotify is authenticated, otherwise the configured fallback ('itunes' or 'deezer').
+        Determine which music source is active — respects user's configured primary source.
         """
-        if self.spotify_client and hasattr(self.spotify_client, 'is_spotify_authenticated'):
-            if self.spotify_client.is_spotify_authenticated():
-                return 'spotify'
         try:
             from config.settings import config_manager
-            return config_manager.get('metadata.fallback_source', 'itunes') or 'itunes'
+            source = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
+            if source == 'spotify' and not (self.spotify_client and hasattr(self.spotify_client, 'is_spotify_authenticated') and self.spotify_client.is_spotify_authenticated()):
+                return 'deezer'
+            return source
         except Exception:
-            return 'itunes'
+            return 'deezer'
 
     def _build_track_dict(self, row, source: str) -> Dict:
         """Build a standardized track dictionary from a database row."""
@@ -882,8 +881,8 @@ class PersonalizedPlaylistsService:
                 logger.error(f"Invalid seed artists count: {len(seed_artist_ids)}")
                 return {'tracks': [], 'error': 'Must provide 1-5 seed artists'}
 
-            use_spotify = self.spotify_client and self.spotify_client.sp
-            active_source = 'spotify' if use_spotify else self._get_active_source()
+            active_source = self._get_active_source()
+            use_spotify = (active_source == 'spotify') and self.spotify_client and self.spotify_client.sp
             logger.info(f"Building custom playlist from {len(seed_artist_ids)} seed artists (source: {active_source})")
 
             # Step 1: Get similar artists for each seed
@@ -914,8 +913,8 @@ class PersonalizedPlaylistsService:
                                 seen_artist_ids.add(artist_id)
                                 if len(all_similar_artists) >= 25:
                                     break
-                    elif use_spotify:
-                        # Fallback: fetch related artists from Spotify API
+                    elif self.spotify_client and self.spotify_client.sp:
+                        # Fallback: fetch related artists from Spotify API (no Deezer/iTunes equivalent)
                         logger.info(f"No cached similar artists for {seed_artist_id}, trying Spotify related artists API")
                         try:
                             related = self.spotify_client.sp.artist_related_artists(seed_artist_id)
