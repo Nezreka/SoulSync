@@ -32432,8 +32432,20 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                     except (json.JSONDecodeError, TypeError):
                         pass
                 if existing_extra.get('discovered'):
-                    pl_skipped += 1
-                    total_skipped += 1
+                    # Check if matched_data is complete — old discoveries may be missing
+                    # track_number/release_date due to the Track dataclass stripping them.
+                    # Re-discover these so the enriched pipeline fills in the gaps.
+                    md = existing_extra.get('matched_data', {})
+                    album = md.get('album', {})
+                    has_track_num = md.get('track_number')
+                    has_release = album.get('release_date') if isinstance(album, dict) else None
+                    has_album_id = album.get('id') if isinstance(album, dict) else None
+                    if has_track_num and (has_release or has_album_id):
+                        pl_skipped += 1
+                        total_skipped += 1
+                    else:
+                        # Incomplete discovery — re-discover to get full metadata
+                        undiscovered_tracks.append(track)
                 else:
                     undiscovered_tracks.append(track)
 
