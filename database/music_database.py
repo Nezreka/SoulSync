@@ -4598,7 +4598,10 @@ class MusicDatabase:
                     bitrate = track_obj.bitRate
                 if file_path is None and hasattr(track_obj, 'suffix') and track_obj.suffix:
                     file_path = f"{track_obj.title}.{track_obj.suffix}"
-                
+
+                # Extract MusicBrainz recording ID from track object (set by Navidrome client)
+                musicbrainz_recording_id = getattr(track_obj, 'musicBrainzId', None)
+
                 # Check if track already exists — UPDATE to preserve enrichment columns,
                 # INSERT only for genuinely new tracks
                 cursor.execute("SELECT 1 FROM tracks WHERE id = ? LIMIT 1", (track_id,))
@@ -4607,19 +4610,19 @@ class MusicDatabase:
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source))
+                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, musicbrainz_recording_id, server_source, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, musicbrainz_recording_id, server_source))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
                     # isrc, bpm, musicbrainz IDs, and all other enrichment data
                     cursor.execute("""
                         UPDATE tracks
                         SET album_id = ?, artist_id = ?, title = ?, track_number = ?,
-                            duration = ?, file_path = ?, bitrate = ?, server_source = ?,
+                            duration = ?, file_path = ?, bitrate = ?, musicbrainz_recording_id = ?, server_source = ?,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_id))
+                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, musicbrainz_recording_id, server_source, track_id))
 
                 conn.commit()
 
