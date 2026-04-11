@@ -353,6 +353,7 @@ class WatchlistScanner:
         self._database = None
         self._wishlist_service = None
         self._matching_engine = None
+        self._rescan_cutoff_log_marker = None
         
         if metadata_service:
             self._metadata_service = metadata_service
@@ -932,7 +933,9 @@ class WatchlistScanner:
                 # Check if a lookback period change requires a one-time wider window
                 rescan_cutoff = self._get_rescan_cutoff()
                 if rescan_cutoff == 'all':
-                    logger.info(f"Lookback period changed to 'all' — returning full discography")
+                    if self._rescan_cutoff_log_marker != 'all':
+                        logger.info(f"Lookback period changed to 'all' — returning full discography")
+                        self._rescan_cutoff_log_marker = 'all'
                     cutoff_timestamp = None
                     needs_full_discog = True
                 elif rescan_cutoff is not None:
@@ -942,7 +945,10 @@ class WatchlistScanner:
                     if rescan_cutoff.tzinfo is None:
                         rescan_cutoff = rescan_cutoff.replace(tzinfo=timezone.utc)
                     if rescan_cutoff < scan_ts:
-                        logger.info(f"Lookback period change detected — expanding cutoff from {cutoff_timestamp} to {rescan_cutoff}")
+                        marker = rescan_cutoff.isoformat()
+                        if self._rescan_cutoff_log_marker != marker:
+                            logger.info(f"Lookback period change detected — expanding cutoff from {cutoff_timestamp} to {rescan_cutoff}")
+                            self._rescan_cutoff_log_marker = marker
                         cutoff_timestamp = rescan_cutoff
             else:
                 # No scan timestamp — first scan, use lookback period
@@ -1248,6 +1254,7 @@ class WatchlistScanner:
                 cursor.execute("DELETE FROM metadata WHERE key = 'watchlist_rescan_cutoff'")
                 conn.commit()
                 logger.info("Cleared watchlist rescan cutoff flag")
+                self._rescan_cutoff_log_marker = None
         except Exception as e:
             logger.debug(f"Error clearing rescan cutoff: {e}")
 

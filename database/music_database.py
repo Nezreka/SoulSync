@@ -15,6 +15,9 @@ from utils.logging_config import get_logger
 
 logger = get_logger("music_database")
 
+_database_initialized_paths = set()
+_database_initialization_lock = threading.Lock()
+
 # Import matching engine for enhanced similarity logic
 try:
     from core.matching_engine import MusicMatchingEngine
@@ -168,8 +171,19 @@ class MusicDatabase:
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Initialize database
-        self._initialize_database()
+        # Initialize database once per process for this path
+        self._initialize_database_once()
+
+    def _initialize_database_once(self):
+        """Run schema setup and migrations once per database path per process."""
+        db_key = str(self.database_path.resolve())
+
+        with _database_initialization_lock:
+            if db_key in _database_initialized_paths:
+                return
+
+            self._initialize_database()
+            _database_initialized_paths.add(db_key)
     
     def _get_connection(self) -> sqlite3.Connection:
         """Get a NEW database connection for each operation (thread-safe)"""
