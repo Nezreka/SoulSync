@@ -7,6 +7,7 @@ the logic. This prevents bugs where different files have different defaults
 or auth checks.
 """
 
+import threading
 from typing import List, Optional, Dict, Any, Literal
 from core.spotify_client import SpotifyClient
 from core.itunes_client import iTunesClient
@@ -15,6 +16,9 @@ from utils.logging_config import get_logger
 logger = get_logger("metadata_service")
 
 MetadataProvider = Literal["spotify", "itunes", "auto"]
+
+_client_cache_lock = threading.RLock()
+_client_cache: Dict[str, Any] = {}
 
 
 # =============================================================================
@@ -58,8 +62,89 @@ def get_primary_client():
 
     This is THE single source of truth for "which client should I call?"
     """
-    source = get_primary_source()
+    return _get_client_for_source(get_primary_source())
 
+
+def get_deezer_client():
+    """Get cached Deezer client.
+
+    Deezer client is safe to reuse across requests because it owns no
+    request-specific state beyond the current access token.
+    """
+    from core.deezer_client import DeezerClient
+    try:
+        from config.settings import config_manager
+        current_token = config_manager.get('deezer.access_token', None)
+    except Exception:
+        current_token = None
+
+    cache_key = f"deezer::{current_token or ''}"
+    with _client_cache_lock:
+        client = _client_cache.get(cache_key)
+        if client is None:
+            client = DeezerClient()
+            _client_cache[cache_key] = client
+        return client
+
+
+def get_itunes_client():
+    """Get cached iTunes client."""
+    with _client_cache_lock:
+        client = _client_cache.get("itunes")
+        if client is None:
+            client = iTunesClient()
+            _client_cache["itunes"] = client
+        return client
+
+
+def get_discogs_client(token: Optional[str] = None):
+    """Get cached Discogs client.
+
+    Discogs auth changes are token-driven, so the cache key tracks the
+    current configured token.
+    """
+    if token is None:
+        try:
+            from config.settings import config_manager
+            current_token = config_manager.get('discogs.token', '') or ''
+        except Exception:
+            current_token = ''
+    else:
+        current_token = token or ''
+
+    cache_key = f"discogs::{current_token}"
+    with _client_cache_lock:
+        client = _client_cache.get(cache_key)
+        if client is None:
+            from core.discogs_client import DiscogsClient
+            client = DiscogsClient(token=current_token or None)
+            _client_cache[cache_key] = client
+        return client
+
+
+def get_hydrabase_client():
+    """Return current Hydrabase client if connected, else iTunes fallback."""
+    try:
+        import importlib
+        ws = importlib.import_module('web_server')
+        client = getattr(ws, 'hydrabase_client', None)
+        if client and client.is_connected():
+            return client
+    except Exception:
+        pass
+    return get_itunes_client()
+
+
+def clear_cached_metadata_clients():
+    """Clear cached metadata clients.
+
+    Useful for tests and config reload flows.
+    """
+    with _client_cache_lock:
+        _client_cache.clear()
+
+
+def _get_client_for_source(source: str):
     if source == 'spotify':
         try:
             import importlib
@@ -69,38 +154,18 @@ def get_primary_client():
                 return sc
         except Exception:
             pass
-        # Spotify selected but unavailable — fall back to Deezer
-        from core.deezer_client import DeezerClient
-        return DeezerClient()
+        return get_deezer_client()
 
     if source == 'deezer':
-        from core.deezer_client import DeezerClient
-        return DeezerClient()
+        return get_deezer_client()
 
     if source == 'discogs':
-        try:
-            from config.settings import config_manager
-            token = config_manager.get('discogs.token', '')
-            if token:
-                from core.discogs_client import DiscogsClient
-                return DiscogsClient(token=token)
-        except Exception:
-            pass
-        return iTunesClient()
+        return get_discogs_client()
 
     if source == 'hydrabase':
-        try:
-            import importlib
-            ws = importlib.import_module('web_server')
-            client = getattr(ws, 'hydrabase_client', None)
-            if client and client.is_connected():
-                return client
-        except Exception:
-            pass
-        return iTunesClient()
+        return get_hydrabase_client()
 
-    # Default: iTunes
-    return iTunesClient()
+    return get_itunes_client()
 
 
 # =============================================================================
@@ -141,7 +206,7 @@ class MetadataService:
         self.preferred_provider = preferred_provider
         self.spotify = SpotifyClient()
         self._fallback_source = get_primary_source()
-        self.itunes = get_primary_client()  # May be iTunesClient or DeezerClient
+        self.itunes = _get_client_for_source(self._fallback_source)
 
         self._log_initialization()
 
@@ -311,13 +376,9 @@ class MetadataService:
         """Reload configuration for both clients"""
         logger.info("Reloading metadata service configuration")
         self.spotify.reload_config()
-        # Re-create fallback client in case the setting changed
         new_source = get_primary_source()
-        if new_source != self._fallback_source:
-            self._fallback_source = new_source
-            self.itunes = get_primary_client()
-        elif hasattr(self.itunes, 'reload_config'):
-            self.itunes.reload_config()
+        self._fallback_source = new_source
+        self.itunes = _get_client_for_source(new_source)
         self._log_initialization()
 
 
