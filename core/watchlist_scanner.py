@@ -1209,9 +1209,9 @@ class WatchlistScanner:
                     results = client.search_artists(artist_name, limit=5)
                     return self._best_artist_match(results, artist_name)
 
-            # Fallback: create a fresh Deezer client
-            from core.deezer_client import DeezerClient
-            client = DeezerClient()
+            # Fallback: use cached Deezer client
+            from core.metadata_service import get_deezer_client
+            client = get_deezer_client()
             results = client.search_artists(artist_name, limit=5)
             return self._best_artist_match(results, artist_name)
         except Exception as e:
@@ -1221,8 +1221,8 @@ class WatchlistScanner:
     def _match_to_discogs(self, artist_name: str) -> Optional[str]:
         """Match artist name to Discogs ID using fuzzy name comparison."""
         try:
-            from core.discogs_client import DiscogsClient
-            client = DiscogsClient()
+            from core.metadata_service import get_discogs_client
+            client = get_discogs_client()
             results = client.search_artists(artist_name, limit=5)
             return self._best_artist_match(results, artist_name)
         except Exception as e:

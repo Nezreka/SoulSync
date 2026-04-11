@@ -702,8 +702,7 @@ def _register_automation_handlers():
 
                 elif source == 'deezer':
                     try:
-                        from core.deezer_client import DeezerClient
-                        deezer = DeezerClient()
+                        deezer = _get_deezer_client()
                         playlist_data = deezer.get_playlist(source_id)
                         if playlist_data and playlist_data.get('tracks'):
                             tracks = []
@@ -7125,12 +7124,8 @@ def deezer_callback():
         config_manager.set('deezer.access_token', access_token)
 
         # Reload the global deezer client to pick up the token
-        global deezer_client
-        if deezer_client:
-            deezer_client.reload_config()
-        else:
-            from core.deezer_client import DeezerClient
-            deezer_client = DeezerClient()
+        deezer_client = _get_deezer_client()
+        deezer_client.reload_config()
 
         add_activity_item("✅", "Deezer Auth Complete", "Deezer account connected via OAuth", "Now")
         logger.info("Deezer OAuth authentication successful")
@@ -8024,15 +8019,13 @@ def enhanced_search_source(source_name):
             else:
                 return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
         elif source_name == 'itunes':
-            from core.itunes_client import iTunesClient
-            client = iTunesClient()
+            client = _get_itunes_client()
         elif source_name == 'deezer':
             client = _get_deezer_client()
         elif source_name == 'discogs':
             token = config_manager.get('discogs.token', '')
             if token:
-                from core.discogs_client import DiscogsClient
-                client = DiscogsClient(token=token)
+                client = _get_discogs_client(token)
             else:
                 return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
         elif source_name == 'hydrabase':
@@ -10208,8 +10201,7 @@ def get_artist_image(artist_id):
         source_override = request.args.get('source', '')
 
         if source_override == 'itunes':
-            from core.itunes_client import iTunesClient
-            client = iTunesClient()
+            client = _get_itunes_client()
             image_url = client._get_artist_image_from_albums(artist_id)
             return jsonify({"success": True, "image_url": image_url})
         elif source_override == 'deezer':
@@ -10217,8 +10209,7 @@ def get_artist_image(artist_id):
             image_url = client._get_artist_image_from_albums(artist_id)
             return jsonify({"success": True, "image_url": image_url})
         elif source_override == 'discogs':
-            from core.discogs_client import DiscogsClient
-            client = DiscogsClient()
+            client = _get_discogs_client()
             image_url = client._get_artist_image_from_albums(artist_id)
             return jsonify({"success": True, "image_url": image_url})
         elif source_override == 'hydrabase':
@@ -10228,8 +10219,7 @@ def get_artist_image(artist_id):
                 client = _get_deezer_client()
                 image_url = client._get_artist_image_from_albums(artist_id)
             elif plugin == 'itunes' or artist_id.isdigit():
-                from core.itunes_client import iTunesClient
-                client = iTunesClient()
+                client = _get_itunes_client()
                 image_url = client._get_artist_image_from_albums(artist_id)
             else:
                 image_url = None
@@ -10283,8 +10273,7 @@ def get_artist_discography(artist_id):
                     if albums:
                         active_source = 'spotify'
                 elif source_override == 'itunes':
-                    from core.itunes_client import iTunesClient
-                    itunes_cl = iTunesClient()
+                    itunes_cl = _get_itunes_client()
                     albums = itunes_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
                     if albums:
                         active_source = 'itunes'
@@ -10294,8 +10283,7 @@ def get_artist_discography(artist_id):
                     if albums:
                         active_source = 'deezer'
                 elif source_override == 'discogs':
-                    from core.discogs_client import DiscogsClient
-                    discogs_cl = DiscogsClient()
+                    discogs_cl = _get_discogs_client()
                     albums = discogs_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
                     if albums:
                         active_source = 'discogs'
@@ -10304,8 +10292,7 @@ def get_artist_discography(artist_id):
                     if plugin == 'deezer':
                         hb_cl = _get_deezer_client()
                     elif plugin == 'itunes' or artist_id.isdigit():
-                        from core.itunes_client import iTunesClient
-                        hb_cl = iTunesClient()
+                        hb_cl = _get_itunes_client()
                     else:
                         hb_cl = spotify_client
                     albums = hb_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
@@ -10315,20 +10302,17 @@ def get_artist_discography(artist_id):
                 # If direct ID lookup failed but we have artist name, search by name
                 if not albums and artist_name:
                     if source_override == 'itunes':
-                        from core.itunes_client import iTunesClient
-                        cl = iTunesClient()
+                        cl = _get_itunes_client()
                     elif source_override == 'hydrabase':
                         plugin = request.args.get('plugin', '').lower()
                         if plugin == 'deezer':
                             cl = _get_deezer_client()
                         else:
-                            from core.itunes_client import iTunesClient
-                            cl = iTunesClient()
+                            cl = _get_itunes_client()
                     elif source_override == 'deezer':
                         cl = _get_deezer_client()
                     elif source_override == 'discogs':
-                        from core.discogs_client import DiscogsClient
-                        cl = DiscogsClient()
+                        cl = _get_discogs_client()
                     elif source_override == 'spotify' and spotify_available:
                         cl = spotify_client
                     else:
@@ -10690,20 +10674,17 @@ def get_artist_album_tracks(artist_id, album_id):
         source_override = request.args.get('source', '')
         client = spotify_client
         if source_override == 'itunes':
-            from core.itunes_client import iTunesClient
-            client = iTunesClient()
+            client = _get_itunes_client()
         elif source_override == 'hydrabase':
             plugin = request.args.get('plugin', '').lower()
             if plugin == 'deezer':
                 client = _get_deezer_client()
             elif plugin == 'itunes' or album_id.isdigit():
-                from core.itunes_client import iTunesClient
-                client = iTunesClient()
+                client = _get_itunes_client()
         elif source_override == 'deezer':
             client = _get_deezer_client()
         elif source_override == 'discogs':
-            from core.discogs_client import DiscogsClient
-            client = DiscogsClient()
+            client = _get_discogs_client()
 
         print(f"🎵 Fetching tracks for album: {album_id} by artist: {artist_id} (source: {source_override or 'auto'})")
 
@@ -10806,8 +10787,7 @@ def download_discography(artist_id):
         else:
             fallback_src = _get_metadata_fallback_source()
             if fallback_src == 'itunes':
-                from core.itunes_client import iTunesClient
-                client = iTunesClient()
+                client = _get_itunes_client()
             elif fallback_src == 'deezer':
                 client = _get_deezer_client()
 
@@ -14139,8 +14119,7 @@ def redownload_search_metadata(track_id):
         if spotify_client and spotify_client.is_authenticated():
             sources_to_search.append(('spotify', spotify_client))
         try:
-            from core.itunes_client import iTunesClient
-            sources_to_search.append(('itunes', iTunesClient()))
+            sources_to_search.append(('itunes', _get_itunes_client()))
         except Exception as e:
             logger.debug(f"iTunes client not available for redownload search: {e}")
         try:
@@ -14387,8 +14366,7 @@ def redownload_start(track_id):
                     if full_track_details and full_track_details.get('album', {}).get('id'):
                         full_album_data = spotify_client.get_album(full_track_details['album']['id'])
                 elif meta_source == 'itunes':
-                    from core.itunes_client import iTunesClient
-                    _it = iTunesClient()
+                    _it = _get_itunes_client()
                     results = _it._lookup(id=meta_id, entity='song')
                     if results:
                         for r in results:
@@ -17544,8 +17522,7 @@ def _apply_path_template(template: str, context: dict) -> str:
             itunes_artist_id = context.get('_itunes_artist_id')
             if itunes_artist_id and (',' in album_artist_value or ' & ' in album_artist_value):
                 try:
-                    from core.itunes_client import iTunesClient
-                    resolved = iTunesClient().resolve_primary_artist(itunes_artist_id)
+                    resolved = _get_itunes_client().resolve_primary_artist(itunes_artist_id)
                     if resolved and resolved != album_artist_value:
                         album_artist_value = resolved
                 except Exception:
@@ -18050,8 +18027,7 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
             _src = original_search.get('_source') or _track_info_ctx.get('_source', '')
             if _aid.isdigit() and _src != 'deezer':
                 try:
-                    from core.itunes_client import iTunesClient
-                    resolved = iTunesClient().resolve_primary_artist(_aid)
+                    resolved = _get_itunes_client().resolve_primary_artist(_aid)
                     if resolved and resolved != _raw_album_artist:
                         _raw_album_artist = resolved
                 except Exception:
@@ -31234,23 +31210,20 @@ def get_album_tracks(album_id):
         # Use explicit source client when overridden (prevents numeric ID misrouting)
         client = spotify_client
         if source_override == 'itunes':
-            from core.itunes_client import iTunesClient
-            client = iTunesClient()
+            client = _get_itunes_client()
         elif source_override == 'hydrabase':
             # Hydrabase IDs originate from whichever plugin the peer runs.
             # 'plugin' param is authoritative; fall back to ID format detection.
             plugin = request.args.get('plugin', '').lower()
             if plugin == 'itunes' or (not plugin and album_id.isdigit()):
-                from core.itunes_client import iTunesClient
-                client = iTunesClient()
+                client = _get_itunes_client()
             elif plugin == 'deezer':
                 client = _get_deezer_client()
             # else: spotify (default)
         elif source_override == 'deezer':
             client = _get_deezer_client()
         elif source_override == 'discogs':
-            from core.discogs_client import DiscogsClient
-            client = DiscogsClient()
+            client = _get_discogs_client()
 
         album_data = client.get_album(album_id)
         if not album_data:
@@ -31665,8 +31638,7 @@ def get_discover_album(source, album_id):
                 fallback_client = _get_deezer_client()
                 fallback_source = 'deezer'
             else:
-                from core.itunes_client import iTunesClient
-                fallback_client = iTunesClient()
+                fallback_client = _get_itunes_client()
                 fallback_source = 'itunes'
 
             album_data = fallback_client.get_album(album_id)
@@ -33613,19 +33585,20 @@ def cancel_tidal_sync(playlist_id):
 deezer_discovery_states = {}  # Key: playlist_id, Value: discovery state
 deezer_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="deezer_discovery")
 
-# Lazy-initialized global DeezerClient instance
-_deezer_client_instance = None
-_deezer_client_lock = threading.Lock()
-
 def _get_deezer_client():
-    """Get or create the global DeezerClient instance (thread-safe)."""
-    global _deezer_client_instance
-    if _deezer_client_instance is None:
-        with _deezer_client_lock:
-            if _deezer_client_instance is None:
-                from core.deezer_client import DeezerClient
-                _deezer_client_instance = DeezerClient()
-    return _deezer_client_instance
+    """Get cached Deezer client."""
+    from core.metadata_service import get_deezer_client
+    return get_deezer_client()
+
+def _get_itunes_client():
+    """Get cached iTunes client."""
+    from core.metadata_service import get_itunes_client
+    return get_itunes_client()
+
+def _get_discogs_client(token=None):
+    """Get cached Discogs client."""
+    from core.metadata_service import get_discogs_client
+    return get_discogs_client(token)
 
 def _get_metadata_fallback_source():
     """Get the configured primary metadata source.
@@ -33650,17 +33623,13 @@ def _get_metadata_fallback_client():
     if source == 'discogs':
         token = config_manager.get('discogs.token', '')
         if token:
-            from core.discogs_client import DiscogsClient
-            return DiscogsClient(token=token)
-        from core.itunes_client import iTunesClient
-        return iTunesClient()
+            return _get_discogs_client(token)
+        return _get_itunes_client()
     if source == 'hydrabase':
         if hydrabase_client and hydrabase_client.is_connected():
             return hydrabase_client
-        from core.itunes_client import iTunesClient
-        return iTunesClient()
-    from core.itunes_client import iTunesClient
-    return iTunesClient()
+        return _get_itunes_client()
+    return _get_itunes_client()
 
 @app.route('/api/deezer/arl-status', methods=['GET'])
 def get_deezer_arl_status():
@@ -38458,8 +38427,7 @@ def add_to_watchlist():
                     try:
                         if source == 'discogs':
                             # Discogs: fetch artist image from API
-                            from core.discogs_client import DiscogsClient
-                            dc = DiscogsClient()
+                            dc = _get_discogs_client()
                             dc_data = dc.get_artist(artist_id)
                             if dc_data:
                                 image_url = dc_data.get('image_url')
@@ -42207,17 +42175,15 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
     if spotify_client and spotify_client.is_spotify_authenticated():
         search_clients['spotify'] = spotify_client
     try:
-        from core.itunes_client import iTunesClient
-        search_clients['itunes'] = iTunesClient()
+        search_clients['itunes'] = _get_itunes_client()
     except Exception:
         pass
     try:
-        search_clients['deezer'] = DeezerClient()
+        search_clients['deezer'] = _get_deezer_client()
     except Exception:
         pass
     try:
-        from core.discogs_client import DiscogsClient
-        dc = DiscogsClient()
+        dc = _get_discogs_client()
         # Only use Discogs if token is configured
         from config.settings import config_manager as _cm
         if _cm.get('discogs.token', ''):
@@ -43230,8 +43196,7 @@ def get_artist_map_explore():
                             center_genres = sa.genres if hasattr(sa, 'genres') else []
                             artist_found = True
                 if not artist_found:
-                    from core.itunes_client import iTunesClient
-                    ic = iTunesClient()
+                    ic = _get_itunes_client()
                     results = ic.search_artists(artist_name, limit=1)
                     if results and len(results) > 0:
                         ia = results[0]
@@ -48902,14 +48867,19 @@ def start_oauth_callback_servers():
 def get_spotify_artist_discography(artist_name):
     """Get complete artist discography from Spotify using proper matching"""
     try:
-        from core.spotify_client import SpotifyClient
         from core.matching_engine import MusicMatchingEngine
 
         print(f"🎵 Searching Spotify for artist: {artist_name}")
 
-        # Initialize clients
-        spotify_client = SpotifyClient()
+        # Reuse cached profile-aware Spotify client
+        spotify_client = get_spotify_client_for_profile()
         matching_engine = MusicMatchingEngine()
+
+        if not spotify_client:
+            return {
+                'success': False,
+                'error': 'Spotify client unavailable'
+            }
 
         # Search for multiple potential matches (not just 1)
         artists = spotify_client.search_artists(artist_name, limit=5)
