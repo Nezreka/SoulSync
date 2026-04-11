@@ -34383,7 +34383,15 @@ function initializeArtistsPage() {
     }
 
     if (detailBackButton) {
-        detailBackButton.addEventListener('click', () => showArtistsResultsState());
+        detailBackButton.addEventListener('click', () => {
+            // If there are no search results (user navigated directly to artist),
+            // go straight to the main search view instead of showing an empty results page
+            if (!artistsPageState.searchResults || artistsPageState.searchResults.length === 0) {
+                showArtistsSearchState();
+            } else {
+                showArtistsResultsState();
+            }
+        });
     }
 
     // Initialize tabs (only need to do this once)
