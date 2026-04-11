@@ -632,11 +632,11 @@ class RepairWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            # Dedup check: skip if same finding already exists (pending OR recently resolved)
+            # Dedup check: skip if same finding already exists (pending, resolved, OR dismissed)
             cursor.execute("""
                 SELECT id FROM repair_findings
                 WHERE job_id = ? AND finding_type = ?
-                  AND status IN ('pending', 'resolved')
+                  AND status IN ('pending', 'resolved', 'dismissed')
                   AND ((entity_type = ? AND entity_id = ?) OR (file_path = ? AND file_path IS NOT NULL))
                 LIMIT 1
             """, (job_id, finding_type, entity_type, entity_id, file_path))
