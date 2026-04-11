@@ -8346,6 +8346,138 @@ def stream_enhanced_search_track():
         logger.error(f"❌ Error streaming enhanced search track: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+# =============================================================================
+# MUSIC VIDEO DOWNLOADS
+# =============================================================================
+
+_music_video_downloads = {}  # {video_id: {status, progress, path, error}}
+
+@app.route('/api/music-video/download', methods=['POST'])
+def download_music_video():
+    """Download a YouTube video as a music video file to the configured music videos folder."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
+
+    video_id = data.get('video_id', '')
+    video_url = data.get('url', '')
+    raw_title = data.get('title', '')
+    raw_channel = data.get('channel', '')
+
+    if not video_id or not video_url:
+        return jsonify({"error": "Missing video_id or url"}), 400
+
+    # Check if already downloading
+    if video_id in _music_video_downloads and _music_video_downloads[video_id].get('status') == 'downloading':
+        return jsonify({"error": "Already downloading"}), 409
+
+    # Get music videos path
+    music_videos_path = config_manager.get('library.music_videos_path', './MusicVideos')
+    music_videos_path = docker_resolve_path(music_videos_path)
+    os.makedirs(music_videos_path, exist_ok=True)
+
+    # Initialize download state
+    _music_video_downloads[video_id] = {'status': 'searching', 'progress': 0, 'path': None, 'error': None}
+
+    def _do_download():
+        try:
+            # Step 1: Try to match against primary metadata source for clean artist/title
+            _music_video_downloads[video_id]['status'] = 'matching'
+            artist_name = raw_channel
+            track_title = raw_title
+
+            # Strip common YouTube suffixes for cleaner search
+            import re as _re
+            clean_search = _re.sub(r'\s*[\(\[](official\s*(music\s*)?video|official\s*lyric\s*video|official\s*audio|official\s*hd|hd|4k|remastered|lyric\s*video|visualizer|audio)[\)\]]', '', raw_title, flags=_re.IGNORECASE).strip()
+            clean_search = _re.sub(r'\s*-\s*$', '', clean_search).strip()
+
+            try:
+                fallback_client = _get_metadata_fallback_client()
+                results = fallback_client.search_tracks(clean_search, limit=5)
+                if results:
+                    from difflib import SequenceMatcher
+                    best = None
+                    best_score = 0
+                    for r in results:
+                        name_sim = SequenceMatcher(None, clean_search.lower(), r.name.lower()).ratio()
+                        if r.artists:
+                            artist_sim = SequenceMatcher(None, raw_channel.lower(), r.artists[0].lower()).ratio()
+                            name_sim = (name_sim * 0.6) + (artist_sim * 0.4)
+                        if name_sim > best_score:
+                            best_score = name_sim
+                            best = r
+                    if best and best_score >= 0.5:
+                        artist_name = best.artists[0] if best.artists else raw_channel
+                        track_title = best.name
+                        print(f"🎬 [Music Video] Matched to: {artist_name} - {track_title} (confidence: {best_score:.2f})")
+                    else:
+                        # Parse artist from video title: "Artist - Title" pattern
+                        if ' - ' in raw_title:
+                            parts = raw_title.split(' - ', 1)
+                            artist_name = parts[0].strip()
+                            track_title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', parts[1]).strip()
+                        print(f"🎬 [Music Video] No metadata match, using parsed: {artist_name} - {track_title}")
+            except Exception as e:
+                print(f"⚠️ [Music Video] Metadata lookup failed: {e}")
+                if ' - ' in raw_title:
+                    parts = raw_title.split(' - ', 1)
+                    artist_name = parts[0].strip()
+                    track_title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', parts[1]).strip()
+
+            # Sanitize for filesystem
+            def _sanitize(s):
+                return _re.sub(r'[<>:"/\\|?*]', '_', s).strip().rstrip('.')
+
+            artist_folder = _sanitize(artist_name)
+            video_filename = f"{_sanitize(track_title)}-video"
+
+            # Build output path: MusicVideos/Artist/Title-video
+            artist_dir = os.path.join(music_videos_path, artist_folder)
+            os.makedirs(artist_dir, exist_ok=True)
+            output_path = os.path.join(artist_dir, video_filename)
+
+            # Step 2: Download
+            _music_video_downloads[video_id]['status'] = 'downloading'
+            _music_video_downloads[video_id]['artist'] = artist_name
+            _music_video_downloads[video_id]['title'] = track_title
+
+            def _progress(pct):
+                _music_video_downloads[video_id]['progress'] = round(pct, 1)
+
+            final_path = soulseek_client.youtube.download_music_video(video_url, output_path, progress_callback=_progress)
+
+            if final_path and os.path.exists(final_path):
+                _music_video_downloads[video_id]['status'] = 'completed'
+                _music_video_downloads[video_id]['progress'] = 100
+                _music_video_downloads[video_id]['path'] = final_path
+                print(f"✅ [Music Video] Downloaded: {artist_name} - {track_title} → {final_path}")
+                add_activity_item("🎬", "Music Video Downloaded", f"{artist_name} - {track_title}", "Now")
+            else:
+                _music_video_downloads[video_id]['status'] = 'error'
+                _music_video_downloads[video_id]['error'] = 'Download failed — file not found'
+                print(f"❌ [Music Video] Download failed for: {artist_name} - {track_title}")
+
+        except Exception as e:
+            _music_video_downloads[video_id]['status'] = 'error'
+            _music_video_downloads[video_id]['error'] = str(e)
+            print(f"❌ [Music Video] Error: {e}")
+
+    # Run in background thread
+    import threading
+    threading.Thread(target=_do_download, daemon=True, name=f'music-video-{video_id}').start()
+
+    return jsonify({"success": True, "video_id": video_id})
+
+
+@app.route('/api/music-video/status/<video_id>', methods=['GET'])
+def get_music_video_status(video_id):
+    """Get download status for a music video."""
+    status = _music_video_downloads.get(video_id)
+    if not status:
+        return jsonify({"status": "unknown"})
+    return jsonify(status)
+
+
 @app.route('/api/download', methods=['POST'])
 def start_download():
     """Simple download route"""
