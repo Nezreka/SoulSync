@@ -14,7 +14,7 @@ logger = get_logger("spotify_client")
 # Global rate limiting variables
 _last_api_call_time = 0
 _api_call_lock = threading.Lock()
-MIN_API_INTERVAL = 0.35  # Default: 350ms between API calls (~171/min, under Spotify's ~180/min limit)
+MIN_API_INTERVAL = 0.70  # Default: 350ms between API calls (~171/min, under Spotify's ~180/min limit)
 
 def _get_min_api_interval():
     """Get configurable API interval from settings, falling back to default."""

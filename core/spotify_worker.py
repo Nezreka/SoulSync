@@ -491,13 +491,14 @@ class SpotifyWorker:
         spotify_artist_id = item['spotify_artist_id']
         artist_name = item['artist_name']
 
-        # Fetch albums with pagination cap — Spotify returns 10/page, so max_pages=5
-        # gives 50 albums (newest first). Avoids 20+ paginated calls for prolific artists
-        # (e.g., 217 albums = 22 API calls without cap, vs 5 with cap)
+        # Fetch albums with pagination cap — Spotify returns 10/page, so max_pages=2
+        # gives 20 albums (newest first). Most libraries have <20 albums per artist.
+        # Reduced from max_pages=5 to avoid Spotify's undocumented hourly rate limits
+        # which trigger after ~50 paginated calls (10 artists × 5 pages = 50 calls).
         try:
             spotify_albums = self.client.get_artist_albums(
                 spotify_artist_id, album_type='album,single,compilation', limit=50,
-                max_pages=5
+                max_pages=2
             )
         except Exception as e:
             logger.error(f"Failed to get Spotify albums for artist '{artist_name}': {e}")
