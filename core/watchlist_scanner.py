@@ -362,6 +362,11 @@ class WatchlistScanner:
             self._metadata_service = None  # Lazy load if needed
         else:
             raise ValueError("Must provide either spotify_client or metadata_service")
+
+        # Run-local Spotify suppression. One rate-limit hit disables Spotify
+        # for rest of current scan, but keeps fallback providers running.
+        self._spotify_disabled_for_run = False
+        self._spotify_disabled_reason = None
     
     @property
     def database(self):
@@ -391,6 +396,26 @@ class WatchlistScanner:
             from core.metadata_service import MetadataService
             self._metadata_service = MetadataService()
         return self._metadata_service
+
+    def _reset_spotify_run_state(self):
+        """Clear per-run Spotify suppression state."""
+        self._spotify_disabled_for_run = False
+        self._spotify_disabled_reason = None
+
+    def _disable_spotify_for_run(self, reason: str):
+        """Disable Spotify for rest of current run, once."""
+        if not self._spotify_disabled_for_run:
+            logger.warning(f"⚠️ Spotify disabled for rest of run: {reason}")
+        self._spotify_disabled_for_run = True
+        self._spotify_disabled_reason = reason
+
+    def _spotify_available_for_run(self) -> bool:
+        """Check if Spotify should be used for this run."""
+        if self._spotify_disabled_for_run:
+            return False
+        if not self.spotify_client:
+            return False
+        return self.spotify_client.is_spotify_authenticated()
 
     def _get_active_client_and_artist_id(self, watchlist_artist: WatchlistArtist):
         """
@@ -542,6 +567,7 @@ class WatchlistScanner:
         logger.info("Starting watchlist scan")
 
         try:
+            self._reset_spotify_run_state()
             from datetime import datetime, timedelta
             import random
 
@@ -597,8 +623,10 @@ class WatchlistScanner:
             # PROACTIVE ID BACKFILLING (cross-provider support)
             # Before scanning, ensure ALL artists have IDs for ALL available sources
             # iTunes and Deezer are always available; Spotify requires authentication
+            if self.spotify_client and self.spotify_client.is_rate_limited():
+                self._disable_spotify_for_run("global Spotify rate limit active")
             providers_to_backfill = ['itunes', 'deezer']
-            if self.spotify_client and self.spotify_client.is_spotify_authenticated():
+            if self._spotify_available_for_run():
                 providers_to_backfill.append('spotify')
             try:
                 from config.settings import config_manager as _cfg
@@ -611,19 +639,19 @@ class WatchlistScanner:
                 try:
                     self._backfill_missing_ids(all_watchlist_artists, provider)
                 except Exception as backfill_error:
-                    logger.warning(f"Error during {provider} ID backfilling: {backfill_error}")
+                    logger.warning(f"⚠️ Error during {provider} ID backfilling: {backfill_error}")
                     # Continue with scan even if backfilling fails
             
             scan_results = []
             for i, artist in enumerate(watchlist_artists):
-                # Abort scan if Spotify is rate limited — don't keep hammering
-                if self.spotify_client and hasattr(self.spotify_client, 'is_rate_limited') and self.spotify_client.is_rate_limited():
-                    logger.warning(f"⚠️ Spotify rate limited — aborting watchlist scan after {i}/{len(watchlist_artists)} artists")
-                    break
+                if self.spotify_client and self.spotify_client.is_rate_limited():
+                    self._disable_spotify_for_run("global Spotify rate limit active")
 
                 try:
                     result = self.scan_artist(artist)
                     scan_results.append(result)
+                    if self.spotify_client and self.spotify_client.is_rate_limited():
+                        self._disable_spotify_for_run("global Spotify rate limit active")
 
                     if result.success:
                         logger.info(f"✅ Scanned {artist.artist_name}: {result.new_tracks_found} new tracks found")
@@ -658,6 +686,8 @@ class WatchlistScanner:
 
             # Populate discovery pool with tracks from similar artists
             logger.info("Starting discovery pool population...")
+            if self.spotify_client and self.spotify_client.is_rate_limited():
+                self._disable_spotify_for_run("global Spotify rate limit active")
             self.populate_discovery_pool()
 
             # Populate seasonal content (runs independently with its own threshold)
@@ -666,15 +696,19 @@ class WatchlistScanner:
 
             # Sync Spotify library cache (runs after main scan)
             try:
+                if self.spotify_client and self.spotify_client.is_rate_limited():
+                    self._disable_spotify_for_run("global Spotify rate limit active")
                 self.sync_spotify_library_cache()
             except Exception as lib_err:
-                logger.warning(f"Error syncing Spotify library cache: {lib_err}")
-
+                logger.warning(f"⚠️ Error syncing Spotify library cache: {lib_err}")
+            
             return scan_results
             
         except Exception as e:
             logger.error(f"Error during watchlist scan: {e}")
             return []
+        finally:
+            self._reset_spotify_run_state()
     
     def scan_artist(self, watchlist_artist: WatchlistArtist) -> ScanResult:
         """
@@ -1682,7 +1716,7 @@ class WatchlistScanner:
             searched_fallback_id = None
             try:
                 # Try Spotify search
-                if self.spotify_client and self.spotify_client.is_spotify_authenticated():
+                if self._spotify_available_for_run():
                     searched_results = self.spotify_client.search_artists(artist_name, limit=1)
                     if searched_results and len(searched_results) > 0:
                         searched_spotify_id = searched_results[0].id
@@ -1719,7 +1753,7 @@ class WatchlistScanner:
                     }
 
                     # Try to match on Spotify
-                    if self.spotify_client and self.spotify_client.is_spotify_authenticated():
+                    if self._spotify_available_for_run():
                         try:
                             spotify_results = self.spotify_client.search_artists(artist_name_to_match, limit=1)
                             if spotify_results and len(spotify_results) > 0:
@@ -1907,6 +1941,9 @@ class WatchlistScanner:
             from datetime import datetime, timedelta
             import random
 
+            if self.spotify_client and self.spotify_client.is_rate_limited():
+                self._disable_spotify_for_run("global Spotify rate limit active")
+
             # Check if we should run discovery pool population (prevents over-polling)
             skip_pool_population = not self.database.should_populate_discovery_pool(hours_threshold=24, profile_id=profile_id)
 
@@ -1927,7 +1964,7 @@ class WatchlistScanner:
             logger.info("Populating discovery pool from similar artists...")
 
             # Determine which sources are available
-            spotify_available = self.spotify_client and self.spotify_client.is_spotify_authenticated()
+            spotify_available = self._spotify_available_for_run()
 
             # Import fallback metadata client (iTunes or Deezer)
             itunes_client, fallback_source = _get_fallback_metadata_client()
@@ -2536,6 +2573,9 @@ class WatchlistScanner:
 
             logger.info("Caching recent albums for discover page...")
 
+            if self.spotify_client and self.spotify_client.is_rate_limited():
+                self._disable_spotify_for_run("global Spotify rate limit active")
+
             # Clear existing cache for this profile
             self.database.clear_discovery_recent_albums(profile_id=profile_id)
 
@@ -2556,7 +2596,7 @@ class WatchlistScanner:
             albums_checked = 0
 
             # Determine available sources
-            spotify_available = self.spotify_client and self.spotify_client.is_spotify_authenticated()
+            spotify_available = self._spotify_available_for_run()
 
             # Get fallback metadata client (iTunes or Deezer)
             itunes_client, fallback_source = _get_fallback_metadata_client()
@@ -2780,6 +2820,9 @@ class WatchlistScanner:
 
             logger.info("Curating discovery playlists...")
 
+            if self.spotify_client and self.spotify_client.is_rate_limited():
+                self._disable_spotify_for_run("global Spotify rate limit active")
+
             # Build listening profile for personalization
             profile = self._get_listening_profile(profile_id)
             if profile['has_data']:
@@ -2788,7 +2831,7 @@ class WatchlistScanner:
                            f"{profile['avg_daily_plays']:.1f} avg daily plays")
 
             # Determine available sources
-            spotify_available = self.spotify_client and self.spotify_client.is_spotify_authenticated()
+            spotify_available = self._spotify_available_for_run()
             itunes_client, fallback_source = _get_fallback_metadata_client()
 
             # Process each available source
@@ -3158,7 +3201,7 @@ class WatchlistScanner:
         subsequent syncs are incremental (only fetch newly saved albums).
         Every 7 days, does a full re-sync to detect un-saved albums.
         """
-        if not self.spotify_client or not self.spotify_client.is_spotify_authenticated():
+        if not self._spotify_available_for_run():
             logger.debug("Spotify not authenticated, skipping library cache sync")
             return
 
