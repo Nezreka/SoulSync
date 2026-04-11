@@ -5596,10 +5596,11 @@ const HYBRID_SOURCES = [
     { id: 'qobuz', name: 'Qobuz', icon: 'https://www.svgrepo.com/show/504778/qobuz.svg', emoji: '🎧' },
     { id: 'hifi', name: 'HiFi', icon: null, emoji: '🎶' },
     { id: 'deezer_dl', name: 'Deezer', icon: 'https://www.svgrepo.com/show/519734/deezer.svg', emoji: '🎧' },
+    { id: 'lidarr', name: 'Lidarr', icon: null, emoji: '📦' },
 ];
 
 let _hybridSourceOrder = ['soulseek', 'youtube'];
-let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false };
+let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, lidarr: false };
 let _hybridVisualOrder = null; // Full visual order including disabled sources
 
 function buildHybridSourceList() {
