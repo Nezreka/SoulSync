@@ -99,7 +99,7 @@ def _set_global_rate_limit(retry_after_seconds, endpoint_name, has_real_header=F
             _rate_limit_endpoint = endpoint_name
             _rate_limit_set_at = now
             logger.warning(
-                f"GLOBAL RATE LIMIT ACTIVATED: {retry_after_seconds}s ban "
+                f"⚠️ GLOBAL RATE LIMIT ACTIVATED: {retry_after_seconds}s ban "
                 f"(expires {time.strftime('%H:%M:%S', time.localtime(new_until))}) "
                 f"triggered by {endpoint_name}"
             )
@@ -227,7 +227,7 @@ def _detect_and_set_rate_limit(exception, endpoint_name="unknown"):
                 logger.info(f"Rate limit detected on {endpoint_name} — Retry-After header: {delay}s")
             except (ValueError, TypeError):
                 delay = _BASE_UNKNOWN_BAN
-                logger.warning(f"Rate limit detected on {endpoint_name} — unparseable Retry-After: {retry_after}")
+                logger.warning(f"⚠️ Rate limit detected on {endpoint_name} — unparseable Retry-After: {retry_after}")
         else:
             # No Retry-After header available
             if "max retries" in error_str.lower():
@@ -237,7 +237,7 @@ def _detect_and_set_rate_limit(exception, endpoint_name="unknown"):
                 delay = _BASE_MAX_RETRIES_BAN  # 4 hours
             else:
                 delay = _BASE_UNKNOWN_BAN  # 30 min
-            logger.warning(f"Rate limit detected on {endpoint_name} — no Retry-After header, using {delay}s default")
+            logger.warning(f"⚠️ Rate limit detected on {endpoint_name} — no Retry-After header, using {delay}s default")
 
         _set_global_rate_limit(delay, endpoint_name, has_real_header=has_real_header)
         return True
@@ -312,7 +312,7 @@ def rate_limited(func):
                         delay = 3.0 * (2 ** attempt)  # 3, 6, 12, 24, 48
 
                     if attempt < max_retries:
-                        logger.warning(f"Spotify rate limit hit, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries}): {func.__name__}")
+                        logger.warning(f"⚠️ Spotify rate limit hit, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries}): {func.__name__}")
                         time.sleep(delay)
                         continue
                     else:
@@ -323,7 +323,7 @@ def rate_limited(func):
 
                 elif is_server_error and attempt < max_retries:
                     delay = 2.0 * (2 ** attempt)  # 2, 4, 8, 16, 32
-                    logger.warning(f"Spotify server error, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries}): {func.__name__}")
+                    logger.warning(f"⚠️ Spotify server error, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries}): {func.__name__}")
                     time.sleep(delay)
                     continue
 
@@ -534,7 +534,7 @@ class SpotifyClient:
         config = config_manager.get_spotify_config()
         
         if not config.get('client_id') or not config.get('client_secret'):
-            logger.warning("Spotify credentials not configured")
+            logger.warning("⚠️ Spotify credentials not configured")
             return
         
         try:
@@ -630,7 +630,7 @@ class SpotifyClient:
                 # Minimum 30 min for auth probe 429s — these indicate persistent throttling
                 ban_duration = max(delay, _BASE_UNKNOWN_BAN)
                 _set_global_rate_limit(ban_duration, 'is_spotify_authenticated', has_real_header=has_real_header)
-                logger.warning(f"Auth probe rate limited — activating {ban_duration}s global ban")
+                logger.warning(f"⚠️ Auth probe rate limited — activating {ban_duration}s global ban")
                 result = True
             else:
                 logger.debug(f"Spotify authentication check failed: {e}")
@@ -656,7 +656,7 @@ class SpotifyClient:
                 os.remove(cache_path)
                 logger.info("Deleted Spotify cache file")
         except Exception as e:
-            logger.warning(f"Failed to delete Spotify cache: {e}")
+            logger.warning(f"⚠️ Failed to delete Spotify cache: {e}")
 
         logger.info("Spotify client disconnected")
 
@@ -1075,7 +1075,7 @@ class SpotifyClient:
             return artists
         except Exception as e:
             if '403' in str(e) or 'Forbidden' in str(e):
-                logger.warning("Spotify user-follow-read scope not granted — re-authorize to see followed artists")
+                logger.warning("⚠️ Spotify user-follow-read scope not granted — re-authorize to see followed artists")
                 return []
             _detect_and_set_rate_limit(e, 'get_followed_artists')
             logger.error(f"Error fetching followed artists: {e}")
@@ -1125,6 +1125,7 @@ class SpotifyClient:
                     return tracks
 
                 except Exception as e:
+                    _detect_and_set_rate_limit(e, 'search_tracks')
                     logger.error(f"Error searching tracks via Spotify: {e}")
                     # Fall through to fallback
 
@@ -1153,6 +1154,10 @@ class SpotifyClient:
                     artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
                     return artists
 
+            if self.is_rate_limited():
+                logger.debug(f"Spotify rate limited, skipping artist search for: {query}")
+                use_spotify = False
+
         if use_spotify:
             try:
                 search_query = f'artist:{query}' if len(query.strip()) <= 4 else query
@@ -1178,6 +1183,7 @@ class SpotifyClient:
                 return artists
 
             except Exception as e:
+                _detect_and_set_rate_limit(e, 'search_artists')
                 logger.error(f"Error searching artists via Spotify: {e}")
                 # Fall through to iTunes fallback
 
@@ -1232,6 +1238,7 @@ class SpotifyClient:
                     return albums
 
                 except Exception as e:
+                    _detect_and_set_rate_limit(e, 'search_albums')
                     logger.error(f"Error searching albums via Spotify: {e}")
                     # Fall through to iTunes fallback
 
