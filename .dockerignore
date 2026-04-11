@@ -61,6 +61,9 @@ main.py
 ui/
 requirements.txt
 
+# Dev-specific files
+requirements-dev.txt
+
 # OS generated files
 .DS_Store
 .DS_Store?

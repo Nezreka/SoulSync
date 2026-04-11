@@ -224,6 +224,13 @@ python web_server.py
 # Open http://localhost:8008
 ```
 
+For local development and tests:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 ---
 
 ## Setup Guide
