@@ -61,8 +61,9 @@ class OrphanFileDetectorJob(RepairJob):
             cursor.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND file_path != ''")
             for row in cursor.fetchall():
                 parts = row[0].replace('\\', '/').split('/')
-                # Store last 1, 2, and 3 path components as lowercase suffixes
-                for depth in range(1, min(4, len(parts) + 1)):
+                # Store last 1-4 path components as lowercase suffixes.
+                # Depth 4 covers Genre/Artist/Album/track.flac scenarios.
+                for depth in range(1, min(5, len(parts) + 1)):
                     suffix = '/'.join(parts[-depth:]).lower()
                     known_suffixes.add(suffix)
 
@@ -127,7 +128,7 @@ class OrphanFileDetectorJob(RepairJob):
             # Check if this file matches any known DB path via suffix matching
             fpath_parts = fpath.replace('\\', '/').split('/')
             is_known = False
-            for depth in range(1, min(4, len(fpath_parts) + 1)):
+            for depth in range(1, min(5, len(fpath_parts) + 1)):
                 suffix = '/'.join(fpath_parts[-depth:]).lower()
                 if suffix in known_suffixes:
                     is_known = True
@@ -158,6 +159,33 @@ class OrphanFileDetectorJob(RepairJob):
                                     (first_artist and (clean_title, first_artist) in known_titles_clean)
                                 ):
                                     is_known = True
+                except Exception:
+                    pass
+
+            # Last resort: parse title from filename pattern "NN - Title [Quality].ext"
+            # and match against known titles. Catches files with unreadable tags.
+            if not is_known and known_titles:
+                try:
+                    fname_base = os.path.splitext(os.path.basename(fpath))[0]
+                    # Strip quality tags like [FLAC 16bit], [MP3-320]
+                    fname_clean = re.sub(r'\s*\[.*?\]\s*$', '', fname_base).strip()
+                    # Strip leading track number: "01 - Title" → "Title"
+                    fname_clean = re.sub(r'^\d{1,3}\s*[-–.]\s*', '', fname_clean).strip()
+                    if fname_clean:
+                        fname_lower = fname_clean.lower()
+                        # Extract artist from parent folder
+                        parent_folder = os.path.basename(os.path.dirname(fpath)).lower().strip()
+                        # Try artist from grandparent (Artist/Album/track.flac)
+                        grandparent = os.path.basename(os.path.dirname(os.path.dirname(fpath))).lower().strip()
+                        for folder_artist in [parent_folder, grandparent]:
+                            if (fname_lower, folder_artist) in known_titles:
+                                is_known = True
+                                break
+                            clean_fn = _strip_extras(fname_lower)
+                            clean_fa = _strip_extras(folder_artist)
+                            if clean_fn and (clean_fn, clean_fa) in known_titles_clean:
+                                is_known = True
+                                break
                 except Exception:
                     pass
 

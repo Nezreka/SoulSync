@@ -4596,6 +4596,14 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Music Videos Dir:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="music-videos-path" placeholder="./MusicVideos" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('music-videos', this)">Unlock</button>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Download Source:</label>
                                     <select id="download-source-mode" class="form-select"
                                         onchange="updateDownloadSourceUI()">
@@ -5639,6 +5647,13 @@
                                         Worker Orbs
                                     </label>
                                     <small class="settings-hint">Dashboard header buttons animate as floating orbs. Hover the header to expand. Desktop only.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="reduce-effects-enabled">
+                                        Reduce Visual Effects
+                                    </label>
+                                    <small class="settings-hint">Disables backdrop blur, animations, transitions, and shadows. Significantly reduces GPU/CPU usage on low-end devices.</small>
                                 </div>
                             </div>
 

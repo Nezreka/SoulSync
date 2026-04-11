@@ -855,13 +855,18 @@ def _register_automation_handlers():
                 md = extra['matched_data']
                 album_raw = md.get('album', '')
                 album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
-                tracks_json.append({
+                _track_entry = {
                     'name': md.get('name', ''),
                     'artists': md.get('artists', [{'name': t.get('artist_name', '')}]),
                     'album': album_obj,
                     'duration_ms': md.get('duration_ms', 0),
                     'id': md.get('id', ''),
-                })
+                }
+                if md.get('track_number'):
+                    _track_entry['track_number'] = md['track_number']
+                if md.get('disc_number'):
+                    _track_entry['disc_number'] = md['disc_number']
+                tracks_json.append(_track_entry)
             else:
                 # NOT discovered — try to include using available metadata so the
                 # track can still be searched on Soulseek and added to wishlist.
@@ -5179,7 +5184,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -7868,6 +7873,8 @@ def enhanced_search():
             alternate_sources.append('discogs')
         if primary_source != 'hydrabase' and hydrabase_available:
             alternate_sources.append('hydrabase')
+        # YouTube music videos always available (uses yt-dlp, no auth needed)
+        alternate_sources.append('youtube_videos')
 
         logger.info(f"Enhanced search results ({primary_source}): {len(db_artists)} DB artists, "
                      f"{len(primary_results['artists'])} artists, {len(primary_results['albums'])} albums, "
@@ -7954,13 +7961,44 @@ def enhanced_search_source(source_name):
     This prevents slow sources (iTunes with 3s rate limit) from blocking the UI.
     Falls back to single JSON response if streaming not supported.
     """
-    if source_name not in ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase'):
+    if source_name not in ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'youtube_videos'):
         return jsonify({"error": f"Unknown source: {source_name}"}), 400
 
     data = request.get_json()
     query = (data.get('query', '') if data else '').strip()
     if not query:
         return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
+
+    # YouTube music videos — separate flow from metadata sources
+    if source_name == 'youtube_videos':
+        if not soulseek_client or not hasattr(soulseek_client, 'youtube') or not soulseek_client.youtube:
+            return jsonify({"videos": [], "available": False})
+        try:
+            def generate_videos():
+                try:
+                    # Search YouTube via yt-dlp
+                    video_query = f"{query} official music video"
+                    results = run_async(soulseek_client.youtube.search_videos(video_query, max_results=20))
+                    videos = []
+                    for v in (results or []):
+                        videos.append({
+                            'video_id': v.video_id,
+                            'title': v.title,
+                            'channel': v.channel,
+                            'duration': v.duration,
+                            'thumbnail': v.thumbnail,
+                            'url': v.url,
+                            'view_count': v.view_count,
+                            'upload_date': v.upload_date,
+                        })
+                    yield json.dumps({"type": "videos", "data": videos}) + "\n"
+                except Exception as e:
+                    logger.error(f"YouTube music video search failed: {e}")
+                    yield json.dumps({"type": "videos", "data": []}) + "\n"
+                yield json.dumps({"type": "done"}) + "\n"
+            return app.response_class(generate_videos(), mimetype='application/x-ndjson')
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     try:
         client = None
@@ -8307,6 +8345,138 @@ def stream_enhanced_search_track():
     except Exception as e:
         logger.error(f"❌ Error streaming enhanced search track: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+# =============================================================================
+# MUSIC VIDEO DOWNLOADS
+# =============================================================================
+
+_music_video_downloads = {}  # {video_id: {status, progress, path, error}}
+
+@app.route('/api/music-video/download', methods=['POST'])
+def download_music_video():
+    """Download a YouTube video as a music video file to the configured music videos folder."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data"}), 400
+
+    video_id = data.get('video_id', '')
+    video_url = data.get('url', '')
+    raw_title = data.get('title', '')
+    raw_channel = data.get('channel', '')
+
+    if not video_id or not video_url:
+        return jsonify({"error": "Missing video_id or url"}), 400
+
+    # Check if already downloading
+    if video_id in _music_video_downloads and _music_video_downloads[video_id].get('status') == 'downloading':
+        return jsonify({"error": "Already downloading"}), 409
+
+    # Get music videos path
+    music_videos_path = config_manager.get('library.music_videos_path', './MusicVideos')
+    music_videos_path = docker_resolve_path(music_videos_path)
+    os.makedirs(music_videos_path, exist_ok=True)
+
+    # Initialize download state
+    _music_video_downloads[video_id] = {'status': 'searching', 'progress': 0, 'path': None, 'error': None}
+
+    def _do_download():
+        try:
+            # Step 1: Try to match against primary metadata source for clean artist/title
+            _music_video_downloads[video_id]['status'] = 'matching'
+            artist_name = raw_channel
+            track_title = raw_title
+
+            # Strip common YouTube suffixes for cleaner search
+            import re as _re
+            clean_search = _re.sub(r'\s*[\(\[](official\s*(music\s*)?video|official\s*lyric\s*video|official\s*audio|official\s*hd|hd|4k|remastered|lyric\s*video|visualizer|audio)[\)\]]', '', raw_title, flags=_re.IGNORECASE).strip()
+            clean_search = _re.sub(r'\s*-\s*$', '', clean_search).strip()
+
+            try:
+                fallback_client = _get_metadata_fallback_client()
+                results = fallback_client.search_tracks(clean_search, limit=5)
+                if results:
+                    from difflib import SequenceMatcher
+                    best = None
+                    best_score = 0
+                    for r in results:
+                        name_sim = SequenceMatcher(None, clean_search.lower(), r.name.lower()).ratio()
+                        if r.artists:
+                            artist_sim = SequenceMatcher(None, raw_channel.lower(), r.artists[0].lower()).ratio()
+                            name_sim = (name_sim * 0.6) + (artist_sim * 0.4)
+                        if name_sim > best_score:
+                            best_score = name_sim
+                            best = r
+                    if best and best_score >= 0.5:
+                        artist_name = best.artists[0] if best.artists else raw_channel
+                        track_title = best.name
+                        print(f"🎬 [Music Video] Matched to: {artist_name} - {track_title} (confidence: {best_score:.2f})")
+                    else:
+                        # Parse artist from video title: "Artist - Title" pattern
+                        if ' - ' in raw_title:
+                            parts = raw_title.split(' - ', 1)
+                            artist_name = parts[0].strip()
+                            track_title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', parts[1]).strip()
+                        print(f"🎬 [Music Video] No metadata match, using parsed: {artist_name} - {track_title}")
+            except Exception as e:
+                print(f"⚠️ [Music Video] Metadata lookup failed: {e}")
+                if ' - ' in raw_title:
+                    parts = raw_title.split(' - ', 1)
+                    artist_name = parts[0].strip()
+                    track_title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', parts[1]).strip()
+
+            # Sanitize for filesystem
+            def _sanitize(s):
+                return _re.sub(r'[<>:"/\\|?*]', '_', s).strip().rstrip('.')
+
+            artist_folder = _sanitize(artist_name)
+            video_filename = f"{_sanitize(track_title)}-video"
+
+            # Build output path: MusicVideos/Artist/Title-video
+            artist_dir = os.path.join(music_videos_path, artist_folder)
+            os.makedirs(artist_dir, exist_ok=True)
+            output_path = os.path.join(artist_dir, video_filename)
+
+            # Step 2: Download
+            _music_video_downloads[video_id]['status'] = 'downloading'
+            _music_video_downloads[video_id]['artist'] = artist_name
+            _music_video_downloads[video_id]['title'] = track_title
+
+            def _progress(pct):
+                _music_video_downloads[video_id]['progress'] = round(pct, 1)
+
+            final_path = soulseek_client.youtube.download_music_video(video_url, output_path, progress_callback=_progress)
+
+            if final_path and os.path.exists(final_path):
+                _music_video_downloads[video_id]['status'] = 'completed'
+                _music_video_downloads[video_id]['progress'] = 100
+                _music_video_downloads[video_id]['path'] = final_path
+                print(f"✅ [Music Video] Downloaded: {artist_name} - {track_title} → {final_path}")
+                add_activity_item("🎬", "Music Video Downloaded", f"{artist_name} - {track_title}", "Now")
+            else:
+                _music_video_downloads[video_id]['status'] = 'error'
+                _music_video_downloads[video_id]['error'] = 'Download failed — file not found'
+                print(f"❌ [Music Video] Download failed for: {artist_name} - {track_title}")
+
+        except Exception as e:
+            _music_video_downloads[video_id]['status'] = 'error'
+            _music_video_downloads[video_id]['error'] = str(e)
+            print(f"❌ [Music Video] Error: {e}")
+
+    # Run in background thread
+    import threading
+    threading.Thread(target=_do_download, daemon=True, name=f'music-video-{video_id}').start()
+
+    return jsonify({"success": True, "video_id": video_id})
+
+
+@app.route('/api/music-video/status/<video_id>', methods=['GET'])
+def get_music_video_status(video_id):
+    """Get download status for a music video."""
+    status = _music_video_downloads.get(video_id)
+    if not status:
+        return jsonify({"status": "unknown"})
+    return jsonify(status)
+
 
 @app.route('/api/download', methods=['POST'])
 def start_download():
@@ -21117,6 +21287,32 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🔧 Metadata Pipeline Overhaul — Fix Unknown Artist & Source Selection",
+                "description": "Major fix for tracks downloading as 'Unknown Artist' and Spotify being used when Deezer/iTunes was selected",
+                "features": [
+                    "• Fixed playlist pipeline (discover → sync → wishlist → download) losing artist, track number, and album year data",
+                    "• All discovery workers now respect your configured primary metadata source instead of always using Spotify",
+                    "• Centralized metadata source selection in core/metadata_service.py — one source of truth for all features",
+                    "• Fixed Deezer metadata cache returning incomplete data (missing track_number, release_date) from search result cache",
+                    "• Sync completion toast now shows which specific tracks failed to match (not just a count)",
+                    "• New 'Fix Unknown Artists' maintenance job — scans library for Unknown Artist tracks and corrects metadata, tags, and file paths",
+                    "• One-time migration purges stale discovery and Deezer cache entries on first startup after update"
+                ],
+                "usage_note": "If you have existing Unknown Artist tracks, run the Fix Unknown Artists job from Settings > Maintenance."
+            },
+            {
+                "title": "🛡️ Matching Engine — Artist Verification Gate",
+                "description": "Prevents downloading tracks from completely wrong artists on Soulseek and YouTube",
+                "features": [
+                    "• New artist gate rejects candidates where the artist doesn't match the target (Soulseek: < 0.25, YouTube: < 0.15)",
+                    "• Fixed artist substring matching — 'muse' no longer matches 'museum', 'art' no longer matches 'heart'",
+                    "• Artist similarity now compared per path segment instead of full filename — misspelled artist names still match correctly",
+                    "• YouTube artist weight increased from 10% to 20% to reduce wrong-uploader matches",
+                    "• Seasonal discovery, personalized playlists, and playlist explorer all use configured source instead of Spotify"
+                ],
+                "usage_note": "No action needed — matching improvements apply automatically to all new downloads."
+            },
+            {
                 "title": "🎵 Deezer User Playlists — Browse & Download Your Library",
                 "description": "New Deezer tab on the Sync page shows your personal playlists via ARL token — same flow as Spotify",
                 "features": [
@@ -26981,6 +27177,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                             sp_data = {}
                     album_val = sp_data.get('album')
                     album_id = album_val.get('id') if isinstance(album_val, dict) else album_val if isinstance(album_val, str) else None
+                    # Fallback album key: use album name when ID is missing (e.g. mirrored playlist tracks)
+                    if not album_id and isinstance(album_val, dict) and album_val.get('name'):
+                        album_id = f"_name_{album_val['name'].lower().strip()}"
                     disc_num = sp_data.get('disc_number', t.get('disc_number', 1))
                     if album_id:
                         wishlist_album_disc_counts[album_id] = max(
@@ -27013,7 +27212,14 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                                     _fa = _wl_track_artists[0]
                                     wishlist_album_artist_map[album_id] = _fa if isinstance(_fa, dict) else {'name': str(_fa)}
                                 else:
-                                    wishlist_album_artist_map[album_id] = {'name': t.get('artist', 'Unknown Artist')}
+                                    # Try top-level 'artists' (wishlist format uses plural)
+                                    _tl_artists = t.get('artists', [])
+                                    if _tl_artists:
+                                        _tla = _tl_artists[0]
+                                        _fallback_name = _tla.get('name', str(_tla)) if isinstance(_tla, dict) else str(_tla)
+                                    else:
+                                        _fallback_name = t.get('artist', '')
+                                    wishlist_album_artist_map[album_id] = {'name': _fallback_name or 'Unknown Artist'}
                             print(f"🔗 [Wishlist Album Grouping] Album '{_wl_album.get('name', album_id)}' → artist: '{wishlist_album_artist_map[album_id].get('name', '?')}'")
 
 
@@ -27053,11 +27259,22 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         # Use pre-computed album-level artist for folder consistency.
                         # All tracks from the same album get the same artist context,
                         # preventing folder splits on collab albums (KPOP Demon Hunters, etc.)
-                        album_id_for_lookup = s_album.get('id', 'wishlist_album')
+                        album_id_for_lookup = s_album.get('id')
+                        # Fallback album key: match first-pass logic for missing IDs
+                        if not album_id_for_lookup and s_album.get('name'):
+                            album_id_for_lookup = f"_name_{s_album['name'].lower().strip()}"
+                        if not album_id_for_lookup:
+                            album_id_for_lookup = 'wishlist_album'
                         artist_ctx = wishlist_album_artist_map.get(album_id_for_lookup, {})
                         if not artist_ctx or not artist_ctx.get('name'):
-                            # Fallback: per-track resolution (shouldn't happen, but safety)
-                            artist_ctx = {'name': track_info.get('artist', 'Unknown Artist')}
+                            # Fallback: per-track resolution from artists array
+                            _fb_artists = track_info.get('artists', [])
+                            if _fb_artists:
+                                _fb_a = _fb_artists[0]
+                                _fb_name = _fb_a.get('name', str(_fb_a)) if isinstance(_fb_a, dict) else str(_fb_a)
+                            else:
+                                _fb_name = track_info.get('artist', '')
+                            artist_ctx = {'name': _fb_name or 'Unknown Artist'}
 
                         # Construct minimal album context
                         # Ensure images are preserved (important for artwork)
@@ -28076,20 +28293,21 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                                     got_track_number = True
                                     print(f"🔢 [Context] Added track_number from API: {detailed_track['track_number']}, disc_number: {enhanced_payload['disc_number']}")
 
-                                    # Backfill album metadata from detailed track when fallback path
-                                    # produced incomplete data
-                                    if not has_explicit_context and isinstance(detailed_track.get('album'), dict):
+                                    # Backfill album metadata from detailed track when context
+                                    # has incomplete data (missing release_date, total_tracks, etc.)
+                                    if isinstance(detailed_track.get('album'), dict):
                                         dt_album = detailed_track['album']
                                         if not spotify_album_context.get('release_date') and dt_album.get('release_date'):
                                             spotify_album_context['release_date'] = dt_album['release_date']
                                             print(f"📅 [Context] Backfilled release_date from API: {dt_album['release_date']}")
-                                        if dt_album.get('album_type') and not fallback_album.get('album_type'):
+                                        if not spotify_album_context.get('album_type') and dt_album.get('album_type'):
                                             spotify_album_context['album_type'] = dt_album['album_type']
                                         if not spotify_album_context.get('total_tracks') and dt_album.get('total_tracks'):
                                             spotify_album_context['total_tracks'] = dt_album['total_tracks']
-                                        if not spotify_album_context.get('name') or spotify_album_context['name'] == track.album:
-                                            if dt_album.get('name'):
-                                                spotify_album_context['name'] = dt_album['name']
+                                        if not spotify_album_context.get('id') and dt_album.get('id'):
+                                            spotify_album_context['id'] = dt_album['id']
+                                        if not spotify_album_context.get('image_url') and dt_album.get('images'):
+                                            spotify_album_context['image_url'] = dt_album['images'][0].get('url', '')
                             except Exception as e:
                                 print(f"⚠️ [Context] API track details failed: {e}")
 
@@ -32386,8 +32604,8 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
     _ew_state = {}
     try:
         _ew_state = _pause_enrichment_workers('mirrored playlist discovery')
-        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
+        discovery_source = _get_active_discovery_source()
+        use_spotify = (discovery_source == 'spotify') and spotify_client and spotify_client.is_spotify_authenticated()
 
         itunes_client_instance = None
         if not use_spotify:
@@ -32441,8 +32659,20 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                     except (json.JSONDecodeError, TypeError):
                         pass
                 if existing_extra.get('discovered'):
-                    pl_skipped += 1
-                    total_skipped += 1
+                    # Check if matched_data is complete — old discoveries may be missing
+                    # track_number/release_date due to the Track dataclass stripping them.
+                    # Re-discover these so the enriched pipeline fills in the gaps.
+                    md = existing_extra.get('matched_data', {})
+                    album = md.get('album', {})
+                    has_track_num = md.get('track_number')
+                    has_release = album.get('release_date') if isinstance(album, dict) else None
+                    has_album_id = album.get('id') if isinstance(album, dict) else None
+                    if has_track_num and (has_release or has_album_id):
+                        pl_skipped += 1
+                        total_skipped += 1
+                    else:
+                        # Incomplete discovery — re-discover to get full metadata
+                        undiscovered_tracks.append(track)
                 else:
                     undiscovered_tracks.append(track)
 
@@ -32562,6 +32792,35 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                     album_obj = {'name': album_name, 'release_date': getattr(best_match, 'release_date', '') or ''}
                     if match_image:
                         album_obj['images'] = [{'url': match_image, 'height': 600, 'width': 600}]
+
+                    # Enrich album data from metadata cache — search_tracks() caches the
+                    # raw API response which has full album info (id, images, total_tracks)
+                    # that the Track dataclass strips to just a name string
+                    track_number = None
+                    disc_number = None
+                    if hasattr(best_match, 'id') and best_match.id:
+                        try:
+                            _raw = cache.get_entity(discovery_source if not use_spotify else 'spotify', 'track', best_match.id)
+                            if _raw and isinstance(_raw.get('album'), dict):
+                                _raw_album = _raw['album']
+                                if _raw_album.get('id'):
+                                    album_obj['id'] = _raw_album['id']
+                                if _raw_album.get('images') and not album_obj.get('images'):
+                                    album_obj['images'] = _raw_album['images']
+                                if _raw_album.get('total_tracks'):
+                                    album_obj['total_tracks'] = _raw_album['total_tracks']
+                                if _raw_album.get('album_type'):
+                                    album_obj['album_type'] = _raw_album['album_type']
+                                if _raw_album.get('release_date') and not album_obj.get('release_date'):
+                                    album_obj['release_date'] = _raw_album['release_date']
+                                if _raw_album.get('artists'):
+                                    album_obj['artists'] = _raw_album['artists']
+                            if _raw:
+                                track_number = _raw.get('track_number')
+                                disc_number = _raw.get('disc_number')
+                        except Exception:
+                            pass
+
                     matched_data = {
                         'id': best_match.id if hasattr(best_match, 'id') else '',
                         'name': best_match.name if hasattr(best_match, 'name') else '',
@@ -32571,6 +32830,10 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                         'image_url': match_image,
                         'source': discovery_source,
                     }
+                    if track_number:
+                        matched_data['track_number'] = track_number
+                    if disc_number:
+                        matched_data['disc_number'] = disc_number
 
                     extra_data = {
                         'discovered': True,
@@ -32799,9 +33062,9 @@ def _run_tidal_discovery_worker(playlist_id):
         state = tidal_discovery_states[playlist_id]
         playlist = state['playlist']
 
-        # Determine which provider to use
-        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
+        # Determine which provider to use — respect user's configured primary source
+        discovery_source = _get_active_discovery_source()
+        use_spotify = (discovery_source == 'spotify') and spotify_client and spotify_client.is_spotify_authenticated()
 
         # Initialize fallback client if needed
         itunes_client_instance = None
@@ -32900,6 +33163,11 @@ def _run_tidal_discovery_worker(playlist_id):
                         'image_url': _image_url,
                         'source': 'spotify'
                     }
+                    # Preserve track_number/disc_number from raw Spotify API data
+                    if raw_track_data and raw_track_data.get('track_number'):
+                        match_data['track_number'] = raw_track_data['track_number']
+                    if raw_track_data and raw_track_data.get('disc_number'):
+                        match_data['disc_number'] = raw_track_data['disc_number']
                     result['spotify_data'] = match_data
                     result['match_data'] = match_data
                     result['status'] = 'found'
@@ -33112,20 +33380,56 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                 track_id = best_match.id if hasattr(best_match, 'id') else ''
                 duration_ms = best_match.duration_ms if hasattr(best_match, 'duration_ms') else 0
 
-                return {
+                # Fetch full track details to get album ID, track_number, etc.
+                # The Track dataclass strips this data — the API has it
+                album_obj = {
+                    'name': album_name,
+                    'album_type': 'album',
+                    'release_date': getattr(best_match, 'release_date', '') or '',
+                    'images': [{'url': image_url, 'height': 300, 'width': 300}] if image_url else []
+                }
+                track_number = None
+                disc_number = None
+                if track_id:
+                    try:
+                        detailed = itunes_client.get_track_details(track_id)
+                        if detailed and isinstance(detailed.get('album'), dict):
+                            dt_album = detailed['album']
+                            if dt_album.get('id'):
+                                album_obj['id'] = dt_album['id']
+                            if dt_album.get('total_tracks'):
+                                album_obj['total_tracks'] = dt_album['total_tracks']
+                            if dt_album.get('release_date') and not album_obj.get('release_date'):
+                                album_obj['release_date'] = dt_album['release_date']
+                            if dt_album.get('album_type'):
+                                album_obj['album_type'] = dt_album['album_type']
+                            if dt_album.get('images') and not album_obj.get('images'):
+                                album_obj['images'] = dt_album['images']
+                            if dt_album.get('artists'):
+                                album_obj['artists'] = dt_album['artists']
+                        if detailed:
+                            track_number = detailed.get('track_number')
+                            disc_number = detailed.get('disc_number')
+                            print(f"🔢 [Discovery Enrich] {result_name}: track_number={track_number}, disc={disc_number}")
+                        else:
+                            print(f"⚠️ [Discovery Enrich] get_track_details returned None for ID {track_id} ({result_name})")
+                    except Exception as _enrich_err:
+                        print(f"⚠️ [Discovery Enrich] Failed for {result_name} (ID {track_id}): {_enrich_err}")
+
+                result_data = {
                     'id': track_id,
                     'name': result_name,
                     'artists': [result_artist],
-                    'album': {
-                        'name': album_name,
-                        'album_type': 'album',
-                        'release_date': getattr(best_match, 'release_date', '') or '',
-                        'images': [{'url': image_url, 'height': 300, 'width': 300}] if image_url else []
-                    },
+                    'album': album_obj,
                     'duration_ms': duration_ms,
                     'source': _get_metadata_fallback_source(),
                     'confidence': best_confidence
                 }
+                if track_number:
+                    result_data['track_number'] = track_number
+                if disc_number:
+                    result_data['disc_number'] = disc_number
+                return result_data
         else:
             print(f"❌ No suitable Tidal match found (best confidence was {best_confidence:.3f}, required {min_confidence:.3f})")
             return None
@@ -33152,6 +33456,10 @@ def convert_tidal_results_to_spotify_tracks(discovery_results):
                 'album': spotify_data['album'],
                 'duration_ms': spotify_data.get('duration_ms', 0)
             }
+            if spotify_data.get('track_number'):
+                track['track_number'] = spotify_data['track_number']
+            if spotify_data.get('disc_number'):
+                track['disc_number'] = spotify_data['disc_number']
             spotify_tracks.append(track)
         elif result.get('spotify_track') and result.get('status_class') == 'found':
             # Build from individual fields (automatic discovery format)
@@ -33326,11 +33634,12 @@ def _get_deezer_client():
 
 def _get_metadata_fallback_source():
     """Get the configured primary metadata source.
-    Returns 'spotify', 'itunes', 'deezer', 'discogs', or 'hydrabase'."""
-    try:
-        return config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
-    except Exception:
-        return 'deezer'
+    Returns 'spotify', 'itunes', 'deezer', 'discogs', or 'hydrabase'.
+
+    NOTE: This is a thin wrapper — canonical logic lives in core.metadata_service.get_primary_source().
+    Kept as a local function because 70+ callers reference it by name."""
+    from core.metadata_service import get_primary_source
+    return get_primary_source()
 
 def _get_metadata_fallback_client():
     """Get the active metadata client based on settings.
@@ -33818,8 +34127,8 @@ def _run_deezer_discovery_worker(playlist_id):
         playlist = state['playlist']
 
         # Determine which provider to use
-        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
+        discovery_source = _get_active_discovery_source()
+        use_spotify = (discovery_source == 'spotify') and spotify_client and spotify_client.is_spotify_authenticated()
 
         # Initialize fallback client if needed
         itunes_client_instance = None
@@ -33956,6 +34265,11 @@ def _run_deezer_discovery_worker(playlist_id):
                         'image_url': _image_url,
                         'source': 'spotify'
                     }
+                    # Preserve track_number/disc_number from raw Spotify API data
+                    if raw_track_data and raw_track_data.get('track_number'):
+                        match_data['track_number'] = raw_track_data['track_number']
+                    if raw_track_data and raw_track_data.get('disc_number'):
+                        match_data['disc_number'] = raw_track_data['disc_number']
                     result['spotify_data'] = match_data
                     result['match_data'] = match_data
                     result['status'] = '✅ Found'
@@ -34072,6 +34386,10 @@ def convert_deezer_results_to_spotify_tracks(discovery_results):
                 'album': spotify_data['album'],
                 'duration_ms': spotify_data.get('duration_ms', 0)
             }
+            if spotify_data.get('track_number'):
+                track['track_number'] = spotify_data['track_number']
+            if spotify_data.get('disc_number'):
+                track['disc_number'] = spotify_data['disc_number']
             spotify_tracks.append(track)
         elif result.get('spotify_track') and result.get('status_class') == 'found':
             track = {
@@ -34636,9 +34954,9 @@ def _run_spotify_public_discovery_worker(url_hash):
         state = spotify_public_discovery_states[url_hash]
         playlist = state['playlist']
 
-        # Determine which provider to use
-        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
+        # Determine which provider to use — respect user's configured primary source
+        discovery_source = _get_active_discovery_source()
+        use_spotify = (discovery_source == 'spotify') and spotify_client and spotify_client.is_spotify_authenticated()
 
         # Initialize fallback client if needed
         itunes_client_instance = None
@@ -34786,6 +35104,11 @@ def _run_spotify_public_discovery_worker(url_hash):
                         'image_url': _image_url,
                         'source': 'spotify'
                     }
+                    # Preserve track_number/disc_number from raw Spotify API data
+                    if raw_track_data and raw_track_data.get('track_number'):
+                        match_data['track_number'] = raw_track_data['track_number']
+                    if raw_track_data and raw_track_data.get('disc_number'):
+                        match_data['disc_number'] = raw_track_data['disc_number']
                     result['spotify_data'] = match_data
                     result['match_data'] = match_data
                     result['status'] = '✅ Found'
@@ -34899,6 +35222,11 @@ def convert_spotify_public_results_to_spotify_tracks(discovery_results):
                 'album': spotify_data['album'],
                 'duration_ms': spotify_data.get('duration_ms', 0)
             }
+            # Preserve track_number/disc_number from discovery enrichment
+            if spotify_data.get('track_number'):
+                track['track_number'] = spotify_data['track_number']
+            if spotify_data.get('disc_number'):
+                track['disc_number'] = spotify_data['disc_number']
             spotify_tracks.append(track)
         elif result.get('spotify_track') and result.get('status_class') == 'found':
             track = {
@@ -35348,8 +35676,8 @@ def _run_youtube_discovery_worker(url_hash):
         tracks = playlist['tracks']
 
         # Determine which provider to use (Spotify preferred, iTunes fallback)
-        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
+        discovery_source = _get_active_discovery_source()
+        use_spotify = (discovery_source == 'spotify') and spotify_client and spotify_client.is_spotify_authenticated()
 
         # Get fallback client
         itunes_client = _get_metadata_fallback_client()
@@ -35662,8 +35990,8 @@ def _run_listenbrainz_discovery_worker(state_key):
         tracks = playlist['tracks']
 
         # Determine which provider to use (Spotify preferred, iTunes fallback)
-        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
+        discovery_source = _get_active_discovery_source()
+        use_spotify = (discovery_source == 'spotify') and spotify_client and spotify_client.is_spotify_authenticated()
 
         # Get fallback client
         itunes_client = _get_metadata_fallback_client()
@@ -36252,6 +36580,10 @@ def convert_youtube_results_to_spotify_tracks(discovery_results):
                 'album': spotify_data['album'],
                 'duration_ms': spotify_data.get('duration_ms', 0)
             }
+            if spotify_data.get('track_number'):
+                track['track_number'] = spotify_data['track_number']
+            if spotify_data.get('disc_number'):
+                track['disc_number'] = spotify_data['disc_number']
             spotify_tracks.append(track)
         elif result.get('spotify_track') and result.get('status_class') == 'found':
             # Build from individual fields (automatic discovery format)
@@ -36591,12 +36923,21 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
 
         # Update final state on completion
         # Convert result to JSON-serializable dict (datetime/errors can't be emitted via SocketIO)
-        # Exclude match_details — large, not needed for live status, saved to DB separately
+        # Exclude match_details (large) but include a summary of unmatched tracks
         result_dict = {
             k: (v.isoformat() if hasattr(v, 'isoformat') else v)
             for k, v in result.__dict__.items()
             if k != 'match_details'
         }
+        # Include unmatched track names so the frontend can show which tracks failed
+        match_details = getattr(result, 'match_details', None)
+        if match_details:
+            unmatched_summary = [
+                {'name': d.get('name', ''), 'artist': d.get('artist', ''), 'image_url': d.get('image_url', '')}
+                for d in match_details if d.get('status') == 'not_found'
+            ]
+            if unmatched_summary:
+                result_dict['unmatched_tracks'] = unmatched_summary
         with sync_lock:
             sync_states[playlist_id] = {
                 "status": "finished",
@@ -40165,11 +40506,11 @@ def _get_active_discovery_source():
     Determine which music source is active for discovery.
     Returns the user's configured primary metadata source.
     If the selected source requires auth and isn't available, falls back.
+
+    NOTE: Thin wrapper — canonical logic lives in core.metadata_service.get_primary_source().
     """
-    source = _get_metadata_fallback_source()
-    if source == 'spotify' and not (spotify_client and spotify_client.is_spotify_authenticated()):
-        return 'deezer'
-    return source
+    from core.metadata_service import get_primary_source
+    return get_primary_source()
 
 
 @app.route('/api/discover/hero', methods=['GET'])
@@ -43921,6 +44262,10 @@ def convert_listenbrainz_results_to_spotify_tracks(discovery_results):
                 'album': spotify_data['album'],
                 'duration_ms': spotify_data.get('duration_ms', 0)
             }
+            if spotify_data.get('track_number'):
+                track['track_number'] = spotify_data['track_number']
+            if spotify_data.get('disc_number'):
+                track['disc_number'] = spotify_data['disc_number']
             spotify_tracks.append(track)
         elif result.get('spotify_track') and result.get('status_class') == 'found':
             # Build from individual fields (automatic discovery format)
@@ -46135,8 +46480,8 @@ def _run_beatport_discovery_worker(url_hash):
         tracks = chart['tracks']
 
         # Determine which provider to use
-        use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        discovery_source = 'spotify' if use_spotify else _get_metadata_fallback_source()
+        discovery_source = _get_active_discovery_source()
+        use_spotify = (discovery_source == 'spotify') and spotify_client and spotify_client.is_spotify_authenticated()
 
         # Initialize fallback client if needed
         itunes_client_instance = None
@@ -47025,8 +47370,8 @@ def prepare_mirrored_discovery(playlist_id):
             })
 
         # Determine current active metadata source for provider-mismatch detection
-        _use_spotify = spotify_client and spotify_client.is_spotify_authenticated()
-        _current_provider = 'spotify' if _use_spotify else _get_metadata_fallback_source()
+        _current_provider = _get_active_discovery_source()
+        _use_spotify = (_current_provider == 'spotify') and spotify_client and spotify_client.is_spotify_authenticated()
 
         # Check for cached discovery results in extra_data
         pre_discovered_results = []
@@ -47298,11 +47643,10 @@ def playlist_explorer_build_tree():
         if not tracks:
             return jsonify({"success": False, "error": "Playlist has no tracks"}), 400
 
-        # Determine active metadata source
-        spotify_available = spotify_client and spotify_client.is_spotify_authenticated()
-        if spotify_available:
+        # Determine active metadata source — respect user's configured primary
+        source_name = _get_active_discovery_source()
+        if source_name == 'spotify' and spotify_client and spotify_client.is_spotify_authenticated():
             active_client = spotify_client
-            source_name = 'spotify'
         else:
             active_client = _get_metadata_fallback_client()
             source_name = _get_metadata_fallback_source()
@@ -47642,13 +47986,18 @@ def convert_beatport_results_to_spotify_tracks(discovery_results):
                     # Convert from [{'name': 'Artist'}] to ['Artist']
                     artists = [artist['name'] for artist in artists]
 
-            spotify_tracks.append({
+            track = {
                 'id': spotify_data['id'],
                 'name': spotify_data['name'],
                 'artists': artists,
                 'album': spotify_data['album'],
                 'source': 'beatport'
-            })
+            }
+            if spotify_data.get('track_number'):
+                track['track_number'] = spotify_data['track_number']
+            if spotify_data.get('disc_number'):
+                track['disc_number'] = spotify_data['disc_number']
+            spotify_tracks.append(track)
         elif result.get('spotify_track') and result.get('status_class') == 'found':
             # Build from individual fields (automatic discovery format)
             album_val = result.get('spotify_album', '')

@@ -96,14 +96,9 @@ class SeasonalDiscoveryService:
         self._ensure_database_schema()
 
     def _get_source(self):
-        """Determine active music source (matches _get_active_discovery_source in web_server)"""
-        if self.spotify_client and self.spotify_client.is_spotify_authenticated():
-            return 'spotify'
-        try:
-            from core.metadata_service import _get_configured_fallback_source
-            return _get_configured_fallback_source()
-        except Exception:
-            return 'itunes'
+        """Determine active music source — delegates to centralized metadata_service."""
+        from core.metadata_service import get_primary_source
+        return get_primary_source()
 
     def _ensure_database_schema(self):
         """Create seasonal content tables if they don't exist"""
@@ -447,14 +442,14 @@ class SeasonalDiscoveryService:
 
             seasonal_albums = []
             source = self._get_source()
-            use_spotify = self.spotify_client and self.spotify_client.is_authenticated()
+            use_spotify = (source == 'spotify') and self.spotify_client and self.spotify_client.is_spotify_authenticated()
 
             # IMPROVED: Sample 20 random watchlist artists (up from 10) for more variety
             sampled_artists = random.sample(watchlist_artists, min(20, len(watchlist_artists)))
 
-            from core.metadata_service import _create_fallback_client, _get_configured_fallback_source
-            fallback_client = _create_fallback_client()
-            fallback_source = _get_configured_fallback_source()
+            from core.metadata_service import get_primary_client, get_primary_source
+            fallback_client = get_primary_client()
+            fallback_source = get_primary_source()
 
             for artist in sampled_artists:
                 try:
@@ -512,7 +507,7 @@ class SeasonalDiscoveryService:
             config = SEASONAL_CONFIG[season_key]
             keywords = config['keywords']
             source = self._get_source()
-            use_spotify = self.spotify_client and self.spotify_client.is_authenticated()
+            use_spotify = (source == 'spotify') and self.spotify_client and self.spotify_client.is_spotify_authenticated()
 
             seasonal_albums = []
             seen_album_ids = set()
@@ -556,8 +551,8 @@ class SeasonalDiscoveryService:
                         continue
             else:
                 # Fallback metadata source (iTunes or Deezer)
-                from core.metadata_service import _create_fallback_client
-                fallback_client = _create_fallback_client()
+                from core.metadata_service import get_primary_client
+                fallback_client = get_primary_client()
 
                 for keyword in search_keywords:
                     try:
@@ -772,10 +767,10 @@ class SeasonalDiscoveryService:
             # Get tracks from seasonal albums (filtered by source)
             seasonal_albums = self.get_seasonal_albums(season_key, limit=50, source=source)
 
-            use_spotify = self.spotify_client and self.spotify_client.is_authenticated()
+            use_spotify = (source == 'spotify') and self.spotify_client and self.spotify_client.is_spotify_authenticated()
             if not use_spotify:
-                from core.metadata_service import _create_fallback_client
-                fallback_client = _create_fallback_client()
+                from core.metadata_service import get_primary_client
+                fallback_client = get_primary_client()
 
             for album in seasonal_albums:
                 try:

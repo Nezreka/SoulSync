@@ -558,8 +558,78 @@ class YouTubeClient:
                 thumbnail = thumbs[-1].get('url')
         
         track_result.thumbnail = thumbnail
-        
+
         return track_result
+
+    async def search_videos(self, query: str, max_results: int = 20) -> List[YouTubeSearchResult]:
+        """Search YouTube and return video metadata for music video display.
+
+        Unlike search() which returns TrackResult objects for download matching,
+        this returns YouTubeSearchResult objects with video-specific metadata
+        (thumbnails, view counts, channel names) for UI display.
+        """
+        logger.info(f"🎬 Searching YouTube videos for: {query}")
+        try:
+            loop = asyncio.get_event_loop()
+
+            def _search():
+                from config.settings import config_manager
+                ydl_opts = {
+                    'quiet': True,
+                    'no_warnings': True,
+                    'extract_flat': True,
+                    'default_search': 'ytsearch',
+                    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                }
+                cookies_browser = config_manager.get('youtube.cookies_browser', '')
+                if cookies_browser:
+                    ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
+
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    data = ydl.extract_info(f"ytsearch{max_results}:{query}", download=False)
+                    if not data or 'entries' not in data:
+                        return []
+
+                    results = []
+                    for entry in data['entries']:
+                        if not entry:
+                            continue
+                        video_id = entry.get('id', '')
+                        title = entry.get('title', '')
+                        if not video_id or not title:
+                            continue
+
+                        # Skip very short clips (< 30s) and very long content (> 15min)
+                        duration = entry.get('duration') or 0
+                        if duration < 30 or duration > 900:
+                            continue
+
+                        channel = entry.get('uploader', entry.get('channel', ''))
+                        if channel and re.search(r'\s*-\s*Topic\s*$', channel, re.IGNORECASE):
+                            channel = re.sub(r'\s*-\s*Topic\s*$', '', channel, flags=re.IGNORECASE).strip()
+
+                        thumbnail = entry.get('thumbnail')
+                        if not thumbnail and entry.get('thumbnails'):
+                            thumbs = entry['thumbnails']
+                            if isinstance(thumbs, list) and thumbs:
+                                thumbnail = thumbs[-1].get('url')
+
+                        results.append(YouTubeSearchResult(
+                            video_id=video_id,
+                            title=title,
+                            channel=channel,
+                            duration=duration,
+                            url=f"https://www.youtube.com/watch?v={video_id}",
+                            thumbnail=thumbnail or '',
+                            view_count=entry.get('view_count', 0) or 0,
+                            upload_date=entry.get('upload_date', ''),
+                        ))
+                    return results
+
+            return await loop.run_in_executor(None, _search)
+        except Exception as e:
+            logger.error(f"YouTube video search failed: {e}")
+            return []
 
     async def search(self, query: str, timeout: int = None, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
         """
@@ -996,6 +1066,65 @@ class YouTubeClient:
 
         except Exception as e:
             logger.error(f"❌ Download failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def download_music_video(self, video_url: str, output_path: str,
+                              progress_callback=None) -> Optional[str]:
+        """Download a YouTube video as a music video file (keeps video, not audio-only).
+
+        Args:
+            video_url: YouTube video URL
+            output_path: Full path for the output file (without extension — yt-dlp adds it)
+            progress_callback: Optional callback(percent: float) for progress updates
+
+        Returns:
+            Final file path if successful, None otherwise
+        """
+        try:
+            from config.settings import config_manager
+
+            def _progress_hook(d):
+                if progress_callback and d.get('status') == 'downloading':
+                    total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                    downloaded = d.get('downloaded_bytes', 0)
+                    if total > 0:
+                        progress_callback(downloaded / total * 100)
+
+            download_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                'merge_output_format': 'mp4',
+                'outtmpl': output_path + '.%(ext)s',
+                'noplaylist': True,
+                'progress_hooks': [_progress_hook],
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            }
+
+            cookies_browser = config_manager.get('youtube.cookies_browser', '')
+            if cookies_browser:
+                download_opts['cookiesfrombrowser'] = (cookies_browser,)
+
+            with yt_dlp.YoutubeDL(download_opts) as ydl:
+                info = ydl.extract_info(video_url, download=True)
+                final_path = Path(ydl.prepare_filename(info))
+                # yt-dlp may have merged to mp4
+                mp4_path = final_path.with_suffix('.mp4')
+                if mp4_path.exists():
+                    return str(mp4_path)
+                if final_path.exists():
+                    return str(final_path)
+                # Check for any file matching the stem
+                for f in final_path.parent.glob(f"{final_path.stem}.*"):
+                    if f.suffix in ('.mp4', '.mkv', '.webm'):
+                        return str(f)
+                logger.error(f"Music video download completed but file not found: {final_path}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Music video download failed: {e}")
             import traceback
             traceback.print_exc()
             return None

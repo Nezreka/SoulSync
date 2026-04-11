@@ -101,18 +101,9 @@ class PersonalizedPlaylistsService:
         self.spotify_client = spotify_client
 
     def _get_active_source(self) -> str:
-        """
-        Determine which music source is active for discovery.
-        Returns 'spotify' if Spotify is authenticated, otherwise the configured fallback ('itunes' or 'deezer').
-        """
-        if self.spotify_client and hasattr(self.spotify_client, 'is_spotify_authenticated'):
-            if self.spotify_client.is_spotify_authenticated():
-                return 'spotify'
-        try:
-            from config.settings import config_manager
-            return config_manager.get('metadata.fallback_source', 'itunes') or 'itunes'
-        except Exception:
-            return 'itunes'
+        """Determine which music source is active — delegates to centralized metadata_service."""
+        from core.metadata_service import get_primary_source
+        return get_primary_source()
 
     def _build_track_dict(self, row, source: str) -> Dict:
         """Build a standardized track dictionary from a database row."""
@@ -882,8 +873,8 @@ class PersonalizedPlaylistsService:
                 logger.error(f"Invalid seed artists count: {len(seed_artist_ids)}")
                 return {'tracks': [], 'error': 'Must provide 1-5 seed artists'}
 
-            use_spotify = self.spotify_client and self.spotify_client.sp
-            active_source = 'spotify' if use_spotify else self._get_active_source()
+            active_source = self._get_active_source()
+            use_spotify = (active_source == 'spotify') and self.spotify_client and self.spotify_client.sp
             logger.info(f"Building custom playlist from {len(seed_artist_ids)} seed artists (source: {active_source})")
 
             # Step 1: Get similar artists for each seed
@@ -914,8 +905,8 @@ class PersonalizedPlaylistsService:
                                 seen_artist_ids.add(artist_id)
                                 if len(all_similar_artists) >= 25:
                                     break
-                    elif use_spotify:
-                        # Fallback: fetch related artists from Spotify API
+                    elif self.spotify_client and self.spotify_client.sp:
+                        # Fallback: fetch related artists from Spotify API (no Deezer/iTunes equivalent)
                         logger.info(f"No cached similar artists for {seed_artist_id}, trying Spotify related artists API")
                         try:
                             related = self.spotify_client.sp.artist_related_artists(seed_artist_id)
@@ -963,8 +954,8 @@ class PersonalizedPlaylistsService:
                         logger.warning(f"Error getting albums for {artist.get('name', artist['id'])}: {e}")
                         continue
             else:
-                from core.metadata_service import _create_fallback_client
-                itunes = _create_fallback_client()
+                from core.metadata_service import get_primary_client
+                itunes = get_primary_client()
                 for artist in artists_for_albums:
                     try:
                         albums = itunes.get_artist_albums(artist['id'], limit=10)
@@ -1019,8 +1010,8 @@ class PersonalizedPlaylistsService:
                         logger.warning(f"Error getting tracks from album: {e}")
                         continue
             else:
-                from core.metadata_service import _create_fallback_client
-                itunes = _create_fallback_client()
+                from core.metadata_service import get_primary_client
+                itunes = get_primary_client()
                 for album in selected_albums:
                     try:
                         album_data = itunes.get_album(album.id, include_tracks=True)

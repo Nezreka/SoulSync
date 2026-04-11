@@ -392,9 +392,11 @@ class DeezerClient:
         cache = get_metadata_cache()
         cached = cache.get_entity('deezer', 'track', str(track_id))
         if cached and cached.get('title'):
-            # Search results are cached with minimal data (no release_date, track_position).
-            # Only use cache if it has fields that the /track/{id} endpoint provides.
-            if 'release_date' in cached or 'track_position' in cached or 'isrc' in cached:
+            # Search results are cached with minimal data (no track_position).
+            # Only use cache if it has track_position — the key field from /track/{id}.
+            # Search results include 'isrc' and 'release_date' but NOT track_position,
+            # so those fields alone are not sufficient to distinguish full from partial data.
+            if 'track_position' in cached:
                 return self._build_enhanced_track(cached)
             # Otherwise fall through to fetch full data from API
 
@@ -634,7 +636,17 @@ class DeezerClient:
             albums.append(album)
 
         cache = get_metadata_cache()
-        entries = [(str(ad.get('id', '')), ad) for ad in data['data'] if ad.get('id')]
+        # Deezer's /artist/{id}/albums endpoint doesn't include artist info on each album.
+        # Inject it so cached album entities have artist_name for discover page display.
+        artist_stub = None
+        if albums and albums[0].artists:
+            artist_stub = {'id': int(artist_id) if artist_id.isdigit() else 0, 'name': albums[0].artists[0]}
+        entries = []
+        for ad in data['data']:
+            if ad.get('id'):
+                if artist_stub and not ad.get('artist'):
+                    ad['artist'] = artist_stub
+                entries.append((str(ad['id']), ad))
         if entries:
             cache.store_entities_bulk('deezer', 'album', entries, skip_if_exists=True)
 

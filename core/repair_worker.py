@@ -161,8 +161,8 @@ class RepairWorker:
     def itunes_client(self):
         if self._itunes_client is None:
             try:
-                from core.metadata_service import _create_fallback_client
-                self._itunes_client = _create_fallback_client()
+                from core.metadata_service import get_primary_client
+                self._itunes_client = get_primary_client()
             except Exception as e:
                 logger.error("Failed to initialize fallback metadata client: %s", e)
         return self._itunes_client
@@ -632,11 +632,11 @@ class RepairWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            # Dedup check: skip if same finding already exists (pending OR recently resolved)
+            # Dedup check: skip if same finding already exists (pending, resolved, OR dismissed)
             cursor.execute("""
                 SELECT id FROM repair_findings
                 WHERE job_id = ? AND finding_type = ?
-                  AND status IN ('pending', 'resolved')
+                  AND status IN ('pending', 'resolved', 'dismissed')
                   AND ((entity_type = ? AND entity_id = ?) OR (file_path = ? AND file_path IS NOT NULL))
                 LIMIT 1
             """, (job_id, finding_type, entity_type, entity_id, file_path))
@@ -816,6 +816,7 @@ class RepairWorker:
             'path_mismatch': self._fix_path_mismatch,
             'missing_lossy_copy': self._fix_missing_lossy_copy,
             'unwanted_content': self._fix_unwanted_content,
+            'unknown_artist': self._fix_unknown_artist,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1381,6 +1382,109 @@ class RepairWorker:
         if file_deleted:
             msg += ' (file deleted)'
         return {'success': True, 'action': 'removed_content', 'message': msg}
+
+    def _fix_unknown_artist(self, entity_type, entity_id, file_path, details):
+        """Fix an Unknown Artist track — re-tag, move to correct path, update DB."""
+        track_id = details.get('track_id')
+        corrected_artist = details.get('corrected_artist', '')
+        corrected_album = details.get('corrected_album', '')
+        corrected_title = details.get('corrected_title', '')
+        corrected_track_number = details.get('corrected_track_number')
+        corrected_year = details.get('corrected_year', '')
+        cover_url = details.get('cover_url', '')
+        expected_path = details.get('expected_path', '')
+
+        if not corrected_artist or not track_id:
+            return {'success': False, 'error': 'Missing corrected artist or track ID'}
+
+        # Resolve file
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else ''
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) if file_path else None
+        if not resolved or not os.path.exists(resolved):
+            return {'success': False, 'error': f'File not found: {file_path}'}
+
+        # Step 1: Re-tag file
+        try:
+            from core.tag_writer import write_tags_to_file
+            db_data = {
+                'title': corrected_title,
+                'artist_name': corrected_artist,
+                'album_title': corrected_album,
+                'year': corrected_year,
+                'track_number': corrected_track_number,
+            }
+            write_tags_to_file(resolved, db_data, embed_cover=bool(cover_url), cover_url=cover_url or None)
+        except Exception as e:
+            logger.warning(f"Tag write failed during unknown artist fix: {e}")
+
+        # Step 2: Move file if expected path differs
+        final_path = resolved
+        if expected_path:
+            expected_abs = os.path.normpath(os.path.join(self.transfer_folder, expected_path))
+            if os.path.normpath(resolved).lower() != expected_abs.lower():
+                try:
+                    os.makedirs(os.path.dirname(expected_abs), exist_ok=True)
+                    if sys.platform in ('win32', 'darwin') and os.path.exists(expected_abs):
+                        tmp = expected_abs + '.tmp_rename'
+                        shutil.move(resolved, tmp)
+                        shutil.move(tmp, expected_abs)
+                    else:
+                        shutil.move(resolved, expected_abs)
+                    final_path = expected_abs
+
+                    # Move sidecars
+                    src_dir = os.path.dirname(resolved)
+                    dst_dir = os.path.dirname(expected_abs)
+                    src_stem = os.path.splitext(os.path.basename(resolved))[0]
+                    dst_stem = os.path.splitext(os.path.basename(expected_abs))[0]
+                    for ext in ('.lrc', '.jpg', '.jpeg', '.png', '.txt'):
+                        s = os.path.join(src_dir, src_stem + ext)
+                        if os.path.isfile(s):
+                            d = os.path.join(dst_dir, dst_stem + ext)
+                            if not os.path.exists(d):
+                                try:
+                                    shutil.move(s, d)
+                                except Exception:
+                                    pass
+
+                    # Clean up empty dirs
+                    self._cleanup_empty_parents(resolved)
+                except Exception as e:
+                    logger.error(f"File move failed: {e}")
+
+        # Step 3: Update DB
+        try:
+            conn = self.db._get_connection()
+            try:
+                cursor = conn.cursor()
+                # Find or create artist
+                cursor.execute("SELECT id FROM artists WHERE LOWER(name) = LOWER(?)", (corrected_artist,))
+                row = cursor.fetchone()
+                new_artist_id = row[0] if row else None
+                if not new_artist_id:
+                    cursor.execute("INSERT INTO artists (name) VALUES (?)", (corrected_artist,))
+                    new_artist_id = cursor.lastrowid
+
+                cursor.execute("UPDATE tracks SET artist_id = ?, file_path = ? WHERE id = ?",
+                               (new_artist_id, final_path, track_id))
+                if corrected_track_number:
+                    cursor.execute("UPDATE tracks SET track_number = ? WHERE id = ?",
+                                   (corrected_track_number, track_id))
+                album_id = details.get('album_id')
+                if album_id:
+                    if corrected_album:
+                        cursor.execute("UPDATE albums SET title = ? WHERE id = ?", (corrected_album, album_id))
+                    if corrected_year and corrected_year.isdigit():
+                        cursor.execute("UPDATE albums SET year = ? WHERE id = ?", (int(corrected_year), album_id))
+                    cursor.execute("UPDATE albums SET artist_id = ? WHERE id = ?", (new_artist_id, album_id))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            return {'success': False, 'error': f'DB update failed: {e}'}
+
+        return {'success': True, 'action': 'fixed_unknown_artist',
+                'message': f'Fixed: {corrected_artist} - {corrected_title}'}
 
     def _fix_mbid_mismatch(self, entity_type, entity_id, file_path, details):
         """Remove the mismatched MusicBrainz recording ID from the audio file."""

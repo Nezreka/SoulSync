@@ -602,23 +602,42 @@ class MusicMatchingEngine:
             # No word boundary match - rely on similarity ratio only
             title_score = title_ratio
 
-        # 2. Artist Score: Keep substring matching for artists (they're more unique)
-        # But add similarity-based fallback for better matching
+        # 2. Artist Score: Word-boundary matching for artists to prevent false positives
+        # like "muse" matching "museum" or "art" matching "heart".
+        # Falls back to similarity matching for misspellings/variations.
         artist_score = 0.0
         best_artist_similarity = 0.0
 
+        # Split original filename into segments for per-segment matching.
+        # Handles path separators (/, \) and YouTube's || delimiter.
+        _artist_segments = re.split(r'[/\\|]+', slskd_track.filename)
+        _artist_segments_norm = [self.normalize_string(s) for s in _artist_segments if s.strip()]
+
         for artist in spotify_artists_norm:
-            # Skip containment for very short names (≤2 chars) — "b" matches everything
-            if artist and len(artist) > 2 and artist in slskd_filename_norm:
-                artist_score = 1.0  # Perfect match if any artist is found
-                break
-            elif artist and len(artist) <= 2 and re.search(r'\b' + re.escape(artist) + r'\b', slskd_filename_norm):
+            if not artist:
+                continue
+            # Word boundary match against each segment — "muse" matches "muse" but not "museum"
+            found_boundary = False
+            for seg_norm in _artist_segments_norm:
+                if re.search(r'\b' + re.escape(artist) + r'\b', seg_norm):
+                    found_boundary = True
+                    break
+            # Also check full normalized string (handles flat filenames without separators)
+            if not found_boundary and re.search(r'\b' + re.escape(artist) + r'\b', slskd_filename_norm):
+                found_boundary = True
+
+            if found_boundary:
                 artist_score = 1.0
                 break
             else:
-                # Try similarity matching as fallback for misspellings/variations
-                artist_ratio = SequenceMatcher(None, artist, slskd_filename_norm).ratio()
-                best_artist_similarity = max(best_artist_similarity, artist_ratio)
+                # Try similarity matching per path segment for misspellings/variations.
+                # Comparing against the full filename dilutes the score because the artist
+                # name is a small fraction of "artist/album/track.flac".
+                for seg_norm in _artist_segments_norm:
+                    if not seg_norm:
+                        continue
+                    seg_ratio = SequenceMatcher(None, artist, seg_norm).ratio()
+                    best_artist_similarity = max(best_artist_similarity, seg_ratio)
 
         # If no exact artist match, use best similarity with penalty
         if artist_score == 0.0 and best_artist_similarity > 0:
@@ -672,13 +691,35 @@ class MusicMatchingEngine:
             )
             return 0.0
 
+        # --- Minimum Artist Gate ---
+        # Reject matches where the artist has no resemblance to the target.
+        # Without this, a perfect title match + good duration can push a completely
+        # wrong artist past the confidence threshold (e.g. "Hexagons" by lizzylou06
+        # when searching for "Hexagons" by Muse, or "Subhuman Nature" by Belvedere
+        # when searching for "Subhuman" by Periphery).
+        if not is_youtube and artist_score < 0.25:
+            logger.debug(
+                f"Artist gate reject: '{spotify_track.name}' by {spotify_track.artists} "
+                f"vs '{slskd_track.filename[:60]}' (artist_score={artist_score:.2f} < 0.25)"
+            )
+            return 0.0
+
+        # Softer artist gate for YouTube — artist extraction from video titles is
+        # unreliable, but completely wrong uploaders should still be caught.
+        if is_youtube and artist_score < 0.15:
+            logger.debug(
+                f"YouTube artist gate reject: '{spotify_track.name}' by {spotify_track.artists} "
+                f"vs '{slskd_track.filename[:60]}' (artist_score={artist_score:.2f} < 0.15)"
+            )
+            return 0.0
+
         # --- Final Weighted Score ---
 
         if is_youtube:
-            # For YouTube, rely more on Title and Duration since Artist is often missing from video titles
-            # and the search query already filtered by artist to some extent.
-            # New weights: Title 70%, Artist 10%, Duration 20%
-            final_confidence = (title_score * 0.70) + (artist_score * 0.10) + (duration_score * 0.20)
+            # For YouTube, artist gets more weight than before to reduce wrong-uploader matches.
+            # Previous: Title 70%, Artist 10%, Duration 20% — artist was nearly irrelevant.
+            # New: Title 60%, Artist 20%, Duration 20%
+            final_confidence = (title_score * 0.60) + (artist_score * 0.20) + (duration_score * 0.20)
         else:
             # Standard weights for Soulseek (Artist is critical for correctness)
             # Rebalanced weights: Artist matching is now more important to prevent false positives
