@@ -30,6 +30,7 @@ services:
       - ./logs:/app/logs
       - ./downloads:/app/downloads
       - ./Staging:/app/Staging
+      - ./MusicVideos:/app/MusicVideos
       - ./scripts:/app/scripts
       # Use named volume for database persistence (separate from host database)
       # NOTE: Changed from /app/database to /app/data to avoid overwriting Python package
