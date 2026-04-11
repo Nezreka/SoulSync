@@ -31,6 +31,9 @@ _CONTENT_PATTERNS = [
     (r'\bspoken\s*word\b', 'spoken_word'),
     (r'\bnarrat(?:ion|ed)\b', 'spoken_word'),
     (r'\bintroduction\b', 'spoken_word'),
+    # Acappella
+    (r'\ba\s*cappella\b', 'acappella'),
+    (r'\bacappella\b', 'acappella'),
 ]
 
 
