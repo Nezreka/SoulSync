@@ -3307,9 +3307,17 @@ function setLoadingProgress(percentage) {
 // STREAMING FUNCTIONALITY
 // ===============================
 
+let _streamLock = false;
+
 async function startStream(searchResult) {
     // Start streaming a track - handles same track toggle and new track streaming
     try {
+        // Prevent multiple concurrent stream starts (rapid clicking)
+        if (_streamLock) {
+            console.log('⏳ Stream already starting, ignoring duplicate click');
+            return;
+        }
+
         console.log(`🎮 startStream() called with data:`, searchResult);
 
         // Check if this is the same track that's currently playing/loading
@@ -3326,6 +3334,9 @@ async function startStream(searchResult) {
             togglePlayback();
             return;
         }
+
+        // Lock to prevent duplicate stream starts
+        _streamLock = true;
 
         // Different track or no current track - start new stream
         console.log("🎵 Starting new stream");
@@ -3373,6 +3384,8 @@ async function startStream(searchResult) {
         showToast(`Failed to start stream: ${error.message}`, 'error');
         hideLoadingAnimation();
         clearTrack();
+    } finally {
+        _streamLock = false;
     }
 }
 
