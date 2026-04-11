@@ -1125,6 +1125,7 @@ class SpotifyClient:
                     return tracks
 
                 except Exception as e:
+                    _detect_and_set_rate_limit(e, 'search_tracks')
                     logger.error(f"Error searching tracks via Spotify: {e}")
                     # Fall through to fallback
 
@@ -1153,6 +1154,10 @@ class SpotifyClient:
                     artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
                     return artists
 
+            if self.is_rate_limited():
+                logger.debug(f"Spotify rate limited, skipping artist search for: {query}")
+                use_spotify = False
+
         if use_spotify:
             try:
                 search_query = f'artist:{query}' if len(query.strip()) <= 4 else query
@@ -1178,6 +1183,7 @@ class SpotifyClient:
                 return artists
 
             except Exception as e:
+                _detect_and_set_rate_limit(e, 'search_artists')
                 logger.error(f"Error searching artists via Spotify: {e}")
                 # Fall through to iTunes fallback
 
@@ -1232,6 +1238,7 @@ class SpotifyClient:
                     return albums
 
                 except Exception as e:
+                    _detect_and_set_rate_limit(e, 'search_albums')
                     logger.error(f"Error searching albums via Spotify: {e}")
                     # Fall through to iTunes fallback
 
