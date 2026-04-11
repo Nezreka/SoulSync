@@ -1070,6 +1070,65 @@ class YouTubeClient:
             traceback.print_exc()
             return None
 
+    def download_music_video(self, video_url: str, output_path: str,
+                              progress_callback=None) -> Optional[str]:
+        """Download a YouTube video as a music video file (keeps video, not audio-only).
+
+        Args:
+            video_url: YouTube video URL
+            output_path: Full path for the output file (without extension — yt-dlp adds it)
+            progress_callback: Optional callback(percent: float) for progress updates
+
+        Returns:
+            Final file path if successful, None otherwise
+        """
+        try:
+            from config.settings import config_manager
+
+            def _progress_hook(d):
+                if progress_callback and d.get('status') == 'downloading':
+                    total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                    downloaded = d.get('downloaded_bytes', 0)
+                    if total > 0:
+                        progress_callback(downloaded / total * 100)
+
+            download_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                'merge_output_format': 'mp4',
+                'outtmpl': output_path + '.%(ext)s',
+                'noplaylist': True,
+                'progress_hooks': [_progress_hook],
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            }
+
+            cookies_browser = config_manager.get('youtube.cookies_browser', '')
+            if cookies_browser:
+                download_opts['cookiesfrombrowser'] = (cookies_browser,)
+
+            with yt_dlp.YoutubeDL(download_opts) as ydl:
+                info = ydl.extract_info(video_url, download=True)
+                final_path = Path(ydl.prepare_filename(info))
+                # yt-dlp may have merged to mp4
+                mp4_path = final_path.with_suffix('.mp4')
+                if mp4_path.exists():
+                    return str(mp4_path)
+                if final_path.exists():
+                    return str(final_path)
+                # Check for any file matching the stem
+                for f in final_path.parent.glob(f"{final_path.stem}.*"):
+                    if f.suffix in ('.mp4', '.mkv', '.webm'):
+                        return str(f)
+                logger.error(f"Music video download completed but file not found: {final_path}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Music video download failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     async def get_all_downloads(self) -> List[DownloadStatus]:
         """
         Get all active downloads (matches Soulseek interface).

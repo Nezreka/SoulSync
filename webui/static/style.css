@@ -32982,6 +32982,72 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: rgba(255, 255, 255, 0.45);
 }
 
+/* Video download states */
+.enh-video-card.downloading {
+    pointer-events: none;
+    opacity: 0.8;
+}
+
+.enh-video-card.completed .enh-video-thumb::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+}
+
+.enh-video-card.errored .enh-video-thumb::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(180, 0, 0, 0.3);
+}
+
+.enh-video-progress-ring {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px;
+    height: 44px;
+    z-index: 2;
+}
+
+.enh-video-progress-ring svg {
+    width: 100%;
+    height: 100%;
+}
+
+.enh-video-progress-bar {
+    transition: stroke-dashoffset 0.3s ease;
+}
+
+.enh-video-done, .enh-video-error {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    font-weight: 700;
+    z-index: 2;
+}
+
+.enh-video-done {
+    background: rgba(29, 185, 84, 0.85);
+    color: #fff;
+}
+
+.enh-video-error {
+    background: rgba(220, 50, 50, 0.85);
+    color: #fff;
+    cursor: pointer;
+}
+
 .enh-empty-state {
     text-align: center;
     padding: 40px 20px;
