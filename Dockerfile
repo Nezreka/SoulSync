@@ -1,21 +1,41 @@
 # SoulSync WebUI Dockerfile
 # Multi-architecture support for AMD64 and ARM64
 
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# Build-time dependencies for packages that may need compilation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    libffi-dev \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies into an isolated virtualenv so the final image
+# only needs runtime libraries.
+COPY requirements-webui.txt .
+RUN python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements-webui.txt
+
+
 FROM python:3.11-slim
 
 # Build-time commit SHA for update detection
 ARG COMMIT_SHA=""
 ENV SOULSYNC_COMMIT_SHA=${COMMIT_SHA}
 
+# Use the virtualenv from the builder stage
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libc6-dev \
-    libffi-dev \
-    libssl-dev \
+# Install only runtime system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gosu \
     ffmpeg \
@@ -25,12 +45,8 @@ RUN apt-get update && apt-get install -y \
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash --uid 1000 soulsync
 
-# Copy requirements and install Python dependencies
-COPY requirements-webui.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements-webui.txt
-
-# Copy application code
+# Copy the prebuilt virtualenv and application code
+COPY --from=builder /opt/venv /opt/venv
 COPY . .
 
 # Create necessary directories with proper permissions
