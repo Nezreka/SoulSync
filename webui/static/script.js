@@ -8940,74 +8940,6 @@ function initializeSearchModeToggle() {
         }).join('');
     }
 
-    window._downloadMusicVideo = async function(cardEl, video) {
-        if (cardEl.classList.contains('downloading') || cardEl.classList.contains('completed')) return;
-        cardEl.classList.add('downloading');
-        cardEl.onclick = null; // Disable click
-
-        const playBtn = cardEl.querySelector('.enh-video-play');
-        const progressRing = cardEl.querySelector('.enh-video-progress-ring');
-        const progressBar = cardEl.querySelector('.enh-video-progress-bar');
-        const doneIcon = cardEl.querySelector('.enh-video-done');
-        const errorIcon = cardEl.querySelector('.enh-video-error');
-
-        if (playBtn) playBtn.classList.add('hidden');
-        if (progressRing) progressRing.classList.remove('hidden');
-
-        try {
-            const res = await fetch('/api/music-video/download', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    video_id: video.video_id,
-                    url: video.url,
-                    title: video.title,
-                    channel: video.channel,
-                }),
-            });
-            if (!res.ok) throw new Error('Download request failed');
-
-            // Poll for progress
-            const circumference = 97.4; // 2 * PI * 15.5
-            const pollInterval = setInterval(async () => {
-                try {
-                    const statusRes = await fetch(`/api/music-video/status/${video.video_id}`);
-                    const status = await statusRes.json();
-
-                    if (progressBar && status.progress > 0) {
-                        const offset = circumference - (status.progress / 100) * circumference;
-                        progressBar.style.strokeDashoffset = offset;
-                    }
-
-                    if (status.status === 'completed') {
-                        clearInterval(pollInterval);
-                        cardEl.classList.remove('downloading');
-                        cardEl.classList.add('completed');
-                        if (progressRing) progressRing.classList.add('hidden');
-                        if (doneIcon) doneIcon.classList.remove('hidden');
-                    } else if (status.status === 'error') {
-                        clearInterval(pollInterval);
-                        cardEl.classList.remove('downloading');
-                        cardEl.classList.add('errored');
-                        if (progressRing) progressRing.classList.add('hidden');
-                        if (errorIcon) errorIcon.classList.remove('hidden');
-                        // Re-enable click for retry
-                        cardEl.onclick = () => window._downloadMusicVideo(cardEl, video);
-                    }
-                } catch (e) {
-                    // Polling error — keep trying
-                }
-            }, 500);
-
-        } catch (e) {
-            cardEl.classList.remove('downloading');
-            if (progressRing) progressRing.classList.add('hidden');
-            if (playBtn) playBtn.classList.remove('hidden');
-            if (errorIcon) errorIcon.classList.remove('hidden');
-            cardEl.onclick = () => window._downloadMusicVideo(cardEl, video);
-        }
-    };
-
     function _formatViewCount(count) {
         if (count >= 1000000000) return `${(count / 1000000000).toFixed(1)}B`;
         if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
@@ -17516,6 +17448,71 @@ function _notifTimeAgo(ts) {
 }
 
 // ==================================================================================
+// Music video download handler — defined at top level so both enhanced and global search can use it
+function _downloadMusicVideo(cardEl, video) {
+    if (cardEl.classList.contains('downloading') || cardEl.classList.contains('completed')) return;
+    cardEl.classList.add('downloading');
+    cardEl.onclick = null;
+
+    const playBtn = cardEl.querySelector('.enh-video-play');
+    const progressRing = cardEl.querySelector('.enh-video-progress-ring');
+    const progressBar = cardEl.querySelector('.enh-video-progress-bar');
+    const doneIcon = cardEl.querySelector('.enh-video-done');
+    const errorIcon = cardEl.querySelector('.enh-video-error');
+
+    if (playBtn) playBtn.classList.add('hidden');
+    if (progressRing) progressRing.classList.remove('hidden');
+
+    fetch('/api/music-video/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_id: video.video_id, url: video.url, title: video.title, channel: video.channel }),
+    }).then(res => {
+        if (!res.ok) throw new Error('Download request failed');
+        const circumference = 97.4;
+        const pollInterval = setInterval(async () => {
+            try {
+                const statusRes = await fetch(`/api/music-video/status/${video.video_id}`);
+                const status = await statusRes.json();
+                if (progressBar && status.progress > 0) {
+                    progressBar.style.strokeDashoffset = circumference - (status.progress / 100) * circumference;
+                }
+                if (status.status === 'completed') {
+                    clearInterval(pollInterval);
+                    cardEl.classList.remove('downloading');
+                    cardEl.classList.add('completed');
+                    if (progressRing) progressRing.classList.add('hidden');
+                    if (doneIcon) doneIcon.classList.remove('hidden');
+                } else if (status.status === 'error') {
+                    clearInterval(pollInterval);
+                    cardEl.classList.remove('downloading');
+                    cardEl.classList.add('errored');
+                    if (progressRing) progressRing.classList.add('hidden');
+                    if (errorIcon) errorIcon.classList.remove('hidden');
+                    cardEl.onclick = () => _downloadMusicVideo(cardEl, video);
+                }
+            } catch (e) {}
+        }, 500);
+    }).catch(e => {
+        cardEl.classList.remove('downloading');
+        if (progressRing) progressRing.classList.add('hidden');
+        if (playBtn) playBtn.classList.remove('hidden');
+        if (errorIcon) errorIcon.classList.remove('hidden');
+        cardEl.onclick = () => _downloadMusicVideo(cardEl, video);
+    });
+}
+
+// Global search video click — decodes base64 video data and delegates to _downloadMusicVideo
+function _gsClickVideo(cardEl) {
+    try {
+        const encoded = cardEl.dataset.video;
+        const video = JSON.parse(decodeURIComponent(escape(atob(encoded))));
+        _downloadMusicVideo(cardEl, video);
+    } catch (e) {
+        console.error('Failed to parse video data:', e);
+    }
+}
+
 // GLOBAL SEARCH BAR — Spotlight-style search from anywhere
 // ==================================================================================
 
@@ -17767,7 +17764,8 @@ function _gsRender(data) {
             h += videos.map(v => {
                 const dur = v.duration ? `${Math.floor(v.duration / 60)}:${String(v.duration % 60).padStart(2, '0')}` : '';
                 const views = v.view_count >= 1000000 ? `${(v.view_count/1000000).toFixed(1)}M` : v.view_count >= 1000 ? `${(v.view_count/1000).toFixed(1)}K` : (v.view_count || '');
-                return `<div class="enh-video-card" data-video-id="${v.video_id}" onclick="_downloadMusicVideo(this, ${JSON.stringify(v).replace(/"/g, '&quot;')})">
+                const vJson = btoa(unescape(encodeURIComponent(JSON.stringify(v))));
+                return `<div class="enh-video-card" data-video-id="${v.video_id}" data-video="${vJson}" onclick="_gsClickVideo(this)">
                     <div class="enh-video-thumb"><img src="${v.thumbnail}" alt="" loading="lazy" onerror="this.style.display='none'"><div class="enh-video-play">▶</div>
                     <div class="enh-video-progress-ring hidden"><svg viewBox="0 0 36 36"><circle class="enh-video-progress-bg" cx="18" cy="18" r="15.5" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="3"/><circle class="enh-video-progress-bar" cx="18" cy="18" r="15.5" fill="none" stroke="rgb(var(--accent-rgb))" stroke-width="3" stroke-dasharray="97.4" stroke-dashoffset="97.4" stroke-linecap="round" transform="rotate(-90 18 18)"/></svg></div>
                     <div class="enh-video-done hidden">✓</div><div class="enh-video-error hidden">✗</div>
