@@ -32985,7 +32985,14 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 /* Video download states */
 .enh-video-card.downloading {
     pointer-events: none;
-    opacity: 0.8;
+}
+
+.enh-video-card.downloading .enh-video-thumb::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 1;
 }
 
 .enh-video-card.completed .enh-video-thumb::after {
@@ -33007,9 +33014,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: 44px;
-    height: 44px;
+    width: 52px;
+    height: 52px;
     z-index: 2;
+    filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.5));
 }
 
 .enh-video-progress-ring svg {
