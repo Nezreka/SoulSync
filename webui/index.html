@@ -4596,6 +4596,14 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Music Videos Dir:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="music-videos-path" placeholder="./MusicVideos" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('music-videos', this)">Unlock</button>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Download Source:</label>
                                     <select id="download-source-mode" class="form-select"
                                         onchange="updateDownloadSourceUI()">

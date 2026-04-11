@@ -5899,6 +5899,7 @@ async function loadSettingsData() {
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
         document.getElementById('staging-path').value = settings.import?.staging_path || './Staging';
+        document.getElementById('music-videos-path').value = settings.library?.music_videos_path || './MusicVideos';
 
         // Populate Download Source settings
         document.getElementById('download-source-mode').value = settings.download_source?.mode || 'soulseek';
@@ -7153,7 +7154,8 @@ async function saveSettings(quiet = false) {
             allow_explicit: document.getElementById('allow-explicit').checked
         },
         library: {
-            music_paths: collectMusicPaths()
+            music_paths: collectMusicPaths(),
+            music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos'
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked
@@ -8204,7 +8206,8 @@ async function logoutQobuz() {
 const PATH_INPUT_IDS = {
     download: 'download-path',
     transfer: 'transfer-path',
-    staging:  'staging-path'
+    staging:  'staging-path',
+    'music-videos': 'music-videos-path'
 };
 
 function togglePathLock(pathType, btn) {

@@ -35,7 +35,7 @@ COPY . .
 
 # Create necessary directories with proper permissions
 # NOTE: /app/data is for database FILES, /app/database is the Python package
-RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/scripts && \
+RUN mkdir -p /app/config /app/data /app/logs /app/downloads /app/Transfer /app/MusicVideos /app/scripts && \
     chown -R soulsync:soulsync /app
 
 # Create defaults directory and copy template files
@@ -47,7 +47,7 @@ RUN mkdir -p /defaults && \
 
 # Create volume mount points
 # NOTE: Changed /app/database to /app/data to avoid overwriting Python package
-VOLUME ["/app/config", "/app/data", "/app/logs", "/app/downloads", "/app/Transfer", "/app/scripts"]
+VOLUME ["/app/config", "/app/data", "/app/logs", "/app/downloads", "/app/Transfer", "/app/MusicVideos", "/app/scripts"]
 
 # Copy and set up entrypoint script
 COPY entrypoint.sh /entrypoint.sh

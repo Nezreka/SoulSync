@@ -461,7 +461,8 @@ class ConfigManager:
                 "poll_interval": 30
             },
             "library": {
-                "music_paths": []
+                "music_paths": [],
+                "music_videos_path": "./MusicVideos"
             },
             "scripts": {
                 "path": "./scripts",
