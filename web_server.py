@@ -21276,6 +21276,31 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "🎬 Music Videos — Search & Download from YouTube",
+                "description": "New Music Videos tab in enhanced and global search for finding and downloading music videos",
+                "features": [
+                    "• Music Videos pill tab alongside Spotify/Deezer/iTunes/Discogs in both search bars",
+                    "• YouTube search returns video cards with 16:9 thumbnails, duration, channel name, view count",
+                    "• Click any video to download — circular progress ring on thumbnail, green checkmark on completion",
+                    "• Metadata matching — searches your primary source for clean artist/title before saving",
+                    "• Saves to configurable Music Videos directory as Artist/Title-video.mp4 (Plex global folder format)",
+                    "• Plex video type suffixes supported: -video, -lyrics, -live, -concert, -interview, -behindthescenes"
+                ],
+                "usage_note": "Set your Music Videos directory in Settings > Downloads, then search for any artist in the search bar and click the Music Videos tab."
+            },
+            {
+                "title": "📦 Lidarr Download Source (Development)",
+                "description": "Use Lidarr as a download source for Usenet and torrent content",
+                "features": [
+                    "• 7th download source alongside Soulseek, YouTube, Tidal, Qobuz, HiFi, and Deezer",
+                    "• SoulSync handles discovery and matching, Lidarr handles downloading via its indexers",
+                    "• Configure with just URL + API key in Settings > Downloads",
+                    "• Available as standalone source or in Hybrid mode priority order",
+                    "• Currently in development — basic album search and download flow functional"
+                ],
+                "usage_note": "Requires a running Lidarr instance with configured indexers and download clients. Set Download Source to 'Lidarr Only (Development)' or add to Hybrid order."
+            },
+            {
                 "title": "🔧 Metadata Pipeline Overhaul — Fix Unknown Artist & Source Selection",
                 "description": "Major fix for tracks downloading as 'Unknown Artist' and Spotify being used when Deezer/iTunes was selected",
                 "features": [
@@ -21352,6 +21377,11 @@ def get_version_info():
                 "title": "🔧 Fixes & Improvements",
                 "description": "Bug fixes, quality of life improvements, and new settings",
                 "features": [
+                    "• Dismissed maintenance findings no longer reappear on next scan — dedup check now includes dismissed status",
+                    "• Orphan file detector: increased path matching depth to 4 segments + filename parsing fallback for unreadable tags",
+                    "• Media player: rapid play clicks no longer create duplicate audio streams requiring browser refresh",
+                    "• Logs directory auto-created on startup — prevents crash for non-Docker installations",
+                    "• Stale discovery data re-processed in automation pipeline — tracks with missing metadata get re-enriched",
                     "• Artist names no longer stored as lowercase — fixed static method shadowing instance method. Run a database update to fix existing names.",
                     "• Watchlist scanner skips future/unreleased albums — no more garbage downloads from albums not yet out",
                     "• Playlist sync tracks now tagged with correct track numbers instead of always 01",
