@@ -5915,6 +5915,8 @@ async function loadSettingsData() {
         document.getElementById('deezer-download-quality').value = settings.deezer_download?.quality || 'flac';
         document.getElementById('deezer-allow-fallback').checked = settings.deezer_download?.allow_fallback !== false;
         document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
+        document.getElementById('lidarr-url').value = settings.lidarr_download?.url || '';
+        document.getElementById('lidarr-api-key').value = settings.lidarr_download?.api_key || '';
         // Sync ARL to connections tab field + bidirectional listeners
         const _connArl = document.getElementById('deezer-connection-arl');
         const _dlArl = document.getElementById('deezer-download-arl');
@@ -6211,6 +6213,7 @@ function updateDownloadSourceUI() {
     const youtubeContainer = document.getElementById('youtube-settings-container');
     const hifiContainer = document.getElementById('hifi-download-settings-container');
     const deezerDlContainer = document.getElementById('deezer-download-settings-container');
+    const lidarrContainer = document.getElementById('lidarr-download-settings-container');
 
     hybridContainer.style.display = mode === 'hybrid' ? 'block' : 'none';
 
@@ -6231,6 +6234,7 @@ function updateDownloadSourceUI() {
     youtubeContainer.style.display = activeSources.has('youtube') ? 'block' : 'none';
     hifiContainer.style.display = activeSources.has('hifi') ? 'block' : 'none';
     if (deezerDlContainer) deezerDlContainer.style.display = activeSources.has('deezer_dl') ? 'block' : 'none';
+    if (lidarrContainer) lidarrContainer.style.display = activeSources.has('lidarr') ? 'block' : 'none';
 
     // Quality profile is Soulseek-only and downloads-tab-only
     const qualityProfileSection = document.getElementById('quality-profile-section');
@@ -7099,6 +7103,10 @@ async function saveSettings(quiet = false) {
             arl: document.getElementById('deezer-download-arl').value || '',
             allow_fallback: document.getElementById('deezer-allow-fallback').checked,
         },
+        lidarr_download: {
+            url: document.getElementById('lidarr-url').value || '',
+            api_key: document.getElementById('lidarr-api-key').value || '',
+        },
         qobuz: {
             quality: document.getElementById('qobuz-quality').value || 'lossless',
             embed_tags: document.getElementById('embed-qobuz').checked,
@@ -7816,6 +7824,33 @@ async function testHiFiConnection() {
         } else {
             statusEl.textContent = 'No instances reachable';
             statusEl.style.color = '#ff9800';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+    }
+}
+
+async function testLidarrConnection() {
+    const statusEl = document.getElementById('lidarr-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        // Save settings first so the backend has the URL/key
+        await saveSettings();
+        const resp = await fetch('/api/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ service: 'lidarr' })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            statusEl.textContent = 'Connected';
+            statusEl.style.color = '#4caf50';
+        } else {
+            statusEl.textContent = data.error || 'Connection failed';
+            statusEl.style.color = '#f44336';
         }
     } catch (e) {
         statusEl.textContent = 'Connection error';

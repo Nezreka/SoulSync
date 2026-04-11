@@ -79,6 +79,7 @@ class ConfigManager:
         # Download sources
         'soulseek.api_key',
         'deezer_download.arl',
+        'lidarr_download.api_key',
         # Enrichment services
         'listenbrainz.token',
         'acoustid.api_key',
@@ -409,6 +410,13 @@ class ConfigManager:
             "hifi_download": {
                 "quality": "lossless",  # Options: "low", "high", "lossless", "hires"
             },
+            "lidarr_download": {
+                "url": "",
+                "api_key": "",
+                "root_folder": "",
+                "quality_profile": "Any",
+                "cleanup_after_import": True,
+            },
             "listenbrainz": {
                 "base_url": "",
                 "token": "",
@@ -462,7 +470,7 @@ class ConfigManager:
             },
             "library": {
                 "music_paths": [],
-                "music_videos_path": "./MusicVideos"
+                "music_videos_path": ""
             },
             "scripts": {
                 "path": "./scripts",

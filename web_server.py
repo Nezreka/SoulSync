@@ -1955,7 +1955,7 @@ def _record_library_history_download(context):
         # Determine download source
         search_result = context.get('original_search_result') or context.get('search_result') or {}
         username = search_result.get('username', context.get('_download_username', ''))
-        _svc_map = {'youtube': 'YouTube', 'tidal': 'Tidal', 'qobuz': 'Qobuz', 'hifi': 'HiFi', 'deezer_dl': 'Deezer'}
+        _svc_map = {'youtube': 'YouTube', 'tidal': 'Tidal', 'qobuz': 'Qobuz', 'hifi': 'HiFi', 'deezer_dl': 'Deezer', 'lidarr': 'Lidarr'}
         download_source = _svc_map.get(username, 'Soulseek')
 
         ti = context.get('track_info') or context.get('search_result') or {}
@@ -2002,7 +2002,7 @@ def _record_library_history_download(context):
         source_track_title = search_result.get('title', '') or search_result.get('name', '')
         source_artist = search_result.get('artist', '')
         # For streaming sources, track ID is encoded in filename as "id||display_name"
-        if source_filename and '||' in source_filename and username in ('tidal', 'youtube', 'qobuz', 'hifi', 'deezer_dl'):
+        if source_filename and '||' in source_filename and username in ('tidal', 'youtube', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
             _stream_id = source_filename.split('||')[0]
             if _stream_id and not source_track_id:
                 source_track_id = _stream_id
@@ -2039,7 +2039,7 @@ def _record_download_provenance(context):
         filename = search_result.get('filename', '')
 
         # Determine source service from username
-        service_map = {'youtube': 'youtube', 'tidal': 'tidal', 'qobuz': 'qobuz', 'hifi': 'hifi', 'deezer_dl': 'deezer'}
+        service_map = {'youtube': 'youtube', 'tidal': 'tidal', 'qobuz': 'qobuz', 'hifi': 'hifi', 'deezer_dl': 'deezer', 'lidarr': 'lidarr'}
         source_service = service_map.get(username, 'soulseek')
 
         # Track metadata
@@ -2368,7 +2368,7 @@ def get_cached_transfer_data():
                 all_downloads = run_async(soulseek_client.get_all_downloads()) if not soulseek_known_down else []
                 for download in all_downloads:
                     # Only add streaming source downloads (Soulseek ones are already in the lookup)
-                    if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
+                    if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
                         key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format
                         live_transfers_lookup[key] = {
@@ -2695,7 +2695,7 @@ class WebUIDownloadMonitor:
                 all_downloads = run_async(soulseek_client.get_all_downloads())
                 for download in all_downloads:
                     # Only add streaming source downloads (Soulseek ones are already in the lookup from slskd API)
-                    if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
+                    if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
                         key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format for monitor compatibility
                         live_transfers[key] = {
@@ -4101,6 +4101,21 @@ def run_service_test(service, test_config):
                     return False, "Invalid Genius access token."
             except Exception as e:
                 return False, f"Genius connection error: {str(e)}"
+        elif service == "lidarr" or service == "lidarr_download":
+            url = config_manager.get('lidarr_download.url', '')
+            api_key = config_manager.get('lidarr_download.api_key', '')
+            if not url or not api_key:
+                return False, "Lidarr URL and API key are required."
+            try:
+                import requests as _req
+                resp = _req.get(f"{url.rstrip('/')}/api/v1/system/status",
+                                headers={'X-Api-Key': api_key}, timeout=10)
+                if resp.ok:
+                    version = resp.json().get('version', '?')
+                    return True, f"Connected to Lidarr v{version}"
+                return False, f"Lidarr returned HTTP {resp.status_code}"
+            except Exception as e:
+                return False, f"Lidarr connection error: {str(e)}"
         return False, "Unknown service."
     except AttributeError as e:
         # This specifically catches the error you reported for Jellyfin
@@ -5184,7 +5199,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'lidarr_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -8238,7 +8253,7 @@ def stream_enhanced_search_track():
         search_queries = []
         import re
 
-        if effective_mode in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
+        if effective_mode in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
             # Streaming sources: Include artist for better context
             if artist_name and track_name:
                 search_queries.append(f"{artist_name} {track_name}".strip())
@@ -8280,6 +8295,7 @@ def stream_enhanced_search_track():
             'qobuz': soulseek_client.qobuz,
             'hifi': soulseek_client.hifi,
             'deezer_dl': soulseek_client.deezer_dl,
+            'lidarr': soulseek_client.lidarr,
         }
         stream_client = _stream_clients.get(effective_mode)
         use_direct_client = stream_client is not None
@@ -8371,10 +8387,20 @@ def download_music_video():
     if video_id in _music_video_downloads and _music_video_downloads[video_id].get('status') == 'downloading':
         return jsonify({"error": "Already downloading"}), 409
 
-    # Get music videos path
-    music_videos_path = config_manager.get('library.music_videos_path', './MusicVideos')
+    # Get and validate music videos path
+    music_videos_path = config_manager.get('library.music_videos_path', '') or ''
+    if not music_videos_path.strip():
+        return jsonify({"error": "Music Videos directory not configured. Set it in Settings > Downloads."}), 400
     music_videos_path = docker_resolve_path(music_videos_path)
-    os.makedirs(music_videos_path, exist_ok=True)
+    try:
+        os.makedirs(music_videos_path, exist_ok=True)
+        # Quick write test
+        test_file = os.path.join(music_videos_path, '.soulsync_write_test')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+    except (OSError, PermissionError) as e:
+        return jsonify({"error": f"Music Videos directory is not writable: {e}"}), 400
 
     # Initialize download state
     _music_video_downloads[video_id] = {'status': 'searching', 'progress': 0, 'path': None, 'error': None}
@@ -8558,7 +8584,7 @@ def start_download():
             if download_id:
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
-                is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl')
+                is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr')
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -8936,7 +8962,7 @@ def get_download_status():
             all_streaming_downloads = run_async(soulseek_client.get_all_downloads())
 
             for download in all_streaming_downloads:
-                if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
+                if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
                     source_label = download.username.title()
                     # Convert DownloadStatus to transfer format that frontend expects
                     streaming_transfer = {
@@ -28634,7 +28660,7 @@ def _store_batch_source(batch_id, username, filename):
     """Browse the successful download's folder and store results on the batch for reuse."""
     _sr = source_reuse_logger
     _sr.info(f"_store_batch_source called: batch={batch_id}, user={username}, file={filename}")
-    if not batch_id or username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
+    if not batch_id or username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
         _sr.info(f"Skipped — no batch_id or streaming source ({username})")
         return
 
