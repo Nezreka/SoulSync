@@ -133,7 +133,7 @@ class DownloadOrchestrator:
         if client and self.mode != 'hybrid':
             return await client.check_connection()
         elif self.mode == 'hybrid':
-            sources_to_check = self.hybrid_order if self.hybrid_order else ['soulseek', 'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl']
+            sources_to_check = self.hybrid_order if self.hybrid_order else ['soulseek', 'youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr']
             results = {}
             for source in sources_to_check:
                 client = self._client(source)
@@ -163,7 +163,7 @@ class DownloadOrchestrator:
             Tuple of (track_results, album_results)
         """
         source_names = {'soulseek': 'Soulseek', 'youtube': 'YouTube', 'tidal': 'Tidal',
-                        'qobuz': 'Qobuz', 'hifi': 'HiFi', 'deezer_dl': 'Deezer'}
+                        'qobuz': 'Qobuz', 'hifi': 'HiFi', 'deezer_dl': 'Deezer', 'lidarr': 'Lidarr'}
 
         if self.mode != 'hybrid':
             client = self._client(self.mode)
@@ -247,7 +247,7 @@ class DownloadOrchestrator:
             return None
 
         # 2. Filter and validate results
-        _streaming_sources = ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl')
+        _streaming_sources = ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr')
         is_streaming = tracks[0].username in _streaming_sources if tracks else False
 
         if is_streaming and expected_track:
@@ -399,7 +399,7 @@ class DownloadOrchestrator:
         """
         # If username is provided, route directly to that source
         source_map = {'youtube': self.youtube, 'tidal': self.tidal, 'qobuz': self.qobuz,
-                      'hifi': self.hifi, 'deezer_dl': self.deezer_dl}
+                      'hifi': self.hifi, 'deezer_dl': self.deezer_dl, 'lidarr': self.lidarr}
         if username in source_map:
             client = source_map[username]
             return await client.cancel_download(download_id, username, remove) if client else False

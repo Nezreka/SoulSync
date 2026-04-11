@@ -14291,7 +14291,7 @@ def redownload_search_sources(track_id):
                         quality = ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else candidate.quality or ''
                         svc = source_name if source_name != 'default' else 'hybrid'
                         uname = candidate.username
-                        if uname in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
+                        if uname in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
                             svc = uname
                         source_candidates.append({
                             'username': uname,
@@ -28558,7 +28558,7 @@ def _try_source_reuse(task_id, batch_id, track):
     if not source_tracks or not last_source:
         _sr.info(f"Skipped — no source_tracks or no last_source")
         return False
-    if last_source.get('username') in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'):
+    if last_source.get('username') in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
         _sr.info(f"Skipped — {last_source.get('username')} source (no folder-based reuse)")
         return False
 
