@@ -17767,7 +17767,7 @@ function _gsRender(data) {
             h += videos.map(v => {
                 const dur = v.duration ? `${Math.floor(v.duration / 60)}:${String(v.duration % 60).padStart(2, '0')}` : '';
                 const views = v.view_count >= 1000000 ? `${(v.view_count/1000000).toFixed(1)}M` : v.view_count >= 1000 ? `${(v.view_count/1000).toFixed(1)}K` : (v.view_count || '');
-                return `<div class="enh-video-card" data-video-id="${v.video_id}" onclick="_downloadMusicVideo(this, ${_escToast(JSON.stringify(v)).replace(/"/g, '&quot;')})">
+                return `<div class="enh-video-card" data-video-id="${v.video_id}" onclick="_downloadMusicVideo(this, ${JSON.stringify(v).replace(/"/g, '&quot;')})">
                     <div class="enh-video-thumb"><img src="${v.thumbnail}" alt="" loading="lazy" onerror="this.style.display='none'"><div class="enh-video-play">▶</div>
                     <div class="enh-video-progress-ring hidden"><svg viewBox="0 0 36 36"><circle class="enh-video-progress-bg" cx="18" cy="18" r="15.5" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="3"/><circle class="enh-video-progress-bar" cx="18" cy="18" r="15.5" fill="none" stroke="rgb(var(--accent-rgb))" stroke-width="3" stroke-dasharray="97.4" stroke-dashoffset="97.4" stroke-linecap="round" transform="rotate(-90 18 18)"/></svg></div>
                     <div class="enh-video-done hidden">✓</div><div class="enh-video-error hidden">✗</div>
