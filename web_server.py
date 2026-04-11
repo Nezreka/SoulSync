@@ -40,6 +40,7 @@ import logging.handlers as _logging_handlers
 source_reuse_logger = _logging.getLogger("source_reuse")
 source_reuse_logger.setLevel(_logging.DEBUG)
 if not source_reuse_logger.handlers:
+    os.makedirs("logs", exist_ok=True)
     _sr_handler = _logging_handlers.RotatingFileHandler(
         "logs/source_reuse.log", encoding="utf-8", maxBytes=5*1024*1024, backupCount=2
     )
