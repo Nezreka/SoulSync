@@ -558,8 +558,78 @@ class YouTubeClient:
                 thumbnail = thumbs[-1].get('url')
         
         track_result.thumbnail = thumbnail
-        
+
         return track_result
+
+    async def search_videos(self, query: str, max_results: int = 20) -> List[YouTubeSearchResult]:
+        """Search YouTube and return video metadata for music video display.
+
+        Unlike search() which returns TrackResult objects for download matching,
+        this returns YouTubeSearchResult objects with video-specific metadata
+        (thumbnails, view counts, channel names) for UI display.
+        """
+        logger.info(f"🎬 Searching YouTube videos for: {query}")
+        try:
+            loop = asyncio.get_event_loop()
+
+            def _search():
+                from config.settings import config_manager
+                ydl_opts = {
+                    'quiet': True,
+                    'no_warnings': True,
+                    'extract_flat': True,
+                    'default_search': 'ytsearch',
+                    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                }
+                cookies_browser = config_manager.get('youtube.cookies_browser', '')
+                if cookies_browser:
+                    ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
+
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    data = ydl.extract_info(f"ytsearch{max_results}:{query}", download=False)
+                    if not data or 'entries' not in data:
+                        return []
+
+                    results = []
+                    for entry in data['entries']:
+                        if not entry:
+                            continue
+                        video_id = entry.get('id', '')
+                        title = entry.get('title', '')
+                        if not video_id or not title:
+                            continue
+
+                        # Skip very short clips (< 30s) and very long content (> 15min)
+                        duration = entry.get('duration') or 0
+                        if duration < 30 or duration > 900:
+                            continue
+
+                        channel = entry.get('uploader', entry.get('channel', ''))
+                        if channel and re.search(r'\s*-\s*Topic\s*$', channel, re.IGNORECASE):
+                            channel = re.sub(r'\s*-\s*Topic\s*$', '', channel, flags=re.IGNORECASE).strip()
+
+                        thumbnail = entry.get('thumbnail')
+                        if not thumbnail and entry.get('thumbnails'):
+                            thumbs = entry['thumbnails']
+                            if isinstance(thumbs, list) and thumbs:
+                                thumbnail = thumbs[-1].get('url')
+
+                        results.append(YouTubeSearchResult(
+                            video_id=video_id,
+                            title=title,
+                            channel=channel,
+                            duration=duration,
+                            url=f"https://www.youtube.com/watch?v={video_id}",
+                            thumbnail=thumbnail or '',
+                            view_count=entry.get('view_count', 0) or 0,
+                            upload_date=entry.get('upload_date', ''),
+                        ))
+                    return results
+
+            return await loop.run_in_executor(None, _search)
+        except Exception as e:
+            logger.error(f"YouTube video search failed: {e}")
+            return []
 
     async def search(self, query: str, timeout: int = None, progress_callback=None) -> tuple[List[TrackResult], List[AlbumResult]]:
         """

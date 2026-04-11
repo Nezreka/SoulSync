@@ -8330,6 +8330,7 @@ function initializeSearchModeToggle() {
         deezer: { text: 'Deezer', tabClass: 'enh-tab-deezer', badgeClass: 'enh-badge-deezer' },
         discogs: { text: 'Discogs', tabClass: 'enh-tab-discogs', badgeClass: 'enh-badge-discogs' },
         hydrabase: { text: 'Hydrabase', tabClass: 'enh-tab-hydrabase', badgeClass: 'enh-badge-hydrabase' },
+        youtube_videos: { text: 'Music Videos', tabClass: 'enh-tab-youtube', badgeClass: 'enh-badge-youtube' },
     };
 
     // Live search with debouncing
@@ -8454,7 +8455,7 @@ function initializeSearchModeToggle() {
         // Fire ALL source fetches immediately in parallel with the primary endpoint.
         // Don't guess which is primary — the main endpoint response will tell us.
         // If an alternate duplicates the primary, it just overwrites with same data.
-        for (const srcName of ['spotify', 'itunes', 'deezer', 'discogs', 'hydrabase']) {
+        for (const srcName of ['spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'youtube_videos']) {
             _fetchAlternateSource(srcName, query);
         }
 
@@ -8512,6 +8513,9 @@ function initializeSearchModeToggle() {
     }
 
     function renderDropdownResults(data) {
+        // Music Videos tab — don't render regular sections
+        if (_activeSearchSource === 'youtube_videos') return;
+
         // Determine source badge from active tab (not just primary)
         const displaySource = _activeSearchSource || data.metadata_source || 'spotify';
         const sourceInfo = SOURCE_LABELS[displaySource] || SOURCE_LABELS.spotify;
@@ -8726,7 +8730,8 @@ function initializeSearchModeToggle() {
             // Stream NDJSON — render each search type (artists, albums, tracks) as it arrives
             if (!_enhancedSearchData) return;
             if (!_enhancedSearchData.sources[sourceName]) {
-                _enhancedSearchData.sources[sourceName] = { artists: [], albums: [], tracks: [], available: true, _loading: new Set(['artists', 'albums', 'tracks']) };
+                const loadingSet = sourceName === 'youtube_videos' ? new Set(['videos']) : new Set(['artists', 'albums', 'tracks']);
+                _enhancedSearchData.sources[sourceName] = { artists: [], albums: [], tracks: [], videos: [], available: true, _loading: loadingSet };
             }
             const sourceData = _enhancedSearchData.sources[sourceName];
 
@@ -8750,6 +8755,7 @@ function initializeSearchModeToggle() {
                         if (chunk.type === 'artists') { sourceData.artists = chunk.data; if (sourceData._loading) sourceData._loading.delete('artists'); }
                         else if (chunk.type === 'albums') { sourceData.albums = chunk.data; if (sourceData._loading) sourceData._loading.delete('albums'); }
                         else if (chunk.type === 'tracks') { sourceData.tracks = chunk.data; if (sourceData._loading) sourceData._loading.delete('tracks'); }
+                        else if (chunk.type === 'videos') { sourceData.videos = chunk.data; if (sourceData._loading) sourceData._loading.delete('videos'); }
                         else if (chunk.type === 'done') { delete sourceData._loading; break; }
 
                         // Re-render tabs + content if this is the active source
@@ -8797,7 +8803,9 @@ function initializeSearchModeToggle() {
         tabBar.innerHTML = ordered.map(name => {
             const info = SOURCE_LABELS[name] || { text: name, tabClass: '' };
             const src = sources[name] || {};
-            const count = (src.artists?.length || 0) + (src.albums?.length || 0) + (src.tracks?.length || 0);
+            const count = name === 'youtube_videos'
+                ? (src.videos?.length || 0)
+                : (src.artists?.length || 0) + (src.albums?.length || 0) + (src.tracks?.length || 0);
             const isActive = name === _activeSearchSource;
             return `<button class="enh-source-tab ${info.tabClass} ${isActive ? 'active' : ''}"
                             onclick="window._switchEnhSourceTab('${name}')"
@@ -8821,6 +8829,27 @@ function initializeSearchModeToggle() {
         document.querySelectorAll('.enh-source-tab').forEach(tab => {
             tab.classList.toggle('active', tab.dataset.source === sourceName);
         });
+
+        // Music Videos tab — render video cards instead of regular sections
+        if (sourceName === 'youtube_videos') {
+            // Hide ALL regular sections including wrappers
+            ['enh-db-artists-section', 'enh-spotify-artists-section', 'enh-albums-section', 'enh-singles-section', 'enh-tracks-section'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('hidden');
+            });
+            // Hide the artists wrapper div too
+            const artistsWrapper = document.querySelector('.enh-artists-wrapper');
+            if (artistsWrapper) artistsWrapper.style.display = 'none';
+            _renderVideoResults(src.videos || []);
+            resultsContainer.classList.remove('hidden');
+            return;
+        }
+
+        // Hide videos section and restore regular layout when switching to a metadata tab
+        const videosSec = document.getElementById('enh-videos-section');
+        if (videosSec) videosSec.classList.add('hidden');
+        const artistsWrapper = document.querySelector('.enh-artists-wrapper');
+        if (artistsWrapper) artistsWrapper.style.display = '';
 
         // Build data in the shape renderDropdownResults expects
         const viewData = {
@@ -8853,6 +8882,62 @@ function initializeSearchModeToggle() {
             }
         }
     };
+
+    function _renderVideoResults(videos) {
+        let section = document.getElementById('enh-videos-section');
+        if (!section) {
+            // Create the section dynamically if it doesn't exist
+            const container = document.getElementById('enhanced-results-container');
+            if (!container) return;
+            section = document.createElement('div');
+            section.id = 'enh-videos-section';
+            section.className = 'enh-dropdown-section';
+            section.innerHTML = `
+                <div class="enh-section-header">
+                    <span class="enh-section-icon">🎬</span>
+                    <h4 class="enh-section-title">Music Videos</h4>
+                    <span class="enh-section-count" id="enh-videos-count">0</span>
+                </div>
+                <div class="enh-video-grid" id="enh-videos-list"></div>
+            `;
+            container.appendChild(section);
+        }
+
+        section.classList.remove('hidden');
+        const countEl = document.getElementById('enh-videos-count');
+        const listEl = document.getElementById('enh-videos-list');
+        if (countEl) countEl.textContent = videos.length;
+
+        if (!videos.length) {
+            listEl.innerHTML = '<div class="enh-empty-state">No music videos found</div>';
+            return;
+        }
+
+        listEl.innerHTML = videos.map(v => {
+            const duration = v.duration ? `${Math.floor(v.duration / 60)}:${String(v.duration % 60).padStart(2, '0')}` : '';
+            const views = v.view_count ? _formatViewCount(v.view_count) : '';
+            return `
+                <div class="enh-video-card" data-video-id="${v.video_id}" onclick="window.open('${v.url}', '_blank')">
+                    <div class="enh-video-thumb">
+                        <img src="${v.thumbnail}" alt="" loading="lazy" onerror="this.style.display='none'">
+                        <div class="enh-video-play">▶</div>
+                        ${duration ? `<span class="enh-video-duration">${duration}</span>` : ''}
+                    </div>
+                    <div class="enh-video-info">
+                        <div class="enh-video-title" title="${v.title.replace(/"/g, '&quot;')}">${v.title}</div>
+                        <div class="enh-video-channel">${v.channel}${views ? ` · ${views} views` : ''}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function _formatViewCount(count) {
+        if (count >= 1000000000) return `${(count / 1000000000).toFixed(1)}B`;
+        if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`;
+        if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
+        return String(count);
+    }
 
     // Lazy load artist images for enhanced search results
     async function lazyLoadEnhancedSearchArtistImages() {
@@ -17543,7 +17628,8 @@ async function _gsFetchSourceStream(src, query) {
         if (!res.ok) return;
 
         if (!_gsState.sources[src]) {
-            _gsState.sources[src] = { artists: [], albums: [], tracks: [], available: true, _loading: new Set(['artists', 'albums', 'tracks']) };
+            const loadingSet = src === 'youtube_videos' ? new Set(['videos']) : new Set(['artists', 'albums', 'tracks']);
+            _gsState.sources[src] = { artists: [], albums: [], tracks: [], videos: [], available: true, _loading: loadingSet };
         }
         const sourceData = _gsState.sources[src];
 
@@ -17566,6 +17652,7 @@ async function _gsFetchSourceStream(src, query) {
                     if (chunk.type === 'artists') { sourceData.artists = chunk.data; if (sourceData._loading) sourceData._loading.delete('artists'); }
                     else if (chunk.type === 'albums') { sourceData.albums = chunk.data; if (sourceData._loading) sourceData._loading.delete('albums'); }
                     else if (chunk.type === 'tracks') { sourceData.tracks = chunk.data; if (sourceData._loading) sourceData._loading.delete('tracks'); }
+                    else if (chunk.type === 'videos') { sourceData.videos = chunk.data; if (sourceData._loading) sourceData._loading.delete('videos'); }
                     if (chunk.type === 'done') delete sourceData._loading;
                     _gsRenderTabs();
                     // Re-render content if this is the active source tab
@@ -17585,6 +17672,39 @@ function _gsRender(data) {
     const results = document.getElementById('gsearch-results');
     if (!results) return;
 
+    // Music Videos tab — render video grid instead of regular results
+    if (_gsState.activeSource === 'youtube_videos') {
+        const src = _gsState.sources['youtube_videos'] || {};
+        const videos = src.videos || [];
+        const isLoading = src._loading && src._loading.size > 0;
+        let h = '';
+        h += `<div class="gsearch-results-header"><span class="gsearch-results-title">Results</span><span class="gsearch-results-count">${videos.length} videos</span></div>`;
+        h += '<div class="gsearch-tabs" id="gsearch-tabs"></div>';
+        h += '<div class="gsearch-results-body">';
+        if (isLoading) {
+            h += '<div class="gsearch-section-loading"><div class="server-search-spinner" style="width:14px;height:14px"></div> Searching YouTube...</div>';
+        } else if (videos.length === 0) {
+            h += `<div class="gsearch-empty">No music videos found for "${_escToast(_gsState.query)}"</div>`;
+        } else {
+            h += '<div class="gsearch-section-header">🎬 Music Videos</div>';
+            h += '<div class="enh-video-grid">';
+            h += videos.map(v => {
+                const dur = v.duration ? `${Math.floor(v.duration / 60)}:${String(v.duration % 60).padStart(2, '0')}` : '';
+                const views = v.view_count >= 1000000 ? `${(v.view_count/1000000).toFixed(1)}M` : v.view_count >= 1000 ? `${(v.view_count/1000).toFixed(1)}K` : (v.view_count || '');
+                return `<div class="enh-video-card" onclick="window.open('${v.url}', '_blank')">
+                    <div class="enh-video-thumb"><img src="${v.thumbnail}" alt="" loading="lazy" onerror="this.style.display='none'"><div class="enh-video-play">▶</div>${dur ? `<span class="enh-video-duration">${dur}</span>` : ''}</div>
+                    <div class="enh-video-info"><div class="enh-video-title">${_escToast(v.title)}</div><div class="enh-video-channel">${_escToast(v.channel)}${views ? ` · ${views} views` : ''}</div></div>
+                </div>`;
+            }).join('');
+            h += '</div>';
+        }
+        h += '</div>';
+        results.innerHTML = h;
+        results.classList.add('visible');
+        _gsRenderTabs();
+        return;
+    }
+
     const src = _gsState.sources[_gsState.activeSource] || {};
     const loading = src._loading || new Set();
     const dbArtists = data?.db_artists || [];
@@ -17602,7 +17722,7 @@ function _gsRender(data) {
         return;
     }
 
-    const sourceLabels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', hydrabase: 'Hydrabase' };
+    const sourceLabels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', hydrabase: 'Hydrabase', youtube_videos: 'Music Videos' };
     const srcLabel = sourceLabels[_gsState.activeSource] || _gsState.activeSource || '';
 
     let h = '';
@@ -17699,11 +17819,13 @@ function _gsRenderTabs() {
     if (!el) return;
     const sources = Object.keys(_gsState.sources);
     if (sources.length < 2) { el.style.display = 'none'; return; }
-    const labels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', hydrabase: 'Hydrabase' };
+    const labels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', hydrabase: 'Hydrabase', youtube_videos: 'Music Videos' };
     el.style.display = 'flex';
     el.innerHTML = sources.map(s => {
         const d = _gsState.sources[s];
-        const c = (d.artists?.length || 0) + (d.albums?.length || 0) + (d.tracks?.length || 0);
+        const c = s === 'youtube_videos'
+            ? (d.videos?.length || 0)
+            : (d.artists?.length || 0) + (d.albums?.length || 0) + (d.tracks?.length || 0);
         return `<button class="gsearch-tab${s === _gsState.activeSource ? ' active' : ''}" onclick="_gsSwitchSource('${s}')">${labels[s] || s} (${c})</button>`;
     }).join('');
 }

@@ -7873,6 +7873,8 @@ def enhanced_search():
             alternate_sources.append('discogs')
         if primary_source != 'hydrabase' and hydrabase_available:
             alternate_sources.append('hydrabase')
+        # YouTube music videos always available (uses yt-dlp, no auth needed)
+        alternate_sources.append('youtube_videos')
 
         logger.info(f"Enhanced search results ({primary_source}): {len(db_artists)} DB artists, "
                      f"{len(primary_results['artists'])} artists, {len(primary_results['albums'])} albums, "
@@ -7959,13 +7961,44 @@ def enhanced_search_source(source_name):
     This prevents slow sources (iTunes with 3s rate limit) from blocking the UI.
     Falls back to single JSON response if streaming not supported.
     """
-    if source_name not in ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase'):
+    if source_name not in ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'youtube_videos'):
         return jsonify({"error": f"Unknown source: {source_name}"}), 400
 
     data = request.get_json()
     query = (data.get('query', '') if data else '').strip()
     if not query:
         return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
+
+    # YouTube music videos — separate flow from metadata sources
+    if source_name == 'youtube_videos':
+        if not soulseek_client or not hasattr(soulseek_client, 'youtube') or not soulseek_client.youtube:
+            return jsonify({"videos": [], "available": False})
+        try:
+            def generate_videos():
+                try:
+                    # Search YouTube via yt-dlp
+                    video_query = f"{query} official music video"
+                    results = run_async(soulseek_client.youtube.search_videos(video_query, max_results=20))
+                    videos = []
+                    for v in (results or []):
+                        videos.append({
+                            'video_id': v.video_id,
+                            'title': v.title,
+                            'channel': v.channel,
+                            'duration': v.duration,
+                            'thumbnail': v.thumbnail,
+                            'url': v.url,
+                            'view_count': v.view_count,
+                            'upload_date': v.upload_date,
+                        })
+                    yield json.dumps({"type": "videos", "data": videos}) + "\n"
+                except Exception as e:
+                    logger.error(f"YouTube music video search failed: {e}")
+                    yield json.dumps({"type": "videos", "data": []}) + "\n"
+                yield json.dumps({"type": "done"}) + "\n"
+            return app.response_class(generate_videos(), mimetype='application/x-ndjson')
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     try:
         client = None
