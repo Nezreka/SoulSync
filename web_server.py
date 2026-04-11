@@ -48810,14 +48810,19 @@ def start_oauth_callback_servers():
 def get_spotify_artist_discography(artist_name):
     """Get complete artist discography from Spotify using proper matching"""
     try:
-        from core.spotify_client import SpotifyClient
         from core.matching_engine import MusicMatchingEngine
 
         print(f"🎵 Searching Spotify for artist: {artist_name}")
 
-        # Initialize clients
-        spotify_client = SpotifyClient()
+        # Reuse cached profile-aware Spotify client
+        spotify_client = get_spotify_client_for_profile()
         matching_engine = MusicMatchingEngine()
+
+        if not spotify_client:
+            return {
+                'success': False,
+                'error': 'Spotify client unavailable'
+            }
 
         # Search for multiple potential matches (not just 1)
         artists = spotify_client.search_artists(artist_name, limit=5)
