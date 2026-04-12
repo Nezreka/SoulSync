@@ -120,6 +120,7 @@ class NavidromeTrack:
 
         self._album_id = navidrome_data.get('albumId', '')
         self._artist_id = navidrome_data.get('artistId', '')
+        self.musicBrainzId = navidrome_data.get('musicBrainzId')
 
     def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
         if not date_str:
