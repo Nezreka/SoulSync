@@ -21,15 +21,17 @@ from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, redirect, send_file, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from utils.logging_config import get_logger
+from utils.logging_config import get_logger, setup_logging
 from utils.async_helpers import run_async
 
 # --- Core Application Imports ---
 # Import the same core clients and config manager used by the GUI app
 from config.settings import config_manager
 
-# Initialize logger
-logger = get_logger("web_server")
+# Setup logging early to avoid any import-time logs from being swallowed
+_log_level = config_manager.get('logging.level', 'INFO')
+_log_path = config_manager.get('logging.path', 'logs/app.log')
+logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
 SOULSYNC_VERSION = "2.2"
@@ -52560,12 +52562,6 @@ def _emit_repair_progress_loop():
 
 
 if __name__ == '__main__':
-    # Initialize logging for web server
-    from utils.logging_config import setup_logging
-    log_level = config_manager.get('logging.level', 'INFO')
-    log_path = config_manager.get('logging.path', 'logs/app.log')
-    logger = setup_logging(log_level, log_path)
-
     print("Starting SoulSync Web UI Server...")
     print("Open your browser and navigate to http://127.0.0.1:8008")
     
