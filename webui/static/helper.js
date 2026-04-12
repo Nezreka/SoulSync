@@ -100,6 +100,24 @@ const HELPER_CONTENT = {
         ],
         docsId: 'library'
     },
+    '.nav-button[data-page="active-downloads"]': {
+        title: 'Downloads',
+        description: 'Centralized view of every download across the entire app. Shows live status for all tracks from Sync, Discover, Artists, Search, and Wishlist in one place.',
+        tips: [
+            'Filter by status: Active, Queued, Completed, Failed',
+            'Badge on the nav button shows active download count from any page',
+            'Clear Completed button removes finished items from the list'
+        ]
+    },
+    '.nav-button[data-page="playlist-explorer"]': {
+        title: 'Playlist Explorer',
+        description: 'Visual exploration tool for playlists. Browse album art grids or full discographies from any playlist source. Select tracks to add to wishlist or download directly.',
+        tips: [
+            'Toggle between Albums view and Full Discog view',
+            'Select multiple tracks across albums for batch operations',
+            'Works with Spotify, Tidal, Deezer, and ListenBrainz playlists'
+        ]
+    },
     '.nav-button[data-page="stats"]': {
         title: 'Library Statistics',
         description: 'Detailed analytics — genre breakdowns, format distribution, quality analysis, collection growth, and enrichment coverage across all metadata services.',
@@ -723,6 +741,20 @@ const HELPER_CONTENT = {
         description: 'All imported playlists from every source, saved persistently. Shows discovery status, download progress, and allows re-syncing.',
         tips: ['Every parsed playlist is automatically mirrored here', 'Cards show live state: Discovering, Discovered, Syncing, Complete', 'Re-parsing the same URL updates the existing mirror'],
         docsId: 'sync-mirrored'
+    },
+    '.sync-tab-button[data-tab="server"]': {
+        title: 'Server Playlists',
+        description: 'View and manage playlists from your connected media server (Plex, Jellyfin, or Navidrome). Compare server-side playlists with source playlists to find differences.',
+        tips: [
+            'Two-column layout: source playlist vs server playlist',
+            'Disambiguation overlay helps match tracks when names differ',
+            'Useful for verifying sync completeness against your media server'
+        ]
+    },
+    '.sync-tab-button[data-tab="listenbrainz"]': {
+        title: 'ListenBrainz Playlists',
+        description: 'Import playlists from ListenBrainz — community-generated playlists, weekly discoveries, and your own ListenBrainz playlists.',
+        tips: ['Paste any ListenBrainz playlist URL', 'Supports weekly exploration and community playlists', 'Tracks are resolved via MusicBrainz recording IDs'],
     },
 
     // Sync page header & history
@@ -2092,6 +2124,81 @@ const HELPER_CONTENT = {
         description: 'Save all settings changes. Some changes take effect immediately; others require a restart.',
     },
 
+    // ─── DASHBOARD: ENRICHMENT SERVICES ────────────────────────────
+
+    '#enrichment-pills-section': {
+        title: 'Enrichment Service Workers',
+        description: 'Per-service enrichment workers that run in the background to enrich your library metadata. Each button shows the worker status and lets you start/stop individual services.',
+        tips: [
+            'Green = running, grey = stopped, red = error',
+            'Click a service pill to toggle its worker on/off',
+            'Workers process tracks in batches — hover for detailed stats'
+        ]
+    },
+    '#musicbrainz-button': {
+        title: 'MusicBrainz Enrichment',
+        description: 'Looks up recording IDs, release groups, and artist MBIDs from MusicBrainz. Provides canonical identifiers used by other services.',
+    },
+    '#audiodb-button': {
+        title: 'AudioDB Enrichment',
+        description: 'Adds artist bios, band member info, genre tags, and high-res artwork from TheAudioDB.',
+    },
+    '#deezer-button': {
+        title: 'Deezer Enrichment',
+        description: 'Enriches tracks with Deezer IDs, BPM data, and genre information from the Deezer catalog.',
+    },
+    '#spotify-enrich-button': {
+        title: 'Spotify Enrichment',
+        description: 'Links tracks to Spotify IDs for popularity scores, audio features, and cross-referencing. Requires Spotify OAuth connection.',
+    },
+    '#itunes-enrich-button': {
+        title: 'iTunes Enrichment',
+        description: 'Matches tracks to the Apple Music/iTunes catalog for genre tags and iTunes IDs.',
+    },
+    '#lastfm-enrich-button': {
+        title: 'Last.fm Enrichment',
+        description: 'Adds Last.fm listener/play counts and community genre tags to your library tracks.',
+    },
+    '#genius-enrich-button': {
+        title: 'Genius Enrichment',
+        description: 'Links tracks to Genius for lyrics availability and song descriptions.',
+    },
+    '#tidal-enrich-button': {
+        title: 'Tidal Enrichment',
+        description: 'Matches tracks to the Tidal catalog for Tidal IDs and lossless availability info.',
+    },
+    '#qobuz-enrich-button': {
+        title: 'Qobuz Enrichment',
+        description: 'Links tracks to Qobuz for Hi-Res availability data and Qobuz IDs.',
+    },
+    '#discogs-button': {
+        title: 'Discogs Enrichment',
+        description: 'Enriches with Discogs data — detailed genre/style taxonomy (400+ tags), label info, catalog numbers, and community ratings.',
+    },
+
+    // ─── DASHBOARD: RECENT SYNCS & RATE MONITOR ──────────────────────
+
+    '#sync-history-cards': {
+        title: 'Recent Syncs',
+        description: 'Quick view of your most recent playlist sync operations. Shows playlist name, track counts, and completion status.',
+    },
+    '#rate-monitor-section': {
+        title: 'API Rate Monitor',
+        description: 'Live view of API rate limit usage across all metadata services. Shows remaining quota, cooldown timers, and ban status.',
+    },
+    '#repair-button': {
+        title: 'Library Maintenance',
+        description: 'Open the maintenance panel to run repair jobs — detect orphan files, fix missing covers, clean live recordings, reorganize files, and more.',
+    },
+    '#soulid-button': {
+        title: 'SoulID Generator',
+        description: 'Generate unique fingerprint IDs for your audio files using AcoustID. Useful for deduplication and cross-referencing.',
+    },
+    '#blacklist-card': {
+        title: 'Download Blacklist',
+        description: 'Sources that have been blocked from future downloads. Tracks from blacklisted sources will be skipped during search and matching.',
+    },
+
     // ─── DASHBOARD: ACTIVITY FEED ───────────────────────────────────
 
     '#dashboard-activity-feed': {
@@ -2102,6 +2209,92 @@ const HELPER_CONTENT = {
             'Events are timestamped and categorized by type',
             'The feed persists across page navigation within the session'
         ]
+    },
+
+    // ─── ACTIVE DOWNLOADS PAGE ──────────────────────────────────────
+
+    '.adl-container': {
+        title: 'Downloads',
+        description: 'Live view of every download happening across the app. Tracks from Search, Sync, Discover, Artists, and Wishlist all appear here in one unified list.',
+    },
+    '#adl-filter-pills': {
+        title: 'Download Filters',
+        description: 'Filter downloads by status. "All" shows everything, "Active" shows currently downloading/searching tracks, "Queued" shows waiting tracks, "Completed" and "Failed" show finished items.',
+    },
+    '#adl-list': {
+        title: 'Download List',
+        description: 'Each row shows track title, artist, album, which batch it belongs to (playlist name or album), and current status. Active downloads show a spinner, completed show green, failed show red with error details.',
+        tips: [
+            'Track position (e.g. "3 of 19") shows progress within album/playlist batches',
+            'Section headers group downloads by status category',
+            'List updates every 2 seconds while you\'re on this page'
+        ]
+    },
+    '#adl-clear-btn': {
+        title: 'Clear Completed',
+        description: 'Remove all completed, failed, and cancelled downloads from the list. Only affects the tracker display — does not delete any downloaded files.',
+    },
+
+    // ─── PLAYLIST EXPLORER PAGE ──────────────────────────────────────
+
+    '#playlist-explorer-page': {
+        title: 'Playlist Explorer',
+        description: 'Visual exploration tool for deep-diving into playlists. Browse album art grids, explore full artist discographies, and batch-select tracks for download or wishlist.',
+        tips: [
+            'Pick a playlist source (Spotify, Tidal, Deezer, ListenBrainz) and select a playlist',
+            'Albums view shows album art cards; Full Discog view shows complete artist discographies',
+            'Select tracks across multiple albums, then use the action bar to download or wishlist them all'
+        ]
+    },
+    '#explorer-playlist-picker': {
+        title: 'Playlist Picker',
+        description: 'Choose which playlist to explore. Select a source tab, then pick a playlist from the dropdown.',
+    },
+    '.explorer-mode-btn': {
+        title: 'View Mode Toggle',
+        description: 'Switch between Albums view (grouped by album with artwork) and Full Discog view (complete discography for each artist in the playlist).',
+    },
+    '#explorer-build-btn': {
+        title: 'Explore Playlist',
+        description: 'Load the selected playlist and build the visual explorer view. Fetches album art and track listings from your metadata source.',
+    },
+    '#explorer-action-bar': {
+        title: 'Selection Action Bar',
+        description: 'Appears when tracks are selected. Shows selection count and provides batch actions — add to wishlist or download all selected tracks.',
+    },
+
+    // ─── ISSUES PAGE ────────────────────────────────────────────────
+
+    '.issues-header': {
+        title: 'Issues & Findings',
+        description: 'Library health scanner results. Each finding is a detected problem — missing files, duplicate tracks, incomplete albums, bad metadata, and more.',
+    },
+    '#issues-filters': {
+        title: 'Issue Filters',
+        description: 'Filter findings by category (Missing Files, Duplicates, Metadata Gaps, etc.), severity, or job type. Helps focus on the most important issues first.',
+    },
+    '#issues-list': {
+        title: 'Findings List',
+        description: 'Each row is a detected issue with details, severity, and available actions. Click "Fix" to auto-repair, "Dismiss" to hide, or expand for more details.',
+        tips: [
+            'Green "Fix" button applies the suggested repair automatically',
+            'Dismissed findings are hidden but can be restored from filters',
+            'Run repair jobs from Settings > Maintenance to generate new findings'
+        ]
+    },
+
+    // ─── DISCOVER PAGE: ADDITIONAL ─────────────────────────────────
+
+    '#your-artists-section': {
+        title: 'Your Artists',
+        description: 'Carousel of artists from your watchlist. Quick access to view their latest releases, discography, or manage watchlist settings.',
+    },
+
+    // ─── PERSONAL SETTINGS ─────────────────────────────────────────
+
+    '#personal-settings-btn': {
+        title: 'My Settings',
+        description: 'Personal settings for your profile — accent color, home page preference, notification preferences, and other per-user customizations.',
     },
 };
 
