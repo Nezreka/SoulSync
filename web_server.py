@@ -34,7 +34,7 @@ _log_path = config_manager.get('logging.path', 'logs/app.log')
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-SOULSYNC_VERSION = "2.2"
+SOULSYNC_VERSION = "2.3"
 
 # Dedicated source reuse logger — writes to logs/source_reuse.log
 import logging as _logging
@@ -21493,180 +21493,120 @@ def get_version_info():
         "sections": [
             {
                 "title": "Centralized Downloads Page",
-                "description": "Live view of every download across the entire app in one place",
+                "description": "Live view of every download across the entire app — tracks from Sync, Discover, Artists, Search, and Wishlist all in one place",
                 "features": [
-                    "• New Downloads page in sidebar — shows all tracks from Sync, Discover, Artists, Search, and Wishlist",
-                    "• Live-updating list with filter pills: All, Active, Queued, Completed, Failed",
-                    "• Section headers group downloads by status with track counts",
-                    "• Track position display (3 of 19) for album and playlist batches",
-                    "• Album art, artist/album metadata, batch context, and error messages per row",
+                    "• New Downloads page in sidebar with live-updating list and nav badge",
+                    "• Filter pills: All, Active, Queued, Completed, Failed",
+                    "• Track position (3 of 19), album art, batch context, and error details per row",
                     "• Clear Completed button removes finished items from the tracker",
-                    "• Nav badge shows active download count from any page via WebSocket",
                 ],
-                "usage_note": "Click Downloads in the sidebar to see all active and recent downloads. The badge updates in real-time from any page."
+                "usage_note": "Click Downloads in the sidebar. The badge updates in real-time from any page."
             },
             {
                 "title": "First-Run Setup Wizard",
-                "description": "New full-screen guided setup for first-time users",
+                "description": "Full-screen guided setup that walks new users through configuration and their first download",
                 "features": [
-                    "• 7-step wizard: Welcome, Metadata Source, Download Source, Paths & Media Server, Add Artists, First Download, Done",
-                    "• All 6 download sources available: Soulseek, YouTube, HiFi, Tidal, Qobuz, Deezer — with inline config and test buttons",
-                    "• Path fields default to /app/downloads and /app/Transfer with lock/unlock for Docker users",
-                    "• Media server connection (Plex/Jellyfin/Navidrome) with inline test",
-                    "• Add artists to watchlist with live search — shows watchlist status, add/remove in place",
-                    "• First download step searches metadata, finds best match, and downloads through the full pipeline",
-                    "• All settings save to DB identically to the Settings page — no difference in behavior",
+                    "• 7-step wizard: Welcome, Metadata Source, Download Source, Paths, Media Server, Add Artists, First Download",
+                    "• All 6 download sources with inline config and test buttons",
+                    "• Locked path defaults for Docker users (/app/downloads, /app/Transfer)",
+                    "• Add artists to watchlist with live search and remove in place",
+                    "• First download goes through the full matched download pipeline with metadata",
+                    "• Auto-shows on fresh installs, skippable, all settings save to DB",
+                    "• Done page with tips grid covering Sync, Wishlist, Automations, Notifications, Help, and Settings",
                 ],
-                "usage_note": "Open with ?setup=1 URL parameter or openSetupWizard() from browser console. First-run auto-detection coming soon."
+                "usage_note": "Auto-shows for new users. Re-open anytime with ?setup=1 in the URL."
+            },
+            {
+                "title": "Graceful Shutdown & Stability",
+                "description": "Application now shuts down cleanly within 1 second instead of 60+",
+                "features": [
+                    "• All background workers use interruptible sleep — respond to shutdown signals immediately",
+                    "• Docker containers no longer force-kill, preventing SQLite WAL corruption",
+                    "• Parallel component shutdown for scan managers, repair workers, executors",
+                    "• Download monitor thread safety with proper locking",
+                    "• Logging initialized early so import-time diagnostic messages are captured",
+                    "• Database initialization fixed for fresh installs — all migrations run in a single cycle",
+                ],
+                "usage_note": "Docker users: containers now stop gracefully within the default 10-second timeout."
+            },
+            {
+                "title": "Unknown Artist Prevention",
+                "description": "Multi-layer defense against tracks downloading as 'Unknown Artist'",
+                "features": [
+                    "• Metadata cache now rejects tracks with junk artist names — prevents caching incomplete data",
+                    "• Post-processing 3-tier fallback: check track_info, search result, then re-fetch from metadata API",
+                    "• Files never land in 'Unknown Artist' folders — guard runs before folder creation and tag embedding",
+                ],
+            },
+            {
+                "title": "Deezer Multi-Artist Tagging",
+                "description": "Feature tracks now tag all credited artists using Deezer's contributors field",
+                "features": [
+                    "• ARTIST tag includes all contributors (e.g. 'Kraftklub, Domiziana') instead of just the primary",
+                    "• Album artist tag unchanged — folder organization unaffected",
+                    "• Falls back gracefully when contributors field is absent (search results)",
+                ],
             },
             {
                 "title": "Music Videos — Search & Download from YouTube",
-                "description": "New Music Videos tab in enhanced and global search for finding and downloading music videos",
+                "description": "Music Videos tab in enhanced and global search",
                 "features": [
-                    "• Music Videos pill tab alongside Spotify/Deezer/iTunes/Discogs in both search bars",
-                    "• YouTube search returns video cards with 16:9 thumbnails, duration, channel name, view count",
-                    "• Click any video to download — circular progress ring on thumbnail, green checkmark on completion",
-                    "• Metadata matching — searches your primary source for clean artist/title before saving",
-                    "• Saves to configurable Music Videos directory as Artist/Title-video.mp4 (Plex global folder format)",
-                    "• Plex video type suffixes supported: -video, -lyrics, -live, -concert, -interview, -behindthescenes"
+                    "• Video cards with thumbnails, duration, channel name, view count",
+                    "• Click to download with progress ring — metadata matched before saving",
+                    "• Saves to configurable Music Videos directory (Plex format)",
                 ],
-                "usage_note": "Set your Music Videos directory in Settings > Downloads, then search for any artist in the search bar and click the Music Videos tab."
+                "usage_note": "Set your Music Videos directory in Settings > Downloads, then use the Music Videos tab in search."
             },
             {
                 "title": "Lidarr Download Source (Development)",
-                "description": "Use Lidarr as a download source for Usenet and torrent content",
+                "description": "7th download source for Usenet and torrent content via Lidarr",
                 "features": [
-                    "• 7th download source alongside Soulseek, YouTube, Tidal, Qobuz, HiFi, and Deezer",
-                    "• SoulSync handles discovery and matching, Lidarr handles downloading via its indexers",
-                    "• Configure with just URL + API key in Settings > Downloads",
+                    "• SoulSync handles discovery and matching, Lidarr handles downloading",
+                    "• Configure with URL + API key in Settings > Downloads",
                     "• Available as standalone source or in Hybrid mode priority order",
-                    "• Currently in development — basic album search and download flow functional"
                 ],
-                "usage_note": "Requires a running Lidarr instance with configured indexers and download clients. Set Download Source to 'Lidarr Only (Development)' or add to Hybrid order."
+                "usage_note": "Requires a running Lidarr instance. Set Download Source to 'Lidarr Only (Development)' or add to Hybrid order."
             },
             {
-                "title": "Metadata Pipeline Overhaul — Fix Unknown Artist & Source Selection",
-                "description": "Major fix for tracks downloading as 'Unknown Artist' and Spotify being used when Deezer/iTunes was selected",
+                "title": "Matching & Quality Improvements",
+                "description": "Better album matching, per-track artist support, and placeholder detection",
                 "features": [
-                    "• Fixed playlist pipeline (discover → sync → wishlist → download) losing artist, track number, and album year data",
-                    "• All discovery workers now respect your configured primary metadata source instead of always using Spotify",
-                    "• Centralized metadata source selection in core/metadata_service.py — one source of truth for all features",
-                    "• Fixed Deezer metadata cache returning incomplete data (missing track_number, release_date) from search result cache",
-                    "• Sync completion toast now shows which specific tracks failed to match (not just a count)",
-                    "• New 'Fix Unknown Artists' maintenance job — scans library for Unknown Artist tracks and corrects metadata, tags, and file paths",
-                    "• One-time migration purges stale discovery and Deezer cache entries on first startup after update"
+                    "• Album matching uses full similarity instead of word subset — 'Paradise' no longer matches 'Club Paradise'",
+                    "• Artist gate prevents wrong-artist downloads (Soulseek < 0.25, YouTube < 0.15 threshold)",
+                    "• Word boundary matching for artists — 'muse' no longer matches 'museum'",
+                    "• Watchlist scanner skips albums with placeholder tracks ('Track 1', 'Track 2') from unreleased tracklists",
+                    "• Per-track artist column for compilations and DJ mixes — tag writer uses track artist, not album artist",
+                    "• Centralized metadata source selection — all features respect your configured source",
                 ],
-                "usage_note": "If you have existing Unknown Artist tracks, run the Fix Unknown Artists job from Settings > Maintenance."
-            },
-            {
-                "title": "Matching Engine — Artist Verification Gate",
-                "description": "Prevents downloading tracks from completely wrong artists on Soulseek and YouTube",
-                "features": [
-                    "• New artist gate rejects candidates where the artist doesn't match the target (Soulseek: < 0.25, YouTube: < 0.15)",
-                    "• Fixed artist substring matching — 'muse' no longer matches 'museum', 'art' no longer matches 'heart'",
-                    "• Artist similarity now compared per path segment instead of full filename — misspelled artist names still match correctly",
-                    "• YouTube artist weight increased from 10% to 20% to reduce wrong-uploader matches",
-                    "• Seasonal discovery, personalized playlists, and playlist explorer all use configured source instead of Spotify"
-                ],
-                "usage_note": "No action needed — matching improvements apply automatically to all new downloads."
-            },
-            {
-                "title": "Deezer User Playlists — Browse & Download Your Library",
-                "description": "New Deezer tab on the Sync page shows your personal playlists via ARL token — same flow as Spotify",
-                "features": [
-                    "• Click Refresh to load all your Deezer playlists with track counts",
-                    "• Click any playlist to view tracks, then Download Missing or Sync — no discovery step needed",
-                    "• Existing Deezer URL import moved to 'Deezer Link' tab (unchanged)",
-                    "• ARL token field added to Connections tab alongside Downloads tab with bidirectional sync",
-                    "• Album release dates fetched for proper $year template variable support"
-                ],
-                "usage_note": "Configure your ARL token in Settings > Connections or Downloads, then open the Deezer tab on the Sync page."
-            },
-            {
-                "title": "Qobuz Token Auth — CAPTCHA Bypass",
-                "description": "Qobuz added reCAPTCHA to their login — token auth lets you paste your session token directly",
-                "features": [
-                    "• New 'Auth Token' field on both Connections and Downloads tabs for Qobuz",
-                    "• Log into play.qobuz.com in your browser, copy X-User-Auth-Token from DevTools, paste it in",
-                    "• Bypasses the CAPTCHA entirely — existing email/password login still works if your session is active",
-                    "• Token is validated and saved as a normal session — identical to email/password login"
-                ],
-                "usage_note": "If Qobuz email/password login fails, use the Auth Token field instead."
-            },
-            {
-                "title": "Streaming Source Matching — Artist Gate",
-                "description": "Tidal, Qobuz, HiFi, and Deezer downloads no longer match to wrong artists",
-                "features": [
-                    "• Artist similarity gate rejects candidates below 0.4 match threshold",
-                    "• Streaming source threshold raised from 0.55 to 0.60",
-                    "• No more fallback to lenient Soulseek filename matcher for structured API sources",
-                    "• Fixed single-char artist containment bug (e.g. 'B小町' no longer matches 'B.B. King')",
-                    "• YouTube and Soulseek matching completely unchanged"
-                ],
-                "usage_note": "Downloads from official sources are now much more accurate. Check Download History for verification details."
-            },
-            {
-                "title": "Download History — Source Provenance",
-                "description": "Collapsible download history with full source tracking and AcoustID verification badges",
-                "features": [
-                    "• Expected vs Downloaded comparison — shows what you asked for vs what the source provided",
-                    "• Mismatched downloads highlighted in red for easy identification",
-                    "• AcoustID verification badge per entry: Verified (green), Failed (red), Skipped (orange), Off (gray)",
-                    "• Source filename, track ID, and artist saved with every download",
-                    "• Click anywhere on an entry to expand/collapse details"
-                ],
-                "usage_note": "Click 'Download History' on the Dashboard to see source provenance for new downloads."
             },
             {
                 "title": "Fixes & Improvements",
-                "description": "Bug fixes, quality of life improvements, and new settings",
+                "description": "60+ commits of bug fixes, UX improvements, and infrastructure",
                 "features": [
-                    "• Dismissed maintenance findings no longer reappear on next scan — dedup check now includes dismissed status",
-                    "• Orphan file detector: increased path matching depth to 4 segments + filename parsing fallback for unreadable tags",
-                    "• Media player: rapid play clicks no longer create duplicate audio streams requiring browser refresh",
-                    "• Logs directory auto-created on startup — prevents crash for non-Docker installations",
-                    "• Stale discovery data re-processed in automation pipeline — tracks with missing metadata get re-enriched",
-                    "• Artist names no longer stored as lowercase — fixed static method shadowing instance method. Run a database update to fix existing names.",
-                    "• Watchlist scanner skips future/unreleased albums — no more garbage downloads from albums not yet out",
-                    "• Playlist sync tracks now tagged with correct track numbers instead of always 01",
-                    "• Emby playlist sync fixed — integer IDs now accepted alongside Jellyfin GUIDs",
-                    "• Discovery fix search now tries all metadata sources (Spotify → Deezer → iTunes) with automatic fallback",
-                    "• Album completeness scanner skips zero-track albums to prevent auto-fill errors",
-                    "• Global search string escaping fixed — albums with newlines in metadata no longer crash",
-                    "• Download history timestamps fixed — no longer always showing 'Just now'",
-                    "• Discogs added to enrichment service whitelist — Enrich button now works for Discogs",
-                    "• Settings Connections tab redesigned with collapsible accordion services and brand-colored dots",
-                    "• Metadata source filter on Library page — filter artists by matched/unmatched to any service",
-                    "• Database Maintenance UI — VACUUM and incremental vacuum in Settings > Advanced",
-                    "• Music Library Paths setting — configure where your music files live for tag writing and file detection",
-                    "• Replace lower quality files on import — opt-in toggle in Settings > Library",
-                    "• HiFi API instance health check in Settings > Downloads",
-                    "• Debug test activity feed message removed from startup",
-                    "• Global search downloads now create bubble snapshots on Dashboard and Search page",
-                    "• Dead file findings now offer 'Remove from DB' option alongside 'Re-download' — works in bulk fix too",
-                    "• Deezer ARL sync and download modals rehydrate after page refresh",
-                    "• Deezer album data (release dates, cover art) cached in metadata cache — subsequent playlist loads are near-instant"
-                ]
-            },
-            {
-                "title": "Artist Map — Visualize Your Music Universe",
-                "description": "Three interactive canvas-based visualization modes on the Discover page",
-                "features": [
-                    "• Watchlist Constellation — your watched artists as large nodes with similar artists orbiting around them",
-                    "• Genre Map — browse all artists by genre with a sidebar picker, ring-packed clusters, no artist cap",
-                    "• Artist Explorer — deep-dive any artist, ring 1 (direct similar) + ring 2 (extended network)",
-                    "• On-the-fly discovery — exploring an unknown artist fetches similar artists from MusicMap in real-time and caches them",
-                    "• Invalid artist names validated against Spotify/iTunes before loading the map",
-                    "• Offscreen canvas buffer rendering with LOD — handles 1000+ nodes smoothly",
-                    "• Image proxy endpoint solves CORS for canvas — Deezer, Last.fm, Discogs images now render on bubbles",
-                    "• Direct CORS fetch first (zero server load), proxy only as fallback for non-CORS CDNs",
-                    "• Server-side 5-minute cache on all map endpoints — switching genres and reopening is instant",
-                    "• Cache auto-invalidates on watchlist changes, scans, and new similar artist discoveries",
-                    "• Keyboard shortcuts (?, F for fit, S for search), mouse wheel zoom, click-to-explore",
-                    "• Hover constellation effect with fade animation, rich tooltips with genre tags"
+                    "• Plex playlists crash on Tag objects fixed — safe attribute access for non-playlist items",
+                    "• Music library paths now auto-save when added/removed on settings page",
+                    "• M3U files no longer created for single track downloads — only playlists",
+                    "• M3U [object Object] artist bug fixed — handles all artist format variations",
+                    "• Album year update 'database not defined' error fixed in post-processing",
+                    "• Sync tab content scrolling fixed — long lists no longer clipped",
+                    "• Hybrid download status shows green when any serverless source is in the order",
+                    "• Serverless sources (YouTube, HiFi, Qobuz) always show green in service status",
+                    "• Repeated slskd 401 errors suppressed after first warning",
+                    "• Download clients reload paths when settings change (no restart needed)",
+                    "• watchlist_artists table migrations include all provider ID columns in rebuilds",
+                    "• Emojis removed from all Python log and print statements",
+                    "• Interactive help coverage expanded with 30+ new entries",
+                    "• Docker compose includes optional slskd service block",
+                    "• Multi-stage Docker build reduces image size",
+                    "• MusicBrainz recording ID backfilled from Navidrome during scan",
                 ],
-                "usage_note": "Navigate to Discover and click the Artist Map section. Choose Watchlist, Genre, or Explorer mode."
             },
+            # v2.2 and earlier features moved to archive
+        ]
+    }
+    return jsonify(version_data)
+
+_OLD_V22_NOTES = """
             {
                 "title": "Wing It — Download or Sync Without Discovery",
                 "description": "Bypass metadata discovery and use raw track names directly",
@@ -22320,9 +22260,7 @@ def get_version_info():
                     "• Wishlist process API endpoint for external apps"
                 ]
             }
-        ]
-    }
-    return jsonify(version_data)
+"""  # end of _OLD_V22_NOTES
 
 _OLD_V2_NOTES = r"""
                 "features": [
@@ -30558,7 +30496,7 @@ def get_server_playlists():
                 raw_playlists = plex_client.server.playlists()
                 logger.info(f"[ServerPlaylists] Plex returned {len(raw_playlists)} total playlists")
                 for playlist in raw_playlists:
-                    if playlist.playlistType == 'audio':
+                    if getattr(playlist, 'playlistType', None) == 'audio':
                         playlists_data.append({
                             'id': str(playlist.ratingKey),
                             'name': playlist.title,
