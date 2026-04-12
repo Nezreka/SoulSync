@@ -1053,7 +1053,7 @@ class iTunesClient:
                             logger.debug(f"Replacing clean version with explicit: {album.name} (verified {track_count} tracks)")
                             seen_albums[normalized_name] = {'album': album, 'is_explicit': is_explicit}
                         else:
-                            logger.warning(f"⚠️ Skipping broken explicit album {album.name} (ID {album.id}): reports tracks but has 0")
+                            logger.warning(f"Skipping broken explicit album {album.name} (ID {album.id}): reports tracks but has 0")
                     except Exception as e:
                         logger.warning(f"Failed to validate explicit album {album.name}: {e}, keeping clean version")
                 else:
@@ -1072,7 +1072,7 @@ class iTunesClient:
                             logger.debug(f"  Verified explicit album has {track_count} tracks")
                             seen_albums[normalized_name] = {'album': album, 'is_explicit': is_explicit}
                         else:
-                            logger.warning(f"⚠️ Skipping broken explicit album {album.name} (ID {album.id}): reports tracks but has 0")
+                            logger.warning(f"Skipping broken explicit album {album.name} (ID {album.id}): reports tracks but has 0")
                             # Don't add to seen_albums so a clean version can be added later
                     except Exception as e:
                         logger.warning(f"Failed to validate explicit album {album.name}: {e}, skipping")

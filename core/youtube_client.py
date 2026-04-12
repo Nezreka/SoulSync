@@ -107,7 +107,7 @@ class YouTubeClient:
         self.download_path = Path(download_path)
         self.download_path.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"📁 YouTube client using download path: {self.download_path}")
+        logger.info(f"YouTube client using download path: {self.download_path}")
 
         # Callback for shutdown check (avoids circular imports)
         self.shutdown_check = None
@@ -123,11 +123,11 @@ class YouTubeClient:
 
         # Initialize production matching engine for parity with Soulseek
         self.matching_engine = MusicMatchingEngine()
-        logger.info("✅ Initialized production MusicMatchingEngine")
+        logger.info("Initialized production MusicMatchingEngine")
 
         # Check for ffmpeg (REQUIRED for MP3 conversion)
         if not self._check_ffmpeg():
-            logger.error("❌ ffmpeg is required but not found")
+            logger.error("ffmpeg is required but not found")
             logger.error("The client will attempt to auto-download ffmpeg on first use")
 
         # Download queue management (mirrors Soulseek's download tracking)
@@ -201,7 +201,7 @@ class YouTubeClient:
             self.download_opts['cookiesfrombrowser'] = (cookies_browser,)
         elif 'cookiesfrombrowser' in self.download_opts:
             del self.download_opts['cookiesfrombrowser']
-        logger.info(f"🔄 YouTube settings reloaded (delay={self._download_delay}s, cookies={'enabled' if cookies_browser else 'disabled'})")
+        logger.info(f"YouTube settings reloaded (delay={self._download_delay}s, cookies={'enabled' if cookies_browser else 'disabled'})")
 
     async def check_connection(self) -> bool:
         """
@@ -356,7 +356,7 @@ class YouTubeClient:
 
         # Check if ffmpeg is in system PATH
         if shutil.which('ffmpeg'):
-            logger.info("✅ Found ffmpeg in system PATH")
+            logger.info("Found ffmpeg in system PATH")
             return True
 
         # Auto-download ffmpeg to tools folder if not found
@@ -373,7 +373,7 @@ class YouTubeClient:
 
         # If we already have both locally, use them
         if ffmpeg_path.exists() and ffprobe_path.exists():
-            logger.info(f"✅ Found ffmpeg and ffprobe in tools folder")
+            logger.info(f"Found ffmpeg and ffprobe in tools folder")
             # Add to PATH so yt-dlp can find them
             tools_dir_str = str(tools_dir.absolute())
             os.environ['PATH'] = tools_dir_str + os.pathsep + os.environ.get('PATH', '')
@@ -451,10 +451,10 @@ class YouTubeClient:
                 ffprobe_zip.unlink()  # Clean up zip
 
             else:
-                logger.error(f"❌ Unsupported platform: {system}")
+                logger.error(f"Unsupported platform: {system}")
                 return False
 
-            logger.info(f"✅ Downloaded ffmpeg to: {ffmpeg_path}")
+            logger.info(f"Downloaded ffmpeg to: {ffmpeg_path}")
 
             # Add to PATH
             tools_dir_str = str(tools_dir.absolute())
@@ -463,7 +463,7 @@ class YouTubeClient:
             return True
 
         except Exception as e:
-            logger.error(f"❌ Failed to download ffmpeg: {e}")
+            logger.error(f"Failed to download ffmpeg: {e}")
             logger.error(f"   Please install manually:")
             logger.error(f"   Windows: scoop install ffmpeg")
             logger.error(f"   Linux:   sudo apt install ffmpeg")
@@ -568,7 +568,7 @@ class YouTubeClient:
         this returns YouTubeSearchResult objects with video-specific metadata
         (thumbnails, view counts, channel names) for UI display.
         """
-        logger.info(f"🎬 Searching YouTube videos for: {query}")
+        logger.info(f"Searching YouTube videos for: {query}")
         try:
             loop = asyncio.get_event_loop()
 
@@ -643,7 +643,7 @@ class YouTubeClient:
         Returns:
             Tuple of (track_results, album_results). Album results will always be empty for YouTube.
         """
-        logger.info(f"🔍 Searching YouTube for: {query}")
+        logger.info(f"Searching YouTube for: {query}")
 
         try:
             # Run yt-dlp in executor to avoid blocking event loop
@@ -693,13 +693,13 @@ class YouTubeClient:
                 track_result = self._youtube_to_track_result(entry, best_audio)
                 track_results.append(track_result)
 
-            logger.info(f"✅ Found {len(track_results)} YouTube tracks")
+            logger.info(f"Found {len(track_results)} YouTube tracks")
 
             # Return tuple: (tracks, albums) - YouTube doesn't have albums, so return empty list
             return (track_results, [])
 
         except Exception as e:
-            logger.error(f"❌ YouTube search failed: {e}")
+            logger.error(f"YouTube search failed: {e}")
             import traceback
             traceback.print_exc()
             return ([], [])
@@ -846,7 +846,7 @@ class YouTubeClient:
         # Sort by confidence (best first)
         matches.sort(key=lambda r: r.confidence, reverse=True)
 
-        logger.info(f"✅ Found {len(matches)} matches above {min_confidence} confidence")
+        logger.info(f"Found {len(matches)} matches above {min_confidence} confidence")
         return matches
 
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
@@ -867,13 +867,13 @@ class YouTubeClient:
         try:
             # Parse filename to extract video_id
             if '||' not in filename:
-                logger.error(f"❌ Invalid filename format: {filename}")
+                logger.error(f"Invalid filename format: {filename}")
                 return None
 
             video_id, title = filename.split('||', 1)
             youtube_url = f"https://www.youtube.com/watch?v={video_id}"
 
-            logger.info(f"📥 Starting YouTube download: {title}")
+            logger.info(f"Starting YouTube download: {title}")
             logger.info(f"   URL: {youtube_url}")
 
             # Create unique download ID
@@ -905,11 +905,11 @@ class YouTubeClient:
             )
             download_thread.start()
 
-            logger.info(f"✅ YouTube download {download_id} started in background")
+            logger.info(f"YouTube download {download_id} started in background")
             return download_id
 
         except Exception as e:
-            logger.error(f"❌ Failed to start YouTube download: {e}")
+            logger.error(f"Failed to start YouTube download: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -926,7 +926,7 @@ class YouTubeClient:
                 elapsed = time.time() - self._last_download_time
                 if self._last_download_time > 0 and elapsed < self._download_delay:
                     wait_time = self._download_delay - elapsed
-                    logger.info(f"⏳ Rate limiting: waiting {wait_time:.1f}s before next YouTube download")
+                    logger.info(f"Rate limiting: waiting {wait_time:.1f}s before next YouTube download")
                     time.sleep(wait_time)
 
                 # Update state to downloading
@@ -958,17 +958,17 @@ class YouTubeClient:
                             self.active_downloads[download_id]['file_path'] = file_path
                             # DO NOT update filename - keep original_filename for context matching
 
-                    logger.info(f"✅ YouTube download {download_id} completed: {file_path}")
+                    logger.info(f"YouTube download {download_id} completed: {file_path}")
                 else:
                     # Mark as errored
                     with self._download_lock:
                         if download_id in self.active_downloads:
                             self.active_downloads[download_id]['state'] = 'Errored'
 
-                    logger.error(f"❌ YouTube download {download_id} failed")
+                    logger.error(f"YouTube download {download_id} failed")
 
         except Exception as e:
-            logger.error(f"❌ YouTube download thread failed for {download_id}: {e}")
+            logger.error(f"YouTube download thread failed for {download_id}: {e}")
             import traceback
             traceback.print_exc()
 
@@ -997,7 +997,7 @@ class YouTubeClient:
             for attempt in range(max_retries):
                 # Check for server shutdown using callback
                 if self.shutdown_check and self.shutdown_check():
-                    logger.info(f"🛑 Server shutting down, aborting download attempt {attempt + 1}")
+                    logger.info(f"Server shutting down, aborting download attempt {attempt + 1}")
                     return None
 
                 try:
@@ -1012,15 +1012,15 @@ class YouTubeClient:
                     if attempt == 1:
                         # Drop browser cookies — authenticated sessions sometimes get restricted formats
                         if 'cookiesfrombrowser' in download_opts:
-                            logger.info(f"🔄 Retry {attempt + 1}/{max_retries} without browser cookies")
+                            logger.info(f"Retry {attempt + 1}/{max_retries} without browser cookies")
                             download_opts.pop('cookiesfrombrowser', None)
                         else:
-                            logger.info(f"🔄 Retry {attempt + 1}/{max_retries} with web_creator client")
+                            logger.info(f"Retry {attempt + 1}/{max_retries} with web_creator client")
                             download_opts['extractor_args'] = {
                                 'youtube': { 'player_client': ['web_creator'] }
                             }
                     elif attempt >= 2:
-                        logger.info(f"🔄 Retry {attempt + 1}/{max_retries} with 'best' format (video fallback)")
+                        logger.info(f"Retry {attempt + 1}/{max_retries} with 'best' format (video fallback)")
                         download_opts['format'] = 'best'
                         download_opts.pop('cookiesfrombrowser', None)
                         download_opts.pop('extractor_args', None)
@@ -1036,19 +1036,19 @@ class YouTubeClient:
                         if filename.exists():
                             return str(filename)
                         else:
-                            logger.error(f"❌ Download completed but file not found: {filename}")
+                            logger.error(f"Download completed but file not found: {filename}")
                             if attempt < max_retries - 1:
                                 continue  # Retry
                             return None
 
                 except Exception as e:
                     error_msg = str(e)
-                    logger.error(f"❌ Download attempt {attempt + 1} failed: {error_msg}")
+                    logger.error(f"Download attempt {attempt + 1} failed: {error_msg}")
 
                     # Check if it's a 403 error
                     if '403' in error_msg or 'Forbidden' in error_msg:
                         if attempt < max_retries - 1:
-                            logger.info(f"⏳ Waiting 2 seconds before retry...")
+                            logger.info(f"Waiting 2 seconds before retry...")
                             import time
                             time.sleep(2)
                             continue  # Retry on 403
@@ -1065,7 +1065,7 @@ class YouTubeClient:
             return None  # All retries failed
 
         except Exception as e:
-            logger.error(f"❌ Download failed: {e}")
+            logger.error(f"Download failed: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -1204,7 +1204,7 @@ class YouTubeClient:
                 # Remove them
                 for download_id in ids_to_remove:
                     del self.active_downloads[download_id]
-                    logger.debug(f"🗑️  Cleared finished download {download_id}")
+                    logger.debug(f"Cleared finished download {download_id}")
             
             return True
         except Exception as e:
@@ -1229,22 +1229,22 @@ class YouTubeClient:
         try:
             with self._download_lock:
                 if download_id not in self.active_downloads:
-                    logger.warning(f"⚠️  Download {download_id} not found")
+                    logger.warning(f"Download {download_id} not found")
                     return False
 
                 # Update state to cancelled
                 self.active_downloads[download_id]['state'] = 'Cancelled'
-                logger.info(f"⚠️  Marked YouTube download {download_id} as cancelled")
+                logger.info(f"Marked YouTube download {download_id} as cancelled")
 
                 # Remove from active downloads if requested
                 if remove:
                     del self.active_downloads[download_id]
-                    logger.info(f"🗑️  Removed YouTube download {download_id} from queue")
+                    logger.info(f"Removed YouTube download {download_id} from queue")
 
             return True
 
         except Exception as e:
-            logger.error(f"❌ Failed to cancel download {download_id}: {e}")
+            logger.error(f"Failed to cancel download {download_id}: {e}")
             return False
 
     def _enhance_metadata(self, filepath: str, spotify_track: Optional[SpotifyTrack], yt_result: YouTubeSearchResult, track_number: int = 1, disc_number: int = 1, release_year: str = None, artist_genres: list = None):
@@ -1258,7 +1258,7 @@ class YouTubeClient:
             from mutagen.id3 import ID3NoHeaderError
             import requests
 
-            logger.info(f"🏷️  Enhancing metadata for: {Path(filepath).name}")
+            logger.info(f"Enhancing metadata for: {Path(filepath).name}")
 
             # Load MP3 file
             audio = MP3(filepath)
@@ -1267,11 +1267,11 @@ class YouTubeClient:
             if audio.tags is not None:
                 # Delete ALL existing frames
                 audio.tags.clear()
-                logger.debug(f"   🧹 Cleared all existing tag frames")
+                logger.debug(f"   Cleared all existing tag frames")
             else:
                 # No tags exist, add them
                 audio.add_tags()
-                logger.debug(f"   ➕ Added new tag structure")
+                logger.debug(f"   Added new tag structure")
 
             if spotify_track:
                 # Use Spotify metadata
@@ -1295,7 +1295,7 @@ class YouTubeClient:
                 except:
                     pass
 
-                logger.debug(f"   📝 Setting metadata tags...")
+                logger.debug(f"   Setting metadata tags...")
 
                 # Set ID3 tags (using setall to ensure they're set)
                 audio.tags.setall('TIT2', [TIT2(encoding=3, text=title)])
@@ -1314,21 +1314,21 @@ class YouTubeClient:
                         # Combine up to 3 genres (matches production logic)
                         genre = ', '.join(artist_genres[:3])
                     audio.tags.setall('TCON', [TCON(encoding=3, text=genre)])
-                    logger.debug(f"   ✓ Genre: {genre}")
+                    logger.debug(f"   Genre: {genre}")
 
                 audio.tags.setall('COMM', [COMM(encoding=3, lang='eng', desc='',
                                text=f'Downloaded via SoulSync (YouTube)\nSource: {yt_result.url}\nConfidence: {yt_result.confidence:.2f}')])
 
-                logger.debug(f"   ✓ Artist: {artist}")
-                logger.debug(f"   ✓ Album Artist: {album_artist}")
-                logger.debug(f"   ✓ Title: {title}")
-                logger.debug(f"   ✓ Album: {album}")
-                logger.debug(f"   ✓ Track #: {track_number}")
-                logger.debug(f"   ✓ Disc #: {disc_number}")
-                logger.debug(f"   ✓ Year: {year}")
+                logger.debug(f"   Artist: {artist}")
+                logger.debug(f"   Album Artist: {album_artist}")
+                logger.debug(f"   Title: {title}")
+                logger.debug(f"   Album: {album}")
+                logger.debug(f"   Track #: {track_number}")
+                logger.debug(f"   Disc #: {disc_number}")
+                logger.debug(f"   Year: {year}")
 
                 # Fetch and embed album art from Spotify (via search)
-                logger.debug(f"   🎨 Fetching album art from Spotify...")
+                logger.debug(f"   Fetching album art from Spotify...")
                 album_art_url = self._get_spotify_album_art(spotify_track)
 
                 if album_art_url:
@@ -1354,25 +1354,25 @@ class YouTubeClient:
                             data=response.content
                         ))
 
-                        logger.debug(f"   ✓ Album art embedded ({len(response.content) // 1024} KB)")
+                        logger.debug(f"   Album art embedded ({len(response.content) // 1024} KB)")
                     except Exception as art_error:
-                        logger.warning(f"   ⚠️  Could not embed album art: {art_error}")
+                        logger.warning(f"   Could not embed album art: {art_error}")
                 else:
-                    logger.warning(f"   ⚠️  No album art found on Spotify")
+                    logger.warning(f"   No album art found on Spotify")
 
             # Save all tags
             audio.save()
-            logger.info(f"✅ Metadata enhanced successfully")
+            logger.info(f"Metadata enhanced successfully")
 
             # Return album art URL for cover.jpg creation
             return album_art_url
 
         except ImportError:
-            logger.warning("⚠️  mutagen not installed - skipping enhanced metadata tagging")
+            logger.warning("mutagen not installed - skipping enhanced metadata tagging")
             logger.warning("   Install with: pip install mutagen")
             return None
         except Exception as e:
-            logger.warning(f"⚠️  Could not enhance metadata: {e}")
+            logger.warning(f"Could not enhance metadata: {e}")
             return None
 
     def _get_spotify_album_art(self, spotify_track: SpotifyTrack) -> Optional[str]:
@@ -1409,7 +1409,7 @@ class YouTubeClient:
                 logger.debug(f"   ℹ️  cover.jpg already exists, skipping")
                 return
 
-            logger.debug(f"   📥 Downloading cover.jpg...")
+            logger.debug(f"   Downloading cover.jpg...")
 
             response = requests.get(album_art_url, timeout=10)
             response.raise_for_status()
@@ -1417,10 +1417,10 @@ class YouTubeClient:
             # Save to file
             cover_path.write_bytes(response.content)
 
-            logger.debug(f"   ✅ Saved cover.jpg ({len(response.content) // 1024} KB)")
+            logger.debug(f"   Saved cover.jpg ({len(response.content) // 1024} KB)")
 
         except Exception as e:
-            logger.warning(f"   ⚠️  Could not save cover.jpg: {e}")
+            logger.warning(f"   Could not save cover.jpg: {e}")
 
     def _create_lyrics_file(self, audio_file_path: str, spotify_track: SpotifyTrack):
         """
@@ -1431,10 +1431,10 @@ class YouTubeClient:
             from core.lyrics_client import lyrics_client
 
             if not lyrics_client.api:
-                logger.debug(f"   🎵 LRClib API not available - skipping lyrics")
+                logger.debug(f"   LRClib API not available - skipping lyrics")
                 return
 
-            logger.debug(f"   🎵 Fetching lyrics from LRClib...")
+            logger.debug(f"   Fetching lyrics from LRClib...")
 
             # Get track metadata
             artist_name = spotify_track.artists[0] if spotify_track.artists else "Unknown Artist"
@@ -1452,14 +1452,14 @@ class YouTubeClient:
             )
 
             if success:
-                logger.debug(f"   ✅ Created .lrc lyrics file")
+                logger.debug(f"   Created .lrc lyrics file")
             else:
-                logger.debug(f"   🎵 No lyrics found on LRClib")
+                logger.debug(f"   No lyrics found on LRClib")
 
         except ImportError:
-            logger.debug(f"   ⚠️  lyrics_client not available - skipping lyrics")
+            logger.debug(f"   lyrics_client not available - skipping lyrics")
         except Exception as e:
-            logger.warning(f"   ⚠️  Could not create lyrics file: {e}")
+            logger.warning(f"   Could not create lyrics file: {e}")
 
     def search_and_download_best(self, spotify_track: SpotifyTrack, min_confidence: float = 0.58) -> Optional[str]:
         """
@@ -1473,7 +1473,7 @@ class YouTubeClient:
         Returns:
             Path to downloaded file, or None if failed
         """
-        logger.info(f"🎯 Starting YouTube download flow for: {spotify_track.name} by {spotify_track.artists[0]}")
+        logger.info(f"Starting YouTube download flow for: {spotify_track.name} by {spotify_track.artists[0]}")
 
         # Generate search query
         query = f"{spotify_track.artists[0]} {spotify_track.name}"
@@ -1482,19 +1482,19 @@ class YouTubeClient:
         results = self.search(query, max_results=10)
 
         if not results:
-            logger.error(f"❌ No YouTube results found for query: {query}")
+            logger.error(f"No YouTube results found for query: {query}")
             return None
 
         # Find best matches
         matches = self.find_best_matches(spotify_track, results, min_confidence=min_confidence)
 
         if not matches:
-            logger.error(f"❌ No matches above {min_confidence} confidence threshold")
+            logger.error(f"No matches above {min_confidence} confidence threshold")
             return None
 
         # Try downloading best match
         best_match = matches[0]
-        logger.info(f"🎯 Best match: {best_match.title} (confidence: {best_match.confidence:.2f})")
+        logger.info(f"Best match: {best_match.title} (confidence: {best_match.confidence:.2f})")
 
         downloaded_file = self.download(best_match, spotify_track)
 

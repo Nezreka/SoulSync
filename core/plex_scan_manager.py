@@ -54,15 +54,15 @@ class PlexScanManager:
             if self._scan_in_progress:
                 # Plex is currently scanning - mark that we need another scan later
                 self._downloads_during_scan = True
-                logger.info(f"📡 Plex scan in progress - queueing follow-up scan ({reason})")
+                logger.info(f"Plex scan in progress - queueing follow-up scan ({reason})")
                 return
             
             # Cancel any existing timer and start a new one
             if self._timer:
                 self._timer.cancel()
-                logger.debug(f"⏳ Resetting scan timer ({reason})")
+                logger.debug(f"Resetting scan timer ({reason})")
             else:
-                logger.info(f"⏳ Plex scan queued - will execute in {self.delay}s ({reason})")
+                logger.info(f"Plex scan queued - will execute in {self.delay}s ({reason})")
             
             # Start the debounce timer
             self._timer = threading.Timer(self.delay, self._execute_scan)
@@ -105,17 +105,17 @@ class PlexScanManager:
             self._timer = None
             self._scan_start_time = time.time()
         
-        logger.info("🎵 Starting Plex library scan...")
+        logger.info("Starting Plex library scan...")
         
         try:
             success = self.plex_client.trigger_library_scan()
             
             if success:
-                logger.info("✅ Plex library scan initiated successfully")
+                logger.info("Plex library scan initiated successfully")
                 # Start new periodic update system instead of completion detection
                 self._start_periodic_updates()
             else:
-                logger.error("❌ Failed to initiate Plex library scan")
+                logger.error("Failed to initiate Plex library scan")
                 self._reset_scan_state()
                 
         except Exception as e:
@@ -132,7 +132,7 @@ class PlexScanManager:
                     
                 self._is_doing_periodic_updates = True
             
-            logger.info(f"🕒 Starting periodic database updates - will check/update every {self._periodic_update_interval//60} minutes")
+            logger.info(f"Starting periodic database updates - will check/update every {self._periodic_update_interval//60} minutes")
             
             # Schedule first periodic update after 5 minutes
             self._periodic_update_timer = threading.Timer(self._periodic_update_interval, self._do_periodic_update)
@@ -160,20 +160,20 @@ class PlexScanManager:
             is_scanning = self.plex_client.is_library_scanning("Music")
             elapsed_time = time.time() - self._scan_start_time if self._scan_start_time else 0
             
-            logger.info(f"🕒 PERIODIC UPDATE: After {elapsed_time//60:.0f} minutes - Plex scanning: {is_scanning}")
+            logger.info(f"PERIODIC UPDATE: After {elapsed_time//60:.0f} minutes - Plex scanning: {is_scanning}")
             
             if is_scanning:
                 # Still scanning - trigger database update and continue periodic updates
-                logger.info("🔄 Plex still scanning - triggering database update")
+                logger.info("Plex still scanning - triggering database update")
                 self._call_completion_callbacks()
                 
                 # Schedule next periodic update
-                logger.info(f"🕒 Scheduling next periodic update in {self._periodic_update_interval//60} minutes")
+                logger.info(f"Scheduling next periodic update in {self._periodic_update_interval//60} minutes")
                 self._periodic_update_timer = threading.Timer(self._periodic_update_interval, self._do_periodic_update)
                 self._periodic_update_timer.start()
             else:
                 # Scanning stopped - final update and cleanup
-                logger.info("✅ Plex scanning completed - doing final database update")
+                logger.info("Plex scanning completed - doing final database update")
                 self._call_completion_callbacks()
                 self._stop_periodic_updates()
                 
@@ -191,7 +191,7 @@ class PlexScanManager:
                     self._periodic_update_timer.cancel()
                     self._periodic_update_timer = None
             
-            logger.info("🕒 Stopped periodic database updates")
+            logger.info("Stopped periodic database updates")
             self._scan_completed()
             
         except Exception as e:
@@ -222,7 +222,7 @@ class PlexScanManager:
             else:
                 # Scan completed!
                 elapsed_time = time.time() - self._scan_start_time if self._scan_start_time else 0
-                logger.info(f"🎵 Plex library scan detected as completed (took {elapsed_time:.1f} seconds)")
+                logger.info(f"Plex library scan detected as completed (took {elapsed_time:.1f} seconds)")
                 self._scan_completed()
                 
         except Exception as e:
@@ -243,17 +243,17 @@ class PlexScanManager:
                 logger.debug("Scan completion callback called but scan was not in progress")
                 return
         
-        logger.info("📡 Plex library scan completed")
+        logger.info("Plex library scan completed")
         
         # Call registered completion callbacks
         self._call_completion_callbacks()
         
         # Check if we need a follow-up scan
         if downloads_during_scan:
-            logger.info("🔄 Downloads occurred during scan - triggering follow-up scan")
+            logger.info("Downloads occurred during scan - triggering follow-up scan")
             self.request_scan("Follow-up scan for downloads during previous scan")
         else:
-            logger.info("✅ No downloads during scan - scan cycle complete")
+            logger.info("No downloads during scan - scan cycle complete")
     
     def _call_completion_callbacks(self):
         """Call all registered scan completion callbacks"""
@@ -295,7 +295,7 @@ class PlexScanManager:
                 logger.warning("Force scan requested but scan already in progress")
                 return
         
-        logger.info("🚀 Force scan requested - executing immediately")
+        logger.info("Force scan requested - executing immediately")
         self._execute_scan()
     
     def get_status(self) -> dict:

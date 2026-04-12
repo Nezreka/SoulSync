@@ -79,7 +79,7 @@ class ListenBrainzManager:
                 "error": "Not authenticated"
             }
 
-        logger.info("🔄 Starting ListenBrainz playlists update...")
+        logger.info("Starting ListenBrainz playlists update...")
 
         summary = {
             "created_for": {"updated": 0, "skipped": 0, "new": 0},
@@ -97,7 +97,7 @@ class ListenBrainzManager:
         for playlist_type, fetch_func in playlist_types:
             try:
                 playlists = fetch_func()
-                logger.info(f"📋 Fetched {len(playlists)} {playlist_type} playlists")
+                logger.info(f"Fetched {len(playlists)} {playlist_type} playlists")
 
                 for playlist in playlists:
                     result = self._update_playlist(playlist, playlist_type)
@@ -114,7 +114,7 @@ class ListenBrainzManager:
         # Cleanup old playlists (keep only 4 most recent per type)
         self._cleanup_old_playlists()
 
-        logger.info(f"✅ ListenBrainz update complete: {summary}")
+        logger.info(f"ListenBrainz update complete: {summary}")
         return {
             "success": True,
             "summary": summary
@@ -165,11 +165,11 @@ class ListenBrainzManager:
 
             # Skip if track count hasn't changed (playlist content likely the same)
             if db_track_count == track_count:
-                logger.debug(f"✓ Playlist '{title}' unchanged, skipping")
+                logger.debug(f"Playlist '{title}' unchanged, skipping")
                 conn.close()
                 return "skipped"
 
-            logger.info(f"🔄 Playlist '{title}' changed ({db_track_count} → {track_count} tracks), updating...")
+            logger.info(f"Playlist '{title}' changed ({db_track_count} → {track_count} tracks), updating...")
 
             # Delete old tracks
             cursor.execute("DELETE FROM listenbrainz_tracks WHERE playlist_id = ?", (db_id,))
@@ -185,7 +185,7 @@ class ListenBrainzManager:
             result_type = "updated"
 
         else:
-            logger.info(f"➕ New playlist '{title}', adding to database...")
+            logger.info(f"New playlist '{title}', adding to database...")
 
             # Insert new playlist
             cursor.execute("""
@@ -218,7 +218,7 @@ class ListenBrainzManager:
         """
         Cache tracks for a playlist, including fetching cover art URLs in parallel
         """
-        logger.info(f"🎵 Caching {len(tracks)} tracks with cover art...")
+        logger.info(f"Caching {len(tracks)} tracks with cover art...")
 
         # First pass: extract track data
         track_data_list = []
@@ -324,7 +324,7 @@ class ListenBrainzManager:
                     logger.debug(f"Error fetching cover for track {idx}: {e}")
 
         covers_found = sum(1 for t in track_data_list if t.get('album_cover_url'))
-        logger.info(f"✅ Fetched {covers_found}/{len(track_data_list)} cover art URLs")
+        logger.info(f"Fetched {covers_found}/{len(track_data_list)} cover art URLs")
 
     def _cleanup_old_playlists(self):
         """Remove old playlists, keeping only the 25 most recent per type"""
@@ -354,7 +354,7 @@ class ListenBrainzManager:
                     # Delete old playlists
                     cursor.execute(f"DELETE FROM listenbrainz_playlists WHERE id IN ({placeholders})", old_playlist_ids)
 
-                    logger.info(f"🗑️ Removed {len(old_playlist_ids)} old {playlist_type} playlists")
+                    logger.info(f"Removed {len(old_playlist_ids)} old {playlist_type} playlists")
 
             except Exception as e:
                 logger.error(f"Error cleaning up {playlist_type} playlists: {e}")

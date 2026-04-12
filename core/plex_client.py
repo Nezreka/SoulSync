@@ -427,7 +427,7 @@ class PlexClient:
             # Create new playlist with copied tracks
             try:
                 self.server.createPlaylist(target_name, items=valid_tracks)
-                logger.info(f"✅ Created backup playlist '{target_name}' with {len(valid_tracks)} tracks")
+                logger.info(f"Created backup playlist '{target_name}' with {len(valid_tracks)} tracks")
                 return True
             except Exception as create_error:
                 logger.error(f"Failed to create backup playlist: {create_error}")
@@ -435,7 +435,7 @@ class PlexClient:
                 try:
                     new_playlist = self.server.createPlaylist(target_name)
                     new_playlist.addItems(valid_tracks)
-                    logger.info(f"✅ Created backup playlist '{target_name}' with {len(valid_tracks)} tracks (alternative method)")
+                    logger.info(f"Created backup playlist '{target_name}' with {len(valid_tracks)} tracks (alternative method)")
                     return True
                 except Exception as alt_error:
                     logger.error(f"Alternative backup creation also failed: {alt_error}")
@@ -461,12 +461,12 @@ class PlexClient:
             
             if create_backup:
                 backup_name = f"{playlist_name} Backup"
-                logger.info(f"🛡️ Creating backup playlist '{backup_name}' before sync")
+                logger.info(f"Creating backup playlist '{backup_name}' before sync")
                 
                 if self.copy_playlist(playlist_name, backup_name):
-                    logger.info(f"✅ Backup created successfully")
+                    logger.info(f"Backup created successfully")
                 else:
-                    logger.warning(f"⚠️ Failed to create backup, continuing with sync")
+                    logger.warning(f"Failed to create backup, continuing with sync")
             
             # Delete original and recreate
             existing_playlist.delete()
@@ -931,7 +931,7 @@ class PlexClient:
         try:
             library = self.server.library.section(library_name)
             library.update()  # Non-blocking scan request
-            logger.info(f"🎵 Triggered Plex library scan for '{library_name}'")
+            logger.info(f"Triggered Plex library scan for '{library_name}'")
             return True
         except Exception as e:
             logger.error(f"Failed to trigger library scan for '{library_name}': {e}")
@@ -940,7 +940,7 @@ class PlexClient:
     def is_library_scanning(self, library_name: str = "Music") -> bool:
         """Check if Plex library is currently scanning"""
         if not self.ensure_connection():
-            logger.debug(f"🔍 DEBUG: Not connected to Plex, cannot check scan status")
+            logger.debug(f"DEBUG: Not connected to Plex, cannot check scan status")
             return False
             
         try:
@@ -949,31 +949,31 @@ class PlexClient:
             # Check if library has a scanning attribute or is refreshing
             # The Plex API exposes this through the library's refreshing property
             refreshing = hasattr(library, 'refreshing') and library.refreshing
-            logger.debug(f"🔍 DEBUG: Library.refreshing = {refreshing}")
+            logger.debug(f"DEBUG: Library.refreshing = {refreshing}")
             
             if refreshing:
-                logger.debug(f"🔍 DEBUG: Library is refreshing")
+                logger.debug(f"DEBUG: Library is refreshing")
                 return True
             
             # Alternative method: Check server activities for scanning
             try:
                 activities = self.server.activities()
-                logger.debug(f"🔍 DEBUG: Found {len(activities)} server activities")
+                logger.debug(f"DEBUG: Found {len(activities)} server activities")
                 
                 for activity in activities:
                     # Look for library scan activities
                     activity_type = getattr(activity, 'type', 'unknown')
                     activity_title = getattr(activity, 'title', 'unknown')
-                    logger.debug(f"🔍 DEBUG: Activity - type: {activity_type}, title: {activity_title}")
+                    logger.debug(f"DEBUG: Activity - type: {activity_type}, title: {activity_title}")
                     
                     if (activity_type in ['library.scan', 'library.refresh'] and
                         library_name.lower() in activity_title.lower()):
-                        logger.debug(f"🔍 DEBUG: Found matching scan activity: {activity_title}")
+                        logger.debug(f"DEBUG: Found matching scan activity: {activity_title}")
                         return True
             except Exception as activities_error:
                 logger.debug(f"Could not check server activities: {activities_error}")
             
-            logger.debug(f"🔍 DEBUG: No scan activity detected")
+            logger.debug(f"DEBUG: No scan activity detected")
             return False
             
         except Exception as e:

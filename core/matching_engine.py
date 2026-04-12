@@ -421,7 +421,7 @@ class MusicMatchingEngine:
             
             if is_likely_album and 4 <= len(potential_album_part) <= 30:
                 cleaned_title = re.sub(dash_pattern, '', track_title).strip()
-                print(f"🎵 Heuristic album detection: '{original_title}' → '{cleaned_title}' (removed: '{potential_album_part}')")
+                print(f"Heuristic album detection: '{original_title}' → '{cleaned_title}' (removed: '{potential_album_part}')")
                 return cleaned_title, True
         
         return track_title, False
@@ -750,7 +750,7 @@ class MusicMatchingEngine:
                 f"vs '{slskd_track.filename[:60]}...' | "
                 f"Title: {title_score:.2f} (ratio: {title_ratio:.2f}, boundary: {has_word_boundary}), "
                 f"Artist: {artist_score:.2f}, Duration: {duration_score:.2f}{album_tag}, "
-                f"Final: {final_confidence:.2f} {'✅ PASS' if final_confidence > 0.63 else '❌ FAIL'}"
+                f"Final: {final_confidence:.2f} {'PASS' if final_confidence > 0.63 else 'FAIL'}"
             )
         
         # Ensure the final score doesn't exceed 1.0
@@ -982,11 +982,11 @@ class MusicMatchingEngine:
         
         # Debug logging for troubleshooting
         if scored_results and not confident_results:
-            print(f"⚠️ DEBUG: Found {len(scored_results)} scored results but none met confidence threshold 0.58")
+            print(f"DEBUG: Found {len(scored_results)} scored results but none met confidence threshold 0.58")
             for i, result in enumerate(sorted_results[:3]):  # Show top 3
                 print(f"   {i+1}. {result.confidence:.3f} - {getattr(result, 'version_type', 'unknown')} - {result.filename[:60]}...")
         elif confident_results:
-            print(f"✅ DEBUG: {len(confident_results)} results passed confidence threshold 0.58")
+            print(f"DEBUG: {len(confident_results)} results passed confidence threshold 0.58")
             for i, result in enumerate(confident_results[:3]):  # Show top 3
                 print(f"   {i+1}. {result.confidence:.3f} - {getattr(result, 'version_type', 'unknown')} - {result.filename[:60]}...")
 

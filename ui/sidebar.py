@@ -892,7 +892,7 @@ class MediaPlayer(QWidget):
         volume_layout = QHBoxLayout()
         volume_layout.setSpacing(10)
         
-        volume_icon = QLabel("🔊")
+        volume_icon = QLabel("")
         volume_icon.setStyleSheet("""
             QLabel {
                 color: #b3b3b3;
@@ -933,7 +933,7 @@ class MediaPlayer(QWidget):
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
         
         # Stop button - more visible Spotify style
-        self.stop_btn = QPushButton("⏹")
+        self.stop_btn = QPushButton("")
         self.stop_btn.setFixedSize(32, 32)
         self.stop_btn.setStyleSheet("""
             QPushButton {
@@ -1029,7 +1029,7 @@ class MediaPlayer(QWidget):
         """Update play/pause button state"""
         self.is_playing = playing
         if playing:
-            self.play_pause_btn.setText("⏸︎")
+            self.play_pause_btn.setText("")
             # Start scrolling animation when playing
             if self.track_info.should_scroll and not self.track_info.is_scrolling:
                 self.track_info.start_scroll_animation()
@@ -1207,11 +1207,11 @@ class ModernSidebar(QWidget):
         
         # Navigation buttons
         nav_items = [
-            ("dashboard", "Dashboard", "📊"),
-            ("sync", "Sync", "🔄"),
-            ("downloads", "Search", "📥"),
-            ("artists", "Artists", "🎵"),
-            ("settings", "Settings", "⚙️")
+            ("dashboard", "Dashboard", ""),
+            ("sync", "Sync", ""),
+            ("downloads", "Search", ""),
+            ("artists", "Artists", ""),
+            ("settings", "Settings", "")
         ]
         
         for page_id, title, icon in nav_items:
