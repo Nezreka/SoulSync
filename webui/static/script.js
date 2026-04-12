@@ -2318,7 +2318,8 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     const editColors = ['#6366f1','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#8b5cf6','#14b8a6'];
     const pageLabels = {
         dashboard: 'Dashboard', sync: 'Sync', downloads: 'Search', discover: 'Discover',
-        artists: 'Artists', automations: 'Automations', library: 'Library', import: 'Import'
+        artists: 'Artists', automations: 'Automations', library: 'Library', stats: 'Listening Stats',
+        'playlist-explorer': 'Playlist Explorer', import: 'Import', help: 'Help & Docs'
     };
 
     const form = document.createElement('div');
@@ -2503,7 +2504,8 @@ function showSelfEditForm() {
 
     const pageLabels = {
         dashboard: 'Dashboard', sync: 'Sync', downloads: 'Search', discover: 'Discover',
-        artists: 'Artists', automations: 'Automations', library: 'Library', import: 'Import'
+        artists: 'Artists', automations: 'Automations', library: 'Library', stats: 'Listening Stats',
+        'playlist-explorer': 'Playlist Explorer', import: 'Import', help: 'Help & Docs'
     };
 
     const form = document.createElement('div');
