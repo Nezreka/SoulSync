@@ -62,6 +62,16 @@ function openSetupWizard() {
 function closeSetupWizard() {
     const overlay = document.getElementById('setup-wizard-overlay');
     if (overlay) overlay.style.display = 'none';
+
+    // Mark as complete so it doesn't show again (server + client)
+    localStorage.setItem('soulsync_setup_complete', 'true');
+    fetch('/api/setup/complete', { method: 'POST' }).catch(() => {});
+
+    // Continue app initialization if wizard was shown on first run
+    if (typeof window._onSetupWizardComplete === 'function') {
+        window._onSetupWizardComplete();
+        window._onSetupWizardComplete = null;
+    }
 }
 
 // ---- Navigation ----
@@ -957,12 +967,26 @@ async function _wizardFinish() {
         console.error('Wizard final save error:', e);
     }
 
+    // Mark setup complete on both server and client
+    try {
+        await fetch('/api/setup/complete', { method: 'POST' });
+    } catch (e) {
+        console.error('Failed to mark setup complete on server:', e);
+    }
     localStorage.setItem('soulsync_setup_complete', 'true');
-    closeSetupWizard();
+
+    const overlay = document.getElementById('setup-wizard-overlay');
+    if (overlay) overlay.style.display = 'none';
 
     // Reload settings into the main UI
     if (typeof loadSettings === 'function') loadSettings();
     if (typeof showToast === 'function') showToast('Setup complete — welcome to SoulSync!', 'success');
+
+    // Continue app initialization if wizard was shown on first run
+    if (typeof window._onSetupWizardComplete === 'function') {
+        window._onSetupWizardComplete();
+        window._onSetupWizardComplete = null;
+    }
 }
 
 // ---- Utility ----
@@ -973,18 +997,8 @@ function _escHtml(str) {
 }
 
 // ---- Dev Trigger ----
-// Open wizard with: openSetupWizard() from console, or ?setup=1 URL param
-
-(function _checkWizardAutoOpen() {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('setup') === '1') {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => setTimeout(openSetupWizard, 300));
-        } else {
-            setTimeout(openSetupWizard, 300);
-        }
-    }
-})();
+// Open wizard manually: openSetupWizard() from console, or ?setup=1 URL param
+// First-run auto-detection is handled in script.js DOMContentLoaded
 
 // Expose globally
 window.openSetupWizard = openSetupWizard;

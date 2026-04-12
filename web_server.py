@@ -6125,17 +6125,21 @@ def get_mirrored_playlists_list():
 @app.route('/api/setup/status', methods=['GET'])
 def setup_status_endpoint():
     """Check if first-run setup has been completed."""
-    # Consider setup incomplete if no slskd URL and no download source configured
-    slskd_url = config_manager.get('soulseek.slskd_url', '')
+    # The setup wizard sets this flag when completed. download_source.mode is only
+    # set by user action (wizard or settings page), never by config.json defaults.
+    setup_done = config_manager.get('setup.completed', False)
     download_mode = config_manager.get('download_source.mode', '')
-    transfer_path = config_manager.get('soulseek.transfer_path', '')
-    has_any_config = bool(slskd_url) or bool(download_mode) or bool(transfer_path)
+    # Either the explicit flag or a user-configured download source means setup is done
+    has_user_config = bool(setup_done) or bool(download_mode)
     return jsonify({
-        "setup_complete": has_any_config,
-        "has_download_source": bool(download_mode),
-        "has_slskd": bool(slskd_url),
-        "has_transfer_path": bool(transfer_path),
+        "setup_complete": has_user_config,
     })
+
+@app.route('/api/setup/complete', methods=['POST'])
+def setup_complete_endpoint():
+    """Mark first-run setup as completed."""
+    config_manager.set('setup.completed', True)
+    return jsonify({"success": True})
 
 @app.route('/api/test-connection', methods=['POST'])
 def test_connection_endpoint():

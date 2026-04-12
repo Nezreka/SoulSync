@@ -2616,6 +2616,36 @@ async function checkAdminPinRequired() {
 document.addEventListener('DOMContentLoaded', async function () {
     console.log('SoulSync WebUI initializing...');
 
+    // Check if first-run setup wizard should be shown
+    const params = new URLSearchParams(window.location.search);
+    const forceSetup = params.get('setup') === '1';
+    let showWizard = forceSetup;
+
+    if (!forceSetup) {
+        try {
+            const setupResp = await fetch('/api/setup/status');
+            const setupData = await setupResp.json();
+            if (!setupData.setup_complete) {
+                showWizard = true;
+                localStorage.removeItem('soulsync_setup_complete');
+            }
+        } catch (e) {
+            console.warn('Setup status check failed, continuing normal init:', e);
+        }
+    }
+
+    if (showWizard && typeof openSetupWizard === 'function') {
+        window._onSetupWizardComplete = function () {
+            _continueAppInit();
+        };
+        openSetupWizard();
+        return; // Defer init until wizard closes
+    }
+
+    _continueAppInit();
+});
+
+async function _continueAppInit() {
     // Initialize profile management UI handlers
     initProfileManagement();
 
@@ -2627,7 +2657,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
 
     initApp();
-});
+}
 
 function initApp() {
     // Initialize components
