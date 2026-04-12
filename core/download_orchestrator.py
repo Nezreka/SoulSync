@@ -93,6 +93,17 @@ class DownloadOrchestrator:
             self.deezer_dl.reconnect(deezer_arl)
             self.deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
 
+        # Reload download path for all clients that cache it
+        new_path = Path(config_manager.get('soulseek.download_path', './downloads'))
+        for client in [self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl]:
+            if client and hasattr(client, 'download_path') and client.download_path != new_path:
+                client.download_path = new_path
+                client.download_path.mkdir(parents=True, exist_ok=True)
+                # YouTube also caches path in yt-dlp opts
+                if hasattr(client, 'download_opts') and 'outtmpl' in client.download_opts:
+                    client.download_opts['outtmpl'] = str(new_path / '%(title)s.%(ext)s')
+                logger.info(f"{type(client).__name__} download path updated to: {new_path}")
+
         logger.info(f"Download Orchestrator settings reloaded - Mode: {self.mode}")
 
     def _client(self, name):

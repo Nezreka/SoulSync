@@ -1,0 +1,732 @@
+/* ============================================
+   SETUP WIZARD — First-Run Full-Screen Overlay
+   ============================================ */
+
+.setup-wizard-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    background: linear-gradient(135deg, #0a0a1a 0%, #111827 50%, #0a0a1a 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: setupFadeIn 0.5s ease;
+    overflow-y: auto;
+    padding: 20px;
+}
+
+@keyframes setupFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.setup-wizard-container {
+    width: 100%;
+    max-width: 640px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 32px;
+}
+
+/* ---- Progress Stepper ---- */
+.setup-stepper {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 8px;
+}
+
+.setup-step-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    transition: all 0.3s ease;
+    cursor: default;
+}
+
+.setup-step-dot.active {
+    background: rgb(var(--accent-rgb));
+    border-color: rgb(var(--accent-rgb));
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.5);
+}
+
+.setup-step-dot.completed {
+    background: rgb(var(--accent-rgb));
+    border-color: rgb(var(--accent-rgb));
+    opacity: 0.6;
+}
+
+.setup-step-line {
+    width: 32px;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    transition: background 0.3s ease;
+}
+
+.setup-step-line.completed {
+    background: rgba(var(--accent-rgb), 0.5);
+}
+
+/* ---- Card Container ---- */
+.setup-card {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+    padding: 40px;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+    animation: setupCardIn 0.35s ease;
+}
+
+@keyframes setupCardIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.setup-card h2 {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
+    text-align: center;
+}
+
+.setup-card .setup-subtitle {
+    font-size: 0.95rem;
+    color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+    margin-bottom: 28px;
+    line-height: 1.5;
+}
+
+/* ---- Welcome Step ---- */
+.setup-welcome-logo {
+    width: auto;
+    height: 80px;
+    max-width: 200px;
+    margin: 0 auto 20px;
+    display: block;
+    object-fit: contain;
+}
+
+.setup-welcome-tagline {
+    font-size: 1.05rem;
+    color: rgba(255, 255, 255, 0.6);
+    text-align: center;
+    margin-bottom: 32px;
+}
+
+.setup-feature-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 32px;
+}
+
+.setup-feature-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.setup-feature-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: rgba(var(--accent-rgb), 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: rgb(var(--accent-rgb));
+}
+
+.setup-feature-text {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* ---- Selection Cards (Metadata / Download Source) ---- */
+.setup-option-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.setup-option-card {
+    position: relative;
+    padding: 18px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 2px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+}
+
+.setup-option-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.setup-option-card.selected {
+    border-color: rgb(var(--accent-rgb));
+    background: rgba(var(--accent-rgb), 0.08);
+    box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.15);
+}
+
+.setup-option-card.selected::after {
+    content: '';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgb(var(--accent-rgb));
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+    background-size: 14px;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.setup-option-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 4px;
+}
+
+.setup-option-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: rgba(var(--accent-rgb), 0.2);
+    color: rgb(var(--accent-light-rgb));
+    margin-bottom: 6px;
+}
+
+.setup-option-desc {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.45);
+    line-height: 1.4;
+}
+
+/* Inline config that appears when an option is selected */
+.setup-inline-config {
+    display: none;
+    margin-top: 16px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    animation: setupCardIn 0.25s ease;
+}
+
+.setup-inline-config.visible {
+    display: block;
+}
+
+/* ---- Form Inputs ---- */
+.setup-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 14px;
+}
+
+.setup-input-group label {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 500;
+}
+
+.setup-input {
+    width: 100%;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    color: #fff;
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.setup-input:focus {
+    border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.setup-input::placeholder {
+    color: rgba(255, 255, 255, 0.25);
+}
+
+.setup-test-btn {
+    padding: 8px 16px;
+    background: rgba(var(--accent-rgb), 0.15);
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    border-radius: 8px;
+    color: rgb(var(--accent-light-rgb));
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-top: 4px;
+}
+
+.setup-test-btn:hover {
+    background: rgba(var(--accent-rgb), 0.25);
+}
+
+.setup-test-btn.success {
+    border-color: #22c55e;
+    color: #22c55e;
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.setup-test-btn.failed {
+    border-color: #ef4444;
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+}
+
+/* ---- Media Server Cards ---- */
+.setup-server-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.setup-server-card {
+    padding: 14px 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 2px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s ease;
+}
+
+.setup-server-card:hover {
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.setup-server-card.selected {
+    border-color: rgb(var(--accent-rgb));
+    background: rgba(var(--accent-rgb), 0.08);
+}
+
+.setup-server-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #fff;
+}
+
+/* ---- Artist Search (Step 5) ---- */
+.setup-search-wrapper {
+    position: relative;
+    margin-bottom: 16px;
+}
+
+.setup-search-input {
+    width: 100%;
+    padding: 12px 16px 12px 42px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    color: #fff;
+    font-size: 0.95rem;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.setup-search-input:focus {
+    border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.setup-search-input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.setup-search-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.setup-artist-results {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 280px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--accent-rgb), 0.3) transparent;
+}
+
+.setup-artist-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.setup-artist-row:hover {
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.setup-artist-row.added {
+    border-color: rgb(var(--accent-rgb));
+    background: rgba(var(--accent-rgb), 0.08);
+}
+
+.setup-artist-img {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.setup-artist-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.setup-artist-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.setup-artist-genre {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* Added artists chips */
+.setup-added-artists {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.setup-added-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: rgba(var(--accent-rgb), 0.12);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    border-radius: 20px;
+    font-size: 0.82rem;
+    color: rgb(var(--accent-light-rgb));
+}
+
+.setup-added-chip .remove {
+    cursor: pointer;
+    opacity: 0.6;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.setup-added-chip .remove:hover {
+    opacity: 1;
+}
+
+/* ---- Track Search (Step 6) ---- */
+.setup-track-results {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 300px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(var(--accent-rgb), 0.3) transparent;
+}
+
+.setup-track-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.setup-track-row:hover {
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.setup-track-row.downloading {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.setup-track-row.downloaded {
+    border-color: #22c55e;
+    background: rgba(34, 197, 94, 0.06);
+}
+
+.setup-track-art {
+    width: 40px;
+    height: 40px;
+    border-radius: 6px;
+    object-fit: cover;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.setup-track-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.setup-track-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.setup-track-artist {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.setup-track-status {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.4);
+    min-width: 80px;
+    text-align: right;
+}
+
+.setup-track-row.downloaded .setup-track-status {
+    color: #22c55e;
+}
+
+/* ---- Done Step ---- */
+.setup-done-icon {
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 20px;
+    border-radius: 50%;
+    background: rgba(var(--accent-rgb), 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: setupPulse 2s ease infinite;
+}
+
+@keyframes setupPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.2); }
+    50% { box-shadow: 0 0 0 16px rgba(var(--accent-rgb), 0); }
+}
+
+.setup-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 28px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 12px;
+}
+
+.setup-summary-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+}
+
+.setup-summary-label {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.setup-summary-value {
+    color: #fff;
+    font-weight: 500;
+}
+
+/* ---- Buttons ---- */
+.setup-btn-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 24px;
+}
+
+.setup-btn {
+    padding: 10px 24px;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+}
+
+.setup-btn-primary {
+    background: rgb(var(--accent-rgb));
+    color: #fff;
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3);
+}
+
+.setup-btn-primary:hover {
+    filter: brightness(1.1);
+    box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.4);
+}
+
+.setup-btn-secondary {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.setup-btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.setup-btn-big {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    font-size: 1rem;
+}
+
+.setup-skip-link {
+    display: block;
+    text-align: center;
+    margin-top: 16px;
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.35);
+    cursor: pointer;
+    transition: color 0.2s ease;
+    background: none;
+    border: none;
+}
+
+.setup-skip-link:hover {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* ---- Path Lock Row ---- */
+.setup-path-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.setup-path-row .setup-path-input {
+    flex: 1;
+}
+
+.setup-path-row .setup-path-input[readonly] {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.setup-lock-btn {
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.setup-lock-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.setup-lock-btn.locked {
+    border-color: rgba(var(--accent-rgb), 0.3);
+    color: rgba(var(--accent-rgb), 0.8);
+}
+
+/* ---- Artist check column ---- */
+.setup-artist-check {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.35);
+    white-space: nowrap;
+    min-width: 70px;
+    text-align: right;
+}
+
+.setup-artist-row.added .setup-artist-check {
+    color: rgb(var(--accent-rgb));
+    font-weight: 600;
+}
+
+/* ---- Loading Spinner ---- */
+.setup-spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top-color: rgb(var(--accent-rgb));
+    border-radius: 50%;
+    animation: setupSpin 0.6s linear infinite;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+@keyframes setupSpin {
+    to { transform: rotate(360deg); }
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 600px) {
+    .setup-card {
+        padding: 24px 20px;
+        border-radius: 16px;
+    }
+
+    .setup-option-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .setup-server-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .setup-card h2 {
+        font-size: 1.3rem;
+    }
+
+    .setup-step-line {
+        width: 20px;
+    }
+}

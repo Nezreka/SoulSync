@@ -8,9 +8,18 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css') }}">
 </head>
 
 <body>
+    <!-- Setup Wizard Overlay -->
+    <div id="setup-wizard-overlay" class="setup-wizard-overlay" style="display: none;">
+        <div class="setup-wizard-container">
+            <div class="setup-stepper" id="setup-wizard-stepper"></div>
+            <div id="setup-wizard-content"></div>
+        </div>
+    </div>
+
     <!-- Launch PIN Lock Screen -->
     <div id="launch-pin-overlay" class="launch-pin-overlay" style="display: none;">
         <div class="launch-pin-container" id="launch-pin-container">
@@ -7367,6 +7376,7 @@
     <script src="{{ url_for('static', filename='helper.js') }}"></script>
     <script src="{{ url_for('static', filename='particles.js') }}"></script>
     <script src="{{ url_for('static', filename='worker-orbs.js') }}"></script>
+    <script src="{{ url_for('static', filename='setup-wizard.js') }}"></script>
 </body>
 
 </html>
