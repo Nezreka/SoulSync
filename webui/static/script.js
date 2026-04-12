@@ -6704,9 +6704,13 @@ function renderMusicPaths(paths) {
     container.innerHTML = paths.map((p, i) => `
         <div class="form-group music-path-row" style="margin-bottom: 4px;">
             <input type="text" class="music-path-input" value="${escapeHtml(p)}" placeholder="/music or C:\\Music" style="flex:1;">
-            <button class="test-button" onclick="this.closest('.music-path-row').remove()" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
+            <button class="test-button" onclick="_removeMusicPathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
         </div>
     `).join('');
+    // Attach auto-save to dynamically rendered inputs
+    container.querySelectorAll('.music-path-input').forEach(input => {
+        input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
+    });
 }
 
 function addMusicPathRow() {
@@ -6720,10 +6724,19 @@ function addMusicPathRow() {
     row.style.marginBottom = '4px';
     row.innerHTML = `
         <input type="text" class="music-path-input" value="" placeholder="/music or C:\\Music" style="flex:1;">
-        <button class="test-button" onclick="this.closest('.music-path-row').remove()" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
+        <button class="test-button" onclick="_removeMusicPathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
     `;
     container.appendChild(row);
-    row.querySelector('input').focus();
+    const input = row.querySelector('input');
+    input.focus();
+    // Auto-save when the user finishes typing a path
+    input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
+}
+
+function _removeMusicPathRow(btn) {
+    btn.closest('.music-path-row').remove();
+    // Auto-save after removing a path
+    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
 }
 
 function collectMusicPaths() {
