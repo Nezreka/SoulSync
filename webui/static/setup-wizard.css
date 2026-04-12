@@ -690,6 +690,64 @@
     font-weight: 600;
 }
 
+/* ---- Info Tip Boxes ---- */
+.setup-info-box {
+    padding: 14px 16px;
+    background: rgba(var(--accent-rgb), 0.06);
+    border: 1px solid rgba(var(--accent-rgb), 0.15);
+    border-radius: 10px;
+    margin-bottom: 16px;
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.6);
+    line-height: 1.55;
+}
+
+.setup-info-box strong {
+    color: rgba(255, 255, 255, 0.85);
+    font-weight: 600;
+}
+
+.setup-info-box ul {
+    margin: 6px 0 0 16px;
+    padding: 0;
+}
+
+.setup-info-box ul li {
+    margin-bottom: 4px;
+}
+
+.setup-info-box + .setup-info-box {
+    margin-top: -4px;
+}
+
+/* ---- Done Page Tips ---- */
+.setup-tips-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.setup-tip-card {
+    padding: 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+}
+
+.setup-tip-title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    margin-bottom: 6px;
+}
+
+.setup-tip-text {
+    font-size: 0.78rem;
+    color: rgba(255, 255, 255, 0.45);
+    line-height: 1.5;
+}
+
 /* ---- Loading Spinner ---- */
 .setup-spinner {
     display: inline-block;
@@ -728,5 +786,9 @@
 
     .setup-step-line {
         width: 20px;
+    }
+
+    .setup-tips-grid {
+        grid-template-columns: 1fr;
     }
 }

@@ -214,27 +214,34 @@ function _renderWelcome(el) {
                     <div class="setup-feature-icon">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
                     </div>
-                    <span class="setup-feature-text">Search and download music from multiple sources</span>
+                    <span class="setup-feature-text">Search and download music from 6 sources — Soulseek, YouTube, Tidal, Qobuz, HiFi, and Deezer</span>
                 </div>
                 <div class="setup-feature-item">
                     <div class="setup-feature-icon">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/></svg>
                     </div>
-                    <span class="setup-feature-text">Sync playlists from Spotify, Tidal, Deezer and more</span>
+                    <span class="setup-feature-text">Mirror playlists from Spotify, Tidal, Deezer, YouTube, Beatport, and ListenBrainz</span>
                 </div>
                 <div class="setup-feature-item">
                     <div class="setup-feature-icon">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88"/></svg>
                     </div>
-                    <span class="setup-feature-text">Discover new music with watchlist monitoring and smart caching</span>
+                    <span class="setup-feature-text">Watch artists and auto-download new releases as they drop</span>
                 </div>
                 <div class="setup-feature-item">
                     <div class="setup-feature-icon">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
                     </div>
-                    <span class="setup-feature-text">Organize and serve to Plex, Jellyfin, or Navidrome</span>
+                    <span class="setup-feature-text">Organize your library and serve to Plex, Jellyfin, or Navidrome</span>
+                </div>
+                <div class="setup-feature-item">
+                    <div class="setup-feature-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    </div>
+                    <span class="setup-feature-text">Build automations that scan, download, and notify on your schedule</span>
                 </div>
             </div>
+            <p style="text-align:center;font-size:0.82rem;color:rgba(255,255,255,0.35);margin-bottom:20px;">This wizard will walk you through the essentials. Everything can be changed later in Settings.</p>
             <button class="setup-btn setup-btn-primary setup-btn-big" onclick="wizardNext()">Get Started</button>
             <button class="setup-skip-link" onclick="closeSetupWizard()">Skip Setup</button>
         </div>
@@ -254,6 +261,9 @@ function _renderMetadata(el) {
         <div class="setup-card">
             <h2>Metadata Source</h2>
             <p class="setup-subtitle">Where should SoulSync look up track info, album art, and metadata?</p>
+            <div class="setup-info-box">
+                <strong>What is a metadata source?</strong> When you search for music or sync a playlist, SoulSync needs a catalog to look up track names, artists, album art, track numbers, and release dates. This source provides that information — it does not affect where music is downloaded from.
+            </div>
             <div class="setup-option-grid" style="grid-template-columns: 1fr 1fr 1fr;">
                 ${sources.map(s => `
                     <div class="setup-option-card ${_wizardSettings.metadata_source === s.id ? 'selected' : ''}"
@@ -344,7 +354,12 @@ function _renderDownloadSource(el) {
     el.innerHTML = `
         <div class="setup-card">
             <h2>Download Source</h2>
-            <p class="setup-subtitle">Choose your primary download source. You can enable Hybrid mode later in Settings to try multiple sources automatically.</p>
+            <p class="setup-subtitle">Choose where SoulSync downloads music files from.</p>
+            <div class="setup-info-box">
+                <strong>How downloads work:</strong> When you search for a track, SoulSync uses your metadata source to identify it, then searches your download source for the actual audio file. The matching engine automatically finds the best quality match.
+                <br><br>
+                <strong>Hybrid mode</strong> (available later in Settings) lets you set a priority order — if your primary source doesn't have a track, SoulSync automatically tries the next source in line.
+            </div>
             <div class="setup-option-grid" style="grid-template-columns: 1fr 1fr 1fr;">
                 ${sources.map(s => `
                     <div class="setup-option-card ${sel === s.id ? 'selected' : ''}"
@@ -488,6 +503,9 @@ function _renderPaths(el) {
         <div class="setup-card">
             <h2>Paths & Media Server</h2>
             <p class="setup-subtitle">Where should downloaded music go?</p>
+            <div class="setup-info-box">
+                <strong>Two-folder system:</strong> Music downloads to the <strong>Download Folder</strong> first as raw files. After post-processing (metadata tagging, file organization), finished tracks are moved to the <strong>Transfer Folder</strong> organized into Artist/Album subfolders. Point your media server at the Transfer folder.
+            </div>
             <div class="setup-input-group">
                 <label>Download Folder (where raw downloads land)</label>
                 <div class="setup-path-row">
@@ -515,7 +533,10 @@ function _renderPaths(el) {
                 </div>
             </div>
 
-            <p class="setup-subtitle" style="margin-top: 20px; margin-bottom: 16px;">Connect a media server</p>
+            <p class="setup-subtitle" style="margin-top: 20px; margin-bottom: 8px;">Connect a media server</p>
+            <div class="setup-info-box" style="margin-bottom: 12px;">
+                Connecting a media server lets SoulSync trigger library scans after downloads, import your existing library, and display what you already own when searching. Select <strong>None</strong> if you don't use one.
+            </div>
             <div class="setup-server-grid">
                 ${['plex', 'jellyfin', 'navidrome', 'none'].map(s => `
                     <div class="setup-server-card ${server === s ? 'selected' : ''}"
@@ -570,7 +591,16 @@ function _renderWatchlist(el) {
     el.innerHTML = `
         <div class="setup-card">
             <h2>Add Your First Artists</h2>
-            <p class="setup-subtitle">Search for artists to add to your watchlist. SoulSync will automatically download their new releases.</p>
+            <p class="setup-subtitle">Search for artists to add to your watchlist.</p>
+            <div class="setup-info-box">
+                <strong>What is the Watchlist?</strong> Artists on your watchlist are monitored for new releases. When a watched artist drops a new album, EP, or single, it appears on your <strong>Discover</strong> page and can be auto-downloaded.
+                <ul>
+                    <li><strong>Discover page</strong> — populated by new releases from watched artists, similar artists, and seasonal picks</li>
+                    <li><strong>Watchlist Scanner</strong> — runs automatically on a schedule to check for new releases</li>
+                    <li><strong>Filters</strong> — per-artist controls for albums, EPs, singles, remixes, live recordings, and more</li>
+                </ul>
+                You can always add or remove artists later from the Artists page.
+            </div>
             <div class="setup-added-artists" id="setup-added-artists">${chips}</div>
             <div class="setup-search-wrapper">
                 <span class="setup-search-icon">
@@ -737,7 +767,10 @@ function _renderFirstDownload(el) {
     el.innerHTML = `
         <div class="setup-card">
             <h2>Your First Download</h2>
-            <p class="setup-subtitle">Search for a track and download it to see SoulSync in action.</p>
+            <p class="setup-subtitle">Try searching for a track to see the full pipeline in action.</p>
+            <div class="setup-info-box">
+                <strong>How it works:</strong> Type a song name below. SoulSync searches your metadata source for the track, then finds the best matching audio file from your download source. The track is tagged with full metadata (artist, album, track number, artwork) and organized into your Transfer folder.
+            </div>
             <div class="setup-search-wrapper">
                 <span class="setup-search-icon">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -916,7 +949,7 @@ function _renderDone(el) {
                 </svg>
             </div>
             <h2>You're All Set!</h2>
-            <p class="setup-subtitle">SoulSync is configured and ready to go.</p>
+            <p class="setup-subtitle">SoulSync is configured and ready to go. Here's a quick overview of what's available.</p>
             <div class="setup-summary">
                 ${summaryRows.map(r => `
                     <div class="setup-summary-row">
@@ -924,6 +957,32 @@ function _renderDone(el) {
                         <span class="setup-summary-value">${_escHtml(r.value)}</span>
                     </div>
                 `).join('')}
+            </div>
+            <div class="setup-tips-grid">
+                <div class="setup-tip-card">
+                    <div class="setup-tip-title">Sync Page</div>
+                    <div class="setup-tip-text">Mirror playlists from Spotify, Tidal, Deezer, YouTube, Beatport, and ListenBrainz. SoulSync matches and downloads missing tracks automatically.</div>
+                </div>
+                <div class="setup-tip-card">
+                    <div class="setup-tip-title">Wishlist</div>
+                    <div class="setup-tip-text">Tracks that can't be found are saved to your Wishlist and retried automatically. Check it on the Dashboard to see what's pending.</div>
+                </div>
+                <div class="setup-tip-card">
+                    <div class="setup-tip-title">Automations</div>
+                    <div class="setup-tip-text">Build event-driven workflows: scan watchlists, process wishlists, sync playlists on a schedule, and get notified via Discord, Telegram, or Pushbullet.</div>
+                </div>
+                <div class="setup-tip-card">
+                    <div class="setup-tip-title">Notifications</div>
+                    <div class="setup-tip-text">The bell icon (top-right) shows download completions, new releases, sync results, and errors. Configure external alerts in Settings.</div>
+                </div>
+                <div class="setup-tip-card">
+                    <div class="setup-tip-title">Interactive Help</div>
+                    <div class="setup-tip-text">Click the <strong>?</strong> button (bottom-right) anytime for context-aware help. It explains any section of the UI you click on.</div>
+                </div>
+                <div class="setup-tip-card">
+                    <div class="setup-tip-title">Settings</div>
+                    <div class="setup-tip-text">Everything from this wizard plus much more — file organization templates, quality preferences, tag embedding, and advanced options.</div>
+                </div>
             </div>
             <button class="setup-btn setup-btn-primary setup-btn-big" onclick="_wizardFinish()">Start Using SoulSync</button>
         </div>
