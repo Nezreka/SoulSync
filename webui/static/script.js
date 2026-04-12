@@ -12183,7 +12183,14 @@ function generateM3UContent(playlistId) {
 
     tracks.forEach((track, index) => {
         const durationSeconds = track.duration_ms ? Math.floor(track.duration_ms / 1000) : -1;
-        const artists = Array.isArray(track.artists) ? track.artists.join(', ') : (track.artists || 'Unknown Artist');
+        let artists = 'Unknown Artist';
+        if (Array.isArray(track.artists)) {
+            artists = track.artists.map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : String(a)).filter(Boolean).join(', ') || 'Unknown Artist';
+        } else if (typeof track.artists === 'string') {
+            artists = track.artists;
+        } else if (track.artist) {
+            artists = typeof track.artist === 'object' ? (track.artist.name || 'Unknown Artist') : String(track.artist);
+        }
 
         // Check library match status from the modal UI
         const matchEl = document.getElementById(`match-${playlistId}-${index}`);
