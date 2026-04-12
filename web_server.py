@@ -21290,6 +21290,20 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "Centralized Downloads Page",
+                "description": "Live view of every download across the entire app in one place",
+                "features": [
+                    "• New Downloads page in sidebar — shows all tracks from Sync, Discover, Artists, Search, and Wishlist",
+                    "• Live-updating list with filter pills: All, Active, Queued, Completed, Failed",
+                    "• Section headers group downloads by status with track counts",
+                    "• Track position display (3 of 19) for album and playlist batches",
+                    "• Album art, artist/album metadata, batch context, and error messages per row",
+                    "• Clear Completed button removes finished items from the tracker",
+                    "• Nav badge shows active download count from any page via WebSocket",
+                ],
+                "usage_note": "Click Downloads in the sidebar to see all active and recent downloads. The badge updates in real-time from any page."
+            },
+            {
                 "title": "First-Run Setup Wizard",
                 "description": "New full-screen guided setup for first-time users",
                 "features": [
