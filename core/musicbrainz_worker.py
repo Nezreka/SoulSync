@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.musicbrainz_service import MusicBrainzService
+from core.worker_utils import interruptible_sleep
 
 logger = get_logger("musicbrainz_worker")
 
@@ -20,6 +21,7 @@ class MusicBrainzWorker:
         self.paused = False
         self.should_stop = False
         self.thread = None
+        self._stop_event = threading.Event()
 
         # Current item being processed (for UI tooltip)
         self.current_item = None
@@ -45,6 +47,7 @@ class MusicBrainzWorker:
 
         self.running = True
         self.should_stop = False
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         logger.info("MusicBrainz background worker started")
@@ -57,9 +60,10 @@ class MusicBrainzWorker:
         logger.info("Stopping MusicBrainz worker...")
         self.should_stop = True
         self.running = False
+        self._stop_event.set()
 
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=1)
 
         logger.info("Music Brainz worker stopped")
 
@@ -112,7 +116,7 @@ class MusicBrainzWorker:
             try:
                 # Check if paused
                 if self.paused:
-                    time.sleep(1)
+                    interruptible_sleep(self._stop_event, 1)
                     continue
 
                 # Clear previous item before getting next
@@ -124,7 +128,7 @@ class MusicBrainzWorker:
                 if not item:
                     # No more items - sleep for a bit
                     logger.debug("No pending items, sleeping...")
-                    time.sleep(10)
+                    interruptible_sleep(self._stop_event, 10)
                     continue
 
                 # Set current item for UI tracking
@@ -147,11 +151,11 @@ class MusicBrainzWorker:
 
                 # Keep current_item set during sleep so UI can see what was just processed
                 # Rate limit: 1 request per second
-                time.sleep(1)
+                interruptible_sleep(self._stop_event, 1)
 
             except Exception as e:
                 logger.error(f"Error in worker loop: {e}")
-                time.sleep(5)  # Back off on errors
+                interruptible_sleep(self._stop_event, 5)  # Back off on errors
 
         logger.info("MusicBrainz worker thread finished")
 
