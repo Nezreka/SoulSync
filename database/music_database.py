@@ -4638,6 +4638,9 @@ class MusicDatabase:
                     except Exception:
                         pass
 
+                # Extract MusicBrainz recording ID from server if available (Navidrome provides this)
+                mbid = getattr(track_obj, 'musicBrainzId', None) or None
+
                 # Check if track already exists — UPDATE to preserve enrichment columns,
                 # INSERT only for genuinely new tracks
                 cursor.execute("SELECT 1 FROM tracks WHERE id = ? LIMIT 1", (track_id,))
@@ -4646,20 +4649,21 @@ class MusicDatabase:
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist))
+                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, musicbrainz_recording_id, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, mbid))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
-                    # isrc, bpm, musicbrainz IDs, and all other enrichment data
+                    # isrc, bpm, and all other enrichment data
                     cursor.execute("""
                         UPDATE tracks
                         SET album_id = ?, artist_id = ?, title = ?, track_number = ?,
                             duration = ?, file_path = ?, bitrate = ?, server_source = ?,
                             track_artist = COALESCE(?, track_artist),
+                            musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, track_id))
+                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, mbid, track_id))
 
                 conn.commit()
 
