@@ -39,6 +39,7 @@ class PlexScanManager:
         self._periodic_update_timer = None  # Timer for 5-minute periodic updates
         self._periodic_update_interval = 300  # 5 minutes in seconds
         self._is_doing_periodic_updates = False  # Track if we're in periodic update mode
+        self._shutting_down = False
         
         logger.info(f"PlexScanManager initialized with {delay_seconds}s debounce delay")
     
@@ -51,6 +52,9 @@ class PlexScanManager:
         """
         logger.info(f"DEBUG: Plex scan requested - reason: {reason}")
         with self._lock:
+            if self._shutting_down:
+                logger.debug("Plex scan request ignored during shutdown")
+                return
             if self._scan_in_progress:
                 # Plex is currently scanning - mark that we need another scan later
                 self._downloads_during_scan = True
@@ -66,6 +70,7 @@ class PlexScanManager:
             
             # Start the debounce timer
             self._timer = threading.Timer(self.delay, self._execute_scan)
+            self._timer.daemon = True
             self._timer.start()
     
     def add_scan_completion_callback(self, callback):
@@ -96,6 +101,9 @@ class PlexScanManager:
     def _execute_scan(self):
         """Execute the actual Plex library scan"""
         with self._lock:
+            if self._shutting_down:
+                logger.debug("Plex scan execution skipped during shutdown")
+                return
             if self._scan_in_progress:
                 logger.warning("Scan already in progress - skipping duplicate execution")
                 return
@@ -136,6 +144,7 @@ class PlexScanManager:
             
             # Schedule first periodic update after 5 minutes
             self._periodic_update_timer = threading.Timer(self._periodic_update_interval, self._do_periodic_update)
+            self._periodic_update_timer.daemon = True
             self._periodic_update_timer.start()
             
         except Exception as e:
@@ -165,15 +174,22 @@ class PlexScanManager:
             if is_scanning:
                 # Still scanning - trigger database update and continue periodic updates
                 logger.info("Plex still scanning - triggering database update")
+                if self._shutting_down:
+                    return
                 self._call_completion_callbacks()
                 
                 # Schedule next periodic update
+                if self._shutting_down:
+                    return
                 logger.info(f"Scheduling next periodic update in {self._periodic_update_interval//60} minutes")
                 self._periodic_update_timer = threading.Timer(self._periodic_update_interval, self._do_periodic_update)
+                self._periodic_update_timer.daemon = True
                 self._periodic_update_timer.start()
             else:
                 # Scanning stopped - final update and cleanup
                 logger.info("Plex scanning completed - doing final database update")
+                if self._shutting_down:
+                    return
                 self._call_completion_callbacks()
                 self._stop_periodic_updates()
                 
@@ -218,7 +234,9 @@ class PlexScanManager:
             if is_scanning:
                 # Still scanning, poll again in 30 seconds
                 logger.info("DEBUG: Plex library still scanning, will check again in 30 seconds")
-                threading.Timer(30, self._poll_scan_status).start()
+                timer = threading.Timer(30, self._poll_scan_status)
+                timer.daemon = True
+                timer.start()
             else:
                 # Scan completed!
                 elapsed_time = time.time() - self._scan_start_time if self._scan_start_time else 0
@@ -311,6 +329,7 @@ class PlexScanManager:
     def shutdown(self):
         """Clean shutdown - cancel any pending timers"""
         with self._lock:
+            self._shutting_down = True
             if self._timer:
                 self._timer.cancel()
                 self._timer = None

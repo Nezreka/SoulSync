@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.audiodb_client import AudioDBClient
+from core.worker_utils import interruptible_sleep
 
 logger = get_logger("audiodb_worker")
 
@@ -24,6 +25,7 @@ class AudioDBWorker:
         self.paused = False
         self.should_stop = False
         self.thread = None
+        self._stop_event = threading.Event()
 
         # Current item being processed (for UI tooltip)
         self.current_item = None
@@ -52,6 +54,7 @@ class AudioDBWorker:
 
         self.running = True
         self.should_stop = False
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         logger.info("AudioDB background worker started")
@@ -64,9 +67,10 @@ class AudioDBWorker:
         logger.info("Stopping AudioDB worker...")
         self.should_stop = True
         self.running = False
+        self._stop_event.set()
 
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=1)
 
         logger.info("AudioDB worker stopped")
 
@@ -115,7 +119,7 @@ class AudioDBWorker:
         while not self.should_stop:
             try:
                 if self.paused:
-                    time.sleep(1)
+                    interruptible_sleep(self._stop_event, 1)
                     continue
 
                 self.current_item = None
@@ -124,7 +128,7 @@ class AudioDBWorker:
 
                 if not item:
                     logger.debug("No pending items, sleeping...")
-                    time.sleep(10)
+                    interruptible_sleep(self._stop_event, 10)
                     continue
 
                 self.current_item = item
@@ -143,11 +147,11 @@ class AudioDBWorker:
 
                 self._process_item(item)
 
-                time.sleep(2)
+                interruptible_sleep(self._stop_event, 2)
 
             except Exception as e:
                 logger.error(f"Error in worker loop: {e}")
-                time.sleep(5)
+                interruptible_sleep(self._stop_event, 5)
 
         logger.info("AudioDB worker thread finished")
 

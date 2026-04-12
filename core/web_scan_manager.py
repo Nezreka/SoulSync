@@ -38,6 +38,8 @@ class WebScanManager:
         self._max_scan_time = 1800  # 30 minutes maximum
         self._current_server_type = None
         self._scan_progress = {}
+        self._completion_check_timer = None
+        self._shutting_down = False
 
         logger.info(f"WebScanManager initialized with {delay_seconds}s debounce delay")
 
@@ -84,6 +86,14 @@ class WebScanManager:
         logger.info(f"Web scan requested - reason: {reason}")
 
         with self._lock:
+            if self._shutting_down:
+                logger.debug("Web scan request ignored during shutdown")
+                return {
+                    "status": "ignored",
+                    "message": "Server is shutting down",
+                    "delay_seconds": 0,
+                    "reason": reason,
+                }
             # Add callback if provided
             if callback and callback not in self._scan_completion_callbacks:
                 self._scan_completion_callbacks.append(callback)
@@ -107,6 +117,7 @@ class WebScanManager:
 
             # Start the debounce timer
             self._timer = threading.Timer(self.delay, self._execute_scan)
+            self._timer.daemon = True
             self._timer.start()
 
             return {
@@ -169,6 +180,9 @@ class WebScanManager:
     def _execute_scan(self):
         """Execute the actual media library scan"""
         with self._lock:
+            if self._shutting_down:
+                logger.debug("Web scan execution skipped during shutdown")
+                return
             if self._scan_in_progress:
                 logger.warning("Web scan already in progress - skipping duplicate execution")
                 return
@@ -231,6 +245,9 @@ class WebScanManager:
         """Start periodic checking for scan completion"""
         def check_completion():
             try:
+                if self._shutting_down:
+                    logger.debug("Web scan completion check aborted during shutdown")
+                    return
                 # Check for timeout
                 if self._scan_start_time and (time.time() - self._scan_start_time) > self._max_scan_time:
                     logger.warning(f"Web scan timed out after {self._max_scan_time} seconds")
@@ -254,23 +271,38 @@ class WebScanManager:
                     self._handle_scan_completion()
                 else:
                     # Continue checking
-                    threading.Timer(30, check_completion).start()  # Check every 30 seconds
+                    if self._shutting_down:
+                        return
+                    timer = threading.Timer(30, check_completion)  # Check every 30 seconds
+                    timer.daemon = True
+                    self._completion_check_timer = timer
+                    timer.start()
 
             except Exception as e:
                 logger.error(f"Error during web scan completion check: {e}")
                 self._reset_scan_state()
 
         # Start first check after 30 seconds
-        threading.Timer(30, check_completion).start()
+        timer = threading.Timer(30, check_completion)
+        timer.daemon = True
+        self._completion_check_timer = timer
+        timer.start()
 
     def _handle_scan_completion(self):
         """Handle scan completion and trigger callbacks"""
-        logger.info(f"Web {self._current_server_type.upper()} library scan completed")
-
-        # Call completion callbacks
-        callbacks_to_call = []
         with self._lock:
+            if self._shutting_down:
+                return
+            server_type = self._current_server_type
             callbacks_to_call = self._scan_completion_callbacks.copy()
+            downloads_during_scan = self._downloads_during_scan
+
+        if not server_type:
+            logger.debug("Skipping web scan completion: no active server type")
+            self._reset_scan_state()
+            return
+
+        logger.info(f"Web {server_type.upper()} library scan completed")
 
         for callback in callbacks_to_call:
             try:
@@ -283,10 +315,9 @@ class WebScanManager:
         self._reset_scan_state()
 
         # Check if we need another scan due to downloads during this scan
-        with self._lock:
-            if self._downloads_during_scan:
-                logger.info("Web scan follow-up needed for downloads during scan")
-                self.request_scan("Follow-up scan for downloads during previous scan")
+        if downloads_during_scan:
+            logger.info("Web scan follow-up needed for downloads during scan")
+            self.request_scan("Follow-up scan for downloads during previous scan")
 
     def _reset_scan_state(self):
         """Reset internal scan state"""
@@ -296,3 +327,23 @@ class WebScanManager:
             self._scan_start_time = None
             self._scan_progress = {}
             # Don't clear callbacks - they might be reused
+
+    def shutdown(self):
+        """Cancel any pending timers and stop scheduling new work."""
+        with self._lock:
+            self._shutting_down = True
+            self._scan_in_progress = False
+            self._current_server_type = None
+            self._scan_start_time = None
+            self._scan_progress = {}
+
+            if self._timer:
+                self._timer.cancel()
+                self._timer = None
+
+            if self._completion_check_timer:
+                self._completion_check_timer.cancel()
+                self._completion_check_timer = None
+
+            self._downloads_during_scan = False
+            logger.info("WebScanManager shutdown - cancelled all pending timers")

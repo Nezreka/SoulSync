@@ -9,6 +9,7 @@ from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.lastfm_client import LastFMClient
 from config.settings import config_manager
+from core.worker_utils import interruptible_sleep
 
 logger = get_logger("lastfm_worker")
 
@@ -31,6 +32,7 @@ class LastFMWorker:
         self.paused = False
         self.should_stop = False
         self.thread = None
+        self._stop_event = threading.Event()
 
         # Current item being processed (for UI tooltip)
         self.current_item = None
@@ -65,6 +67,7 @@ class LastFMWorker:
 
         self.running = True
         self.should_stop = False
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         logger.info("Last.fm background worker started")
@@ -77,9 +80,10 @@ class LastFMWorker:
         logger.info("Stopping Last.fm worker...")
         self.should_stop = True
         self.running = False
+        self._stop_event.set()
 
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=1)
 
         logger.info("Last.fm worker stopped")
 
@@ -124,14 +128,14 @@ class LastFMWorker:
         while not self.should_stop:
             try:
                 if self.paused:
-                    time.sleep(1)
+                    interruptible_sleep(self._stop_event, 1)
                     continue
 
                 # Check if API key is configured
                 if not self.client.api_key:
                     self._init_client()
                     if not self.client.api_key:
-                        time.sleep(30)
+                        interruptible_sleep(self._stop_event, 30)
                         continue
 
                 self.current_item = None
@@ -139,7 +143,7 @@ class LastFMWorker:
 
                 if not item:
                     logger.debug("No pending items, sleeping...")
-                    time.sleep(10)
+                    interruptible_sleep(self._stop_event, 10)
                     continue
 
                 self.current_item = item
@@ -158,11 +162,11 @@ class LastFMWorker:
                 self._process_item(item)
 
                 # Last.fm allows 5 req/sec but we use multiple calls per item
-                time.sleep(1)
+                interruptible_sleep(self._stop_event, 1)
 
             except Exception as e:
                 logger.error(f"Error in worker loop: {e}")
-                time.sleep(5)
+                interruptible_sleep(self._stop_event, 5)
 
         logger.info("Last.fm worker thread finished")
 

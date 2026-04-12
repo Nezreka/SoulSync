@@ -11,6 +11,7 @@ import time
 from typing import Dict, Any
 
 from utils.logging_config import get_logger
+from core.worker_utils import interruptible_sleep
 
 logger = get_logger("listening_stats_worker")
 
@@ -32,6 +33,7 @@ class ListeningStatsWorker:
         self.should_stop = False
         self.thread = None
         self.current_item = None
+        self._stop_event = threading.Event()
 
         # Stats
         self.stats = {
@@ -52,6 +54,7 @@ class ListeningStatsWorker:
             return
         self.running = True
         self.should_stop = False
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         logger.info("Listening stats worker started")
@@ -61,8 +64,9 @@ class ListeningStatsWorker:
             return
         self.should_stop = True
         self.running = False
+        self._stop_event.set()
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=1)
         logger.info("Listening stats worker stopped")
 
     def pause(self):
@@ -86,25 +90,30 @@ class ListeningStatsWorker:
         logger.info("Listening stats worker thread started")
 
         # Build cache from existing data immediately (before first poll)
-        time.sleep(5)
+        if interruptible_sleep(self._stop_event, 5):
+            return
         try:
             self._build_stats_cache()
             logger.info("Initial stats cache built from existing data")
         except Exception as e:
             logger.debug(f"Initial cache build skipped: {e}")
 
+        if self.should_stop:
+            return
+
         # Wait before first poll
-        time.sleep(10)
+        if interruptible_sleep(self._stop_event, 10):
+            return
 
         while not self.should_stop:
             try:
                 if self.paused:
-                    time.sleep(5)
+                    interruptible_sleep(self._stop_event, 5)
                     continue
 
                 # Check if enabled
                 if not self.config_manager.get('listening_stats.enabled', True):
-                    time.sleep(30)
+                    interruptible_sleep(self._stop_event, 30)
                     continue
 
                 # Update poll interval from config
@@ -119,12 +128,13 @@ class ListeningStatsWorker:
                 for _ in range(int(self.poll_interval)):
                     if self.should_stop:
                         break
-                    time.sleep(1)
+                    if interruptible_sleep(self._stop_event, 1):
+                        break
 
             except Exception as e:
                 logger.error(f"Error in listening stats worker: {e}", exc_info=True)
                 self.stats['errors'] += 1
-                time.sleep(60)
+                interruptible_sleep(self._stop_event, 60)
 
         self.current_item = None
         logger.info("Listening stats worker thread finished")

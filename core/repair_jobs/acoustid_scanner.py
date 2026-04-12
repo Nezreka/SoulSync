@@ -141,7 +141,8 @@ class AcoustIDScannerJob(RepairJob):
             if batch_count >= batch_size:
                 batch_count = 0
                 self._save_checkpoint(context, fpath)
-                time.sleep(2)
+                if context.sleep_or_stop(2):
+                    return result
 
             if context.update_progress and (i + 1) % 10 == 0:
                 context.update_progress(i + 1, total)

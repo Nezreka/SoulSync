@@ -173,7 +173,8 @@ class MetadataGapFillerJob(RepairJob):
 
             # Rate limit API calls
             if spotify_track_id:
-                time.sleep(0.5)
+                if context.sleep_or_stop(0.5):
+                    return result
 
             if context.update_progress and (i + 1) % 10 == 0:
                 context.update_progress(i + 1, total)

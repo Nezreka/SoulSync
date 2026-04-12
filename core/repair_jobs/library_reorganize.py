@@ -821,7 +821,8 @@ class LibraryReorganizeJob(RepairJob):
                                 years[key] = year_str
                                 break
                 import time
-                time.sleep(0.1)  # Rate limit courtesy
+                if context.sleep_or_stop(0.1):  # Rate limit courtesy
+                    break
             except Exception as e:
                 logger.debug("API year lookup failed for %s - %s: %s", artist, album, e)
 

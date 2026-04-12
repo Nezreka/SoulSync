@@ -15,6 +15,7 @@ import time
 import uuid
 
 logger = logging.getLogger(__name__)
+from core.worker_utils import interruptible_sleep
 
 
 class HydrabaseWorker:
@@ -31,6 +32,7 @@ class HydrabaseWorker:
         self.paused = False
         self.should_stop = False
         self.thread = None
+        self._stop_event = threading.Event()
 
         # Queue with cap
         self.queue = queue.Queue(maxsize=1000)
@@ -47,6 +49,7 @@ class HydrabaseWorker:
             return
         self.running = True
         self.should_stop = False
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         logger.info("Hydrabase P2P mirror worker started")
@@ -56,8 +59,9 @@ class HydrabaseWorker:
             return
         self.should_stop = True
         self.running = False
+        self._stop_event.set()
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=1)
         logger.info("Hydrabase P2P mirror worker stopped")
 
     def pause(self):
@@ -102,7 +106,7 @@ class HydrabaseWorker:
         while not self.should_stop:
             try:
                 if self.paused:
-                    time.sleep(1)
+                    interruptible_sleep(self._stop_event, 1)
                     continue
 
                 # Non-blocking dequeue with timeout
@@ -112,12 +116,12 @@ class HydrabaseWorker:
                     continue
 
                 self._process_item(item)
-                time.sleep(0.5)  # Rate limit
+                interruptible_sleep(self._stop_event, 0.5)  # Rate limit
 
             except Exception as e:
                 logger.error(f"Error in Hydrabase worker loop: {e}")
                 self.stats['errors'] += 1
-                time.sleep(2)
+                interruptible_sleep(self._stop_event, 2)
 
     def _process_item(self, item):
         ws, lock = self.get_ws_and_lock()

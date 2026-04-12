@@ -16,6 +16,7 @@ from utils.logging_config import get_logger
 logger = get_logger("music_database")
 
 _database_initialized_paths = set()
+_database_sidecar_warnings = set()
 _database_initialization_lock = threading.Lock()
 
 # Import matching engine for enhanced similarity logic
@@ -170,9 +171,56 @@ class MusicDatabase:
             database_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self._warn_about_stale_sqlite_sidecars()
         
         # Initialize database once per process for this path
         self._initialize_database_once()
+
+    def _warn_about_stale_sqlite_sidecars(self):
+        """Warn if SQLite sidecars are present and the database looks unhealthy."""
+        db_key = str(self.database_path.resolve())
+        with _database_initialization_lock:
+            if db_key in _database_sidecar_warnings:
+                return
+            _database_sidecar_warnings.add(db_key)
+
+        wal_path = Path(f"{self.database_path}-wal")
+        shm_path = Path(f"{self.database_path}-shm")
+        existing = [p.name for p in (wal_path, shm_path) if p.exists()]
+
+        if existing:
+            check_result = None
+            try:
+                conn = sqlite3.connect(f"file:{self.database_path}?mode=ro", uri=True, timeout=5.0)
+                try:
+                    row = conn.execute("PRAGMA quick_check").fetchone()
+                    check_result = row[0] if row else None
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.warning(
+                    "SQLite sidecar files detected for %s: %s, and database health check could not be run (%s). "
+                    "This usually means the previous shutdown was not clean.",
+                    self.database_path,
+                    ", ".join(existing),
+                    e,
+                )
+                return
+
+            if check_result != "ok":
+                logger.warning(
+                    "SQLite sidecar files detected for %s: %s, and quick_check returned %r. "
+                    "This usually means the previous shutdown was not clean.",
+                    self.database_path,
+                    ", ".join(existing),
+                    check_result,
+                )
+            else:
+                logger.debug(
+                    "SQLite sidecar files present for %s (%s) but quick_check returned ok.",
+                    self.database_path,
+                    ", ".join(existing),
+                )
 
     def _initialize_database_once(self):
         """Run schema setup and migrations once per database path per process."""
