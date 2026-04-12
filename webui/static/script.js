@@ -386,6 +386,9 @@ function handleServiceStatusUpdate(data) {
     updateSidebarServiceStatus('media-server', data.media_server);
     updateSidebarServiceStatus('soulseek', data.soulseek);
 
+    // Update downloads nav badge from status push
+    if (data.active_downloads !== undefined) _updateDlNavBadge(data.active_downloads);
+
     // Update enrichment service cards
     if (data.enrichment) renderEnrichmentCards(data.enrichment);
 
@@ -2934,6 +2937,9 @@ async function loadPageData(pageId) {
                     // Just restore state if already initialized
                     restoreArtistsPageState();
                 }
+                break;
+            case 'active-downloads':
+                loadActiveDownloadsPage();
                 break;
             case 'library':
                 // Check if we should return to artist detail view instead of list
@@ -38727,6 +38733,9 @@ async function fetchAndUpdateServiceStatus() {
         updateSidebarServiceStatus('media-server', data.media_server);
         updateSidebarServiceStatus('soulseek', data.soulseek);
 
+        // Update downloads nav badge
+        if (data.active_downloads !== undefined) _updateDlNavBadge(data.active_downloads);
+
         // Update enrichment service cards
         if (data.enrichment) renderEnrichmentCards(data.enrichment);
 
@@ -72715,3 +72724,216 @@ function _syncDetailFilter(btn, filter) {
         }
     });
 }
+
+
+// ============================================
+// ACTIVE DOWNLOADS PAGE — Centralized Live View
+// ============================================
+
+let _adlPoller = null;
+let _adlFilter = 'all';
+let _adlData = [];
+
+function loadActiveDownloadsPage() {
+    _adlFetch();
+    // Poll every 2 seconds while on this page
+    if (_adlPoller) clearInterval(_adlPoller);
+    _adlPoller = setInterval(() => {
+        if (currentPage === 'active-downloads') _adlFetch();
+        else { clearInterval(_adlPoller); _adlPoller = null; }
+    }, 2000);
+}
+
+function adlSetFilter(filter) {
+    _adlFilter = filter;
+    document.querySelectorAll('#adl-filter-pills .adl-pill').forEach(p => p.classList.toggle('active', p.dataset.filter === filter));
+    _adlRender();
+}
+
+async function _adlFetch() {
+    try {
+        const resp = await fetch('/api/downloads/all?limit=300');
+        const data = await resp.json();
+        if (data.success) {
+            _adlData = data.downloads || [];
+            _adlRender();
+            _adlUpdateBadge();
+        }
+    } catch (e) {
+        console.error('Downloads page fetch error:', e);
+    }
+}
+
+function _adlUpdateBadge() {
+    const activeCount = _adlData.filter(d => ['downloading', 'searching', 'queued', 'pending', 'post_processing'].includes(d.status)).length;
+    _updateDlNavBadge(activeCount);
+}
+
+function _updateDlNavBadge(count) {
+    const badge = document.getElementById('dl-nav-badge');
+    if (badge) {
+        if (count > 0) {
+            badge.textContent = count;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+}
+
+function _adlRender() {
+    const list = document.getElementById('adl-list');
+    const empty = document.getElementById('adl-empty');
+    const countEl = document.getElementById('adl-count');
+    if (!list) return;
+
+    // Apply filter
+    const activeStatuses = ['downloading', 'searching', 'post_processing'];
+    const queuedStatuses = ['queued'];
+    const completedStatuses = ['completed', 'skipped', 'already_owned'];
+    const failedStatuses = ['failed', 'not_found', 'cancelled'];
+
+    let filtered = _adlData;
+    if (_adlFilter === 'active') filtered = _adlData.filter(d => activeStatuses.includes(d.status));
+    else if (_adlFilter === 'queued') filtered = _adlData.filter(d => queuedStatuses.includes(d.status));
+    else if (_adlFilter === 'completed') filtered = _adlData.filter(d => completedStatuses.includes(d.status));
+    else if (_adlFilter === 'failed') filtered = _adlData.filter(d => failedStatuses.includes(d.status));
+
+    const completedN = _adlData.filter(d => [...completedStatuses, ...failedStatuses].includes(d.status)).length;
+
+    if (countEl) {
+        const activeN = _adlData.filter(d => activeStatuses.includes(d.status)).length;
+        const queuedN = _adlData.filter(d => queuedStatuses.includes(d.status)).length;
+        const total = _adlData.length;
+        const parts = [];
+        if (activeN > 0) parts.push(`${activeN} active`);
+        if (queuedN > 0) parts.push(`${queuedN} queued`);
+        parts.push(`${total} total`);
+        countEl.textContent = parts.join(' / ');
+    }
+
+    // Show/hide clear button
+    const clearBtn = document.getElementById('adl-clear-btn');
+    if (clearBtn) clearBtn.style.display = completedN > 0 ? '' : 'none';
+
+    if (filtered.length === 0) {
+        if (empty) empty.style.display = '';
+        // Clear any existing rows but keep the empty message
+        list.querySelectorAll('.adl-row').forEach(r => r.remove());
+        return;
+    }
+
+    if (empty) empty.style.display = 'none';
+
+    // Group by status category for section headers
+    const groups = { active: [], queued: [], completed: [], failed: [] };
+    for (const dl of filtered) {
+        const cls = _adlStatusClass(dl.status);
+        if (cls === 'active') groups.active.push(dl);
+        else if (cls === 'queued') groups.queued.push(dl);
+        else if (cls === 'completed') groups.completed.push(dl);
+        else groups.failed.push(dl);
+    }
+
+    let html = '';
+    const sections = [
+        { key: 'active', label: 'Active', items: groups.active },
+        { key: 'queued', label: 'Queued', items: groups.queued },
+        { key: 'completed', label: 'Completed', items: groups.completed },
+        { key: 'failed', label: 'Failed', items: groups.failed },
+    ];
+
+    for (const section of sections) {
+        if (section.items.length === 0) continue;
+        // Only show section headers in "all" filter mode
+        if (_adlFilter === 'all') {
+            html += `<div class="adl-section-header">${section.label} (${section.items.length})</div>`;
+        }
+        for (const dl of section.items) {
+            const statusClass = _adlStatusClass(dl.status);
+            const statusLabel = _adlStatusLabel(dl.status);
+            const title = _adlEsc(dl.title || 'Unknown Track');
+            const artist = _adlEsc(dl.artist || '');
+            const album = _adlEsc(dl.album || '');
+            const batchName = _adlEsc(dl.batch_name || '');
+            const error = dl.error ? _adlEsc(dl.error) : '';
+
+            const meta = [artist, album].filter(Boolean).join(' \u00B7 ');
+            const artHtml = dl.artwork
+                ? `<img class="adl-row-art" src="${_adlEsc(dl.artwork)}" alt="" onerror="this.style.display='none'">`
+                : '<div class="adl-row-art adl-row-art-empty"></div>';
+
+            // Track position: "3 of 19"
+            const posText = dl.batch_total > 1 ? `${(dl.track_index || 0) + 1} of ${dl.batch_total}` : '';
+
+            html += `<div class="adl-row adl-row-${statusClass}" data-task-id="${dl.task_id}">
+                ${artHtml}
+                <div class="adl-row-info">
+                    <div class="adl-row-title">${title}</div>
+                    ${meta ? `<div class="adl-row-meta">${meta}</div>` : ''}
+                    ${batchName ? `<div class="adl-row-batch">${batchName}${posText ? ' &middot; Track ' + posText : ''}</div>` : ''}
+                    ${error ? `<div class="adl-row-error">${error}</div>` : ''}
+                </div>
+                <div class="adl-row-status ${statusClass}">
+                    <span class="adl-status-dot ${statusClass}"></span>
+                    ${statusLabel}
+                </div>
+            </div>`;
+        }
+    }
+
+    // Preserve empty element, inject rows
+    const emptyEl = document.getElementById('adl-empty');
+    const emptyHtml = emptyEl ? emptyEl.outerHTML : '';
+    list.innerHTML = emptyHtml + html;
+    const newEmpty = document.getElementById('adl-empty');
+    if (newEmpty) newEmpty.style.display = filtered.length > 0 ? 'none' : '';
+}
+
+function _adlStatusClass(status) {
+    switch (status) {
+        case 'downloading': case 'searching': case 'post_processing': return 'active';
+        case 'queued': case 'pending': return 'queued';
+        case 'completed': case 'skipped': case 'already_owned': return 'completed';
+        case 'failed': case 'not_found': return 'failed';
+        case 'cancelled': return 'cancelled';
+        default: return 'queued';
+    }
+}
+
+function _adlStatusLabel(status) {
+    switch (status) {
+        case 'downloading': return '<span class="adl-spinner"></span>Downloading';
+        case 'searching': return '<span class="adl-spinner"></span>Searching';
+        case 'post_processing': return '<span class="adl-spinner"></span>Processing';
+        case 'queued': case 'pending': return 'Queued';
+        case 'completed': return 'Completed';
+        case 'skipped': return 'Skipped';
+        case 'already_owned': return 'Owned';
+        case 'failed': return 'Failed';
+        case 'not_found': return 'Not Found';
+        case 'cancelled': return 'Cancelled';
+        default: return status;
+    }
+}
+
+function _adlEsc(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function adlClearCompleted() {
+    try {
+        const resp = await fetch('/api/downloads/clear-completed', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            if (typeof showToast === 'function') showToast(`Cleared ${data.cleared} downloads`, 'success');
+            _adlFetch();
+        }
+    } catch (e) {
+        console.error('Error clearing completed downloads:', e);
+    }
+}
+
+window.adlSetFilter = adlSetFilter;
+window.adlClearCompleted = adlClearCompleted;
