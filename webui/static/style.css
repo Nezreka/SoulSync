@@ -34972,38 +34972,54 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 /* Tooltip */
 .discogs-tooltip {
-    display: none;
     position: absolute;
-    bottom: calc(100% + 12px);
     left: 50%;
-    transform: translateX(-50%);
-    z-index: 100;
+    top: calc(100% + 12px);
+    transform: translateX(-50%) translateY(-5px);
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     pointer-events: none;
 }
 
-.discogs-button-container:hover .discogs-tooltip { display: block; }
+.discogs-button:hover+.discogs-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
 
 .discogs-tooltip-content {
-    background: rgba(14, 14, 20, 0.97);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 12px 16px;
-    min-width: 200px;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    min-width: 260px;
+    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
+    backdrop-filter: blur(40px) saturate(1.6);
+    -webkit-backdrop-filter: blur(40px) saturate(1.6);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 16px;
+    padding: 16px 18px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .discogs-tooltip-header {
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
     font-size: 13px;
-    font-weight: 700;
-    color: rgba(255, 255, 255, 0.9);
-    margin-bottom: 8px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    letter-spacing: -0.2px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .discogs-tooltip-body {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.5);
-    line-height: 1.6;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#discogs-tooltip-status {
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 600;
 }
 
 .deezer-button-container {
