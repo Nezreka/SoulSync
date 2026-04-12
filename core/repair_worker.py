@@ -67,6 +67,7 @@ class RepairWorker:
         self.running = False
         self.enabled = False  # Master toggle (replaces 'paused')
         self.should_stop = False
+        self._stop_event = threading.Event()
         self.thread = None
 
         # Current job being executed
@@ -293,6 +294,7 @@ class RepairWorker:
             return
         self.running = True
         self.should_stop = False
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         logger.info("Repair worker started")
@@ -303,8 +305,9 @@ class RepairWorker:
         logger.info("Stopping repair worker...")
         self.should_stop = True
         self.running = False
+        self._stop_event.set()
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=2)
         logger.info("Repair worker stopped")
 
     def toggle(self) -> bool:
@@ -418,7 +421,7 @@ class RepairWorker:
         logger.info("Repair worker thread started")
         self._ensure_jobs_loaded()
 
-        while not self.should_stop:
+        while not self._stop_event.is_set():
             try:
                 # Check force-run queue even when disabled (user explicitly requested)
                 forced_job = None
@@ -428,13 +431,15 @@ class RepairWorker:
 
                 if forced_job:
                     self._run_job(forced_job)
-                    time.sleep(2)
+                    if self._sleep_or_stop(2):
+                        break
                     continue
 
                 if not self.enabled:
                     self._current_job_id = None
                     self._current_job_name = None
-                    time.sleep(2)
+                    if self._sleep_or_stop(2):
+                        break
                     continue
 
                 # Find the next job to run based on staleness
@@ -444,20 +449,23 @@ class RepairWorker:
                     # Nothing due — sleep and re-check
                     self._current_job_id = None
                     self._current_job_name = None
-                    time.sleep(10)
+                    if self._sleep_or_stop(10):
+                        break
                     continue
 
                 # Run the selected job
                 self._run_job(next_job)
 
                 # Brief pause between jobs
-                time.sleep(5)
+                if self._sleep_or_stop(5):
+                    break
 
             except Exception as e:
                 logger.error("Error in repair worker loop: %s", e, exc_info=True)
                 self._current_job_id = None
                 self._current_job_name = None
-                time.sleep(30)
+                if self._sleep_or_stop(30):
+                    break
 
         logger.info("Repair worker thread finished")
 
@@ -552,6 +560,7 @@ class RepairWorker:
             metadata_cache=self.metadata_cache,
             create_finding=self._create_finding,
             should_stop=lambda: self.should_stop,
+            stop_event=self._stop_event,
             is_paused=lambda: not self.enabled,
             update_progress=self._update_progress,
             report_progress=_report_progress,
@@ -594,6 +603,17 @@ class RepairWorker:
         self._current_job_id = None
         self._current_job_name = None
         self._current_progress = {'scanned': 0, 'total': 0, 'percent': 0}
+
+    def _sleep_or_stop(self, seconds: float, step: float = 0.2) -> bool:
+        """Sleep in small chunks so shutdown interrupts quickly."""
+        if seconds <= 0:
+            return self._stop_event.is_set()
+        remaining = seconds
+        while remaining > 0 and not self._stop_event.is_set():
+            chunk = min(step, remaining)
+            self._stop_event.wait(chunk)
+            remaining -= chunk
+        return self._stop_event.is_set()
 
     def run_job_now(self, job_id: str):
         """Queue a job for immediate execution by the main worker loop.

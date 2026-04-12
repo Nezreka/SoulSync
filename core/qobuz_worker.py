@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.qobuz_client import _qobuz_is_rate_limited
+from core.worker_utils import interruptible_sleep
 
 logger = get_logger("qobuz_worker")
 
@@ -24,6 +25,7 @@ class QobuzWorker:
         self.paused = False
         self.should_stop = False
         self.thread = None
+        self._stop_event = threading.Event()
 
         # Current item being processed (for UI tooltip)
         self.current_item = None
@@ -52,6 +54,7 @@ class QobuzWorker:
 
         self.running = True
         self.should_stop = False
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         logger.info("Qobuz background worker started")
@@ -64,9 +67,10 @@ class QobuzWorker:
         logger.info("Stopping Qobuz worker...")
         self.should_stop = True
         self.running = False
+        self._stop_event.set()
 
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=1)
 
         logger.info("Qobuz worker stopped")
 
@@ -120,24 +124,24 @@ class QobuzWorker:
         while not self.should_stop:
             try:
                 if self.paused:
-                    time.sleep(1)
+                    interruptible_sleep(self._stop_event, 1)
                     continue
 
                 # Auth guard: sleep if not authenticated
                 try:
                     if not self.client or not self.client.is_authenticated():
                         self.current_item = None
-                        time.sleep(30)
+                        interruptible_sleep(self._stop_event, 30)
                         continue
                 except Exception:
-                    time.sleep(30)
+                    interruptible_sleep(self._stop_event, 30)
                     continue
 
                 # Rate limit guard: back off if globally rate limited
                 if _qobuz_is_rate_limited():
                     self.current_item = None
                     logger.debug("Qobuz rate limited, backing off...")
-                    time.sleep(10)
+                    interruptible_sleep(self._stop_event, 10)
                     continue
 
                 self.current_item = None
@@ -146,7 +150,7 @@ class QobuzWorker:
 
                 if not item:
                     logger.debug("No pending items, sleeping...")
-                    time.sleep(10)
+                    interruptible_sleep(self._stop_event, 10)
                     continue
 
                 self.current_item = item
@@ -166,11 +170,11 @@ class QobuzWorker:
                 self._process_item(item)
 
                 # Throttle between API calls
-                time.sleep(2)
+                interruptible_sleep(self._stop_event, 2)
 
             except Exception as e:
                 logger.error(f"Error in worker loop: {e}")
-                time.sleep(5)
+                interruptible_sleep(self._stop_event, 5)
 
         logger.info("Qobuz worker thread finished")
 
@@ -351,7 +355,7 @@ class QobuzWorker:
             error_str = str(e).lower()
             if '429' in error_str or 'rate limit' in error_str:
                 logger.warning(f"Rate limited while processing {item['type']} #{item['id']}, backing off 30s")
-                time.sleep(30)
+                interruptible_sleep(self._stop_event, 30)
                 return
             logger.error(f"Error processing {item['type']} #{item['id']}: {e}")
             self.stats['errors'] += 1

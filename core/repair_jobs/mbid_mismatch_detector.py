@@ -294,7 +294,8 @@ class MbidMismatchDetectorJob(RepairJob):
 
             try:
                 # Rate limit: MusicBrainz allows ~1 req/sec
-                time.sleep(1.1)
+                if context.sleep_or_stop(1.1):
+                    return result
 
                 recording = mb_client.get_recording(mbid, includes=['artist-credits'])
                 if not recording:

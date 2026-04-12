@@ -24,6 +24,7 @@ import unicodedata
 from typing import Dict, Any, List, Optional
 
 from utils.logging_config import get_logger
+from core.worker_utils import interruptible_sleep
 
 logger = get_logger("soulid_worker")
 
@@ -79,6 +80,7 @@ class SoulIDWorker:
         self.should_stop = False
         self.thread = None
         self.current_item = None
+        self._stop_event = threading.Event()
 
         # API clients (lazy-initialized)
         self._itunes_client = None
@@ -135,6 +137,7 @@ class SoulIDWorker:
             return
         self.running = True
         self.should_stop = False
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         logger.info("SoulID worker started")
@@ -144,8 +147,9 @@ class SoulIDWorker:
             return
         self.should_stop = True
         self.running = False
+        self._stop_event.set()
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=1)
         logger.info("SoulID worker stopped")
 
     def pause(self):
@@ -178,7 +182,7 @@ class SoulIDWorker:
         while not self.should_stop:
             try:
                 if self.paused:
-                    time.sleep(1)
+                    interruptible_sleep(self._stop_event, 1)
                     continue
 
                 processed = 0
@@ -188,16 +192,16 @@ class SoulIDWorker:
 
                 if processed == 0:
                     self.current_item = None
-                    time.sleep(self.idle_sleep)
+                    interruptible_sleep(self._stop_event, self.idle_sleep)
                 else:
                     # Albums/tracks get inter_batch_sleep, artists get their
                     # own sleep inside _process_next_artist
-                    time.sleep(self.inter_batch_sleep)
+                    interruptible_sleep(self._stop_event, self.inter_batch_sleep)
 
             except Exception as e:
                 logger.error(f"Error in SoulID worker loop: {e}", exc_info=True)
                 self.stats['errors'] += 1
-                time.sleep(5)
+                interruptible_sleep(self._stop_event, 5)
 
         self.current_item = None
         logger.info("SoulID worker thread finished")
@@ -267,7 +271,7 @@ class SoulIDWorker:
             logger.info(f"Generated soul ID for artist: {name}" + (f" (canonical id: {canonical_id})" if canonical_id else ""))
 
             # Rate limit courtesy for API calls
-            time.sleep(self.artist_sleep)
+            interruptible_sleep(self._stop_event, self.artist_sleep)
             return 1
 
         except Exception as e:
@@ -324,7 +328,7 @@ class SoulIDWorker:
                                 deezer_artist_id = int(raw_id)
                                 logger.debug(f"Deezer artist ID for '{artist_name}': {deezer_artist_id}")
                             break
-                time.sleep(0.3)
+                interruptible_sleep(self._stop_event, 0.3)
             except Exception as e:
                 logger.debug(f"Deezer track search failed for '{artist_name}': {e}")
 
@@ -344,7 +348,7 @@ class SoulIDWorker:
                                 itunes_artist_id = int(raw_id)
                                 logger.debug(f"iTunes artist ID for '{artist_name}': {itunes_artist_id}")
                             break
-                time.sleep(0.3)
+                interruptible_sleep(self._stop_event, 0.3)
             except Exception as e:
                 logger.debug(f"iTunes track search failed for '{artist_name}': {e}")
 
