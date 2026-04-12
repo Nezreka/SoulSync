@@ -97,7 +97,7 @@ class DownloadCompletionWorker(QRunnable):
     def run(self):
         """Process download completion in background thread"""
         try:
-            print(f"🧵 Background worker processing: '{self.download_item.title}' by '{self.download_item.matched_artist.name}'")
+            print(f"Background worker processing: '{self.download_item.title}' by '{self.download_item.matched_artist.name}'")
             
             # Add a small delay to ensure file is fully written
             import time
@@ -110,7 +110,7 @@ class DownloadCompletionWorker(QRunnable):
             self.signals.completed.emit(self.download_item, organized_path or self.absolute_file_path)
             
         except Exception as e:
-            print(f"❌ Error in background worker: {e}")
+            print(f"Error in background worker: {e}")
             import traceback
             traceback.print_exc()
             # Emit error signal
@@ -280,7 +280,7 @@ class OptimizedDownloadCompletionWorker(QRunnable):
                 raise FileNotFoundError(f"Download file not found: {self.absolute_file_path}")
             
         except Exception as e:
-            print(f"❌ Error in optimized worker: {e}")
+            print(f"Error in optimized worker: {e}")
             import traceback
             traceback.print_exc()
             self.signals.error.emit(self.download_item, str(e))
@@ -552,7 +552,7 @@ class SpotifyMatchingModal(QDialog):
             self.confirm_btn.setEnabled(True)
             self.confirm_btn.setText(f"Confirm: {artist.name[:30]}...")
             # Update header to indicate completion
-            self.header_label.setText("✅ Artist Selected - Ready to Download")
+            self.header_label.setText("Artist Selected - Ready to Download")
         else:
             # For album mode, proceed to album selection
             self.transition_to_album_stage()
@@ -746,12 +746,12 @@ class ArtistSuggestionThread(QThread):
     def run(self):
         """Generate artist suggestions"""
         try:
-            print(f"🔍 Starting auto suggestions for: {self.track_result.artist} - {self.track_result.title}")
+            print(f"Starting auto suggestions for: {self.track_result.artist} - {self.track_result.title}")
             suggestions = self.generate_artist_suggestions()
-            print(f"✅ Generated {len(suggestions)} auto suggestions")
+            print(f"Generated {len(suggestions)} auto suggestions")
             self.suggestions_ready.emit(suggestions)
         except Exception as e:
-            print(f"❌ Error generating suggestions: {e}")
+            print(f"Error generating suggestions: {e}")
             self.suggestions_ready.emit([])
     
     def generate_artist_suggestions(self) -> List[ArtistMatch]:
@@ -759,7 +759,7 @@ class ArtistSuggestionThread(QThread):
         suggestions = []
         
         # Debug logging
-        print(f"🔍 [DEBUG] Auto suggestion input data:")
+        print(f"[DEBUG] Auto suggestion input data:")
         print(f"    track_result.artist: '{getattr(self.track_result, 'artist', 'NOT_FOUND')}'")
         print(f"    track_result.title: '{getattr(self.track_result, 'title', 'NOT_FOUND')}'")
         print(f"    track_result.album: '{getattr(self.track_result, 'album', 'NOT_FOUND')}'")
@@ -772,7 +772,7 @@ class ArtistSuggestionThread(QThread):
         
         # Special handling for albums - use album title to find artist instead of track data
         if self.is_album and self.album_result and self.album_result.album_title:
-            print(f"🎵 [DEBUG] Album mode detected - using album title for artist search")
+            print(f"[DEBUG] Album mode detected - using album title for artist search")
             print(f"    album_title: '{self.album_result.album_title}'")
             print(f"    album_artist: '{getattr(self.album_result, 'artist', 'NOT_FOUND')}'")
             
@@ -783,9 +783,9 @@ class ArtistSuggestionThread(QThread):
             print(f"    clean_album_title: '{clean_album_title}'")
             
             # Strategy: Search tracks using album title to find the artist
-            print(f"🔍 Album Strategy: Searching tracks for album '{clean_album_title}'")
+            print(f"Album Strategy: Searching tracks for album '{clean_album_title}'")
             tracks = self.spotify_client.search_tracks(clean_album_title, limit=20)
-            print(f"📊 Found {len(tracks)} tracks from album search")
+            print(f"Found {len(tracks)} tracks from album search")
             
             # Collect unique artist names and their associated tracks/albums first
             unique_artists = {}  # artist_name -> list of (track, album) tuples
@@ -795,7 +795,7 @@ class ArtistSuggestionThread(QThread):
                         unique_artists[artist_name] = []
                     unique_artists[artist_name].append((track, track.album))
             
-            print(f"🚀 [PERF] Found {len(unique_artists)} unique artists to lookup (down from {sum(len(track.artists) for track in tracks)} total)")
+            print(f"[PERF] Found {len(unique_artists)} unique artists to lookup (down from {sum(len(track.artists) for track in tracks)} total)")
             
             # Batch fetch artist objects using concurrent futures for speed
             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -811,7 +811,7 @@ class ArtistSuggestionThread(QThread):
                     if matches:
                         return artist_name, matches[0]
                 except Exception as e:
-                    print(f"⚠️ Error fetching artist '{artist_name}': {e}")
+                    print(f"Error fetching artist '{artist_name}': {e}")
                 return artist_name, None
             
             # Use limited concurrency to respect rate limits while improving speed
@@ -824,7 +824,7 @@ class ArtistSuggestionThread(QThread):
                         artist_objects[artist_name] = artist_obj
             
             fetch_time = time.time() - start_time
-            print(f"⚡ [PERF] Fetched {len(artist_objects)} artists in {fetch_time:.2f}s using concurrent API calls")
+            print(f"[PERF] Fetched {len(artist_objects)} artists in {fetch_time:.2f}s using concurrent API calls")
             
             # Now calculate confidence scores for each artist
             artist_scores = {}
@@ -867,14 +867,14 @@ class ArtistSuggestionThread(QThread):
             # Add high-confidence album artists to suggestions
             for artist_data in artist_scores.values():
                 if artist_data['confidence'] >= 0.6:  # Higher threshold for album matches
-                    print(f"✅ Added album artist match: {artist_data['artist'].name} ({artist_data['confidence']:.2f}) via '{artist_data['album_match']}'")
+                    print(f"Added album artist match: {artist_data['artist'].name} ({artist_data['confidence']:.2f}) via '{artist_data['album_match']}'")
                     suggestions.append(ArtistMatch(
                         artist=artist_data['artist'],
                         confidence=artist_data['confidence'],
                         match_reason=f"Album match via '{artist_data['album_match']}'"
                     ))
             
-            print(f"🎯 [DEBUG] Album strategy generated {len(suggestions)} suggestions")
+            print(f"[DEBUG] Album strategy generated {len(suggestions)} suggestions")
             
             # If we found good album matches, return them (don't try track-based strategies)
             if suggestions:
@@ -885,7 +885,7 @@ class ArtistSuggestionThread(QThread):
                         unique_suggestions[suggestion.artist.id] = suggestion
                 
                 final_suggestions = sorted(unique_suggestions.values(), key=lambda x: x.confidence, reverse=True)
-                print(f"🎯 [DEBUG] Returning {len(final_suggestions)} album-based suggestions")
+                print(f"[DEBUG] Returning {len(final_suggestions)} album-based suggestions")
                 return final_suggestions[:5]
         
         # Try to get artist name from different sources (for singles or fallback)
@@ -902,14 +902,14 @@ class ArtistSuggestionThread(QThread):
             if ' - ' in filename:
                 artist_name = filename.split(' - ')[0].strip()
         
-        print(f"🎯 [DEBUG] Determined artist name: '{artist_name}'")
+        print(f"[DEBUG] Determined artist name: '{artist_name}'")
         
         # Strategy 1: Search for the artist name directly
         if artist_name and artist_name != "Unknown Artist":
             artist_query = self.matching_engine.normalize_string(artist_name)
-            print(f"🔍 Strategy 1: Searching for artist '{artist_query}'")
+            print(f"Strategy 1: Searching for artist '{artist_query}'")
             artists = self.spotify_client.search_artists(artist_query, limit=10)
-            print(f"📊 Found {len(artists)} artists from Spotify")
+            print(f"Found {len(artists)} artists from Spotify")
             
             for artist in artists:
                 confidence = self.matching_engine.similarity_score(
@@ -918,21 +918,21 @@ class ArtistSuggestionThread(QThread):
                 )
                 
                 if confidence >= 0.3:  # Minimum threshold
-                    print(f"✅ Added artist match: {artist.name} ({confidence:.2f})")
+                    print(f"Added artist match: {artist.name} ({confidence:.2f})")
                     suggestions.append(ArtistMatch(
                         artist=artist,
                         confidence=confidence,
                         match_reason="Artist name match"
                     ))
         else:
-            print(f"❌ Strategy 1 skipped: artist_name='{artist_name}', original_artist='{getattr(self.track_result, 'artist', 'NO_ATTR')}'")
+            print(f"Strategy 1 skipped: artist_name='{artist_name}', original_artist='{getattr(self.track_result, 'artist', 'NO_ATTR')}'")
         
         # Strategy 2: Search for "artist - title" combination
         if artist_name and self.track_result.title:
             combined_query = f"{artist_name} {self.track_result.title}"
-            print(f"🔍 Strategy 2: Searching for combined query '{combined_query}'")
+            print(f"Strategy 2: Searching for combined query '{combined_query}'")
             tracks = self.spotify_client.search_tracks(combined_query, limit=10)
-            print(f"📊 Found {len(tracks)} tracks from Spotify")
+            print(f"Found {len(tracks)} tracks from Spotify")
             
             for track in tracks:
                 for artist_name in track.artists:
@@ -969,7 +969,7 @@ class ArtistSuggestionThread(QThread):
         final_suggestions = sorted(unique_suggestions.values(), key=lambda x: x.confidence, reverse=True)
         
         # Debug final results
-        print(f"🎯 [DEBUG] Final suggestions count: {len(final_suggestions)}")
+        print(f"[DEBUG] Final suggestions count: {len(final_suggestions)}")
         for i, suggestion in enumerate(final_suggestions[:5]):
             print(f"    {i+1}. {suggestion.artist.name} ({suggestion.confidence:.2f}) - {suggestion.match_reason}")
         
@@ -1094,13 +1094,13 @@ class AlbumSuggestionThread(QThread):
             target_album_name = ""
             if isinstance(self.original_result, AlbumResult):
                 target_album_name = self.original_result.album_title
-                print(f"🎵 Album context for auto-match from AlbumResult: '{target_album_name}'")
+                print(f"Album context for auto-match from AlbumResult: '{target_album_name}'")
             elif hasattr(self.original_result, 'album') and self.original_result.album:
                 target_album_name = self.original_result.album
-                print(f"🎵 Album context for auto-match from TrackResult: '{target_album_name}'")
+                print(f"Album context for auto-match from TrackResult: '{target_album_name}'")
             else:
                 target_album_name = self.original_result.title 
-                print(f"🎵 Album context for auto-match using fallback to track title: '{target_album_name}'")
+                print(f"Album context for auto-match using fallback to track title: '{target_album_name}'")
 
             if not target_album_name:
                 self.suggestions_ready.emit([])
@@ -1117,20 +1117,20 @@ class AlbumSuggestionThread(QThread):
             # 3. Clean up any remaining leading/trailing dashes or spaces.
             cleaned_search_term = cleaned_search_term.strip(' -')
 
-            print(f"🧹 Cleaned album search term: '{target_album_name}' -> '{cleaned_search_term}'")
+            print(f"Cleaned album search term: '{target_album_name}' -> '{cleaned_search_term}'")
 
             search_query = f"artist:{self.artist.name} album:{cleaned_search_term}"
-            print(f"🔍 Searching Spotify for albums with query: '{search_query}'")
+            print(f"Searching Spotify for albums with query: '{search_query}'")
             
             spotify_albums = self.spotify_client.search_albums(search_query, limit=10)
-            print(f"📊 Found {len(spotify_albums)} potential albums from Spotify search.")
+            print(f"Found {len(spotify_albums)} potential albums from Spotify search.")
 
             suggestions = []
             for album in spotify_albums:
                 is_correct_artist = any(self.matching_engine.similarity_score(self.artist.name, art) > 0.85 for art in album.artists)
                 
                 if not is_correct_artist:
-                    print(f"⚠️ Skipping album '{album.name}' as artist does not match '{self.artist.name}'")
+                    print(f"Skipping album '{album.name}' as artist does not match '{self.artist.name}'")
                     continue
 
                 confidence = self.matching_engine.similarity_score(
@@ -1142,7 +1142,7 @@ class AlbumSuggestionThread(QThread):
                     confidence = max(confidence, 0.95)
                 
                 if confidence >= 0.5:
-                    print(f"✅ Found album match: '{album.name}' with confidence {confidence:.2f}")
+                    print(f"Found album match: '{album.name}' with confidence {confidence:.2f}")
                     suggestions.append(AlbumMatch(
                         album=album,
                         confidence=confidence,
@@ -1173,16 +1173,16 @@ class AlbumSuggestionThread(QThread):
                             is_new_better = True
 
                     if is_new_better:
-                        print(f"🔄 Replacing duplicate album '{album_key}' with a better version (type: {suggestion.album.album_type}, tracks: {getattr(suggestion.album, 'total_tracks', 'N/A')})")
+                        print(f"Replacing duplicate album '{album_key}' with a better version (type: {suggestion.album.album_type}, tracks: {getattr(suggestion.album, 'total_tracks', 'N/A')})")
                         unique_suggestions[album_key] = suggestion
             
             final_suggestions = sorted(unique_suggestions.values(), key=lambda x: x.confidence, reverse=True)
             
-            print(f"✅ Generated {len(final_suggestions)} final album suggestions.")
+            print(f"Generated {len(final_suggestions)} final album suggestions.")
             self.suggestions_ready.emit(final_suggestions[:4])
 
         except Exception as e:
-            print(f"❌ Error generating album suggestions: {e}")
+            print(f"Error generating album suggestions: {e}")
             import traceback
             traceback.print_exc()
             self.suggestions_ready.emit([])
@@ -1361,7 +1361,7 @@ class AudioPlayer(QMediaPlayer):
             QMediaPlayer.PlaybackState.PlayingState: "PLAYING", 
             QMediaPlayer.PlaybackState.PausedState: "PAUSED"
         }
-        print(f"🎵 AudioPlayer state changed to: {state_names.get(state, 'UNKNOWN')}")
+        print(f"AudioPlayer state changed to: {state_names.get(state, 'UNKNOWN')}")
         self.is_playing = (state == QMediaPlayer.PlaybackState.PlayingState)
     
     def play_file(self, file_path):
@@ -1382,7 +1382,7 @@ class AudioPlayer(QMediaPlayer):
             self.play()
             # is_playing will be set automatically by _on_playback_state_changed
             
-            print(f"🎵 Started playing: {os.path.basename(file_path)}")
+            print(f"Started playing: {os.path.basename(file_path)}")
             return True
             
         except Exception as e:
@@ -1394,20 +1394,20 @@ class AudioPlayer(QMediaPlayer):
     def toggle_playback(self):
         """Toggle between play and pause"""
         current_state = self.playbackState()
-        print(f"🔄 toggle_playback() - Current state: {current_state}")
-        print(f"🔄 toggle_playback() - Current source: {self.source().toString()}")
+        print(f"toggle_playback() - Current state: {current_state}")
+        print(f"toggle_playback() - Current source: {self.source().toString()}")
         
         if current_state == QMediaPlayer.PlaybackState.PlayingState:
-            print("⏸️ AudioPlayer: Pausing playback")
+            print("AudioPlayer: Pausing playback")
             self.pause()
             # is_playing will be set automatically by _on_playback_state_changed
             return False  # Now paused
         else:
-            print("▶️ AudioPlayer: Attempting to resume/play")
+            print("AudioPlayer: Attempting to resume/play")
             
             # Check if we have a valid source to play
             if not self.source().isValid() and self.current_file_path:
-                print(f"🔧 AudioPlayer: No source set, restoring from: {self.current_file_path}")
+                print(f"AudioPlayer: No source set, restoring from: {self.current_file_path}")
                 self.setSource(QUrl.fromLocalFile(self.current_file_path))
             
             self.play()
@@ -1416,7 +1416,7 @@ class AudioPlayer(QMediaPlayer):
     
     def stop_playback(self):
         """Stop playback and reset"""
-        print("⏹️ AudioPlayer: stop_playback() called")
+        print("AudioPlayer: stop_playback() called")
         self.stop()
         # is_playing will be set automatically by _on_playback_state_changed
         self.release_file()
@@ -1428,28 +1428,28 @@ class AudioPlayer(QMediaPlayer):
             clear_file_path (bool): Whether to clear the stored file path.
                                   Set to False to keep the path for potential resuming.
         """
-        print(f"🔓 AudioPlayer: release_file() called - clearing source: {self.source().toString()}")
+        print(f"AudioPlayer: release_file() called - clearing source: {self.source().toString()}")
         self.setSource(QUrl())  # Clear the media source to release file handle
         if clear_file_path:
             self.current_file_path = None
-        print("🔓 Released audio file handle")
+        print("Released audio file handle")
     
     def _on_media_status_changed(self, status):
         """Handle media status changes"""
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
-            print("🎵 Playback finished")
+            print("Playback finished")
             # is_playing will be set automatically by _on_playback_state_changed
             self.playback_finished.emit()
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
             error_msg = "Invalid media file or unsupported format"
-            print(f"❌ {error_msg}")
+            print(f"{error_msg}")
             # is_playing will be set automatically by _on_playback_state_changed
             self.playback_error.emit(error_msg)
     
     def _on_error_occurred(self, error, error_string):
         """Handle playback errors"""
         error_msg = f"Audio playback error: {error_string}"
-        print(f"❌ {error_msg}")
+        print(f"{error_msg}")
         # is_playing will be set automatically by _on_playback_state_changed
         self.playback_error.emit(error_msg)
 
@@ -1730,7 +1730,7 @@ class ApiCleanupThread(QThread):
             self.cleanup_completed.emit(success, self.download_id, self.username)
             
         except Exception as e:
-            print(f"⚠️ Error in API cleanup thread: {e}")
+            print(f"Error in API cleanup thread: {e}")
             self.cleanup_completed.emit(False, self.download_id, self.username)
         finally:
             # Ensure proper cleanup
@@ -1961,12 +1961,12 @@ class StreamingThread(QThread):
                                 # Track queue state timing
                                 if is_queued and queue_start_time is None:
                                     queue_start_time = time.time()
-                                    print(f"📋 Download entered queue state: {original_state}")
+                                    print(f"Download entered queue state: {original_state}")
                                     self.streaming_queued.emit(f"Queuing with uploader...", self.search_result)
                                 elif is_downloading and not actively_downloading:
                                     actively_downloading = True
                                     queue_start_time = None  # Reset queue timer
-                                    print(f"🚀 Download started actively downloading: {original_state}")
+                                    print(f"Download started actively downloading: {original_state}")
                                     # Emit a progress update to indicate downloading has started
                                     if api_progress > 0:
                                         self.streaming_progress.emit(api_progress, self.search_result)
@@ -1981,19 +1981,19 @@ class StreamingThread(QThread):
                                 
                                 # Check if download is complete
                                 if is_completed:
-                                    print(f"✓ Download completed via API status: {original_state}")
+                                    print(f"Download completed via API status: {original_state}")
                                     # Try to find the actual file - with retries for file system sync
                                     for retry_count in range(5):  # Try up to 5 times with delays
                                         found_file = self._find_downloaded_file(download_path)
                                         if found_file:
-                                            print(f"✓ Found completed file after {retry_count} retries: {found_file}")
+                                            print(f"Found completed file after {retry_count} retries: {found_file}")
                                             break
                                         else:
-                                            print(f"⏳ File not found yet, waiting... (retry {retry_count + 1}/5)")
+                                            print(f"File not found yet, waiting... (retry {retry_count + 1}/5)")
                                             time.sleep(1)  # Wait 1 second for file system to sync
                                     
                                     if found_file:
-                                        print(f"✓ Found downloaded file: {found_file}")
+                                        print(f"Found downloaded file: {found_file}")
                                         
                                         # Move the file to Stream folder with original filename
                                         original_filename = os.path.basename(found_file)
@@ -2002,7 +2002,7 @@ class StreamingThread(QThread):
                                         try:
                                             # Move file to Stream folder
                                             shutil.move(found_file, stream_path)
-                                            print(f"✓ Moved file to stream folder: {stream_path}")
+                                            print(f"Moved file to stream folder: {stream_path}")
                                             
                                             # Clean up empty directories left behind
                                             self._cleanup_empty_directories(download_path, found_file)
@@ -2011,7 +2011,7 @@ class StreamingThread(QThread):
                                             self.streaming_progress.emit(100.0, self.search_result)
                                             self.streaming_finished.emit(f"Stream ready: {os.path.basename(found_file)}", self.search_result)
                                             self.temp_file_path = stream_path
-                                            print(f"✓ Stream file ready for playback: {stream_path}")
+                                            print(f"Stream file ready for playback: {stream_path}")
                                             
                                             # Signal API that download is complete
                                             try:
@@ -2029,11 +2029,11 @@ class StreamingThread(QThread):
                                                         )
                                                         loop.close()
                                                         if success:
-                                                            print(f"✓ Successfully signaled completion for download {download_id}")
+                                                            print(f"Successfully signaled completion for download {download_id}")
                                                         else:
-                                                            print(f"⚠️ Failed to signal completion for download {download_id}")
+                                                            print(f"Failed to signal completion for download {download_id}")
                                             except Exception as e:
-                                                print(f"⚠️ Error signaling download completion: {e}")
+                                                print(f"Error signaling download completion: {e}")
                                             
                                             break  # Exit main polling loop
                                             
@@ -2057,7 +2057,7 @@ class StreamingThread(QThread):
                         found_file = self._find_downloaded_file(download_path)
                         
                         if found_file:
-                            print(f"✓ Found downloaded file: {found_file}")
+                            print(f"Found downloaded file: {found_file}")
                             
                             # Move the file to Stream folder with original filename
                             original_filename = os.path.basename(found_file)
@@ -2066,7 +2066,7 @@ class StreamingThread(QThread):
                             try:
                                 # Move file to Stream folder
                                 shutil.move(found_file, stream_path)
-                                print(f"✓ Moved file to stream folder: {stream_path}")
+                                print(f"Moved file to stream folder: {stream_path}")
                                 
                                 # Clean up empty directories left behind
                                 self._cleanup_empty_directories(download_path, found_file)
@@ -2075,7 +2075,7 @@ class StreamingThread(QThread):
                                 self.streaming_progress.emit(100.0, self.search_result)
                                 self.streaming_finished.emit(f"Stream ready: {os.path.basename(found_file)}", self.search_result)
                                 self.temp_file_path = stream_path
-                                print(f"✓ Stream file ready for playback: {stream_path}")
+                                print(f"Stream file ready for playback: {stream_path}")
                                 break
                                 
                             except Exception as e:
@@ -2088,7 +2088,7 @@ class StreamingThread(QThread):
                             time.sleep(poll_interval)
                     else:
                         # Timed out waiting for file
-                        print(f"❌ Polling loop completed, timeout reached. found_file = {found_file}")
+                        print(f"Polling loop completed, timeout reached. found_file = {found_file}")
                         self.streaming_failed.emit("Stream download timed out - file not found", self.search_result)
                         
                 else:
@@ -2131,21 +2131,21 @@ class StreamingThread(QThread):
             target_filename = os.path.basename(self.search_result.filename)
             target_username = self.search_result.username
             
-            print(f"🔍 Looking for streaming download - Target: {target_username}:{target_filename}")
-            print(f"🔍 Found {len(all_transfers)} total transfers in API")
+            print(f"Looking for streaming download - Target: {target_username}:{target_filename}")
+            print(f"Found {len(all_transfers)} total transfers in API")
             
             for i, transfer in enumerate(all_transfers):
                 transfer_filename = os.path.basename(transfer.get('filename', ''))
                 transfer_username = transfer.get('username', '')
                 
-                print(f"📁 Transfer {i+1}: {transfer_username}:{transfer_filename} - State: {transfer.get('state')} - Progress: {transfer.get('percentComplete', 0):.1f}%")
+                print(f"Transfer {i+1}: {transfer_username}:{transfer_filename} - State: {transfer.get('state')} - Progress: {transfer.get('percentComplete', 0):.1f}%")
                 
                 if (transfer_filename == target_filename and 
                     transfer_username == target_username):
-                    print(f"✅ Found matching streaming download: {transfer.get('state')} - {transfer.get('percentComplete', 0):.1f}%")
+                    print(f"Found matching streaming download: {transfer.get('state')} - {transfer.get('percentComplete', 0):.1f}%")
                     return transfer
             
-            print(f"❌ No matching streaming download found for {target_username}:{target_filename}")
+            print(f"No matching streaming download found for {target_username}:{target_filename}")
             return None
         except Exception as e:
             print(f"Error finding streaming download in transfers: {e}")
@@ -2282,7 +2282,7 @@ class TrackItem(QFrame):
         
         # Always show artist information prominently for tracks within albums
         if self.track_result.artist:
-            details.append(f"🎤 {self.track_result.artist}")
+            details.append(f"{self.track_result.artist}")
         
         details.append(self.track_result.quality.upper())
         if self.track_result.bitrate:
@@ -2309,7 +2309,7 @@ class TrackItem(QFrame):
         button_layout.setSpacing(8)
         
         # Play button
-        play_btn = QPushButton("▶️")
+        play_btn = QPushButton("")
         play_btn.setFixedSize(32, 32)
         play_btn.clicked.connect(self.request_stream)
         play_btn.setStyleSheet("""
@@ -2344,7 +2344,7 @@ class TrackItem(QFrame):
         """)
         
         # Matched Download button
-        matched_download_btn = QPushButton("📱")
+        matched_download_btn = QPushButton("")
         matched_download_btn.setFixedSize(32, 32)
         matched_download_btn.clicked.connect(self.request_matched_download)
         matched_download_btn.setToolTip("Download with Spotify Matching")
@@ -2400,12 +2400,12 @@ class TrackItem(QFrame):
     
     def set_loading_state(self):
         """Set play button to loading state"""
-        self.play_btn.setText("⏳")
+        self.play_btn.setText("")
         self.play_btn.setEnabled(False)
     
     def set_queue_state(self):
         """Set play button to queue state"""
-        self.play_btn.setText("📋")
+        self.play_btn.setText("")
         self.play_btn.setEnabled(False)
         self.play_btn.setStyleSheet("""
             QPushButton {
@@ -2419,7 +2419,7 @@ class TrackItem(QFrame):
     
     def set_download_queued_state(self):
         """Set download button to queued state (disabled, shows queued)"""
-        self.download_btn.setText("⏳")
+        self.download_btn.setText("")
         self.download_btn.setEnabled(False)
         self.download_btn.setStyleSheet("""
             QPushButton {
@@ -2433,7 +2433,7 @@ class TrackItem(QFrame):
     
     def set_download_downloading_state(self):
         """Set download button to downloading state"""
-        self.download_btn.setText("📥")
+        self.download_btn.setText("")
         self.download_btn.setEnabled(False)
         self.download_btn.setStyleSheet("""
             QPushButton {
@@ -2447,7 +2447,7 @@ class TrackItem(QFrame):
     
     def set_download_completed_state(self):
         """Set download button to completed state"""
-        self.download_btn.setText("✅")
+        self.download_btn.setText("")
         self.download_btn.setEnabled(False)
         self.download_btn.setStyleSheet("""
             QPushButton {
@@ -2478,12 +2478,12 @@ class TrackItem(QFrame):
     
     def set_playing_state(self):
         """Set play button to playing/pause state"""
-        self.play_btn.setText("⏸️")
+        self.play_btn.setText("")
         self.play_btn.setEnabled(True)
     
     def reset_play_state(self):
         """Reset play button to default state"""
-        self.play_btn.setText("▶️")
+        self.play_btn.setText("")
         self.play_btn.setEnabled(True)
 
 class AlbumResultItem(QFrame):
@@ -2542,7 +2542,7 @@ class AlbumResultItem(QFrame):
         
         # Album icon with expand indicator
         icon_container = QVBoxLayout()
-        album_icon = QLabel("💿")
+        album_icon = QLabel("")
         album_icon.setFixedSize(48, 48)  # Larger for better presence
         album_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         album_icon.setStyleSheet("""
@@ -2558,7 +2558,7 @@ class AlbumResultItem(QFrame):
         """)
         
         # Expand indicator
-        self.expand_indicator = QLabel("▶")
+        self.expand_indicator = QLabel("")
         self.expand_indicator.setFixedSize(20, 20)  # Slightly larger
         self.expand_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.expand_indicator.setStyleSheet("""
@@ -2590,7 +2590,7 @@ class AlbumResultItem(QFrame):
         
         # Make artist more prominent by placing it first and with better formatting
         if self.album_result.artist:
-            details.append(f"🎤 {self.album_result.artist}")
+            details.append(f"{self.album_result.artist}")
         
         details.append(f"{self.album_result.track_count} tracks")
         details.append(f"{self.album_result.size_mb}MB")
@@ -2609,7 +2609,7 @@ class AlbumResultItem(QFrame):
         album_details.setStyleSheet("color: rgba(179, 179, 179, 0.9);")
         
         # User info
-        user_info = QLabel(f"👤 {self.album_result.username}")
+        user_info = QLabel(f"{self.album_result.username}")
         user_info.setFont(QFont("Arial", 9))
         user_info.setStyleSheet("color: rgba(29, 185, 84, 0.8);")
         
@@ -2651,7 +2651,7 @@ class AlbumResultItem(QFrame):
         """)
         
         # Matched Download button
-        self.matched_download_btn = QPushButton("🎯 Matched Album")
+        self.matched_download_btn = QPushButton("Matched Album")
         self.matched_download_btn.setFixedSize(160, 36)  # Match the other button
         self.matched_download_btn.clicked.connect(self.request_matched_album_download)
         self.matched_download_btn.setToolTip("Download Album with Spotify Matching")
@@ -2718,13 +2718,13 @@ class AlbumResultItem(QFrame):
     
     def request_album_download(self):
         """Request download of the entire album"""
-        self.download_btn.setText("⏳")
+        self.download_btn.setText("")
         self.download_btn.setEnabled(False)
         self.album_download_requested.emit(self.album_result)
     
     def request_matched_album_download(self):
         """Request matched download of the entire album with Spotify integration"""
-        self.matched_download_btn.setText("⏳")
+        self.matched_download_btn.setText("")
         self.matched_download_btn.setEnabled(False)
         self.matched_album_download_requested.emit(self.album_result)
     
@@ -2743,7 +2743,7 @@ class AlbumResultItem(QFrame):
         else:
             # Collapse to hide tracks
             self.tracks_container.setVisible(False)
-            self.expand_indicator.setText("▶")
+            self.expand_indicator.setText("")
             self.setFixedHeight(self.collapsed_height)
         
         # Force layout update
@@ -2765,13 +2765,13 @@ class AlbumResultItem(QFrame):
         if speed > 0:
             # Use same logic as Singles but return text only (no icons for inline display)
             if speed > 200:
-                icon = "🚀"
+                icon = ""
             elif speed > 100:
-                icon = "🚀" if slots > 0 else "⚡"
+                icon = "" if slots > 0 else ""
             elif speed > 50:
-                icon = "⚡"
+                icon = ""
             else:
-                icon = "🐌"
+                icon = ""
             
             # Convert to MB/s and format
             speed_mb = speed / 1024
@@ -2832,7 +2832,7 @@ class SearchResultItem(QFrame):
         left_section.setSpacing(12)  # Increased from 8px for better separation
         
         # Enhanced music icon with modern styling
-        music_icon = QLabel("🎵")
+        music_icon = QLabel("")
         music_icon.setFixedSize(44, 44)  # Slightly larger for better presence
         music_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         music_icon.setStyleSheet("""
@@ -2870,7 +2870,7 @@ class SearchResultItem(QFrame):
         buttons_layout.setSpacing(8)  # Increased from 4px for better button separation
         
         # Play button for streaming preview
-        self.play_btn = QPushButton("▶️")
+        self.play_btn = QPushButton("")
         self.play_btn.setFixedSize(46, 46)  # Larger for better accessibility
         self.play_btn.clicked.connect(self.request_stream)
         self.play_btn.setStyleSheet("""
@@ -2926,7 +2926,7 @@ class SearchResultItem(QFrame):
         """)
         
         # Matched Download button
-        self.matched_download_btn = QPushButton("🎯")
+        self.matched_download_btn = QPushButton("")
         self.matched_download_btn.setFixedSize(46, 46)  # Match other buttons
         self.matched_download_btn.clicked.connect(self.request_matched_download)
         self.matched_download_btn.setToolTip("Download with Spotify Matching")
@@ -3012,7 +3012,7 @@ class SearchResultItem(QFrame):
         
         # Add artist information if available
         if hasattr(result, 'artist') and result.artist:
-            info_parts.append(f"🎤 {result.artist}")
+            info_parts.append(f"{result.artist}")
         
         # Add quality info
         quality_text = result.quality.upper()
@@ -3032,7 +3032,7 @@ class SearchResultItem(QFrame):
         self.secondary_info.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         
         # Create separate uploader info with green styling like albums
-        self.uploader_info = QLabel(f"👤 {result.username}")
+        self.uploader_info = QLabel(f"{result.username}")
         self.uploader_info.setFont(QFont("Arial", 9))
         self.uploader_info.setStyleSheet("color: rgba(29, 185, 84, 0.8);")
         self.uploader_info.setWordWrap(False)
@@ -3336,23 +3336,23 @@ class SearchResultItem(QFrame):
         # Speed-focused logic (slots as bonus, not requirement)
         if speed > 200:
             indicator_color = "#1db954"
-            icon = "🚀"
+            icon = ""
             tooltip = f"Very Fast: {speed} KB/s" + (f", {slots} slots" if slots > 0 else "")
         elif speed > 100:
             indicator_color = "#1db954" if slots > 0 else "#4CAF50"
-            icon = "🚀" if slots > 0 else "⚡"
+            icon = "" if slots > 0 else ""
             tooltip = f"Fast: {speed} KB/s" + (f", {slots} slots" if slots > 0 else "")
         elif speed > 50:
             indicator_color = "#ffa500"
-            icon = "⚡"
+            icon = ""
             tooltip = f"Good: {speed} KB/s" + (f", {slots} slots" if slots > 0 else "")
         elif speed > 0:
             indicator_color = "#ffaa00"
-            icon = "🐌"
+            icon = ""
             tooltip = f"Slow: {speed} KB/s" + (f", {slots} slots" if slots > 0 else "")
         else:
             indicator_color = "#e22134"
-            icon = "⏳"
+            icon = ""
             tooltip = "No speed data available"
         
         # Convert KB/s to MB/s and format nicely
@@ -3386,7 +3386,7 @@ class SearchResultItem(QFrame):
     def request_download(self):
         if not self.is_downloading:
             self.is_downloading = True
-            self.download_btn.setText("⏳")
+            self.download_btn.setText("")
             self.download_btn.setEnabled(False)
             self.download_requested.emit(self.search_result)
     
@@ -3420,13 +3420,13 @@ class SearchResultItem(QFrame):
                 if is_playing:
                     self.set_playing_state()
                 else:
-                    self.play_btn.setText("▶️")  # Play icon when paused
+                    self.play_btn.setText("")  # Play icon when paused
                     self.play_btn.setEnabled(True)
                 return
             
             # Otherwise, start new streaming
             # Change button state to indicate streaming is starting
-            self.play_btn.setText("⏸️")  # Pause icon to indicate playing
+            self.play_btn.setText("")  # Pause icon to indicate playing
             self.play_btn.setEnabled(False)
             
             # Emit streaming request
@@ -3446,14 +3446,14 @@ class SearchResultItem(QFrame):
             parent = parent.parent()
         return None
     
-    def reset_play_state(self, original_text="▶️"):
+    def reset_play_state(self, original_text=""):
         """Reset the play button state"""
         self.play_btn.setText(original_text)
         self.play_btn.setEnabled(True)
     
     def set_playing_state(self):
         """Set button to playing state"""
-        self.play_btn.setText("⏸️")
+        self.play_btn.setText("")
         self.play_btn.setEnabled(True)
     
     def set_loading_state(self):
@@ -3463,7 +3463,7 @@ class SearchResultItem(QFrame):
     
     def set_queue_state(self):
         """Set play button to queue state"""
-        self.play_btn.setText("📋")
+        self.play_btn.setText("")
         self.play_btn.setEnabled(False)
         self.play_btn.setStyleSheet("""
             QPushButton {
@@ -3665,7 +3665,7 @@ class DownloadItem(QFrame):
                 }
             """)
         else:
-            self.action_btn.setText("📂 Open")
+            self.action_btn.setText("Open")
             self.action_btn.clicked.connect(self.open_download_location)
             self.action_btn.setStyleSheet("""
                 QPushButton {
@@ -3813,7 +3813,7 @@ class DownloadItem(QFrame):
                         }
                     """)
                 else:
-                    self.action_btn.setText("📂 Open")
+                    self.action_btn.setText("Open")
                     # Disconnect old connections
                     self.action_btn.clicked.disconnect()
                     self.action_btn.clicked.connect(self.open_download_location)
@@ -4068,7 +4068,7 @@ class CompactDownloadItem(QFrame):
 
             if 'completed' in final_status or 'succeeded' in final_status:
                 # For successfully completed downloads, show the 'Open' button.
-                open_btn = QPushButton("📂 Open")
+                open_btn = QPushButton("Open")
                 open_btn.setFixedSize(60, 35)
                 open_btn.clicked.connect(self.open_download_location)
                 open_btn.setStyleSheet("""
@@ -4096,7 +4096,7 @@ class CompactDownloadItem(QFrame):
                 action_layout.addWidget(status_label)
 
             else: # Fallback for any other unexpected status
-                open_btn = QPushButton("📂 Open")
+                open_btn = QPushButton("Open")
                 open_btn.setFixedSize(60, 35)
                 open_btn.clicked.connect(self.open_download_location)
                 action_layout.addWidget(open_btn)
@@ -4237,7 +4237,7 @@ class CompactDownloadItem(QFrame):
         """Cancel the download using soulseek client"""
         print(f"[DEBUG] Cancel button clicked - download_id: {self.download_id}, username: {self.username}, title: {self.title}")
         if self.soulseek_client and self.download_id:
-            print(f"🚫 Cancelling download: {self.download_id}")
+            print(f"Cancelling download: {self.download_id}")
             
             # Find the parent DownloadsPage to use its async helper
             parent_page = self.parent()
@@ -4249,13 +4249,13 @@ class CompactDownloadItem(QFrame):
                 def on_success(result):
                     print(f"[DEBUG] Cancel result: {result}")
                     if result:
-                        print(f"✅ Successfully cancelled download: {self.title}")
+                        print(f"Successfully cancelled download: {self.title}")
                         self.update_status("cancelled")
                     else:
-                        print(f"❌ Failed to cancel download: {self.title}")
+                        print(f"Failed to cancel download: {self.title}")
                 
                 def on_error(error):
-                    print(f"❌ Failed to cancel download: {error}")
+                    print(f"Failed to cancel download: {error}")
                 
                 parent_page._run_async_operation(
                     self.soulseek_client.cancel_download,
@@ -4270,7 +4270,7 @@ class CompactDownloadItem(QFrame):
     
     def retry_download(self):
         """Retry a failed download"""
-        print(f"🔄 Retrying download: {self.title}")
+        print(f"Retrying download: {self.title}")
         # This would trigger a new download attempt
         # Implementation depends on how retries are handled in the main system
         self.update_status("queued", 0)
@@ -4298,9 +4298,9 @@ class CompactDownloadItem(QFrame):
                 else:  # Linux
                     os.system(f'xdg-open "{download_path}"')
                     
-                print(f"📂 Opened downloads folder: {download_path}")
+                print(f"Opened downloads folder: {download_path}")
             except Exception as e:
-                print(f"❌ Failed to open downloads folder: {e}")
+                print(f"Failed to open downloads folder: {e}")
             return
             
         try:
@@ -4319,9 +4319,9 @@ class CompactDownloadItem(QFrame):
                 else:  # Linux
                     os.system(f"xdg-open '{folder_path}'")
                     
-                print(f"📂 Opened folder: {folder_path}")
+                print(f"Opened folder: {folder_path}")
             else:
-                print(f"❌ File not found: {file_path}")
+                print(f"File not found: {file_path}")
                 # Try to find the file in the downloads directory using the filename
                 filename = os.path.basename(self.file_path)
                 print(f"[DEBUG] Searching for file: {filename}")
@@ -4352,9 +4352,9 @@ class CompactDownloadItem(QFrame):
                     else:  # Linux
                         os.system(f'xdg-open "{folder_path}"')
                         
-                    print(f"📂 Opened folder: {folder_path}")
+                    print(f"Opened folder: {folder_path}")
                 else:
-                    print(f"❌ Could not find file {filename} in downloads directory")
+                    print(f"Could not find file {filename} in downloads directory")
                     # Fallback to opening the downloads folder
                     system = platform.system()
                     if system == "Windows":
@@ -4364,10 +4364,10 @@ class CompactDownloadItem(QFrame):
                     else:  # Linux
                         os.system(f'xdg-open "{download_path}"')
                         
-                    print(f"📂 Opened downloads folder as fallback: {download_path}")
+                    print(f"Opened downloads folder as fallback: {download_path}")
                     
         except Exception as e:
-            print(f"❌ Failed to open download location: {e}")
+            print(f"Failed to open download location: {e}")
 
 class DownloadQueue(QFrame):
     def __init__(self, title="Download Queue", queue_type="active", parent=None):
@@ -4733,14 +4733,14 @@ class TabbedDownloadManager(QTabWidget):
                         # Start the thread
                         cleanup_thread.start()
                         
-                        print(f"🧵 Started API cleanup thread for download {download_item.download_id}")
+                        print(f"Started API cleanup thread for download {download_item.download_id}")
                     else:
-                        print(f"⚠️ Cannot find parent DownloadsPage for API cleanup thread")
+                        print(f"Cannot find parent DownloadsPage for API cleanup thread")
                         # Fallback: Skip API cleanup to prevent blocking
-                        print(f"⚠️ Skipping API cleanup for download {download_item.download_id}")
+                        print(f"Skipping API cleanup for download {download_item.download_id}")
                         
             except Exception as e:
-                print(f"⚠️ Error setting up download completion cleanup: {e}")
+                print(f"Error setting up download completion cleanup: {e}")
             
             self.update_tab_counts()
             
@@ -4781,9 +4781,9 @@ class TabbedDownloadManager(QTabWidget):
                     thread.wait(1000)  # Wait up to 1 second for completion
                 thread.deleteLater()
                 
-                print(f"🧹 Cleaned up API cleanup thread")
+                print(f"Cleaned up API cleanup thread")
         except Exception as e:
-            print(f"⚠️ Error cleaning up API cleanup thread: {e}")
+            print(f"Error cleaning up API cleanup thread: {e}")
     
     def update_tab_counts(self):
         """Schedule a batched tab count update to prevent excessive UI updates"""
@@ -4886,7 +4886,7 @@ class DownloadsPage(QWidget):
             download_path = config_manager.get('soulseek.download_path')
             if download_path and hasattr(self.soulseek_client, 'download_path'):
                 self.soulseek_client.download_path = download_path
-                print(f"✅ Set soulseek_client download path to: {download_path}")
+                print(f"Set soulseek_client download path to: {download_path}")
         # --- END FIX ---
 
         self.search_thread = None
@@ -5028,7 +5028,7 @@ class DownloadsPage(QWidget):
         title_section = QVBoxLayout()
         title_section.setSpacing(6)  # Increased for better title hierarchy
         
-        title_label = QLabel("🎵 Music Downloads")
+        title_label = QLabel("Music Downloads")
         title_label.setFont(QFont("Segoe UI", 28, QFont.Weight.Bold))  # Larger for better prominence
         title_label.setStyleSheet("""
             color: #ffffff;
@@ -5253,7 +5253,7 @@ class DownloadsPage(QWidget):
         """)
         
         # Enhanced search button
-        self.search_btn = QPushButton("🔍 Search")
+        self.search_btn = QPushButton("Search")
         self.search_btn.setFixedSize(120, 40)
         self.search_btn.clicked.connect(self.perform_search)
         self.search_btn.setStyleSheet("""
@@ -5284,7 +5284,7 @@ class DownloadsPage(QWidget):
         """)
         
         # Cancel search button (initially hidden)
-        self.cancel_search_btn = QPushButton("✕ Cancel")
+        self.cancel_search_btn = QPushButton("Cancel")
         self.cancel_search_btn.setFixedSize(100, 40)
         self.cancel_search_btn.clicked.connect(self.cancel_search)
         self.cancel_search_btn.setVisible(False)  # Hidden by default
@@ -6063,7 +6063,7 @@ class DownloadsPage(QWidget):
         if total_filtered > 0:
             if total_filtered > self.results_per_page:
                 filter_status += f" (showing first {len(results_to_show)})"
-            self.search_status.setText(f"✨ {filter_status} • {total_albums} albums, {total_tracks} singles")
+            self.search_status.setText(f"{filter_status} • {total_albums} albums, {total_tracks} singles")
         else:
             self.search_status.setText(f"No results found for '{self.current_filter}' filter")
     
@@ -6132,7 +6132,7 @@ class DownloadsPage(QWidget):
         controls_layout.setContentsMargins(10, 10, 10, 10)
         controls_layout.setSpacing(6)
         
-        clear_btn = QPushButton("🗑️ Clear Completed")
+        clear_btn = QPushButton("Clear Completed")
         clear_btn.setFixedHeight(28)
         clear_btn.clicked.connect(self.clear_completed_downloads)
         clear_btn.setStyleSheet(self._get_control_button_style("#e22134"))
@@ -6189,14 +6189,14 @@ class DownloadsPage(QWidget):
         layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(12)
         
-        connection_status = QLabel("🟢 slskd Connected")
+        connection_status = QLabel("slskd Connected")
         connection_status.setFont(QFont("Arial", 10))
         connection_status.setStyleSheet("color: rgba(29, 185, 84, 0.9);")
         
         layout.addWidget(connection_status)
         layout.addStretch()
         
-        download_path_info = QLabel(f"📁 Downloads: {self.soulseek_client.download_path if self.soulseek_client else './downloads'}")
+        download_path_info = QLabel(f"Downloads: {self.soulseek_client.download_path if self.soulseek_client else './downloads'}")
         download_path_info.setFont(QFont("Arial", 9))
         download_path_info.setStyleSheet("color: rgba(255, 255, 255, 0.6);")
         layout.addWidget(download_path_info)
@@ -6272,7 +6272,7 @@ class DownloadsPage(QWidget):
             }
         """)
         
-        self.search_btn = QPushButton("🔍 Search")
+        self.search_btn = QPushButton("Search")
         self.search_btn.setFixedSize(100, 40)
         self.search_btn.clicked.connect(self.perform_search)
         self.search_btn.setStyleSheet("""
@@ -6338,11 +6338,11 @@ class DownloadsPage(QWidget):
     def perform_search(self):
         query = self.search_input.text().strip()
         if not query:
-            self.update_search_status("⚠️ Please enter a search term", "#ffa500")
+            self.update_search_status("Please enter a search term", "#ffa500")
             return
         
         if not self.soulseek_client:
-            self.update_search_status("❌ Soulseek client not available", "#e22134")
+            self.update_search_status("Soulseek client not available", "#e22134")
             return
         
         # Stop any existing search
@@ -6378,12 +6378,12 @@ class DownloadsPage(QWidget):
         self.filter_container.setVisible(False)
         
         # Enhanced searching state with animation
-        self.search_btn.setText("🔍 Searching...")
+        self.search_btn.setText("Searching...")
         self.search_btn.setEnabled(False)
         self.update_search_status(f"Searching for '{query}'... Results will appear as they are found", "#1db954")
         
         # Emit activity signal for search start
-        self.download_activity.emit("🔍", "Search Started", f"Searching for '{query}'", "Now")
+        self.download_activity.emit("", "Search Started", f"Searching for '{query}'", "Now")
         
         # Show loading animations
         self.start_search_animations()
@@ -6411,7 +6411,7 @@ class DownloadsPage(QWidget):
                 self.search_thread.terminate()
         
         # Reset UI state
-        self.search_btn.setText("🔍 Search")
+        self.search_btn.setText("Search")
         self.search_btn.setEnabled(True)
         self.search_btn.setVisible(True)
         self.cancel_search_btn.setVisible(False)
@@ -6570,12 +6570,12 @@ class DownloadsPage(QWidget):
         
         # Update status message with real-time feedback
         if self.displayed_results < self.results_per_page:
-            self.update_search_status(f"✨ Found {total_results} results ({len(tracks)} tracks, {len(albums)} albums) from {response_count} users • Live updating...", "#1db954")
+            self.update_search_status(f"Found {total_results} results ({len(tracks)} tracks, {len(albums)} albums) from {response_count} users • Live updating...", "#1db954")
         else:
-            self.update_search_status(f"✨ Found {total_results} results ({len(tracks)} tracks, {len(albums)} albums) from {response_count} users • Showing first {self.results_per_page} (scroll for more)", "#1db954")
+            self.update_search_status(f"Found {total_results} results ({len(tracks)} tracks, {len(albums)} albums) from {response_count} users • Showing first {self.results_per_page} (scroll for more)", "#1db954")
     
     def on_search_completed(self, results):
-        self.search_btn.setText("🔍 Search")
+        self.search_btn.setText("Search")
         self.search_btn.setEnabled(True)
         self.search_btn.setVisible(True)
         self.cancel_search_btn.setVisible(False)
@@ -6608,9 +6608,9 @@ class DownloadsPage(QWidget):
         
         if total_results == 0:
             if self.displayed_results == 0:
-                self.update_search_status("😔 No results found • Try a different search term or artist name", "#ffa500")
+                self.update_search_status("No results found • Try a different search term or artist name", "#ffa500")
             else:
-                self.update_search_status(f"✨ Search completed • Found {self.displayed_results} total results", "#1db954")
+                self.update_search_status(f"Search completed • Found {self.displayed_results} total results", "#1db954")
             # Hide filter controls when no results
             self.filter_container.setVisible(False)
             return
@@ -6632,14 +6632,14 @@ class DownloadsPage(QWidget):
         
         # Emit activity signal for search completion
         search_query = self.search_input.text().strip()
-        self.download_activity.emit("✅", "Search Complete", f"Found {total_results} results for '{search_query}'", "Now")
+        self.download_activity.emit("", "Search Complete", f"Found {total_results} results for '{search_query}'", "Now")
         
         # Update status based on whether there are more results to load
         if self.displayed_results < total_results:
             remaining = total_results - self.displayed_results
-            self.update_search_status(f"✅ Search completed • Found {result_summary} • Showing first {self.displayed_results} (scroll down for {remaining} more)", "#1db954")
+            self.update_search_status(f"Search completed • Found {result_summary} • Showing first {self.displayed_results} (scroll down for {remaining} more)", "#1db954")
         else:
-            self.update_search_status(f"✅ Search completed • Found {result_summary}", "#1db954")
+            self.update_search_status(f"Search completed • Found {result_summary}", "#1db954")
     
     def clear_search_results(self):
         """Clear all search result items from the layout"""
@@ -6690,7 +6690,7 @@ class DownloadsPage(QWidget):
         self._results_to_load_queue.extend(results_to_add)
 
         # Update status to show that we are loading more
-        self.update_search_status(f"✨ Loading more results...", "#1db954")
+        self.update_search_status(f"Loading more results...", "#1db954")
 
         # Kick off the staggered loading process by loading the first item
         if self._results_to_load_queue:
@@ -6720,7 +6720,7 @@ class DownloadsPage(QWidget):
             self.currently_expanded_item = None
     
     def on_search_failed(self, error_msg):
-        self.search_btn.setText("🔍 Search")
+        self.search_btn.setText("Search")
         self.search_btn.setEnabled(True)
         self.search_btn.setVisible(True)
         self.cancel_search_btn.setVisible(False)
@@ -6728,10 +6728,10 @@ class DownloadsPage(QWidget):
         # Stop loading animations
         self.stop_search_animations()
         
-        self.update_search_status(f"❌ Search failed: {error_msg}", "#e22134")
+        self.update_search_status(f"Search failed: {error_msg}", "#e22134")
     
     def on_search_progress(self, message):
-        self.update_search_status(f"🔍 {message}", "#1db954")
+        self.update_search_status(f"{message}", "#1db954")
     
     def start_download(self, search_result):
         """Start downloading a search result using threaded approach"""
@@ -6856,7 +6856,7 @@ class DownloadsPage(QWidget):
             print(f"[DEBUG] Created download item with album context: album='{album_name}', track_number={track_number}")
             
             # Emit activity signal for download start
-            self.download_activity.emit("📥", "Download Started", f"'{title}' by {artist}", "Now")
+            self.download_activity.emit("", "Download Started", f"'{title}' by {artist}", "Now")
             
             # Create and start download thread
             download_thread = DownloadThread(self.soulseek_client, search_result, download_item)
@@ -6882,7 +6882,7 @@ class DownloadsPage(QWidget):
     def start_album_download(self, album_result):
         """Start downloading all tracks in an album"""
         try:
-            print(f"🎵 Starting album download: {album_result.album_title} by {album_result.artist}")
+            print(f"Starting album download: {album_result.album_title} by {album_result.artist}")
             
             # First, find and disable all track download buttons for this album
             self.disable_album_track_buttons(album_result)
@@ -6891,7 +6891,7 @@ class DownloadsPage(QWidget):
             for track in album_result.tracks:
                 self.start_download(track)
             
-            print(f"✓ Queued {len(album_result.tracks)} tracks for download from album: {album_result.album_title}")
+            print(f"Queued {len(album_result.tracks)} tracks for download from album: {album_result.album_title}")
             
         except Exception as e:
             print(f"Failed to start album download: {str(e)}")
@@ -6923,15 +6923,15 @@ class DownloadsPage(QWidget):
             )
             
             if modal.exec() == QDialog.DialogCode.Accepted:
-                print("✅ Match confirmed via modal.")
+                print("Match confirmed via modal.")
             elif hasattr(modal, 'skipped_matching') and modal.skipped_matching:
-                print("🔄 Matching skipped, proceeding with normal download.")
+                print("Matching skipped, proceeding with normal download.")
                 self.start_download(search_result)
             else:
-                print("🚫 Match process cancelled by user.")
+                print("Match process cancelled by user.")
                 
         except Exception as e:
-            print(f"❌ Error in matched download process: {e}")
+            print(f"Error in matched download process: {e}")
             self.start_download(search_result)
 
     def start_matched_album_download(self, album_result):
@@ -6944,7 +6944,7 @@ class DownloadsPage(QWidget):
             # Use the first track as a reference for the modal
             first_track = album_result.tracks[0] if album_result.tracks else None
             if not first_track:
-                print("❌ Cannot start matched download for an empty album.")
+                print("Cannot start matched download for an empty album.")
                 self.start_album_download(album_result)
                 return
 
@@ -6954,22 +6954,22 @@ class DownloadsPage(QWidget):
             )
 
             if modal.exec() == QDialog.DialogCode.Accepted:
-                print("✅ Album match confirmed via modal.")
+                print("Album match confirmed via modal.")
             elif hasattr(modal, 'skipped_matching') and modal.skipped_matching:
-                print("🔄 Album matching skipped, proceeding with normal download.")
+                print("Album matching skipped, proceeding with normal download.")
                 self.start_album_download(album_result)
             else:
-                print("🚫 Album match process cancelled by user.")
+                print("Album match process cancelled by user.")
 
         except Exception as e:
-            print(f"❌ Error in matched album download process: {e}")
+            print(f"Error in matched album download process: {e}")
             self.start_album_download(album_result)
 
     
     def _handle_matched_download(self, search_result, artist: Artist):
         """Handle the download after artist selection from modal"""
         try:
-            print(f"🎯 Starting matched download for '{search_result.title}' by '{artist.name}'")
+            print(f"Starting matched download for '{search_result.title}' by '{artist.name}'")
             
             # Store the selected artist metadata with the search result
             search_result.matched_artist = artist
@@ -6978,13 +6978,13 @@ class DownloadsPage(QWidget):
             download_item = self._start_download_with_artist(search_result, artist)
             
             if download_item:
-                print(f"✅ Successfully created matched download for '{download_item.title}'")
+                print(f"Successfully created matched download for '{download_item.title}'")
             else:
-                print(f"❌ Failed to create matched download, falling back to normal download")
+                print(f"Failed to create matched download, falling back to normal download")
                 self.start_download(search_result)
             
         except Exception as e:
-            print(f"❌ Error handling matched download: {e}")
+            print(f"Error handling matched download: {e}")
             # Fallback to normal download
             self.start_download(search_result)
     
@@ -6995,7 +6995,7 @@ class DownloadsPage(QWidget):
         try:
             if is_album_download:
                 # This is a full album download
-                print(f"🎯 Confirmed album match: '{album.name}' by '{artist.name}'")
+                print(f"Confirmed album match: '{album.name}' by '{artist.name}'")
                 # Now, we process each track in the original album_result
                 for track in original_result.tracks:
                     track.matched_artist = artist
@@ -7004,7 +7004,7 @@ class DownloadsPage(QWidget):
                     self._start_download_with_artist(track, artist)
             else:
                 # This is a single track download
-                print(f"🎯 Confirmed single track match: '{original_result.title}' -> Artist: '{artist.name}', Album: '{album.name}'")
+                print(f"Confirmed single track match: '{original_result.title}' -> Artist: '{artist.name}', Album: '{album.name}'")
                 original_result.matched_artist = artist
                 original_result.matched_album = album
                 
@@ -7016,7 +7016,7 @@ class DownloadsPage(QWidget):
                 self._start_download_with_artist(original_result, artist)
 
         except Exception as e:
-            print(f"❌ Error handling confirmed match: {e}")
+            print(f"Error handling confirmed match: {e}")
             # Fallback to normal download
             if is_album_download:
                 self.start_album_download(original_result)
@@ -7103,9 +7103,9 @@ class DownloadsPage(QWidget):
             if not track_number:
                 track_number = self._extract_track_number_from_filename(filename, title)
                 if track_number:
-                    print(f"✅ Extracted track number from filename: {track_number}")
+                    print(f"Extracted track number from filename: {track_number}")
                 else:
-                    print(f"❌ Could not extract track number from filename: '{filename}'")
+                    print(f"Could not extract track number from filename: '{filename}'")
             
             # Generate download ID
             import time
@@ -7132,10 +7132,10 @@ class DownloadsPage(QWidget):
             # Immediately assign the matched artist - no timing delays
             if download_item:
                 download_item.matched_artist = artist
-                print(f"✅ Matched artist '{artist.name}' assigned to download item '{download_item.title}'")
+                print(f"Matched artist '{artist.name}' assigned to download item '{download_item.title}'")
             
             # Emit activity signal for download start (with matched artist)
-            self.download_activity.emit("📥", "Download Started", f"'{title}' by {artist.name if artist else original_artist}", "Now")
+            self.download_activity.emit("", "Download Started", f"'{title}' by {artist.name if artist else original_artist}", "Now")
             
             # Start the download thread
             download_thread = DownloadThread(self.soulseek_client, search_result, download_item)
@@ -7153,7 +7153,7 @@ class DownloadsPage(QWidget):
             return download_item
             
         except Exception as e:
-            print(f"❌ Failed to start download with artist: {str(e)}")
+            print(f"Failed to start download with artist: {str(e)}")
             return None
     
     def _ensure_album_consistency(self, download_items, artist: Artist, album_name: str):
@@ -7166,22 +7166,22 @@ class DownloadsPage(QWidget):
                 # Store the definitive album name
                 self.album_name_cache[album_key] = album_name
                 
-                print(f"🔒 Cached album name: '{album_name}' for key: '{album_key}'")
+                print(f"Cached album name: '{album_name}' for key: '{album_key}'")
                 
                 # Ensure all download items use the same album name
                 for download_item in download_items:
                     if hasattr(download_item, 'album'):
                         download_item.album = album_name
-                        print(f"   ✅ Set album name for '{download_item.title}': '{album_name}'")
+                        print(f"   Set album name for '{download_item.title}': '{album_name}'")
                 
         except Exception as e:
-            print(f"❌ Error ensuring album consistency: {e}")
+            print(f"Error ensuring album consistency: {e}")
     
     def _assign_matched_artist_to_download_item(self, search_result, artist: Artist):
         """Assign matched artist to the corresponding download item"""
         try:
-            print(f"🔍 Looking for download item matching: '{search_result.title}' by '{search_result.artist}'")
-            print(f"📋 Current download items: {len(self.download_queue.download_items)}")
+            print(f"Looking for download item matching: '{search_result.title}' by '{search_result.artist}'")
+            print(f"Current download items: {len(self.download_queue.download_items)}")
             
             matched = False
             # Find the download item for this search result
@@ -7191,26 +7191,26 @@ class DownloadsPage(QWidget):
                 if (hasattr(download_item, 'title') and download_item.title == search_result.title and
                     hasattr(download_item, 'artist') and download_item.artist == search_result.artist):
                     download_item.matched_artist = artist
-                    print(f"✅ Assigned matched artist '{artist.name}' to download item '{download_item.title}'")
+                    print(f"Assigned matched artist '{artist.name}' to download item '{download_item.title}'")
                     matched = True
                     break
             
             if not matched:
-                print(f"❌ Could not find matching download item for '{search_result.title}' by '{search_result.artist}'")
+                print(f"Could not find matching download item for '{search_result.title}' by '{search_result.artist}'")
                 # Try a more lenient search
                 for i, download_item in enumerate(self.download_queue.download_items):
                     if (hasattr(download_item, 'title') and 
                         self.matching_engine.normalize_string(download_item.title) == self.matching_engine.normalize_string(search_result.title)):
                         download_item.matched_artist = artist
-                        print(f"✅ Assigned matched artist '{artist.name}' to download item '{download_item.title}' (lenient match)")
+                        print(f"Assigned matched artist '{artist.name}' to download item '{download_item.title}' (lenient match)")
                         matched = True
                         break
                 
                 if not matched:
-                    print(f"❌ Still could not find matching download item - assignment failed")
+                    print(f"Still could not find matching download item - assignment failed")
                         
         except Exception as e:
-            print(f"❌ Error assigning matched artist to download item: {e}")
+            print(f"Error assigning matched artist to download item: {e}")
     
     def _handle_matched_album_download(self, album_result, artist: Artist):
         """Handle the album download after artist selection from modal"""
@@ -7219,11 +7219,11 @@ class DownloadsPage(QWidget):
             return self._handle_matched_album_download_v2(album_result, artist)
             
         try:
-            print(f"🎯 Starting matched album download for '{album_result.album_title}' by '{artist.name}'")
-            print(f"📀 Processing {len(album_result.tracks)} tracks with matched artist")
+            print(f"Starting matched album download for '{album_result.album_title}' by '{artist.name}'")
+            print(f"Processing {len(album_result.tracks)} tracks with matched artist")
             
             # Store the selected artist metadata and album context with each track
-            print(f"🔍 Album context being set:")
+            print(f"Album context being set:")
             print(f"    Album result title: '{album_result.album_title}'")
             print(f"    Matched artist: '{artist.name}'")
             
@@ -7244,44 +7244,44 @@ class DownloadsPage(QWidget):
                     original_track_num = self._extract_track_number_from_filename(filename, track.title)
                     if original_track_num:
                         track.track_number = original_track_num
-                        print(f"   🎵 Preserved original track number: {original_track_num}")
+                        print(f"   Preserved original track number: {original_track_num}")
                     else:
                         # Only use sequential as fallback if no original number found
                         track.track_number = track_index
-                        print(f"   ⚠️ Using fallback sequential track number: {track_index}")
+                        print(f"   Using fallback sequential track number: {track_index}")
                 else:
                     # Fallback to sequential numbering if no filename available
                     track.track_number = track_index
-                    print(f"   ⚠️ Using fallback sequential track number (no filename): {track_index}")
+                    print(f"   Using fallback sequential track number (no filename): {track_index}")
                 
                 # Clean up track title - remove artist prefix if present
                 clean_track_title = self._clean_track_title(track.title, artist.name)
                 track.title = clean_track_title
                 
-                print(f"   🎵 Track {track_index}: '{clean_track_title}' -> Artist: '{artist.name}', Album: '{clean_album_title}', Track#: {track.track_number}")
+                print(f"   Track {track_index}: '{clean_track_title}' -> Artist: '{artist.name}', Album: '{clean_album_title}', Track#: {track.track_number}")
             
             # Start downloading all tracks with matched artist immediately
             import time
             download_items = []
             for track_index, track in enumerate(album_result.tracks, 1):
-                print(f"🎬 Starting download {track_index}/{len(album_result.tracks)}: {track.title}")
+                print(f"Starting download {track_index}/{len(album_result.tracks)}: {track.title}")
                 download_item = self._start_download_with_artist(track, artist)
                 if download_item:
                     download_items.append(download_item)
                     # Small delay between downloads to avoid overwhelming Soulseek
                     time.sleep(0.1)
             
-            print(f"✅ Successfully queued {len(download_items)}/{len(album_result.tracks)} tracks with matched artist")
+            print(f"Successfully queued {len(download_items)}/{len(album_result.tracks)} tracks with matched artist")
             
             # Pre-calculate and cache the album name to ensure consistency
             if download_items:
                 self._ensure_album_consistency(download_items, artist, clean_album_title)
             
-            print(f"✓ Queued {len(album_result.tracks)} tracks for matched download from album: {album_result.album_title}")
-            print(f"🎯 All tracks have album context preserved: '{album_result.album_title}'")
+            print(f"Queued {len(album_result.tracks)} tracks for matched download from album: {album_result.album_title}")
+            print(f"All tracks have album context preserved: '{album_result.album_title}'")
             
         except Exception as e:
-            print(f"❌ Error handling matched album download: {e}")
+            print(f"Error handling matched album download: {e}")
             # Fallback to normal album download
             self.start_album_download(album_result)
 
@@ -7325,7 +7325,7 @@ class DownloadsPage(QWidget):
                             download_items.append(download_item)
                             # No sleep - let the system handle queuing naturally
                     except Exception as e:
-                        print(f"❌ Failed to start download for track {track.title}: {e}")
+                        print(f"Failed to start download for track {track.title}: {e}")
                 
                 # Ensure album consistency in background
                 if download_items:
@@ -7334,14 +7334,14 @@ class DownloadsPage(QWidget):
                 # Reset bulk operation flag
                 self._bulk_operation_active = False
                 
-                print(f"✅ Queued {len(download_items)}/{len(prepared_tracks)} tracks")
+                print(f"Queued {len(download_items)}/{len(prepared_tracks)} tracks")
                 return download_items
             
             # Submit to optimized thread pool
             self._optimized_api_pool.submit(batch_download_tracks)
             
         except Exception as e:
-            print(f"❌ Optimized album download failed: {e}")
+            print(f"Optimized album download failed: {e}")
             self._bulk_operation_active = False
             # Fallback to original method
             self._handle_matched_album_download(album_result, artist)
@@ -7349,14 +7349,14 @@ class DownloadsPage(QWidget):
     def _handle_matched_album_download_with_album(self, album_result, artist: Artist, selected_album: Album):
         """Handle the album download after both artist and album selection from modal"""
         try:
-            print(f"🎯 Starting matched album download with FORCED album selection")
+            print(f"Starting matched album download with FORCED album selection")
             print(f"    Original album: '{album_result.album_title}'")
             print(f"    Selected artist: '{artist.name}'")
             print(f"    Selected album: '{selected_album.name}'")
-            print(f"    🔒 ALL tracks will be forced into: '{selected_album.name}'")
+            print(f"    ALL tracks will be forced into: '{selected_album.name}'")
             
             # Fetch official track titles from Spotify album
-            print(f"🎵 Fetching official track titles from Spotify album...")
+            print(f"Fetching official track titles from Spotify album...")
             spotify_tracks = self._get_spotify_album_tracks(selected_album)
             
             download_items = []
@@ -7382,13 +7382,13 @@ class DownloadsPage(QWidget):
                 # Match to Spotify track title if available
                 spotify_title = self._match_track_to_spotify_title(track, spotify_tracks)
                 if spotify_title:
-                    print(f"   🎵 Track {track_index}: '{track.title}' -> Spotify title: '{spotify_title}'")
+                    print(f"   Track {track_index}: '{track.title}' -> Spotify title: '{spotify_title}'")
                     track._spotify_title = spotify_title  # Store the official Spotify title
                     track._spotify_clean_title = spotify_title  # This will be used for file naming
                 else:
-                    print(f"   🎵 Track {track_index}: '{track.title}' -> No Spotify match found, using original")
+                    print(f"   Track {track_index}: '{track.title}' -> No Spotify match found, using original")
                 
-                print(f"   🔒 FORCED into Album: {selected_album.name}")
+                print(f"   FORCED into Album: {selected_album.name}")
                 
                 # Start individual track download with enhanced metadata
                 download_item = self._start_download_with_artist(track, artist)
@@ -7400,12 +7400,12 @@ class DownloadsPage(QWidget):
                     # Apply Spotify title to download item if available
                     if hasattr(track, '_spotify_clean_title'):
                         download_item._spotify_clean_title = track._spotify_clean_title
-                        print(f"✅ Applied Spotify title to download item: '{track._spotify_clean_title}'")
+                        print(f"Applied Spotify title to download item: '{track._spotify_clean_title}'")
                     
                     download_items.append(download_item)
-                    print(f"✓ Successfully queued track: {track.title}")
+                    print(f"Successfully queued track: {track.title}")
                 else:
-                    print(f"❌ Failed to queue track: {track.title}")
+                    print(f"Failed to queue track: {track.title}")
             
             # Ensure all download items have consistent album information
             for download_item in download_items:
@@ -7413,25 +7413,25 @@ class DownloadsPage(QWidget):
                     download_item._force_album_name = selected_album.name
                     download_item._force_album_mode = True
             
-            print(f"✓ Queued {len(album_result.tracks)} tracks for matched download - ALL FORCED into album: {selected_album.name}")
+            print(f"Queued {len(album_result.tracks)} tracks for matched download - ALL FORCED into album: {selected_album.name}")
             
         except Exception as e:
-            print(f"❌ Error handling matched album download with album selection: {e}")
+            print(f"Error handling matched album download with album selection: {e}")
             # Fallback to normal album download
             self.start_album_download(album_result)
     
     def _assign_matched_artist_to_album_downloads(self, album_result, artist: Artist):
         """Assign matched artist to all download items for an album"""
         try:
-            print(f"📋 Assigning matched artist '{artist.name}' to all album download items")
-            print(f"📀 Album has {len(album_result.tracks)} tracks")
-            print(f"📋 Current download queue has {len(self.download_queue.download_items)} items")
+            print(f"Assigning matched artist '{artist.name}' to all album download items")
+            print(f"Album has {len(album_result.tracks)} tracks")
+            print(f"Current download queue has {len(self.download_queue.download_items)} items")
             
             assigned_count = 0
             
             # Find download items for all tracks in this album
             for track_idx, track in enumerate(album_result.tracks):
-                print(f"🔍 Looking for track {track_idx + 1}: '{track.title}' by '{track.artist}'")
+                print(f"Looking for track {track_idx + 1}: '{track.title}' by '{track.artist}'")
                 
                 matched = False
                 for download_item in self.download_queue.download_items:
@@ -7439,26 +7439,26 @@ class DownloadsPage(QWidget):
                         hasattr(download_item, 'artist') and download_item.artist == track.artist):
                         download_item.matched_artist = artist
                         assigned_count += 1
-                        print(f"   ✅ Assigned to: {download_item.title}")
+                        print(f"   Assigned to: {download_item.title}")
                         matched = True
                         break
                 
                 if not matched:
-                    print(f"   ❌ Could not find download item for: {track.title}")
+                    print(f"   Could not find download item for: {track.title}")
                     # Try a more lenient search
                     for download_item in self.download_queue.download_items:
                         if (hasattr(download_item, 'title') and 
                             self.matching_engine.normalize_string(download_item.title) == self.matching_engine.normalize_string(track.title)):
                             download_item.matched_artist = artist
                             assigned_count += 1
-                            print(f"   ✅ Assigned to: {download_item.title} (lenient match)")
+                            print(f"   Assigned to: {download_item.title} (lenient match)")
                             matched = True
                             break
                     
                     if not matched:
-                        print(f"   ❌ Still could not find download item for: {track.title}")
+                        print(f"   Still could not find download item for: {track.title}")
             
-            print(f"✅ Successfully assigned matched artist to {assigned_count}/{len(album_result.tracks)} album tracks")
+            print(f"Successfully assigned matched artist to {assigned_count}/{len(album_result.tracks)} album tracks")
             
             # If we didn't assign to all tracks, let's try again with a longer delay
             if assigned_count < len(album_result.tracks):
@@ -7466,12 +7466,12 @@ class DownloadsPage(QWidget):
                 QTimer.singleShot(1000, lambda: self._retry_album_assignment(album_result, artist, assigned_count))
             
         except Exception as e:
-            print(f"❌ Error assigning matched artist to album download items: {e}")
+            print(f"Error assigning matched artist to album download items: {e}")
     
     def _retry_album_assignment(self, album_result, artist: Artist, previous_count: int):
         """Retry assignment for album tracks that failed the first time"""
         try:
-            print(f"🔄 Retrying album assignment for remaining tracks...")
+            print(f"Retrying album assignment for remaining tracks...")
             new_assigned = 0
             
             for track in album_result.tracks:
@@ -7490,24 +7490,24 @@ class DownloadsPage(QWidget):
                             self.matching_engine.normalize_string(download_item.title) == self.matching_engine.normalize_string(track.title)):
                             download_item.matched_artist = artist
                             new_assigned += 1
-                            print(f"   ✅ Retry assigned to: {download_item.title}")
+                            print(f"   Retry assigned to: {download_item.title}")
                             break
             
             total_assigned = previous_count + new_assigned
-            print(f"🔄 Retry complete: {total_assigned}/{len(album_result.tracks)} tracks now assigned")
+            print(f"Retry complete: {total_assigned}/{len(album_result.tracks)} tracks now assigned")
             
         except Exception as e:
-            print(f"❌ Error in retry assignment: {e}")
+            print(f"Error in retry assignment: {e}")
     
     def _handle_modal_cancelled(self, search_result):
         """Handle when modal is cancelled for single track downloads"""
-        print(f"🚫 Modal cancelled for track: {search_result.title}")
+        print(f"Modal cancelled for track: {search_result.title}")
         # Re-enable any disabled download buttons for this track
         # Since track downloads don't disable buttons, this is mainly for consistency
     
     def _handle_album_modal_cancelled(self, album_result):
         """Handle when modal is cancelled for album downloads - re-enable buttons"""
-        print(f"🚫 Album modal cancelled for: {album_result.album_title}")
+        print(f"Album modal cancelled for: {album_result.album_title}")
         
         # Re-enable all track download buttons for this album
         self._enable_album_track_buttons(album_result)
@@ -7523,7 +7523,7 @@ class DownloadsPage(QWidget):
                     if hasattr(widget, 'album_result') and widget.album_result == album_result:
                         # Re-enable the matched download button
                         if hasattr(widget, 'matched_download_btn'):
-                            widget.matched_download_btn.setText("🎯 Download w/ Matching")
+                            widget.matched_download_btn.setText("Download w/ Matching")
                             widget.matched_download_btn.setEnabled(True)
                         
                         # Re-enable the regular download button
@@ -7531,10 +7531,10 @@ class DownloadsPage(QWidget):
                             widget.download_btn.setText("⬇️ Download Album")
                             widget.download_btn.setEnabled(True)
                         
-                        print(f"✅ Re-enabled buttons for album: {album_result.album_title}")
+                        print(f"Re-enabled buttons for album: {album_result.album_title}")
                         break
         except Exception as e:
-            print(f"❌ Error re-enabling album buttons: {e}")
+            print(f"Error re-enabling album buttons: {e}")
     
 
     def _cleanup_empty_directories(self, download_path, moved_file_path):
@@ -7584,11 +7584,11 @@ class DownloadsPage(QWidget):
             from pathlib import Path
             
             if not hasattr(download_item, 'matched_artist'):
-                print("❌ No matched artist information found")
+                print("No matched artist information found")
                 return None
             
             artist = download_item.matched_artist
-            print(f"🎯 Organizing download for artist: {artist.name}")
+            print(f"Organizing download for artist: {artist.name}")
             
             # --- FIX: Get transfer directory from config instead of hardcoding ---
             # OLD CODE:
@@ -7608,7 +7608,7 @@ class DownloadsPage(QWidget):
             
             # Resolve consistent album name for grouping tracks from same album
             if album_info and album_info['is_album']:
-                print(f"\n🎯 SMART ALBUM GROUPING for track: '{download_item.title}'")
+                print(f"\nSMART ALBUM GROUPING for track: '{download_item.title}'")
                 print(f"   Original album: '{getattr(download_item, 'album', 'None')}'")
                 print(f"   Detected album: '{album_info.get('album_name', 'None')}'")
                 
@@ -7616,11 +7616,11 @@ class DownloadsPage(QWidget):
                 album_info['album_name'] = consistent_album_name
                 
                 print(f"   Final album name: '{consistent_album_name}'")
-                print(f"🔗 ✅ Album grouping complete!\n")
+                print(f"Album grouping complete!\n")
             
             if album_info and album_info['is_album']:
                 # Album track structure: Transfer/ARTIST/ARTIST - ALBUM/TRACK# TRACK.ext
-                print(f"🔍 Creating album folder:")
+                print(f"Creating album folder:")
                 print(f"    Artist name: '{artist.name}'")
                 print(f"    Album name from album_info: '{album_info['album_name']}'")
                 print(f"    Original download item title: '{download_item.title}'")
@@ -7644,8 +7644,8 @@ class DownloadsPage(QWidget):
                 track_filename = f"{track_number:02d} - {self._sanitize_filename(clean_track_name)}{file_ext}"
                 new_file_path = os.path.join(album_dir, track_filename)
                 
-                print(f"📁 Album folder created: '{album_folder_name}'")
-                print(f"🎵 Track filename: '{track_filename}'")
+                print(f"Album folder created: '{album_folder_name}'")
+                print(f"Track filename: '{track_filename}'")
                 
             else:
                 # Single track structure: Transfer/ARTIST/ARTIST - SINGLE/SINGLE.ext
@@ -7668,32 +7668,32 @@ class DownloadsPage(QWidget):
                 single_filename = f"{self._sanitize_filename(clean_track_name)}{file_ext}"
                 new_file_path = os.path.join(single_dir, single_filename)
                 
-                print(f"📁 Single track: {single_folder_name}/{single_filename}")
+                print(f"Single track: {single_folder_name}/{single_filename}")
             
             # Check if source file exists, and try to find it if not
             if not os.path.exists(original_file_path):
-                print(f"❌ Source file not found: {original_file_path}")
+                print(f"Source file not found: {original_file_path}")
                 
                 # Try to find the file using different methods
                 found_file = self._find_downloaded_file(original_file_path, download_item)
                 if found_file:
-                    print(f"✅ Found file at: {found_file}")
+                    print(f"Found file at: {found_file}")
                     original_file_path = found_file
                 else:
-                    print(f"❌ Could not locate downloaded file anywhere")
+                    print(f"Could not locate downloaded file anywhere")
                     return None
             
             # File organization and overwrite logic will be handled after metadata enhancement
             
             # 🆕 METADATA ENHANCEMENT - Enhance BEFORE moving to avoid race conditions
             if self._enhance_file_metadata(original_file_path, download_item, artist, album_info):
-                print(f"✅ Metadata enhanced with Spotify data")
+                print(f"Metadata enhanced with Spotify data")
             else:
-                print(f"⚠️ Metadata enhancement failed, using original tags")
+                print(f"Metadata enhancement failed, using original tags")
             
             # Verify source file exists before attempting move
             if not os.path.exists(original_file_path):
-                print(f"❌ Source file not found: {original_file_path}")
+                print(f"Source file not found: {original_file_path}")
                 return None
                 
             # Explicit overwrite: check if file exists, remove it, then move
@@ -7705,21 +7705,21 @@ class DownloadsPage(QWidget):
             
             # Verify the move was successful
             if not os.path.exists(new_file_path):
-                print(f"❌ File move failed - destination file not found: {new_file_path}")
+                print(f"File move failed - destination file not found: {new_file_path}")
                 return None
                 
             if os.path.exists(original_file_path):
                 try:
                     os.remove(original_file_path)
                 except Exception as cleanup_error:
-                    print(f"⚠️ Could not remove original file: {cleanup_error}")
+                    print(f"Could not remove original file: {cleanup_error}")
             
             # Clean up any empty directories left in the downloads folder
             try:
                 downloads_path = config_manager.get('soulseek.download_path', './Downloads')
                 self._cleanup_empty_directories(downloads_path, original_file_path)
             except Exception as cleanup_error:
-                print(f"⚠️ Could not clean up empty directories: {cleanup_error}")
+                print(f"Could not clean up empty directories: {cleanup_error}")
             
             # Download cover art for both albums and singles
             if album_info and album_info['is_album']:
@@ -7734,11 +7734,11 @@ class DownloadsPage(QWidget):
             # Generate LRC lyrics file at final location (elegant addition)
             self._generate_lrc_file(new_file_path, download_item, artist, album_info)
 
-            print(f"✅ Successfully organized matched download: {new_file_path}")
+            print(f"Successfully organized matched download: {new_file_path}")
             return new_file_path
             
         except Exception as e:
-            print(f"❌ Error organizing matched download: {e}")
+            print(f"Error organizing matched download: {e}")
             return None
     
 
@@ -7766,7 +7766,7 @@ class DownloadsPage(QWidget):
         # Start with the original title
         original = album_title.strip()
         cleaned = original
-        print(f"🧹 Album Title Cleaning: '{original}' (artist: '{artist_name}')")
+        print(f"Album Title Cleaning: '{original}' (artist: '{artist_name}')")
         
         # Remove "Album - " prefix
         cleaned = re.sub(r'^Album\s*-\s*', '', cleaned, flags=re.IGNORECASE)
@@ -7831,9 +7831,9 @@ class DownloadsPage(QWidget):
             # Remove artist prefix from fallback
             fallback = re.sub(f'^{re.escape(artist_name)}\\s*-\\s*', '', fallback, flags=re.IGNORECASE)
             cleaned = fallback.strip() if fallback.strip() else album_title
-            print(f"🧹 Album Title used fallback: '{fallback}'")
+            print(f"Album Title used fallback: '{fallback}'")
         
-        print(f"🧹 Album Title Result: '{original}' -> '{cleaned}'")
+        print(f"Album Title Result: '{original}' -> '{cleaned}'")
         return cleaned
     
     def _clean_track_title(self, track_title: str, artist_name: str) -> str:
@@ -7843,7 +7843,7 @@ class DownloadsPage(QWidget):
         # Start with the original title
         original = track_title.strip()
         cleaned = original
-        print(f"🧹 Track Title Cleaning: '{original}' (artist: '{artist_name}')")
+        print(f"Track Title Cleaning: '{original}' (artist: '{artist_name}')")
         
         # Remove track numbers from the beginning if present
         # Handles cases like "01 - Track Name", "1. Track Name", "01. Track Name"
@@ -7880,9 +7880,9 @@ class DownloadsPage(QWidget):
             fallback = re.sub(r'^\d{1,2}[\.\s\-]+', '', fallback)  # Remove track numbers
             fallback = re.sub(f'^{re.escape(artist_name)}\\s*-\\s*', '', fallback, flags=re.IGNORECASE)
             cleaned = fallback.strip() if fallback.strip() else track_title
-            print(f"🧹 Track Title used fallback: '{fallback}'")
+            print(f"Track Title used fallback: '{fallback}'")
         
-        print(f"🧹 Track Title Result: '{original}' -> '{cleaned}'")
+        print(f"Track Title Result: '{original}' -> '{cleaned}'")
         return cleaned
     
     def _resolve_album_group(self, download_item, artist: Artist, album_info: dict) -> str:
@@ -7916,10 +7916,10 @@ class DownloadsPage(QWidget):
                 # Check if we already have a cached result for this album
                 if album_key in self.album_name_cache:
                     cached_name = self.album_name_cache[album_key]
-                    print(f"🔍 Using cached album name for '{album_key}': '{cached_name}'")
+                    print(f"Using cached album name for '{album_key}': '{cached_name}'")
                     return cached_name
                 
-                print(f"🔍 Album grouping - Key: '{album_key}', Detected: '{detected_album}'")
+                print(f"Album grouping - Key: '{album_key}', Detected: '{detected_album}'")
                 
                 # Check if this track indicates a deluxe edition
                 is_deluxe_track = False
@@ -7933,7 +7933,7 @@ class DownloadsPage(QWidget):
                 
                 # SMART ALGORITHM: Upgrade to deluxe if this track is deluxe
                 if is_deluxe_track and current_edition == "standard":
-                    print(f"🎯 UPGRADE: Album '{base_album}' upgraded from standard to deluxe!")
+                    print(f"UPGRADE: Album '{base_album}' upgraded from standard to deluxe!")
                     self.album_editions[album_key] = "deluxe"
                     current_edition = "deluxe"
                 
@@ -7948,12 +7948,12 @@ class DownloadsPage(QWidget):
                 self.album_name_cache[album_key] = final_album_name
                 self.album_artists[album_key] = artist.name
                 
-                print(f"🔗 Album resolution: '{detected_album}' -> '{final_album_name}' (edition: {current_edition})")
+                print(f"Album resolution: '{detected_album}' -> '{final_album_name}' (edition: {current_edition})")
                 
                 return final_album_name
             
         except Exception as e:
-            print(f"❌ Error resolving album group: {e}")
+            print(f"Error resolving album group: {e}")
             return album_info.get('album_name', download_item.title)
     
     def _normalize_base_album_name(self, base_album: str, artist_name: str) -> str:
@@ -7975,7 +7975,7 @@ class DownloadsPage(QWidget):
         
         for key, correction in known_corrections.items():
             if key == normalized_lower:
-                print(f"📝 Base album correction: '{base_album}' -> '{correction}'")
+                print(f"Base album correction: '{base_album}' -> '{correction}'")
                 return correction
         
         # If no specific correction, return cleaned version
@@ -8028,7 +8028,7 @@ class DownloadsPage(QWidget):
                 normalized = correction + suffix
                 break
         
-        print(f"📀 Album variant normalization: '{album_name}' -> '{normalized}'")
+        print(f"Album variant normalization: '{album_name}' -> '{normalized}'")
         return normalized
     
     def _detect_deluxe_edition(self, album_name: str) -> bool:
@@ -8057,7 +8057,7 @@ class DownloadsPage(QWidget):
         
         for indicator in deluxe_indicators:
             if indicator in album_lower:
-                print(f"🎯 Detected deluxe edition: '{album_name}' contains '{indicator}'")
+                print(f"Detected deluxe edition: '{album_name}' contains '{indicator}'")
                 return True
         
         return False
@@ -8083,14 +8083,14 @@ class DownloadsPage(QWidget):
     def _detect_album_info(self, download_item, artist: Artist) -> Optional[dict]:
         """Detect if track is part of an album using Spotify API as primary source"""
         try:
-            print(f"🔍 Album detection for '{download_item.title}' by '{artist.name}':")
+            print(f"Album detection for '{download_item.title}' by '{artist.name}':")
             print(f"    Has album attr: {hasattr(download_item, 'album')}")
             if hasattr(download_item, 'album'):
                 print(f"    Album value: '{download_item.album}'")
             
             # CHECK FOR FORCED ALBUM MODE FIRST
             if hasattr(download_item, '_force_album_mode') and download_item._force_album_mode:
-                print(f"🔒 FORCED ALBUM MODE DETECTED - Using forced album name")
+                print(f"FORCED ALBUM MODE DETECTED - Using forced album name")
                 forced_album = getattr(download_item, '_force_album_name', 'Unknown Album')
                 print(f"    Forced album: '{forced_album}'")
                 
@@ -8111,20 +8111,20 @@ class DownloadsPage(QWidget):
             
             # PRIORITY 1: Try album-aware search if we have album context
             if hasattr(download_item, 'album') and download_item.album and download_item.album.strip() and download_item.album != "Unknown Album":
-                print(f"🎯 ALBUM-AWARE SEARCH: Looking for '{download_item.title}' in album '{download_item.album}'")
+                print(f"ALBUM-AWARE SEARCH: Looking for '{download_item.title}' in album '{download_item.album}'")
                 album_result = self._search_track_in_album_context(download_item, artist)
                 if album_result:
-                    print(f"✅ Found track in album context - using album classification")
+                    print(f"Found track in album context - using album classification")
                     return album_result
                 else:
-                    print(f"⚠️ Track not found in album context, falling back to individual search")
+                    print(f"Track not found in album context, falling back to individual search")
             
             # PRIORITY 2: Fallback to individual track search for clean metadata
-            print(f"🔍 Searching Spotify for individual track info (PRIORITY 2)...")
+            print(f"Searching Spotify for individual track info (PRIORITY 2)...")
             
             # Clean the track title before searching - remove artist prefix
             clean_title = self._clean_track_title(download_item.title, artist.name)
-            print(f"🧹 Cleaned title: '{download_item.title}' -> '{clean_title}'")
+            print(f"Cleaned title: '{download_item.title}' -> '{clean_title}'")
             
             # Search for the track by artist and cleaned title
             query = f"artist:{artist.name} track:{clean_title}"
@@ -8154,25 +8154,25 @@ class DownloadsPage(QWidget):
             
             # If we found a good Spotify match, use it for clean metadata
             if best_match and best_confidence > 0.6:
-                print(f"✅ Found matching Spotify track: '{best_match.name}' - Album: '{best_match.album}' (confidence: {best_confidence:.2f})")
+                print(f"Found matching Spotify track: '{best_match.name}' - Album: '{best_match.album}' (confidence: {best_confidence:.2f})")
                 
                 # Get detailed track information using Spotify's track API
                 detailed_track = None
                 if hasattr(best_match, 'id') and best_match.id:
-                    print(f"🔍 Getting detailed track info from Spotify API for track ID: {best_match.id}")
+                    print(f"Getting detailed track info from Spotify API for track ID: {best_match.id}")
                     detailed_track = self.spotify_client.get_track_details(best_match.id)
                 
                 # Use detailed track data if available
                 if detailed_track:
-                    print(f"✅ Got detailed track data from Spotify API")
+                    print(f"Got detailed track data from Spotify API")
                     album_name = self._clean_album_title(detailed_track['album']['name'], artist.name)
                     clean_track_name = detailed_track['name']  # Use Spotify's clean track name
                     album_type = detailed_track['album'].get('album_type', 'album')
                     total_tracks = detailed_track['album'].get('total_tracks', 1)
                     spotify_track_number = detailed_track.get('track_number', 1)
                     
-                    print(f"📀 Spotify album info: '{album_name}' (type: {album_type}, total_tracks: {total_tracks}, track#: {spotify_track_number})")
-                    print(f"🎵 Clean track name from Spotify: '{clean_track_name}'")
+                    print(f"Spotify album info: '{album_name}' (type: {album_type}, total_tracks: {total_tracks}, track#: {spotify_track_number})")
+                    print(f"Clean track name from Spotify: '{clean_track_name}'")
                     
                     # Enhanced album detection using detailed API data
                     is_album = (
@@ -8187,7 +8187,7 @@ class DownloadsPage(QWidget):
                     )
                     
                     track_num = spotify_track_number
-                    print(f"🎯 Using Spotify track number: {track_num}")
+                    print(f"Using Spotify track number: {track_num}")
                     
                     # Store the clean Spotify track name for use in file organization (only if not already set)
                     if not hasattr(download_item, '_spotify_clean_title') or not download_item._spotify_clean_title:
@@ -8201,7 +8201,7 @@ class DownloadsPage(QWidget):
                         album_image_url = detailed_track['album']['images'][0]['url']
                     
                     if is_album:
-                        print(f"🎯 Spotify detection: Album track - '{album_name}'")
+                        print(f"Spotify detection: Album track - '{album_name}'")
                         return {
                             'is_album': True,
                             'album_name': album_name,
@@ -8211,7 +8211,7 @@ class DownloadsPage(QWidget):
                             'album_image_url': album_image_url
                         }
                     else:
-                        print(f"🎯 Spotify detection: Single track - using clean track name")
+                        print(f"Spotify detection: Single track - using clean track name")
                         return {
                             'is_album': False,
                             'album_name': clean_track_name,  # Use clean track name for single structure
@@ -8222,7 +8222,7 @@ class DownloadsPage(QWidget):
                         }
                         
                 else:
-                    print(f"⚠️ Could not get detailed track data, using basic Spotify search data")
+                    print(f"Could not get detailed track data, using basic Spotify search data")
                     album_name = self._clean_album_title(best_match.album, artist.name)
                     clean_track_name = best_match.name
                     
@@ -8259,15 +8259,15 @@ class DownloadsPage(QWidget):
                     }
             
             # PRIORITY 3: Fallback to Soulseek album context if Spotify search failed
-            print(f"🔍 No good Spotify match found (confidence: {best_confidence:.2f}), checking Soulseek album context...")
+            print(f"No good Spotify match found (confidence: {best_confidence:.2f}), checking Soulseek album context...")
             
             if hasattr(download_item, 'album') and download_item.album and download_item.album != "Unknown Album":
                 clean_album = self._clean_album_title(download_item.album, artist.name)
                 clean_title = self._clean_track_title(download_item.title, artist.name)
                 track_num = self._extract_track_number(download_item)
                 
-                print(f"✅ Using cleaned Soulseek album context: '{clean_album}' (cleaned from '{download_item.album}')")
-                print(f"🧹 Cleaned track title: '{clean_title}' (cleaned from '{download_item.title}')")
+                print(f"Using cleaned Soulseek album context: '{clean_album}' (cleaned from '{download_item.album}')")
+                print(f"Cleaned track title: '{clean_title}' (cleaned from '{download_item.title}')")
                 
                 # Only set if not already set (preserve original Spotify title from modal)
                 if not hasattr(download_item, '_spotify_clean_title') or not download_item._spotify_clean_title:
@@ -8289,7 +8289,7 @@ class DownloadsPage(QWidget):
                 }
             
             # PRIORITY 4: Complete fallback - single track with cleaned title
-            print(f"🎯 No album context found, defaulting to single track structure with cleaned title")
+            print(f"No album context found, defaulting to single track structure with cleaned title")
             clean_title = self._clean_track_title(download_item.title, artist.name)
             
             # Only set if not already set (preserve original Spotify title from modal)
@@ -8311,7 +8311,7 @@ class DownloadsPage(QWidget):
             }
             
         except Exception as e:
-            print(f"❌ Error detecting album info: {e}")
+            print(f"Error detecting album info: {e}")
             # Emergency fallback to single structure with basic cleaning
             clean_title = self._clean_track_title(download_item.title, artist.name)
             
@@ -8335,7 +8335,7 @@ class DownloadsPage(QWidget):
             album_name = download_item.album
             track_title = download_item.title
             
-            print(f"🎯 Album-aware search: '{track_title}' in album '{album_name}' by '{artist.name}'")
+            print(f"Album-aware search: '{track_title}' in album '{album_name}' by '{artist.name}'")
             
             # Clean the album name for better search results
             clean_album = self._clean_album_title(album_name, artist.name)
@@ -8343,21 +8343,21 @@ class DownloadsPage(QWidget):
             
             # Search for the specific album first
             album_query = f"album:{clean_album} artist:{artist.name}"
-            print(f"🔍 Searching albums: {album_query}")
+            print(f"Searching albums: {album_query}")
             albums = self.spotify_client.search_albums(album_query, limit=5)
             
             if not albums:
-                print(f"❌ No albums found for query: {album_query}")
+                print(f"No albums found for query: {album_query}")
                 return None
             
             # Check each album to see if our track is in it
             for album in albums:
-                print(f"🎵 Checking album: '{album.name}' ({album.total_tracks} tracks)")
+                print(f"Checking album: '{album.name}' ({album.total_tracks} tracks)")
                 
                 # Get tracks from this album
                 album_tracks_data = self.spotify_client.get_album_tracks(album.id)
                 if not album_tracks_data or 'items' not in album_tracks_data:
-                    print(f"❌ Could not get tracks for album: {album.name}")
+                    print(f"Could not get tracks for album: {album.name}")
                     continue
                 
                 # Check if our track is in this album
@@ -8376,8 +8376,8 @@ class DownloadsPage(QWidget):
                     threshold = 0.9 if is_remix else 0.7  # Much stricter for remixes
                     
                     if similarity > threshold:
-                        print(f"✅ FOUND: '{track_name}' (track #{track_number}) matches '{clean_track}' (similarity: {similarity:.2f})")
-                        print(f"🎯 Forcing album classification for track in '{album.name}'")
+                        print(f"FOUND: '{track_name}' (track #{track_number}) matches '{clean_track}' (similarity: {similarity:.2f})")
+                        print(f"Forcing album classification for track in '{album.name}'")
                         
                         # Return album info - force album classification!
                         return {
@@ -8390,13 +8390,13 @@ class DownloadsPage(QWidget):
                             'source': 'album_context_search'
                         }
                 
-                print(f"❌ Track '{clean_track}' not found in album '{album.name}'")
+                print(f"Track '{clean_track}' not found in album '{album.name}'")
             
-            print(f"❌ Track '{clean_track}' not found in any matching albums")
+            print(f"Track '{clean_track}' not found in any matching albums")
             return None
             
         except Exception as e:
-            print(f"❌ Error in album-aware search: {e}")
+            print(f"Error in album-aware search: {e}")
             return None
     
     def _download_cover_art(self, artist: Artist, album_info: dict, target_dir: str):
@@ -8409,7 +8409,7 @@ class DownloadsPage(QWidget):
             
             # Skip if cover already exists
             if os.path.exists(cover_path):
-                print("📷 Cover art already exists")
+                print("Cover art already exists")
                 return
             
             image_url = None
@@ -8419,12 +8419,12 @@ class DownloadsPage(QWidget):
             if album_info.get('album_image_url'):
                 image_url = album_info['album_image_url']
                 source_description = f"album artwork for '{album_info.get('album_name', 'Unknown Album')}'"
-                print(f"📷 Using album artwork from album_info")
+                print(f"Using album artwork from album_info")
             
             # Priority 2: Try to get album artwork via Spotify search if we have album name
             elif album_info.get('album_name') and hasattr(self, 'spotify_client'):
                 try:
-                    print(f"📷 Searching Spotify for album artwork: '{album_info['album_name']}' by '{artist.name}'")
+                    print(f"Searching Spotify for album artwork: '{album_info['album_name']}' by '{artist.name}'")
                     # Search for the specific album
                     search_query = f"album:{album_info['album_name']} artist:{artist.name}"
                     albums = self.spotify_client.search_albums(search_query, limit=1)
@@ -8434,36 +8434,36 @@ class DownloadsPage(QWidget):
                         if album.image_url:
                             image_url = album.image_url
                             source_description = f"Spotify album artwork for '{album.name}'"
-                            print(f"📷 Found album artwork via Spotify search")
+                            print(f"Found album artwork via Spotify search")
                         else:
-                            print(f"📷 Album found but no image available")
+                            print(f"Album found but no image available")
                     else:
-                        print(f"📷 No album found in Spotify search")
+                        print(f"No album found in Spotify search")
                 except Exception as e:
-                    print(f"📷 Error searching Spotify for album artwork: {e}")
+                    print(f"Error searching Spotify for album artwork: {e}")
             
             # Priority 3: Fall back to artist image
             if not image_url and artist.image_url:
                 image_url = artist.image_url
                 source_description = f"artist image for '{artist.name}'"
-                print(f"📷 Falling back to artist image")
+                print(f"Falling back to artist image")
             
             # No image available
             if not image_url:
-                print("📷 No cover art available (no album artwork or artist image)")
+                print("No cover art available (no album artwork or artist image)")
                 return
             
-            print(f"📷 Downloading {source_description} from: {image_url}")
+            print(f"Downloading {source_description} from: {image_url}")
             response = requests.get(image_url, timeout=10)
             response.raise_for_status()
             
             with open(cover_path, 'wb') as f:
                 f.write(response.content)
             
-            print(f"✅ Cover art downloaded: {cover_path}")
+            print(f"Cover art downloaded: {cover_path}")
             
         except Exception as e:
-            print(f"❌ Error downloading cover art: {e}")
+            print(f"Error downloading cover art: {e}")
     
     def _create_single_track_album_info(self, download_item, artist: Artist) -> Optional[dict]:
         """Create album_info dict for single track cover art download"""
@@ -8471,7 +8471,7 @@ class DownloadsPage(QWidget):
             # Check if we have matched_album from Spotify matching
             if hasattr(download_item, 'matched_album') and download_item.matched_album:
                 album = download_item.matched_album
-                print(f"📷 Single track has matched album: '{album.name}' with image: {bool(album.image_url)}")
+                print(f"Single track has matched album: '{album.name}' with image: {bool(album.image_url)}")
                 return {
                     'album_name': album.name,
                     'album_image_url': album.image_url,
@@ -8484,9 +8484,9 @@ class DownloadsPage(QWidget):
             album_name = None
             if hasattr(download_item, 'album') and download_item.album and download_item.album.strip():
                 album_name = download_item.album.strip()
-                print(f"📷 Using album name from download_item: '{album_name}'")
+                print(f"Using album name from download_item: '{album_name}'")
             else:
-                print(f"📷 No album information available for single track")
+                print(f"No album information available for single track")
                 return None
             
             # Create basic album_info for cover art search
@@ -8499,7 +8499,7 @@ class DownloadsPage(QWidget):
             }
             
         except Exception as e:
-            print(f"❌ Error creating single track album info: {e}")
+            print(f"Error creating single track album info: {e}")
             return None
 
     def _generate_lrc_file(self, file_path: str, download_item, artist, album_info: dict) -> bool:
@@ -8550,25 +8550,25 @@ class DownloadsPage(QWidget):
             )
 
             if success:
-                print(f"🎵 LRC file generated for: {track_name}")
+                print(f"LRC file generated for: {track_name}")
             else:
-                print(f"🎵 No lyrics found for: {track_name}")
+                print(f"No lyrics found for: {track_name}")
 
             return success
 
         except Exception as e:
-            print(f"❌ Error generating LRC file for {file_path}: {e}")
+            print(f"Error generating LRC file for {file_path}: {e}")
             return False
 
     def _extract_track_number(self, download_item, spotify_track=None) -> int:
         """Extract track number from various sources"""
         try:
-            print(f"🔢 Extracting track number for: '{download_item.title}'")
+            print(f"Extracting track number for: '{download_item.title}'")
             
             # Method 1: Check if download_item has track_number attribute (explicit metadata)
             if hasattr(download_item, 'track_number') and download_item.track_number:
                 track_num = int(download_item.track_number)
-                print(f"    ✅ Found track_number attribute: {track_num}")
+                print(f"    Found track_number attribute: {track_num}")
                 return track_num
             
             # Method 2: Parse from filename (e.g., "01. Track Name.mp3", "01 - Track Name.flac")
@@ -8584,7 +8584,7 @@ class DownloadsPage(QWidget):
                     match = re.match(pattern, download_item.title.strip())
                     if match:
                         track_num = int(match.group(1))
-                        print(f"    ✅ Parsed from title pattern '{pattern}': {track_num}")
+                        print(f"    Parsed from title pattern '{pattern}': {track_num}")
                         return track_num
             
             # Method 3: Parse from filename if available
@@ -8603,22 +8603,22 @@ class DownloadsPage(QWidget):
                     match = re.match(pattern, base_name.strip())
                     if match:
                         track_num = int(match.group(1))
-                        print(f"    ✅ Parsed from filename pattern '{pattern}': {track_num}")
+                        print(f"    Parsed from filename pattern '{pattern}': {track_num}")
                         return track_num
             
             # Method 4: Get from Spotify track data (would need album API call)
             if spotify_track:
                 # This would require additional Spotify API call to get full album
                 # For now, we'll skip this but could be enhanced later
-                print(f"    ⏭️ Spotify track data available but not implemented yet")
+                print(f"    Spotify track data available but not implemented yet")
                 pass
             
             # Default to 1 if no track number found
-            print(f"    ⚠️ No track number found, defaulting to 1")
+            print(f"    No track number found, defaulting to 1")
             return 1
             
         except Exception as e:
-            print(f"❌ Error extracting track number: {e}")
+            print(f"Error extracting track number: {e}")
             return 1
     
     def _find_downloaded_file(self, original_file_path: str, download_item) -> Optional[str]:
@@ -8628,7 +8628,7 @@ class DownloadsPage(QWidget):
             import glob
             from pathlib import Path
             
-            print(f"🔍 Searching for downloaded file...")
+            print(f"Searching for downloaded file...")
             print(f"    Original path: {original_file_path}")
             
             # Get the download directory
@@ -8644,7 +8644,7 @@ class DownloadsPage(QWidget):
             
             # Method 1: Try the exact path first (but normalized)
             if os.path.exists(original_file_path):
-                print(f"    ✅ Found exact path: {original_file_path}")
+                print(f"    Found exact path: {original_file_path}")
                 return original_file_path
             
             # Method 2: Search in the download directory recursively
@@ -8666,7 +8666,7 @@ class DownloadsPage(QWidget):
                         # Return the first match that exists and has reasonable size
                         for match in audio_matches:
                             if os.path.exists(match) and os.path.getsize(match) > 1024:  # At least 1KB
-                                print(f"    ✅ Found match: {match}")
+                                print(f"    Found match: {match}")
                                 return match
             
             # Method 3: Look for recently modified files in download directory
@@ -8675,7 +8675,7 @@ class DownloadsPage(QWidget):
             audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
             
             # Debug: List all files in download directory
-            print(f"    📂 Files in download directory:")
+            print(f"    Files in download directory:")
             for root, dirs, files in os.walk(download_dir):
                 for file in files:
                     file_path = os.path.join(root, file)
@@ -8697,14 +8697,14 @@ class DownloadsPage(QWidget):
                 # Simple filename matching
                 if (download_item.title.lower() in os.path.basename(file_path).lower() or
                     download_item.artist.lower() in os.path.basename(file_path).lower()):
-                    print(f"    ✅ Found recent match: {file_path}")
+                    print(f"    Found recent match: {file_path}")
                     return file_path
             
-            print(f"    ❌ No matching files found")
+            print(f"    No matching files found")
             return None
             
         except Exception as e:
-            print(f"❌ Error searching for downloaded file: {e}")
+            print(f"Error searching for downloaded file: {e}")
             return None
     
     def update_album_track_button_states(self, download_item, status):
@@ -8727,18 +8727,18 @@ class DownloadsPage(QWidget):
                     # Update button state based on download status
                     if status == 'downloading':
                         track_item.set_download_downloading_state()
-                        print(f"[DEBUG] Set button to downloading state (📥)")
+                        print(f"[DEBUG] Set button to downloading state ()")
                     elif status in ['completed', 'finished']:
                         track_item.set_download_completed_state()
-                        print(f"[DEBUG] Set button to completed state (✅)")
+                        print(f"[DEBUG] Set button to completed state ()")
                     elif status in ['queued', 'initializing']:
                         track_item.set_download_queued_state()
-                        print(f"[DEBUG] Set button to queued state (⏳)")
+                        print(f"[DEBUG] Set button to queued state ()")
                     elif status in ['failed', 'cancelled', 'canceled']:
                         track_item.reset_download_state()  # Allow retry
-                        print(f"[DEBUG] 🔓 RESET button to downloadable state (⬇️) - track can now be downloaded again!")
+                        print(f"[DEBUG] RESET button to downloadable state (⬇️) - track can now be downloaded again!")
                     else:
-                        print(f"[DEBUG] ⚠️ Unknown status '{status}' - no button update performed")
+                        print(f"[DEBUG] Unknown status '{status}' - no button update performed")
                     
                     return
         
@@ -8750,31 +8750,31 @@ class DownloadsPage(QWidget):
             current_track_id = getattr(self, 'current_track_id', None)
             new_track_id = f"{search_result.username}:{search_result.filename}"
             
-            print(f"🎮 start_stream() called for: {search_result.filename}")
-            print(f"🎮 Current track ID: {current_track_id}")
-            print(f"🎮 New track ID: {new_track_id}")
-            print(f"🎮 Currently playing button: {self.currently_playing_button}")
-            print(f"🎮 Result item: {result_item}")
-            print(f"🎮 Button match: {self.currently_playing_button == result_item}")
-            print(f"🎮 Track ID match: {current_track_id == new_track_id}")
+            print(f"start_stream() called for: {search_result.filename}")
+            print(f"Current track ID: {current_track_id}")
+            print(f"New track ID: {new_track_id}")
+            print(f"Currently playing button: {self.currently_playing_button}")
+            print(f"Result item: {result_item}")
+            print(f"Button match: {self.currently_playing_button == result_item}")
+            print(f"Track ID match: {current_track_id == new_track_id}")
             
             if current_track_id == new_track_id and self.currently_playing_button == result_item:
                 # Same track clicked - toggle playback
-                print(f"🔄 Toggling playback for: {search_result.filename}")
+                print(f"Toggling playback for: {search_result.filename}")
                 
                 toggle_result = self.audio_player.toggle_playback()
-                print(f"🔄 toggle_playback() returned: {toggle_result}")
+                print(f"toggle_playback() returned: {toggle_result}")
                 
                 if toggle_result:
                     # Now playing
                     result_item.set_playing_state()
                     self.track_resumed.emit()
-                    print("🎵 Song card: Resumed playback")
+                    print("Song card: Resumed playback")
                 else:
                     # Now paused
                     result_item.set_loading_state()  # Use loading as "paused" state
                     self.track_paused.emit()
-                    print("⏸️ Song card: Paused playback")
+                    print("Song card: Paused playback")
                 
                 return
             else:
@@ -8810,7 +8810,7 @@ class DownloadsPage(QWidget):
             is_audio = any(filename_lower.endswith(ext) for ext in audio_extensions)
             
             if is_audio:
-                print(f"✓ Streaming audio file: {search_result.filename}")
+                print(f"Streaming audio file: {search_result.filename}")
                 print(f"  Quality: {search_result.quality}")
                 print(f"  Size: {search_result.size // (1024*1024)}MB")
                 print(f"  User: {search_result.username}")
@@ -8821,7 +8821,7 @@ class DownloadsPage(QWidget):
                     'filename': search_result.filename,
                     'download_id': None  # Will be set when download starts
                 }
-                print(f"🎯 Tracking new streaming download: {search_result.username}:{search_result.filename}")
+                print(f"Tracking new streaming download: {search_result.username}:{search_result.filename}")
                 
                 # Create and start streaming thread
                 streaming_thread = StreamingThread(self.soulseek_client, search_result)
@@ -8844,7 +8844,7 @@ class DownloadsPage(QWidget):
                 streaming_thread.start()
                 
             else:
-                print(f"✗ Cannot stream non-audio file: {search_result.filename}")
+                print(f"Cannot stream non-audio file: {search_result.filename}")
                 
         except Exception as e:
             print(f"Failed to start stream: {str(e)}")
@@ -8874,7 +8874,7 @@ class DownloadsPage(QWidget):
             finished_track_id = f"{search_result.username}:{search_result.filename}"
             
             if current_track_id != finished_track_id:
-                print(f"🚫 Ignoring old streaming result for: {search_result.filename}")
+                print(f"Ignoring old streaming result for: {search_result.filename}")
                 print(f"   Current track: {current_track_id}")
                 print(f"   Finished track: {finished_track_id}")
                 return
@@ -8899,7 +8899,7 @@ class DownloadsPage(QWidget):
                 # Start audio playback
                 success = self.audio_player.play_file(stream_file)
                 if success:
-                    print(f"🎵 Started audio playback: {os.path.basename(stream_file)}")
+                    print(f"Started audio playback: {os.path.basename(stream_file)}")
                     # Set button to playing state
                     if self.currently_playing_button:
                         try:
@@ -8912,7 +8912,7 @@ class DownloadsPage(QWidget):
                         self.track_loading_finished.emit(self.current_track_result)
                         self.track_started.emit(self.current_track_result)
                 else:
-                    print(f"❌ Failed to start audio playback")
+                    print(f"Failed to start audio playback")
                     # Reset button on failure
                     if self.currently_playing_button:
                         try:
@@ -8922,7 +8922,7 @@ class DownloadsPage(QWidget):
                             pass
                         self.currently_playing_button = None
             else:
-                print(f"❌ Stream file not found in {stream_folder}")
+                print(f"Stream file not found in {stream_folder}")
                 # Reset button on failure
                 if self.currently_playing_button:
                     try:
@@ -8933,7 +8933,7 @@ class DownloadsPage(QWidget):
                     self.currently_playing_button = None
                 
         except Exception as e:
-            print(f"❌ Error starting audio playback: {e}")
+            print(f"Error starting audio playback: {e}")
             # Reset button on error
             if self.currently_playing_button:
                 try:
@@ -8956,7 +8956,7 @@ class DownloadsPage(QWidget):
                 # Emit progress signal for media player
                 self.track_loading_progress.emit(progress_percent, search_result)
             else:
-                print(f"🚫 Ignoring progress for old streaming result: {search_result.filename}")
+                print(f"Ignoring progress for old streaming result: {search_result.filename}")
     
     def on_streaming_queued(self, queue_msg, search_result):
         """Handle streaming queue state updates"""
@@ -8975,9 +8975,9 @@ class DownloadsPage(QWidget):
                     except RuntimeError:
                         # Button was deleted, ignore
                         pass
-                print(f"📋 Showing queue status for current track")
+                print(f"Showing queue status for current track")
             else:
-                print(f"🚫 Ignoring queue status for old streaming result: {search_result.filename}")
+                print(f"Ignoring queue status for old streaming result: {search_result.filename}")
     
     def on_streaming_failed(self, error_msg, search_result):
         """Handle streaming failure"""
@@ -8994,35 +8994,35 @@ class DownloadsPage(QWidget):
     def _stop_all_streaming_threads(self):
         """Stop all active streaming threads to prevent old downloads from interrupting new streams"""
         if hasattr(self, 'streaming_threads'):
-            print(f"🛑 Stopping {len(self.streaming_threads)} active streaming threads")
+            print(f"Stopping {len(self.streaming_threads)} active streaming threads")
             
             for thread in self.streaming_threads[:]:  # Use slice copy to avoid modification during iteration
                 try:
                     if thread.isRunning():
-                        print(f"🛑 Stopping streaming thread for: {getattr(thread.search_result, 'filename', 'unknown')}")
+                        print(f"Stopping streaming thread for: {getattr(thread.search_result, 'filename', 'unknown')}")
                         thread.stop()  # Request stop
                         
                         # Give thread more time to stop gracefully (3 seconds)
                         if not thread.wait(3000):  # Wait up to 3 seconds
-                            print(f"⚠️ Streaming thread taking longer to stop, giving more time...")
+                            print(f"Streaming thread taking longer to stop, giving more time...")
                             # Try one more time with longer wait
                             if not thread.wait(2000):  # Additional 2 seconds
-                                print(f"⚠️ Force terminating unresponsive streaming thread")
+                                print(f"Force terminating unresponsive streaming thread")
                                 thread.terminate()
                                 thread.wait(1000)  # Wait for termination
                             else:
-                                print(f"✓ Streaming thread stopped gracefully (delayed)")
+                                print(f"Streaming thread stopped gracefully (delayed)")
                         else:
-                            print(f"✓ Streaming thread stopped gracefully")
+                            print(f"Streaming thread stopped gracefully")
                     
                     # Remove from list
                     if thread in self.streaming_threads:
                         self.streaming_threads.remove(thread)
                         
                 except Exception as e:
-                    print(f"⚠️ Error stopping streaming thread: {e}")
+                    print(f"Error stopping streaming thread: {e}")
             
-            print(f"✓ All streaming threads stopped")
+            print(f"All streaming threads stopped")
     
     async def _cancel_current_streaming_download(self):
         """Cancel the current streaming download via slskd API to prevent queue clogging"""
@@ -9032,7 +9032,7 @@ class DownloadsPage(QWidget):
         try:
             username = self.current_streaming_download['username']
             filename = self.current_streaming_download['filename']
-            print(f"🚫 Attempting to cancel streaming download: {username}:{os.path.basename(filename)}")
+            print(f"Attempting to cancel streaming download: {username}:{os.path.basename(filename)}")
             
             # Find the download ID by searching current transfers
             all_transfers = await self.soulseek_client._make_request('GET', 'transfers/downloads')
@@ -9053,27 +9053,27 @@ class DownloadsPage(QWidget):
                         break
             
             if download_id:
-                print(f"🚫 Found streaming download ID: {download_id}")
+                print(f"Found streaming download ID: {download_id}")
                 # Cancel the download with remove=False (slskd won't allow remove=True for active downloads)
                 success = await self.soulseek_client.cancel_download(download_id, username, remove=False)
                 if success:
-                    print(f"✓ Successfully cancelled streaming download: {os.path.basename(filename)}")
+                    print(f"Successfully cancelled streaming download: {os.path.basename(filename)}")
                 else:
-                    print(f"⚠️ Failed to cancel streaming download: {os.path.basename(filename)}")
+                    print(f"Failed to cancel streaming download: {os.path.basename(filename)}")
                     # Try without remove flag as fallback
                     try:
                         success = await self.soulseek_client.cancel_download(download_id, username, remove=False)
                         if success:
-                            print(f"✓ Cancelled streaming download with fallback method: {os.path.basename(filename)}")
+                            print(f"Cancelled streaming download with fallback method: {os.path.basename(filename)}")
                     except Exception as fallback_e:
-                        print(f"⚠️ Fallback cancellation also failed: {fallback_e}")
+                        print(f"Fallback cancellation also failed: {fallback_e}")
             else:
-                print(f"⚠️ Could not find download ID for streaming download: {os.path.basename(filename)}")
+                print(f"Could not find download ID for streaming download: {os.path.basename(filename)}")
                 
         except Exception as e:
-            print(f"⚠️ Error cancelling streaming download: {e}")
+            print(f"Error cancelling streaming download: {e}")
             # Continue with graceful fallback - don't let cancellation errors break streaming
-            print(f"🔄 Continuing with new stream despite cancellation error")
+            print(f"Continuing with new stream despite cancellation error")
         finally:
             # Clean up any partial files from the cancelled streaming download
             if hasattr(self, 'current_streaming_download') and self.current_streaming_download:
@@ -9081,7 +9081,7 @@ class DownloadsPage(QWidget):
             
             # Clear tracking regardless of success to prevent stuck state
             self.current_streaming_download = None
-            print(f"🧹 Cleared streaming download tracking")
+            print(f"Cleared streaming download tracking")
             
         # Also clean up any completed streaming downloads to prevent queue clogging
         await self._cleanup_completed_streaming_downloads()
@@ -9089,7 +9089,7 @@ class DownloadsPage(QWidget):
     async def _cleanup_completed_streaming_downloads(self):
         """Remove completed streaming downloads from slskd to prevent queue clogging"""
         try:
-            print(f"🧹 Cleaning up completed streaming downloads...")
+            print(f"Cleaning up completed streaming downloads...")
             
             # Get current transfers to find completed ones
             all_transfers = await self.soulseek_client._make_request('GET', 'transfers/downloads')
@@ -9126,19 +9126,19 @@ class DownloadsPage(QWidget):
                         download['id'], download['username'], remove=True
                     )
                     if success:
-                        print(f"🧹 Cleaned up completed streaming download: {os.path.basename(download['filename'])}")
+                        print(f"Cleaned up completed streaming download: {os.path.basename(download['filename'])}")
                     else:
-                        print(f"⚠️ Failed to clean up: {os.path.basename(download['filename'])}")
+                        print(f"Failed to clean up: {os.path.basename(download['filename'])}")
                 except Exception as e:
-                    print(f"⚠️ Error cleaning up download {download['id']}: {e}")
+                    print(f"Error cleaning up download {download['id']}: {e}")
                     
             if completed_streaming_downloads:
-                print(f"🧹 Completed streaming download cleanup: {len(completed_streaming_downloads[:max_cleanup])} items removed")
+                print(f"Completed streaming download cleanup: {len(completed_streaming_downloads[:max_cleanup])} items removed")
             else:
-                print(f"🧹 No completed streaming downloads found to clean up")
+                print(f"No completed streaming downloads found to clean up")
                 
         except Exception as e:
-            print(f"⚠️ Error during streaming download cleanup: {e}")
+            print(f"Error during streaming download cleanup: {e}")
     
     async def _cleanup_cancelled_streaming_files(self, download_info):
         """Clean up partial files from cancelled streaming downloads"""
@@ -9149,7 +9149,7 @@ class DownloadsPage(QWidget):
             if not username or not filename:
                 return
                 
-            print(f"🧹 Cleaning up cancelled streaming files for: {os.path.basename(filename)}")
+            print(f"Cleaning up cancelled streaming files for: {os.path.basename(filename)}")
             
             # Get downloads directory from config
             from config.settings import config_manager
@@ -9168,17 +9168,17 @@ class DownloadsPage(QWidget):
                         
                         file_path = os.path.join(root, file)
                         try:
-                            print(f"🗑️ Removing cancelled streaming file: {file_path}")
+                            print(f"Removing cancelled streaming file: {file_path}")
                             os.remove(file_path)
                             
                             # Clean up empty directories
                             self._cleanup_empty_directories(download_path, file_path)
                             
                         except Exception as e:
-                            print(f"⚠️ Error removing file {file_path}: {e}")
+                            print(f"Error removing file {file_path}: {e}")
                             
         except Exception as e:
-            print(f"⚠️ Error cleaning up cancelled streaming files: {e}")
+            print(f"Error cleaning up cancelled streaming files: {e}")
     
     def _cancel_current_streaming_download_sync(self):
         """Synchronous wrapper for cancelling current streaming download"""
@@ -9217,8 +9217,8 @@ class DownloadsPage(QWidget):
                     loop.close()
                     
             except Exception as e:
-                print(f"⚠️ Error in sync streaming download cancellation: {e}")
-                print(f"🔄 Continuing with new stream despite sync cancellation error")
+                print(f"Error in sync streaming download cancellation: {e}")
+                print(f"Continuing with new stream despite sync cancellation error")
                 # Clear tracking as fallback to prevent stuck state
                 self.current_streaming_download = None
     
@@ -9250,7 +9250,7 @@ class DownloadsPage(QWidget):
     
     def on_audio_playback_finished(self):
         """Handle when audio playback finishes"""
-        print("🎵 Audio playback completed")
+        print("Audio playback completed")
         # Reset the play button to play state
         if self.currently_playing_button:
             try:
@@ -9272,7 +9272,7 @@ class DownloadsPage(QWidget):
     
     def on_audio_playback_error(self, error_msg):
         """Handle audio playback errors"""
-        print(f"❌ Audio playback error: {error_msg}")
+        print(f"Audio playback error: {error_msg}")
         # Reset the play button to play state
         if self.currently_playing_button:
             try:
@@ -9298,11 +9298,11 @@ class DownloadsPage(QWidget):
         from PyQt6.QtMultimedia import QMediaPlayer
         
         current_state = self.audio_player.playbackState()
-        print(f"🎮 handle_sidebar_play_pause() - Current state: {current_state}")
-        print(f"🎮 handle_sidebar_play_pause() - Current source: {self.audio_player.source().toString()}")
+        print(f"handle_sidebar_play_pause() - Current state: {current_state}")
+        print(f"handle_sidebar_play_pause() - Current source: {self.audio_player.source().toString()}")
         
         if current_state == QMediaPlayer.PlaybackState.PlayingState:
-            print("⏸️ Sidebar: Pausing playback")
+            print("Sidebar: Pausing playback")
             self.audio_player.pause()
             # is_playing will be set automatically by _on_playback_state_changed
             if self.currently_playing_button:
@@ -9312,9 +9312,9 @@ class DownloadsPage(QWidget):
                     # Button was deleted, ignore
                     pass
             self.track_paused.emit()
-            print("⏸️ Paused from sidebar")
+            print("Paused from sidebar")
         else:
-            print("▶️ Sidebar: Attempting to resume/play")
+            print("Sidebar: Attempting to resume/play")
             self.audio_player.play()
             # is_playing will be set automatically by _on_playback_state_changed
             if self.currently_playing_button:
@@ -9324,7 +9324,7 @@ class DownloadsPage(QWidget):
                     # Button was deleted, ignore
                     pass
             self.track_resumed.emit()
-            print("🎵 Resumed from sidebar")
+            print("Resumed from sidebar")
     
     def handle_sidebar_stop(self):
         """Handle stop request from sidebar media player"""
@@ -9346,12 +9346,12 @@ class DownloadsPage(QWidget):
         # Clear track state
         self.current_track_id = None
         self.current_track_result = None
-        print("⏹️ Stopped from sidebar")
+        print("Stopped from sidebar")
     
     def handle_sidebar_volume(self, volume):
         """Handle volume change from sidebar media player"""
         self.audio_player.audio_output.setVolume(volume)
-        print(f"🔊 Volume set to {int(volume * 100)}% from sidebar")
+        print(f"Volume set to {int(volume * 100)}% from sidebar")
     
     def clear_stream_folder(self, release_current_file=True):
         """Clear all files from the Stream folder to prevent playing wrong files
@@ -9364,7 +9364,7 @@ class DownloadsPage(QWidget):
             # Only release file handles if explicitly requested
             if release_current_file and hasattr(self, 'audio_player') and self.audio_player:
                 self.audio_player.release_file()
-                print("🔓 Released audio player file handle before clearing")
+                print("Released audio player file handle before clearing")
             
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # Go up from ui/pages/
             stream_folder = os.path.join(project_root, 'Stream')
@@ -9375,12 +9375,12 @@ class DownloadsPage(QWidget):
                     if os.path.isfile(file_path):
                         try:
                             os.remove(file_path)
-                            print(f"🗑️ Cleared old stream file: {filename}")
+                            print(f"Cleared old stream file: {filename}")
                         except Exception as e:
-                            print(f"⚠️ Could not remove stream file {filename}: {e}")
+                            print(f"Could not remove stream file {filename}: {e}")
                     
         except Exception as e:
-            print(f"⚠️ Error clearing stream folder: {e}")
+            print(f"Error clearing stream folder: {e}")
     
     def on_download_completed(self, message, download_item):
         """Handle successful download start (NOT completion)"""
@@ -9413,7 +9413,7 @@ class DownloadsPage(QWidget):
         download_item.progress = 0
         
         # Emit activity signal for download failure
-        self.download_activity.emit("❌", "Download Failed", f"'{download_item.title}' - {error_msg}", "Now")
+        self.download_activity.emit("", "Download Failed", f"'{download_item.title}' - {error_msg}", "Now")
         
         # Error logged to console for debugging
     
@@ -9553,13 +9553,13 @@ class DownloadsPage(QWidget):
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 
-                print("[DEBUG] 🗑️ Clearing all completed/cancelled downloads from slskd backend...")
+                print("[DEBUG] Clearing all completed/cancelled downloads from slskd backend...")
                 success = loop.run_until_complete(self.soulseek_client.clear_all_completed_downloads())
                 
                 if success:
-                    print("[DEBUG] ✅ Successfully cleared completed/cancelled downloads from backend")
+                    print("[DEBUG] Successfully cleared completed/cancelled downloads from backend")
                 else:
-                    print("[WARNING] ❌ Backend reported failure, but proceeding with UI clearing anyway")
+                    print("[WARNING] Backend reported failure, but proceeding with UI clearing anyway")
                     print("[WARNING] (Web UI may have cleared successfully despite backend failure report)")
                     
             except Exception as e:
@@ -9604,13 +9604,13 @@ class DownloadsPage(QWidget):
     def _handle_api_cleanup_completion(self, success, download_id, username):
         """Handle completion of API cleanup operation on main thread"""
         if success:
-            print(f"✓ Successfully signaled completion for download {download_id}")
+            print(f"Successfully signaled completion for download {download_id}")
         else:
-            print(f"⚠️ Failed to signal completion for download {download_id}")
+            print(f"Failed to signal completion for download {download_id}")
     
     def _on_download_completion_finished(self, download_item, organized_path):
         """Handle successful completion of background download processing"""
-        print(f"✅ Background processing completed for '{download_item.title}' -> {organized_path}")
+        print(f"Background processing completed for '{download_item.title}' -> {organized_path}")
         
         # Update the download item status and progress on main thread
         download_item.update_status(
@@ -9626,7 +9626,7 @@ class DownloadsPage(QWidget):
     
     def _on_download_completion_error(self, download_item, error_message):
         """Handle error in background download processing"""
-        print(f"❌ Background processing failed for '{download_item.title}': {error_message}")
+        print(f"Background processing failed for '{download_item.title}': {error_message}")
         
         # Still mark as completed but with original path, move to finished queue
         download_item.update_status(
@@ -9771,9 +9771,9 @@ class DownloadsPage(QWidget):
                     stuck_downloads.append((item.title, f"API missing {item.api_missing_count_v2} cycles"))
             
             # Log summary
-            print(f"📊 Queue Health: {status_counts}")
+            print(f"Queue Health: {status_counts}")
             if stuck_downloads:
-                print(f"⚠️ Potentially stuck downloads: {len(stuck_downloads)}")
+                print(f"Potentially stuck downloads: {len(stuck_downloads)}")
                 for title, issue in stuck_downloads[:3]:  # Show first 3
                     if isinstance(issue, str):
                         print(f"   - {title}: {issue}")
@@ -9834,7 +9834,7 @@ class DownloadsPage(QWidget):
         # Track queue state transitions for progressive timeout
         if new_status in ['queued', 'initializing'] and download_item.queue_start_time is None:
             download_item.queue_start_time = time.time()
-            print(f"🕐 Download entered queue: {download_item.title}")
+            print(f"Download entered queue: {download_item.title}")
         elif new_status in ['downloading', 'completed', 'cancelled', 'failed']:
             if download_item.queue_start_time:
                 queue_duration = time.time() - download_item.queue_start_time
@@ -9857,7 +9857,7 @@ class DownloadsPage(QWidget):
         
         # Reset API missing count when transfer is found and add enhanced logging
         if hasattr(download_item, 'api_missing_count_v2') and download_item.api_missing_count_v2 > 0:
-            print(f"✅ Download reconnected to API after {download_item.api_missing_count_v2} missing cycles: {download_item.title}")
+            print(f"Download reconnected to API after {download_item.api_missing_count_v2} missing cycles: {download_item.title}")
             download_item.api_missing_count_v2 = 0
         
         # Update ID mapping if needed
@@ -9873,9 +9873,9 @@ class DownloadsPage(QWidget):
             
             # Emit specific activity signal for failures
             if new_status == 'failed':
-                self.download_activity.emit("❌", "Download Failed", f"'{download_item.title}' by {download_item.artist}", "Now")
+                self.download_activity.emit("", "Download Failed", f"'{download_item.title}' by {download_item.artist}", "Now")
             elif new_status == 'cancelled':
-                self.download_activity.emit("⏹️", "Download Cancelled", f"'{download_item.title}' by {download_item.artist}", "Now")
+                self.download_activity.emit("", "Download Cancelled", f"'{download_item.title}' by {download_item.artist}", "Now")
             
             # Cleanup API if needed
             if new_status in ['cancelled', 'failed'] and hasattr(download_item, 'download_id'):
@@ -9899,7 +9899,7 @@ class DownloadsPage(QWidget):
         current_status = download_item.status.lower()
         if current_status in ['queued', 'initializing'] and download_item.queue_start_time is None:
             download_item.queue_start_time = time.time()
-            print(f"🕐 Started tracking queue time for: {download_item.title}")
+            print(f"Started tracking queue time for: {download_item.title}")
         elif current_status not in ['queued', 'initializing']:
             download_item.queue_start_time = None  # Reset if no longer queued
         
@@ -9917,9 +9917,9 @@ class DownloadsPage(QWidget):
         # Fail download if API missing for 3 cycles OR queue timeout exceeded
         if download_item.api_missing_count_v2 >= 3 or queue_timeout_exceeded:
             if queue_timeout_exceeded:
-                print(f"⚠️ Download failed due to queue timeout: {download_item.title}")
+                print(f"Download failed due to queue timeout: {download_item.title}")
             else:
-                print(f"⚠️ Download missing from API for {download_item.api_missing_count_v2} cycles: {download_item.title}")
+                print(f"Download missing from API for {download_item.api_missing_count_v2} cycles: {download_item.title}")
             self._queue_manager.atomic_state_transition(download_item, 'failed')
             self.download_queue.move_to_finished(download_item)
     
@@ -9959,14 +9959,14 @@ class DownloadsPage(QWidget):
                             return  # Success, exit retry loop
                         else:
                             if attempt == max_retries - 1:
-                                print(f"❌ API cleanup failed after {max_retries} attempts: {download_item.title}")
+                                print(f"API cleanup failed after {max_retries} attempts: {download_item.title}")
                             
                     finally:
                         loop.close()
                         
                 except Exception as e:
                     if attempt == max_retries - 1:
-                        print(f"❌ API cleanup failed after {max_retries} attempts: {e}")
+                        print(f"API cleanup failed after {max_retries} attempts: {e}")
                     # Continue to next retry
                         
         self._optimized_api_pool.submit(cleanup_task_with_retry)
@@ -10016,7 +10016,7 @@ class DownloadsPage(QWidget):
                                     )
                                 )
                                 if success:
-                                    print(f"✅ Fallback cleanup successful for persistent error")
+                                    print(f"Fallback cleanup successful for persistent error")
                             except Exception as e:
                                 pass  # Silent fallback failures
                                 
@@ -10041,7 +10041,7 @@ class DownloadsPage(QWidget):
     def enable_optimized_systems(self):
         """Enable all v2 optimization systems"""
         self._use_optimized_systems = True
-        print("✅ Enabled optimized download systems")
+        print("Enabled optimized download systems")
         
         # Switch to optimized timer callback
         self.download_status_timer.timeout.disconnect()
@@ -10053,7 +10053,7 @@ class DownloadsPage(QWidget):
     def disable_optimized_systems(self):
         """Disable v2 optimizations and revert to original behavior"""
         self._use_optimized_systems = False
-        print("⚠️ Disabled optimizations, reverted to original system")
+        print("Disabled optimizations, reverted to original system")
         
         # Revert to original timer callback
         self.download_status_timer.timeout.disconnect()
@@ -10222,9 +10222,9 @@ class DownloadsPage(QWidget):
                                 
                                 if success:
                                     success_count += 1
-                                    print(f"[CLEANUP] ✅ Successfully removed {state} download: {username}/{download_id}")
+                                    print(f"[CLEANUP] Successfully removed {state} download: {username}/{download_id}")
                                 else:
-                                    print(f"[CLEANUP] ❌ Failed to remove {state} download: {username}/{download_id}")
+                                    print(f"[CLEANUP] Failed to remove {state} download: {username}/{download_id}")
                                     
                             except Exception as e:
                                 print(f"[ERROR] Error removing individual download {download_info}: {e}")
@@ -10396,7 +10396,7 @@ class DownloadsPage(QWidget):
         controls_title.setStyleSheet("color: #ffffff;")
         
         # Pause/Resume button
-        pause_btn = QPushButton("⏸️ Pause Downloads")
+        pause_btn = QPushButton("Pause Downloads")
         pause_btn.setFixedHeight(40)
         pause_btn.setStyleSheet("""
             QPushButton {
@@ -10413,7 +10413,7 @@ class DownloadsPage(QWidget):
         """)
         
         # Clear completed button
-        clear_btn = QPushButton("🗑️ Clear Completed")
+        clear_btn = QPushButton("Clear Completed")
         clear_btn.setFixedHeight(35)
         clear_btn.clicked.connect(self.clear_completed_downloads)  # Connect to the clearing method
         clear_btn.setStyleSheet("""
@@ -10513,7 +10513,7 @@ class DownloadsPage(QWidget):
         count_label.setFont(QFont("Arial", 11))
         count_label.setStyleSheet("color: #b3b3b3;")
         
-        download_all_btn = QPushButton("📥 Download All")
+        download_all_btn = QPushButton("Download All")
         download_all_btn.setFixedSize(150, 35)
         download_all_btn.setStyleSheet("""
             QPushButton {
@@ -10614,7 +10614,7 @@ class DownloadsPage(QWidget):
         info_layout.addWidget(playlist_label)
         
         # Download button
-        download_btn = QPushButton("📥")
+        download_btn = QPushButton("")
         download_btn.setFixedSize(30, 30)
         download_btn.setStyleSheet("""
             QPushButton {
@@ -10657,7 +10657,7 @@ class DownloadsPage(QWidget):
                     match = re.match(pattern, title.strip())
                     if match:
                         track_num = int(match.group(1))
-                        print(f"    🎵 Found track number in title '{title}': {track_num}")
+                        print(f"    Found track number in title '{title}': {track_num}")
                         return track_num
             
             # Try extracting from filename
@@ -10678,20 +10678,20 @@ class DownloadsPage(QWidget):
                 match = re.match(pattern, base_name.strip())
                 if match:
                     track_num = int(match.group(1))
-                    print(f"    🎵 Found track number in filename '{filename}': {track_num}")
+                    print(f"    Found track number in filename '{filename}': {track_num}")
                     return track_num
             
-            print(f"    ❌ No track number found in filename: '{filename}'")
+            print(f"    No track number found in filename: '{filename}'")
             return None
             
         except Exception as e:
-            print(f"❌ Error extracting track number from filename: {e}")
+            print(f"Error extracting track number from filename: {e}")
             return None
     
     def _get_spotify_album_tracks(self, selected_album: Album) -> List[dict]:
         """Fetch all tracks from the selected Spotify album"""
         try:
-            print(f"🎵 Fetching tracks from Spotify album: {selected_album.name}")
+            print(f"Fetching tracks from Spotify album: {selected_album.name}")
             tracks_data = self.spotify_client.get_album_tracks(selected_album.id)
             
             if tracks_data and 'items' in tracks_data:
@@ -10703,14 +10703,14 @@ class DownloadsPage(QWidget):
                         'duration_ms': track_data['duration_ms'],
                         'id': track_data['id']
                     })
-                print(f"✅ Found {len(tracks)} tracks in Spotify album")
+                print(f"Found {len(tracks)} tracks in Spotify album")
                 return tracks
             else:
-                print(f"❌ No tracks found in Spotify album")
+                print(f"No tracks found in Spotify album")
                 return []
                 
         except Exception as e:
-            print(f"❌ Error fetching Spotify album tracks: {e}")
+            print(f"Error fetching Spotify album tracks: {e}")
             return []
     
     def _match_track_to_spotify_title(self, track, spotify_tracks: List[dict]) -> Optional[str]:
@@ -10720,7 +10720,7 @@ class DownloadsPage(QWidget):
                 return None
             
             original_title = track.title
-            print(f"🔍 Matching track: '{original_title}'")
+            print(f"Matching track: '{original_title}'")
             
             # Clean the original title by removing track number prefixes
             import re
@@ -10728,7 +10728,7 @@ class DownloadsPage(QWidget):
             track_num_match = re.match(r'^(\d+)\s*[\.\-_]\s*(.+)', cleaned_original.strip())
             if track_num_match:
                 cleaned_original = track_num_match.group(2).strip()
-                print(f"   🧹 Cleaned title (removed track number): '{cleaned_original}'")
+                print(f"   Cleaned title (removed track number): '{cleaned_original}'")
             
             best_match = None
             best_score = 0.0
@@ -10737,7 +10737,7 @@ class DownloadsPage(QWidget):
             if hasattr(track, 'track_number') and track.track_number:
                 for spotify_track in spotify_tracks:
                     if spotify_track['track_number'] == track.track_number:
-                        print(f"✅ Matched by track number {track.track_number}: '{spotify_track['name']}'")
+                        print(f"Matched by track number {track.track_number}: '{spotify_track['name']}'")
                         return spotify_track['name']
             
             # Fallback to title similarity matching using cleaned titles
@@ -10746,7 +10746,7 @@ class DownloadsPage(QWidget):
                 normalized_original = self.matching_engine.normalize_string(cleaned_original)
                 normalized_spotify = self.matching_engine.normalize_string(spotify_track['name'])
                 
-                print(f"   📊 Comparing: '{normalized_original}' vs '{normalized_spotify}'")
+                print(f"   Comparing: '{normalized_original}' vs '{normalized_spotify}'")
                 
                 # Calculate similarity score
                 score = self.matching_engine.similarity_score(normalized_original, normalized_spotify)
@@ -10754,18 +10754,18 @@ class DownloadsPage(QWidget):
                 if score > best_score:
                     best_score = score
                     best_match = spotify_track
-                    print(f"   ⬆️ New best match ({score:.2f}): '{spotify_track['name']}'")
+                    print(f"   New best match ({score:.2f}): '{spotify_track['name']}'")
             
             # Only return match if confidence is high enough
             if best_match and best_score >= 0.6:  # 60% similarity threshold
-                print(f"✅ Matched by title similarity ({best_score:.2f}): '{best_match['name']}'")
+                print(f"Matched by title similarity ({best_score:.2f}): '{best_match['name']}'")
                 return best_match['name']
             else:
-                print(f"❌ No good title match found (best score: {best_score:.2f})")
+                print(f"No good title match found (best score: {best_score:.2f})")
                 return None
                 
         except Exception as e:
-            print(f"❌ Error matching track to Spotify title: {e}")
+            print(f"Error matching track to Spotify title: {e}")
             return None
 
     # In downloads.py, add this new method inside the DownloadsPage class (e.g., after load_more_results)
@@ -10810,9 +10810,9 @@ class DownloadsPage(QWidget):
             total_filtered = len(self.current_filtered_results)
             if self.displayed_results < total_filtered:
                 remaining = total_filtered - self.displayed_results
-                self.update_search_status(f"✨ Showing {self.displayed_results} of {total_filtered} results (scroll for {remaining} more)", "#1db954")
+                self.update_search_status(f"Showing {self.displayed_results} of {total_filtered} results (scroll for {remaining} more)", "#1db954")
             else:
-                self.update_search_status(f"✨ Showing all {total_filtered} results", "#1db954")
+                self.update_search_status(f"Showing all {total_filtered} results", "#1db954")
 
     # In class DownloadsPage, add this new method
 
@@ -10903,21 +10903,21 @@ class DownloadsPage(QWidget):
         try:
             # Check if metadata enhancement is enabled
             if not config_manager.get('metadata_enhancement.enabled', True):
-                print("🎵 Metadata enhancement disabled in config")
+                print("Metadata enhancement disabled in config")
                 return True
                 
-            print(f"🎵 Enhancing metadata for: {os.path.basename(file_path)}")
+            print(f"Enhancing metadata for: {os.path.basename(file_path)}")
             
             # Load the audio file
             audio_file = MutagenFile(file_path)
             if audio_file is None:
-                print(f"❌ Could not load audio file with Mutagen: {file_path}")
+                print(f"Could not load audio file with Mutagen: {file_path}")
                 return False
                 
             # Extract comprehensive metadata from Spotify
             metadata = self._extract_spotify_metadata(download_item, artist, album_info)
             if not metadata:
-                print(f"⚠️ Could not extract Spotify metadata, preserving original tags")
+                print(f"Could not extract Spotify metadata, preserving original tags")
                 return True
                 
             # Determine file format and apply appropriate tags
@@ -10925,19 +10925,19 @@ class DownloadsPage(QWidget):
             success = False
             
             if file_format == 'mp3':
-                print(f"🎵 Applying ID3 tags for {file_path}")
+                print(f"Applying ID3 tags for {file_path}")
                 success = self._apply_id3_tags(audio_file, metadata, file_path)
             elif file_format == 'flac':
-                print(f"🎵 Applying FLAC tags for {file_path}")
+                print(f"Applying FLAC tags for {file_path}")
                 success = self._apply_flac_tags(audio_file, metadata, file_path)
             elif file_format in ['mp4', 'm4a']:
-                print(f"🎵 Applying MP4 tags for {file_path}")
+                print(f"Applying MP4 tags for {file_path}")
                 success = self._apply_mp4_tags(audio_file, metadata, file_path)
             elif file_format == 'ogg':
-                print(f"🎵 Applying OGG tags for {file_path}")
+                print(f"Applying OGG tags for {file_path}")
                 success = self._apply_ogg_tags(audio_file, metadata, file_path)
             else:
-                print(f"⚠️ Unsupported audio format for metadata enhancement: {file_format}")
+                print(f"Unsupported audio format for metadata enhancement: {file_format}")
                 return True
                 
             if success:
@@ -10945,14 +10945,14 @@ class DownloadsPage(QWidget):
                 if config_manager.get('metadata_enhancement.embed_album_art', True):
                     self._embed_album_art_metadata(file_path, audio_file, metadata, file_format)
                     
-                print(f"✅ Metadata enhanced with Spotify data")
+                print(f"Metadata enhanced with Spotify data")
                 return True
             else:
-                print(f"⚠️ Metadata enhancement failed, original tags preserved")
+                print(f"Metadata enhancement failed, original tags preserved")
                 return False
                 
         except Exception as e:
-            print(f"❌ Error enhancing metadata for {file_path}: {e}")
+            print(f"Error enhancing metadata for {file_path}: {e}")
             return False
     
     def _extract_spotify_metadata(self, download_item, artist: Artist, album_info: dict) -> dict:
@@ -10970,14 +10970,14 @@ class DownloadsPage(QWidget):
             metadata = {}
             
             # Debug: Log what we're working with
-            print(f"🔍 Extracting metadata for: {download_item.title}")
+            print(f"Extracting metadata for: {download_item.title}")
             print(f"   - Artist: {artist.name if artist else 'None'}")
             print(f"   - Album info: {album_info}")
             print(f"   - Has _spotify_clean_title: {hasattr(download_item, '_spotify_clean_title')}")
             print(f"   - Has matched_album: {hasattr(download_item, 'matched_album')}")
             
             if not artist:
-                print(f"❌ No artist provided for metadata extraction")
+                print(f"No artist provided for metadata extraction")
                 return {}
             
             # Basic track information
@@ -11022,7 +11022,7 @@ class DownloadsPage(QWidget):
             if hasattr(download_item, 'matched_album') and download_item.matched_album:
                 metadata['spotify_album_id'] = getattr(download_item.matched_album, 'id', None)
             
-            print(f"🎯 Extracted metadata summary:")
+            print(f"Extracted metadata summary:")
             print(f"   - Title: {metadata.get('title')}")
             print(f"   - Artist: {metadata.get('artist')}")
             print(f"   - Album: {metadata.get('album')}")
@@ -11034,7 +11034,7 @@ class DownloadsPage(QWidget):
             
             # Special debugging for problematic tracks
             if metadata.get('title') == 'Tell Me What You Want' or metadata.get('track_number') == 13:
-                print(f"🔍 [DEBUG] Special track detected - Tell Me What You Want:")
+                print(f"[DEBUG] Special track detected - Tell Me What You Want:")
                 print(f"   - Full metadata dict: {metadata}")
                 print(f"   - Album info dict: {album_info}")
                 print(f"   - Artist object: {artist}")
@@ -11046,7 +11046,7 @@ class DownloadsPage(QWidget):
             return metadata
             
         except Exception as e:
-            print(f"❌ Error extracting Spotify metadata: {e}")
+            print(f"Error extracting Spotify metadata: {e}")
             import traceback
             traceback.print_exc()
             return {}
@@ -11084,7 +11084,7 @@ class DownloadsPage(QWidget):
             return 'unknown'
             
         except Exception as e:
-            print(f"⚠️ Could not detect audio format: {e}")
+            print(f"Could not detect audio format: {e}")
             return 'unknown'
     
     def _apply_id3_tags(self, audio_file, metadata: dict, file_path: str) -> bool:
@@ -11130,13 +11130,13 @@ class DownloadsPage(QWidget):
             return True
             
         except Exception as e:
-            print(f"❌ Error applying ID3 tags: {e}")
+            print(f"Error applying ID3 tags: {e}")
             return False
     
     def _apply_flac_tags(self, audio_file, metadata: dict, file_path: str) -> bool:
         """Handle FLAC Vorbis comments for lossless files"""
         try:
-            print(f"🎵 Applying FLAC tags with {len(metadata)} metadata fields")
+            print(f"Applying FLAC tags with {len(metadata)} metadata fields")
             
             # Read existing tags first to preserve non-empty values
             existing_title = audio_file.get('TITLE', [''])[0] if audio_file.get('TITLE') else ''
@@ -11202,11 +11202,11 @@ class DownloadsPage(QWidget):
             
             print(f"   - Saving FLAC file with enhanced metadata...")
             audio_file.save()
-            print(f"   - ✅ FLAC tags saved successfully")
+            print(f"   - FLAC tags saved successfully")
             return True
             
         except Exception as e:
-            print(f"❌ Error applying FLAC tags: {e}")
+            print(f"Error applying FLAC tags: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -11249,7 +11249,7 @@ class DownloadsPage(QWidget):
             return True
             
         except Exception as e:
-            print(f"❌ Error applying MP4 tags: {e}")
+            print(f"Error applying MP4 tags: {e}")
             return False
     
     def _apply_ogg_tags(self, audio_file, metadata: dict, file_path: str) -> bool:
@@ -11287,17 +11287,17 @@ class DownloadsPage(QWidget):
             return True
             
         except Exception as e:
-            print(f"❌ Error applying OGG tags: {e}")
+            print(f"Error applying OGG tags: {e}")
             return False
     
     def _embed_album_art_metadata(self, file_path: str, audio_file, metadata: dict, file_format: str) -> bool:
         """Download and embed high-quality Spotify album art"""
         try:
             if not metadata.get('album_art_url'):
-                print("🎨 No album art URL available for embedding")
+                print("No album art URL available for embedding")
                 return True
                 
-            print(f"🎨 Downloading album art for embedding...")
+            print(f"Downloading album art for embedding...")
             
             # Download album art
             album_art_url = metadata['album_art_url']
@@ -11305,7 +11305,7 @@ class DownloadsPage(QWidget):
             image_data = response.read()
             
             if not image_data:
-                print("❌ Failed to download album art data")
+                print("Failed to download album art data")
                 return False
                 
             # Determine image format
@@ -11342,11 +11342,11 @@ class DownloadsPage(QWidget):
             
             # Save with embedded art
             audio_file.save()
-            print(f"🎨 ✅ Album art successfully embedded")
+            print(f"Album art successfully embedded")
             return True
             
         except Exception as e:
-            print(f"❌ Error embedding album art: {e}")
+            print(f"Error embedding album art: {e}")
             return False
     
     def cleanup_resources(self):
@@ -11355,10 +11355,10 @@ class DownloadsPage(QWidget):
             # Shutdown thread pools
             if hasattr(self, 'api_thread_pool'):
                 self.api_thread_pool.shutdown(wait=False)
-                print("🧹 API thread pool shutdown")
+                print("API thread pool shutdown")
             
             if hasattr(self, 'completion_thread_pool'):
                 self.completion_thread_pool.waitForDone(3000)  # Wait up to 3 seconds for completion
-                print("🧹 Completion thread pool shutdown")
+                print("Completion thread pool shutdown")
         except Exception as e:
-            print(f"❌ Error during resource cleanup: {e}")
+            print(f"Error during resource cleanup: {e}")

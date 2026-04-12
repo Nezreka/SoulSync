@@ -64,6 +64,26 @@ services:
           cpus: '0.5'
           memory: 512M
 
+  ## ─── Optional: slskd (Soulseek client) ───────────────────────────────
+  ## Uncomment below to run slskd alongside SoulSync.
+  ## Downloads land in ./downloads which SoulSync already reads from.
+  ## After starting, set your SoulSync slskd URL to http://slskd:5030
+  ## and the API key to whatever you set in SLSKD_API_KEY below.
+  #
+  # slskd:
+  #   image: slskd/slskd:latest
+  #   container_name: slskd
+  #   environment:
+  #     - SLSKD_REMOTE_CONFIGURATION=true
+  #     - SLSKD_API_KEY=your-api-key-here
+  #     - TZ=America/New_York
+  #   ports:
+  #     - "5030:5030"
+  #   volumes:
+  #     - ./slskd-data:/app
+  #     - ./downloads:/app/downloads
+  #   restart: unless-stopped
+
 # Named volumes for persistent data
 volumes:
   soulsync_database:

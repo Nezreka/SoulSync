@@ -381,10 +381,10 @@ class DownloadMissingWishlistTracksModal(QDialog):
         title_section.addWidget(subtitle)
         
         dashboard_layout = QHBoxLayout()
-        self.total_card = self.create_compact_counter_card("📀 Total", "0", "#1db954")
-        self.matched_card = self.create_compact_counter_card("✅ Found", "0", "#4CAF50")
+        self.total_card = self.create_compact_counter_card("Total", "0", "#1db954")
+        self.matched_card = self.create_compact_counter_card("Found", "0", "#4CAF50")
         self.download_card = self.create_compact_counter_card("⬇️ Missing", "0", "#ff6b6b")
-        self.downloaded_card = self.create_compact_counter_card("✅ Downloaded", "0", "#4CAF50")
+        self.downloaded_card = self.create_compact_counter_card("Downloaded", "0", "#4CAF50")
         dashboard_layout.addWidget(self.total_card)
         dashboard_layout.addWidget(self.matched_card)
         dashboard_layout.addWidget(self.download_card)
@@ -421,7 +421,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
         progress_frame.setStyleSheet("background-color: #2d2d2d; border: 1px solid #444444; border-radius: 8px; padding: 12px;")
         layout = QVBoxLayout(progress_frame)
         analysis_container = QVBoxLayout()
-        analysis_label = QLabel("🔍 Library Analysis")
+        analysis_label = QLabel("Library Analysis")
         analysis_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
         self.analysis_progress = QProgressBar()
         self.analysis_progress.setFixedHeight(20)
@@ -482,7 +482,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
             # --- DURATION LOGIC REMOVED ---
 
             # "Matched" is now column 2
-            matched_item = QTableWidgetItem("⏳ Pending")
+            matched_item = QTableWidgetItem("Pending")
             matched_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.track_table.setItem(i, 2, matched_item)
 
@@ -575,10 +575,10 @@ class DownloadMissingWishlistTracksModal(QDialog):
                 cancel_button = layout.itemAt(0).widget()
                 if cancel_button:
                     cancel_button.setEnabled(False)
-                    cancel_button.setText("✓")
+                    cancel_button.setText("")
         
         # Update status to cancelled (column 3 for dashboard)
-        self.track_table.setItem(row, 3, QTableWidgetItem("🚫 Cancelled"))
+        self.track_table.setItem(row, 3, QTableWidgetItem("Cancelled"))
         
         # Add to cancelled tracks set
         if not hasattr(self, 'cancelled_tracks'):
@@ -586,7 +586,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
         self.cancelled_tracks.add(row)
         
         track = self.wishlist_tracks[row]
-        print(f"🚫 Track cancelled: {track.name} (row {row})")
+        print(f"Track cancelled: {track.name} (row {row})")
         
         # If downloads are active, also handle active download cancellation
         download_index = None
@@ -596,7 +596,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
             for download in self.active_downloads:
                 if download.get('table_index') == row:
                     download_index = download.get('download_index', row)
-                    print(f"🚫 Found active download {download_index} for cancelled track")
+                    print(f"Found active download {download_index} for cancelled track")
                     break
         
         # Check parallel_search_tracking for download index
@@ -604,23 +604,23 @@ class DownloadMissingWishlistTracksModal(QDialog):
             for idx, track_info in self.parallel_search_tracking.items():
                 if track_info.get('table_index') == row:
                     download_index = idx
-                    print(f"🚫 Found parallel tracking {download_index} for cancelled track")
+                    print(f"Found parallel tracking {download_index} for cancelled track")
                     break
         
         # If we found an active download, trigger completion to free up the worker
         if download_index is not None and hasattr(self, 'on_parallel_track_completed'):
-            print(f"🚫 Triggering completion for active download {download_index}")
+            print(f"Triggering completion for active download {download_index}")
             self.on_parallel_track_completed(download_index, success=False)
 
     def create_buttons(self):
         button_frame = QFrame(styleSheet="background-color: transparent; padding: 10px;")
         layout = QHBoxLayout(button_frame)
-        self.correct_failed_btn = QPushButton("🔧 Correct Failed Matches")
+        self.correct_failed_btn = QPushButton("Correct Failed Matches")
         self.correct_failed_btn.setFixedWidth(220)
         self.correct_failed_btn.setStyleSheet("QPushButton { background-color: #ffc107; color: #000; border-radius: 20px; font-weight: bold; }")
         self.correct_failed_btn.clicked.connect(self.on_correct_failed_matches_clicked)
         self.correct_failed_btn.hide()
-        self.clear_wishlist_btn = QPushButton("🗑️ Clear Wishlist")
+        self.clear_wishlist_btn = QPushButton("Clear Wishlist")
         self.clear_wishlist_btn.setFixedSize(150, 40)
         self.clear_wishlist_btn.setStyleSheet("QPushButton { background-color: #d32f2f; color: #fff; border-radius: 20px; font-size: 14px; font-weight: bold; }")
         self.clear_wishlist_btn.clicked.connect(self.on_clear_wishlist_clicked)
@@ -701,7 +701,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
         self.analysis_progress.setValue(track_index)
         row_index = track_index - 1
         if result.exists_in_plex:
-            matched_text = f"✅ Found ({result.confidence:.1f})"
+            matched_text = f"Found ({result.confidence:.1f})"
             self.matched_tracks_count += 1
             self.matched_count_label.setText(str(self.matched_tracks_count))
      
@@ -713,7 +713,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
                 logger.warning(f"Could not remove pre-existing track '{track_id_to_remove}' from wishlist.")
       
         else:
-            matched_text = "❌ Missing"
+            matched_text = "Missing"
             self.tracks_to_download_count += 1
             self.download_count_label.setText(str(self.tracks_to_download_count))
             # Add cancel button for missing tracks only
@@ -764,13 +764,13 @@ class DownloadMissingWishlistTracksModal(QDialog):
             if track_index != -1:
                 # Skip if track was cancelled
                 if hasattr(self, 'cancelled_tracks') and track_index in self.cancelled_tracks:
-                    print(f"🚫 Skipping cancelled track at index {track_index}: {track.name}")
+                    print(f"Skipping cancelled track at index {track_index}: {track.name}")
                     self.download_queue_index += 1
                     self.completed_downloads += 1
                     continue
                 
                 # FIX: Changed column index from 4 to 3 to target the "Status" column.
-                self.track_table.setItem(track_index, 3, QTableWidgetItem("🔍 Searching..."))
+                self.track_table.setItem(track_index, 3, QTableWidgetItem("Searching..."))
                 self.search_and_download_track_parallel(track, self.download_queue_index, track_index)
                 self.active_parallel_downloads += 1
             self.download_queue_index += 1
@@ -940,18 +940,18 @@ class DownloadMissingWishlistTracksModal(QDialog):
         if not next_candidate:
             self.on_parallel_track_failed(download_index, "No alternative sources in cache")
             return
-        self.track_table.setItem(failed_download_info['table_index'], 3, QTableWidgetItem(f"🔄 Retrying ({track_info['retry_count']})..."))
+        self.track_table.setItem(failed_download_info['table_index'], 3, QTableWidgetItem(f"Retrying ({track_info['retry_count']})..."))
         self.start_validated_download_parallel(next_candidate, track_info['spotify_track'], track_info['track_index'], track_info['table_index'], download_index)
 
     def on_parallel_track_completed(self, download_index, success):
         if not hasattr(self, 'parallel_search_tracking'):
-            print(f"⚠️ parallel_search_tracking not initialized yet, skipping completion for download {download_index}")
+            print(f"parallel_search_tracking not initialized yet, skipping completion for download {download_index}")
             return
         track_info = self.parallel_search_tracking.get(download_index)
         if not track_info or track_info.get('completed', False): return
         track_info['completed'] = True
         if success:
-            self.track_table.setItem(track_info['table_index'], 3, QTableWidgetItem("✅ Downloaded"))
+            self.track_table.setItem(track_info['table_index'], 3, QTableWidgetItem("Downloaded"))
             # Hide cancel button since track is now downloaded
             self.hide_cancel_button_for_row(track_info['table_index'])
             self.downloaded_tracks_count += 1
@@ -966,10 +966,10 @@ class DownloadMissingWishlistTracksModal(QDialog):
             # Check if track was cancelled (don't overwrite cancelled status)
             table_index = track_info['table_index']
             current_status = self.track_table.item(table_index, 3)
-            if current_status and "🚫 Cancelled" in current_status.text():
-                print(f"🔧 Track {download_index} was cancelled - preserving cancelled status")
+            if current_status and "Cancelled" in current_status.text():
+                print(f"Track {download_index} was cancelled - preserving cancelled status")
             else:
-                self.track_table.setItem(table_index, 3, QTableWidgetItem("❌ Failed"))
+                self.track_table.setItem(table_index, 3, QTableWidgetItem("Failed"))
                 if track_info not in self.permanently_failed_tracks:
                     self.permanently_failed_tracks.append(track_info)
             self.failed_downloads += 1
@@ -986,7 +986,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
     def update_failed_matches_button(self):
         count = len(self.permanently_failed_tracks)
         if count > 0:
-            self.correct_failed_btn.setText(f"🔧 Correct {count} Failed Match{'es' if count > 1 else ''}")
+            self.correct_failed_btn.setText(f"Correct {count} Failed Match{'es' if count > 1 else ''}")
             self.correct_failed_btn.show()
         else:
             self.correct_failed_btn.hide()
@@ -1033,8 +1033,8 @@ class DownloadMissingWishlistTracksModal(QDialog):
                     status_item = self.track_table.item(cancelled_row, 3)
                     current_status = status_item.text() if status_item else ""
                     
-                    if "✅ Downloaded" in current_status:
-                        print(f"🚫 Cancelled track {cancelled_track.name} was already downloaded, skipping wishlist re-addition")
+                    if "Downloaded" in current_status:
+                        print(f"Cancelled track {cancelled_track.name} was already downloaded, skipping wishlist re-addition")
                     else:
                         cancelled_track_info = {
                             'download_index': cancelled_row,
@@ -1048,9 +1048,9 @@ class DownloadMissingWishlistTracksModal(QDialog):
                         # Check if not already in permanently_failed_tracks
                         if not any(t.get('table_index') == cancelled_row for t in self.permanently_failed_tracks):
                             self.permanently_failed_tracks.append(cancelled_track_info)
-                            print(f"🚫 Added cancelled missing track {cancelled_track.name} to failed list for wishlist re-addition")
+                            print(f"Added cancelled missing track {cancelled_track.name} to failed list for wishlist re-addition")
                 else:
-                    print(f"🚫 Cancelled track {cancelled_track.name} was not missing from Plex, skipping wishlist re-addition")
+                    print(f"Cancelled track {cancelled_track.name} was not missing from Plex, skipping wishlist re-addition")
 
         wishlist_added_count = 0
         if self.permanently_failed_tracks:
@@ -1061,7 +1061,7 @@ class DownloadMissingWishlistTracksModal(QDialog):
         
         final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing tracks!\n\n"
         if wishlist_added_count > 0:
-            final_message += f"✨ Re-added {wishlist_added_count} failed track{'s' if wishlist_added_count > 1 else ''} to wishlist for future retry.\n\n"
+            final_message += f"Re-added {wishlist_added_count} failed track{'s' if wishlist_added_count > 1 else ''} to wishlist for future retry.\n\n"
         if self.permanently_failed_tracks:
             final_message += "You can also manually correct failed downloads."
         else:
@@ -1322,7 +1322,7 @@ class SimpleWishlistDownloadWorker(QRunnable):
         """Run the download with detailed status updates"""
         try:
             # Update status: Starting search
-            self.signals.status_updated.emit(self.download_index, "🔍 Searching...")
+            self.signals.status_updated.emit(self.download_index, "Searching...")
 
             # Use async method in sync context
             loop = asyncio.new_event_loop()
@@ -1330,7 +1330,7 @@ class SimpleWishlistDownloadWorker(QRunnable):
 
             try:
                 # Update status: Found candidates, analyzing
-                self.signals.status_updated.emit(self.download_index, "🔎 Analyzing results...")
+                self.signals.status_updated.emit(self.download_index, "Analyzing results...")
 
                 # Use the enhanced search method that provides more feedback
                 results = loop.run_until_complete(
@@ -1339,7 +1339,7 @@ class SimpleWishlistDownloadWorker(QRunnable):
                 
                 if results and len(results) > 0:
                     # Update status: Found candidates, starting download
-                    self.signals.status_updated.emit(self.download_index, f"📋 Found {len(results)} candidates")
+                    self.signals.status_updated.emit(self.download_index, f"Found {len(results)} candidates")
                     time.sleep(0.5)  # Brief pause so user can see the status
                     
                     # Get the best result and start download
@@ -1369,7 +1369,7 @@ class SimpleWishlistDownloadWorker(QRunnable):
         """Search for tracks with progress updates"""
         try:
             # Emit search progress
-            self.signals.status_updated.emit(self.download_index, "🌐 Searching network...")
+            self.signals.status_updated.emit(self.download_index, "Searching network...")
 
             # Perform the search (this would ideally use the soulseek client's search methods)
             # For now, we'll use the existing search_and_download_best method
@@ -1690,7 +1690,7 @@ class MetadataUpdateWorker(QThread):
                 print(f"No albums found for artist '{artist.title}'")
                 return 0
             
-            print(f"🎨 Checking artwork for {len(albums)} albums by '{artist.title}'...")
+            print(f"Checking artwork for {len(albums)} albums by '{artist.title}'...")
             
             for album in albums:
                 try:
@@ -1741,10 +1741,10 @@ class MetadataUpdateWorker(QThread):
                     continue
             
             total_processed = updated_count + skipped_count
-            print(f"🎨 Artwork summary for '{artist.title}': {updated_count} updated, {skipped_count} skipped (already have good artwork)")
+            print(f"Artwork summary for '{artist.title}': {updated_count} updated, {skipped_count} skipped (already have good artwork)")
             
             if updated_count == 0 and skipped_count == len(albums):
-                print(f"  ✅ All albums already have good artwork - no Spotify API calls needed!")
+                print(f"  All albums already have good artwork - no Spotify API calls needed!")
             return updated_count
             
         except Exception as e:
@@ -1758,17 +1758,17 @@ class MetadataUpdateWorker(QThread):
             
             # Check if album has any thumb at all
             if not hasattr(album, 'thumb') or not album.thumb:
-                if debug: print(f"  🎨 Album '{album_title}' has NO THUMB - needs update")
+                if debug: print(f"  Album '{album_title}' has NO THUMB - needs update")
                 return False
             
             thumb_url = str(album.thumb)
-            if debug: print(f"  🔍 Album '{album_title}' artwork URL: {thumb_url}")
+            if debug: print(f"  Album '{album_title}' artwork URL: {thumb_url}")
             
             # CONSERVATIVE APPROACH: Only mark as "needs update" in very obvious cases
             
             # Case 1: Completely empty or None
             if not thumb_url or thumb_url.strip() == '':
-                if debug: print(f"  🎨 Album '{album_title}' has empty URL - needs update")
+                if debug: print(f"  Album '{album_title}' has empty URL - needs update")
                 return False
             
             # Case 2: Obvious placeholder text in URL
@@ -1784,20 +1784,20 @@ class MetadataUpdateWorker(QThread):
             thumb_lower = thumb_url.lower()
             for placeholder in obvious_placeholders:
                 if placeholder in thumb_lower:
-                    if debug: print(f"  🎨 Album '{album_title}' has obvious placeholder ({placeholder}) - needs update")
+                    if debug: print(f"  Album '{album_title}' has obvious placeholder ({placeholder}) - needs update")
                     return False
             
             # Case 3: Extremely short URLs (likely broken)
             if len(thumb_url) < 20:
-                if debug: print(f"  🎨 Album '{album_title}' has very short URL ({len(thumb_url)} chars) - needs update")
+                if debug: print(f"  Album '{album_title}' has very short URL ({len(thumb_url)} chars) - needs update")
                 return False
             
             # OTHERWISE: Assume it has valid artwork and SKIP updating
-            if debug: print(f"  ✅ Album '{album_title}' appears to have artwork - SKIPPING (URL: {len(thumb_url)} chars)")
+            if debug: print(f"  Album '{album_title}' appears to have artwork - SKIPPING (URL: {len(thumb_url)} chars)")
             return True
             
         except Exception as e:
-            if debug: print(f"  ❌ Error checking artwork for album '{album_title}': {e}")
+            if debug: print(f"  Error checking artwork for album '{album_title}': {e}")
             # If we can't check, be conservative and skip updating
             return True
     
@@ -1819,9 +1819,9 @@ class MetadataUpdateWorker(QThread):
             # Upload using media client
             success = self.media_client.update_album_poster(album, image_data)
             if success:
-                print(f"✅ Updated artwork for album '{album_title}'")
+                print(f"Updated artwork for album '{album_title}'")
             else:
-                print(f"❌ Failed to upload artwork for album '{album_title}'")
+                print(f"Failed to upload artwork for album '{album_title}'")
             
             return success
             
@@ -1980,7 +1980,7 @@ class DashboardDataProvider(QObject):
         self.session_completed_downloads += 1
         
         # Emit signal for activity feed with specific track info
-        self.activity_item_added.emit("📥", "Download Complete", f"'{title}' by {artist}", "Now")
+        self.activity_item_added.emit("", "Download Complete", f"'{title}' by {artist}", "Now")
     
     def update_service_status(self, service: str, connected: bool, response_time: float = 0.0, error: str = ""):
         if service in self.service_status:
@@ -2734,7 +2734,7 @@ class DashboardPage(QWidget):
             self.scan_manager = MediaScanManager(delay_seconds=60)
             # Add automatic incremental database update after scan completion
             self.scan_manager.add_scan_completion_callback(self._on_media_scan_completed)
-            logger.info("✅ MediaScanManager initialized for Dashboard wishlist modal")
+            logger.info("MediaScanManager initialized for Dashboard wishlist modal")
         except Exception as e:
             logger.error(f"Failed to initialize MediaScanManager: {e}")
     
@@ -2792,7 +2792,7 @@ class DashboardPage(QWidget):
                 return
             
             # All conditions met - start incremental update
-            logger.info(f"🎵 Starting automatic incremental database update after {active_server.upper()} scan")
+            logger.info(f"Starting automatic incremental database update after {active_server.upper()} scan")
             self._start_automatic_incremental_update()
             
         except Exception as e:
@@ -2843,9 +2843,9 @@ class DashboardPage(QWidget):
         """Handle completion of automatic database update"""
         try:
             if successful > 0:
-                logger.info(f"✅ Automatic database update completed: {successful} items processed successfully")
+                logger.info(f"Automatic database update completed: {successful} items processed successfully")
             else:
-                logger.info("💡 Automatic database update completed - no new content found")
+                logger.info("Automatic database update completed - no new content found")
             self.refresh_database_statistics()
             # Clean up the worker
             if hasattr(self, '_auto_database_worker'):
@@ -2970,7 +2970,7 @@ class DashboardPage(QWidget):
         buttons_layout.setSpacing(10)
         
         # Wishlist button
-        self.wishlist_button = QPushButton("🎵 Wishlist (0)")
+        self.wishlist_button = QPushButton("Wishlist (0)")
         self.wishlist_button.setFixedHeight(45)
         self.wishlist_button.setFixedWidth(150)
         self.wishlist_button.clicked.connect(self.on_wishlist_button_clicked)
@@ -2997,7 +2997,7 @@ class DashboardPage(QWidget):
         """)
         
         # Watchlist button
-        self.watchlist_button = QPushButton("👁️ Watchlist (0)")
+        self.watchlist_button = QPushButton("Watchlist (0)")
         self.watchlist_button.setFixedHeight(45)
         self.watchlist_button.setFixedWidth(150)
         self.watchlist_button.clicked.connect(self.on_watchlist_button_clicked)
@@ -3166,7 +3166,7 @@ class DashboardPage(QWidget):
         self.activity_layout = activity_layout
         
         # Add initial placeholder
-        placeholder_item = ActivityItem("📊", "System Started", "Dashboard initialized successfully", "Now")
+        placeholder_item = ActivityItem("", "System Started", "Dashboard initialized successfully", "Now")
         activity_layout.addWidget(placeholder_item)
         
         layout.addWidget(header_label)
@@ -3192,7 +3192,7 @@ class DashboardPage(QWidget):
             card.status_text.setText("Testing connection...")
             
             # Add activity item for test initiation
-            self.add_activity_item("🔍", f"Testing {service.capitalize()}", "Connection test initiated", "Now")
+            self.add_activity_item("", f"Testing {service.capitalize()}", "Connection test initiated", "Now")
             
             # Start test
             self.data_provider.test_service_connection(service)
@@ -3216,7 +3216,7 @@ class DashboardPage(QWidget):
         
         # Check that we have a data provider
         if not hasattr(self, 'data_provider'):
-            self.add_activity_item("❌", "Database Update", "Service clients not available", "Now")
+            self.add_activity_item("", "Database Update", "Service clients not available", "Now")
             return
         
         # Get the active media server and check if client is available
@@ -3224,13 +3224,13 @@ class DashboardPage(QWidget):
         active_server = config_manager.get_active_media_server()
         
         if active_server == "plex" and not self.data_provider.service_clients.get('plex_client'):
-            self.add_activity_item("❌", "Database Update", "Plex client not available", "Now")
+            self.add_activity_item("", "Database Update", "Plex client not available", "Now")
             return
         elif active_server == "jellyfin":
             # Jellyfin client will be created on-demand, just verify config exists
             jellyfin_config = config_manager.get_jellyfin_config()
             if not jellyfin_config.get('base_url') or not jellyfin_config.get('api_key'):
-                self.add_activity_item("❌", "Database Update", "Jellyfin not configured", "Now")
+                self.add_activity_item("", "Database Update", "Jellyfin not configured", "Now")
                 return
         
         try:
@@ -3242,7 +3242,7 @@ class DashboardPage(QWidget):
                 reply = QMessageBox.question(
                     self, 
                     "Confirm Full Database Refresh",
-                    "⚠️ You've selected FULL REFRESH mode.\n\n"
+                    "You've selected FULL REFRESH mode.\n\n"
                     "This will completely rebuild your database and may take several minutes.\n"
                     "All existing data will be cleared and rebuilt from your Plex library.\n\n"
                     "Are you sure you want to continue?",
@@ -3267,7 +3267,7 @@ class DashboardPage(QWidget):
                 media_client = JellyfinClient()
             else:
                 logger.error(f"Unknown active server: {active_server}")
-                self.add_activity_item("❌", "Database Update", f"Unknown server type: {active_server}", "Now")
+                self.add_activity_item("", "Database Update", f"Unknown server type: {active_server}", "Now")
                 return
             
             # Start the database update worker
@@ -3289,7 +3289,7 @@ class DashboardPage(QWidget):
             self.database_widget.update_progress(True, "Initializing...", 0, 0, 0.0)
             update_type = "Full refresh" if full_refresh else "Incremental update"
             server_display = active_server.title()  # "Plex" or "Jellyfin"
-            self.add_activity_item("🗄️", "Database Update", f"Starting {update_type.lower()} from {server_display}...", "Now")
+            self.add_activity_item("", "Database Update", f"Starting {update_type.lower()} from {server_display}...", "Now")
             
             self.database_worker.start()
             
@@ -3297,7 +3297,7 @@ class DashboardPage(QWidget):
             self.start_database_stats_refresh()
             
         except Exception as e:
-            self.add_activity_item("❌", "Database Update", f"Failed to start: {str(e)}", "Now")
+            self.add_activity_item("", "Database Update", f"Failed to start: {str(e)}", "Now")
     
     def stop_database_update(self):
         """Stop the database update process"""
@@ -3308,7 +3308,7 @@ class DashboardPage(QWidget):
                 self.database_worker.terminate()
         
         self.database_widget.update_progress(False, "", 0, 0, 0.0)
-        self.add_activity_item("⏹️", "Database Update", "Stopped database update process", "Now")
+        self.add_activity_item("", "Database Update", "Stopped database update process", "Now")
         
         # Stop statistics refresh timer
         self.stop_database_stats_refresh()
@@ -3320,15 +3320,15 @@ class DashboardPage(QWidget):
     def on_database_artist_processed(self, artist_name: str, success: bool, details: str, album_count: int, track_count: int):
         """Handle individual artist processing completion"""
         if success:
-            self.add_activity_item("✅", "Artist Processed", f"'{artist_name}' - {details}", "Now")
+            self.add_activity_item("", "Artist Processed", f"'{artist_name}' - {details}", "Now")
         else:
-            self.add_activity_item("❌", "Artist Failed", f"'{artist_name}' - {details}", "Now")
+            self.add_activity_item("", "Artist Failed", f"'{artist_name}' - {details}", "Now")
     
     def on_database_finished(self, total_artists: int, total_albums: int, total_tracks: int, successful: int, failed: int):
         """Handle database update completion"""
         self.database_widget.update_progress(False, "", 0, 0, 0.0)
         summary = f"Processed {total_artists} artists, {total_albums} albums, {total_tracks} tracks"
-        self.add_activity_item("🗄️", "Database Complete", summary, "Now")
+        self.add_activity_item("", "Database Complete", summary, "Now")
         
         # Stop statistics refresh timer and do final update
         self.stop_database_stats_refresh()
@@ -3337,7 +3337,7 @@ class DashboardPage(QWidget):
     def on_database_error(self, error_message: str):
         """Handle database update error"""
         self.database_widget.update_progress(False, "", 0, 0, 0.0)
-        self.add_activity_item("❌", "Database Error", error_message, "Now")
+        self.add_activity_item("", "Database Error", error_message, "Now")
         
         # Stop statistics refresh timer
         self.stop_database_stats_refresh()
@@ -3461,16 +3461,16 @@ class DashboardPage(QWidget):
         if active_server == "jellyfin":
             media_client = self.data_provider.service_clients.get('jellyfin_client')
             if not media_client:
-                self.add_activity_item("❌", "Metadata Update", "Jellyfin client not available", "Now")
+                self.add_activity_item("", "Metadata Update", "Jellyfin client not available", "Now")
                 return
         else:
             media_client = self.data_provider.service_clients.get('plex_client')
             if not media_client:
-                self.add_activity_item("❌", "Metadata Update", "Plex client not available", "Now")
+                self.add_activity_item("", "Metadata Update", "Plex client not available", "Now")
                 return
             
         if not self.data_provider.service_clients.get('spotify_client'):
-            self.add_activity_item("❌", "Metadata Update", "Spotify client not available", "Now")
+            self.add_activity_item("", "Metadata Update", "Spotify client not available", "Now")
             return
         
         try:
@@ -3496,19 +3496,19 @@ class DashboardPage(QWidget):
             # Update UI and start
             if self.metadata_widget:
                 self.metadata_widget.update_progress(True, "Loading artists...", 0, 0, 0.0)
-            self.add_activity_item("🎵", "Metadata Update", "Loading artists from library...", "Now")
+            self.add_activity_item("", "Metadata Update", "Loading artists from library...", "Now")
             
             self.metadata_worker.start()
             
         except Exception as e:
-            self.add_activity_item("❌", "Metadata Update", f"Failed to start: {str(e)}", "Now")
+            self.add_activity_item("", "Metadata Update", f"Failed to start: {str(e)}", "Now")
     
     def on_artists_loaded(self, total_artists, artists_to_process):
         """Handle when artists are loaded and filtered"""
         if artists_to_process == 0:
-            self.add_activity_item("✅", "Metadata Update", "All artists already have good metadata", "Now")
+            self.add_activity_item("", "Metadata Update", "All artists already have good metadata", "Now")
         else:
-            self.add_activity_item("🎵", "Metadata Update", f"Processing {artists_to_process} of {total_artists} artists", "Now")
+            self.add_activity_item("", "Metadata Update", f"Processing {artists_to_process} of {total_artists} artists", "Now")
     
     def stop_metadata_update(self):
         """Stop the metadata update process"""
@@ -3520,7 +3520,7 @@ class DashboardPage(QWidget):
         
         if self.metadata_widget:
             self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
-        self.add_activity_item("⏹️", "Metadata Update", "Stopped metadata update process", "Now")
+        self.add_activity_item("", "Metadata Update", "Stopped metadata update process", "Now")
     
     def artist_needs_processing(self, artist):
         """Check if an artist needs metadata processing using smart detection"""
@@ -3564,22 +3564,22 @@ class DashboardPage(QWidget):
     def on_artist_updated(self, artist_name, success, details):
         """Handle individual artist update completion"""
         if success:
-            self.add_activity_item("✅", "Artist Updated", f"'{artist_name}' - {details}", "Now")
+            self.add_activity_item("", "Artist Updated", f"'{artist_name}' - {details}", "Now")
         else:
-            self.add_activity_item("❌", "Artist Failed", f"'{artist_name}' - {details}", "Now")
+            self.add_activity_item("", "Artist Failed", f"'{artist_name}' - {details}", "Now")
     
     def on_metadata_finished(self, total_processed, successful, failed):
         """Handle metadata update completion"""
         if self.metadata_widget:
             self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
         summary = f"Processed {total_processed} artists: {successful} updated, {failed} failed"
-        self.add_activity_item("🎵", "Metadata Complete", summary, "Now")
+        self.add_activity_item("", "Metadata Complete", summary, "Now")
     
     def on_metadata_error(self, error_message):
         """Handle metadata update error"""
         if self.metadata_widget:
             self.metadata_widget.update_progress(False, "", 0, 0, 0.0)
-        self.add_activity_item("❌", "Metadata Error", error_message, "Now")
+        self.add_activity_item("", "Metadata Error", error_message, "Now")
     
     def on_service_status_updated(self, service: str, connected: bool, response_time: float, error: str):
         """Handle service status updates from data provider"""
@@ -3591,7 +3591,7 @@ class DashboardPage(QWidget):
                 self.previous_service_status[service] = connected
                 
                 status = "Connected" if connected else "Disconnected"
-                icon = "✅" if connected else "❌"
+                icon = "" if connected else ""
                 self.add_activity_item(icon, f"{service.capitalize()} {status}", 
                                      f"Response time: {response_time:.0f}ms" if connected else f"Error: {error}" if error else "Connection test completed", 
                                      "Now")
@@ -3676,20 +3676,20 @@ class DashboardPage(QWidget):
         from ui.components.toast_manager import ToastType
         
         # Success activities that deserve toasts
-        if icon == "✅" and any(keyword in title.lower() for keyword in ["download started", "sync completed", "complete"]):
+        if icon == "" and any(keyword in title.lower() for keyword in ["download started", "sync completed", "complete"]):
             self.toast_manager.success(f"{title}: {subtitle}")
             return
         
-        if icon == "📥" and "Download Started" in title:
+        if icon == "" and "Download Started" in title:
             self.toast_manager.success(f"{subtitle}")
             return
             
-        if icon == "🔍" and "Search Complete" in title:
+        if icon == "" and "Search Complete" in title:
             self.toast_manager.info(f"{subtitle}")
             return
         
         # Error activities that need immediate attention
-        if icon == "❌":
+        if icon == "":
             # Skip routine background errors
             if any(skip_term in title.lower() for skip_term in ["metadata", "connection test", "routine"]):
                 return
@@ -3700,12 +3700,12 @@ class DashboardPage(QWidget):
                 return
         
         # Warning activities
-        if icon == "⚠️":
+        if icon == "":
             self.toast_manager.warning(f"{title}: {subtitle}")
             return
         
         # Info activities for searches and connections
-        if icon == "🔍" and "Search Started" in title:
+        if icon == "" and "Search Started" in title:
             self.toast_manager.info(f"{subtitle}")
             return
     
@@ -3811,7 +3811,7 @@ class DashboardPage(QWidget):
             count = self.wishlist_service.get_wishlist_count()
             
             if hasattr(self, 'wishlist_button'):
-                self.wishlist_button.setText(f"🎵 Wishlist ({count})")
+                self.wishlist_button.setText(f"Wishlist ({count})")
                 
                 # Enable/disable button based on count
                 if count == 0:
@@ -3913,7 +3913,7 @@ class DashboardPage(QWidget):
             count = database.get_watchlist_count()
             
             if hasattr(self, 'watchlist_button'):
-                self.watchlist_button.setText(f"👁️ Watchlist ({count})")
+                self.watchlist_button.setText(f"Watchlist ({count})")
                 
                 # Enable/disable button based on count
                 if count == 0:

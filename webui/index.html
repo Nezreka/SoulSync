@@ -8,9 +8,18 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css') }}">
 </head>
 
 <body>
+    <!-- Setup Wizard Overlay -->
+    <div id="setup-wizard-overlay" class="setup-wizard-overlay" style="display: none;">
+        <div class="setup-wizard-container">
+            <div class="setup-stepper" id="setup-wizard-stepper"></div>
+            <div id="setup-wizard-content"></div>
+        </div>
+    </div>
+
     <!-- Launch PIN Lock Screen -->
     <div id="launch-pin-overlay" class="launch-pin-overlay" style="display: none;">
         <div class="launch-pin-container" id="launch-pin-container">
@@ -93,8 +102,12 @@
                             <option value="discover">Discover</option>
                             <option value="artists">Artists</option>
                             <option value="automations">Automations</option>
+                            <option value="active-downloads">Downloads</option>
                             <option value="library">Library</option>
+                            <option value="stats">Listening Stats</option>
+                            <option value="playlist-explorer">Playlist Explorer</option>
                             <option value="import">Import</option>
+                            <option value="help">Help & Docs</option>
                         </select>
                         <label class="profile-settings-label">Page Access</label>
                         <div id="new-profile-allowed-pages" class="profile-page-checkboxes">
@@ -104,9 +117,13 @@
                             <label><input type="checkbox" value="discover" checked> Discover</label>
                             <label><input type="checkbox" value="artists" checked> Artists</label>
                             <label><input type="checkbox" value="automations" checked> Automations</label>
+                            <label><input type="checkbox" value="active-downloads" checked> Downloads</label>
                             <label><input type="checkbox" value="library" checked> Library</label>
+                            <label><input type="checkbox" value="stats" checked> Listening Stats</label>
+                            <label><input type="checkbox" value="playlist-explorer" checked> Playlist Explorer</label>
                             <label><input type="checkbox" value="import" checked> Import</label>
                             <label><input type="checkbox" value="help" checked disabled> Help & Docs</label>
+                            <label><input type="checkbox" value="issues" checked disabled> Issues</label>
                         </div>
                         <label class="profile-checkbox-label">
                             <input type="checkbox" id="new-profile-can-download" checked> Can download music
@@ -198,6 +215,11 @@
                 <button class="nav-button" data-page="automations">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
                     <span class="nav-text">Automations</span>
+                </button>
+                <button class="nav-button" data-page="active-downloads">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
+                    <span class="nav-text">Downloads</span>
+                    <span class="dl-nav-badge hidden" id="dl-nav-badge">0</span>
                 </button>
                 <button class="nav-button" data-page="library">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="14" y2="11"/></svg></span>
@@ -2607,6 +2629,31 @@
                     <div class="builder-content">
                         <div class="builder-sidebar" id="builder-sidebar"></div>
                         <div class="builder-canvas" id="builder-canvas"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Downloads Page -->
+            <div class="page" id="active-downloads-page">
+                <div class="adl-container">
+                    <div class="adl-header">
+                        <h2 class="adl-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Downloads</h2>
+                        <div class="adl-controls">
+                            <div class="adl-filter-pills" id="adl-filter-pills">
+                                <button class="adl-pill active" data-filter="all" onclick="adlSetFilter('all')">All</button>
+                                <button class="adl-pill" data-filter="active" onclick="adlSetFilter('active')">Active</button>
+                                <button class="adl-pill" data-filter="queued" onclick="adlSetFilter('queued')">Queued</button>
+                                <button class="adl-pill" data-filter="completed" onclick="adlSetFilter('completed')">Completed</button>
+                                <button class="adl-pill" data-filter="failed" onclick="adlSetFilter('failed')">Failed</button>
+                            </div>
+                            <div style="display:flex;align-items:center;gap:10px;">
+                                <span class="adl-count" id="adl-count"></span>
+                                <button class="adl-clear-btn" id="adl-clear-btn" onclick="adlClearCompleted()" style="display:none">Clear Completed</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="adl-list" id="adl-list">
+                        <div class="adl-empty" id="adl-empty">No downloads yet. Start one from Search, Sync, Discover, or Artists.</div>
                     </div>
                 </div>
             </div>
@@ -7336,6 +7383,7 @@
 
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <script src="{{ url_for('static', filename='setup-wizard.js') }}"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->
     <!-- Global Search Bar — Spotlight-style search from anywhere -->

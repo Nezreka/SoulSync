@@ -32,7 +32,7 @@ if sys.platform == 'win32':
 try:
     import yt_dlp
 except ImportError:
-    print("❌ yt-dlp not installed. Install with: pip install yt-dlp")
+    print("yt-dlp not installed. Install with: pip install yt-dlp")
     sys.exit(1)
 
 # Add parent directory to path to import from core
@@ -122,12 +122,12 @@ class YouTubeClient:
 
         # Initialize production matching engine for parity with Soulseek
         self.matching_engine = MusicMatchingEngine()
-        logger.info("✅ Initialized production MusicMatchingEngine")
+        logger.info("Initialized production MusicMatchingEngine")
 
         # Check for ffmpeg (REQUIRED for MP3 conversion)
         if not self._check_ffmpeg():
             print("\n" + "="*80)
-            print("❌ ERROR: ffmpeg is required but not found in PATH")
+            print("ERROR: ffmpeg is required but not found in PATH")
             print("="*80)
             print("\nInstall ffmpeg:")
             print("  Windows:  scoop install ffmpeg")
@@ -195,7 +195,7 @@ class YouTubeClient:
 
         # Check if ffmpeg is in system PATH
         if shutil.which('ffmpeg'):
-            logger.info("✅ Found ffmpeg in system PATH")
+            logger.info("Found ffmpeg in system PATH")
             return True
 
         # Auto-download ffmpeg to tools folder if not found
@@ -211,7 +211,7 @@ class YouTubeClient:
 
         # If we already have both locally, use them
         if ffmpeg_path.exists() and ffprobe_path.exists():
-            logger.info(f"✅ Found ffmpeg and ffprobe in tools folder")
+            logger.info(f"Found ffmpeg and ffprobe in tools folder")
             # Add to PATH so yt-dlp can find them
             import os
             tools_dir_str = str(tools_dir.absolute())
@@ -290,10 +290,10 @@ class YouTubeClient:
                 ffprobe_zip.unlink()  # Clean up zip
 
             else:
-                logger.error(f"❌ Unsupported platform: {system}")
+                logger.error(f"Unsupported platform: {system}")
                 return False
 
-            logger.info(f"✅ Downloaded ffmpeg to: {ffmpeg_path}")
+            logger.info(f"Downloaded ffmpeg to: {ffmpeg_path}")
 
             # Add to PATH
             import os
@@ -303,7 +303,7 @@ class YouTubeClient:
             return True
 
         except Exception as e:
-            logger.error(f"❌ Failed to download ffmpeg: {e}")
+            logger.error(f"Failed to download ffmpeg: {e}")
             logger.error(f"   Please install manually:")
             logger.error(f"   Windows: scoop install ffmpeg")
             logger.error(f"   Linux:   sudo apt install ffmpeg")
@@ -331,7 +331,7 @@ class YouTubeClient:
 
                 # Format speed safely
                 speed_kb = speed / 1024 if speed else 0
-                logger.info(f"📥 Progress: {progress:.1f}% | Speed: {speed_kb:.1f} KB/s | ETA: {eta}s")
+                logger.info(f"Progress: {progress:.1f}% | Speed: {speed_kb:.1f} KB/s | ETA: {eta}s")
 
         elif d['status'] == 'finished':
             self.current_download_progress = {
@@ -339,14 +339,14 @@ class YouTubeClient:
                 'progress': 100.0,
                 'filename': d.get('filename', '')
             }
-            logger.info(f"✅ Download finished: {d.get('filename', '')}")
+            logger.info(f"Download finished: {d.get('filename', '')}")
 
         elif d['status'] == 'error':
             self.current_download_progress = {
                 'status': 'error',
                 'error': str(d.get('error', 'Unknown error'))
             }
-            logger.error(f"❌ Download error: {d.get('error', '')}")
+            logger.error(f"Download error: {d.get('error', '')}")
 
     def search(self, query: str, max_results: int = 10) -> List[YouTubeSearchResult]:
         """
@@ -359,7 +359,7 @@ class YouTubeClient:
         Returns:
             List of YouTubeSearchResult objects
         """
-        logger.info(f"🔍 Searching YouTube for: '{query}'")
+        logger.info(f"Searching YouTube for: '{query}'")
 
         try:
             # Use YouTube Music for better music search results
@@ -406,11 +406,11 @@ class YouTubeClient:
                         logger.warning(f"Could not get detailed info for {entry['id']}: {e}")
                         continue
 
-                logger.info(f"✅ Found {len(results)} YouTube results")
+                logger.info(f"Found {len(results)} YouTube results")
                 return results
 
         except Exception as e:
-            logger.error(f"❌ YouTube search error: {e}")
+            logger.error(f"YouTube search error: {e}")
             return []
 
     def _get_best_audio_format(self, formats: List[Dict]) -> Optional[Dict]:
@@ -555,7 +555,7 @@ class YouTubeClient:
         # Sort by confidence (best first)
         matches.sort(key=lambda r: r.confidence, reverse=True)
 
-        logger.info(f"✅ Found {len(matches)} matches above {min_confidence} confidence")
+        logger.info(f"Found {len(matches)} matches above {min_confidence} confidence")
         return matches
 
     def download(self, yt_result: YouTubeSearchResult, spotify_track: Optional[SpotifyTrack] = None) -> Optional[str]:
@@ -569,7 +569,7 @@ class YouTubeClient:
         Returns:
             Path to downloaded file, or None if failed
         """
-        logger.info(f"📥 Starting download: {yt_result.title}")
+        logger.info(f"Starting download: {yt_result.title}")
         logger.info(f"   Quality: {yt_result.available_quality}")
         logger.info(f"   URL: {yt_result.url}")
 
@@ -617,9 +617,9 @@ class YouTubeClient:
                             except:
                                 pass
 
-                            logger.info(f"   📀 Spotify track #{track_number} on album: {spotify_track.album} ({release_year})")
+                            logger.info(f"   Spotify track #{track_number} on album: {spotify_track.album} ({release_year})")
                 except Exception as e:
-                    logger.warning(f"   ⚠️  Could not fetch Spotify track details: {e}")
+                    logger.warning(f"   Could not fetch Spotify track details: {e}")
 
             # If we have Spotify metadata, use production file organization
             if spotify_track:
@@ -644,8 +644,8 @@ class YouTubeClient:
                 # Override output template with production folder structure
                 download_opts['outtmpl'] = str(album_folder / f'{final_filename}.%(ext)s')
 
-                logger.info(f"   📁 Album folder: {album_artist}/{album_artist} - {album}/")
-                logger.info(f"   📝 Filename: {final_filename}.mp3")
+                logger.info(f"   Album folder: {album_artist}/{album_artist} - {album}/")
+                logger.info(f"   Filename: {final_filename}.mp3")
 
                 # Add metadata postprocessor with Spotify info
                 download_opts['postprocessor_args'] = {
@@ -669,7 +669,7 @@ class YouTubeClient:
                 filename = Path(ydl.prepare_filename(info)).with_suffix('.mp3')
 
                 if filename.exists():
-                    logger.info(f"✅ Download successful: {filename}")
+                    logger.info(f"Download successful: {filename}")
 
                     # Post-download: Enhance metadata with mutagen
                     album_art_url = self._enhance_metadata(str(filename), spotify_track, yt_result, track_number, disc_number, release_year, artist_genres)
@@ -684,11 +684,11 @@ class YouTubeClient:
 
                     return str(filename)
                 else:
-                    logger.error(f"❌ Download completed but file not found: {filename}")
+                    logger.error(f"Download completed but file not found: {filename}")
                     return None
 
         except Exception as e:
-            logger.error(f"❌ Download failed: {e}")
+            logger.error(f"Download failed: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -704,7 +704,7 @@ class YouTubeClient:
             from mutagen.id3 import ID3NoHeaderError
             import requests
 
-            logger.info(f"🏷️  Enhancing metadata for: {Path(filepath).name}")
+            logger.info(f"Enhancing metadata for: {Path(filepath).name}")
 
             # Load MP3 file
             audio = MP3(filepath)
@@ -713,11 +713,11 @@ class YouTubeClient:
             if audio.tags is not None:
                 # Delete ALL existing frames
                 audio.tags.clear()
-                logger.info(f"   🧹 Cleared all existing tag frames")
+                logger.info(f"   Cleared all existing tag frames")
             else:
                 # No tags exist, add them
                 audio.add_tags()
-                logger.info(f"   ➕ Added new tag structure")
+                logger.info(f"   Added new tag structure")
 
             if spotify_track:
                 # Use Spotify metadata
@@ -741,7 +741,7 @@ class YouTubeClient:
                 except:
                     pass
 
-                logger.info(f"   📝 Setting metadata tags...")
+                logger.info(f"   Setting metadata tags...")
 
                 # Set ID3 tags (using setall to ensure they're set)
                 audio.tags.setall('TIT2', [TIT2(encoding=3, text=title)])
@@ -760,21 +760,21 @@ class YouTubeClient:
                         # Combine up to 3 genres (matches production logic)
                         genre = ', '.join(artist_genres[:3])
                     audio.tags.setall('TCON', [TCON(encoding=3, text=genre)])
-                    logger.info(f"   ✓ Genre: {genre}")
+                    logger.info(f"   Genre: {genre}")
 
                 audio.tags.setall('COMM', [COMM(encoding=3, lang='eng', desc='',
                                text=f'Downloaded via SoulSync (YouTube)\nSource: {yt_result.url}\nConfidence: {yt_result.confidence:.2f}')])
 
-                logger.info(f"   ✓ Artist: {artist}")
-                logger.info(f"   ✓ Album Artist: {album_artist}")
-                logger.info(f"   ✓ Title: {title}")
-                logger.info(f"   ✓ Album: {album}")
-                logger.info(f"   ✓ Track #: {track_number}")
-                logger.info(f"   ✓ Disc #: {disc_number}")
-                logger.info(f"   ✓ Year: {year}")
+                logger.info(f"   Artist: {artist}")
+                logger.info(f"   Album Artist: {album_artist}")
+                logger.info(f"   Title: {title}")
+                logger.info(f"   Album: {album}")
+                logger.info(f"   Track #: {track_number}")
+                logger.info(f"   Disc #: {disc_number}")
+                logger.info(f"   Year: {year}")
 
                 # Fetch and embed album art from Spotify (via search)
-                logger.info(f"   🎨 Fetching album art from Spotify...")
+                logger.info(f"   Fetching album art from Spotify...")
                 album_art_url = self._get_spotify_album_art(spotify_track)
 
                 if album_art_url:
@@ -800,25 +800,25 @@ class YouTubeClient:
                             data=response.content
                         ))
 
-                        logger.info(f"   ✓ Album art embedded ({len(response.content) // 1024} KB)")
+                        logger.info(f"   Album art embedded ({len(response.content) // 1024} KB)")
                     except Exception as art_error:
-                        logger.warning(f"   ⚠️  Could not embed album art: {art_error}")
+                        logger.warning(f"   Could not embed album art: {art_error}")
                 else:
-                    logger.warning(f"   ⚠️  No album art found on Spotify")
+                    logger.warning(f"   No album art found on Spotify")
 
             # Save all tags
             audio.save()
-            logger.info(f"✅ Metadata enhanced successfully")
+            logger.info(f"Metadata enhanced successfully")
 
             # Return album art URL for cover.jpg creation
             return album_art_url
 
         except ImportError:
-            logger.warning("⚠️  mutagen not installed - skipping enhanced metadata tagging")
+            logger.warning("mutagen not installed - skipping enhanced metadata tagging")
             logger.warning("   Install with: pip install mutagen")
             return None
         except Exception as e:
-            logger.warning(f"⚠️  Could not enhance metadata: {e}")
+            logger.warning(f"Could not enhance metadata: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -833,83 +833,83 @@ class YouTubeClient:
             sys.path.insert(0, str(Path(__file__).parent.parent))
             from core.spotify_client import SpotifyClient
 
-            logger.info(f"      🔍 Getting Spotify client...")
+            logger.info(f"      Getting Spotify client...")
 
             # Get authenticated Spotify client
             spotify_client = SpotifyClient()
 
             if not spotify_client:
-                logger.warning(f"      ⚠️  Spotify client not available")
+                logger.warning(f"      Spotify client not available")
                 return None
 
             if not spotify_client.is_authenticated():
-                logger.warning(f"      ⚠️  Spotify client not authenticated")
+                logger.warning(f"      Spotify client not authenticated")
                 return None
 
-            logger.info(f"      ✓ Spotify client authenticated")
+            logger.info(f"      Spotify client authenticated")
 
             # Use the track ID if available (real Spotify IDs)
             if spotify_track.id and not spotify_track.id.startswith('test'):
-                logger.info(f"      🔍 Fetching track info for ID: {spotify_track.id}")
+                logger.info(f"      Fetching track info for ID: {spotify_track.id}")
                 try:
                     # Get track info from Spotify API
                     track_info = spotify_client.sp.track(spotify_track.id)
 
                     if track_info:
-                        logger.info(f"      ✓ Got track info from Spotify")
+                        logger.info(f"      Got track info from Spotify")
 
                         if 'album' in track_info:
                             album_images = track_info['album'].get('images', [])
-                            logger.info(f"      📸 Found {len(album_images)} album images")
+                            logger.info(f"      Found {len(album_images)} album images")
 
                             if album_images:
                                 # Get highest quality image (first in list)
                                 album_art_url = album_images[0]['url']
-                                logger.info(f"      ✓ Album art URL: {album_art_url[:50]}...")
+                                logger.info(f"      Album art URL: {album_art_url[:50]}...")
                                 return album_art_url
                         else:
-                            logger.warning(f"      ⚠️  No album data in track info")
+                            logger.warning(f"      No album data in track info")
                     else:
-                        logger.warning(f"      ⚠️  Track info is empty")
+                        logger.warning(f"      Track info is empty")
 
                 except Exception as e:
-                    logger.warning(f"      ❌ Error fetching via track ID: {e}")
+                    logger.warning(f"      Error fetching via track ID: {e}")
                     import traceback
                     traceback.print_exc()
 
             # Fallback: Search for the track
             query = f"track:{spotify_track.name} artist:{spotify_track.artists[0]}"
-            logger.info(f"      🔍 Searching Spotify: {query}")
+            logger.info(f"      Searching Spotify: {query}")
 
             try:
                 search_results = spotify_client.sp.search(q=query, type='track', limit=1)
 
                 if search_results and 'tracks' in search_results:
                     tracks = search_results['tracks'].get('items', [])
-                    logger.info(f"      📋 Search returned {len(tracks)} tracks")
+                    logger.info(f"      Search returned {len(tracks)} tracks")
 
                     if tracks:
                         album_images = tracks[0].get('album', {}).get('images', [])
                         if album_images:
                             # Get highest quality image (first in list)
                             album_art_url = album_images[0]['url']
-                            logger.info(f"      ✓ Found via search: {album_art_url[:50]}...")
+                            logger.info(f"      Found via search: {album_art_url[:50]}...")
                             return album_art_url
             except Exception as search_error:
-                logger.warning(f"      ❌ Search error: {search_error}")
+                logger.warning(f"      Search error: {search_error}")
                 import traceback
                 traceback.print_exc()
 
-            logger.warning(f"      ⚠️  No album art found on Spotify")
+            logger.warning(f"      No album art found on Spotify")
             return None
 
         except ImportError as e:
-            logger.warning(f"      ❌ Could not import Spotify client: {e}")
+            logger.warning(f"      Could not import Spotify client: {e}")
             import traceback
             traceback.print_exc()
             return None
         except Exception as e:
-            logger.warning(f"      ❌ Error fetching album art: {e}")
+            logger.warning(f"      Error fetching album art: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -925,10 +925,10 @@ class YouTubeClient:
 
             # Skip if already exists
             if cover_path.exists():
-                logger.info(f"   📷 cover.jpg already exists")
+                logger.info(f"   cover.jpg already exists")
                 return
 
-            logger.info(f"   📷 Downloading cover.jpg to album folder...")
+            logger.info(f"   Downloading cover.jpg to album folder...")
 
             # Download album art
             response = requests.get(album_art_url, timeout=10)
@@ -937,10 +937,10 @@ class YouTubeClient:
             # Save to file
             cover_path.write_bytes(response.content)
 
-            logger.info(f"   ✅ Saved cover.jpg ({len(response.content) // 1024} KB)")
+            logger.info(f"   Saved cover.jpg ({len(response.content) // 1024} KB)")
 
         except Exception as e:
-            logger.warning(f"   ⚠️  Could not save cover.jpg: {e}")
+            logger.warning(f"   Could not save cover.jpg: {e}")
 
     def _create_lyrics_file(self, audio_file_path: str, spotify_track: SpotifyTrack):
         """
@@ -952,10 +952,10 @@ class YouTubeClient:
             from core.lyrics_client import lyrics_client
 
             if not lyrics_client.api:
-                logger.debug(f"   🎵 LRClib API not available - skipping lyrics")
+                logger.debug(f"   LRClib API not available - skipping lyrics")
                 return
 
-            logger.info(f"   🎵 Fetching lyrics from LRClib...")
+            logger.info(f"   Fetching lyrics from LRClib...")
 
             # Get track metadata
             artist_name = spotify_track.artists[0] if spotify_track.artists else "Unknown Artist"
@@ -973,14 +973,14 @@ class YouTubeClient:
             )
 
             if success:
-                logger.info(f"   ✅ Created .lrc lyrics file")
+                logger.info(f"   Created .lrc lyrics file")
             else:
-                logger.info(f"   🎵 No lyrics found on LRClib")
+                logger.info(f"   No lyrics found on LRClib")
 
         except ImportError:
-            logger.debug(f"   ⚠️  lyrics_client not available - skipping lyrics")
+            logger.debug(f"   lyrics_client not available - skipping lyrics")
         except Exception as e:
-            logger.warning(f"   ⚠️  Could not create lyrics file: {e}")
+            logger.warning(f"   Could not create lyrics file: {e}")
 
     def search_and_download_best(self, spotify_track: SpotifyTrack, min_confidence: float = 0.58) -> Optional[str]:
         """
@@ -994,7 +994,7 @@ class YouTubeClient:
         Returns:
             Path to downloaded file, or None if failed
         """
-        logger.info(f"🎯 Starting YouTube download flow for: {spotify_track.name} by {spotify_track.artists[0]}")
+        logger.info(f"Starting YouTube download flow for: {spotify_track.name} by {spotify_track.artists[0]}")
 
         # Generate search query
         query = f"{spotify_track.artists[0]} {spotify_track.name}"
@@ -1003,19 +1003,19 @@ class YouTubeClient:
         results = self.search(query, max_results=10)
 
         if not results:
-            logger.error(f"❌ No YouTube results found for query: {query}")
+            logger.error(f"No YouTube results found for query: {query}")
             return None
 
         # Find best matches
         matches = self.find_best_matches(spotify_track, results, min_confidence=min_confidence)
 
         if not matches:
-            logger.error(f"❌ No matches above {min_confidence} confidence threshold")
+            logger.error(f"No matches above {min_confidence} confidence threshold")
             return None
 
         # Try downloading best match
         best_match = matches[0]
-        logger.info(f"🎯 Best match: {best_match.title} (confidence: {best_match.confidence:.2f})")
+        logger.info(f"Best match: {best_match.title} (confidence: {best_match.confidence:.2f})")
 
         downloaded_file = self.download(best_match, spotify_track)
 
@@ -1030,7 +1030,7 @@ def test_youtube_download():
     """Test the YouTube download flow with a curated playlist"""
 
     print("=" * 80)
-    print("🎵 YouTube Download Test - Curated Playlist (5 Tracks)")
+    print("YouTube Download Test - Curated Playlist (5 Tracks)")
     print("=" * 80)
     print()
 
@@ -1082,7 +1082,7 @@ def test_youtube_download():
         ),
     ]
 
-    print("🎧 Curated Playlist - Testing Diverse Genres:")
+    print("Curated Playlist - Testing Diverse Genres:")
     print()
     for i, track in enumerate(test_playlist, 1):
         print(f"  {i}. {track.artists[0]:20s} - {track.name}")
@@ -1133,7 +1133,7 @@ def test_youtube_download():
                     'error': None
                 })
 
-                print(f"\n✅ SUCCESS - Downloaded in {track_duration:.1f}s")
+                print(f"\nSUCCESS - Downloaded in {track_duration:.1f}s")
                 print(f"   File: {Path(downloaded_file).name}")
                 print(f"   Size: {file_size:.2f} MB")
             else:
@@ -1148,13 +1148,13 @@ def test_youtube_download():
                     'error': 'Download failed or no matches found'
                 })
 
-                print(f"\n❌ FAILED - No suitable match found")
+                print(f"\nFAILED - No suitable match found")
 
         except Exception as e:
             track_end_time = datetime.now()
             track_duration = (track_end_time - track_start_time).total_seconds()
 
-            print(f"\n❌ ERROR: {e}")
+            print(f"\nERROR: {e}")
             import traceback
             traceback.print_exc()
 
@@ -1177,7 +1177,7 @@ def test_youtube_download():
     # ========================================================================
 
     print("\n\n" + "=" * 80)
-    print("📊 FINAL SUMMARY REPORT")
+    print("FINAL SUMMARY REPORT")
     print("=" * 80)
     print()
 
@@ -1185,7 +1185,7 @@ def test_youtube_download():
     failed = [r for r in results if not r['success']]
 
     print(f"⏱️  Total Time: {total_duration:.1f}s ({total_duration/60:.1f} minutes)")
-    print(f"✅ Success Rate: {len(successful)}/{len(results)} ({len(successful)/len(results)*100:.1f}%)")
+    print(f"Success Rate: {len(successful)}/{len(results)} ({len(successful)/len(results)*100:.1f}%)")
     print()
 
     if successful:
@@ -1193,7 +1193,7 @@ def test_youtube_download():
         avg_time = sum(r['duration_seconds'] for r in successful) / len(successful)
 
         print("─" * 80)
-        print("✅ SUCCESSFUL DOWNLOADS:")
+        print("SUCCESSFUL DOWNLOADS:")
         print("─" * 80)
         for i, result in enumerate(successful, 1):
             print(f"\n{i}. {result['artist']} - {result['track']}")
@@ -1203,13 +1203,13 @@ def test_youtube_download():
             print(f"   Time: {result['duration_seconds']:.1f}s")
 
         print()
-        print(f"📦 Total Downloaded: {total_size:.2f} MB")
-        print(f"⚡ Average Download Time: {avg_time:.1f}s per track")
+        print(f"Total Downloaded: {total_size:.2f} MB")
+        print(f"Average Download Time: {avg_time:.1f}s per track")
         print()
 
     if failed:
         print("─" * 80)
-        print("❌ FAILED DOWNLOADS:")
+        print("FAILED DOWNLOADS:")
         print("─" * 80)
         for i, result in enumerate(failed, 1):
             print(f"\n{i}. {result['artist']} - {result['track']}")
@@ -1219,7 +1219,7 @@ def test_youtube_download():
     # File list for easy access
     if successful:
         print("─" * 80)
-        print("📁 DOWNLOAD LOCATION:")
+        print("DOWNLOAD LOCATION:")
         print("─" * 80)
         print(f"\n{yt_client.download_path.absolute()}\n")
         print("Files:")
@@ -1228,13 +1228,13 @@ def test_youtube_download():
         print()
 
     print("=" * 80)
-    print("🎉 Test Complete!")
+    print("Test Complete!")
     print("=" * 80)
     print()
 
     # Quality check reminder
     if successful:
-        print("📝 Next Steps:")
+        print("Next Steps:")
         print("  1. Listen to downloaded files to verify quality")
         print("  2. Check metadata tags in your music player")
         print("  3. Compare with Soulseek downloads if available")

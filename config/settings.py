@@ -33,7 +33,7 @@ class ConfigManager:
                 # Default to project path even if it doesn't exist yet (for creation/fallback)
                 self.config_path = project_path
 
-        print(f"🔧 ConfigManager initialized with path: {self.config_path}")
+        print(f"ConfigManager initialized with path: {self.config_path}")
         
         self.config_data: Dict[str, Any] = {}
         self._fernet: Optional[Fernet] = None
@@ -45,7 +45,7 @@ class ConfigManager:
         else:
              self.database_path = self.base_dir / "database" / "music_library.db"
              
-        print(f"💾 Database path set to: {self.database_path}")
+        print(f"Database path set to: {self.database_path}")
              
         self.load_config(str(self.config_path))
 
@@ -107,7 +107,7 @@ class ConfigManager:
             try:
                 import shutil
                 shutil.move(str(old_key_file), str(key_file))
-                print(f"[MIGRATE] 🔑 Moved encryption key to {key_file}")
+                print(f"[MIGRATE] Moved encryption key to {key_file}")
             except Exception:
                 key_file = old_key_file  # Fall back to old location
         if key_file.exists():
@@ -155,7 +155,7 @@ class ConfigManager:
             return decrypted
         except InvalidToken:
             # Key mismatch — encrypted with a different key (key file deleted/replaced)
-            print(f"[ERROR] ⚠️ Failed to decrypt a config value — encryption key may have changed. "
+            print(f"[ERROR] Failed to decrypt a config value — encryption key may have changed. "
                   f"Re-enter credentials in Settings or restore the original .encryption_key file.")
             return value
         except Exception:
@@ -243,9 +243,9 @@ class ConfigManager:
                     needs_migration = True
                     break
             if needs_migration:
-                print("[MIGRATE] 🔐 Encrypting sensitive config values at rest...")
+                print("[MIGRATE] Encrypting sensitive config values at rest...")
                 self._save_to_database(self.config_data)
-                print("[OK] ✅ Sensitive config values encrypted successfully")
+                print("[OK] Sensitive config values encrypted successfully")
         except Exception as e:
             print(f"[WARN] Could not migrate encryption: {e}")
 
@@ -505,7 +505,7 @@ class ConfigManager:
         2. config.json (migration from file-based config)
         3. Defaults (fresh install)
         """
-        print(f"📥 Loading configuration...")
+        print(f"Loading configuration...")
         
         # Try loading from database first
         config_data = self._load_from_database()
@@ -518,18 +518,18 @@ class ConfigManager:
             return
 
         # Database is empty - try migration from config.json
-        print(f"⚠️ Configuration not found in database. Attempting migration from: {self.config_path}")
+        print(f"Configuration not found in database. Attempting migration from: {self.config_path}")
         config_data = self._load_from_config_file()
 
         if config_data:
             # Migrate from config.json to database
-            print("[MIGRATE] 🚀 Migrating configuration from config.json to database...")
+            print("[MIGRATE] Migrating configuration from config.json to database...")
             if self._save_to_database(config_data):
-                print("[OK] ✅ Configuration migrated successfully to database.")
+                print("[OK] Configuration migrated successfully to database.")
                 self.config_data = config_data
                 return
             else:
-                print("[WARN] ⚠️ Migration failed - using file-based config temporarily.")
+                print("[WARN] Migration failed - using file-based config temporarily.")
                 self.config_data = config_data
                 return
 
@@ -539,9 +539,9 @@ class ConfigManager:
 
         # Try to save defaults to database
         if self._save_to_database(config_data):
-            print("[OK] ✅ Default configuration saved to database")
+            print("[OK] Default configuration saved to database")
         else:
-            print("[WARN] ⚠️ Could not save defaults to database - using in-memory config")
+            print("[WARN] Could not save defaults to database - using in-memory config")
 
         self.config_data = config_data
 

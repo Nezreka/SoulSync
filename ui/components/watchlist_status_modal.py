@@ -483,7 +483,7 @@ class WatchlistStatusModal(QDialog):
         
         # Search bar
         self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("🔍 Search all artists...")
+        self.search_bar.setPlaceholderText("Search all artists...")
         self.search_bar.setFixedHeight(32)
         self.search_bar.setStyleSheet("""
             QLineEdit {
@@ -675,7 +675,7 @@ class WatchlistStatusModal(QDialog):
     def get_artist_status_icon(self, artist):
         """Determine the appropriate status icon and color for an artist based on scan history"""
         if not artist.last_scan_timestamp:
-            return "⚪", "#888888"  # Not scanned yet (gray circle)
+            return "", "#888888"  # Not scanned yet (gray circle)
         
         try:
             from datetime import datetime, timezone
@@ -693,13 +693,13 @@ class WatchlistStatusModal(QDialog):
             # If scanned within the last 24 hours, show as up to date
             # If older, show as potentially stale but still scanned
             if hours_ago <= 24:
-                return "✓", "#4caf50"  # Recently up to date (bright green)
+                return "", "#4caf50"  # Recently up to date (bright green)
             else:
-                return "✓", "#888888"  # Scanned but older (gray checkmark)
+                return "", "#888888"  # Scanned but older (gray checkmark)
                 
         except Exception:
             # Fallback if datetime parsing fails
-            return "✓", "#4caf50"  # Default to up to date
+            return "", "#4caf50"  # Default to up to date
     
     def create_artist_card(self, artist: WatchlistArtist) -> QFrame:
         """Create a professional artist card widget"""
@@ -773,7 +773,7 @@ class WatchlistStatusModal(QDialog):
         info_layout.addWidget(sync_label)
         
         # Delete button with modern styling
-        delete_button = QPushButton("✕")
+        delete_button = QPushButton("")
         delete_button.setFixedSize(28, 28)
         delete_button.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         delete_button.setStyleSheet("""
@@ -870,7 +870,7 @@ class WatchlistStatusModal(QDialog):
                 if item and item.widget():
                     card = item.widget()
                     if hasattr(card, 'status_indicator'):
-                        card.status_indicator.setText("⚪")  # Not scanned yet
+                        card.status_indicator.setText("")  # Not scanned yet
                         card.status_indicator.setStyleSheet("color: #888888; border: none; background: transparent;")
             
             # Use shared scan worker so it persists across modal close/open
@@ -945,7 +945,7 @@ class WatchlistStatusModal(QDialog):
                     # Find artist by name (we don't have ID in signal)
                     for artist in self.current_artists:
                         if artist.artist_name == artist_name:
-                            card.status_indicator.setText("🔍")  # Scanning
+                            card.status_indicator.setText("")  # Scanning
                             card.status_indicator.setStyleSheet("color: #ffc107; border: none; background: transparent;")
                             break
     
@@ -1018,13 +1018,13 @@ class WatchlistStatusModal(QDialog):
                         if artist.artist_name == artist_name:
                             if success:
                                 if new_tracks > 0:
-                                    card.status_indicator.setText("⚡")  # New tracks found
+                                    card.status_indicator.setText("")  # New tracks found
                                     card.status_indicator.setStyleSheet("color: #1db954; border: none; background: transparent;")
                                 else:
-                                    card.status_indicator.setText("✓")  # Up to date
+                                    card.status_indicator.setText("")  # Up to date
                                     card.status_indicator.setStyleSheet("color: #4caf50; border: none; background: transparent;")
                             else:
-                                card.status_indicator.setText("❌")  # Error
+                                card.status_indicator.setText("")  # Error
                                 card.status_indicator.setStyleSheet("color: #f44336; border: none; background: transparent;")
                             break
     
@@ -1083,7 +1083,7 @@ class WatchlistStatusModal(QDialog):
                 if item and item.widget():
                     card = item.widget()
                     if hasattr(card, 'status_indicator'):
-                        card.status_indicator.setText("⚪")  # Not scanned yet
+                        card.status_indicator.setText("")  # Not scanned yet
                         card.status_indicator.setStyleSheet("color: #888888; border: none; background: transparent;")
     
     def on_background_scan_completed(self, total_artists: int, total_new_tracks: int, total_added_to_wishlist: int):

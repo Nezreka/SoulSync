@@ -176,7 +176,7 @@ class JellyfinClient:
         self.music_library_id = None
         self._connection_attempted = False
         self.clear_cache()
-        logger.info("🔄 Jellyfin client config reset — will reconnect with new settings")
+        logger.info("Jellyfin client config reset — will reconnect with new settings")
 
     def ensure_connection(self) -> bool:
         """Ensure connection to Jellyfin server with lazy initialization."""
@@ -493,17 +493,17 @@ class JellyfinClient:
         
         # Check if we're in metadata-only mode and skip expensive operations
         if self._metadata_only_mode:
-            logger.info("🎯 Skipping cache population for metadata-only operation")
+            logger.info("Skipping cache population for metadata-only operation")
             self._cache_populated = True
             return
             
-        logger.info("🚀 Starting aggressive Jellyfin cache population to eliminate slow individual API calls...")
+        logger.info("Starting aggressive Jellyfin cache population to eliminate slow individual API calls...")
         if self._progress_callback:
             self._progress_callback("Fetching all tracks in bulk...")
         
         try:
             # SIMPLIFIED APPROACH: Fetch all tracks, then all albums separately (robust and fast)
-            logger.info("🎵 Fetching all tracks in bulk...")
+            logger.info("Fetching all tracks in bulk...")
             all_tracks = []
             start_index = 0
             limit = 10000
@@ -530,13 +530,13 @@ class JellyfinClient:
                     if limit > 1000:
                         limit = limit // 2
                         consecutive_failures = 0  # Reset — give the smaller batch a fair chance
-                        logger.warning(f"⚠️ Track fetch failed - reducing batch size to {limit}")
+                        logger.warning(f"Track fetch failed - reducing batch size to {limit}")
                         continue
                     elif consecutive_failures >= 2:
-                        logger.warning("🚨 Multiple track fetch failures at minimum batch size - stopping")
+                        logger.warning("Multiple track fetch failures at minimum batch size - stopping")
                         break
                     else:
-                        logger.warning("⚠️ Track fetch failed at minimum batch size - retrying once")
+                        logger.warning("Track fetch failed at minimum batch size - retrying once")
                         continue
 
                 consecutive_failures = 0
@@ -551,7 +551,7 @@ class JellyfinClient:
                     
                 start_index += limit
                 progress_msg = f"Fetched {len(all_tracks)} tracks so far..."
-                logger.info(f"   🎵 {progress_msg} (batch size: {limit})")
+                logger.info(f"   {progress_msg} (batch size: {limit})")
                 if self._progress_callback:
                     self._progress_callback(progress_msg)
             
@@ -564,12 +564,12 @@ class JellyfinClient:
                         self._track_cache[album_id] = []
                     self._track_cache[album_id].append(JellyfinTrack(track_data, self))
             
-            logger.info(f"✅ Cached {len(all_tracks)} tracks for {len(self._track_cache)} albums")
+            logger.info(f"Cached {len(all_tracks)} tracks for {len(self._track_cache)} albums")
             if self._progress_callback:
                 self._progress_callback(f"Cached {len(all_tracks)} tracks. Now fetching albums...")
             
             # STEP 2: Fetch all albums in bulk (same proven pattern)
-            logger.info("📀 Fetching all albums in bulk...")
+            logger.info("Fetching all albums in bulk...")
             all_albums = []
             start_index = 0
             limit = 10000
@@ -596,13 +596,13 @@ class JellyfinClient:
                     if limit > 1000:
                         limit = limit // 2
                         consecutive_failures = 0  # Reset — give the smaller batch a fair chance
-                        logger.warning(f"⚠️ Album fetch failed - reducing batch size to {limit}")
+                        logger.warning(f"Album fetch failed - reducing batch size to {limit}")
                         continue
                     elif consecutive_failures >= 2:
-                        logger.warning("🚨 Multiple album fetch failures at minimum batch size - stopping")
+                        logger.warning("Multiple album fetch failures at minimum batch size - stopping")
                         break
                     else:
-                        logger.warning("⚠️ Album fetch failed at minimum batch size - retrying once")
+                        logger.warning("Album fetch failed at minimum batch size - retrying once")
                         continue
 
                 consecutive_failures = 0
@@ -617,7 +617,7 @@ class JellyfinClient:
                     
                 start_index += limit
                 progress_msg = f"Fetched {len(all_albums)} albums so far..."
-                logger.info(f"   📀 {progress_msg} (batch size: {limit})")
+                logger.info(f"   {progress_msg} (batch size: {limit})")
                 if self._progress_callback:
                     self._progress_callback(progress_msg)
             
@@ -632,10 +632,10 @@ class JellyfinClient:
                             self._album_cache[artist_id] = []
                         self._album_cache[artist_id].append(JellyfinAlbum(album_data, self))
             
-            logger.info(f"✅ Cached {len(all_albums)} albums for {len(self._album_cache)} artists")
+            logger.info(f"Cached {len(all_albums)} albums for {len(self._album_cache)} artists")
             
             self._cache_populated = True
-            logger.info("🎯 AGGRESSIVE CACHE COMPLETE! All subsequent album/track lookups will be INSTANT!")
+            logger.info("AGGRESSIVE CACHE COMPLETE! All subsequent album/track lookups will be INSTANT!")
             if self._progress_callback:
                 self._progress_callback("Cache complete! Now processing artists...")
             
@@ -648,7 +648,7 @@ class JellyfinClient:
         if not albums:
             return
             
-        logger.info(f"🎯 Starting targeted Jellyfin cache for {len(albums)} recent albums...")
+        logger.info(f"Starting targeted Jellyfin cache for {len(albums)} recent albums...")
         if self._progress_callback:
             self._progress_callback(f"Caching tracks for {len(albums)} recent albums...")
         
@@ -688,11 +688,11 @@ class JellyfinClient:
                 # Progress update every 50 albums
                 if (i + 1) % 50 == 0 or i == len(album_ids) - 1:
                     progress_msg = f"Cached {cached_tracks} tracks from {i + 1} albums..."
-                    logger.info(f"   🎯 {progress_msg}")
+                    logger.info(f"   {progress_msg}")
                     if self._progress_callback:
                         self._progress_callback(progress_msg)
             
-            logger.info(f"✅ Targeted cache complete: {cached_tracks} tracks cached for {len(self._track_cache)} albums")
+            logger.info(f"Targeted cache complete: {cached_tracks} tracks cached for {len(self._track_cache)} albums")
             if self._progress_callback:
                 self._progress_callback("Targeted cache complete! Now checking for new tracks...")
                 
@@ -1300,7 +1300,7 @@ class JellyfinClient:
             
             result = response.json()
             if result and 'Id' in result:
-                logger.info(f"✅ Created Jellyfin playlist '{name}' with {len(track_ids)} tracks")
+                logger.info(f"Created Jellyfin playlist '{name}' with {len(track_ids)} tracks")
                 return True
             else:
                 logger.error(f"Failed to create Jellyfin playlist '{name}': No playlist ID returned")
@@ -1407,7 +1407,7 @@ class JellyfinClient:
                     logger.error(f"  Request params: Ids={add_params['Ids'][:200]}... (truncated)")
                     # Continue with other batches even if one fails
                     
-            logger.info(f"✅ Created large Jellyfin playlist '{name}' with {len(track_ids)} tracks in {total_batches} batches")
+            logger.info(f"Created large Jellyfin playlist '{name}' with {len(track_ids)} tracks in {total_batches} batches")
             return True
             
         except Exception as e:
@@ -1453,7 +1453,7 @@ class JellyfinClient:
             try:
                 success = self.create_playlist(target_name, source_tracks)
                 if success:
-                    logger.info(f"✅ Created backup playlist '{target_name}' with {len(source_tracks)} tracks")
+                    logger.info(f"Created backup playlist '{target_name}' with {len(source_tracks)} tracks")
                     return True
                 else:
                     logger.error(f"Failed to create backup playlist '{target_name}'")
@@ -1541,12 +1541,12 @@ class JellyfinClient:
             
             if existing_playlist and create_backup:
                 backup_name = f"{playlist_name} Backup"
-                logger.info(f"🛡️ Creating backup playlist '{backup_name}' before sync")
+                logger.info(f"Creating backup playlist '{backup_name}' before sync")
                 
                 if self.copy_playlist(playlist_name, backup_name):
-                    logger.info(f"✅ Backup created successfully")
+                    logger.info(f"Backup created successfully")
                 else:
-                    logger.warning(f"⚠️ Failed to create backup, continuing with sync")
+                    logger.warning(f"Failed to create backup, continuing with sync")
             
             if existing_playlist:
                 # Delete existing playlist using DELETE request
@@ -1612,7 +1612,7 @@ class JellyfinClient:
             response = requests.post(url, headers=headers, params=params, timeout=10)
             response.raise_for_status()
             
-            logger.info(f"🎵 Triggered Jellyfin library scan for '{library_name}'")
+            logger.info(f"Triggered Jellyfin library scan for '{library_name}'")
             return True
             
         except Exception as e:
@@ -1622,14 +1622,14 @@ class JellyfinClient:
     def is_library_scanning(self, library_name: str = "Music") -> bool:
         """Check if Jellyfin library is currently scanning"""
         if not self.ensure_connection():
-            logger.debug("🔍 DEBUG: Not connected to Jellyfin, cannot check scan status")
+            logger.debug("DEBUG: Not connected to Jellyfin, cannot check scan status")
             return False
             
         try:
             # Check scheduled tasks for library scan activities
             response = self._make_request('/ScheduledTasks')
             if not response:
-                logger.debug("🔍 DEBUG: Could not get scheduled tasks")
+                logger.debug("DEBUG: Could not get scheduled tasks")
                 return False
                 
             for task in response:
@@ -1639,10 +1639,10 @@ class JellyfinClient:
                 # Look for library scan related tasks that are running
                 if ('scan' in task_name or 'refresh' in task_name or 'library' in task_name):
                     if task_state in ['Running', 'Cancelling']:
-                        logger.debug(f"🔍 DEBUG: Found running scan task: {task.get('Name')} (State: {task_state})")
+                        logger.debug(f"DEBUG: Found running scan task: {task.get('Name')} (State: {task_state})")
                         return True
                         
-            logger.debug("🔍 DEBUG: No active scan tasks detected")
+            logger.debug("DEBUG: No active scan tasks detected")
             return False
             
         except Exception as e:
@@ -1802,9 +1802,9 @@ class JellyfinClient:
         try:
             self._metadata_only_mode = enabled
             if enabled:
-                logger.info("🎯 Metadata-only mode enabled - will skip expensive track caching")
+                logger.info("Metadata-only mode enabled - will skip expensive track caching")
             else:
-                logger.info("🎯 Metadata-only mode disabled")
+                logger.info("Metadata-only mode disabled")
             return True
         except Exception as e:
             logger.error(f"Error setting metadata-only mode: {e}")

@@ -113,14 +113,14 @@ class LyricsClient:
                     f.write(synced)
                 # Embed synced lyrics in audio tags
                 self._embed_lyrics(audio_file_path, synced)
-                logger.info(f"✅ Created synced LRC + embedded: {os.path.basename(lrc_path)}")
+                logger.info(f"Created synced LRC + embedded: {os.path.basename(lrc_path)}")
             else:
                 # Plain lyrics only → write as .txt (not .lrc, which requires timestamps)
                 with open(txt_path, 'w', encoding='utf-8') as f:
                     f.write(plain)
                 # Still embed plain lyrics in audio tags (players can display unsynced lyrics)
                 self._embed_lyrics(audio_file_path, plain)
-                logger.info(f"✅ Created plain lyrics .txt + embedded: {os.path.basename(txt_path)}")
+                logger.info(f"Created plain lyrics .txt + embedded: {os.path.basename(txt_path)}")
             return True
 
         except Exception as e:

@@ -28,7 +28,7 @@ SEASONAL_CONFIG = {
         "keywords": ["christmas", "xmas", "holiday", "santa", "jingle", "winter wonderland", "sleigh", "noel", "carol"],
         "active_months": [11, 12],  # November-December
         "playlist_size": 50,
-        "icon": "🎄"
+        "icon": "🎅"
     },
     "valentines": {
         "name": "Love Songs",
@@ -36,7 +36,7 @@ SEASONAL_CONFIG = {
         "keywords": ["love", "valentine", "romance", "heart", "romantic", "darling"],
         "active_months": [2],  # February
         "playlist_size": 50,
-        "icon": "❤️"
+        "icon": "💝"
     },
     "summer": {
         "name": "Summer Vibes",

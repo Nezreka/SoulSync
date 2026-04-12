@@ -345,6 +345,7 @@ class SoulseekClient:
              
                 
                 if response.status in [200, 201, 204]:  # Accept 200 OK, 201 Created, and 204 No Content
+                    self._last_401_logged = False  # Reset on success
                     try:
                         if response_text.strip():  # Only parse if there's content
                             return await response.json()
@@ -362,11 +363,17 @@ class SoulseekClient:
                     # Enhanced error logging for better debugging
                     error_detail = response_text if response_text.strip() else "No error details provided"
                     
-                    # Reduce noise for expected 404s during search cleanup
                     # Reduce noise for expected 404s (e.g. status checks for YouTube downloads)
+                    # and repeated 401s (slskd not running / bad credentials)
                     if response.status == 404:
                         logger.debug(f"API request returned 404 (Not Found) for {url}")
+                    elif response.status == 401:
+                        if not getattr(self, '_last_401_logged', False):
+                            logger.warning(f"slskd authentication failed (401) — check API key. Suppressing further 401 errors.")
+                            self._last_401_logged = True
+                        logger.debug(f"API request 401 for {url}")
                     else:
+                        self._last_401_logged = False
                         logger.error(f"API request failed: HTTP {response.status} ({response.reason}) - {error_detail}")
                         logger.debug(f"Failed request: {method} {url}")
                     
@@ -1029,10 +1036,10 @@ class SoulseekClient:
                 logger.debug(f"{action} download (attempt {i+1}/3) with endpoint: {endpoint}")
                 response = await self._make_request('DELETE', endpoint)
                 if response is not None:
-                    logger.info(f"✅ Successfully cancelled download using endpoint format {i+1}")
+                    logger.info(f"Successfully cancelled download using endpoint format {i+1}")
                     return True
                 else:
-                    logger.debug(f"❌ Endpoint format {i+1} failed: {endpoint}")
+                    logger.debug(f"Endpoint format {i+1} failed: {endpoint}")
 
             # Fallback: if download_id looks like a filename (contains path separators),
             # list all transfers, find by filename, and cancel with the real transfer ID
@@ -1049,12 +1056,12 @@ class SoulseekClient:
                             logger.debug(f"Found matching transfer with real ID, trying: {fallback_endpoint}")
                             response = await self._make_request('DELETE', fallback_endpoint)
                             if response is not None:
-                                logger.info(f"✅ Successfully cancelled download via filename fallback")
+                                logger.info(f"Successfully cancelled download via filename fallback")
                                 return True
                 except Exception as fallback_error:
                     logger.debug(f"Filename fallback failed: {fallback_error}")
 
-            logger.error(f"❌ All cancel endpoint formats failed for download_id: {download_id}")
+            logger.error(f"All cancel endpoint formats failed for download_id: {download_id}")
             return False
 
         except Exception as e:
@@ -1725,7 +1732,7 @@ class SoulseekClient:
                 async with session.get(swagger_url, headers=headers) as response:
                     if response.status == 200:
                         swagger_data = await response.json()
-                        logger.info("✓ Found Swagger documentation")
+                        logger.info("Found Swagger documentation")
                         
                         # Look for download/transfer related endpoints
                         paths = swagger_data.get('paths', {})
