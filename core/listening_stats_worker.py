@@ -90,15 +90,20 @@ class ListeningStatsWorker:
         logger.info("Listening stats worker thread started")
 
         # Build cache from existing data immediately (before first poll)
-        interruptible_sleep(self._stop_event, 5)
+        if interruptible_sleep(self._stop_event, 5):
+            return
         try:
             self._build_stats_cache()
             logger.info("Initial stats cache built from existing data")
         except Exception as e:
             logger.debug(f"Initial cache build skipped: {e}")
 
+        if self.should_stop:
+            return
+
         # Wait before first poll
-        interruptible_sleep(self._stop_event, 10)
+        if interruptible_sleep(self._stop_event, 10):
+            return
 
         while not self.should_stop:
             try:

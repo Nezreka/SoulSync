@@ -2638,6 +2638,8 @@ class WebUIDownloadMonitor:
                                 completed_tasks.append((batch_id, task_id))
 
         # ---- All work below runs WITHOUT tasks_lock held ----
+        if globals().get('IS_SHUTTING_DOWN', False) or not self.monitoring:
+            return
 
         # Execute deferred operations from _should_retry_task (network calls, nested locks)
         for op in deferred_ops:
@@ -3459,6 +3461,11 @@ def _shutdown_runtime_components():
         print("API call history saved")
     except Exception as e:
         print(f"Error saving API call history: {e}")
+
+    # Stop the active DB update worker before tearing down the executor it runs on.
+    # This lets an in-flight update observe should_stop and exit cleanly.
+    _stop_component(db_update_worker, "db update worker")
+    _stop_component(metadata_update_runtime_worker, "metadata update worker")
 
     # Stop long-lived worker components in parallel so shutdown waits for the
     # slowest worker instead of serially burning the timeout for each one.
@@ -40789,6 +40796,7 @@ metadata_update_state = {
 }
 
 metadata_update_worker = None
+metadata_update_runtime_worker = None
 metadata_update_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="metadata_update")
 
 # ===============================
@@ -44903,7 +44911,7 @@ def _old_get_listenbrainz_playlist_tracks_DEPRECATED(playlist_mbid):
 @app.route('/api/metadata/start', methods=['POST'])
 def start_metadata_update():
     """Start the metadata update process - EXACT copy of dashboard.py logic"""
-    global metadata_update_worker, metadata_update_state
+    global metadata_update_worker, metadata_update_runtime_worker, metadata_update_state
     
     try:
         # Check if already running
@@ -44971,6 +44979,7 @@ def start_metadata_update():
         
         # Start the metadata update worker - EXACTLY like dashboard.py
         def run_metadata_update():
+            global metadata_update_runtime_worker
             try:
                 metadata_worker = WebMetadataUpdateWorker(
                     None,  # Artists will be loaded in the worker thread - EXACTLY like dashboard.py
@@ -44979,12 +44988,15 @@ def start_metadata_update():
                     active_server,
                     refresh_interval_days
                 )
+                metadata_update_runtime_worker = metadata_worker
                 metadata_worker.run()
             except Exception as e:
                 print(f"Error in metadata update worker: {e}")
                 metadata_update_state['status'] = 'error'
                 metadata_update_state['error'] = str(e)
                 add_activity_item("", "Metadata Error", str(e), "Now")
+            finally:
+                metadata_update_runtime_worker = None
         
         metadata_update_worker = metadata_update_executor.submit(run_metadata_update)
         
