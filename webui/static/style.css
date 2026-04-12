@@ -11894,7 +11894,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     flex-direction: column;
     gap: 15px;
     flex-grow: 1;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .sync-tab-content.active {
