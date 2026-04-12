@@ -18403,7 +18403,7 @@ def _embed_source_ids(audio_file, metadata: dict):
                 _pp_album_name = metadata.get('album', '')
                 _pp_artist_name = metadata.get('album_artist', '') or metadata.get('artist', '')
                 if _pp_album_name and _pp_artist_name:
-                    conn = database._get_connection()
+                    conn = get_database()._get_connection()
                     try:
                         cursor = conn.cursor()
                         cursor.execute("""
