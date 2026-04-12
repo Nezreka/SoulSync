@@ -4603,18 +4603,19 @@ def get_status():
             serverless_sources = ('youtube', 'hifi', 'qobuz')
             is_serverless = (download_mode in serverless_sources or
                              (download_mode == 'hybrid' and
-                              hybrid_order and hybrid_order[0] in serverless_sources))
+                              hybrid_order and any(s in serverless_sources for s in hybrid_order)))
 
-            if soulseek_relevant and soulseek_client:
+            # Serverless check first — avoids slow slskd timeout when YouTube/HiFi are in hybrid order
+            if is_serverless:
+                soulseek_status = True
+                soulseek_response_time = 0
+            elif soulseek_relevant and soulseek_client:
                 soulseek_start = time.time()
                 try:
                     soulseek_status = run_async(soulseek_client.check_connection())
                 except Exception:
                     soulseek_status = False
                 soulseek_response_time = (time.time() - soulseek_start) * 1000
-            elif is_serverless:
-                soulseek_status = True
-                soulseek_response_time = 0
             else:
                 soulseek_status = False
                 soulseek_response_time = 0
