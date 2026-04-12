@@ -3043,6 +3043,10 @@ function initializeMediaPlayer() {
     const stopButton = document.getElementById('stop-button');
     const volumeSlider = document.getElementById('volume-slider');
 
+    // Start in idle state (no track playing)
+    const player = document.getElementById('media-player');
+    if (player && !currentTrack) player.classList.add('idle');
+
     // Initialize HTML5 audio player
     audioPlayer = document.getElementById('audio-player');
     if (audioPlayer) {
@@ -3129,8 +3133,9 @@ function setTrackInfo(track) {
     document.getElementById('play-button').disabled = false;
     document.getElementById('stop-button').disabled = false;
 
-    // Hide no track message
+    // Hide no track message and expand player
     document.getElementById('no-track-message').classList.add('hidden');
+    document.getElementById('media-player').classList.remove('idle');
 
     // Sync expanded player and media session
     updateNpTrackInfo();
@@ -3205,8 +3210,9 @@ function clearTrack() {
     // Hide loading animation
     hideLoadingAnimation();
 
-    // Show no track message
+    // Show no track message and collapse player
     document.getElementById('no-track-message').classList.remove('hidden');
+    document.getElementById('media-player').classList.add('idle');
 
     // Reset queue state
     npQueue = [];
@@ -15584,6 +15590,11 @@ function processModalStatusUpdate(playlistId, data) {
             if (failedOrCancelledCount > 0) completionParts.push(`${failedOrCancelledCount} failed`);
             const completionMessage = `Download complete! ${completionParts.join(', ')}.`;
             showToast(completionMessage, 'success');
+
+            // Refresh server playlists tab so it reflects newly synced tracks
+            if (typeof loadServerPlaylists === 'function') {
+                setTimeout(() => loadServerPlaylists(), 2000);
+            }
 
             // Auto-close wishlist modal when completed (for auto-processing)
             if (playlistId === 'wishlist') {
