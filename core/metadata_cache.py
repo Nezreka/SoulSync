@@ -99,7 +99,13 @@ class MetadataCache:
     def _is_junk_entity(self, fields: dict) -> bool:
         """Check if extracted fields represent junk/placeholder data."""
         name = (fields.get('name') or '').strip().lower()
-        return name in self._JUNK_NAMES
+        if name in self._JUNK_NAMES:
+            return True
+        # For tracks: reject if artist_name is junk (prevents caching "Song by Unknown Artist")
+        artist_name = (fields.get('artist_name') or '').strip().lower()
+        if artist_name and artist_name in self._JUNK_NAMES:
+            return True
+        return False
 
     def store_entity(self, source: str, entity_type: str, entity_id: str, raw_data: dict) -> None:
         """Store an entity in the cache. Extracts structured fields from raw_data."""
