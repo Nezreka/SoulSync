@@ -2517,27 +2517,41 @@ class WebUIDownloadMonitor:
         self.monitoring = False
         self.monitor_thread = None
         self.monitored_batches = set()
+        self._lock = threading.Lock()
         
     def start_monitoring(self, batch_id):
         """Start monitoring a download batch"""
-        self.monitored_batches.add(batch_id)
-        if not self.monitoring:
-            self.monitoring = True
-            self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-            self.monitor_thread.start()
-            print(f"Started download monitor for batch {batch_id}")
+        with self._lock:
+            self.monitored_batches.add(batch_id)
+            if not self.monitoring:
+                self.monitoring = True
+                self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+                self.monitor_thread.start()
+                print(f"Started download monitor for batch {batch_id}")
     
     def stop_monitoring(self, batch_id):
         """Stop monitoring a specific batch"""
-        self.monitored_batches.discard(batch_id)
-        if not self.monitored_batches:
+        with self._lock:
+            self.monitored_batches.discard(batch_id)
+            if not self.monitored_batches:
+                self.monitoring = False
+                print(f"Stopped download monitor (no active batches)")
+
+    def shutdown(self):
+        """Stop the monitor loop and clear active batch tracking."""
+        with self._lock:
             self.monitoring = False
-            print(f"Stopped download monitor (no active batches)")
+            self.monitored_batches.clear()
+            self.monitor_thread = None
+        print("Download monitor shutdown requested")
     
     def _monitor_loop(self):
         """Main monitoring loop - checks downloads every 1 second for responsive web UX"""
         while self.monitoring and self.monitored_batches:
             try:
+                if globals().get('IS_SHUTTING_DOWN', False):
+                    self.monitoring = False
+                    break
                 self._check_all_downloads()
                 time.sleep(1)  # 1-second polling for fast web UI updates
             except Exception as e:
@@ -3206,6 +3220,8 @@ def validate_and_heal_batch_states():
     This is the server-side equivalent of the frontend's worker count validation.
     """
     try:
+        if globals().get('IS_SHUTTING_DOWN', False):
+            return
         import time
         current_time = time.time()
 
@@ -3310,15 +3326,41 @@ def validate_and_heal_batch_states():
 
 # Start periodic batch healing (every 30 seconds)
 import threading
+_batch_healing_timer = None
+_batch_healing_timer_lock = threading.Lock()
+
+def _schedule_batch_healing_timer(delay_seconds=30.0):
+    """Schedule the next batch healing cycle."""
+    global _batch_healing_timer
+    if globals().get('IS_SHUTTING_DOWN', False):
+        return
+
+    timer = threading.Timer(delay_seconds, start_batch_healing_timer)
+    timer.daemon = True
+    with _batch_healing_timer_lock:
+        _batch_healing_timer = timer
+    timer.start()
+
+def _cancel_batch_healing_timer():
+    """Cancel the current batch healing timer if one exists."""
+    global _batch_healing_timer
+    with _batch_healing_timer_lock:
+        timer = _batch_healing_timer
+        _batch_healing_timer = None
+    if timer:
+        timer.cancel()
+
 def start_batch_healing_timer():
     """Start periodic batch state validation and healing"""
     try:
+        if globals().get('IS_SHUTTING_DOWN', False):
+            return
         validate_and_heal_batch_states()
     except Exception as e:
         print(f"[Batch Healing Timer] Error: {e}")
     finally:
         # Schedule next healing cycle
-        threading.Timer(30.0, start_batch_healing_timer).start()
+        _schedule_batch_healing_timer(30.0)
 
 # Start the healing timer when the server starts
 start_batch_healing_timer()
@@ -3332,35 +3374,85 @@ def cleanup_monitor():
     """Clean up background monitor on shutdown"""
     if download_monitor.monitoring:
         print("Flask shutdown detected, stopping download monitor...")
-        download_monitor.monitoring = False
-        download_monitor.monitored_batches.clear()
+        download_monitor.shutdown()
         # Give the thread a moment to exit cleanly
         time.sleep(0.5)
         
     # Clean up batch locks to prevent memory leaks
-    with tasks_lock:
-        batch_locks.clear()
-        print("Cleaned up batch locks")
+    try:
+        acquired = tasks_lock.acquire(timeout=1.0)
+        if acquired:
+            try:
+                batch_locks.clear()
+                print("Cleaned up batch locks")
+            finally:
+                tasks_lock.release()
+        else:
+            print("Skipped batch lock cleanup - tasks_lock busy")
+    except Exception as e:
+        print(f"Error cleaning up batch locks: {e}")
 
 # Global shutdown flag
 IS_SHUTTING_DOWN = False
 
-def signal_handler(signum, frame):
-    """Handle SIGINT (Ctrl+C) and SIGTERM"""
-    global IS_SHUTTING_DOWN
-    print(f"Signal {signum} received, cleaning up...")
-    IS_SHUTTING_DOWN = True
-    cleanup_monitor()
-    
-    # Stop automation engine
+def _shutdown_executor(executor, name):
+    """Shut down a ThreadPoolExecutor without waiting for long-running tasks."""
+    if executor is None:
+        return
     try:
-        if automation_engine:
-            print("Stopping automation engine...")
-            automation_engine.stop()
+        print(f"Shutting down {name}...")
+        executor.shutdown(wait=False, cancel_futures=True)
     except Exception as e:
-        print(f"Error stopping automation engine: {e}")
+        print(f"Error shutting down {name}: {e}")
 
-    # Persist API call history
+def _stop_component(component, name, method_names=("stop", "shutdown")):
+    """Call a best-effort stop method on a component if it has one."""
+    if component is None:
+        return
+    for method_name in method_names:
+        method = getattr(component, method_name, None)
+        if callable(method):
+            try:
+                print(f"Stopping {name}...")
+                method()
+            except Exception as e:
+                print(f"Error stopping {name}: {e}")
+            return
+
+def _stop_components_parallel(components):
+    """Stop multiple components concurrently and wait for all stop calls to finish."""
+    stop_threads = []
+
+    for component, name in components:
+        if component is None:
+            continue
+
+        thread = threading.Thread(
+            target=_stop_component,
+            args=(component, name),
+            name=f"shutdown-{name.replace(' ', '-')}",
+        )
+        thread.start()
+        stop_threads.append((name, thread))
+
+    for name, thread in stop_threads:
+        thread.join()
+
+def _shutdown_runtime_components():
+    """Best-effort shutdown for timers, monitors, workers, and executors."""
+    global IS_SHUTTING_DOWN
+    if IS_SHUTTING_DOWN:
+        return
+
+    IS_SHUTTING_DOWN = True
+    _cancel_batch_healing_timer()
+
+    cleanup_monitor()
+
+    _stop_component(web_scan_manager, "web scan manager")
+    _stop_component(automation_engine, "automation engine")
+
+    # Persist API call history before shutting down worker pools.
     try:
         from core.api_call_tracker import api_call_tracker
         api_call_tracker.save()
@@ -3368,13 +3460,52 @@ def signal_handler(signum, frame):
     except Exception as e:
         print(f"Error saving API call history: {e}")
 
-    # Shutdown executor to prevent new tasks
-    try:
-        print("Shutting down missing_download_executor...")
-        missing_download_executor.shutdown(wait=False, cancel_futures=True)
-    except Exception as e:
-        print(f"Error shutting down executor: {e}")
+    # Stop long-lived worker components in parallel so shutdown waits for the
+    # slowest worker instead of serially burning the timeout for each one.
+    _stop_components_parallel([
+        (mb_worker, "musicbrainz worker"),
+        (audiodb_worker, "audiodb worker"),
+        (discogs_worker, "discogs worker"),
+        (deezer_worker, "deezer worker"),
+        (spotify_enrichment_worker, "spotify enrichment worker"),
+        (itunes_enrichment_worker, "itunes enrichment worker"),
+        (lastfm_worker, "lastfm worker"),
+        (genius_worker, "genius worker"),
+        (tidal_enrichment_worker, "tidal enrichment worker"),
+        (qobuz_enrichment_worker, "qobuz enrichment worker"),
+        (hydrabase_worker, "hydrabase worker"),
+        (soulid_worker, "soulid worker"),
+        (listening_stats_worker, "listening stats worker"),
+        (repair_worker, "repair worker"),
+    ])
 
+    # Shut down executor pools so their worker threads stop keeping the process alive.
+    for executor, name in [
+        (stream_executor, "stream executor"),
+        (db_update_executor, "db update executor"),
+        (quality_scanner_executor, "quality scanner executor"),
+        (duplicate_cleaner_executor, "duplicate cleaner executor"),
+        (retag_executor, "retag executor"),
+        (sync_executor, "sync executor"),
+        (missing_download_executor, "missing download executor"),
+        (tidal_discovery_executor, "tidal discovery executor"),
+        (deezer_discovery_executor, "deezer discovery executor"),
+        (spotify_public_discovery_executor, "spotify public discovery executor"),
+        (youtube_discovery_executor, "youtube discovery executor"),
+        (beatport_discovery_executor, "beatport discovery executor"),
+        (listenbrainz_discovery_executor, "listenbrainz discovery executor"),
+        (similar_artists_executor, "similar artists executor"),
+        (metadata_update_executor, "metadata update executor"),
+    ]:
+        _shutdown_executor(executor, name)
+
+    # Give daemon cleanup threads a moment to observe the shutdown flag.
+    time.sleep(0.2)
+
+def signal_handler(signum, frame):
+    """Handle SIGINT (Ctrl+C) and SIGTERM"""
+    print(f"Signal {signum} received, cleaning up...")
+    _shutdown_runtime_components()
     sys.exit(0)
 
 # Register cleanup handlers
@@ -3385,7 +3516,14 @@ def _atexit_save_history():
     except Exception:
         pass
 
+def _atexit_shutdown():
+    try:
+        _shutdown_runtime_components()
+    except Exception:
+        pass
+
 atexit.register(_atexit_save_history)
+atexit.register(_atexit_shutdown)
 atexit.register(cleanup_monitor)
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)

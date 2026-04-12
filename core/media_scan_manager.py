@@ -39,6 +39,7 @@ class MediaScanManager:
         self._periodic_update_timer = None  # Timer for 5-minute periodic updates
         self._periodic_update_interval = 300  # 5 minutes in seconds
         self._is_doing_periodic_updates = False  # Track if we're in periodic update mode
+        self._shutting_down = False
         
         logger.info(f"MediaScanManager initialized with {delay_seconds}s debounce delay")
     
@@ -119,6 +120,9 @@ class MediaScanManager:
         """
         logger.info(f"DEBUG: Media scan requested - reason: {reason}")
         with self._lock:
+            if self._shutting_down:
+                logger.debug("Media scan request ignored during shutdown")
+                return
             if self._scan_in_progress:
                 # Server is currently scanning - mark that we need another scan later
                 self._downloads_during_scan = True
@@ -134,6 +138,7 @@ class MediaScanManager:
             
             # Start the debounce timer
             self._timer = threading.Timer(self.delay, self._execute_scan)
+            self._timer.daemon = True
             self._timer.start()
     
     def add_scan_completion_callback(self, callback):
@@ -164,6 +169,9 @@ class MediaScanManager:
     def _execute_scan(self):
         """Execute the actual media library scan"""
         with self._lock:
+            if self._shutting_down:
+                logger.debug("Media scan execution skipped during shutdown")
+                return
             if self._scan_in_progress:
                 logger.warning("Scan already in progress - skipping duplicate execution")
                 return
@@ -211,6 +219,7 @@ class MediaScanManager:
             
             # Schedule first periodic update after 5 minutes
             self._periodic_update_timer = threading.Timer(self._periodic_update_interval, self._do_periodic_update)
+            self._periodic_update_timer.daemon = True
             self._periodic_update_timer.start()
             
         except Exception as e:
@@ -250,8 +259,11 @@ class MediaScanManager:
                 self._call_completion_callbacks()
                 
                 # Schedule next periodic update
+                if self._shutting_down:
+                    return
                 logger.info(f"Scheduling next periodic update in {self._periodic_update_interval//60} minutes")
                 self._periodic_update_timer = threading.Timer(self._periodic_update_interval, self._do_periodic_update)
+                self._periodic_update_timer.daemon = True
                 self._periodic_update_timer.start()
             else:
                 # Scanning stopped - final update and cleanup
@@ -360,6 +372,7 @@ class MediaScanManager:
     def shutdown(self):
         """Clean shutdown - cancel any pending timers"""
         with self._lock:
+            self._shutting_down = True
             if self._timer:
                 self._timer.cancel()
                 self._timer = None
