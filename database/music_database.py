@@ -565,6 +565,16 @@ class MusicDatabase:
                 except Exception:
                     pass
 
+            # Migration: add track_artist column for per-track artist on compilations/DJ mixes
+            try:
+                cursor.execute("SELECT track_artist FROM tracks LIMIT 1")
+            except Exception:
+                try:
+                    cursor.execute("ALTER TABLE tracks ADD COLUMN track_artist TEXT")
+                    logger.info("Added track_artist column to tracks table")
+                except Exception:
+                    pass
+
             # One-time migration: purge discovery cache entries that lack track_number.
             # Prior versions cached discovery results without track_number/disc_number/release_date,
             # causing incorrect file organization (all tracks as "01", missing album year).
@@ -4598,7 +4608,36 @@ class MusicDatabase:
                     bitrate = track_obj.bitRate
                 if file_path is None and hasattr(track_obj, 'suffix') and track_obj.suffix:
                     file_path = f"{track_obj.title}.{track_obj.suffix}"
-                
+
+                # Extract per-track artist for compilations/DJ mixes.
+                # Only stored when it differs from the album artist.
+                track_artist = None
+                # Plex: originalTitle holds the per-track artist on compilation albums
+                plex_original = getattr(track_obj, 'originalTitle', None)
+                if plex_original and plex_original.strip():
+                    track_artist = plex_original.strip()
+                # Jellyfin/Emby: ArtistItems[0] is the track artist, may differ from album artist
+                if not track_artist and hasattr(track_obj, '_data'):
+                    raw = getattr(track_obj, '_data', {}) or {}
+                    artist_items = raw.get('ArtistItems', [])
+                    if artist_items:
+                        jf_track_artist = artist_items[0].get('Name', '')
+                        album_artists = raw.get('AlbumArtists', [])
+                        jf_album_artist = album_artists[0].get('Name', '') if album_artists else ''
+                        if jf_track_artist and jf_track_artist != jf_album_artist:
+                            track_artist = jf_track_artist
+                # Navidrome/Subsonic: artist attribute is per-track
+                if not track_artist and hasattr(track_obj, 'artist') and isinstance(getattr(track_obj, 'artist', None), str):
+                    nav_artist = getattr(track_obj, 'artist', '').strip()
+                    # Compare against album artist name to only store when different
+                    try:
+                        artist_row = cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,)).fetchone()
+                        album_artist_name = artist_row[0] if artist_row else ''
+                        if nav_artist and nav_artist.lower() != album_artist_name.lower():
+                            track_artist = nav_artist
+                    except Exception:
+                        pass
+
                 # Check if track already exists — UPDATE to preserve enrichment columns,
                 # INSERT only for genuinely new tracks
                 cursor.execute("SELECT 1 FROM tracks WHERE id = ? LIMIT 1", (track_id,))
@@ -4607,9 +4646,9 @@ class MusicDatabase:
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source))
+                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
                     # isrc, bpm, musicbrainz IDs, and all other enrichment data
@@ -4617,9 +4656,10 @@ class MusicDatabase:
                         UPDATE tracks
                         SET album_id = ?, artist_id = ?, title = ?, track_number = ?,
                             duration = ?, file_path = ?, bitrate = ?, server_source = ?,
+                            track_artist = COALESCE(?, track_artist),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_id))
+                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, track_id))
 
                 conn.commit()
 
