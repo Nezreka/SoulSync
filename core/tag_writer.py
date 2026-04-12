@@ -143,6 +143,10 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         file_val = file_tags.get(file_key)
         db_val = db_data.get(db_key)
 
+        # Special: use per-track artist for Artist field when available (DJ mixes, compilations)
+        if file_key == 'artist' and db_data.get('track_artist'):
+            db_val = db_data['track_artist']
+
         # Normalize for comparison
         file_str = _normalize_for_compare(file_val)
         db_str = _normalize_for_compare(db_val)
@@ -230,9 +234,9 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
 
         # Build metadata dict from DB data
         title = db_data.get('title')
-        artist = db_data.get('artist_name')
+        artist = db_data.get('track_artist') or db_data.get('artist_name')  # Per-track artist for compilations/DJ mixes
         album = db_data.get('album_title')
-        album_artist = db_data.get('artist_name')  # Use artist name as album artist
+        album_artist = db_data.get('artist_name')  # Album artist stays as the album-level artist
         year = db_data.get('year')
         genres = db_data.get('genres')
         track_num = db_data.get('track_number')
