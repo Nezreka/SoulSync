@@ -290,12 +290,19 @@ class WebScanManager:
 
     def _handle_scan_completion(self):
         """Handle scan completion and trigger callbacks"""
-        logger.info(f"Web {self._current_server_type.upper()} library scan completed")
-
-        # Call completion callbacks
-        callbacks_to_call = []
         with self._lock:
+            if self._shutting_down:
+                return
+            server_type = self._current_server_type
             callbacks_to_call = self._scan_completion_callbacks.copy()
+            downloads_during_scan = self._downloads_during_scan
+
+        if not server_type:
+            logger.debug("Skipping web scan completion: no active server type")
+            self._reset_scan_state()
+            return
+
+        logger.info(f"Web {server_type.upper()} library scan completed")
 
         for callback in callbacks_to_call:
             try:
@@ -308,10 +315,9 @@ class WebScanManager:
         self._reset_scan_state()
 
         # Check if we need another scan due to downloads during this scan
-        with self._lock:
-            if self._downloads_during_scan:
-                logger.info("Web scan follow-up needed for downloads during scan")
-                self.request_scan("Follow-up scan for downloads during previous scan")
+        if downloads_during_scan:
+            logger.info("Web scan follow-up needed for downloads during scan")
+            self.request_scan("Follow-up scan for downloads during previous scan")
 
     def _reset_scan_state(self):
         """Reset internal scan state"""

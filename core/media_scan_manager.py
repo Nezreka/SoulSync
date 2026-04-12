@@ -256,6 +256,8 @@ class MediaScanManager:
             if is_scanning:
                 # Still scanning - trigger database update and continue periodic updates
                 logger.info(f"{server_type.upper()} still scanning - triggering database update")
+                if self._shutting_down:
+                    return
                 self._call_completion_callbacks()
                 
                 # Schedule next periodic update
@@ -268,6 +270,8 @@ class MediaScanManager:
             else:
                 # Scanning stopped - final update and cleanup
                 logger.info(f"{server_type.upper()} scanning completed - doing final database update")
+                if self._shutting_down:
+                    return
                 self._call_completion_callbacks()
                 self._stop_periodic_updates()
                 

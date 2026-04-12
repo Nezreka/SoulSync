@@ -174,6 +174,8 @@ class PlexScanManager:
             if is_scanning:
                 # Still scanning - trigger database update and continue periodic updates
                 logger.info("Plex still scanning - triggering database update")
+                if self._shutting_down:
+                    return
                 self._call_completion_callbacks()
                 
                 # Schedule next periodic update
@@ -186,6 +188,8 @@ class PlexScanManager:
             else:
                 # Scanning stopped - final update and cleanup
                 logger.info("Plex scanning completed - doing final database update")
+                if self._shutting_down:
+                    return
                 self._call_completion_callbacks()
                 self._stop_periodic_updates()
                 
