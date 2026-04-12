@@ -657,22 +657,30 @@ class MusicMatchingEngine:
         # --- Source Type ---
         is_youtube = slskd_track.username == 'youtube'
 
-        # 4b. Album Bonus: Prefer results from the correct album folder
-        # This ensures "Dark Side of the Moon" sources rank above "Greatest Hits"
-        # when both have the same song. Binary check — album words in path or not.
+        # 4b. Album Bonus/Penalty: Prefer results from the correct album folder.
+        # Uses full-string similarity to prevent "Paradise" matching "Club Paradise".
+        # The old subset check said "paradise" ⊂ {"club", "paradise"} = True, which was wrong.
         album_bonus = 0.0
         album_name = getattr(spotify_track, 'album', None)
         if album_name and not is_youtube:
-            album_words = set(self.clean_album_name(album_name).split())
-            if album_words:
+            album_cleaned = self.clean_album_name(album_name)
+            if album_cleaned:
+                best_album_sim = 0.0
                 path_segments = re.split(r'[/\\]', slskd_track.filename)
                 for segment in path_segments:
                     if not segment:
                         continue
-                    seg_words = set(self.normalize_string(segment).split())
-                    if album_words.issubset(seg_words):
-                        album_bonus = 0.10
-                        break
+                    seg_cleaned = self.normalize_string(segment)
+                    if not seg_cleaned:
+                        continue
+                    sim = SequenceMatcher(None, album_cleaned, seg_cleaned).ratio()
+                    best_album_sim = max(best_album_sim, sim)
+
+                if best_album_sim >= 0.85:
+                    album_bonus = 0.10  # Strong album match (e.g. "Paradise" vs "Paradise")
+                elif best_album_sim >= 0.60:
+                    album_bonus = 0.03  # Partial match — small bonus
+                # No penalty for low similarity — the file might just not have album folders
 
         # 5. Special handling for short titles (high false positive risk)
         # Titles like "Run", "Love", "Girls", "Stay" need stricter artist matching
