@@ -660,6 +660,23 @@ class MusicDatabase:
             except Exception:
                 pass
 
+            # One-time migration: purge cached tracks/albums with junk artist names.
+            # The cache gate now rejects these, but existing entries need cleaning.
+            try:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_cache_junk_artist_purged'")
+                if not cursor.fetchone():
+                    cursor.execute("""DELETE FROM metadata_cache_entities
+                                     WHERE entity_type IN ('track', 'album')
+                                       AND (artist_name IS NULL
+                                         OR TRIM(artist_name) = ''
+                                         OR LOWER(TRIM(artist_name)) IN ('unknown', 'unknown artist', 'none', 'null'))""")
+                    purged = cursor.rowcount
+                    cursor.execute("CREATE TABLE _cache_junk_artist_purged (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                    if purged > 0:
+                        logger.info(f"Purged {purged} cached tracks/albums with junk artist names")
+            except Exception:
+                pass
+
             conn.commit()
             logger.info("Database initialized successfully")
 
