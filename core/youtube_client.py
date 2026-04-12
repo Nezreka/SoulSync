@@ -201,6 +201,15 @@ class YouTubeClient:
             self.download_opts['cookiesfrombrowser'] = (cookies_browser,)
         elif 'cookiesfrombrowser' in self.download_opts:
             del self.download_opts['cookiesfrombrowser']
+
+        # Reload download path
+        new_path = Path(config_manager.get('soulseek.download_path', './downloads'))
+        if new_path != self.download_path:
+            self.download_path = new_path
+            self.download_path.mkdir(parents=True, exist_ok=True)
+            self.download_opts['outtmpl'] = str(self.download_path / '%(title)s.%(ext)s')
+            logger.info(f"YouTube download path updated to: {self.download_path}")
+
         logger.info(f"YouTube settings reloaded (delay={self._download_delay}s, cookies={'enabled' if cookies_browser else 'disabled'})")
 
     async def check_connection(self) -> bool:

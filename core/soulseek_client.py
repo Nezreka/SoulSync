@@ -345,6 +345,7 @@ class SoulseekClient:
              
                 
                 if response.status in [200, 201, 204]:  # Accept 200 OK, 201 Created, and 204 No Content
+                    self._last_401_logged = False  # Reset on success
                     try:
                         if response_text.strip():  # Only parse if there's content
                             return await response.json()
@@ -362,11 +363,17 @@ class SoulseekClient:
                     # Enhanced error logging for better debugging
                     error_detail = response_text if response_text.strip() else "No error details provided"
                     
-                    # Reduce noise for expected 404s during search cleanup
                     # Reduce noise for expected 404s (e.g. status checks for YouTube downloads)
+                    # and repeated 401s (slskd not running / bad credentials)
                     if response.status == 404:
                         logger.debug(f"API request returned 404 (Not Found) for {url}")
+                    elif response.status == 401:
+                        if not getattr(self, '_last_401_logged', False):
+                            logger.warning(f"slskd authentication failed (401) — check API key. Suppressing further 401 errors.")
+                            self._last_401_logged = True
+                        logger.debug(f"API request 401 for {url}")
                     else:
+                        self._last_401_logged = False
                         logger.error(f"API request failed: HTTP {response.status} ({response.reason}) - {error_detail}")
                         logger.debug(f"Failed request: {method} {url}")
                     

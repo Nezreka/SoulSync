@@ -4599,6 +4599,12 @@ def get_status():
             soulseek_relevant = (download_mode == 'soulseek' or
                                 (download_mode == 'hybrid' and 'soulseek' in hybrid_order))
 
+            # Serverless sources (YouTube, HiFi, Qobuz) are always available
+            serverless_sources = ('youtube', 'hifi', 'qobuz')
+            is_serverless = (download_mode in serverless_sources or
+                             (download_mode == 'hybrid' and
+                              hybrid_order and hybrid_order[0] in serverless_sources))
+
             if soulseek_relevant and soulseek_client:
                 soulseek_start = time.time()
                 try:
@@ -4606,6 +4612,9 @@ def get_status():
                 except Exception:
                     soulseek_status = False
                 soulseek_response_time = (time.time() - soulseek_start) * 1000
+            elif is_serverless:
+                soulseek_status = True
+                soulseek_response_time = 0
             else:
                 soulseek_status = False
                 soulseek_response_time = 0
@@ -6112,6 +6121,21 @@ def get_mirrored_playlists_list():
         })
     except Exception as e:
         return jsonify({"playlists": [], "spotify_authenticated": False}), 200
+
+@app.route('/api/setup/status', methods=['GET'])
+def setup_status_endpoint():
+    """Check if first-run setup has been completed."""
+    # Consider setup incomplete if no slskd URL and no download source configured
+    slskd_url = config_manager.get('soulseek.slskd_url', '')
+    download_mode = config_manager.get('download_source.mode', '')
+    transfer_path = config_manager.get('soulseek.transfer_path', '')
+    has_any_config = bool(slskd_url) or bool(download_mode) or bool(transfer_path)
+    return jsonify({
+        "setup_complete": has_any_config,
+        "has_download_source": bool(download_mode),
+        "has_slskd": bool(slskd_url),
+        "has_transfer_path": bool(transfer_path),
+    })
 
 @app.route('/api/test-connection', methods=['POST'])
 def test_connection_endpoint():
@@ -21252,6 +21276,20 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "First-Run Setup Wizard",
+                "description": "New full-screen guided setup for first-time users",
+                "features": [
+                    "• 7-step wizard: Welcome, Metadata Source, Download Source, Paths & Media Server, Add Artists, First Download, Done",
+                    "• All 6 download sources available: Soulseek, YouTube, HiFi, Tidal, Qobuz, Deezer — with inline config and test buttons",
+                    "• Path fields default to /app/downloads and /app/Transfer with lock/unlock for Docker users",
+                    "• Media server connection (Plex/Jellyfin/Navidrome) with inline test",
+                    "• Add artists to watchlist with live search — shows watchlist status, add/remove in place",
+                    "• First download step searches metadata, finds best match, and downloads through the full pipeline",
+                    "• All settings save to DB identically to the Settings page — no difference in behavior",
+                ],
+                "usage_note": "Open with ?setup=1 URL parameter or openSetupWizard() from browser console. First-run auto-detection coming soon."
+            },
             {
                 "title": "Music Videos — Search & Download from YouTube",
                 "description": "New Music Videos tab in enhanced and global search for finding and downloading music videos",

@@ -284,6 +284,9 @@ class MusicDatabase:
                 CREATE TABLE IF NOT EXISTS watchlist_artists (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     spotify_artist_id TEXT UNIQUE,
+                    itunes_artist_id TEXT,
+                    deezer_artist_id TEXT,
+                    discogs_artist_id TEXT,
                     artist_name TEXT NOT NULL,
                     date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_scan_timestamp TIMESTAMP,
@@ -1448,6 +1451,8 @@ class MusicDatabase:
                             include_acoustic INTEGER DEFAULT 0,
                             include_compilations INTEGER DEFAULT 0,
                             itunes_artist_id TEXT,
+                            deezer_artist_id TEXT,
+                            discogs_artist_id TEXT,
                             profile_id INTEGER DEFAULT 1,
                             UNIQUE(profile_id, spotify_artist_id),
                             UNIQUE(profile_id, itunes_artist_id)
@@ -1471,7 +1476,9 @@ class MusicDatabase:
                             include_remixes INTEGER DEFAULT 0,
                             include_acoustic INTEGER DEFAULT 0,
                             include_compilations INTEGER DEFAULT 0,
-                            itunes_artist_id TEXT
+                            itunes_artist_id TEXT,
+                            deezer_artist_id TEXT,
+                            discogs_artist_id TEXT
                         )
                     """)
 
@@ -1482,7 +1489,7 @@ class MusicDatabase:
                             'last_scan_timestamp', 'created_at', 'updated_at', 'image_url',
                             'include_albums', 'include_eps', 'include_singles', 'include_live',
                             'include_remixes', 'include_acoustic', 'include_compilations',
-                            'itunes_artist_id', 'profile_id']
+                            'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'profile_id']
                 shared_cols = [c for c in new_cols if c in old_cols]
                 cols_str = ', '.join(shared_cols)
                 cursor.execute(f"INSERT INTO watchlist_artists_new ({cols_str}) SELECT {cols_str} FROM watchlist_artists")
@@ -2211,6 +2218,8 @@ class MusicDatabase:
                             include_acoustic INTEGER DEFAULT 0,
                             include_compilations INTEGER DEFAULT 0,
                             itunes_artist_id TEXT,
+                            deezer_artist_id TEXT,
+                            discogs_artist_id TEXT,
                             profile_id INTEGER DEFAULT 1,
                             UNIQUE(profile_id, spotify_artist_id),
                             UNIQUE(profile_id, itunes_artist_id)
@@ -2222,7 +2231,7 @@ class MusicDatabase:
                                 'last_scan_timestamp', 'created_at', 'updated_at', 'image_url',
                                 'include_albums', 'include_eps', 'include_singles', 'include_live',
                                 'include_remixes', 'include_acoustic', 'include_compilations',
-                                'itunes_artist_id', 'profile_id']
+                                'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'profile_id']
                     shared_cols = [c for c in new_cols if c in col_names]
                     cols_str = ', '.join(shared_cols)
 
