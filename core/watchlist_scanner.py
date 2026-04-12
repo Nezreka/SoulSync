@@ -1524,15 +1524,22 @@ class WatchlistScanner:
             unique_title_variations = list(dict.fromkeys(title_variations))
             
             # Search for each artist with each title variation
-            
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
+
             for artist_name in artists_to_search:
                 for query_title in unique_title_variations:
-                    # Use same database check as modals with server awareness
-                    from config.settings import config_manager
-                    active_server = config_manager.get_active_media_server()
                     db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=album_name)
-                    
+
                     if db_track and confidence >= 0.7:
+                        # When allow_duplicates is on, only skip if the same album matches
+                        if allow_duplicates and album_name and db_track.album_title:
+                            from difflib import SequenceMatcher
+                            album_sim = SequenceMatcher(None, album_name.lower(), db_track.album_title.lower()).ratio()
+                            if album_sim < 0.8:
+                                logger.debug(f"Track found but different album (allow_duplicates=True): '{original_title}' — library: '{db_track.album_title}', wanted: '{album_name}'")
+                                continue  # Different album — allow it
                         logger.debug(f"Track found in library: '{original_title}' by '{artist_name}' (confidence: {confidence:.2f})")
                         return False  # Track exists in library
             
