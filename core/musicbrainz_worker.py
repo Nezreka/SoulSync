@@ -288,11 +288,11 @@ class MusicBrainzWorker:
                 if result and result.get('mbid'):
                     self.mb_service.update_artist_mbid(item_id, result['mbid'], 'matched')
                     self.stats['matched'] += 1
-                    logger.info(f"✅ Matched artist '{item_name}' → MBID: {result['mbid']}")
+                    logger.info(f"Matched artist '{item_name}' → MBID: {result['mbid']}")
                 else:
                     self.mb_service.update_artist_mbid(item_id, None, 'not_found')
                     self.stats['not_found'] += 1
-                    logger.debug(f"❌ No match for artist '{item_name}'")
+                    logger.debug(f"No match for artist '{item_name}'")
 
             elif item_type == 'album':
                 artist_name = item.get('artist')
@@ -300,11 +300,11 @@ class MusicBrainzWorker:
                 if result and result.get('mbid'):
                     self.mb_service.update_album_mbid(item_id, result['mbid'], 'matched')
                     self.stats['matched'] += 1
-                    logger.info(f"✅ Matched album '{item_name}' → MBID: {result['mbid']}")
+                    logger.info(f"Matched album '{item_name}' → MBID: {result['mbid']}")
                 else:
                     self.mb_service.update_album_mbid(item_id, None, 'not_found')
                     self.stats['not_found'] += 1
-                    logger.debug(f"❌ No match for album '{item_name}'")
+                    logger.debug(f"No match for album '{item_name}'")
 
             elif item_type == 'track':
                 artist_name = item.get('artist')
@@ -312,11 +312,11 @@ class MusicBrainzWorker:
                 if result and result.get('mbid'):
                     self.mb_service.update_track_mbid(item_id, result['mbid'], 'matched')
                     self.stats['matched'] += 1
-                    logger.info(f"✅ Matched track '{item_name}' → MBID: {result['mbid']}")
+                    logger.info(f"Matched track '{item_name}' → MBID: {result['mbid']}")
                 else:
                     self.mb_service.update_track_mbid(item_id, None, 'not_found')
                     self.stats['not_found'] += 1
-                    logger.debug(f"❌ No match for track '{item_name}'")
+                    logger.debug(f"No match for track '{item_name}'")
 
         except Exception as e:
             logger.error(f"Error processing {item['type']} #{item['id']}: {e}")

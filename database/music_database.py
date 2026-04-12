@@ -1524,7 +1524,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN musicbrainz_match_status TEXT")
                 columns_added = True
             if columns_added:
-                logger.info("✅ Added MusicBrainz columns to artists table")
+                logger.info("Added MusicBrainz columns to artists table")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -1542,7 +1542,7 @@ class MusicDatabase:
                 added_albums = True
             if added_albums:
                 columns_added = True
-                logger.info("✅ Added MusicBrainz columns to albums table")
+                logger.info("Added MusicBrainz columns to albums table")
 
             # --- Tracks ---
             cursor.execute("PRAGMA table_info(tracks)")
@@ -1560,7 +1560,7 @@ class MusicDatabase:
                 added_tracks = True
             if added_tracks:
                 columns_added = True
-                logger.info("✅ Added MusicBrainz columns to tracks table")
+                logger.info("Added MusicBrainz columns to tracks table")
             
             # Create MusicBrainz cache table for storing API results
             cursor.execute("""
@@ -1593,7 +1593,7 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_failed ON musicbrainz_cache (entity_type, last_updated) WHERE musicbrainz_id IS NULL")
             
             if columns_added:
-                logger.info("🎉 MusicBrainz migration completed successfully")
+                logger.info("MusicBrainz migration completed successfully")
             
         except Exception as e:
             logger.error(f"Error in MusicBrainz migration: {e}")
@@ -2902,7 +2902,7 @@ class MusicDatabase:
                 cleared = cursor.rowcount
                 cursor.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('soulid_v2_migration', '1')")
                 if cleared > 0:
-                    logger.info(f"🔄 SoulID v2 migration: cleared {cleared} artist soul_ids for regeneration")
+                    logger.info(f"SoulID v2 migration: cleared {cleared} artist soul_ids for regeneration")
 
         except Exception as e:
             logger.error(f"Error adding soul_id columns: {e}")
@@ -3932,7 +3932,7 @@ class MusicDatabase:
                         DELETE FROM artists 
                         WHERE id NOT IN (SELECT DISTINCT artist_id FROM tracks WHERE artist_id IS NOT NULL)
                     """)
-                    logger.info(f"🧹 Removed {orphaned_artists_count} orphaned artists")
+                    logger.info(f"Removed {orphaned_artists_count} orphaned artists")
                 
                 # Delete orphaned albums  
                 if orphaned_albums_count > 0:
@@ -3940,7 +3940,7 @@ class MusicDatabase:
                         DELETE FROM albums 
                         WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
                     """)
-                    logger.info(f"🧹 Removed {orphaned_albums_count} orphaned albums")
+                    logger.info(f"Removed {orphaned_albums_count} orphaned albums")
                 
                 conn.commit()
                 
@@ -3973,7 +3973,7 @@ class MusicDatabase:
                 duplicate_groups = cursor.fetchall()
 
                 if not duplicate_groups:
-                    logger.debug("🧹 No duplicate artists found")
+                    logger.debug("No duplicate artists found")
                     return {'artists_merged': 0, 'albums_migrated': 0}
 
                 total_merged = 0
@@ -3993,7 +3993,7 @@ class MusicDatabase:
                     server_source = group['server_source']
                     ids = group['ids'].split(',')
 
-                    logger.info(f"🔄 Merging duplicate artist '{artist_name}' ({server_source}): IDs {ids}")
+                    logger.info(f"Merging duplicate artist '{artist_name}' ({server_source}): IDs {ids}")
 
                     # Pick the keeper: the one with the most enrichment data
                     best_id = ids[0]
@@ -4061,7 +4061,7 @@ class MusicDatabase:
                 conn.commit()
 
                 if total_merged > 0:
-                    logger.info(f"🧹 Duplicate merge complete: {total_merged} duplicates merged, {total_albums_migrated} albums migrated")
+                    logger.info(f"Duplicate merge complete: {total_merged} duplicates merged, {total_albums_migrated} albums migrated")
 
                 return {'artists_merged': total_merged, 'albums_migrated': total_albums_migrated}
 
@@ -4292,7 +4292,7 @@ class MusicDatabase:
                     if existing_by_name:
                         old_id = existing_by_name['id']
                         # ratingKey changed — migrate old artist to new ID, preserving enrichment data
-                        logger.info(f"🔄 Artist ratingKey migrated: '{name}' ({old_id} → {artist_id})")
+                        logger.info(f"Artist ratingKey migrated: '{name}' ({old_id} → {artist_id})")
 
                         # Step 1: Insert new artist record, copying enrichment data from old
                         enrichment_cols = [
@@ -4463,7 +4463,7 @@ class MusicDatabase:
                 if existing_by_title:
                     old_id = existing_by_title['id']
                     # ratingKey changed — migrate old album to new ID, preserving enrichment data
-                    logger.info(f"🔄 Album ratingKey migrated: '{title}' ({old_id} → {album_id})")
+                    logger.info(f"Album ratingKey migrated: '{title}' ({old_id} → {album_id})")
 
                     enrichment_cols = [
                         'musicbrainz_release_id', 'musicbrainz_last_attempted', 'musicbrainz_match_status',
@@ -4857,13 +4857,13 @@ class MusicDatabase:
             basic_results = self._search_tracks_basic(cursor, title, artist, limit, server_source)
             
             if basic_results:
-                logger.debug(f"🔍 Basic search found {len(basic_results)} results")
+                logger.debug(f"Basic search found {len(basic_results)} results")
                 return basic_results
 
             # STRATEGY 2: Broader fuzzy search - splits into individual words with OR matching
             fuzzy_results = self._search_tracks_fuzzy_fallback(cursor, title, artist, limit, server_source)
             if fuzzy_results:
-                logger.debug(f"🔍 Fuzzy fallback search found {len(fuzzy_results)} results")
+                logger.debug(f"Fuzzy fallback search found {len(fuzzy_results)} results")
             
             return fuzzy_results
             
@@ -5108,7 +5108,7 @@ class MusicDatabase:
             # Generate title variations for better matching (similar to album approach)
             title_variations = self._generate_track_title_variations(title)
             
-            logger.debug(f"🔍 Enhanced track matching for '{title}' by '{artist}': trying {len(title_variations)} variations")
+            logger.debug(f"Enhanced track matching for '{title}' by '{artist}': trying {len(title_variations)} variations")
             for i, var in enumerate(title_variations):
                 logger.debug(f"  {i+1}. '{var}'")
             
@@ -5126,12 +5126,12 @@ class MusicDatabase:
                 if not potential_matches:
                     continue
                 
-                logger.debug(f"🎵 Found {len(potential_matches)} tracks for variation '{title_variation}'")
+                logger.debug(f"Found {len(potential_matches)} tracks for variation '{title_variation}'")
                 
                 # Score each potential match
                 for track in potential_matches:
                     confidence = self._calculate_track_confidence(title, artist, track)
-                    logger.debug(f"  🎯 '{track.title}' confidence: {confidence:.3f}")
+                    logger.debug(f"  '{track.title}' confidence: {confidence:.3f}")
                     
                     if confidence > best_confidence:
                         best_confidence = confidence
@@ -5139,13 +5139,13 @@ class MusicDatabase:
             
             # Return match only if it meets threshold
             if best_match and best_confidence >= confidence_threshold:
-                logger.debug(f"✅ Enhanced track match found: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
+                logger.debug(f"Enhanced track match found: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
                 return best_match, best_confidence
 
             # Album-aware fallback: find album by title (any artist), check tracks on it
             # Handles multi-artist albums filed under a different artist in the library
             if album and best_confidence < confidence_threshold:
-                logger.debug(f"⚠️ Artist-specific search failed, trying album-aware fallback: '{title}' on '{album}'")
+                logger.debug(f"Artist-specific search failed, trying album-aware fallback: '{title}' on '{album}'")
                 try:
                     album_candidates = self.search_albums(title=album, artist="", limit=10, server_source=server_source)
                     for album_candidate in album_candidates:
@@ -5185,12 +5185,12 @@ class MusicDatabase:
                                 best_match = db_track
 
                         if best_match and best_confidence >= 0.7:
-                            logger.debug(f"✅ Album-aware fallback matched: '{title}' on '{album}' -> '{best_match.title}' by '{best_match.artist_name}' (title_sim: {best_confidence:.3f})")
+                            logger.debug(f"Album-aware fallback matched: '{title}' on '{album}' -> '{best_match.title}' by '{best_match.artist_name}' (title_sim: {best_confidence:.3f})")
                             return best_match, best_confidence
                 except Exception as album_fallback_err:
                     logger.debug(f"Album-aware fallback error: {album_fallback_err}")
 
-            logger.debug(f"❌ No confident track match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
+            logger.debug(f"No confident track match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
             return None, best_confidence
             
         except Exception as e:
@@ -5441,7 +5441,7 @@ class MusicDatabase:
             # Generate album title variations for edition matching
             title_variations = self._generate_album_title_variations(title)
             
-            logger.debug(f"🔍 Edition matching for '{title}' by '{artist}': trying {len(title_variations)} variations")
+            logger.debug(f"Edition matching for '{title}' by '{artist}': trying {len(title_variations)} variations")
             for i, var in enumerate(title_variations):
                 logger.debug(f"  {i+1}. '{var}'")
             
@@ -5462,7 +5462,7 @@ class MusicDatabase:
                             existing_ids.add(album.id)
                 
                 if albums:
-                    logger.debug(f"📀 Found {len(albums)} albums for variation '{variation}'")
+                    logger.debug(f"Found {len(albums)} albums for variation '{variation}'")
                 
                 if not albums:
                     continue
@@ -5470,7 +5470,7 @@ class MusicDatabase:
                 # Score each potential match with Smart Edition Matching
                 for album in albums:
                     confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
-                    logger.debug(f"  🎯 '{album.title}' confidence: {confidence:.3f}")
+                    logger.debug(f"  '{album.title}' confidence: {confidence:.3f}")
                     
                     if confidence > best_confidence:
                         best_confidence = confidence
@@ -5478,13 +5478,13 @@ class MusicDatabase:
             
             # Return match only if it meets threshold
             if best_match and best_confidence >= confidence_threshold:
-                logger.debug(f"✅ Edition match found: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
+                logger.debug(f"Edition match found: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
                 return best_match, best_confidence
             
             # Fallback: Check ALL albums by this artist (resolves SQL accent sensitivity issues #101)
             # If we haven't found a match yet, fetch broader list from artist and double check
             if best_confidence < confidence_threshold:
-                logger.debug(f"⚠️ specific title search failed, trying broad artist search fallback for '{artist}'")
+                logger.debug(f"specific title search failed, trying broad artist search fallback for '{artist}'")
                 try:
                     # Get ALL albums by this artist (limit 100 to be safe)
                     # This bypasses SQL 'LIKE' limitations for diacritics (e.g. 'ă' vs 'a')
@@ -5508,18 +5508,18 @@ class MusicDatabase:
                         if confidence > best_confidence:
                             best_confidence = confidence
                             best_match = album
-                            logger.debug(f"  🎯 Fallback match: '{album.title}' confidence: {confidence:.3f}")
+                            logger.debug(f"  Fallback match: '{album.title}' confidence: {confidence:.3f}")
                 except Exception as fallback_error:
                      logger.warning(f"Fallback artist search failed: {fallback_error}")
 
             if best_match and best_confidence >= confidence_threshold:
-                 logger.debug(f"✅ Fallback match succeeded: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
+                 logger.debug(f"Fallback match succeeded: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
                  return best_match, best_confidence
 
             # Multi-artist fallback: search by title only (any artist)
             # Handles collaborative albums filed under a different artist in the library
             if best_confidence < confidence_threshold:
-                logger.debug(f"⚠️ Artist-specific search failed, trying title-only fallback for '{title}'")
+                logger.debug(f"Artist-specific search failed, trying title-only fallback for '{title}'")
                 try:
                     title_only_albums = self.search_albums(title=title, artist="", limit=20, server_source=server_source)
                     for album in title_only_albums:
@@ -5528,15 +5528,15 @@ class MusicDatabase:
                         if confidence > best_confidence:
                             best_confidence = confidence
                             best_match = album
-                            logger.debug(f"  🎯 Title-only match: '{album.title}' (confidence: {confidence:.3f})")
+                            logger.debug(f"  Title-only match: '{album.title}' (confidence: {confidence:.3f})")
                 except Exception as title_error:
                     logger.warning(f"Title-only fallback search failed: {title_error}")
 
             if best_match and best_confidence >= confidence_threshold:
-                logger.debug(f"✅ Title-only match succeeded: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
+                logger.debug(f"Title-only match succeeded: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
                 return best_match, best_confidence
 
-            logger.debug(f"❌ No confident edition match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
+            logger.debug(f"No confident edition match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
             return None, best_confidence
                 
         except Exception as e:
@@ -5662,7 +5662,7 @@ class MusicDatabase:
 
             # Log when normalized matching helps (only if it's the best score and better than others)
             if normalized_title_similarity == best_title_similarity and normalized_title_similarity > max(title_similarity, clean_title_similarity):
-                logger.debug(f"  🌍 Diacritic normalization improved match: '{search_title}' -> '{db_album.title}' (normalized: {normalized_title_similarity:.3f} vs raw: {title_similarity:.3f})")
+                logger.debug(f"  Diacritic normalization improved match: '{search_title}' -> '{db_album.title}' (normalized: {normalized_title_similarity:.3f} vs raw: {title_similarity:.3f})")
 
             # Require minimum title similarity to prevent a perfect artist match from
             # carrying a bad title match over the threshold (e.g. "divisions" vs "silos")
@@ -5684,12 +5684,12 @@ class MusicDatabase:
                     # Found same/better edition (e.g., Deluxe when searching for Standard)
                     edition_bonus = min(0.15, (db_album.track_count - expected_track_count) / expected_track_count * 0.1)
                     confidence += edition_bonus
-                    logger.debug(f"  📀 Edition upgrade bonus: +{edition_bonus:.3f} ({db_album.track_count} >= {expected_track_count} tracks)")
+                    logger.debug(f"  Edition upgrade bonus: +{edition_bonus:.3f} ({db_album.track_count} >= {expected_track_count} tracks)")
                 elif db_album.track_count < expected_track_count * 0.8:
                     # Found significantly smaller edition, apply penalty
                     edition_penalty = 0.1
                     confidence -= edition_penalty
-                    logger.debug(f"  📀 Edition downgrade penalty: -{edition_penalty:.3f} ({db_album.track_count} << {expected_track_count} tracks)")
+                    logger.debug(f"  Edition downgrade penalty: -{edition_penalty:.3f} ({db_album.track_count} << {expected_track_count} tracks)")
             
             return min(confidence, 1.0)  # Cap at 1.0
             
@@ -5800,7 +5800,7 @@ class MusicDatabase:
             # Debug logging for Unicode normalization
             if search_title != search_title_norm or search_artist != search_artist_norm or \
                db_track.title != db_title_norm or db_track.artist_name != db_artist_norm:
-                logger.debug(f"🔤 Unicode normalization:")
+                logger.debug(f"Unicode normalization:")
                 logger.debug(f"   Search: '{search_title}' → '{search_title_norm}' | '{search_artist}' → '{search_artist_norm}'")
                 logger.debug(f"   Database: '{db_track.title}' → '{db_title_norm}' | '{db_track.artist_name}' → '{db_artist_norm}'")
             

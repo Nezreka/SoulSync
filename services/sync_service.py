@@ -271,9 +271,9 @@ class PlaylistSyncService:
             for i, track in enumerate(media_tracks):
                 if track and hasattr(track, 'ratingKey'):
                     valid_tracks.append(track)
-                    logger.debug(f"✔️ Track {i+1} valid for playlist: '{track.title}' (ratingKey: {track.ratingKey})")
+                    logger.debug(f"Track {i+1} valid for playlist: '{track.title}' (ratingKey: {track.ratingKey})")
                 else:
-                    logger.warning(f"❌ Track {i+1} invalid for playlist: {track} (type: {type(track)}, has ratingKey: {hasattr(track, 'ratingKey') if track else 'N/A'})")
+                    logger.warning(f"Track {i+1} invalid for playlist: {track} (type: {type(track)}, has ratingKey: {hasattr(track, 'ratingKey') if track else 'N/A'})")
             
             logger.info(f"Playlist validation: {len(valid_tracks)}/{len(media_tracks)} tracks are valid {server_type.title()} objects with ratingKeys")
 
@@ -312,7 +312,7 @@ class PlaylistSyncService:
             # Auto-add unmatched tracks to wishlist (skip in Wing It mode)
             wishlist_added_count = 0
             if unmatched_tracks and getattr(self, '_skip_wishlist', False):
-                logger.info(f"⚡ [Wing It] Skipping wishlist for {len(unmatched_tracks)} unmatched tracks")
+                logger.info(f"[Wing It] Skipping wishlist for {len(unmatched_tracks)} unmatched tracks")
                 unmatched_tracks = []  # Clear so the loop below doesn't run
             if unmatched_tracks:
                 try:
@@ -484,10 +484,10 @@ class PlaylistSyncService:
                                     actual_track = None
 
                             if actual_track:
-                                logger.debug(f"⚡ Sync cache hit: '{original_title}' → server track {server_track_id}")
+                                logger.debug(f"Sync cache hit: '{original_title}' → server track {server_track_id}")
                                 return actual_track, cached['confidence']
 
-                        logger.debug(f"🔄 Sync cache stale for '{original_title}' — track {server_track_id} gone")
+                        logger.debug(f"Sync cache stale for '{original_title}' — track {server_track_id} gone")
                 except Exception as cache_err:
                     logger.debug(f"Sync cache lookup error: {cache_err}")
             # --- End cache fast-path ---
@@ -511,7 +511,7 @@ class PlaylistSyncService:
                     db_track, confidence = db.check_track_exists(original_title, artist_name, confidence_threshold=0.7, server_source=active_server)
 
                     if db_track and confidence >= 0.7:
-                        logger.debug(f"✔️ Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
+                        logger.debug(f"Database match found for '{original_title}' by '{artist_name}': '{db_track.title}' with confidence {confidence:.2f}")
 
                         # Save to sync match cache for next time
                         if spotify_id:
@@ -536,7 +536,7 @@ class PlaylistSyncService:
                                         self.id = db_track.id
                                 
                                 actual_track = JellyfinTrackFromDB(db_track)
-                                logger.debug(f"✔️ Created Jellyfin track object for '{db_track.title}' (ID: {actual_track.ratingKey})")
+                                logger.debug(f"Created Jellyfin track object for '{db_track.title}' (ID: {actual_track.ratingKey})")
                                 return actual_track, confidence
                             elif server_type == "navidrome":
                                 # For Navidrome, create a track object from database info (similar to Jellyfin)
@@ -547,7 +547,7 @@ class PlaylistSyncService:
                                         self.id = db_track.id
 
                                 actual_track = NavidromeTrackFromDB(db_track)
-                                logger.debug(f"✔️ Created Navidrome track object for '{db_track.title}' (ID: {actual_track.ratingKey})")
+                                logger.debug(f"Created Navidrome track object for '{db_track.title}' (ID: {actual_track.ratingKey})")
                                 return actual_track, confidence
                             else:
                                 # For Plex, use the original fetchItem approach
@@ -556,16 +556,16 @@ class PlaylistSyncService:
                                     track_id = int(db_track.id)
                                     actual_plex_track = media_client.server.fetchItem(track_id)
                                     if actual_plex_track and hasattr(actual_plex_track, 'ratingKey'):
-                                        logger.debug(f"✔️ Successfully fetched actual Plex track for '{db_track.title}' (ratingKey: {actual_plex_track.ratingKey})")
+                                        logger.debug(f"Successfully fetched actual Plex track for '{db_track.title}' (ratingKey: {actual_plex_track.ratingKey})")
                                         return actual_plex_track, confidence
                                     else:
-                                        logger.warning(f"❌ Fetched Plex track for '{db_track.title}' lacks ratingKey attribute")
+                                        logger.warning(f"Fetched Plex track for '{db_track.title}' lacks ratingKey attribute")
                                 except ValueError:
-                                    logger.warning(f"❌ Invalid Plex track ID format for '{db_track.title}' (ID: {db_track.id}) - skipping this track")
+                                    logger.warning(f"Invalid Plex track ID format for '{db_track.title}' (ID: {db_track.id}) - skipping this track")
                                     continue
                                 
                         except Exception as fetch_error:
-                            logger.error(f"❌ Failed to fetch actual {server_type} track for '{db_track.title}' (ID: {db_track.id}): {fetch_error}")
+                            logger.error(f"Failed to fetch actual {server_type} track for '{db_track.title}' (ID: {db_track.id}): {fetch_error}")
                             # Continue to try other artists rather than fail completely
                             continue
                         
@@ -573,7 +573,7 @@ class PlaylistSyncService:
                     logger.error(f"Error checking track existence for '{original_title}' by '{artist_name}': {db_error}")
                     continue
             
-            logger.debug(f"❌ No database match found for '{original_title}' by any of the artists {spotify_track.artists}")
+            logger.debug(f"No database match found for '{original_title}' by any of the artists {spotify_track.artists}")
             return None, 0.0
             
         except Exception as e:

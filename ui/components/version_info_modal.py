@@ -114,7 +114,7 @@ class VersionInfoModal(QDialog):
         
         # WebUI Transformation
         webui_section = self.create_feature_section(
-            "🌐 Complete WebUI Transformation",
+            "Complete WebUI Transformation",
             "SoulSync has been completely rebuilt from the ground up as a modern web application, moving from desktop GUI to web-based interface",
             [
                 "• Full transition from PyQt6 desktop application to responsive web interface",
@@ -131,7 +131,7 @@ class VersionInfoModal(QDialog):
 
         # Docker Support
         docker_section = self.create_feature_section(
-            "🐳 Docker Container Support",
+            "Docker Container Support",
             "Complete containerization with Docker for easy deployment and scalability",
             [
                 "• Pre-built Docker images available for instant deployment",
@@ -147,7 +147,7 @@ class VersionInfoModal(QDialog):
 
         # Enhanced Music Management
         music_section = self.create_feature_section(
-            "🎵 Enhanced Music Management",
+            "Enhanced Music Management",
             "All beloved features preserved and enhanced with new web-based capabilities",
             [
                 "• Complete Spotify, Tidal, and YouTube Music playlist synchronization",
@@ -163,7 +163,7 @@ class VersionInfoModal(QDialog):
 
         # Performance & Reliability
         performance_section = self.create_feature_section(
-            "🚀 Performance & Reliability",
+            "Performance & Reliability",
             "Significant improvements in speed, stability, and resource efficiency",
             [
                 "• Asynchronous processing for improved responsiveness",
@@ -234,7 +234,7 @@ class VersionInfoModal(QDialog):
         
         # Usage note if provided
         if usage_note:
-            usage_label = QLabel(f"💡 {usage_note}")
+            usage_label = QLabel(f"{usage_note}")
             usage_label.setFont(QFont("SF Pro Text", 10))
             usage_label.setStyleSheet("""
                 color: #1ed760;

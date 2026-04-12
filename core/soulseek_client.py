@@ -1029,10 +1029,10 @@ class SoulseekClient:
                 logger.debug(f"{action} download (attempt {i+1}/3) with endpoint: {endpoint}")
                 response = await self._make_request('DELETE', endpoint)
                 if response is not None:
-                    logger.info(f"✅ Successfully cancelled download using endpoint format {i+1}")
+                    logger.info(f"Successfully cancelled download using endpoint format {i+1}")
                     return True
                 else:
-                    logger.debug(f"❌ Endpoint format {i+1} failed: {endpoint}")
+                    logger.debug(f"Endpoint format {i+1} failed: {endpoint}")
 
             # Fallback: if download_id looks like a filename (contains path separators),
             # list all transfers, find by filename, and cancel with the real transfer ID
@@ -1049,12 +1049,12 @@ class SoulseekClient:
                             logger.debug(f"Found matching transfer with real ID, trying: {fallback_endpoint}")
                             response = await self._make_request('DELETE', fallback_endpoint)
                             if response is not None:
-                                logger.info(f"✅ Successfully cancelled download via filename fallback")
+                                logger.info(f"Successfully cancelled download via filename fallback")
                                 return True
                 except Exception as fallback_error:
                     logger.debug(f"Filename fallback failed: {fallback_error}")
 
-            logger.error(f"❌ All cancel endpoint formats failed for download_id: {download_id}")
+            logger.error(f"All cancel endpoint formats failed for download_id: {download_id}")
             return False
 
         except Exception as e:
@@ -1725,7 +1725,7 @@ class SoulseekClient:
                 async with session.get(swagger_url, headers=headers) as response:
                     if response.status == 200:
                         swagger_data = await response.json()
-                        logger.info("✓ Found Swagger documentation")
+                        logger.info("Found Swagger documentation")
                         
                         # Look for download/transfer related endpoints
                         paths = swagger_data.get('paths', {})

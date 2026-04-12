@@ -143,7 +143,7 @@ class DatabaseUpdateWorker(QThread):
                 else:
                     freed_items = "unknown"
                 self.media_client.clear_cache()
-                logger.info(f"🧹 Cleared {self.server_type} cache after user stop - freed ~{freed_items} items from memory")
+                logger.info(f"Cleared {self.server_type} cache after user stop - freed ~{freed_items} items from memory")
             except Exception as e:
                 logger.warning(f"Could not clear {self.server_type} cache on stop: {e}")
     
@@ -168,7 +168,7 @@ class DatabaseUpdateWorker(QThread):
                     # Connect Navidrome client progress to UI
                     if hasattr(self.media_client, 'set_progress_callback'):
                         self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
-                        logger.info("✅ Connected Navidrome progress callback")
+                        logger.info("Connected Navidrome progress callback")
 
                 # For full refresh, get all artists
                 artists_to_process = self._get_all_artists()
@@ -189,7 +189,7 @@ class DatabaseUpdateWorker(QThread):
                             merge_results = self.database.merge_duplicate_artists()
                             merged = merge_results.get('artists_merged', 0)
                             if merged > 0:
-                                logger.info(f"🧹 Merged {merged} duplicate artists")
+                                logger.info(f"Merged {merged} duplicate artists")
                         except Exception as e:
                             logger.warning(f"Could not merge duplicate artists: {e}")
                     self._emit_signal('finished', 0, 0, 0, 0, 0)
@@ -204,7 +204,7 @@ class DatabaseUpdateWorker(QThread):
                 self._process_jellyfin_new_tracks_directly(artists_to_process)
             else:
                 # Standard artist processing for Plex or full refresh
-                logger.info(f"🎯 About to process {len(artists_to_process) if artists_to_process else 0} artists for {self.server_type}")
+                logger.info(f"About to process {len(artists_to_process) if artists_to_process else 0} artists for {self.server_type}")
                 self._process_all_artists(artists_to_process)
             
             # Record full refresh completion for tracking purposes
@@ -224,7 +224,7 @@ class DatabaseUpdateWorker(QThread):
                     else:
                         freed_items = "cache data"
                     self.media_client.clear_cache()
-                    logger.info(f"🧹 Cleared {self.server_type} cache after full refresh - freed ~{freed_items} items from memory")
+                    logger.info(f"Cleared {self.server_type} cache after full refresh - freed ~{freed_items} items from memory")
                 except Exception as e:
                     logger.warning(f"Could not clear {self.server_type} cache: {e}")
             
@@ -240,7 +240,7 @@ class DatabaseUpdateWorker(QThread):
                         r_albums = removal_results.get('albums_removed', 0)
                         r_tracks = removal_results.get('tracks_removed', 0)
                         if r_artists > 0 or r_albums > 0:
-                            logger.info(f"🗑️ Removal detection: {r_artists} artists, "
+                            logger.info(f"Removal detection: {r_artists} artists, "
                                        f"{r_albums} albums, {r_tracks} tracks removed")
                 except Exception as e:
                     logger.warning(f"Removal detection failed (non-fatal): {e}")
@@ -253,9 +253,9 @@ class DatabaseUpdateWorker(QThread):
                     orphaned_albums = cleanup_results.get('orphaned_albums_removed', 0)
 
                     if orphaned_artists > 0 or orphaned_albums > 0:
-                        logger.info(f"🧹 Cleanup complete: {orphaned_artists} orphaned artists, {orphaned_albums} orphaned albums removed")
+                        logger.info(f"Cleanup complete: {orphaned_artists} orphaned artists, {orphaned_albums} orphaned albums removed")
                     else:
-                        logger.debug("🧹 Cleanup complete: No orphaned records found")
+                        logger.debug("Cleanup complete: No orphaned records found")
 
                 except Exception as e:
                     logger.warning(f"Could not cleanup orphaned records: {e}")
@@ -265,7 +265,7 @@ class DatabaseUpdateWorker(QThread):
                     merge_results = self.database.merge_duplicate_artists()
                     merged = merge_results.get('artists_merged', 0)
                     if merged > 0:
-                        logger.info(f"🧹 Merged {merged} duplicate artists")
+                        logger.info(f"Merged {merged} duplicate artists")
                 except Exception as e:
                     logger.warning(f"Could not merge duplicate artists: {e}")
             
@@ -437,9 +437,9 @@ class DatabaseUpdateWorker(QThread):
                 logger.error(f"Could not connect to {self.server_type} server — check URL, credentials, and network (Docker users: use container name or host.docker.internal instead of host IP)")
                 return []
 
-            logger.info(f"🎯 _get_all_artists: Calling media_client.get_all_artists() for {self.server_type}")
+            logger.info(f"_get_all_artists: Calling media_client.get_all_artists() for {self.server_type}")
             artists = self.media_client.get_all_artists()
-            logger.info(f"🎯 _get_all_artists: Received {len(artists) if artists else 0} artists from {self.server_type}")
+            logger.info(f"_get_all_artists: Received {len(artists) if artists else 0} artists from {self.server_type}")
             return artists
 
         except Exception as e:
@@ -581,9 +581,9 @@ class DatabaseUpdateWorker(QThread):
                                 if not track_exists:
                                     missing_tracks_count += 1
                                     album_has_new_tracks = True
-                                    logger.debug(f"📀 Track '{track_title}' is new - album needs processing")
+                                    logger.debug(f"Track '{track_title}' is new - album needs processing")
                                 else:
-                                    logger.debug(f"✅ Track '{track_title}' already exists")
+                                    logger.debug(f"Track '{track_title}' already exists")
                                     
                             except Exception as track_error:
                                 logger.debug(f"Error checking individual track: {track_error}")
@@ -595,23 +595,23 @@ class DatabaseUpdateWorker(QThread):
                         if album_has_new_tracks:
                             albums_with_new_content += 1
                             consecutive_complete_albums = 0  # Reset counter
-                            logger.info(f"📀 Album '{album_title}' has {missing_tracks_count} new tracks - needs processing")
+                            logger.info(f"Album '{album_title}' has {missing_tracks_count} new tracks - needs processing")
                         else:
                             # Check if existing tracks have metadata changes (catches Plex corrections)
                             metadata_changed = self._check_for_metadata_changes(tracks)
                             if metadata_changed:
                                 albums_with_new_content += 1
                                 consecutive_complete_albums = 0  # Reset counter
-                                logger.info(f"🔄 Album '{album_title}' has metadata changes - needs processing")
+                                logger.info(f"Album '{album_title}' has metadata changes - needs processing")
                                 album_has_new_tracks = True  # Mark for artist processing
                             else:
                                 consecutive_complete_albums += 1
-                                logger.debug(f"✅ Album '{album_title}' is fully up-to-date (consecutive complete: {consecutive_complete_albums})")
+                                logger.debug(f"Album '{album_title}' is fully up-to-date (consecutive complete: {consecutive_complete_albums})")
                                 
                                 # Very conservative stopping criteria: 25 consecutive complete albums after metadata fixes
                                 # This ensures we don't miss scattered updated content from manual corrections
                                 if consecutive_complete_albums >= 25:
-                                    logger.info(f"🛑 Found 25 consecutive complete albums - stopping incremental scan after checking {total_tracks_checked} tracks from {i+1} albums")
+                                    logger.info(f"Found 25 consecutive complete albums - stopping incremental scan after checking {total_tracks_checked} tracks from {i+1} albums")
                                     stopped_early = True
                                     break
                             
@@ -633,7 +633,7 @@ class DatabaseUpdateWorker(QThread):
                                 if artist_id not in processed_artist_ids:
                                     processed_artist_ids.add(artist_id)
                                     artists_to_process.append(album_artist)
-                                    logger.info(f"✅ Added artist '{album_artist.title}' for processing (from album '{album_title}' with new tracks)")
+                                    logger.info(f"Added artist '{album_artist.title}' for processing (from album '{album_title}' with new tracks)")
                         except Exception as artist_error:
                             logger.warning(f"Error getting artist for album '{album_title}': {artist_error}")
                 
@@ -649,7 +649,7 @@ class DatabaseUpdateWorker(QThread):
             else:
                 result_msg += f" (checked all {total_tracks_checked} tracks from {len(recent_albums)} recent albums)"
             
-            logger.info(f"📊 Incremental scan stats: {len(recent_albums)} recent albums examined, {albums_with_new_content} needed processing")
+            logger.info(f"Incremental scan stats: {len(recent_albums)} recent albums examined, {albums_with_new_content} needed processing")
             
             logger.info(result_msg)
             return artists_to_process
@@ -662,7 +662,7 @@ class DatabaseUpdateWorker(QThread):
     def _get_artists_for_navidrome_incremental_update(self) -> List:
         """Get artists for Navidrome incremental update using smart early-stopping logic like Plex/Jellyfin"""
         try:
-            logger.info("🎵 Navidrome incremental: Getting recent albums and checking for new content...")
+            logger.info("Navidrome incremental: Getting recent albums and checking for new content...")
 
             # Get recent albums from Navidrome (use the generic method that calls Navidrome-specific logic)
             recent_albums = self._get_recent_albums_for_server()
@@ -720,11 +720,11 @@ class DatabaseUpdateWorker(QThread):
                         # If no new tracks found, increment consecutive complete counter
                         if not album_has_new_tracks:
                             consecutive_complete_albums += 1
-                            logger.debug(f"✅ Album '{album_title}' is up-to-date (consecutive: {consecutive_complete_albums})")
+                            logger.debug(f"Album '{album_title}' is up-to-date (consecutive: {consecutive_complete_albums})")
 
                             # Early stopping after 25 consecutive complete albums (same as Plex/Jellyfin)
                             if consecutive_complete_albums >= 25:
-                                logger.info(f"🛑 Found 25 consecutive complete albums - stopping incremental scan after checking {total_tracks_checked} tracks from {i+1} albums")
+                                logger.info(f"Found 25 consecutive complete albums - stopping incremental scan after checking {total_tracks_checked} tracks from {i+1} albums")
                                 break
 
                     except Exception as tracks_error:
@@ -744,7 +744,7 @@ class DatabaseUpdateWorker(QThread):
                                 if artist_id not in processed_artist_ids:
                                     processed_artist_ids.add(artist_id)
                                     artists_to_process.append(album_artist)
-                                    logger.info(f"✅ Added artist '{album_artist.title}' for processing (from album '{album_title}' with new tracks)")
+                                    logger.info(f"Added artist '{album_artist.title}' for processing (from album '{album_title}' with new tracks)")
                         except Exception as artist_error:
                             logger.warning(f"Error getting artist for album '{album_title}': {artist_error}")
 
@@ -753,7 +753,7 @@ class DatabaseUpdateWorker(QThread):
                     consecutive_complete_albums = 0  # Reset on error
                     continue
 
-            logger.info(f"🎵 Navidrome incremental complete: {len(artists_to_process)} artists need processing (checked {total_tracks_checked} tracks from {len(recent_albums)} recent albums)")
+            logger.info(f"Navidrome incremental complete: {len(artists_to_process)} artists need processing (checked {total_tracks_checked} tracks from {len(recent_albums)} recent albums)")
             return artists_to_process
 
         except Exception as e:
@@ -763,7 +763,7 @@ class DatabaseUpdateWorker(QThread):
     def _get_artists_for_jellyfin_track_incremental_update(self) -> List:
         """FAST Jellyfin incremental update using recent tracks directly (no caching needed)"""
         try:
-            logger.info("🚀 FAST Jellyfin incremental: getting recent tracks directly...")
+            logger.info("FAST Jellyfin incremental: getting recent tracks directly...")
             
             # Get recent tracks directly from Jellyfin (FAST - 2 API calls)
             recent_added_tracks = self.media_client.get_recently_added_tracks(5000)
@@ -799,14 +799,14 @@ class DatabaseUpdateWorker(QThread):
                     if not track_exists:
                         new_tracks.append(track)
                         consecutive_existing_tracks = 0  # Reset counter
-                        logger.debug(f"🎵 New track: {track.title}")
+                        logger.debug(f"New track: {track.title}")
                     else:
                         consecutive_existing_tracks += 1
-                        logger.debug(f"✅ Track exists: {track.title}")
+                        logger.debug(f"Track exists: {track.title}")
                     
                     # Early stopping: if we find 100 consecutive existing tracks, we're done
                     if consecutive_existing_tracks >= 100:
-                        logger.info(f"🛑 Found 100 consecutive existing tracks - stopping after checking {i+1} tracks")
+                        logger.info(f"Found 100 consecutive existing tracks - stopping after checking {i+1} tracks")
                         break
                         
                 except Exception as e:
@@ -833,12 +833,12 @@ class DatabaseUpdateWorker(QThread):
                         if artist_id not in processed_artists:
                             processed_artists.add(artist_id) 
                             artists_to_process.append(track_artist)
-                            logger.info(f"✅ Added artist '{track_artist.title}' (from new track '{track.title}')")
+                            logger.info(f"Added artist '{track_artist.title}' (from new track '{track.title}')")
                 except Exception as e:
                     logger.debug(f"Error getting artist for track {getattr(track, 'title', 'Unknown')}: {e}")
                     continue
             
-            logger.info(f"🚀 FAST incremental complete: {len(artists_to_process)} artists need processing (from {len(new_tracks)} new tracks)")
+            logger.info(f"FAST incremental complete: {len(artists_to_process)} artists need processing (from {len(new_tracks)} new tracks)")
             return artists_to_process
             
         except Exception as e:
@@ -853,7 +853,7 @@ class DatabaseUpdateWorker(QThread):
                 logger.warning("No new tracks to process directly")
                 return
                 
-            logger.info(f"🚀 FAST PROCESSING: Directly processing {len(new_tracks)} new tracks...")
+            logger.info(f"FAST PROCESSING: Directly processing {len(new_tracks)} new tracks...")
             
             # Group tracks by album and artist for efficient processing
             tracks_by_album = {}
@@ -921,7 +921,7 @@ class DatabaseUpdateWorker(QThread):
                                             track_success = self.database.insert_or_update_media_track(track, album_id, artist_id, server_source=self.server_type)
                                             if track_success:
                                                 total_processed_tracks += 1
-                                                logger.debug(f"✅ Processed new track: {track.title}")
+                                                logger.debug(f"Processed new track: {track.title}")
                                         except Exception as e:
                                             logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
                         except Exception as e:
@@ -943,7 +943,7 @@ class DatabaseUpdateWorker(QThread):
                 self.processed_tracks += total_processed_tracks
                 self.successful_operations += total_processed_artists  # Count successful artists
                 
-            logger.info(f"🚀 FAST PROCESSING COMPLETE: {total_processed_artists} artists, {total_processed_albums} albums, {total_processed_tracks} tracks")
+            logger.info(f"FAST PROCESSING COMPLETE: {total_processed_artists} artists, {total_processed_albums} albums, {total_processed_tracks} tracks")
             
             # Clean up
             delattr(self, '_jellyfin_new_tracks')
@@ -976,7 +976,7 @@ class DatabaseUpdateWorker(QThread):
                     if (db_track.title != current_title or 
                         db_track.artist_name != current_artist or 
                         db_track.album_title != current_album):
-                        logger.debug(f"🔄 Metadata change detected for track ID {track_id}:")
+                        logger.debug(f"Metadata change detected for track ID {track_id}:")
                         logger.debug(f"  Title: '{db_track.title}' → '{current_title}'")
                         logger.debug(f"  Artist: '{db_track.artist_name}' → '{current_artist}'")
                         logger.debug(f"  Album: '{db_track.album_title}' → '{current_album}'")
@@ -987,7 +987,7 @@ class DatabaseUpdateWorker(QThread):
                     continue
             
             if changes_detected > 0:
-                logger.info(f"🔄 Found {changes_detected} tracks with metadata changes")
+                logger.info(f"Found {changes_detected} tracks with metadata changes")
                 return True
                 
             return False
@@ -1014,7 +1014,7 @@ class DatabaseUpdateWorker(QThread):
             return None
 
         # Fetch current IDs from media server (lightweight calls)
-        logger.info(f"🔍 Removal detection: fetching current IDs from {self.server_type}...")
+        logger.info(f"Removal detection: fetching current IDs from {self.server_type}...")
         self._emit_signal('phase_changed', f"Fetching artist catalog from {self.server_type}...")
         server_artist_ids = self.media_client.get_all_artist_ids()
         self._emit_signal('phase_changed', f"Fetching album catalog from {self.server_type}...")
@@ -1022,7 +1022,7 @@ class DatabaseUpdateWorker(QThread):
 
         # Safety: if both come back empty, the server is unreachable
         if not server_artist_ids and not server_album_ids:
-            logger.warning("🛡️ SAFETY: Server returned zero artists AND zero albums — "
+            logger.warning("SAFETY: Server returned zero artists AND zero albums — "
                           "skipping removal detection")
             return None
 
@@ -1044,19 +1044,19 @@ class DatabaseUpdateWorker(QThread):
         if check_artists and db_artist_count > 100:
             if len(server_artist_ids) < db_artist_count * 0.5:
                 logger.warning(
-                    f"🛡️ SAFETY: Server reported {len(server_artist_ids)} artists but "
+                    f"SAFETY: Server reported {len(server_artist_ids)} artists but "
                     f"database has {db_artist_count} — skipping artist removal check")
                 check_artists = False
 
         if check_albums and db_album_count > 100:
             if len(server_album_ids) < db_album_count * 0.5:
                 logger.warning(
-                    f"🛡️ SAFETY: Server reported {len(server_album_ids)} albums but "
+                    f"SAFETY: Server reported {len(server_album_ids)} albums but "
                     f"database has {db_album_count} — skipping album removal check")
                 check_albums = False
 
         if not check_artists and not check_albums:
-            logger.warning("🛡️ SAFETY: Both artist and album checks disabled — "
+            logger.warning("SAFETY: Both artist and album checks disabled — "
                           "skipping removal detection")
             return None
 
@@ -1090,11 +1090,11 @@ class DatabaseUpdateWorker(QThread):
                 pass  # If this optimization fails, double-delete is harmless
 
         if not removed_artist_ids and not removed_album_ids:
-            logger.info("🔍 Removal detection: no stale content found")
+            logger.info("Removal detection: no stale content found")
             self._emit_signal('phase_changed', "No removed content detected")
             return {'artists_removed': 0, 'albums_removed': 0, 'tracks_removed': 0}
 
-        logger.info(f"🗑️ Removal detection: found {len(removed_artist_ids)} removed artists, "
+        logger.info(f"Removal detection: found {len(removed_artist_ids)} removed artists, "
                     f"{len(removed_album_ids)} removed albums")
 
         self._emit_signal('phase_changed',
@@ -1219,7 +1219,7 @@ class DatabaseUpdateWorker(QThread):
     def _process_all_artists(self, artists: List):
         """Process all artists and their albums/tracks using thread pool"""
         total_artists = len(artists)
-        logger.info(f"🎯 Processing {total_artists} artists with progress tracking")
+        logger.info(f"Processing {total_artists} artists with progress tracking")
         
         def process_single_artist(artist):
             """Process a single artist and return results"""
@@ -1240,7 +1240,7 @@ class DatabaseUpdateWorker(QThread):
                     total_artists,
                     progress_percent
                 )
-                logger.debug(f"🔄 Progress: {self.processed_artists}/{total_artists} ({progress_percent:.1f}%) - {artist_name}")
+                logger.debug(f"Progress: {self.processed_artists}/{total_artists} ({progress_percent:.1f}%) - {artist_name}")
                 
                 # Process the artist
                 success, details, album_count, track_count = self._process_artist_with_content(artist)

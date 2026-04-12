@@ -188,7 +188,7 @@ _DEFAULT_DISCOVERY_STATES = {
             'discovery_progress': 30, 'spotify_matches': 3, 'spotify_total': 10,
             'discovery_results': [
                 {'index': 0, 'yt_track': 'Song B', 'yt_artist': 'Artist B',
-                 'status': '✅ Found', 'status_class': 'found',
+                 'status': 'Found', 'status_class': 'found',
                  'spotify_track': 'Song B', 'spotify_artist': 'Artist B',
                  'spotify_album': 'Album B'},
             ],

@@ -173,7 +173,7 @@ class NavidromeClient:
         self._artist_cache.clear()
         self._album_cache.clear()
         self._track_cache.clear()
-        logger.info("🔄 Navidrome client config reset — will reconnect with new settings")
+        logger.info("Navidrome client config reset — will reconnect with new settings")
 
     def get_music_folders(self) -> list:
         """Get available music folders from Navidrome."""
@@ -833,7 +833,7 @@ class NavidromeClient:
             response = self._make_request('createPlaylist', params)
 
             if response and response.get('status') == 'ok':
-                logger.info(f"✅ {'Updated' if playlist_id else 'Created'} Navidrome playlist '{name}' with {len(track_ids)} tracks")
+                logger.info(f"{'Updated' if playlist_id else 'Created'} Navidrome playlist '{name}' with {len(track_ids)} tracks")
                 return True
             else:
                 logger.error(f"Failed to {'update' if playlist_id else 'create'} Navidrome playlist '{name}'")
@@ -877,7 +877,7 @@ class NavidromeClient:
             try:
                 success = self.create_playlist(target_name, source_tracks)
                 if success:
-                    logger.info(f"✅ Created backup playlist '{target_name}' with {len(source_tracks)} tracks")
+                    logger.info(f"Created backup playlist '{target_name}' with {len(source_tracks)} tracks")
                     return True
                 else:
                     logger.error(f"Failed to create backup playlist '{target_name}'")
@@ -938,13 +938,13 @@ class NavidromeClient:
             # If we have existing playlists and want to backup, use the first one found
             if existing_playlists and create_backup:
                 backup_name = f"{playlist_name} Backup"
-                logger.info(f"🛡️ Creating backup playlist '{backup_name}' before sync")
+                logger.info(f"Creating backup playlist '{backup_name}' before sync")
                 
                 # We only need to backup once, even if duplicates exist
                 if self.copy_playlist(playlist_name, backup_name):
-                    logger.info(f"✅ Backup created successfully")
+                    logger.info(f"Backup created successfully")
                 else:
-                    logger.warning(f"⚠️ Failed to create backup, continuing with sync")
+                    logger.warning(f"Failed to create backup, continuing with sync")
 
             # STRATEGY: Update the first match, delete the rest
             if existing_playlists:

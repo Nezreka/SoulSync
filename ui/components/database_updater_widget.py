@@ -52,7 +52,7 @@ class DatabaseUpdaterWidget(QFrame):
         info_label.setWordWrap(True)
         
         # Recommendation label
-        self.recommendation_label = QLabel("💡 Tip: Run a Full Refresh every 1-2 weeks to ensure database accuracy")
+        self.recommendation_label = QLabel("Tip: Run a Full Refresh every 1-2 weeks to ensure database accuracy")
         self.recommendation_label.setFont(QFont("Arial", 9))
         self.recommendation_label.setStyleSheet("color: #ffaa00; margin-bottom: 8px; padding: 6px 8px; background: #332200; border-radius: 4px;")
         self.recommendation_label.setWordWrap(True)
@@ -389,8 +389,8 @@ class DatabaseUpdaterWidget(QFrame):
     def _update_recommendation_urgency(self, urgent: bool = False):
         """Update the recommendation label styling based on urgency"""
         if urgent:
-            self.recommendation_label.setText("⚠️  Recommended: Run a Full Refresh - it's been over 2 weeks!")
+            self.recommendation_label.setText("Recommended: Run a Full Refresh - it's been over 2 weeks!")
             self.recommendation_label.setStyleSheet("color: #ffffff; margin-bottom: 8px; padding: 6px 8px; background: #cc3300; border-radius: 4px;")
         else:
-            self.recommendation_label.setText("💡 Tip: Run a Full Refresh every 1-2 weeks to ensure database accuracy")
+            self.recommendation_label.setText("Tip: Run a Full Refresh every 1-2 weeks to ensure database accuracy")
             self.recommendation_label.setStyleSheet("color: #ffaa00; margin-bottom: 8px; padding: 6px 8px; background: #332200; border-radius: 4px;")

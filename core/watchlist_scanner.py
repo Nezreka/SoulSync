@@ -128,7 +128,7 @@ def clean_track_name_for_search(track_name):
         
     # Log cleaning if significant changes were made
     if cleaned_name != track_name:
-        logger.debug(f"🧹 Intelligent track cleaning: '{track_name}' -> '{cleaned_name}'")
+        logger.debug(f"Intelligent track cleaning: '{track_name}' -> '{cleaned_name}'")
     
     return cleaned_name
 
@@ -406,7 +406,7 @@ class WatchlistScanner:
     def _disable_spotify_for_run(self, reason: str):
         """Disable Spotify for rest of current run, once."""
         if not self._spotify_disabled_for_run:
-            logger.warning(f"⚠️ Spotify disabled for rest of run: {reason}")
+            logger.warning(f"Spotify disabled for rest of run: {reason}")
         self._spotify_disabled_for_run = True
         self._spotify_disabled_reason = reason
 
@@ -640,7 +640,7 @@ class WatchlistScanner:
                 try:
                     self._backfill_missing_ids(all_watchlist_artists, provider)
                 except Exception as backfill_error:
-                    logger.warning(f"⚠️ Error during {provider} ID backfilling: {backfill_error}")
+                    logger.warning(f"Error during {provider} ID backfilling: {backfill_error}")
                     # Continue with scan even if backfilling fails
             
             scan_results = []
@@ -655,9 +655,9 @@ class WatchlistScanner:
                         self._disable_spotify_for_run("global Spotify rate limit active")
 
                     if result.success:
-                        logger.info(f"✅ Scanned {artist.artist_name}: {result.new_tracks_found} new tracks found")
+                        logger.info(f"Scanned {artist.artist_name}: {result.new_tracks_found} new tracks found")
                     else:
-                        logger.warning(f"❌ Failed to scan {artist.artist_name}: {result.error_message}")
+                        logger.warning(f"Failed to scan {artist.artist_name}: {result.error_message}")
 
                     # Rate limiting: Add delay between artists to avoid hitting Spotify API limits
                     # This is critical to prevent getting banned for 6+ hours
@@ -701,7 +701,7 @@ class WatchlistScanner:
                     self._disable_spotify_for_run("global Spotify rate limit active")
                 self.sync_spotify_library_cache()
             except Exception as lib_err:
-                logger.warning(f"⚠️ Error syncing Spotify library cache: {lib_err}")
+                logger.warning(f"Error syncing Spotify library cache: {lib_err}")
             
             return scan_results
             
@@ -1054,10 +1054,10 @@ class WatchlistScanner:
         artists_to_match = [a for a in artists if not getattr(a, id_attr, None)]
 
         if not artists_to_match:
-            logger.info(f"✅ All artists already have {provider} IDs")
+            logger.info(f"All artists already have {provider} IDs")
             return
 
-        logger.info(f"🔄 Backfilling {len(artists_to_match)} artists with {provider} IDs...")
+        logger.info(f"Backfilling {len(artists_to_match)} artists with {provider} IDs...")
 
         match_fn = {
             'spotify': self._match_to_spotify,
@@ -1086,7 +1086,7 @@ class WatchlistScanner:
                     update_fn(artist.id, new_id)
                     setattr(artist, id_attr, new_id)
                     matched_count += 1
-                    logger.info(f"✅ Matched '{artist.artist_name}' to {provider}: {new_id}")
+                    logger.info(f"Matched '{artist.artist_name}' to {provider}: {new_id}")
                 else:
                     unmatched_names.append(artist.artist_name)
 
@@ -1097,9 +1097,9 @@ class WatchlistScanner:
                 unmatched_names.append(artist.artist_name)
                 continue
 
-        logger.info(f"✅ Backfilled {matched_count}/{len(artists_to_match)} artists with {provider} IDs")
+        logger.info(f"Backfilled {matched_count}/{len(artists_to_match)} artists with {provider} IDs")
         if unmatched_names:
-            logger.warning(f"⚠️ Could not confidently match {len(unmatched_names)} artists: {', '.join(unmatched_names[:10])}"
+            logger.warning(f"Could not confidently match {len(unmatched_names)} artists: {', '.join(unmatched_names[:10])}"
                           f"{'...' if len(unmatched_names) > 10 else ''} — use Watchlist Settings to link manually")
 
     @staticmethod
@@ -1511,11 +1511,11 @@ class WatchlistScanner:
                     db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=album_name)
                     
                     if db_track and confidence >= 0.7:
-                        logger.debug(f"✔️ Track found in library: '{original_title}' by '{artist_name}' (confidence: {confidence:.2f})")
+                        logger.debug(f"Track found in library: '{original_title}' by '{artist_name}' (confidence: {confidence:.2f})")
                         return False  # Track exists in library
             
             # No match found with any variation or artist
-            logger.info(f"❌ Track missing from library: '{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' - adding to wishlist")
+            logger.info(f"Track missing from library: '{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' - adding to wishlist")
             return True  # Track is missing
             
         except Exception as e:
@@ -3212,7 +3212,7 @@ class WatchlistScanner:
             logger.debug("Spotify not authenticated, skipping library cache sync")
             return
 
-        logger.info("📚 Syncing Spotify library cache...")
+        logger.info("Syncing Spotify library cache...")
 
         try:
             last_sync = self.database.get_metadata('spotify_library_last_sync')
@@ -3256,7 +3256,7 @@ class WatchlistScanner:
             # Update last sync timestamp
             self.database.set_metadata('spotify_library_last_sync', datetime.now().isoformat())
 
-            logger.info(f"✅ Spotify library cache sync complete — {len(albums)} albums processed")
+            logger.info(f"Spotify library cache sync complete — {len(albums)} albums processed")
 
         except Exception as e:
             logger.error(f"Error syncing Spotify library cache: {e}")

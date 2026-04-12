@@ -91,7 +91,7 @@ class WebScanManager:
             if self._scan_in_progress:
                 # Server is currently scanning - mark that we need another scan later
                 self._downloads_during_scan = True
-                logger.info(f"📡 Web scan in progress - queueing follow-up scan ({reason})")
+                logger.info(f"Web scan in progress - queueing follow-up scan ({reason})")
                 return {
                     "status": "queued",
                     "message": "Scan already in progress, queued for later",
@@ -101,9 +101,9 @@ class WebScanManager:
             # Cancel any existing timer and start a new one
             if self._timer:
                 self._timer.cancel()
-                logger.debug(f"⏳ Resetting web scan timer ({reason})")
+                logger.debug(f"Resetting web scan timer ({reason})")
             else:
-                logger.info(f"⏳ Web scan queued - will execute in {self.delay}s ({reason})")
+                logger.info(f"Web scan queued - will execute in {self.delay}s ({reason})")
 
             # Start the debounce timer
             self._timer = threading.Timer(self.delay, self._execute_scan)
@@ -182,12 +182,12 @@ class WebScanManager:
         # Get the active media client
         media_client, server_type = self._get_active_media_client()
         if not media_client:
-            logger.error("❌ No active media client available for web library scan")
+            logger.error("No active media client available for web library scan")
             self._reset_scan_state()
             return
 
         self._current_server_type = server_type
-        logger.info(f"🎵 Starting {server_type.upper()} library scan via web interface...")
+        logger.info(f"Starting {server_type.upper()} library scan via web interface...")
 
         try:
             # Update progress
@@ -200,7 +200,7 @@ class WebScanManager:
             success = media_client.trigger_library_scan()
 
             if success:
-                logger.info(f"✅ {server_type.upper()} library scan initiated successfully via web")
+                logger.info(f"{server_type.upper()} library scan initiated successfully via web")
                 with self._lock:
                     self._scan_progress = {
                         "status": "active",
@@ -210,7 +210,7 @@ class WebScanManager:
                 # Start periodic completion checking
                 self._start_periodic_completion_check()
             else:
-                logger.error(f"❌ Failed to initiate {server_type.upper()} library scan via web")
+                logger.error(f"Failed to initiate {server_type.upper()} library scan via web")
                 with self._lock:
                     self._scan_progress = {
                         "status": "failed",
@@ -219,7 +219,7 @@ class WebScanManager:
                 self._reset_scan_state()
 
         except Exception as e:
-            logger.error(f"❌ Error during {server_type.upper()} library scan via web: {e}")
+            logger.error(f"Error during {server_type.upper()} library scan via web: {e}")
             with self._lock:
                 self._scan_progress = {
                     "status": "error",
@@ -265,7 +265,7 @@ class WebScanManager:
 
     def _handle_scan_completion(self):
         """Handle scan completion and trigger callbacks"""
-        logger.info(f"🏁 Web {self._current_server_type.upper()} library scan completed")
+        logger.info(f"Web {self._current_server_type.upper()} library scan completed")
 
         # Call completion callbacks
         callbacks_to_call = []
@@ -274,7 +274,7 @@ class WebScanManager:
 
         for callback in callbacks_to_call:
             try:
-                logger.info(f"🔄 Calling web scan completion callback: {callback.__name__}")
+                logger.info(f"Calling web scan completion callback: {callback.__name__}")
                 callback()
             except Exception as e:
                 logger.error(f"Error in web scan completion callback {callback.__name__}: {e}")
@@ -285,7 +285,7 @@ class WebScanManager:
         # Check if we need another scan due to downloads during this scan
         with self._lock:
             if self._downloads_during_scan:
-                logger.info("🔄 Web scan follow-up needed for downloads during scan")
+                logger.info("Web scan follow-up needed for downloads during scan")
                 self.request_scan("Follow-up scan for downloads during previous scan")
 
     def _reset_scan_state(self):

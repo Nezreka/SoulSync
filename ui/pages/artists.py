@@ -76,7 +76,7 @@ class DownloadCompletionWorker(QRunnable):
     def run(self):
         """Process download completion in background thread"""
         try:
-            print(f"🧵 Background worker processing download...")
+            print(f"Background worker processing download...")
             
             # Add a small delay to ensure file is fully written
             import time
@@ -89,7 +89,7 @@ class DownloadCompletionWorker(QRunnable):
             self.signals.completed.emit(self.download_item, organized_path or self.absolute_file_path)
             
         except Exception as e:
-            print(f"❌ Error in background worker: {e}")
+            print(f"Error in background worker: {e}")
             import traceback
             traceback.print_exc()
             # Emit error signal
@@ -181,12 +181,12 @@ class AlbumFetchWorker(QThread):
     
     def run(self):
         try:
-            print(f"🎵 Fetching all releases (albums & singles) for artist: {self.artist.name} (ID: {self.artist.id})")
+            print(f"Fetching all releases (albums & singles) for artist: {self.artist.name} (ID: {self.artist.id})")
             
             # Always fetch both albums and singles from the Spotify API
             albums = self.spotify_client.get_artist_albums(self.artist.id, album_type='album,single', limit=50)
             
-            print(f"📀 Found {len(albums)} total releases for {self.artist.name}")
+            print(f"Found {len(albums)} total releases for {self.artist.name}")
             
             # Remove duplicates based on name (case insensitive)
             seen_names = set()
@@ -200,12 +200,12 @@ class AlbumFetchWorker(QThread):
             # Sort by release date (newest first)
             unique_albums.sort(key=lambda x: x.release_date if x.release_date else '', reverse=True)
             
-            print(f"✅ Returning {len(unique_albums)} unique releases")
+            print(f"Returning {len(unique_albums)} unique releases")
             self.albums_found.emit(unique_albums, self.artist)
             
         except Exception as e:
             error_msg = f"Failed to fetch albums for {self.artist.name}: {str(e)}"
-            print(f"❌ {error_msg}")
+            print(f"{error_msg}")
             self.fetch_failed.emit(error_msg)
 
 class AlbumSearchWorker(QThread):
@@ -328,7 +328,7 @@ class AlbumStatusProcessingWorker(QRunnable):
                                     if 'id' in file_data:
                                         transfers_by_id[file_data['id']] = file_data
                 
-                print(f"🔍 Album status worker found {len(all_transfers)} total transfers")
+                print(f"Album status worker found {len(all_transfers)} total transfers")
                 
                 # Process each download item
                 results = []
@@ -339,7 +339,7 @@ class AlbumStatusProcessingWorker(QRunnable):
                     file_path = item_data.get('file_path', '')
                     widget_id = item_data.get('widget_id')
                     
-                    print(f"🔍 Processing album download: ID={download_id}, file={os.path.basename(file_path)}")
+                    print(f"Processing album download: ID={download_id}, file={os.path.basename(file_path)}")
                     
                     matching_transfer = None
                     
@@ -347,7 +347,7 @@ class AlbumStatusProcessingWorker(QRunnable):
                     if download_id and download_id in transfers_by_id and download_id not in used_transfer_ids:
                         matching_transfer = transfers_by_id[download_id]
                         used_transfer_ids.add(download_id)
-                        print(f"   ✅ ID match found for {download_id}")
+                        print(f"   ID match found for {download_id}")
                     
                     # Fallback matching: by filename
                     elif file_path:
@@ -363,7 +363,7 @@ class AlbumStatusProcessingWorker(QRunnable):
                             if transfer_basename == expected_basename:
                                 matching_transfer = transfer
                                 used_transfer_ids.add(transfer_id)
-                                print(f"   🎯 Filename match: {expected_basename}")
+                                print(f"   Filename match: {expected_basename}")
                                 # Update download_id if it was missing
                                 if not download_id:
                                     download_id = transfer_id
@@ -408,7 +408,7 @@ class AlbumStatusProcessingWorker(QRunnable):
                             'speed': matching_transfer.get('averageSpeed', 0)
                         }
                         
-                        print(f"   📊 Status: {new_status} ({progress:.1f}%)")
+                        print(f"   Status: {new_status} ({progress:.1f}%)")
                     else:
                         # Download not found in API - increment missing count
                         api_missing_count = item_data.get('api_missing_count', 0) + 1
@@ -416,11 +416,11 @@ class AlbumStatusProcessingWorker(QRunnable):
                         if api_missing_count >= 3:
                             # Grace period exceeded - mark as failed
                             new_status = 'failed'
-                            print(f"   ❌ Download missing from API (failed after 3 checks)")
+                            print(f"   Download missing from API (failed after 3 checks)")
                         else:
                             # Still in grace period
                             new_status = 'missing'
-                            print(f"   ⚠️ Download missing from API (attempt {api_missing_count}/3)")
+                            print(f"   Download missing from API (attempt {api_missing_count}/3)")
                         
                         result = {
                             'widget_id': widget_id,
@@ -432,7 +432,7 @@ class AlbumStatusProcessingWorker(QRunnable):
                     
                     results.append(result)
                 
-                print(f"🎯 Album status worker completed: {len(results)} results")
+                print(f"Album status worker completed: {len(results)} results")
                 self.signals.completed.emit(results)
                 
             finally:
@@ -463,7 +463,7 @@ class SinglesEPsLibraryWorker(QThread):
     
     def run(self):
         try:
-            print("🔍 Starting track-level matching for singles and EPs...")
+            print("Starting track-level matching for singles and EPs...")
             release_statuses = {}  # release_name -> AlbumOwnershipStatus
             
             # Get database instance
@@ -472,13 +472,13 @@ class SinglesEPsLibraryWorker(QThread):
             if self._stop_requested:
                 return
             
-            print(f"🎵 Checking {len(self.releases)} singles/EPs against database...")
+            print(f"Checking {len(self.releases)} singles/EPs against database...")
             
             for i, release in enumerate(self.releases):
                 if self._stop_requested:
                     return
                 
-                print(f"🎵 Checking release {i+1}/{len(self.releases)}: {release.name} ({release.total_tracks} tracks)")
+                print(f"Checking release {i+1}/{len(self.releases)}: {release.name} ({release.total_tracks} tracks)")
                 
                 if release.total_tracks == 1:
                     # SINGLE: Use track-level matching
@@ -492,12 +492,12 @@ class SinglesEPsLibraryWorker(QThread):
                 # Emit individual match for real-time UI update
                 self.release_matched.emit(release.name, status)
             
-            print(f"🎯 Singles/EPs check complete: {len(release_statuses)} releases processed")
+            print(f"Singles/EPs check complete: {len(release_statuses)} releases processed")
             self.check_completed.emit(release_statuses)
             
         except Exception as e:
             error_msg = f"Error checking singles/EPs library: {e}"
-            print(f"❌ {error_msg}")
+            print(f"{error_msg}")
             import traceback
             traceback.print_exc()
             self.check_failed.emit(error_msg)
@@ -535,14 +535,14 @@ class SinglesEPsLibraryWorker(QThread):
                         track_name = single_release.name
                         artist_name = single_release.artists[0] if single_release.artists else ""
                 except Exception as e:
-                    print(f"   🔍 Debug single track fetch error: {e}")
+                    print(f"   Debug single track fetch error: {e}")
                     if album_data and 'tracks' in album_data:
-                        print(f"   🔍 Debug: tracks data type = {type(album_data['tracks'])}")
+                        print(f"   Debug: tracks data type = {type(album_data['tracks'])}")
                     # Fallback if Spotify call fails
                     track_name = single_release.name
                     artist_name = single_release.artists[0] if single_release.artists else ""
             
-            print(f"   🔍 Searching for single track: '{track_name}' by '{artist_name}'")
+            print(f"   Searching for single track: '{track_name}' by '{artist_name}'")
             
             # Search for the track anywhere in the library (active server only)
             from config.settings import config_manager
@@ -550,7 +550,7 @@ class SinglesEPsLibraryWorker(QThread):
             db_track, confidence = db.check_track_exists(track_name, artist_name, confidence_threshold=0.7, server_source=active_server)
             
             if db_track and confidence >= 0.7:
-                print(f"   ✅ Single found: '{track_name}' in album '{db_track.album_title}' (confidence: {confidence:.2f})")
+                print(f"   Single found: '{track_name}' in album '{db_track.album_title}' (confidence: {confidence:.2f})")
                 
                 # For singles, if we find the track, it's "complete"
                 return AlbumOwnershipStatus(
@@ -563,7 +563,7 @@ class SinglesEPsLibraryWorker(QThread):
                     completion_ratio=1.0
                 )
             else:
-                print(f"   ❌ Single not found: '{track_name}'")
+                print(f"   Single not found: '{track_name}'")
                 return AlbumOwnershipStatus(
                     album_name=single_release.name,
                     is_owned=False,
@@ -575,7 +575,7 @@ class SinglesEPsLibraryWorker(QThread):
                 )
                 
         except Exception as e:
-            print(f"   ❌ Error checking single '{single_release.name}': {e}")
+            print(f"   Error checking single '{single_release.name}': {e}")
             return AlbumOwnershipStatus(
                 album_name=single_release.name,
                 is_owned=False,
@@ -594,7 +594,7 @@ class SinglesEPsLibraryWorker(QThread):
             spotify_client = SpotifyClient()
             
             if not spotify_client.is_authenticated():
-                print(f"   ⚠️ Spotify not available, cannot check EP tracks for '{ep_release.name}'")
+                print(f"   Spotify not available, cannot check EP tracks for '{ep_release.name}'")
                 return AlbumOwnershipStatus(
                     album_name=ep_release.name,
                     is_owned=False,
@@ -620,11 +620,11 @@ class SinglesEPsLibraryWorker(QThread):
                     raise Exception(f"Unexpected tracks data format: {type(tracks_data)}")
                     
             except Exception as e:
-                print(f"   ⚠️ Could not fetch EP tracks for '{ep_release.name}': {e}")
+                print(f"   Could not fetch EP tracks for '{ep_release.name}': {e}")
                 if album_data and 'tracks' in album_data:
-                    print(f"   🔍 Debug: tracks data type = {type(album_data['tracks'])}")
+                    print(f"   Debug: tracks data type = {type(album_data['tracks'])}")
                     if hasattr(album_data['tracks'], '__len__') and len(album_data['tracks']) > 0:
-                        print(f"   🔍 Debug: first item type = {type(album_data['tracks'][0])}")
+                        print(f"   Debug: first item type = {type(album_data['tracks'][0])}")
                 return AlbumOwnershipStatus(
                     album_name=ep_release.name,
                     is_owned=False,
@@ -635,7 +635,7 @@ class SinglesEPsLibraryWorker(QThread):
                     completion_ratio=0.0
                 )
             
-            print(f"   🔍 Checking {len(tracks)} tracks in EP '{ep_release.name}'")
+            print(f"   Checking {len(tracks)} tracks in EP '{ep_release.name}'")
             
             owned_tracks = 0
             expected_tracks = len(tracks)
@@ -654,16 +654,16 @@ class SinglesEPsLibraryWorker(QThread):
                 
                 if db_track and confidence >= 0.7:
                     owned_tracks += 1
-                    print(f"     ✅ Track found: '{track_name}'")
+                    print(f"     Track found: '{track_name}'")
                 else:
-                    print(f"     ❌ Track missing: '{track_name}'")
+                    print(f"     Track missing: '{track_name}'")
             
             completion_ratio = owned_tracks / max(expected_tracks, 1)
             is_complete = completion_ratio >= 0.9
             is_nearly_complete = completion_ratio >= 0.8 and completion_ratio < 0.9
             is_owned = owned_tracks > 0
             
-            print(f"   📊 EP '{ep_release.name}': {owned_tracks}/{expected_tracks} tracks ({int(completion_ratio * 100)}%)")
+            print(f"   EP '{ep_release.name}': {owned_tracks}/{expected_tracks} tracks ({int(completion_ratio * 100)}%)")
             
             return AlbumOwnershipStatus(
                 album_name=ep_release.name,
@@ -676,7 +676,7 @@ class SinglesEPsLibraryWorker(QThread):
             )
             
         except Exception as e:
-            print(f"   ❌ Error checking EP '{ep_release.name}': {e}")
+            print(f"   Error checking EP '{ep_release.name}': {e}")
             return AlbumOwnershipStatus(
                 album_name=ep_release.name,
                 is_owned=False,
@@ -705,7 +705,7 @@ class DatabaseLibraryWorker(QThread):
     
     def run(self):
         try:
-            print("🔍 Starting robust database album matching with completeness checking...")
+            print("Starting robust database album matching with completeness checking...")
             album_statuses = {}  # album_name -> AlbumOwnershipStatus
             
             # Get database instance
@@ -715,22 +715,22 @@ class DatabaseLibraryWorker(QThread):
             try:
                 from config.settings import config_manager
                 active_server = config_manager.get_active_media_server()
-                print(f"🔍 Checking albums against {active_server.upper()} library only")
+                print(f"Checking albums against {active_server.upper()} library only")
             except Exception as e:
-                print(f"⚠️ Could not get active server, defaulting to 'plex': {e}")
+                print(f"Could not get active server, defaulting to 'plex': {e}")
                 active_server = 'plex'
             
             if self._stop_requested:
                 return
             
-            print(f"📚 Checking {len(self.albums)} Spotify albums against local database...")
+            print(f"Checking {len(self.albums)} Spotify albums against local database...")
             
             # Use robust matching for each album
             for i, spotify_album in enumerate(self.albums):
                 if self._stop_requested:
                     return
                 
-                print(f"🎵 Checking album {i+1}/{len(self.albums)}: {spotify_album.name}")
+                print(f"Checking album {i+1}/{len(self.albums)}: {spotify_album.name}")
                 
                 # Create multiple search variations
                 album_variations = []
@@ -768,7 +768,7 @@ class DatabaseLibraryWorker(QThread):
                             return
                         
                         # Search database for this combination with completeness info
-                        print(f"   🔍 Searching database: album='{album_name}', artist='{artist_clean}'")
+                        print(f"   Searching database: album='{album_name}', artist='{artist_clean}'")
                         db_album, confidence, owned_tracks, expected_tracks, is_complete, *_ = db.check_album_exists_with_completeness(
                             album_name, artist_clean, expected_track_count, confidence_threshold=0.7, server_source=active_server
                         )
@@ -779,7 +779,7 @@ class DatabaseLibraryWorker(QThread):
                             best_owned_tracks = owned_tracks
                             best_expected_tracks = expected_tracks
                             best_is_complete = is_complete
-                            print(f"   📀 Found database match with confidence {confidence:.2f} ({owned_tracks}/{expected_tracks} tracks)")
+                            print(f"   Found database match with confidence {confidence:.2f} ({owned_tracks}/{expected_tracks} tracks)")
                             
                             # If we have a very confident match, we can stop searching for this album
                             if confidence >= 0.95:
@@ -787,7 +787,7 @@ class DatabaseLibraryWorker(QThread):
                         
                         # Backup search with original uncleaned artist name
                         if not db_album and artist and artist != artist_clean:
-                            print(f"   🔄 Backup search with original artist: album='{album_name}', artist='{artist}'")
+                            print(f"   Backup search with original artist: album='{album_name}', artist='{artist}'")
                             db_album_backup, confidence_backup, owned_backup, expected_backup, complete_backup, *_ = db.check_album_exists_with_completeness(
                                 album_name, artist, expected_track_count, confidence_threshold=0.7, server_source=active_server
                             )
@@ -798,13 +798,13 @@ class DatabaseLibraryWorker(QThread):
                                 best_owned_tracks = owned_backup
                                 best_expected_tracks = expected_backup
                                 best_is_complete = complete_backup
-                                print(f"   📀 Found backup match with confidence {confidence_backup:.2f} ({owned_backup}/{expected_backup} tracks)")
+                                print(f"   Found backup match with confidence {confidence_backup:.2f} ({owned_backup}/{expected_backup} tracks)")
                             
                             # Additional fallback: remove commas
                             if not db_album_backup and ',' in artist:
                                 artist_no_comma = artist.replace(',', '').strip()
                                 artist_no_comma = ' '.join(artist_no_comma.split())
-                                print(f"   🔄 Comma-removal fallback: album='{album_name}', artist='{artist_no_comma}'")
+                                print(f"   Comma-removal fallback: album='{album_name}', artist='{artist_no_comma}'")
                                 db_album_comma, confidence_comma, owned_comma, expected_comma, complete_comma, *_ = db.check_album_exists_with_completeness(
                                     album_name, artist_no_comma, expected_track_count, confidence_threshold=0.7, server_source=active_server
                                 )
@@ -815,7 +815,7 @@ class DatabaseLibraryWorker(QThread):
                                     best_owned_tracks = owned_comma
                                     best_expected_tracks = expected_comma
                                     best_is_complete = complete_comma
-                                    print(f"   📀 Found comma-removal match with confidence {confidence_comma:.2f} ({owned_comma}/{expected_comma} tracks)")
+                                    print(f"   Found comma-removal match with confidence {confidence_comma:.2f} ({owned_comma}/{expected_comma} tracks)")
                     
                     # If we found a very confident match, stop searching other artists
                     if best_confidence >= 0.95:
@@ -838,11 +838,11 @@ class DatabaseLibraryWorker(QThread):
                     
                     # Log detailed result
                     if best_is_complete:
-                        print(f"✅ Complete album: '{spotify_album.name}' -> '{best_album.title}' ({best_owned_tracks}/{best_expected_tracks} tracks)")
+                        print(f"Complete album: '{spotify_album.name}' -> '{best_album.title}' ({best_owned_tracks}/{best_expected_tracks} tracks)")
                     elif is_nearly_complete:
-                        print(f"🔵 Nearly complete album: '{spotify_album.name}' -> '{best_album.title}' ({best_owned_tracks}/{best_expected_tracks} tracks)")
+                        print(f"Nearly complete album: '{spotify_album.name}' -> '{best_album.title}' ({best_owned_tracks}/{best_expected_tracks} tracks)")
                     else:
-                        print(f"⚠️ Partial album: '{spotify_album.name}' -> '{best_album.title}' ({best_owned_tracks}/{best_expected_tracks} tracks)")
+                        print(f"Partial album: '{spotify_album.name}' -> '{best_album.title}' ({best_owned_tracks}/{best_expected_tracks} tracks)")
                     
                     # Emit individual match for real-time UI update
                     self.album_matched.emit(spotify_album.name, status)
@@ -860,9 +860,9 @@ class DatabaseLibraryWorker(QThread):
                     album_statuses[spotify_album.name] = status
                     
                     if best_album:
-                        print(f"❌ No confident match for '{spotify_album.name}' (best: {best_confidence:.2f})")
+                        print(f"No confident match for '{spotify_album.name}' (best: {best_confidence:.2f})")
                     else:
-                        print(f"❌ No database candidates found for '{spotify_album.name}'")
+                        print(f"No database candidates found for '{spotify_album.name}'")
             
             # Count results for summary
             complete_count = sum(1 for status in album_statuses.values() if status.is_complete)
@@ -870,14 +870,14 @@ class DatabaseLibraryWorker(QThread):
             partial_count = sum(1 for status in album_statuses.values() if status.is_owned and not status.is_complete and not status.is_nearly_complete)
             missing_count = sum(1 for status in album_statuses.values() if not status.is_owned)
             
-            print(f"🎯 Final result: {complete_count} complete, {nearly_complete_count} nearly complete, {partial_count} partial, {missing_count} missing out of {len(self.albums)} albums")
-            print(f"🚀 Emitting detailed album statuses")
+            print(f"Final result: {complete_count} complete, {nearly_complete_count} nearly complete, {partial_count} partial, {missing_count} missing out of {len(self.albums)} albums")
+            print(f"Emitting detailed album statuses")
             self.library_checked.emit(album_statuses)
             
         except Exception as e:
             if not self._stop_requested:
                 error_msg = f"Error checking database library: {e}"
-                print(f"❌ {error_msg}")
+                print(f"{error_msg}")
                 self.check_failed.emit(error_msg)
 
 
@@ -1232,7 +1232,7 @@ class ArtistResultCard(QFrame):
                 font-size: 48px;
             }
         """)
-        self.image_label.setText("🎵")
+        self.image_label.setText("")
         
         image_layout.addWidget(self.image_label)
         
@@ -1258,7 +1258,7 @@ class ArtistResultCard(QFrame):
         
         # Watchlist eye indicator (positioned absolutely in top-right corner)
         self.watchlist_indicator = QLabel(self)
-        self.watchlist_indicator.setText("👁️")
+        self.watchlist_indicator.setText("")
         self.watchlist_indicator.setFont(QFont("Arial", 14))
         self.watchlist_indicator.setFixedSize(24, 24)
         self.watchlist_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1348,7 +1348,7 @@ class ArtistResultCard(QFrame):
             super().mousePressEvent(event)
         except RuntimeError as e:
             # Qt object has been deleted, ignore the event silently
-            print(f"⚠️ ArtistCard object deleted during mouse event: {e}")
+            print(f"ArtistCard object deleted during mouse event: {e}")
             pass
 
 class AlbumCard(QFrame):
@@ -1413,7 +1413,7 @@ class AlbumCard(QFrame):
                 font-size: 32px;
             }
         """)
-        self.image_label.setText("💿")
+        self.image_label.setText("")
         
         image_layout.addWidget(self.image_label)
         
@@ -1533,7 +1533,7 @@ class AlbumCard(QFrame):
                         font-weight: bold;
                     }
                 """)
-                self.overlay.setText("✓ Complete\nVerify tracks")
+                self.overlay.setText("Complete\nVerify tracks")
                 self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
             elif self.ownership_status and self.ownership_status.is_nearly_complete:
                 # Nearly complete album (80-89%) - blue overlay
@@ -1563,7 +1563,7 @@ class AlbumCard(QFrame):
                 """)
                 percentage = int(self.ownership_status.completion_ratio * 100)
                 missing_tracks = self.ownership_status.expected_tracks - self.ownership_status.owned_tracks
-                self.overlay.setText(f"⚠ Partial\n({percentage}%)\nGet {missing_tracks} missing")
+                self.overlay.setText(f"Partial\n({percentage}%)\nGet {missing_tracks} missing")
                 self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
             else:
                 # Legacy complete album - green checkmark overlay
@@ -1576,7 +1576,7 @@ class AlbumCard(QFrame):
                         font-weight: bold;
                     }
                 """)
-                self.overlay.setText("✓ Complete\nVerify tracks")
+                self.overlay.setText("Complete\nVerify tracks")
                 self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
         else:
             # Missing album - download overlay
@@ -1589,7 +1589,7 @@ class AlbumCard(QFrame):
                     font-weight: bold;
                 }
             """)
-            self.overlay.setText("📥 Missing\n(0%)\nDownload")
+            self.overlay.setText("Missing\n(0%)\nDownload")
             self.overlay.setCursor(Qt.CursorShape.PointingHandCursor)
     
     def update_status_indicator(self):
@@ -1606,7 +1606,7 @@ class AlbumCard(QFrame):
                         font-weight: bold;
                     }
                 """)
-                self.status_indicator.setText("✓")
+                self.status_indicator.setText("")
                 self.status_indicator.setToolTip(f"Complete album - {self.ownership_status.owned_tracks}/{self.ownership_status.expected_tracks} tracks ({int(self.ownership_status.completion_ratio * 100)}%)")
             elif self.ownership_status and self.ownership_status.is_nearly_complete:
                 # Nearly complete album (80-89%) - blue half-circle
@@ -1634,7 +1634,7 @@ class AlbumCard(QFrame):
                         font-weight: bold;
                     }
                 """)
-                self.status_indicator.setText("⚠")
+                self.status_indicator.setText("")
                 percentage = int(self.ownership_status.completion_ratio * 100)
                 self.status_indicator.setToolTip(f"Partial album - {self.ownership_status.owned_tracks}/{self.ownership_status.expected_tracks} tracks ({percentage}%)")
             else:
@@ -1648,7 +1648,7 @@ class AlbumCard(QFrame):
                         font-weight: bold;
                     }
                 """)
-                self.status_indicator.setText("✓")
+                self.status_indicator.setText("")
                 self.status_indicator.setToolTip("Album owned in library")
         else:
             # Missing album - red download icon
@@ -1661,7 +1661,7 @@ class AlbumCard(QFrame):
                     font-weight: bold;
                 }
             """)
-            self.status_indicator.setText("📥")
+            self.status_indicator.setText("")
             self.status_indicator.setToolTip("Album available for download")
     
     def update_ownership(self, ownership_info):
@@ -1677,9 +1677,9 @@ class AlbumCard(QFrame):
         
         if self.is_owned != is_owned:  # Only log if status actually changed
             if self.ownership_status:
-                print(f"🔄 '{self.album.name}' ownership: {self.is_owned} -> {is_owned} (complete: {self.ownership_status.is_complete})")
+                print(f"'{self.album.name}' ownership: {self.is_owned} -> {is_owned} (complete: {self.ownership_status.is_complete})")
             else:
-                print(f"🔄 '{self.album.name}' ownership: {self.is_owned} -> {is_owned}")
+                print(f"'{self.album.name}' ownership: {self.is_owned} -> {is_owned}")
         
         self.is_owned = is_owned
         
@@ -1701,7 +1701,7 @@ class AlbumCard(QFrame):
         
         try:
             if hasattr(self, 'progress_overlay') and self.progress_overlay and not self.progress_overlay.isNull():
-                self.progress_overlay.setText("⏳\nPreparing...")
+                self.progress_overlay.setText("\nPreparing...")
                 self.progress_overlay.show()
         except (RuntimeError, AttributeError):
             # Object has been deleted or is invalid, skip
@@ -1719,7 +1719,7 @@ class AlbumCard(QFrame):
                         font-weight: bold;
                     }
                 """)
-                self.status_indicator.setText("⏳")
+                self.status_indicator.setText("")
                 self.status_indicator.setToolTip("Album downloading...")
         except (RuntimeError, AttributeError):
             # Object has been deleted or is invalid, skip
@@ -1728,7 +1728,7 @@ class AlbumCard(QFrame):
     def update_download_progress(self, completed_tracks: int, total_tracks: int, percentage: int):
         """Update download progress display"""
         try:
-            progress_text = f"📥 Downloading\n{completed_tracks}/{total_tracks} tracks\n{percentage}%"
+            progress_text = f"Downloading\n{completed_tracks}/{total_tracks} tracks\n{percentage}%"
             if hasattr(self, 'progress_overlay') and self.progress_overlay:
                 self.progress_overlay.setText(progress_text)
                 self.progress_overlay.show()
@@ -1762,7 +1762,7 @@ class AlbumCard(QFrame):
             # Show completion message briefly if overlay still exists
             if hasattr(self, 'progress_overlay') and self.progress_overlay is not None:
                 try:
-                    self.progress_overlay.setText("✅\nCompleted!")
+                    self.progress_overlay.setText("\nCompleted!")
                     self.progress_overlay.setStyleSheet("""
                         QLabel {
                 background: rgba(29, 185, 84, 0.9);
@@ -1782,7 +1782,7 @@ class AlbumCard(QFrame):
                     pass
                     
         except Exception as e:
-            print(f"⚠️ Error in set_download_completed: {e}")
+            print(f"Error in set_download_completed: {e}")
             # Still try to update ownership even if overlay fails
             try:
                 self.update_ownership(True)
@@ -1804,12 +1804,12 @@ class AlbumCard(QFrame):
             # Don't allow downloads if already downloading
             if (event.button() == Qt.MouseButton.LeftButton and 
                 not self.progress_overlay.isVisible()):
-                print(f"🖱️ Album card clicked: {self.album.name} (owned: {self.is_owned})")
+                print(f"Album card clicked: {self.album.name} (owned: {self.is_owned})")
                 self.download_requested.emit(self.album)
             super().mousePressEvent(event)
         except RuntimeError as e:
             # Qt object has been deleted, ignore the event silently
-            print(f"⚠️ AlbumCard object deleted during mouse event: {e}")
+            print(f"AlbumCard object deleted during mouse event: {e}")
             pass
 
 class DownloadMissingAlbumTracksModal(QDialog):
@@ -1841,7 +1841,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
         self.permanently_failed_tracks = []
         self.cancelled_tracks = set()  # Track indices of cancelled tracks
         
-        print(f"📊 Total album tracks: {self.total_tracks}")
+        print(f"Total album tracks: {self.total_tracks}")
         
         # Track analysis results
         self.analysis_results = []
@@ -1862,9 +1862,9 @@ class DownloadMissingAlbumTracksModal(QDialog):
 
         self.active_downloads = [] 
         
-        print("🎨 Setting up album modal UI...")
+        print("Setting up album modal UI...")
         self.setup_ui()
-        print("✅ Album modal initialization complete")
+        print("Album modal initialization complete")
 
     def generate_smart_search_queries(self, artist_name, track_name):
         """Generate smart search query variations with album-in-title detection"""
@@ -1912,7 +1912,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
                 unique_queries.append(query)
                 seen.add(query.lower())
         
-        print(f"🧠 Generated {len(unique_queries)} smart queries for '{track_name}' (enhanced with album detection)")
+        print(f"Generated {len(unique_queries)} smart queries for '{track_name}' (enhanced with album detection)")
         for i, query in enumerate(unique_queries):
             print(f"   {i+1}. '{query}'")
         
@@ -1983,10 +1983,10 @@ class DownloadMissingAlbumTracksModal(QDialog):
         dashboard_layout = QHBoxLayout()
         dashboard_layout.setSpacing(20)
         
-        self.total_card = self.create_compact_counter_card("📀 Total", str(self.total_tracks), "#1db954")
-        self.matched_card = self.create_compact_counter_card("✅ Found", "0", "#4CAF50")
+        self.total_card = self.create_compact_counter_card("Total", str(self.total_tracks), "#1db954")
+        self.matched_card = self.create_compact_counter_card("Found", "0", "#4CAF50")
         self.download_card = self.create_compact_counter_card("⬇️ Missing", "0", "#ff6b6b")
-        self.downloaded_card = self.create_compact_counter_card("✅ Downloaded", "0", "#4CAF50")
+        self.downloaded_card = self.create_compact_counter_card("Downloaded", "0", "#4CAF50")
         
         dashboard_layout.addWidget(self.total_card)
         dashboard_layout.addWidget(self.matched_card)
@@ -2051,7 +2051,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
         analysis_container = QVBoxLayout()
         analysis_container.setSpacing(4)
         
-        analysis_label = QLabel("🔍 Plex Analysis")
+        analysis_label = QLabel("Plex Analysis")
         analysis_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
         analysis_label.setStyleSheet("color: #cccccc;")
         
@@ -2109,7 +2109,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
         
-        header_label = QLabel("📋 Album Track Analysis")
+        header_label = QLabel("Album Track Analysis")
         header_label.setFont(QFont("Arial", 13, QFont.Weight.Bold))
         header_label.setStyleSheet("color: #ffffff; padding: 5px;")
         
@@ -2158,7 +2158,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
             if self.is_valid_track(track):
                 valid_tracks.append(track)
             else:
-                print(f"⚠️ Skipping invalid track: name='{getattr(track, 'name', 'None')}', artists={getattr(track, 'artists', 'None')}, duration={getattr(track, 'duration_ms', 'None')}")
+                print(f"Skipping invalid track: name='{getattr(track, 'name', 'None')}', artists={getattr(track, 'artists', 'None')}, duration={getattr(track, 'duration_ms', 'None')}")
         
         # Update album tracks to only include valid ones
         self.album.tracks = valid_tracks
@@ -2177,7 +2177,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
             duration_item = QTableWidgetItem(duration)
             duration_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.track_table.setItem(i, 2, duration_item)
-            matched_item = QTableWidgetItem("⏳ Pending")
+            matched_item = QTableWidgetItem("Pending")
             matched_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.track_table.setItem(i, 3, matched_item)
             status_item = QTableWidgetItem("—")
@@ -2287,10 +2287,10 @@ class DownloadMissingAlbumTracksModal(QDialog):
                 cancel_button = layout.itemAt(0).widget()
                 if cancel_button:
                     cancel_button.setEnabled(False)
-                    cancel_button.setText("✓")
+                    cancel_button.setText("")
         
         # Update status to cancelled
-        self.track_table.setItem(row, 4, QTableWidgetItem("🚫 Cancelled"))
+        self.track_table.setItem(row, 4, QTableWidgetItem("Cancelled"))
         
         # Add to cancelled tracks set
         if not hasattr(self, 'cancelled_tracks'):
@@ -2298,7 +2298,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
         self.cancelled_tracks.add(row)
         
         track = self.album.tracks[row]
-        print(f"🚫 Track cancelled: {track.name} (row {row})")
+        print(f"Track cancelled: {track.name} (row {row})")
         
         # If downloads are active, also handle active download cancellation
         download_index = None
@@ -2308,7 +2308,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
             for download in self.active_downloads:
                 if download.get('table_index') == row:
                     download_index = download.get('download_index', row)
-                    print(f"🚫 Found active download {download_index} for cancelled track")
+                    print(f"Found active download {download_index} for cancelled track")
                     break
         
         # Check parallel_search_tracking for download index
@@ -2316,12 +2316,12 @@ class DownloadMissingAlbumTracksModal(QDialog):
             for idx, track_info in self.parallel_search_tracking.items():
                 if track_info.get('table_index') == row:
                     download_index = idx
-                    print(f"🚫 Found parallel tracking {download_index} for cancelled track")
+                    print(f"Found parallel tracking {download_index} for cancelled track")
                     break
         
         # If we found an active download, trigger completion to free up the worker
         if download_index is not None and hasattr(self, 'on_parallel_track_completed'):
-            print(f"🚫 Triggering completion for active download {download_index}")
+            print(f"Triggering completion for active download {download_index}")
             self.on_parallel_track_completed(download_index, success=False)
         
     def create_buttons(self):
@@ -2331,7 +2331,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
         layout.setSpacing(15)
         layout.setContentsMargins(0, 10, 0, 0)
 
-        self.correct_failed_btn = QPushButton("🔧 Correct Failed Matches")
+        self.correct_failed_btn = QPushButton("Correct Failed Matches")
         self.correct_failed_btn.setFixedWidth(220)
         self.correct_failed_btn.setStyleSheet("""
             QPushButton { background-color: #ffc107; color: #000000; border-radius: 20px; font-weight: bold; }
@@ -2384,7 +2384,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
                 self.album_card.set_download_in_progress()
         except (RuntimeError, AttributeError):
             # Album card object has been deleted, skip UI update
-            print("⚠️ Album card object deleted, skipping progress update")
+            print("Album card object deleted, skipping progress update")
             pass
 
         self.begin_search_btn.hide()
@@ -2407,18 +2407,18 @@ class DownloadMissingAlbumTracksModal(QDialog):
         QThreadPool.globalInstance().start(worker)
             
     def on_analysis_started(self, total_tracks):
-        print(f"🔍 Album analysis started for {total_tracks} tracks")
+        print(f"Album analysis started for {total_tracks} tracks")
         
     def on_track_analyzed(self, track_index, result):
         """Handle individual track analysis completion with live UI updates"""
         self.analysis_progress.setValue(track_index)
         row_index = track_index - 1
         if result.exists_in_plex:
-            matched_text = f"✅ Found ({result.confidence:.1f})"
+            matched_text = f"Found ({result.confidence:.1f})"
             self.matched_tracks_count += 1
             self.matched_count_label.setText(str(self.matched_tracks_count))
         else:
-            matched_text = "❌ Missing"
+            matched_text = "Missing"
             self.tracks_to_download_count += 1
             self.download_count_label.setText(str(self.tracks_to_download_count))
             # Add cancel button for missing tracks only
@@ -2430,7 +2430,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
         self.analysis_complete = True
         self.analysis_results = results
         self.missing_tracks = [r for r in results if not r.exists_in_plex]
-        print(f"✅ Album analysis complete: {len(self.missing_tracks)} to download")
+        print(f"Album analysis complete: {len(self.missing_tracks)} to download")
         if self.missing_tracks:
             self.start_download_progress()
         else:
@@ -2439,13 +2439,13 @@ class DownloadMissingAlbumTracksModal(QDialog):
             try:
                 self.process_finished.emit()
             except RuntimeError as e:
-                print(f"⚠️ Modal object deleted during analysis complete signal: {e}")
+                print(f"Modal object deleted during analysis complete signal: {e}")
             QMessageBox.information(self, "Analysis Complete", "All album tracks already exist in Plex! No downloads needed.")
             # Close with accept since all tracks are already available (success case)
             self.accept()
             
     def on_analysis_failed(self, error_message):
-        print(f"❌ Album analysis failed: {error_message}")
+        print(f"Album analysis failed: {error_message}")
         QMessageBox.critical(self, "Analysis Failed", f"Failed to analyze album tracks: {error_message}")
         self.cancel_btn.hide()
         self.begin_search_btn.show()
@@ -2476,12 +2476,12 @@ class DownloadMissingAlbumTracksModal(QDialog):
             
             # Skip if track was cancelled
             if hasattr(self, 'cancelled_tracks') and track_index in self.cancelled_tracks:
-                print(f"🚫 Skipping cancelled track at index {track_index}: {track.name}")
+                print(f"Skipping cancelled track at index {track_index}: {track.name}")
                 self.download_queue_index += 1
                 self.completed_downloads += 1
                 continue
             
-            self.track_table.setItem(track_index, 4, QTableWidgetItem("🔍 Searching..."))
+            self.track_table.setItem(track_index, 4, QTableWidgetItem("Searching..."))
             self.search_and_download_track_parallel(track, self.download_queue_index, track_index)
             self.active_parallel_downloads += 1
             self.download_queue_index += 1
@@ -2549,7 +2549,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
 
         # Reset state if this track was previously marked as completed (for retries)
         if track_info.get('completed', False):
-            print(f"🔄 Resetting state for manually retried track (index: {download_index}).")
+            print(f"Resetting state for manually retried track (index: {download_index}).")
             track_info['completed'] = False
             
             if self.failed_downloads > 0:
@@ -2596,7 +2596,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
     def cancel_existing_download(self, download_item):
         """Cancel an existing download item"""
         if download_item and hasattr(download_item, 'cancel_download'):
-            print(f"🚫 Cancelling existing queued download: '{download_item.title}' by {download_item.artist}")
+            print(f"Cancelling existing queued download: '{download_item.title}' by {download_item.artist}")
             download_item.cancel_download()
             return True
         return False
@@ -2607,7 +2607,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
             # Check for existing download and cancel if found
             existing_download = self.find_existing_download_for_track(spotify_based_result)
             if existing_download:
-                print(f"⚠️ Found existing download for '{spotify_based_result.title}', canceling before retry...")
+                print(f"Found existing download for '{spotify_based_result.title}', canceling before retry...")
                 self.cancel_existing_download(existing_download)
             
             artist = type('Artist', (), {'name': spotify_based_result.artist})()
@@ -2706,7 +2706,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
                          download_info['downloading_start_time'] = time.time()
                      # 90-second timeout for being stuck at 0%
                      elif time.time() - download_info['downloading_start_time'] > 90:
-                         print(f"⚠️ Download for '{download_info['slskd_result'].filename}' is stuck at 0%. Cancelling and retrying.")
+                         print(f"Download for '{download_info['slskd_result'].filename}' is stuck at 0%. Cancelling and retrying.")
                          # Cancel the old download before retry
                          self.cancel_download_before_retry(download_info)
                          if download_info in self.active_downloads:
@@ -2723,7 +2723,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
                  if 'queued_start_time' not in download_info:
                      download_info['queued_start_time'] = time.time()
                  elif time.time() - download_info['queued_start_time'] > 90: # 90-second timeout
-                     print(f"⚠️ Download for '{download_info['slskd_result'].filename}' is stuck in queue. Cancelling and retrying.")
+                     print(f"Download for '{download_info['slskd_result'].filename}' is stuck in queue. Cancelling and retrying.")
                      # Cancel the old download before retry
                      self.cancel_download_before_retry(download_info)
                      if download_info in self.active_downloads:
@@ -2737,7 +2737,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
         try:
             slskd_result = download_info.get('slskd_result')
             if not slskd_result:
-                print("⚠️ No slskd_result found in download_info for cancellation")
+                print("No slskd_result found in download_info for cancellation")
                 return
             
             # Extract download details for cancellation
@@ -2745,7 +2745,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
             username = getattr(slskd_result, 'username', None)
             
             if download_id and username:
-                print(f"🚫 Cancelling timed-out album download: {download_id} from {username}")
+                print(f"Cancelling timed-out album download: {download_id} from {username}")
                 
                 # Use asyncio to call the async cancel method
                 import asyncio
@@ -2756,16 +2756,16 @@ class DownloadMissingAlbumTracksModal(QDialog):
                         self.soulseek_client.cancel_download(download_id, username, remove=False)
                     )
                     if success:
-                        print(f"✅ Successfully cancelled album download {download_id}")
+                        print(f"Successfully cancelled album download {download_id}")
                     else:
-                        print(f"⚠️ Failed to cancel album download {download_id}")
+                        print(f"Failed to cancel album download {download_id}")
                 finally:
                     loop.close()
             else:
-                print(f"⚠️ Missing download_id ({download_id}) or username ({username}) for album cancellation")
+                print(f"Missing download_id ({download_id}) or username ({username}) for album cancellation")
                 
         except Exception as e:
-            print(f"❌ Error cancelling album download: {e}")
+            print(f"Error cancelling album download: {e}")
 
     def retry_parallel_download_with_fallback(self, failed_download_info):
         """Retries a failed download by selecting the next-best cached candidate"""
@@ -2791,8 +2791,8 @@ class DownloadMissingAlbumTracksModal(QDialog):
             self.on_parallel_track_failed(download_index, "No alternative sources in cache")
             return
 
-        print(f"🔄 Retrying album download {download_index + 1} with next candidate: {next_candidate.filename}")
-        self.track_table.setItem(failed_download_info['table_index'], 4, QTableWidgetItem(f"🔄 Retrying ({track_info['retry_count']})..."))
+        print(f"Retrying album download {download_index + 1} with next candidate: {next_candidate.filename}")
+        self.track_table.setItem(failed_download_info['table_index'], 4, QTableWidgetItem(f"Retrying ({track_info['retry_count']})..."))
         
         self.start_validated_download_parallel(
             next_candidate, track_info['spotify_track'], track_info['track_index'],
@@ -2802,14 +2802,14 @@ class DownloadMissingAlbumTracksModal(QDialog):
     def on_parallel_track_completed(self, download_index, success):
         """Handle completion of a parallel track download"""
         if not hasattr(self, 'parallel_search_tracking'):
-            print(f"⚠️ parallel_search_tracking not initialized yet, skipping completion for download {download_index}")
+            print(f"parallel_search_tracking not initialized yet, skipping completion for download {download_index}")
             return
         track_info = self.parallel_search_tracking.get(download_index)
         if not track_info or track_info.get('completed', False): return
         
         track_info['completed'] = True
         if success:
-            self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("✅ Downloaded"))
+            self.track_table.setItem(track_info['table_index'], 4, QTableWidgetItem("Downloaded"))
             # Hide cancel button since track is now downloaded
             self.hide_cancel_button_for_row(track_info['table_index'])
             self.downloaded_tracks_count += 1
@@ -2819,10 +2819,10 @@ class DownloadMissingAlbumTracksModal(QDialog):
             # Check if track was cancelled (don't overwrite cancelled status)
             table_index = track_info['table_index']
             current_status = self.track_table.item(table_index, 4)
-            if current_status and "🚫 Cancelled" in current_status.text():
-                print(f"🔧 Track {download_index} was cancelled - preserving cancelled status")
+            if current_status and "Cancelled" in current_status.text():
+                print(f"Track {download_index} was cancelled - preserving cancelled status")
             else:
-                self.track_table.setItem(table_index, 4, QTableWidgetItem("❌ Failed"))
+                self.track_table.setItem(table_index, 4, QTableWidgetItem("Failed"))
                 if track_info not in self.permanently_failed_tracks:
                     self.permanently_failed_tracks.append(track_info)
                 self.update_failed_matches_button()
@@ -2838,14 +2838,14 @@ class DownloadMissingAlbumTracksModal(QDialog):
     
     def on_parallel_track_failed(self, download_index, reason):
         """Handle failure of a parallel track download"""
-        print(f"❌ Album parallel download {download_index + 1} failed: {reason}")
+        print(f"Album parallel download {download_index + 1} failed: {reason}")
         self.on_parallel_track_completed(download_index, False)
     
     def update_failed_matches_button(self):
         """Shows, hides, and updates the counter on the 'Correct Failed Matches' button"""
         count = len(self.permanently_failed_tracks)
         if count > 0:
-            self.correct_failed_btn.setText(f"🔧 Correct {count} Failed Match{'es' if count > 1 else ''}")
+            self.correct_failed_btn.setText(f"Correct {count} Failed Match{'es' if count > 1 else ''}")
             self.correct_failed_btn.show()
         else:
             self.correct_failed_btn.hide()
@@ -2860,14 +2860,14 @@ class DownloadMissingAlbumTracksModal(QDialog):
     def on_all_downloads_complete(self):
         """Handle completion of all downloads"""
         self.download_in_progress = False
-        print("🎉 All album downloads completed!")
+        print("All album downloads completed!")
         self.cancel_btn.hide()
         
         # Emit process_finished signal to unlock UI
         try:
             self.process_finished.emit()
         except RuntimeError as e:
-            print(f"⚠️ Modal object deleted during downloads complete signal: {e}")
+            print(f"Modal object deleted during downloads complete signal: {e}")
         
         # Request Plex library scan if we have successful downloads
         if self.successful_downloads > 0 and hasattr(self, 'parent_artists_page') and self.parent_artists_page.scan_manager:
@@ -2893,8 +2893,8 @@ class DownloadMissingAlbumTracksModal(QDialog):
                     status_item = self.track_table.item(cancelled_row, 4)
                     current_status = status_item.text() if status_item else ""
                     
-                    if "✅ Downloaded" in current_status:
-                        print(f"🚫 Cancelled track {cancelled_track.name} was already downloaded, skipping wishlist addition")
+                    if "Downloaded" in current_status:
+                        print(f"Cancelled track {cancelled_track.name} was already downloaded, skipping wishlist addition")
                     else:
                         cancelled_track_info = {
                             'download_index': cancelled_row,
@@ -2908,9 +2908,9 @@ class DownloadMissingAlbumTracksModal(QDialog):
                         # Check if not already in permanently_failed_tracks
                         if not any(t.get('table_index') == cancelled_row for t in self.permanently_failed_tracks):
                             self.permanently_failed_tracks.append(cancelled_track_info)
-                            print(f"🚫 Added cancelled missing track {cancelled_track.name} to failed list for wishlist")
+                            print(f"Added cancelled missing track {cancelled_track.name} to failed list for wishlist")
                 else:
-                    print(f"🚫 Cancelled track {cancelled_track.name} was not missing from Plex, skipping wishlist addition")
+                    print(f"Cancelled track {cancelled_track.name} was not missing from Plex, skipping wishlist addition")
 
         # Add permanently failed tracks to wishlist before showing completion message
         failed_count = len(self.permanently_failed_tracks)
@@ -2981,7 +2981,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
             final_message = f"Completed downloading {self.successful_downloads}/{len(self.missing_tracks)} missing album tracks!\n\n"
             
             if wishlist_added_count > 0:
-                final_message += f"✨ Added {wishlist_added_count} failed track{'s' if wishlist_added_count != 1 else ''} to wishlist for automatic retry.\n\n"
+                final_message += f"Added {wishlist_added_count} failed track{'s' if wishlist_added_count != 1 else ''} to wishlist for automatic retry.\n\n"
             
             final_message += "You can also manually correct failed downloads or check the wishlist on the dashboard."
             
@@ -3012,10 +3012,10 @@ class DownloadMissingAlbumTracksModal(QDialog):
         initial_candidates = self.matching_engine.find_best_slskd_matches_enhanced(spotify_track, results)
 
         if not initial_candidates:
-            print(f"⚠️ No initial candidates found for '{spotify_track.name}' from query '{query}'.")
+            print(f"No initial candidates found for '{spotify_track.name}' from query '{query}'.")
             return []
             
-        print(f"✅ Found {len(initial_candidates)} initial candidates for '{spotify_track.name}'. Now verifying artist...")
+        print(f"Found {len(initial_candidates)} initial candidates for '{spotify_track.name}'. Now verifying artist...")
 
         # Perform strict artist verification on the initial candidates
         verified_candidates = []
@@ -3033,10 +3033,10 @@ class DownloadMissingAlbumTracksModal(QDialog):
             
             # Check if the cleaned artist's name is in the cleaned folder path
             if normalized_spotify_artist in normalized_slskd_path:
-                print(f"✔️ Artist '{spotify_artist_name}' VERIFIED in path: '{slskd_full_path}'")
+                print(f"Artist '{spotify_artist_name}' VERIFIED in path: '{slskd_full_path}'")
                 verified_candidates.append(candidate)
             else:
-                print(f"❌ Artist '{spotify_artist_name}' NOT found in path: '{slskd_full_path}'. Discarding candidate.")
+                print(f"Artist '{spotify_artist_name}' NOT found in path: '{slskd_full_path}'. Discarding candidate.")
 
         if verified_candidates:
             # Apply quality profile filtering before returning
@@ -3047,14 +3047,14 @@ class DownloadMissingAlbumTracksModal(QDialog):
 
                 if quality_filtered:
                     verified_candidates = quality_filtered
-                    print(f"🎯 Applied quality profile filtering: {len(verified_candidates)} candidates remain")
+                    print(f"Applied quality profile filtering: {len(verified_candidates)} candidates remain")
                 else:
-                    print(f"⚠️ Quality profile filtering removed all candidates, keeping originals")
+                    print(f"Quality profile filtering removed all candidates, keeping originals")
             
             best_confidence = verified_candidates[0].confidence
             best_version = getattr(verified_candidates[0], 'version_type', 'unknown')
             best_quality = getattr(verified_candidates[0], 'quality', 'unknown')
-            print(f"✅ Found {len(verified_candidates)} VERIFIED matches for '{spotify_track.name}'. Best: {best_confidence:.2f} ({best_version}, {best_quality.upper()})")
+            print(f"Found {len(verified_candidates)} VERIFIED matches for '{spotify_track.name}'. Best: {best_confidence:.2f} ({best_version}, {best_quality.upper()})")
             
             # Log version breakdown for debugging
             version_counts = {}
@@ -3064,10 +3064,10 @@ class DownloadMissingAlbumTracksModal(QDialog):
                 penalty = getattr(candidate, 'version_penalty', 0.0)
                 quality = getattr(candidate, 'quality', 'unknown')
                 bitrate_info = f" {candidate.bitrate}kbps" if hasattr(candidate, 'bitrate') and candidate.bitrate else ""
-                print(f"   🎵 {candidate.confidence:.2f} - {version} ({quality.upper()}{bitrate_info}) (penalty: {penalty:.2f}) - {candidate.filename[:100]}...")
+                print(f"   {candidate.confidence:.2f} - {version} ({quality.upper()}{bitrate_info}) (penalty: {penalty:.2f}) - {candidate.filename[:100]}...")
                 
         else:
-            print(f"⚠️ No verified matches found for '{spotify_track.name}' after checking file paths.")
+            print(f"No verified matches found for '{spotify_track.name}' after checking file paths.")
 
         return verified_candidates
     
@@ -3130,7 +3130,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
             self.process_finished.emit()
             self.reject()
         except RuntimeError as e:
-            print(f"⚠️ Modal object deleted during cancel: {e}")
+            print(f"Modal object deleted during cancel: {e}")
             pass
         
     def on_close_clicked(self):
@@ -3141,12 +3141,12 @@ class DownloadMissingAlbumTracksModal(QDialog):
                 self.process_finished.emit()
             self.reject()
         except RuntimeError as e:
-            print(f"⚠️ Modal object deleted during close: {e}")
+            print(f"Modal object deleted during close: {e}")
             pass
         
     def cancel_operations(self):
         """Cancel any ongoing operations"""
-        print("🛑 Cancelling album download operations...")
+        print("Cancelling album download operations...")
         self.cancel_requested = True
         
         # Stop workers
@@ -3157,7 +3157,7 @@ class DownloadMissingAlbumTracksModal(QDialog):
         
         # Stop polling
         self.download_status_timer.stop()
-        print("🛑 Album modal operations cancelled successfully.")
+        print("Album modal operations cancelled successfully.")
         
     def on_correct_failed_matches_clicked(self):
         """Handle failed matches correction using ManualMatchModal from sync.py"""
@@ -3173,13 +3173,13 @@ class DownloadMissingAlbumTracksModal(QDialog):
 
     def on_manual_match_resolved(self, resolved_track_info):
         """Handle a track being successfully resolved by the ManualMatchModal"""
-        print(f"🔧 Manual match resolved (Artists) - download_index: {resolved_track_info.get('download_index')}, table_index: {resolved_track_info.get('table_index')}")
+        print(f"Manual match resolved (Artists) - download_index: {resolved_track_info.get('download_index')}, table_index: {resolved_track_info.get('table_index')}")
         original_failed_track = next((t for t in self.permanently_failed_tracks if t['download_index'] == resolved_track_info['download_index']), None)
         if original_failed_track:
             self.permanently_failed_tracks.remove(original_failed_track)
-            print(f"✅ Removed track from permanently_failed_tracks (Artists) - remaining: {len(self.permanently_failed_tracks)}")
+            print(f"Removed track from permanently_failed_tracks (Artists) - remaining: {len(self.permanently_failed_tracks)}")
         else:
-            print("⚠️ Could not find original failed track to remove (Artists)")
+            print("Could not find original failed track to remove (Artists)")
         self.update_failed_matches_button()
 
 class ArtistsPage(QWidget):
@@ -3270,7 +3270,7 @@ class ArtistsPage(QWidget):
                 return
             
             # All conditions met - start incremental update
-            logger.info(f"🎵 Starting automatic incremental database update after {active_server.upper()} scan")
+            logger.info(f"Starting automatic incremental database update after {active_server.upper()} scan")
             self._start_automatic_incremental_update()
             
         except Exception as e:
@@ -3307,13 +3307,13 @@ class ArtistsPage(QWidget):
         """Handle completion of automatic database update"""
         try:
             if successful > 0:
-                logger.info(f"✅ Automatic database update completed: {successful} items processed successfully")
+                logger.info(f"Automatic database update completed: {successful} items processed successfully")
             else:
-                logger.info("💡 Automatic database update completed - no new content found")
+                logger.info("Automatic database update completed - no new content found")
             
             # Emit the signal to notify the dashboard to refresh its statistics
             self.database_updated_externally.emit()
-            logger.info("📊 Emitted signal to refresh dashboard database statistics after auto update")
+            logger.info("Emitted signal to refresh dashboard database statistics after auto update")
             
             # Clean up the worker
             if hasattr(self, '_auto_database_worker'):
@@ -3359,7 +3359,7 @@ class ArtistsPage(QWidget):
             download_path = config_manager.get('soulseek.download_path')
             if download_path and hasattr(self.soulseek_client, 'download_path'):
                 self.soulseek_client.download_path = download_path
-                print(f"✅ Set soulseek_client download path for ArtistsPage to: {download_path}")
+                print(f"Set soulseek_client download path for ArtistsPage to: {download_path}")
             # --- END FIX ---
             
             # Initialize unified media scan manager now that clients are available
@@ -3368,7 +3368,7 @@ class ArtistsPage(QWidget):
                 self.scan_manager = MediaScanManager(delay_seconds=60)
                 # Add automatic incremental database update after scan completion
                 self.scan_manager.add_scan_completion_callback(self._on_media_scan_completed)
-                print("✅ MediaScanManager initialized for ArtistsPage")
+                print("MediaScanManager initialized for ArtistsPage")
             except Exception as e:
                 print(f"Failed to initialize MediaScanManager: {e}")
 
@@ -3470,7 +3470,7 @@ class ArtistsPage(QWidget):
         """)
         self.search_input.returnPressed.connect(self.perform_artist_search)
         
-        search_btn = QPushButton("🔍 Search Artists")
+        search_btn = QPushButton("Search Artists")
         search_btn.setFixedHeight(40)
         search_btn.setStyleSheet("""
             QPushButton {
@@ -3916,7 +3916,7 @@ class ArtistsPage(QWidget):
                 self.toast_manager.error("Spotify authentication required")
             return
         
-        self.search_status.setText("🔍 Searching for artists...")
+        self.search_status.setText("Searching for artists...")
         self.search_status.setStyleSheet("color: #1db954; padding: 10px;")
         
         # Show toast for search start
@@ -4030,21 +4030,21 @@ class ArtistsPage(QWidget):
             self.albums_status.setText("No releases found")
             return
         
-        print(f"📀 Processing {len(albums)} releases for {artist.name}")
+        print(f"Processing {len(albums)} releases for {artist.name}")
         
         # Store all releases and classify them
         self.all_releases = albums
         self.albums_only, singles, eps = self.classify_releases(albums)
         self.singles_and_eps = singles + eps
         
-        print(f"📊 Classification: {len(self.albums_only)} albums, {len(singles)} singles, {len(eps)} EPs")
+        print(f"Classification: {len(self.albums_only)} albums, {len(singles)} singles, {len(eps)} EPs")
         
         # Initialize match counter for real-time updates
         self.matched_count = 0
         
         # Auto-switch to Singles & EPs if no albums available
         if len(self.albums_only) == 0 and len(self.singles_and_eps) > 0:
-            print("📀 No albums found, automatically switching to Singles & EPs view")
+            print("No albums found, automatically switching to Singles & EPs view")
             self.current_filter = "singles_eps"
             self.albums_button.setChecked(False)
             self.singles_eps_button.setChecked(True)
@@ -4057,9 +4057,9 @@ class ArtistsPage(QWidget):
         
         # Handle both old format (set of owned album names) and new format (dict of statuses)
         if isinstance(ownership_info, dict):
-            print(f"🎨 Displaying {len(albums)} albums with detailed ownership info")
+            print(f"Displaying {len(albums)} albums with detailed ownership info")
         else:
-            print(f"🎨 Displaying {len(albums)} albums, {len(ownership_info)} owned")
+            print(f"Displaying {len(albums)} albums, {len(ownership_info)} owned")
         
         # Clear existing albums
         self.clear_albums()
@@ -4148,10 +4148,10 @@ class ArtistsPage(QWidget):
     
     def on_plex_library_checked(self, album_statuses):
         """Handle final database library check completion with detailed status info"""
-        print(f"📨 Database check completed: {len(album_statuses)} album statuses")
+        print(f"Database check completed: {len(album_statuses)} album statuses")
         
         if not self.current_albums:
-            print("📨 No current albums, skipping final update")
+            print("No current albums, skipping final update")
             return
         
         # Count different types of ownership
@@ -4188,7 +4188,7 @@ class ArtistsPage(QWidget):
             else:
                 self.toast_manager.success(f"Found {complete_count} complete albums out of {total_count}")
         
-        print(f"✅ Database check complete: {complete_count} complete, {nearly_complete_count} nearly complete, {partial_count} partial, {missing_count} missing out of {total_count} albums")
+        print(f"Database check complete: {complete_count} complete, {nearly_complete_count} nearly complete, {partial_count} partial, {missing_count} missing out of {total_count} albums")
         
         # Update the album display with the final ownership statuses
         self.display_albums(self.current_albums, album_statuses)
@@ -4196,11 +4196,11 @@ class ArtistsPage(QWidget):
     def on_album_matched(self, album_name, ownership_status):
         """Handle individual album match for real-time UI update with detailed status"""
         if ownership_status.is_complete:
-            print(f"🎯 Real-time match: '{album_name}' (complete)")
+            print(f"Real-time match: '{album_name}' (complete)")
         elif ownership_status.is_nearly_complete:
-            print(f"🎯 Real-time match: '{album_name}' (nearly complete {int(ownership_status.completion_ratio * 100)}%)")
+            print(f"Real-time match: '{album_name}' (nearly complete {int(ownership_status.completion_ratio * 100)}%)")
         else:
-            print(f"🎯 Real-time match: '{album_name}' (partial {int(ownership_status.completion_ratio * 100)}%)")
+            print(f"Real-time match: '{album_name}' (partial {int(ownership_status.completion_ratio * 100)}%)")
         
         # Update match counter
         self.matched_count += 1
@@ -4224,7 +4224,7 @@ class ArtistsPage(QWidget):
                         status_text = f"nearly complete ({int(ownership_status.completion_ratio * 100)}%)"
                     else:
                         status_text = f"partial ({int(ownership_status.completion_ratio * 100)}%)"
-                    print(f"🔄 Real-time update: '{album_name}' -> {status_text}")
+                    print(f"Real-time update: '{album_name}' -> {status_text}")
                     album_card.update_ownership(ownership_status)
                     break
     
@@ -4253,9 +4253,9 @@ class ArtistsPage(QWidget):
         """Handle real-time single/EP match results"""
         if ownership_status.is_owned:
             if ownership_status.is_complete:
-                print(f"🎯 Single/EP match: '{release_name}' (complete)")
+                print(f"Single/EP match: '{release_name}' (complete)")
             else:
-                print(f"🎯 Single/EP match: '{release_name}' (partial {int(ownership_status.completion_ratio * 100)}%)")
+                print(f"Single/EP match: '{release_name}' (partial {int(ownership_status.completion_ratio * 100)}%)")
         
         # Find the corresponding card and update it
         for i in range(self.albums_grid_layout.count()):
@@ -4268,7 +4268,7 @@ class ArtistsPage(QWidget):
 
     def on_singles_eps_library_checked(self, release_statuses):
         """Handle singles/EPs library check completion"""
-        print(f"📨 Singles/EPs check completed: {len(release_statuses)} statuses")
+        print(f"Singles/EPs check completed: {len(release_statuses)} statuses")
         
         # Count results for summary
         complete_count = sum(1 for status in release_statuses.values() if status.is_complete)
@@ -4295,14 +4295,14 @@ class ArtistsPage(QWidget):
                 else:
                     self.toast_manager.success(f"Found {owned_count} partial releases")
         
-        print(f"✅ Singles/EPs check complete: {complete_count} complete, {nearly_complete_count} nearly complete, {partial_count} partial, {missing_count} missing out of {total_count} releases")
+        print(f"Singles/EPs check complete: {complete_count} complete, {nearly_complete_count} nearly complete, {partial_count} partial, {missing_count} missing out of {total_count} releases")
         
         # Update the display with the final ownership statuses
         self.display_albums(self.current_albums, release_statuses)
 
     def on_singles_eps_check_failed(self, error):
         """Handle singles/EPs check failure"""
-        print(f"❌ Singles/EPs library check failed: {error}")
+        print(f"Singles/EPs library check failed: {error}")
         
         # Update status
         singles_count = len([r for r in self.singles_and_eps if r.total_tracks == 1])
@@ -4323,7 +4323,7 @@ class ArtistsPage(QWidget):
     
     def on_album_download_requested(self, album: Album):
         """Handle album download request from an AlbumCard using new modal system."""
-        print(f"🎵 Download requested for album: {album.name} by {', '.join(album.artists)}")
+        print(f"Download requested for album: {album.name} by {', '.join(album.artists)}")
         
         # Find the album card for this album to pass to modal
         album_card = None
@@ -4356,7 +4356,7 @@ class ArtistsPage(QWidget):
             # Check if the modal still exists and is valid
             try:
                 if existing_modal and existing_modal.isVisible():
-                    print(f"🔄 Resuming existing active modal for album: {album.name}")
+                    print(f"Resuming existing active modal for album: {album.name}")
                     # Modal is already visible and active, just bring it to front
                     existing_modal.activateWindow()
                     existing_modal.raise_()
@@ -4368,7 +4368,7 @@ class ArtistsPage(QWidget):
                 elif existing_modal:
                     # Modal exists but is not visible - check if downloads are still in progress
                     if hasattr(existing_modal, 'download_in_progress') and existing_modal.download_in_progress:
-                        print(f"🔄 Resuming hidden modal with active downloads for album: {album.name}")
+                        print(f"Resuming hidden modal with active downloads for album: {album.name}")
                         # Show the existing modal to resume progress tracking
                         existing_modal.show()
                         existing_modal.activateWindow()
@@ -4378,18 +4378,18 @@ class ArtistsPage(QWidget):
                         return
                     else:
                         # Modal finished or cancelled, safe to create fresh one
-                        print("⚠️ Found finished modal, creating fresh modal")
+                        print("Found finished modal, creating fresh modal")
                         del self.active_album_sessions[album.id]
                 else:
                     # No modal reference, clean up stale session
-                    print("⚠️ Stale session found, cleaning up")
+                    print("Stale session found, cleaning up")
                     del self.active_album_sessions[album.id]
             except RuntimeError:
                 # Modal was deleted, remove from sessions
-                print("⚠️ Existing modal was deleted, creating fresh session")
+                print("Existing modal was deleted, creating fresh session")
                 del self.active_album_sessions[album.id]
         
-        print("🚀 Fetching album tracks and creating DownloadMissingAlbumTracksModal...")
+        print("Fetching album tracks and creating DownloadMissingAlbumTracksModal...")
         
         # First, we need to fetch the tracks for this album
         try:
@@ -4419,7 +4419,7 @@ class ArtistsPage(QWidget):
                 track = Track.from_spotify_track(track_data)
                 tracks.append(track)
                 
-            print(f"✅ Fetched {len(tracks)} tracks for album '{album.name}'")
+            print(f"Fetched {len(tracks)} tracks for album '{album.name}'")
             
             # Create a copy of the album with tracks added
             album_with_tracks = album
@@ -4464,23 +4464,23 @@ class ArtistsPage(QWidget):
             modal.exec()
             
         except Exception as e:
-            print(f"❌ Error fetching album tracks: {e}")
+            print(f"Error fetching album tracks: {e}")
             QMessageBox.critical(self, "Error", f"Failed to fetch album tracks: {str(e)}\n\nPlease check your Spotify connection and try again.")
     
     def on_album_download_process_finished(self, album_id: str, album_card):
         """Handle cleanup when album download process is actually finished (downloads completed)"""
-        print(f"🏁 Album download process finished for album: {album_id}")
+        print(f"Album download process finished for album: {album_id}")
         
         # Only mark as completed if downloads actually finished successfully
         if album_card and hasattr(album_card, 'set_download_completed'):
             album_card.set_download_completed()
-            print(f"✅ Marked album {album_id} as download completed")
+            print(f"Marked album {album_id} as download completed")
         
-        print("✅ Album download process cleanup completed")
+        print("Album download process cleanup completed")
     
     def on_album_modal_closed(self, album_id: str, album_card, result):
         """Handle cleanup when album modal is closed (regardless of reason)"""
-        print(f"📋 Album modal closed for album: {album_id}, result: {'Accepted' if result == 1 else 'Rejected/Cancelled'}")
+        print(f"Album modal closed for album: {album_id}, result: {'Accepted' if result == 1 else 'Rejected/Cancelled'}")
         
         # Clean up the session when modal is definitely closing
         if album_id in self.active_album_sessions:
@@ -4490,18 +4490,18 @@ class ArtistsPage(QWidget):
             # Only remove session if downloads are completely finished or cancelled
             if result == 1:  # QDialog.Accepted = 1 (downloads completed or all tracks exist)
                 del self.active_album_sessions[album_id]
-                print(f"🗑️ Removed completed session for album {album_id}")
+                print(f"Removed completed session for album {album_id}")
             elif modal and hasattr(modal, 'cancel_requested') and modal.cancel_requested:
                 # User explicitly cancelled - remove session for fresh modal on next click
                 del self.active_album_sessions[album_id]
-                print(f"🗑️ Removed cancelled session for album {album_id} - user requested cancellation")
+                print(f"Removed cancelled session for album {album_id} - user requested cancellation")
             elif modal and hasattr(modal, 'download_in_progress') and not modal.download_in_progress:
                 # Downloads are not in progress, safe to remove session
                 del self.active_album_sessions[album_id]
-                print(f"🗑️ Removed finished session for album {album_id} - no downloads in progress")
+                print(f"Removed finished session for album {album_id} - no downloads in progress")
             else:
                 # Downloads still in progress and not cancelled - keep session alive for resumption
-                print(f"💾 Keeping session for album {album_id} - downloads still in progress, can be resumed")
+                print(f"Keeping session for album {album_id} - downloads still in progress, can be resumed")
         
         if album_card:
             try:
@@ -4509,14 +4509,14 @@ class ArtistsPage(QWidget):
                     # Only mark as completed if downloads were actually successful
                     if hasattr(album_card, 'set_download_completed'):
                         album_card.set_download_completed()
-                        print(f"✅ Marked album {album_id} as download completed")
+                        print(f"Marked album {album_id} as download completed")
                 else:
                     # Modal was cancelled/closed - reset the card to allow reopening (but keep session)
                     # Reset any download-in-progress indicators
                     if hasattr(album_card, 'progress_overlay') and album_card.progress_overlay is not None:
                         try:
                             album_card.progress_overlay.hide()
-                            print(f"🔄 Hidden progress overlay for album {album_id}")
+                            print(f"Hidden progress overlay for album {album_id}")
                         except RuntimeError:
                             pass
                     
@@ -4529,16 +4529,16 @@ class ArtistsPage(QWidget):
                         # Show a visual indicator that this album has an active session
                         if hasattr(album_card, 'status_indicator'):
                             try:
-                                album_card.status_indicator.setText("▶️")
+                                album_card.status_indicator.setText("")
                                 album_card.status_indicator.setToolTip("Click to resume download session")
                             except RuntimeError:
                                 pass
-                        print(f"🔄 Reset album card for {album_id} to allow resumption")
+                        print(f"Reset album card for {album_id} to allow resumption")
                 
             except Exception as e:
-                print(f"⚠️ Error handling album card state: {e}")
+                print(f"Error handling album card state: {e}")
         
-        print("✅ Album modal cleanup completed")
+        print("Album modal cleanup completed")
     
     # === LEGACY METHODS - NO LONGER USED WITH NEW MODAL SYSTEM ===
     # These methods were part of the old manual album download flow
@@ -4559,7 +4559,7 @@ class ArtistsPage(QWidget):
     #         
     #         # Delegate to the DownloadsPage to handle the matched download
     #         # This will open the Spotify matching modal and add to the central queue
-    #         print("🚀 Delegating to DownloadsPage to start matched album download...")
+    #         print("Delegating to DownloadsPage to start matched album download...")
     #         self.downloads_page.start_matched_album_download(album_result)
     #     else:
     #         QMessageBox.critical(self, "Error", "Downloads page is not connected. Cannot start download.")
@@ -4592,7 +4592,7 @@ class ArtistsPage(QWidget):
     #         
     #         # Update album card to show download in progress
     #         album_card.set_download_in_progress()
-    #         print(f"📊 Started tracking album: {spotify_album.name} ({album_result.track_count} tracks)")
+    #         print(f"Started tracking album: {spotify_album.name} ({album_result.track_count} tracks)")
     
     # === END LEGACY METHODS ===
     
@@ -4638,7 +4638,7 @@ class ArtistsPage(QWidget):
             self._is_status_update_running = False
             return
         
-        print(f"🔍 Starting album status check for {len(items_to_check)} downloads across {len(self.album_downloads)} albums")
+        print(f"Starting album status check for {len(items_to_check)} downloads across {len(self.album_downloads)} albums")
         
         # Create and start our dedicated album worker
         worker = AlbumStatusProcessingWorker(
@@ -4694,7 +4694,7 @@ class ArtistsPage(QWidget):
     
     def _on_album_status_error(self, error_msg):
         """Handle errors from album status worker"""
-        print(f"❌ Album status worker error: {error_msg}")
+        print(f"Album status worker error: {error_msg}")
         self._is_status_update_running = False
     
     def update_active_downloads_from_queue(self):
@@ -4712,7 +4712,7 @@ class ArtistsPage(QWidget):
         if hasattr(self.downloads_page.download_queue, 'finished_queue'):
             finished_items = self.downloads_page.download_queue.finished_queue.download_items
         
-        print(f"🔍 Checking {len(active_items)} active downloads and {len(finished_items)} finished downloads for album tracking")
+        print(f"Checking {len(active_items)} active downloads and {len(finished_items)} finished downloads for album tracking")
         
         # For each tracked album, check if any downloads match
         for album_id, album_info in self.album_downloads.items():
@@ -4722,7 +4722,7 @@ class ArtistsPage(QWidget):
                 continue
             
             album_name = spotify_album.name if spotify_album else 'Unknown'
-            print(f"🎵 Looking for downloads matching album: {album_name} by {album_result.artist}")
+            print(f"Looking for downloads matching album: {album_name} by {album_result.artist}")
             
             # Look for downloads that match this album's tracks (both active and finished)
             matching_downloads = []
@@ -4739,20 +4739,20 @@ class ArtistsPage(QWidget):
                     # Debug: show what download ID we're working with
                     current_id = getattr(download_item, 'download_id', 'NO_ID')
                     title = getattr(download_item, 'title', 'Unknown')
-                    print(f"   🔍 Found matching item: '{title}' with download_id: {current_id}")
+                    print(f"   Found matching item: '{title}' with download_id: {current_id}")
                     
                     # Use the download ID directly from the item (should be the real one)
                     if current_id and current_id != 'NO_ID':
                         # Check if this item is in finished items (completed)
                         if download_item in finished_items:
                             completed_count += 1
-                            print(f"   ✅ Found completed track: '{title}' (ID: {current_id})")
+                            print(f"   Found completed track: '{title}' (ID: {current_id})")
                         else:
                             # It's an active download - use the current ID
                             matching_downloads.append(current_id)
-                            print(f"   🔄 Added active download ID: {current_id} for '{title}'")
+                            print(f"   Added active download ID: {current_id} for '{title}'")
                     else:
-                        print(f"   ⚠️ No download ID found for: '{title}'")
+                        print(f"   No download ID found for: '{title}'")
             
             # Update the active downloads and completed count for this album
             old_active = album_info.get('active_downloads', [])
@@ -4762,18 +4762,18 @@ class ArtistsPage(QWidget):
             
             # Update completed tracks count if we found more completed items
             if completed_count > old_completed:
-                print(f"📈 Updating completed tracks: {old_completed} -> {completed_count}")
+                print(f"Updating completed tracks: {old_completed} -> {completed_count}")
                 album_info['completed_tracks'] = completed_count
                 # Trigger UI update
                 self.update_album_card_progress(album_id)
             
             # Log changes
             if len(matching_downloads) != len(old_active) or completed_count != old_completed:
-                print(f"📊 Album '{album_name}': {len(old_active)} -> {len(matching_downloads)} active, {old_completed} -> {completed_count} completed")
+                print(f"Album '{album_name}': {len(old_active)} -> {len(matching_downloads)} active, {old_completed} -> {completed_count} completed")
             
             if not matching_downloads and completed_count == 0:
                 total_tracks = album_info.get('total_tracks', 0)
-                print(f"❌ No matching downloads found for album: {album_name} (expected {total_tracks} tracks)")
+                print(f"No matching downloads found for album: {album_name} (expected {total_tracks} tracks)")
     
     def _get_real_download_id(self, download_item):
         """Extract the real slskd download ID from a download item"""
@@ -4800,7 +4800,7 @@ class ArtistsPage(QWidget):
             # Try to find the real ID by querying current downloads by filename
             real_id = self._lookup_download_id_by_filename(download_item.filename)
             if real_id:
-                print(f"🔍 Found real ID {real_id} for composite ID {download_id}")
+                print(f"Found real ID {real_id} for composite ID {download_id}")
                 return real_id
         
         # If we can't determine the real ID, return the composite one
@@ -4854,7 +4854,7 @@ class ArtistsPage(QWidget):
                 loop.close()
                 
         except Exception as e:
-            print(f"❌ Error looking up download ID for {filename}: {e}")
+            print(f"Error looking up download ID for {filename}: {e}")
             
         return None
     
@@ -4862,7 +4862,7 @@ class ArtistsPage(QWidget):
         """Enhanced matching logic to determine if a download belongs to the tracked album"""
         # Check for explicit album match flag (from Spotify matching modal)
         if hasattr(download_item, 'matched_download') and download_item.matched_download:
-            print(f"   🎯 Found explicitly matched download: {getattr(download_item, 'title', 'Unknown')}")
+            print(f"   Found explicitly matched download: {getattr(download_item, 'title', 'Unknown')}")
             return True
         
         # Check for album metadata match
@@ -4874,7 +4874,7 @@ class ArtistsPage(QWidget):
             if (download_album == spotify_album_name or 
                 download_album in spotify_album_name or 
                 spotify_album_name in download_album):
-                print(f"   🎵 Album name match: '{download_album}' ~ '{spotify_album_name}'")
+                print(f"   Album name match: '{download_album}' ~ '{spotify_album_name}'")
                 return True
         
         # Check artist matching
@@ -4907,7 +4907,7 @@ class ArtistsPage(QWidget):
             if hasattr(download_item, 'created_time') or hasattr(download_item, 'start_time'):
                 # Could add timestamp checking here if needed
                 pass
-            print(f"   👤 Artist match found for: {getattr(download_item, 'title', 'Unknown')}")
+            print(f"   Artist match found for: {getattr(download_item, 'title', 'Unknown')}")
             return True
         
         # Check filename-based matching as last resort
@@ -4916,12 +4916,12 @@ class ArtistsPage(QWidget):
             
             # Check if filename contains album name
             if spotify_album and spotify_album.name.lower() in filename:
-                print(f"   📂 Filename contains album name: {download_item.filename}")
+                print(f"   Filename contains album name: {download_item.filename}")
                 return True
             
             # Check if filename contains artist name
             if album_result and album_result.artist and album_result.artist.lower() in filename:
-                print(f"   📂 Filename contains artist name: {download_item.filename}")
+                print(f"   Filename contains artist name: {download_item.filename}")
                 return True
         
         return False
@@ -4932,7 +4932,7 @@ class ArtistsPage(QWidget):
             self._is_status_update_running = False
             return
         
-        print(f"📊 Processing {len(results)} album download status updates")
+        print(f"Processing {len(results)} album download status updates")
         
         albums_to_update = set()
         albums_completed = set()
@@ -4949,7 +4949,7 @@ class ArtistsPage(QWidget):
                 api_missing_count = result.get('api_missing_count', 0)
                 # Check if this download was previously completed but now missing (due to cleanup)
                 if self._was_download_previously_completed(download_id):
-                    print(f"✅ Download {download_id} was previously completed (now cleaned up)")
+                    print(f"Download {download_id} was previously completed (now cleaned up)")
                     status = 'completed'  # Treat as completed
                 else:
                     # Update the missing count in our tracking data for next poll
@@ -4966,13 +4966,13 @@ class ArtistsPage(QWidget):
                         break
             
             if not target_album_id or target_album_id not in self.album_downloads:
-                print(f"⚠️ Could not find album for download {download_id}")
+                print(f"Could not find album for download {download_id}")
                 continue
             
             album_info = self.album_downloads[target_album_id]
             album_name = album_info.get('spotify_album', {}).name if album_info.get('spotify_album') else 'Unknown'
             
-            print(f"🎵 Album '{album_name}': Download {download_id} status = {status} ({progress:.1f}%)")
+            print(f"Album '{album_name}': Download {download_id} status = {status} ({progress:.1f}%)")
             
             # Handle status changes
             if status == 'completed':
@@ -4986,27 +4986,27 @@ class ArtistsPage(QWidget):
                         album_info['completed_tracks'] += 1
                         album_info['active_downloads'].remove(download_id)
                         albums_to_update.add(target_album_id)
-                        print(f"✅ Album track completed via polling: {album_info['completed_tracks']}/{album_info['total_tracks']}")
+                        print(f"Album track completed via polling: {album_info['completed_tracks']}/{album_info['total_tracks']}")
                         
                         # Check if album is fully completed
                         if (album_info['completed_tracks'] >= album_info['total_tracks'] and 
                             not album_info.get('active_downloads')):
                             albums_completed.add(target_album_id)
                 else:
-                    print(f"✅ Download {download_id} already counted as completed")
+                    print(f"Download {download_id} already counted as completed")
             
             elif status in ['failed', 'cancelled']:
                 # Remove from active downloads but don't increment completed
                 if download_id in album_info['active_downloads']:
                     album_info['active_downloads'].remove(download_id)
                 albums_to_update.add(target_album_id)
-                print(f"❌ Album track {status}: {download_id}")
+                print(f"Album track {status}: {download_id}")
             
             elif status in ['downloading', 'queued']:
                 # Update progress for in-progress downloads
                 albums_to_update.add(target_album_id)
                 if progress > 0:
-                    print(f"⏳ Track downloading: {progress:.1f}%")
+                    print(f"Track downloading: {progress:.1f}%")
         
         # Update album cards for albums that had status changes
         for album_id in albums_to_update:
@@ -5024,7 +5024,7 @@ class ArtistsPage(QWidget):
             
             # Remove from tracking
             del self.album_downloads[album_id]
-            print(f"🎉 Album download completed and removed from tracking: {album_name}")
+            print(f"Album download completed and removed from tracking: {album_name}")
         
         self._is_status_update_running = False
     
@@ -5042,14 +5042,14 @@ class ArtistsPage(QWidget):
                         did for did in album_info.get('active_downloads', []) 
                         if did != download_id
                     ]
-                    print(f"❌ Removed failed download {download_id} from album tracking")
+                    print(f"Removed failed download {download_id} from album tracking")
                 break
     
     def _mark_download_as_completed(self, download_id):
         """Mark a download as completed to handle cleanup detection"""
         if download_id:
             self.completed_downloads.add(download_id)
-            print(f"📝 Marked download {download_id} as completed")
+            print(f"Marked download {download_id} as completed")
     
     def _was_download_previously_completed(self, download_id):
         """Check if a download was previously marked as completed"""
@@ -5057,13 +5057,13 @@ class ArtistsPage(QWidget):
     
     def notify_download_completed(self, download_id, download_item=None):
         """Called by downloads page when a download completes (before cleanup)"""
-        print(f"🔔 Downloads page notified completion of: {download_id}")
+        print(f"Downloads page notified completion of: {download_id}")
         if download_item:
             print(f"   Item: '{getattr(download_item, 'title', 'Unknown')}' by '{getattr(download_item, 'artist', 'Unknown')}'")
         
         # Check if already processed to prevent double counting
         if self._was_download_previously_completed(download_id):
-            print(f"⏭️ Download {download_id} already processed, skipping")
+            print(f"Download {download_id} already processed, skipping")
             return
         
         # Mark as completed immediately
@@ -5076,7 +5076,7 @@ class ArtistsPage(QWidget):
         for album_id, album_info in self.album_downloads.items():
             if download_id in album_info.get('active_downloads', []):
                 target_album_id = album_id
-                print(f"✅ Found album by direct ID match: {album_id}")
+                print(f"Found album by direct ID match: {album_id}")
                 break
         
         # Approach 2: Match by download item attributes if we have the item
@@ -5087,7 +5087,7 @@ class ArtistsPage(QWidget):
                 
                 if self._is_download_from_album(download_item, album_result, spotify_album):
                     target_album_id = album_id
-                    print(f"✅ Found album by item matching: {album_id}")
+                    print(f"Found album by item matching: {album_id}")
                     break
         
         # Approach 3: Remove any composite ID that might match this download
@@ -5103,7 +5103,7 @@ class ArtistsPage(QWidget):
                         album_info['active_downloads'].remove(active_id)
                         album_info['active_downloads'].append(download_id)
                         target_album_id = album_id
-                        print(f"✅ Found album by title matching and updated ID: {active_id} -> {download_id}")
+                        print(f"Found album by title matching and updated ID: {active_id} -> {download_id}")
                         break
                 
                 if target_album_id:
@@ -5124,7 +5124,7 @@ class ArtistsPage(QWidget):
             
             spotify_album = album_info.get('spotify_album')
             album_name = spotify_album.name if spotify_album else 'Unknown'
-            print(f"✅ Album '{album_name}' track completed via notification: {album_info['completed_tracks']}/{album_info['total_tracks']}")
+            print(f"Album '{album_name}' track completed via notification: {album_info['completed_tracks']}/{album_info['total_tracks']}")
             
             # Check if album is complete
             if (album_info['completed_tracks'] >= album_info['total_tracks'] and 
@@ -5136,9 +5136,9 @@ class ArtistsPage(QWidget):
                 
                 # Remove from tracking
                 del self.album_downloads[target_album_id]
-                print(f"🎉 Album download completed via notification: {album_name}")
+                print(f"Album download completed via notification: {album_name}")
         else:
-            print(f"⚠️ Could not find album for completed download: {download_id}")
+            print(f"Could not find album for completed download: {download_id}")
             if download_item:
                 print(f"   Title: '{getattr(download_item, 'title', 'Unknown')}'")
                 print(f"   Artist: '{getattr(download_item, 'artist', 'Unknown')}'")
@@ -5173,24 +5173,24 @@ class ArtistsPage(QWidget):
         if completed >= total and not active_downloads:
             # Album is fully complete - this will be handled in the main status handler
             # Don't call set_download_completed here to avoid duplicate processing
-            print(f"🎯 Album '{album_info.get('spotify_album', {}).name if album_info.get('spotify_album') else 'Unknown'}' is complete: {completed}/{total}")
+            print(f"Album '{album_info.get('spotify_album', {}).name if album_info.get('spotify_album') else 'Unknown'}' is complete: {completed}/{total}")
             return
         elif not active_downloads and completed == 0:
             # No active downloads and nothing completed - might be initializing
             album_card.set_download_in_progress()
-            print(f"🔄 Album initializing downloads...")
+            print(f"Album initializing downloads...")
         elif active_downloads:
             # Has active downloads - show progress
             album_card.update_download_progress(completed, total, percentage)
-            print(f"📊 Album progress: {completed}/{total} tracks ({percentage}%)")
+            print(f"Album progress: {completed}/{total} tracks ({percentage}%)")
         else:
             # Some completed but no active - might be stalled or failed
             if completed > 0:
                 album_card.update_download_progress(completed, total, percentage)
-                print(f"⚠️ Album partially complete: {completed}/{total} tracks ({percentage}%)")
+                print(f"Album partially complete: {completed}/{total} tracks ({percentage}%)")
             else:
                 album_card.set_download_in_progress()
-                print(f"🔄 Album status unclear, showing in progress...")
+                print(f"Album status unclear, showing in progress...")
         
         # Update the album card's status indicator to show download activity
         if hasattr(album_card, 'status_indicator'):
@@ -5200,7 +5200,7 @@ class ArtistsPage(QWidget):
                     album_card.status_indicator.setText(f"{percentage}%")
                     album_card.status_indicator.setToolTip(f"Downloading: {completed}/{total} tracks ({percentage}%)")
                 else:
-                    album_card.status_indicator.setText("⏳")
+                    album_card.status_indicator.setText("")
                     album_card.status_indicator.setToolTip("Starting download...")
             elif completed > 0:
                 # Show partial completion
@@ -5344,12 +5344,12 @@ class ArtistsPage(QWidget):
 
     def cleanup_download_tracking(self):
         """Clean up download tracking resources"""
-        print("🧹 Starting album download tracking cleanup...")
+        print("Starting album download tracking cleanup...")
         
         # Stop the download status timer
         if hasattr(self, 'download_status_timer') and self.download_status_timer.isActive():
             self.download_status_timer.stop()
-            print("   ⏹️ Stopped download status timer")
+            print("   Stopped download status timer")
         
         # Reset any album cards that are showing download progress
         cards_reset = 0
@@ -5368,7 +5368,7 @@ class ArtistsPage(QWidget):
                 cards_reset += 1
         
         if cards_reset > 0:
-            print(f"   🔄 Reset {cards_reset} album cards")
+            print(f"   Reset {cards_reset} album cards")
         
         # Clear download tracking state
         tracked_albums = len(self.album_downloads)
@@ -5378,7 +5378,7 @@ class ArtistsPage(QWidget):
         self._is_status_update_running = False
         
         if tracked_albums > 0:
-            print(f"   🗑️ Cleared tracking for {tracked_albums} albums")
+            print(f"   Cleared tracking for {tracked_albums} albums")
         
         # Shutdown the download status thread pool gracefully
         if hasattr(self, 'download_status_pool'):
@@ -5388,14 +5388,14 @@ class ArtistsPage(QWidget):
                 
                 # Wait for active tasks to complete (with timeout)
                 if not self.download_status_pool.waitForDone(2000):  # Wait up to 2 seconds
-                    print("   ⚠️ Download status pool did not finish within timeout")
+                    print("   Download status pool did not finish within timeout")
                 else:
-                    print("   ✅ Download status pool shut down cleanly")
+                    print("   Download status pool shut down cleanly")
                     
             except Exception as e:
-                print(f"   ❌ Error cleaning up download status pool: {e}")
+                print(f"   Error cleaning up download status pool: {e}")
         
-        print("🧹 Album download tracking cleanup completed")
+        print("Album download tracking cleanup completed")
     
     def cleanup_album_sessions(self):
         """Clean up active album download sessions"""
@@ -5403,7 +5403,7 @@ class ArtistsPage(QWidget):
             return
             
         session_count = len(self.active_album_sessions)
-        print(f"🧹 Cleaning up {session_count} active album sessions...")
+        print(f"Cleaning up {session_count} active album sessions...")
         
         for album_id, session in list(self.active_album_sessions.items()):
             try:
@@ -5412,51 +5412,51 @@ class ArtistsPage(QWidget):
                     modal.cancel_operations()
                     modal.close()
             except Exception as e:
-                print(f"   ⚠️ Error cleaning up session for album {album_id}: {e}")
+                print(f"   Error cleaning up session for album {album_id}: {e}")
         
         self.active_album_sessions.clear()
-        print(f"🧹 Cleaned up {session_count} album sessions")
+        print(f"Cleaned up {session_count} album sessions")
     
     def restart_download_tracking(self):
         """Restart download tracking timer if stopped"""
         if hasattr(self, 'download_status_timer') and not self.download_status_timer.isActive():
             self.download_status_timer.start(2000)
-            print("🔄 Download tracking timer restarted")
+            print("Download tracking timer restarted")
     
     def stop_all_workers(self):
         """Stop all background workers"""
-        print("🛑 Stopping all artist page workers...")
+        print("Stopping all artist page workers...")
         
         workers_stopped = 0
         
         if self.artist_search_worker and self.artist_search_worker.isRunning():
-            print("   🔍 Stopping artist search worker...")
+            print("   Stopping artist search worker...")
             self.artist_search_worker.terminate()
             if self.artist_search_worker.wait(2000):  # Wait up to 2 seconds
-                print("   ✅ Artist search worker stopped")
+                print("   Artist search worker stopped")
             else:
-                print("   ⚠️ Artist search worker did not stop within timeout")
+                print("   Artist search worker did not stop within timeout")
             self.artist_search_worker = None
             workers_stopped += 1
             
         if self.album_fetch_worker and self.album_fetch_worker.isRunning():
-            print("   📀 Stopping album fetch worker...")
+            print("   Stopping album fetch worker...")
             self.album_fetch_worker.terminate()
             if self.album_fetch_worker.wait(2000):  # Wait up to 2 seconds
-                print("   ✅ Album fetch worker stopped")
+                print("   Album fetch worker stopped")
             else:
-                print("   ⚠️ Album fetch worker did not stop within timeout")
+                print("   Album fetch worker did not stop within timeout")
             self.album_fetch_worker = None
             workers_stopped += 1
             
         if self.plex_library_worker and self.plex_library_worker.isRunning():
-            print("   📚 Stopping Plex library worker...")
+            print("   Stopping Plex library worker...")
             self.plex_library_worker.stop()
             self.plex_library_worker.terminate()
             if self.plex_library_worker.wait(2000):  # Wait up to 2 seconds
-                print("   ✅ Plex library worker stopped")
+                print("   Plex library worker stopped")
             else:
-                print("   ⚠️ Plex library worker did not stop within timeout")
+                print("   Plex library worker did not stop within timeout")
             self.plex_library_worker = None
             
         if hasattr(self, 'singles_eps_worker') and self.singles_eps_worker:
@@ -5466,7 +5466,7 @@ class ArtistsPage(QWidget):
             workers_stopped += 1
         
         if workers_stopped > 0:
-            print(f"   🛑 Stopped {workers_stopped} background workers")
+            print(f"   Stopped {workers_stopped} background workers")
         
         # Stop download tracking (this includes its own worker cleanup)
         self.cleanup_download_tracking()
@@ -5474,7 +5474,7 @@ class ArtistsPage(QWidget):
         # Clean up active album sessions
         self.cleanup_album_sessions()
         
-        print("🛑 All workers stopped")
+        print("All workers stopped")
     
     def clear_artist_results(self):
         """Clear artist search results"""

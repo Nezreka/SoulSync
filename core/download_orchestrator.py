@@ -51,7 +51,7 @@ class DownloadOrchestrator:
         self.lidarr = self._safe_init('Lidarr', LidarrDownloadClient)
 
         if self._init_failures:
-            logger.warning(f"⚠️  Download clients failed to initialize: {', '.join(self._init_failures)}")
+            logger.warning(f"Download clients failed to initialize: {', '.join(self._init_failures)}")
 
         # Load mode from config
         self.mode = config_manager.get('download_source.mode', 'soulseek')
@@ -59,7 +59,7 @@ class DownloadOrchestrator:
         self.hybrid_secondary = config_manager.get('download_source.hybrid_secondary', 'youtube')
         self.hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
 
-        logger.info(f"🎛️  Download Orchestrator initialized - Mode: {self.mode}")
+        logger.info(f"Download Orchestrator initialized - Mode: {self.mode}")
         if self.mode == 'hybrid':
             if self.hybrid_order:
                 logger.info(f"   Source priority: {' → '.join(self.hybrid_order)}")
@@ -71,7 +71,7 @@ class DownloadOrchestrator:
         try:
             return cls()
         except Exception as e:
-            logger.error(f"❌ {name} download client failed to initialize: {e}")
+            logger.error(f"{name} download client failed to initialize: {e}")
             self._init_failures.append(name)
             return None
 
@@ -85,7 +85,7 @@ class DownloadOrchestrator:
         # Reload underlying client configs (SLSKD URL, API key, etc.)
         if self.soulseek:
             self.soulseek._setup_client()
-            logger.info(f"🔄 Soulseek client config reloaded")
+            logger.info(f"Soulseek client config reloaded")
 
         # Reconnect Deezer if ARL changed
         deezer_arl = config_manager.get('deezer_download.arl', '')
@@ -93,7 +93,7 @@ class DownloadOrchestrator:
             self.deezer_dl.reconnect(deezer_arl)
             self.deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
 
-        logger.info(f"🔄 Download Orchestrator settings reloaded - Mode: {self.mode}")
+        logger.info(f"Download Orchestrator settings reloaded - Mode: {self.mode}")
 
     def _client(self, name):
         """Get a client by name, returning None if not initialized."""
@@ -143,7 +143,7 @@ class DownloadOrchestrator:
                     except Exception:
                         results[source] = False
 
-            status_parts = [f"{s}: {'✅' if ok else '❌'}" for s, ok in results.items()]
+            status_parts = [f"{s}: {'' if ok else ''}" for s, ok in results.items()]
             logger.info(f"   {' | '.join(status_parts)}")
 
             return any(results.values())
@@ -168,9 +168,9 @@ class DownloadOrchestrator:
         if self.mode != 'hybrid':
             client = self._client(self.mode)
             if not client:
-                logger.error(f"❌ {source_names.get(self.mode, self.mode)} client not available (failed to initialize)")
+                logger.error(f"{source_names.get(self.mode, self.mode)} client not available (failed to initialize)")
                 return [], []
-            logger.info(f"🔍 Searching {source_names.get(self.mode, self.mode)}: {query}")
+            logger.info(f"Searching {source_names.get(self.mode, self.mode)}: {query}")
             return await client.search(query, timeout, progress_callback)
 
         elif self.mode == 'hybrid':
@@ -189,33 +189,33 @@ class DownloadOrchestrator:
             if not source_order:
                 source_order = ['soulseek']
 
-            logger.info(f"🔍 Hybrid search ({' → '.join(source_order)}): {query}")
+            logger.info(f"Hybrid search ({' → '.join(source_order)}): {query}")
 
             # Try each source in priority order (skip unconfigured/unavailable ones)
             for i, source_name in enumerate(source_order):
                 client = clients.get(source_name)
                 if not client:
-                    logger.info(f"⏭️ Skipping {source_name} (not available)")
+                    logger.info(f"Skipping {source_name} (not available)")
                     continue
                 if hasattr(client, 'is_configured') and not client.is_configured():
-                    logger.info(f"⏭️ Skipping {source_name} (not configured)")
+                    logger.info(f"Skipping {source_name} (not configured)")
                     continue
 
                 try:
                     if i == 0:
-                        logger.info(f"🔍 Trying {source_name} (priority {i+1}): {query}")
+                        logger.info(f"Trying {source_name} (priority {i+1}): {query}")
                     else:
-                        logger.info(f"🔄 Trying {source_name} (priority {i+1}): {query}")
+                        logger.info(f"Trying {source_name} (priority {i+1}): {query}")
 
                     tracks, albums = await client.search(query, timeout, progress_callback)
                     if tracks:
-                        logger.info(f"✅ {source_name} found {len(tracks)} tracks")
+                        logger.info(f"{source_name} found {len(tracks)} tracks")
                         return (tracks, albums)
                 except Exception as e:
-                    logger.warning(f"⚠️ {source_name} search failed: {e}")
+                    logger.warning(f"{source_name} search failed: {e}")
 
             # Nothing found from any source
-            logger.warning(f"❌ Hybrid search: all sources ({', '.join(source_order)}) found nothing for: {query}")
+            logger.warning(f"Hybrid search: all sources ({', '.join(source_order)}) found nothing for: {query}")
             return ([], [])
 
         # Fallback: empty results
@@ -289,10 +289,10 @@ class DownloadOrchestrator:
             if scored:
                 scored.sort(key=lambda x: x._match_confidence, reverse=True)
                 filtered_results = scored
-                logger.info(f"🎵 Streaming validation: {len(scored)}/{len(tracks)} passed "
+                logger.info(f"Streaming validation: {len(scored)}/{len(tracks)} passed "
                             f"(best: {scored[0]._match_confidence:.2f})")
             else:
-                logger.warning(f"⚠️ No streaming results passed validation for: {query}")
+                logger.warning(f"No streaming results passed validation for: {query}")
                 return None
         elif is_streaming:
             filtered_results = tracks
@@ -337,12 +337,12 @@ class DownloadOrchestrator:
             client = source_map[username]
             if not client:
                 raise RuntimeError(f"{source_names[username]} download client not available (failed to initialize)")
-            logger.info(f"📥 Downloading from {source_names[username]}: {filename}")
+            logger.info(f"Downloading from {source_names[username]}: {filename}")
             return await client.download(username, filename, file_size)
         else:
             if not self.soulseek:
                 raise RuntimeError("Soulseek client not available (failed to initialize)")
-            logger.info(f"📥 Downloading from Soulseek: {filename}")
+            logger.info(f"Downloading from Soulseek: {filename}")
             return await self.soulseek.download(username, filename, file_size)
 
     async def get_all_downloads(self) -> List[DownloadStatus]:

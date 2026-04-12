@@ -103,7 +103,7 @@ class TestActivityFeed:
         client = socketio.test_client(app)
         # Add some activities first
         add_item = shared_state['add_activity_item']
-        add_item('🎵', 'Download Complete', 'Artist - Song', show_toast=False)
+        add_item('', 'Download Complete', 'Artist - Song', show_toast=False)
 
         build = shared_state['build_activity_feed_payload']
         socketio.emit('dashboard:activity', build())
@@ -123,7 +123,7 @@ class TestActivityFeed:
 
         # Add an activity
         add_item = shared_state['add_activity_item']
-        add_item('🎵', 'Test Activity', 'Test subtitle', show_toast=False)
+        add_item('', 'Test Activity', 'Test subtitle', show_toast=False)
 
         http_data = flask_client.get('/api/activity/feed').get_json()
         build = shared_state['build_activity_feed_payload']
@@ -158,7 +158,7 @@ class TestToasts:
         client.get_received()  # clear
 
         add_item = shared_state['add_activity_item']
-        add_item('✅', 'Download Complete', 'Artist - Song', show_toast=True)
+        add_item('', 'Download Complete', 'Artist - Song', show_toast=True)
 
         received = client.get_received()
         toast_events = [e for e in received if e['name'] == 'dashboard:toast']
@@ -174,7 +174,7 @@ class TestToasts:
         client.get_received()  # clear
 
         add_item = shared_state['add_activity_item']
-        add_item('📊', 'Background Task', 'Silent update', show_toast=False)
+        add_item('', 'Background Task', 'Silent update', show_toast=False)
 
         received = client.get_received()
         toast_events = [e for e in received if e['name'] == 'dashboard:toast']
@@ -187,7 +187,7 @@ class TestToasts:
         client.get_received()  # clear
 
         add_item = shared_state['add_activity_item']
-        add_item('✅', 'Test Title', 'Test Subtitle', 'Now', show_toast=True)
+        add_item('', 'Test Title', 'Test Subtitle', 'Now', show_toast=True)
 
         received = client.get_received()
         toast_events = [e for e in received if e['name'] == 'dashboard:toast']
@@ -205,7 +205,7 @@ class TestToasts:
         """GET /api/activity/toasts returns 200 with expected structure."""
         # Add a toast-worthy activity first
         add_item = shared_state['add_activity_item']
-        add_item('✅', 'Test', 'Sub', show_toast=True)
+        add_item('', 'Test', 'Sub', show_toast=True)
 
         resp = flask_client.get('/api/activity/toasts')
         assert resp.status_code == 200

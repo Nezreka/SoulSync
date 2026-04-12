@@ -127,7 +127,7 @@ class BeatportUnifiedScraper:
             response.raise_for_status()
             return BeautifulSoup(response.content, 'html.parser')
         except requests.RequestException as e:
-            print(f"❌ Error fetching {url}: {e}")
+            print(f"Error fetching {url}: {e}")
             return None
 
     def clean_artist_track_data(self, raw_artist: str, raw_title: str) -> Dict[str, str]:
@@ -171,12 +171,12 @@ class BeatportUnifiedScraper:
 
     def discover_genres_from_homepage(self) -> List[Dict]:
         """Dynamically discover all genres from Beatport homepage dropdown"""
-        print("🔍 Discovering genres from Beatport homepage...")
+        print("Discovering genres from Beatport homepage...")
 
         try:
             soup = self.get_page(self.base_url)
             if not soup:
-                print("❌ Could not fetch homepage")
+                print("Could not fetch homepage")
                 return self.fallback_genres
 
             genres = []
@@ -185,14 +185,14 @@ class BeatportUnifiedScraper:
             genres_dropdown = soup.find('div', {'id': 'genres-dropdown-menu'})
 
             if genres_dropdown:
-                print("✅ Found genres-dropdown-menu")
+                print("Found genres-dropdown-menu")
 
                 # Look for the two main div containers as described
                 genre_containers = genres_dropdown.find_all('div', recursive=False)
-                print(f"🔍 Found {len(genre_containers)} top-level containers in dropdown")
+                print(f"Found {len(genre_containers)} top-level containers in dropdown")
 
                 for container_idx, container in enumerate(genre_containers):
-                    print(f"📦 Processing container {container_idx + 1}")
+                    print(f"Processing container {container_idx + 1}")
 
                     # Look specifically for .dropdown_menu classes
                     dropdown_menus = container.find_all(class_='dropdown_menu')
@@ -202,17 +202,17 @@ class BeatportUnifiedScraper:
                         dropdown_menus = container.find_all(class_=re.compile(r'dropdown.*menu', re.I))
 
                     if not dropdown_menus:
-                        print(f"⚠️ No .dropdown_menu found in container {container_idx + 1}")
+                        print(f"No .dropdown_menu found in container {container_idx + 1}")
                         continue
 
                     for menu_idx, menu in enumerate(dropdown_menus):
-                        print(f"📋 Processing dropdown_menu {menu_idx + 1} in container {container_idx + 1}")
+                        print(f"Processing dropdown_menu {menu_idx + 1} in container {container_idx + 1}")
 
                         # Look for <li> elements first, then <a> elements within them
                         list_items = menu.find_all('li')
 
                         if list_items:
-                            print(f"📝 Found {len(list_items)} list items in menu")
+                            print(f"Found {len(list_items)} list items in menu")
 
                             for li in list_items:
                                 # Find anchor tag within the list item
@@ -239,16 +239,16 @@ class BeatportUnifiedScraper:
                                                 'id': genre_id,
                                                 'url': urljoin(self.base_url, href)
                                             })
-                                            print(f"   ✅ Added: {name} ({slug}/{genre_id})")
+                                            print(f"   Added: {name} ({slug}/{genre_id})")
                                     else:
-                                        print(f"   🚫 Filtered out: '{name}' (appears to be a section title)")
+                                        print(f"   Filtered out: '{name}' (appears to be a section title)")
                         else:
                             # Fallback: try the old method if no <li> elements found
-                            print(f"⚠️ No <li> elements found, trying direct <a> search...")
+                            print(f"No <li> elements found, trying direct <a> search...")
                             genre_links = menu.find_all('a', href=re.compile(r'/genre/[^/]+/\d+'))
 
                             if genre_links:
-                                print(f"🔗 Found {len(genre_links)} genre links in menu (fallback method)")
+                                print(f"Found {len(genre_links)} genre links in menu (fallback method)")
                                 for link in genre_links:
                                     href = link.get('href', '')
                                     name_text = link.get_text(strip=True)
@@ -266,16 +266,16 @@ class BeatportUnifiedScraper:
                                                 'id': genre_id,
                                                 'url': urljoin(self.base_url, href)
                                             })
-                                            print(f"   ✅ Added: {name} ({slug}/{genre_id})")
+                                            print(f"   Added: {name} ({slug}/{genre_id})")
                             else:
-                                print(f"⚠️ No genre links found in dropdown_menu {menu_idx + 1}")
+                                print(f"No genre links found in dropdown_menu {menu_idx + 1}")
 
                 if genres:
-                    print(f"🎯 Successfully extracted {len(genres)} genres from dropdown menu")
+                    print(f"Successfully extracted {len(genres)} genres from dropdown menu")
                 else:
-                    print("⚠️ No genre links found in dropdown menu structure")
+                    print("No genre links found in dropdown menu structure")
             else:
-                print("❌ Could not find genres-dropdown-menu, trying fallback methods...")
+                print("Could not find genres-dropdown-menu, trying fallback methods...")
 
                 # Fallback: Look for other potential dropdown structures
                 potential_dropdowns = [
@@ -289,11 +289,11 @@ class BeatportUnifiedScraper:
 
                 for dropdown in potential_dropdowns:
                     if dropdown:
-                        print(f"✅ Found fallback dropdown: {dropdown.name} with class {dropdown.get('class')}")
+                        print(f"Found fallback dropdown: {dropdown.name} with class {dropdown.get('class')}")
                         genre_links = dropdown.find_all('a', href=re.compile(r'/genre/[^/]+/\d+'))
 
                         if genre_links:
-                            print(f"🔗 Found {len(genre_links)} genre links in fallback dropdown")
+                            print(f"Found {len(genre_links)} genre links in fallback dropdown")
                             for link in genre_links:
                                 href = link.get('href', '')
                                 name_text = link.get_text(strip=True)
@@ -313,14 +313,14 @@ class BeatportUnifiedScraper:
                                         })
 
                             if genres:
-                                print(f"🎯 Successfully extracted {len(genres)} genres from fallback dropdown")
+                                print(f"Successfully extracted {len(genres)} genres from fallback dropdown")
                                 break
 
             # Method 2: Look for any genre links on the page
             if not genres:
-                print("🔍 Dropdown not found, searching for genre links...")
+                print("Dropdown not found, searching for genre links...")
                 all_genre_links = soup.find_all('a', href=re.compile(r'/genre/[^/]+/\d+'))
-                print(f"🔗 Found {len(all_genre_links)} potential genre links on page")
+                print(f"Found {len(all_genre_links)} potential genre links on page")
 
                 seen_genres = set()
                 for link in all_genre_links:
@@ -343,18 +343,18 @@ class BeatportUnifiedScraper:
 
             # Method 3: Try to find a genres page link and scrape from there
             if not genres:
-                print("🔍 Searching for genres page...")
+                print("Searching for genres page...")
                 genres_page_link = soup.find('a', href=re.compile(r'/genres$')) or \
                                  soup.find('a', href=re.compile(r'/browse.*genre', re.I))
 
                 if genres_page_link:
                     genres_page_url = urljoin(self.base_url, genres_page_link['href'])
-                    print(f"🔗 Found genres page: {genres_page_url}")
+                    print(f"Found genres page: {genres_page_url}")
                     genres_soup = self.get_page(genres_page_url)
 
                     if genres_soup:
                         genre_links = genres_soup.find_all('a', href=re.compile(r'/genre/[^/]+/\d+'))
-                        print(f"🔗 Found {len(genre_links)} genre links on genres page")
+                        print(f"Found {len(genre_links)} genre links on genres page")
 
                         seen_genres = set()
                         for link in genre_links:
@@ -386,19 +386,19 @@ class BeatportUnifiedScraper:
                 final_genres = list(unique_genres.values())
                 final_genres.sort(key=lambda x: x['name'])
 
-                print(f"✅ Discovered {len(final_genres)} unique genres from homepage")
+                print(f"Discovered {len(final_genres)} unique genres from homepage")
                 return final_genres
             else:
-                print("⚠️ No genres found, using fallback list")
+                print("No genres found, using fallback list")
                 return self.fallback_genres
 
         except Exception as e:
-            print(f"❌ Error discovering genres: {e}")
+            print(f"Error discovering genres: {e}")
             return self.fallback_genres
 
     def discover_chart_sections(self) -> Dict[str, List[Dict]]:
         """Dynamically discover chart sections from homepage"""
-        print("🔍 Discovering chart sections from Beatport homepage...")
+        print("Discovering chart sections from Beatport homepage...")
 
         soup = self.get_page(self.base_url)
         if not soup:
@@ -411,7 +411,7 @@ class BeatportUnifiedScraper:
         }
 
         # Method 1: Find H2 section headings
-        print("   📋 Finding H2 section headings...")
+        print("   Finding H2 section headings...")
         h2_headings = soup.find_all('h2')
 
         for heading in h2_headings:
@@ -429,7 +429,7 @@ class BeatportUnifiedScraper:
                 print(f"      Found: '{text}' -> {category}")
 
         # Method 2: Find specific chart links
-        print("   🔗 Finding chart page links...")
+        print("   Finding chart page links...")
         chart_links = []
 
         # Look for the specific links we discovered
@@ -453,7 +453,7 @@ class BeatportUnifiedScraper:
                 print(f"      Found: '{link.get_text(strip=True)}' -> {href}")
 
         # Method 3: Count individual DJ charts
-        print("   🎧 Counting individual DJ charts...")
+        print("   Counting individual DJ charts...")
         dj_chart_links = soup.find_all('a', href=re.compile(r'/chart/'))
         individual_dj_charts = []
 
@@ -529,20 +529,20 @@ class BeatportUnifiedScraper:
                 for img in artwork_imgs:
                     src = img.get('src', '')
                     if 'geo-media' in src and ('1050x508' in src or '500x500' in src):
-                        print(f"   ✅ Found high-quality artwork image: {src}")
+                        print(f"   Found high-quality artwork image: {src}")
                         return src
 
                 # Second, try any geo-media images in artwork containers
                 for img in artwork_imgs:
                     src = img.get('src', '')
                     if 'geo-media' in src:
-                        print(f"   ✅ Found geo-media artwork image: {src}")
+                        print(f"   Found geo-media artwork image: {src}")
                         return src
 
                 # Third, use any artwork image as fallback
                 first_artwork_src = artwork_imgs[0].get('src', '')
                 if first_artwork_src:
-                    print(f"   ✅ Found artwork image (fallback): {first_artwork_src}")
+                    print(f"   Found artwork image (fallback): {first_artwork_src}")
                     return first_artwork_src
 
             # Priority 2: Original method - Look for hero release slideshow images
@@ -553,19 +553,19 @@ class BeatportUnifiedScraper:
                 for img in hero_images:
                     src = img.get('src', '')
                     if '1050x508' in src or '500x500' in src:
-                        print(f"   ✅ Found high-quality hero image: {src}")
+                        print(f"   Found high-quality hero image: {src}")
                         return src
 
                 # Fallback to any geo-media image
                 fallback_src = hero_images[0].get('src', '')
-                print(f"   ✅ Found hero image (fallback): {fallback_src}")
+                print(f"   Found hero image (fallback): {fallback_src}")
                 return fallback_src
 
-            print(f"   ⚠️ No suitable images found on page")
+            print(f"   No suitable images found on page")
             return None
 
         except Exception as e:
-            print(f"⚠️ Could not get image for {genre_url}: {e}")
+            print(f"Could not get image for {genre_url}: {e}")
             return None
 
     def discover_genres_with_images(self, include_images: bool = False) -> List[Dict]:
@@ -573,16 +573,16 @@ class BeatportUnifiedScraper:
         genres = self.discover_genres_from_homepage()
 
         if include_images:
-            print("🖼️ Fetching genre images...")
+            print("Fetching genre images...")
             for i, genre in enumerate(genres[:10]):  # Limit to first 10 for demo
-                print(f"📷 Getting image for {genre['name']} ({i+1}/{min(10, len(genres))})")
+                print(f"Getting image for {genre['name']} ({i+1}/{min(10, len(genres))})")
 
                 # Check if genre has URL
                 if 'url' in genre and genre['url']:
                     image_url = self.get_genre_image(genre['url'])
                     genre['image_url'] = image_url
                 else:
-                    print(f"   ⚠️ No URL available for {genre['name']}, skipping image")
+                    print(f"   No URL available for {genre['name']}, skipping image")
                     genre['image_url'] = None
 
                 # Small delay to be respectful
@@ -649,7 +649,7 @@ class BeatportUnifiedScraper:
             }
 
         except Exception as e:
-            print(f"❌ Error extracting release data: {e}")
+            print(f"Error extracting release data: {e}")
             return None
 
     def extract_chart_data_from_card(self, chart_card) -> Optional[Dict]:
@@ -695,7 +695,7 @@ class BeatportUnifiedScraper:
             }
 
         except Exception as e:
-            print(f"❌ Error extracting chart data: {e}")
+            print(f"Error extracting chart data: {e}")
             return None
 
     def extract_tracks_from_page(self, soup: BeautifulSoup, list_name: str, limit: int = 100) -> List[Dict]:
@@ -800,7 +800,7 @@ class BeatportUnifiedScraper:
 
     def scrape_top_100(self, limit: int = 100, enrich: bool = True) -> List[Dict]:
         """Scrape Beatport Top 100"""
-        print("\n🔥 Scraping Beatport Top 100...")
+        print("\nScraping Beatport Top 100...")
 
         soup = self.get_page(f"{self.base_url}/top-100")
         tracks = self.extract_tracks_from_page(soup, "Top 100", limit)
@@ -809,7 +809,7 @@ class BeatportUnifiedScraper:
         if tracks and enrich:
             tracks = self.enrich_chart_tracks(tracks)
 
-        print(f"✅ Extracted {len(tracks)} tracks from Top 100")
+        print(f"Extracted {len(tracks)} tracks from Top 100")
         return tracks
 
     def scrape_new_releases(self, limit: int = 40) -> List[Dict]:
@@ -824,7 +824,7 @@ class BeatportUnifiedScraper:
         # Step 2: Extract individual tracks from each release
         all_tracks = []
         for i, release_url in enumerate(release_urls):
-            print(f"\n📀 Processing release {i+1}/{len(release_urls)}")
+            print(f"\nProcessing release {i+1}/{len(release_urls)}")
             tracks = self.extract_tracks_from_release_json(release_url)
             if tracks:
                 all_tracks.extend(tracks)
@@ -833,7 +833,7 @@ class BeatportUnifiedScraper:
             import time
             time.sleep(0.5)
 
-        print(f"✅ Extracted {len(all_tracks)} individual tracks from {len(release_urls)} releases")
+        print(f"Extracted {len(all_tracks)} individual tracks from {len(release_urls)} releases")
         return all_tracks
 
     def extract_new_releases_urls(self, limit: int) -> List[str]:
@@ -866,7 +866,7 @@ class BeatportUnifiedScraper:
 
     def extract_tracks_from_release_json(self, release_url: str) -> List[Dict]:
         """Extract individual tracks from a release page using JSON data"""
-        print(f"🎵 Extracting tracks from: {release_url}")
+        print(f"Extracting tracks from: {release_url}")
 
         soup = self.get_page(release_url)
         if not soup:
@@ -875,13 +875,13 @@ class BeatportUnifiedScraper:
         # Extract JSON object from page
         json_obj = self.extract_json_object_from_release_page(soup)
         if not json_obj:
-            print("   ❌ No JSON data found")
+            print("   No JSON data found")
             return []
 
         # Filter tracks for this specific release
         release_tracks = self.filter_tracks_for_specific_release(json_obj, release_url)
         if not release_tracks:
-            print("   ❌ No matching tracks found")
+            print("   No matching tracks found")
             return []
 
         # Convert to our standard format
@@ -891,7 +891,7 @@ class BeatportUnifiedScraper:
             if track:
                 converted_tracks.append(track)
 
-        print(f"   ✅ Extracted {len(converted_tracks)} tracks")
+        print(f"   Extracted {len(converted_tracks)} tracks")
         return converted_tracks
 
     def extract_json_object_from_release_page(self, soup):
@@ -930,7 +930,7 @@ class BeatportUnifiedScraper:
                 converted.append(track)
 
         if len(converted) >= 5:
-            print(f"   ✅ JSON extraction found {len(converted)} tracks with rich metadata")
+            print(f"   JSON extraction found {len(converted)} tracks with rich metadata")
             return converted
 
         return []
@@ -954,12 +954,12 @@ class BeatportUnifiedScraper:
                     if results and isinstance(results, list) and len(results) > 0:
                         first = results[0] if isinstance(results[0], dict) else {}
                         if first.get('title') or first.get('name'):
-                            print(f"   ✅ Found {len(results)} tracks in queries[{idx}].data.results")
+                            print(f"   Found {len(results)} tracks in queries[{idx}].data.results")
                             return results
 
                 # Pattern 2: data itself is a single track object (track pages)
                 if isinstance(data, dict) and (data.get('title') or data.get('name')) and data.get('id'):
-                    print(f"   ✅ Found single track in queries[{idx}].data")
+                    print(f"   Found single track in queries[{idx}].data")
                     return [data]
 
                 # Pattern 3: data.tracks[]
@@ -968,11 +968,11 @@ class BeatportUnifiedScraper:
                     if tracks and isinstance(tracks, list) and len(tracks) > 0:
                         first = tracks[0] if isinstance(tracks[0], dict) else {}
                         if first.get('title') or first.get('name'):
-                            print(f"   ✅ Found {len(tracks)} tracks in queries[{idx}].data.tracks")
+                            print(f"   Found {len(tracks)} tracks in queries[{idx}].data.tracks")
                             return tracks
 
         except Exception as e:
-            print(f"   ❌ Error extracting tracks from JSON: {e}")
+            print(f"   Error extracting tracks from JSON: {e}")
 
         return []
 
@@ -1065,7 +1065,7 @@ class BeatportUnifiedScraper:
             return track
 
         except Exception as e:
-            print(f"   ❌ Error converting chart JSON track: {e}")
+            print(f"   Error converting chart JSON track: {e}")
             return None
 
     def enrich_chart_tracks(self, tracks: List[Dict], progress_callback=None) -> List[Dict]:
@@ -1080,7 +1080,7 @@ class BeatportUnifiedScraper:
 
         enriched = []
         total = len(tracks)
-        print(f"   🔍 Enriching {total} chart tracks with per-track metadata...")
+        print(f"   Enriching {total} chart tracks with per-track metadata...")
 
         for i, track in enumerate(tracks):
             track_url = track.get('url', '')
@@ -1113,14 +1113,14 @@ class BeatportUnifiedScraper:
                 if not matched and json_tracks:
                     # Debug: show what IDs we have vs what we're looking for
                     sample_ids = [str(jt.get('id', '')) for jt in json_tracks[:5]]
-                    print(f"   ⚠️ [{i+1}] No ID match for '{track_id_from_url}' in {sample_ids}... trying title match")
+                    print(f"   [{i+1}] No ID match for '{track_id_from_url}' in {sample_ids}... trying title match")
                     # Fallback: match by title similarity
                     track_title = track.get('title', '').lower().strip()
                     for jt in json_tracks:
                         jt_title = (jt.get('title') or jt.get('name', '')).lower().strip()
                         if track_title and jt_title and (track_title in jt_title or jt_title in track_title):
                             matched = jt
-                            print(f"   ✅ [{i+1}] Title matched: '{jt_title}'")
+                            print(f"   [{i+1}] Title matched: '{jt_title}'")
                             break
 
                 # Fallback: use first track if only one result
@@ -1132,14 +1132,14 @@ class BeatportUnifiedScraper:
                     if rich:
                         enriched.append(rich)
                         if (i + 1) <= 3 or (i + 1) % 25 == 0:
-                            print(f"   ✅ [{i+1}/{total}] {rich.get('artist', '?')} - {rich.get('title', '?')} | {rich.get('release_name', 'no release')}")
+                            print(f"   [{i+1}/{total}] {rich.get('artist', '?')} - {rich.get('title', '?')} | {rich.get('release_name', 'no release')}")
                     else:
                         enriched.append(track)
                 else:
                     enriched.append(track)
 
             except Exception as e:
-                print(f"   ⚠️ [{i+1}/{total}] Error enriching track: {e}")
+                print(f"   [{i+1}/{total}] Error enriching track: {e}")
                 enriched.append(track)
 
             # Report progress (always runs — success, failure, or exception)
@@ -1152,7 +1152,7 @@ class BeatportUnifiedScraper:
                 time.sleep(0.3)
 
         enriched_count = sum(1 for t in enriched if t.get('release_name'))
-        print(f"   ✅ Enrichment complete: {enriched_count}/{total} tracks have release metadata")
+        print(f"   Enrichment complete: {enriched_count}/{total} tracks have release metadata")
         return enriched
 
     def filter_tracks_for_specific_release(self, json_obj: Dict, release_url: str) -> List[Dict]:
@@ -1182,7 +1182,7 @@ class BeatportUnifiedScraper:
                 return matching_tracks
 
         except Exception as e:
-            print(f"   ❌ Error filtering tracks: {e}")
+            print(f"   Error filtering tracks: {e}")
 
         return []
 
@@ -1246,7 +1246,7 @@ class BeatportUnifiedScraper:
             return track
 
         except Exception as e:
-            print(f"   ❌ Error converting track data: {e}")
+            print(f"   Error converting track data: {e}")
             return None
 
     def get_release_metadata(self, release_url: str) -> Dict:
@@ -1402,7 +1402,7 @@ class BeatportUnifiedScraper:
             }
 
         except Exception as e:
-            print(f"❌ Error getting release metadata from {release_url}: {e}")
+            print(f"Error getting release metadata from {release_url}: {e}")
             import traceback
             traceback.print_exc()
             return {'success': False, 'error': str(e)}
@@ -1436,7 +1436,7 @@ class BeatportUnifiedScraper:
             return tracks
 
         except Exception as e:
-            print(f"      ❌ Error extracting tracks from {release_url}: {e}")
+            print(f"      Error extracting tracks from {release_url}: {e}")
             return []
 
     def scrape_multiple_releases(self, release_urls, source_name: str = "General Release Scraper") -> List[Dict]:
@@ -1456,22 +1456,22 @@ class BeatportUnifiedScraper:
 
         # Validate input
         if not release_urls or len(release_urls) == 0:
-            print("⚠️ No release URLs provided")
+            print("No release URLs provided")
             return []
 
-        print(f"\n🎯 SCRAPING {len(release_urls)} RELEASE URL{'S' if len(release_urls) > 1 else ''}")
+        print(f"\nSCRAPING {len(release_urls)} RELEASE URL{'S' if len(release_urls) > 1 else ''}")
         print("=" * 60)
 
         all_tracks = []
 
         for i, release_url in enumerate(release_urls, 1):
-            print(f"\n📀 Processing release {i}/{len(release_urls)}: {release_url}")
+            print(f"\nProcessing release {i}/{len(release_urls)}: {release_url}")
 
             try:
                 tracks = self.extract_individual_tracks_from_release_url(release_url, source_name)
                 if tracks:
                     all_tracks.extend(tracks)
-                    print(f"   ✅ Found {len(tracks)} tracks")
+                    print(f"   Found {len(tracks)} tracks")
 
                     # Show first few tracks for verification
                     for j, track in enumerate(tracks[:3], 1):
@@ -1483,10 +1483,10 @@ class BeatportUnifiedScraper:
                     if len(tracks) > 3:
                         print(f"      ... and {len(tracks) - 3} more tracks")
                 else:
-                    print(f"   ❌ No tracks found")
+                    print(f"   No tracks found")
 
             except Exception as e:
-                print(f"   ❌ Error processing release: {e}")
+                print(f"   Error processing release: {e}")
                 continue
 
             # Small delay between requests to be respectful
@@ -1494,7 +1494,7 @@ class BeatportUnifiedScraper:
                 time.sleep(0.5)
 
         print(f"\n" + "=" * 60)
-        print(f"🎉 SCRAPING COMPLETE")
+        print(f"SCRAPING COMPLETE")
         print(f"   Total releases processed: {len(release_urls)}")
         print(f"   Total tracks extracted: {len(all_tracks)}")
 
@@ -1502,7 +1502,7 @@ class BeatportUnifiedScraper:
 
     def scrape_hype_top_100(self, limit: int = 100, enrich: bool = True) -> List[Dict]:
         """Scrape Beatport Hype Top 100 - Fixed URL based on parser discovery"""
-        print("\n🔥 Scraping Beatport Hype Top 100...")
+        print("\nScraping Beatport Hype Top 100...")
 
         # Use the correct URL discovered by parser
         soup = self.get_page(f"{self.base_url}/hype-100")
@@ -1511,10 +1511,10 @@ class BeatportUnifiedScraper:
             if tracks and enrich:
                 print(f"   Enriching {len(tracks)} Hype Top 100 tracks with per-track metadata...")
                 tracks = self.enrich_chart_tracks(tracks)
-            print(f"✅ Extracted {len(tracks)} tracks from Hype Top 100")
+            print(f"Extracted {len(tracks)} tracks from Hype Top 100")
             return tracks
         else:
-            print("⚠️ Could not access /hype-100, trying homepage Hype Picks section...")
+            print("Could not access /hype-100, trying homepage Hype Picks section...")
             # Fallback to homepage section
             soup = self.get_page(self.base_url)
             if soup:
@@ -1534,7 +1534,7 @@ class BeatportUnifiedScraper:
             else:
                 tracks = []
 
-            print(f"✅ Extracted {len(tracks)} tracks from Hype Top 100 (fallback)")
+            print(f"Extracted {len(tracks)} tracks from Hype Top 100 (fallback)")
             return tracks
 
     def extract_releases_from_page(self, soup: BeautifulSoup, list_name: str, limit: int = 100) -> List[Dict]:
@@ -1557,13 +1557,13 @@ class BeatportUnifiedScraper:
                 title_element = row.find('span', class_=re.compile(r'Tables-shared-style__ReleaseName'))
                 if not title_element:
                     if len(releases) < 5:
-                        print(f"   ⚠️ Row {i+1}: No release title found")
+                        print(f"   Row {i+1}: No release title found")
                     continue
 
                 release_title = title_element.get_text(strip=True)
                 if not release_title:
                     if len(releases) < 5:
-                        print(f"   ⚠️ Row {i+1}: Empty release title")
+                        print(f"   Row {i+1}: Empty release title")
                     continue
 
                 # Find the release URL from the title link
@@ -1604,7 +1604,7 @@ class BeatportUnifiedScraper:
                     print(f"   Release {len(releases)}: '{release_title}' by '{artist_text}' (found {len(artists)} artists)")
 
             except Exception as e:
-                print(f"   ⚠️ Error extracting row {i+1}: {e}")
+                print(f"   Error extracting row {i+1}: {e}")
                 continue
 
         print(f"   Successfully extracted {len(releases)} releases from {len(table_rows)} rows")
@@ -1612,12 +1612,12 @@ class BeatportUnifiedScraper:
 
     def scrape_top_100_releases(self, limit: int = 100) -> List[Dict]:
         """Scrape Beatport Top 100 Releases - Extract individual tracks using URL crawling"""
-        print("\n📊 Scraping Beatport Top 100 Releases...")
+        print("\nScraping Beatport Top 100 Releases...")
 
         # Step 1: Extract release URLs from Top 100 page
         soup = self.get_page(f"{self.base_url}/top-100-releases")
         if not soup:
-            print("   ❌ Could not access /top-100-releases page")
+            print("   Could not access /top-100-releases page")
             return []
 
         # Look for rows with release links (Top 100 uses [class*="row"] elements, not tables)
@@ -1645,7 +1645,7 @@ class BeatportUnifiedScraper:
                     break
 
         if not release_urls:
-            print("   ❌ No Top 100 release URLs found")
+            print("   No Top 100 release URLs found")
             return []
 
         # Step 2: Crawl each release URL to extract individual tracks
@@ -1656,21 +1656,21 @@ class BeatportUnifiedScraper:
             # Extract individual tracks from this release
             tracks = self.extract_individual_tracks_from_release_url(release_url, "Top 100 Releases")
             if tracks:
-                print(f"   ✅ Found {len(tracks)} individual tracks")
+                print(f"   Found {len(tracks)} individual tracks")
                 all_individual_tracks.extend(tracks)
             else:
-                print(f"   ❌ No tracks found")
+                print(f"   No tracks found")
 
             # Add delay between requests to be respectful
             if i < len(release_urls) - 1:
                 time.sleep(0.5)
 
-        print(f"✅ Extracted {len(all_individual_tracks)} individual tracks from {len(release_urls)} Top 100 releases")
+        print(f"Extracted {len(all_individual_tracks)} individual tracks from {len(release_urls)} Top 100 releases")
         return all_individual_tracks
 
     def scrape_dj_charts(self, limit: int = 20) -> List[Dict]:
         """Scrape Beatport DJ Charts from homepage section - Improved reliability"""
-        print("\n🎧 Scraping Beatport DJ Charts...")
+        print("\nScraping Beatport DJ Charts...")
 
         soup = self.get_page(self.base_url)
         if not soup:
@@ -1710,7 +1710,7 @@ class BeatportUnifiedScraper:
 
         # Method 2: If no section found, look for chart links across entire homepage
         if not charts:
-            print("   ⚠️ DJ Charts section not found, scanning entire homepage...")
+            print("   DJ Charts section not found, scanning entire homepage...")
             all_chart_links = soup.find_all('a', href=re.compile(r'/chart/'))
             print(f"   Found {len(all_chart_links)} total chart links on homepage")
 
@@ -1730,12 +1730,12 @@ class BeatportUnifiedScraper:
                     }
                     charts.append(chart_info)
 
-        print(f"✅ Extracted {len(charts)} DJ charts")
+        print(f"Extracted {len(charts)} DJ charts")
         return charts
 
     def scrape_featured_charts(self, limit: int = 20) -> List[Dict]:
         """Scrape Beatport Featured Charts from homepage section - FIXED"""
-        print("\n📊 Scraping Beatport Featured Charts...")
+        print("\nScraping Beatport Featured Charts...")
 
         soup = self.get_page(self.base_url)
         if not soup:
@@ -1765,12 +1765,12 @@ class BeatportUnifiedScraper:
                 }
                 charts.append(track_data)
 
-        print(f"✅ Extracted {len(charts)} charts from Featured Charts")
+        print(f"Extracted {len(charts)} charts from Featured Charts")
         return charts
 
     def scrape_hype_picks_homepage(self, limit: int = 40) -> List[Dict]:
         """Scrape individual tracks from Beatport Hype Picks using JSON extraction - ENHANCED"""
-        print("\n🔥 Scraping Beatport Hype Picks (individual tracks)...")
+        print("\nScraping Beatport Hype Picks (individual tracks)...")
 
         # Step 1: Get release URLs from homepage cards
         release_urls = self.extract_hype_picks_urls(limit)
@@ -1780,7 +1780,7 @@ class BeatportUnifiedScraper:
         # Step 2: Extract individual tracks from each release
         all_tracks = []
         for i, release_url in enumerate(release_urls):
-            print(f"\n📀 Processing release {i+1}/{len(release_urls)}")
+            print(f"\nProcessing release {i+1}/{len(release_urls)}")
             tracks = self.extract_tracks_from_hype_picks_release_json(release_url)
             if tracks:
                 all_tracks.extend(tracks)
@@ -1789,7 +1789,7 @@ class BeatportUnifiedScraper:
             import time
             time.sleep(0.5)
 
-        print(f"✅ Extracted {len(all_tracks)} individual tracks from {len(release_urls)} hype picks releases")
+        print(f"Extracted {len(all_tracks)} individual tracks from {len(release_urls)} hype picks releases")
         return all_tracks
 
     def extract_hype_picks_urls(self, limit: int) -> List[str]:
@@ -1822,7 +1822,7 @@ class BeatportUnifiedScraper:
 
     def extract_tracks_from_hype_picks_release_json(self, release_url: str) -> List[Dict]:
         """Extract individual tracks from a hype picks release page using JSON data"""
-        print(f"🎵 Extracting tracks from: {release_url}")
+        print(f"Extracting tracks from: {release_url}")
 
         soup = self.get_page(release_url)
         if not soup:
@@ -1831,13 +1831,13 @@ class BeatportUnifiedScraper:
         # Extract JSON object from page (same method as New Releases)
         json_obj = self.extract_json_object_from_release_page(soup)
         if not json_obj:
-            print("   ❌ No JSON data found")
+            print("   No JSON data found")
             return []
 
         # Filter tracks for this specific release (same method as New Releases)
         release_tracks = self.filter_tracks_for_specific_release(json_obj, release_url)
         if not release_tracks:
-            print("   ❌ No matching tracks found")
+            print("   No matching tracks found")
             return []
 
         # Convert to our standard format (with Hype Picks branding)
@@ -1847,7 +1847,7 @@ class BeatportUnifiedScraper:
             if track:
                 converted_tracks.append(track)
 
-        print(f"   ✅ Extracted {len(converted_tracks)} tracks")
+        print(f"   Extracted {len(converted_tracks)} tracks")
         return converted_tracks
 
     def convert_hype_picks_json_to_track_format(self, track_data: Dict, release_url: str, position: int):
@@ -1912,12 +1912,12 @@ class BeatportUnifiedScraper:
             return track
 
         except Exception as e:
-            print(f"   ❌ Error converting track data: {e}")
+            print(f"   Error converting track data: {e}")
             return None
 
     def scrape_homepage_top10_lists(self) -> Dict[str, List[Dict]]:
         """Scrape Top 10 Lists from homepage - Beatport Top 10 and Hype Top 10"""
-        print("\n🏆 Scraping Top 10 Lists from homepage...")
+        print("\nScraping Top 10 Lists from homepage...")
 
         soup = self.get_page(self.base_url)
         if not soup:
@@ -1934,7 +1934,7 @@ class BeatportUnifiedScraper:
                 if track_data:
                     beatport_tracks.append(track_data)
             except Exception as e:
-                print(f"   ❌ Error extracting Beatport track {i}: {e}")
+                print(f"   Error extracting Beatport track {i}: {e}")
 
         # Extract Hype Top 10 tracks
         hype_top10_items = soup.select('[data-testid="hype-top-10-item"]')
@@ -1947,9 +1947,9 @@ class BeatportUnifiedScraper:
                 if track_data:
                     hype_tracks.append(track_data)
             except Exception as e:
-                print(f"   ❌ Error extracting Hype track {i}: {e}")
+                print(f"   Error extracting Hype track {i}: {e}")
 
-        print(f"✅ Extracted {len(beatport_tracks)} Beatport Top 10 + {len(hype_tracks)} Hype Top 10 tracks")
+        print(f"Extracted {len(beatport_tracks)} Beatport Top 10 + {len(hype_tracks)} Hype Top 10 tracks")
 
         return {
             "beatport_top10": beatport_tracks,
@@ -2036,11 +2036,11 @@ class BeatportUnifiedScraper:
 
     def scrape_homepage_top10_releases(self) -> List[Dict]:
         """Scrape Top 10 Releases from homepage - FIXED VERSION"""
-        print("\n💿 FIXED: Scraping Top 10 Releases from homepage...")
+        print("\nFIXED: Scraping Top 10 Releases from homepage...")
 
         soup = self.get_page(self.base_url)
         if not soup:
-            print("   ❌ Could not get homepage")
+            print("   Could not get homepage")
             return []
 
         # Extract Top 10 Releases items - EXACT same as test script
@@ -2048,7 +2048,7 @@ class BeatportUnifiedScraper:
         print(f"   FOUND {len(top10_releases_items)} Top 10 Releases items")
 
         if len(top10_releases_items) == 0:
-            print("   ❌ No items found - trying alternatives")
+            print("   No items found - trying alternatives")
             return []
 
         releases = []
@@ -2058,13 +2058,13 @@ class BeatportUnifiedScraper:
                 release_data = self.extract_release_from_item_FIXED(item, i)
                 if release_data:
                     releases.append(release_data)
-                    print(f"   ✅ {i}. {release_data['artist']} - {release_data['title']}")
+                    print(f"   {i}. {release_data['artist']} - {release_data['title']}")
                 else:
-                    print(f"   ❌ {i}. No data extracted")
+                    print(f"   {i}. No data extracted")
             except Exception as e:
-                print(f"   ❌ Error extracting release {i}: {e}")
+                print(f"   Error extracting release {i}: {e}")
 
-        print(f"✅ FINAL: Extracted {len(releases)} Top 10 Releases")
+        print(f"FINAL: Extracted {len(releases)} Top 10 Releases")
         return releases
 
     def extract_release_from_item_FIXED(self, item, rank):
@@ -2293,7 +2293,7 @@ class BeatportUnifiedScraper:
 
     def scrape_new_on_beatport_hero(self, limit: int = 10) -> List[Dict]:
         """Scrape the 'New on Beatport' hero slideshow from homepage using data-testid standard"""
-        print("\n🎯 Scraping 'New on Beatport' hero slideshow...")
+        print("\nScraping 'New on Beatport' hero slideshow...")
 
         soup = self.get_page(self.base_url)
         if not soup:
@@ -2304,7 +2304,7 @@ class BeatportUnifiedScraper:
         # Method 1 (PRIMARY): Use data-testid standard like all other rebuild functions
         hero_items = soup.select('[data-testid="new-on-beatport"]')
         if hero_items:
-            print(f"   ✅ Found {len(hero_items)} items using data-testid='new-on-beatport'")
+            print(f"   Found {len(hero_items)} items using data-testid='new-on-beatport'")
             for i, item in enumerate(hero_items[:limit]):
                 track_data = self._extract_track_from_slide(item, f"Hero Item {i+1}")
                 if track_data and track_data.get('url'):
@@ -2314,14 +2314,14 @@ class BeatportUnifiedScraper:
         if len(tracks) < 5:
             hero_wrapper = soup.select_one('[class*="Homepage-style__NewOnBeatportWrapper"]')
             if hero_wrapper:
-                print("   ✅ Found Homepage NewOnBeatportWrapper (fallback)")
+                print("   Found Homepage NewOnBeatportWrapper (fallback)")
                 tracks.extend(self._extract_from_hero_wrapper(hero_wrapper, limit))
 
         # Method 3 (FALLBACK): Look for carousel with aria attributes
         if len(tracks) < 5:
             carousel = soup.find('div', {'aria-roledescription': 'carousel', 'aria-label': 'Carousel'})
             if carousel:
-                print("   ✅ Found carousel with aria-roledescription and aria-label (fallback)")
+                print("   Found carousel with aria-roledescription and aria-label (fallback)")
                 additional_tracks = self._extract_from_carousel(carousel, limit)
                 # Merge without duplicates
                 existing_urls = {track.get('url') for track in tracks}
@@ -2331,7 +2331,7 @@ class BeatportUnifiedScraper:
 
         # Method 4 (LAST RESORT): Look for individual slide items more broadly
         if len(tracks) < 5:
-            print("   🔍 Looking for individual carousel items (last resort)...")
+            print("   Looking for individual carousel items (last resort)...")
             carousel_items = soup.find_all(['div', 'article'], class_=re.compile(r'carousel.*item|item.*carousel|slide', re.I))
             print(f"   Found {len(carousel_items)} potential carousel items")
 
@@ -2343,7 +2343,7 @@ class BeatportUnifiedScraper:
                     if track_data['url'] not in existing_urls:
                         tracks.append(track_data)
 
-        print(f"   📊 Extracted {len(tracks)} tracks from New on Beatport hero")
+        print(f"   Extracted {len(tracks)} tracks from New on Beatport hero")
         return tracks[:limit]
 
     def _extract_from_hero_wrapper(self, wrapper, limit: int) -> List[Dict]:
@@ -2529,21 +2529,21 @@ class BeatportUnifiedScraper:
             if (not title or not artist or
                 title.lower() in ['no title', 'unknown title', 'unknown', ''] or
                 artist.lower() in ['no artist', 'unknown artist', 'unknown', 'various artists', '']):
-                print(f"   ❌ {context}: Filtered out invalid track - '{title}' by '{artist}'")
+                print(f"   {context}: Filtered out invalid track - '{title}' by '{artist}'")
                 return None
 
             # Only return if we found meaningful data
             if track_data.get('url') or track_data.get('image_url'):
                 track_data['source'] = f"New on Beatport Hero - {context}"
                 track_data['scraped_at'] = time.time()
-                print(f"   ✅ {context}: {title} - {artist}")
+                print(f"   {context}: {title} - {artist}")
                 return track_data
             else:
-                print(f"   ❌ {context}: No usable data found")
+                print(f"   {context}: No usable data found")
                 return None
 
         except Exception as e:
-            print(f"   ❌ Error extracting from {context}: {e}")
+            print(f"   Error extracting from {context}: {e}")
             return None
 
     def _extract_title_artist_from_url(self, url: str) -> Dict[str, str]:
@@ -2792,7 +2792,7 @@ class BeatportUnifiedScraper:
 
     def scrape_top_10_releases_homepage(self, limit: int = 10) -> List[Dict]:
         """Scrape Top 10 Releases from homepage - Extract individual tracks using URL crawling"""
-        print("\n🔟 Scraping Top 10 Releases from homepage...")
+        print("\nScraping Top 10 Releases from homepage...")
 
         soup = self.get_page(self.base_url)
         if not soup:
@@ -2812,7 +2812,7 @@ class BeatportUnifiedScraper:
                 print(f"   {i+1}. Found Top 10 release URL: {release_url}")
 
         if not release_urls:
-            print("   ❌ No Top 10 release URLs found")
+            print("   No Top 10 release URLs found")
             return []
 
         # Step 2: Crawl each release URL to extract individual tracks
@@ -2823,16 +2823,16 @@ class BeatportUnifiedScraper:
             # Extract individual tracks from this release
             tracks = self.extract_individual_tracks_from_release_url(release_url, "Top 10 Releases")
             if tracks:
-                print(f"   ✅ Found {len(tracks)} individual tracks")
+                print(f"   Found {len(tracks)} individual tracks")
                 all_individual_tracks.extend(tracks)
             else:
-                print(f"   ❌ No tracks found")
+                print(f"   No tracks found")
 
             # Add delay between requests to be respectful
             if i < len(release_urls) - 1:
                 time.sleep(0.5)
 
-        print(f"✅ Extracted {len(all_individual_tracks)} individual tracks from {len(release_urls)} Top 10 releases")
+        print(f"Extracted {len(all_individual_tracks)} individual tracks from {len(release_urls)} Top 10 releases")
         return all_individual_tracks
 
     def scrape_genre_charts(self, genre: Dict, limit: int = 100, enrich: bool = True) -> List[Dict]:
@@ -2852,17 +2852,17 @@ class BeatportUnifiedScraper:
         ]
 
         for chart_url in chart_urls_to_try:
-            print(f"   🎯 Trying chart URL: {chart_url}")
+            print(f"   Trying chart URL: {chart_url}")
             soup = self.get_page(chart_url)
             if soup:
                 tracks = self.extract_tracks_from_page(soup, f"{genre['name']} Top 100", limit)
                 if tracks and len(tracks) >= min(limit, 50):
-                    print(f"   ✅ Successfully extracted {len(tracks)} tracks from {chart_url}")
+                    print(f"   Successfully extracted {len(tracks)} tracks from {chart_url}")
                     break
                 elif tracks:
-                    print(f"   ⚠️ Only found {len(tracks)} tracks at {chart_url}, trying next URL...")
+                    print(f"   Only found {len(tracks)} tracks at {chart_url}, trying next URL...")
                 else:
-                    print(f"   ❌ No tracks found at {chart_url}")
+                    print(f"   No tracks found at {chart_url}")
 
         if tracks and enrich:
             print(f"   Enriching {len(tracks)} {genre['name']} chart tracks with per-track metadata...")
@@ -2892,7 +2892,7 @@ class BeatportUnifiedScraper:
         ]
 
         for release_url in release_urls_to_try:
-            print(f"   🎯 Trying release URL: {release_url}")
+            print(f"   Trying release URL: {release_url}")
             soup = self.get_page(release_url)
             if soup:
                 # Try to find releases section on the page
@@ -2900,19 +2900,19 @@ class BeatportUnifiedScraper:
 
                 # If no releases found with release extraction, try track extraction
                 if not releases:
-                    print(f"   ⚠️ No releases found with release method, trying track method for {genre['name']}")
+                    print(f"   No releases found with release method, trying track method for {genre['name']}")
                     releases = self.extract_tracks_from_page(soup, f"{genre['name']} Top Releases", limit)
                     # Mark these as releases
                     for release in releases:
                         release['type'] = 'release'
 
                 if releases and len(releases) >= min(limit, 30):  # If we got a decent number of releases
-                    print(f"   ✅ Successfully extracted {len(releases)} releases from {release_url}")
+                    print(f"   Successfully extracted {len(releases)} releases from {release_url}")
                     break
                 elif releases:
-                    print(f"   ⚠️ Only found {len(releases)} releases at {release_url}, trying next URL...")
+                    print(f"   Only found {len(releases)} releases at {release_url}, trying next URL...")
                 else:
-                    print(f"   ❌ No releases found at {release_url}")
+                    print(f"   No releases found at {release_url}")
 
         return releases
 
@@ -2933,22 +2933,22 @@ class BeatportUnifiedScraper:
         ]
 
         for hype_url in hype_urls_to_try:
-            print(f"   🔥 Trying hype URL: {hype_url}")
+            print(f"   Trying hype URL: {hype_url}")
             soup = self.get_page(hype_url)
             if soup:
                 # Use the new dedicated hype extraction method
                 tracks = self.extract_hype_tracks_from_beatport_page(soup, f"{genre['name']} Hype Charts", limit)
                 if tracks and len(tracks) >= min(limit, 10):  # If we got a decent number of tracks
-                    print(f"   ✅ Successfully extracted {len(tracks)} hype tracks from {hype_url}")
+                    print(f"   Successfully extracted {len(tracks)} hype tracks from {hype_url}")
                     break
                 elif tracks:
-                    print(f"   ⚠️ Only found {len(tracks)} hype tracks at {hype_url}, trying next URL...")
+                    print(f"   Only found {len(tracks)} hype tracks at {hype_url}, trying next URL...")
                 else:
-                    print(f"   ❌ No hype tracks found at {hype_url}")
+                    print(f"   No hype tracks found at {hype_url}")
 
         # If no dedicated hype page found, try main genre page for hype content
         if not tracks:
-            print(f"   🔍 No dedicated hype page found, looking for hype content on main page...")
+            print(f"   No dedicated hype page found, looking for hype content on main page...")
             genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
             soup = self.get_page(genre_url)
             if soup:
@@ -2958,7 +2958,7 @@ class BeatportUnifiedScraper:
 
     def scrape_genre_hype_picks(self, genre: Dict, limit: int = 100) -> List[Dict]:
         """Scrape individual tracks from Genre Hype Picks using JSON extraction - ENHANCED (same pattern as Latest Releases)"""
-        print(f"\n🔥 Scraping {genre['name']} Hype Picks (individual tracks)...")
+        print(f"\nScraping {genre['name']} Hype Picks (individual tracks)...")
 
         # Step 1: Get release URLs from genre Hype Picks carousel (same logic as Latest Releases)
         release_urls = self.extract_genre_hype_picks_urls(genre, limit)
@@ -2968,7 +2968,7 @@ class BeatportUnifiedScraper:
         # Step 2: Extract individual tracks from each release (same method as Latest Releases)
         all_tracks = []
         for i, release_url in enumerate(release_urls):
-            print(f"\n🔥 Processing {genre['name']} hype pick {i+1}/{len(release_urls)}")
+            print(f"\nProcessing {genre['name']} hype pick {i+1}/{len(release_urls)}")
             tracks = self.extract_tracks_from_release_json(release_url)
             if tracks:
                 # Update list_name to match genre context
@@ -2980,7 +2980,7 @@ class BeatportUnifiedScraper:
             import time
             time.sleep(0.5)
 
-        print(f"✅ Extracted {len(all_tracks)} individual tracks from {len(release_urls)} {genre['name']} hype picks")
+        print(f"Extracted {len(all_tracks)} individual tracks from {len(release_urls)} {genre['name']} hype picks")
         return all_tracks
 
     def extract_genre_hype_picks_urls(self, genre: Dict, limit: int) -> List[str]:
@@ -3002,7 +3002,7 @@ class BeatportUnifiedScraper:
                 break
 
         if not hype_container:
-            print(f"   ❌ Could not find Hype Picks section for {genre['name']}")
+            print(f"   Could not find Hype Picks section for {genre['name']}")
             return []
 
         # Extract release URLs from ALL releases in Hype Picks section (same as Latest Releases)
@@ -3041,7 +3041,7 @@ class BeatportUnifiedScraper:
                                      string=re.compile(r'hype', re.I))
 
         for heading in hype_headings:
-            print(f"   📝 Found hype heading: {heading.get_text(strip=True)}")
+            print(f"   Found hype heading: {heading.get_text(strip=True)}")
 
             # Get the section after this heading
             section_container = heading.find_parent()
@@ -3146,7 +3146,7 @@ class BeatportUnifiedScraper:
                         }
 
                         tracks.append(track_data)
-                        print(f"   🎵 Release Track: {artist_text} - {track_title}")
+                        print(f"   Release Track: {artist_text} - {track_title}")
 
                     except Exception:
                         continue
@@ -3171,7 +3171,7 @@ class BeatportUnifiedScraper:
                 string=re.compile(rf'{section_name}', re.I))
 
             if section_heading:
-                print(f"   📝 Found hype picks section: {section_heading.get_text(strip=True)}")
+                print(f"   Found hype picks section: {section_heading.get_text(strip=True)}")
                 section_container = section_heading.find_parent()
                 if section_container:
                     content_area = section_container.find_next_sibling()
@@ -3193,7 +3193,7 @@ class BeatportUnifiedScraper:
         if not soup:
             return tracks
 
-        print(f"   🔍 Looking for HYPE labeled tracks on page...")
+        print(f"   Looking for HYPE labeled tracks on page...")
 
         # Look for elements containing "HYPE" text
         hype_elements = soup.find_all(text=re.compile(r'HYPE', re.I))
@@ -3261,7 +3261,7 @@ class BeatportUnifiedScraper:
                             # Avoid duplicates
                             if not any(existing['url'] == track_data['url'] for existing in tracks):
                                 tracks.append(track_data)
-                                print(f"   🔥 Found HYPE track: {track_data['artist']} - {track_data['title']}")
+                                print(f"   Found HYPE track: {track_data['artist']} - {track_data['title']}")
 
                         except Exception as e:
                             continue
@@ -3269,7 +3269,7 @@ class BeatportUnifiedScraper:
             except Exception as e:
                 continue
 
-        print(f"   ✅ Extracted {len(tracks)} HYPE labeled tracks")
+        print(f"   Extracted {len(tracks)} HYPE labeled tracks")
         return tracks
 
     def extract_hype_tracks_from_beatport_page(self, soup: BeautifulSoup, list_name: str, limit: int = 100) -> List[Dict]:
@@ -3279,7 +3279,7 @@ class BeatportUnifiedScraper:
         if not soup:
             return tracks
 
-        print(f"   🔍 Extracting hype tracks from Beatport page...")
+        print(f"   Extracting hype tracks from Beatport page...")
 
         # Method 1: Extract from Hype Picks carousel (release cards with HYPE badges)
         hype_picks_tracks = self.extract_hype_picks_from_carousel(soup, list_name, limit)
@@ -3295,7 +3295,7 @@ class BeatportUnifiedScraper:
             hype_table_tracks = self.extract_hype_from_track_table(soup, list_name, limit - len(tracks))
             tracks.extend(hype_table_tracks)
 
-        print(f"   ✅ Extracted {len(tracks)} hype tracks using actual Beatport structure")
+        print(f"   Extracted {len(tracks)} hype tracks using actual Beatport structure")
         return tracks[:limit]
 
     def extract_hype_picks_from_carousel(self, soup: BeautifulSoup, list_name: str, limit: int) -> List[Dict]:
@@ -3342,7 +3342,7 @@ class BeatportUnifiedScraper:
                 }
 
                 tracks.append(track_data)
-                print(f"   🔥 Hype Pick: {artist_text} - {release_title}")
+                print(f"   Hype Pick: {artist_text} - {release_title}")
 
             except Exception as e:
                 continue
@@ -3395,7 +3395,7 @@ class BeatportUnifiedScraper:
                 }
 
                 tracks.append(track_data)
-                print(f"   🎵 Hype Track {position}: {artist_text} - {track_title}")
+                print(f"   Hype Track {position}: {artist_text} - {track_title}")
 
             except Exception as e:
                 continue
@@ -3452,7 +3452,7 @@ class BeatportUnifiedScraper:
                 }
 
                 tracks.append(track_data)
-                print(f"   📊 Hype Track {position}: {artist_text} - {track_title}")
+                print(f"   Hype Track {position}: {artist_text} - {track_title}")
 
             except Exception as e:
                 continue
@@ -3461,7 +3461,7 @@ class BeatportUnifiedScraper:
 
     def scrape_genre_staff_picks(self, genre: Dict, limit: int = 100) -> List[Dict]:
         """Scrape individual tracks from Genre Staff Picks using JSON extraction - ENHANCED (same pattern as Latest Releases)"""
-        print(f"\n📝 Scraping {genre['name']} Staff Picks (individual tracks)...")
+        print(f"\nScraping {genre['name']} Staff Picks (individual tracks)...")
 
         # Step 1: Get release URLs from genre Staff Picks carousel (same logic as Latest Releases)
         release_urls = self.extract_genre_staff_picks_urls(genre, limit)
@@ -3471,7 +3471,7 @@ class BeatportUnifiedScraper:
         # Step 2: Extract individual tracks from each release (same method as Latest Releases)
         all_tracks = []
         for i, release_url in enumerate(release_urls):
-            print(f"\n📝 Processing {genre['name']} staff pick {i+1}/{len(release_urls)}")
+            print(f"\nProcessing {genre['name']} staff pick {i+1}/{len(release_urls)}")
             tracks = self.extract_tracks_from_release_json(release_url)
             if tracks:
                 # Update list_name to match genre context
@@ -3483,7 +3483,7 @@ class BeatportUnifiedScraper:
             import time
             time.sleep(0.5)
 
-        print(f"✅ Extracted {len(all_tracks)} individual tracks from {len(release_urls)} {genre['name']} staff picks")
+        print(f"Extracted {len(all_tracks)} individual tracks from {len(release_urls)} {genre['name']} staff picks")
         return all_tracks
 
     def extract_genre_staff_picks_urls(self, genre: Dict, limit: int) -> List[str]:
@@ -3505,7 +3505,7 @@ class BeatportUnifiedScraper:
                 break
 
         if not staff_container:
-            print(f"   ❌ Could not find Staff Picks section for {genre['name']}")
+            print(f"   Could not find Staff Picks section for {genre['name']}")
             return []
 
         # Extract release URLs from ALL releases in Staff Picks section (same as Latest Releases)
@@ -3547,7 +3547,7 @@ class BeatportUnifiedScraper:
         # Step 2: Extract individual tracks from each release (same method as homepage)
         all_tracks = []
         for i, release_url in enumerate(release_urls):
-            print(f"\n📀 Processing {genre['name']} latest release {i+1}/{len(release_urls)}")
+            print(f"\nProcessing {genre['name']} latest release {i+1}/{len(release_urls)}")
             tracks = self.extract_tracks_from_release_json(release_url)
             if tracks:
                 # Update list_name to match genre context
@@ -3559,7 +3559,7 @@ class BeatportUnifiedScraper:
             import time
             time.sleep(0.5)
 
-        print(f"✅ Extracted {len(all_tracks)} individual tracks from {len(release_urls)} latest {genre['name']} releases")
+        print(f"Extracted {len(all_tracks)} individual tracks from {len(release_urls)} latest {genre['name']} releases")
         return all_tracks
 
     def extract_genre_latest_releases_urls(self, genre: Dict, limit: int) -> List[str]:
@@ -3581,7 +3581,7 @@ class BeatportUnifiedScraper:
                 break
 
         if not latest_container:
-            print(f"   ❌ Could not find Latest Releases section for {genre['name']}")
+            print(f"   Could not find Latest Releases section for {genre['name']}")
             return []
 
         # Extract release URLs from ALL releases in Latest Releases section (same as homepage gets all cards)
@@ -3622,7 +3622,7 @@ class BeatportUnifiedScraper:
         charts = []
         chart_links = soup.find_all('a', href=re.compile(r'/chart/'))
 
-        print(f"   🔍 Found {len(chart_links)} chart links on genre page")
+        print(f"   Found {len(chart_links)} chart links on genre page")
 
         for chart_link in chart_links[:limit]:
             chart_name = chart_link.get_text(strip=True)
@@ -3642,9 +3642,9 @@ class BeatportUnifiedScraper:
                 }
                 charts.append(chart_info)
 
-                print(f"   📊 Chart {len(charts)}: {chart_name}")
+                print(f"   Chart {len(charts)}: {chart_name}")
 
-        print(f"   ✅ Found {len(charts)} charts in New Charts Collection")
+        print(f"   Found {len(charts)} charts in New Charts Collection")
         return charts[:limit]
 
     def extract_tracks_from_chart(self, chart_url: str, chart_name: str, limit: int) -> List[Dict]:
@@ -3656,14 +3656,14 @@ class BeatportUnifiedScraper:
             if not soup:
                 return tracks
 
-            print(f"   🔍 Extracting tracks from chart page: {chart_url}")
-            print(f"   📋 Chart name: {chart_name}")
+            print(f"   Extracting tracks from chart page: {chart_url}")
+            print(f"   Chart name: {chart_name}")
 
             # Step 1: Get basic track list from HTML
             tracks = self.extract_tracks_from_chart_table(soup, chart_name, limit)
 
             if len(tracks) < 10:
-                print(f"   ⚠️ Chart table extraction found {len(tracks)} tracks, trying general extraction...")
+                print(f"   Chart table extraction found {len(tracks)} tracks, trying general extraction...")
                 general_tracks = self.extract_tracks_from_page(soup, f"New Chart: {chart_name}", limit)
                 if len(general_tracks) > len(tracks):
                     tracks = general_tracks
@@ -3673,7 +3673,7 @@ class BeatportUnifiedScraper:
                 if len(table_tracks) > len(tracks):
                     tracks = table_tracks
 
-            print(f"   📊 Found {len(tracks)} tracks, enriching with per-track metadata...")
+            print(f"   Found {len(tracks)} tracks, enriching with per-track metadata...")
 
             # Step 2: Enrich each track by visiting its individual page
             if tracks:
@@ -3682,35 +3682,35 @@ class BeatportUnifiedScraper:
             return tracks
 
         except Exception as e:
-            print(f"   ❌ Error extracting tracks from chart {chart_name}: {e}")
+            print(f"   Error extracting tracks from chart {chart_name}: {e}")
             return []
 
     def extract_tracks_from_chart_table(self, soup, chart_name: str, limit: int) -> List[Dict]:
         """Extract tracks from Beatport chart table structure (tracks-table class)"""
         tracks = []
 
-        print(f"   🔍 DEBUG: Looking for tracks-table container...")
+        print(f"   DEBUG: Looking for tracks-table container...")
 
         # Look for the tracks table container
         tracks_table = soup.find(class_=re.compile(r'tracks-table'))
         if not tracks_table:
-            print(f"   ⚠️ No tracks-table container found")
+            print(f"   No tracks-table container found")
             # Debug: Let's see what table classes ARE available
             all_tables = soup.find_all(['table', 'div'], class_=re.compile(r'table|Table', re.I))
-            print(f"   🔍 DEBUG: Found {len(all_tables)} table-like elements")
+            print(f"   DEBUG: Found {len(all_tables)} table-like elements")
             for i, table in enumerate(all_tables[:5]):
                 classes = table.get('class', [])
                 print(f"      Table {i+1}: {' '.join(classes)}")
             return tracks
 
-        print(f"   ✅ Found tracks-table container with classes: {tracks_table.get('class', [])}")
+        print(f"   Found tracks-table container with classes: {tracks_table.get('class', [])}")
 
         # Find all track rows using data-testid or table row classes
         track_rows_testid = tracks_table.find_all(['div', 'tr'], attrs={'data-testid': 'tracks-table-row'})
         track_rows_class = tracks_table.find_all(class_=re.compile(r'Table.*Row.*tracks-table'))
         track_rows_generic = tracks_table.find_all(class_=re.compile(r'Table.*Row'))
 
-        print(f"   🔍 DEBUG: Track rows found:")
+        print(f"   DEBUG: Track rows found:")
         print(f"      - By data-testid='tracks-table-row': {len(track_rows_testid)}")
         print(f"      - By class pattern 'Table.*Row.*tracks-table': {len(track_rows_class)}")
         print(f"      - By generic 'Table.*Row': {len(track_rows_generic)}")
@@ -3719,10 +3719,10 @@ class BeatportUnifiedScraper:
         track_rows = track_rows_testid or track_rows_class or track_rows_generic
 
         if not track_rows:
-            print(f"   ❌ No track rows found in any format")
+            print(f"   No track rows found in any format")
             return tracks
 
-        print(f"   🔍 Using {len(track_rows)} track rows for extraction")
+        print(f"   Using {len(track_rows)} track rows for extraction")
 
         for i, row in enumerate(track_rows[:limit]):
             try:
@@ -3760,7 +3760,7 @@ class BeatportUnifiedScraper:
 
                 # DEBUG: Print track details for first few
                 if len(tracks) < 3:
-                    print(f"   🔍 DEBUG Track {len(tracks)+1}:")
+                    print(f"   DEBUG Track {len(tracks)+1}:")
                     print(f"      Title: '{track_title}'")
                     print(f"      Artist: '{artist_text}'")
                     print(f"      URL: {track_url}")
@@ -3783,13 +3783,13 @@ class BeatportUnifiedScraper:
 
                 # Debug output for first few tracks
                 if len(tracks) <= 5:
-                    print(f"   🎵 Track {len(tracks)}: {artist_text} - {track_title}")
+                    print(f"   Track {len(tracks)}: {artist_text} - {track_title}")
 
             except Exception as e:
-                print(f"   ⚠️ Error parsing track row {i+1}: {e}")
+                print(f"   Error parsing track row {i+1}: {e}")
                 continue
 
-        print(f"   ✅ Chart table extraction completed: {len(tracks)} tracks found")
+        print(f"   Chart table extraction completed: {len(tracks)} tracks found")
         return tracks
 
     def extract_tracks_from_table_format(self, soup, chart_name: str, limit: int) -> List[Dict]:
@@ -3799,7 +3799,7 @@ class BeatportUnifiedScraper:
         # Look for table rows containing track data
         table_rows = soup.find_all('tr') + soup.find_all('div', class_=re.compile(r'Table.*Row|track.*row', re.I))
 
-        print(f"   🔍 Found {len(table_rows)} potential table rows")
+        print(f"   Found {len(table_rows)} potential table rows")
 
         for i, row in enumerate(table_rows[:limit]):
             try:
@@ -3837,7 +3837,7 @@ class BeatportUnifiedScraper:
                 tracks.append(track_data)
 
                 if len(tracks) <= 3:  # Debug first few
-                    print(f"   🎵 Track {len(tracks)}: {artist_text} - {track_title}")
+                    print(f"   Track {len(tracks)}: {artist_text} - {track_title}")
 
             except Exception as e:
                 continue
@@ -3848,7 +3848,7 @@ class BeatportUnifiedScraper:
         """Analyze a genre page to discover all available sections"""
         genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
 
-        print(f"🔍 Discovering sections for {genre['name']} genre page...")
+        print(f"Discovering sections for {genre['name']} genre page...")
 
         soup = self.get_page(genre_url)
         if not soup:
@@ -3886,7 +3886,7 @@ class BeatportUnifiedScraper:
         chart_links = soup.find_all('a', href=re.compile(r'/chart/'))
         sections['chart_count'] = len(chart_links)
 
-        print(f"✅ Discovered sections for {genre['name']}:")
+        print(f"Discovered sections for {genre['name']}:")
         for section_type, items in sections.items():
             if items and section_type != 'chart_count':
                 print(f"   • {section_type}: {len(items)} sections")
@@ -3896,7 +3896,7 @@ class BeatportUnifiedScraper:
 
     def scrape_genre_hero_slider(self, genre_slug: str, genre_id: str) -> List[Dict]:
         """Scrape hero slider data from a genre page"""
-        print(f"\n🎠 Scraping hero slider for {genre_slug}...")
+        print(f"\nScraping hero slider for {genre_slug}...")
 
         genre_url = f"{self.base_url}/genre/{genre_slug}/{genre_id}"
         soup = self.get_page(genre_url)
@@ -3906,18 +3906,18 @@ class BeatportUnifiedScraper:
         # Find the main section container
         main_section = soup.find('div', class_=re.compile(r'Genre-style__MainSection'))
         if not main_section:
-            print(f"   ⚠️ Main section not found for {genre_slug}")
+            print(f"   Main section not found for {genre_slug}")
             return []
 
         # Find the hero slider
         hero_slider = main_section.find('div', class_='hero-slider')
         if not hero_slider:
-            print(f"   ⚠️ Hero slider not found for {genre_slug}")
+            print(f"   Hero slider not found for {genre_slug}")
             return []
 
         # Extract all hero releases
         hero_releases = hero_slider.find_all(class_='hero-release')
-        print(f"   🎯 Found {len(hero_releases)} hero releases")
+        print(f"   Found {len(hero_releases)} hero releases")
 
         releases_data = []
         for i, release in enumerate(hero_releases):
@@ -3925,18 +3925,18 @@ class BeatportUnifiedScraper:
                 release_data = self.extract_hero_release_data(release)
                 if release_data and release_data.get('url'):
                     releases_data.append(release_data)
-                    print(f"   ✅ Extracted: {release_data.get('title', 'Unknown')} by {release_data.get('artists_string', 'Unknown')}")
+                    print(f"   Extracted: {release_data.get('title', 'Unknown')} by {release_data.get('artists_string', 'Unknown')}")
                 else:
-                    print(f"   ⚠️ Skipped release {i+1} - incomplete data")
+                    print(f"   Skipped release {i+1} - incomplete data")
             except Exception as e:
-                print(f"   ❌ Error extracting release {i+1}: {e}")
+                print(f"   Error extracting release {i+1}: {e}")
 
-        print(f"   📊 Successfully extracted {len(releases_data)} hero releases")
+        print(f"   Successfully extracted {len(releases_data)} hero releases")
         return releases_data
 
     def scrape_genre_top10_tracks(self, genre_slug, genre_id):
         """Scrape Top 10 tracks lists from genre page (Beatport Top 10 + Hype Top 10 if available)"""
-        print(f"🎵 Scraping Top 10 tracks for {genre_slug} (ID: {genre_id})")
+        print(f"Scraping Top 10 tracks for {genre_slug} (ID: {genre_id})")
 
         genre_url = f"https://www.beatport.com/genre/{genre_slug}/{genre_id}"
 
@@ -3948,7 +3948,7 @@ class BeatportUnifiedScraper:
         track_items = soup.find_all(attrs={'data-testid': 'tracks-list-item'})
 
         if not track_items:
-            print(f"❌ No tracks-list-item elements found on {genre_url}")
+            print(f"No tracks-list-item elements found on {genre_url}")
             return {
                 'beatport_top10': [],
                 'hype_top10': [],
@@ -3956,7 +3956,7 @@ class BeatportUnifiedScraper:
                 'has_hype_section': False
             }
 
-        print(f"📊 Found {len(track_items)} total track items")
+        print(f"Found {len(track_items)} total track items")
 
         # Extract track data from all items
         all_tracks = []
@@ -3983,7 +3983,7 @@ class BeatportUnifiedScraper:
 
         has_hype_section = len(all_tracks) > 10
 
-        print(f"✅ Extracted {len(beatport_top10)} Beatport Top 10 + {len(hype_top10)} Hype Top 10 tracks")
+        print(f"Extracted {len(beatport_top10)} Beatport Top 10 + {len(hype_top10)} Hype Top 10 tracks")
 
         return {
             'beatport_top10': beatport_top10,
@@ -4059,12 +4059,12 @@ class BeatportUnifiedScraper:
             }
 
         except Exception as e:
-            print(f"❌ Error extracting track data: {e}")
+            print(f"Error extracting track data: {e}")
             return None
 
     def scrape_genre_top10_releases(self, genre_slug, genre_id):
         """Scrape Top 10 releases from genre page using .partial-artwork elements"""
-        print(f"💿 Scraping Top 10 releases for {genre_slug} (ID: {genre_id})")
+        print(f"Scraping Top 10 releases for {genre_slug} (ID: {genre_id})")
 
         genre_url = f"https://www.beatport.com/genre/{genre_slug}/{genre_id}"
 
@@ -4076,10 +4076,10 @@ class BeatportUnifiedScraper:
         partial_artwork_elements = soup.find_all(class_='partial-artwork')
 
         if not partial_artwork_elements:
-            print(f"❌ No .partial-artwork elements found on {genre_url}")
+            print(f"No .partial-artwork elements found on {genre_url}")
             return []
 
-        print(f"📊 Found {len(partial_artwork_elements)} .partial-artwork elements")
+        print(f"Found {len(partial_artwork_elements)} .partial-artwork elements")
 
         # Extract release data from each element
         releases = []
@@ -4088,7 +4088,7 @@ class BeatportUnifiedScraper:
             if release_data:
                 releases.append(release_data)
 
-        print(f"✅ Extracted {len(releases)} Top 10 releases")
+        print(f"Extracted {len(releases)} Top 10 releases")
         return releases
 
     def extract_release_data_from_partial_artwork(self, artwork_element, rank):
@@ -4144,7 +4144,7 @@ class BeatportUnifiedScraper:
             artist = self.clean_beatport_text(artist) if artist != "Unknown Artist" else artist
             label = self.clean_beatport_text(label) if label != "Unknown Label" else label
 
-            print(f"   📦 Release #{rank}: '{title}' by '{artist}' [{label}]")
+            print(f"   Release #{rank}: '{title}' by '{artist}' [{label}]")
 
             return {
                 'title': title,
@@ -4158,7 +4158,7 @@ class BeatportUnifiedScraper:
             }
 
         except Exception as e:
-            print(f"❌ Error extracting release data from .partial-artwork: {e}")
+            print(f"Error extracting release data from .partial-artwork: {e}")
             return None
 
     def extract_hero_release_data(self, release_element) -> Dict:
@@ -4234,7 +4234,7 @@ class BeatportUnifiedScraper:
             return data
 
         except Exception as e:
-            print(f"⚠️ Error extracting hero release data: {e}")
+            print(f"Error extracting hero release data: {e}")
             return {}
 
     def scrape_all_genres(self, tracks_per_genre: int = 100, max_workers: int = 5, include_images: bool = False) -> Dict[str, List[Dict]]:
@@ -4243,7 +4243,7 @@ class BeatportUnifiedScraper:
         if not self.all_genres:
             self.all_genres = self.discover_genres_with_images(include_images=include_images)
 
-        print(f"\n🎵 Scraping {len(self.all_genres)} genres...")
+        print(f"\nScraping {len(self.all_genres)} genres...")
 
         all_results = {}
         completed = 0
@@ -4251,14 +4251,14 @@ class BeatportUnifiedScraper:
         def scrape_single_genre(genre):
             nonlocal completed
 
-            print(f"🎯 Scraping {genre['name']}...")
+            print(f"Scraping {genre['name']}...")
             tracks = self.scrape_genre_charts(genre, tracks_per_genre)
 
             with self.results_lock:
                 if tracks:  # Only store genres that have tracks
                     all_results[genre['name']] = tracks
                 completed += 1
-                print(f"✅ {genre['name']}: {len(tracks)} tracks ({completed}/{len(self.all_genres)} complete)")
+                print(f"{genre['name']}: {len(tracks)} tracks ({completed}/{len(self.all_genres)} complete)")
 
             return genre['name'], tracks
 
@@ -4273,7 +4273,7 @@ class BeatportUnifiedScraper:
                 try:
                     future.result()
                 except Exception as e:
-                    print(f"❌ Error processing {genre['name']}: {e}")
+                    print(f"Error processing {genre['name']}: {e}")
 
         return all_results
 
@@ -4304,16 +4304,16 @@ class BeatportUnifiedScraper:
 
 def test_dynamic_genre_discovery():
     """Test the dynamic genre discovery functionality"""
-    print("🚀 Dynamic Genre Discovery Test")
+    print("Dynamic Genre Discovery Test")
     print("=" * 80)
 
     scraper = BeatportUnifiedScraper()
 
     # Test genre discovery
-    print("\n🔍 TEST 1: Genre Discovery")
+    print("\nTEST 1: Genre Discovery")
     genres = scraper.discover_genres_from_homepage()
 
-    print(f"\n✅ Discovered {len(genres)} genres:")
+    print(f"\nDiscovered {len(genres)} genres:")
     for i, genre in enumerate(genres[:10]):  # Show first 10
         print(f"   {i+1:2}. {genre['name']} -> {genre['slug']} (ID: {genre['id']})")
         if 'url' in genre:
@@ -4323,41 +4323,41 @@ def test_dynamic_genre_discovery():
         print(f"   ... and {len(genres) - 10} more genres")
 
     # Test with images (limit to 3 for demo)
-    print("\n📷 TEST 2: Genre Discovery with Images (Sample)")
+    print("\nTEST 2: Genre Discovery with Images (Sample)")
     genres_with_images = scraper.discover_genres_with_images(include_images=True)
 
-    print(f"\n🖼️ Sample genres with images:")
+    print(f"\nSample genres with images:")
     for genre in genres_with_images[:3]:
         print(f"   • {genre['name']}: {genre.get('image_url', 'No image')}")
 
     # Test a few genre scrapes
-    print("\n🎵 TEST 3: Sample Genre Chart Scraping")
+    print("\nTEST 3: Sample Genre Chart Scraping")
     sample_genres = genres[:3]
 
     for genre in sample_genres:
-        print(f"\n🎯 Testing {genre['name']}...")
+        print(f"\nTesting {genre['name']}...")
         tracks = scraper.scrape_genre_charts(genre, limit=3)
         if tracks:
-            print(f"   ✅ Found {len(tracks)} tracks:")
+            print(f"   Found {len(tracks)} tracks:")
             for track in tracks:
                 print(f"      • {track['artist']} - {track['title']}")
         else:
-            print(f"   ❌ No tracks found")
+            print(f"   No tracks found")
 
     return genres
 
 def test_improved_chart_sections():
     """Test the improved chart section discovery and scraping"""
-    print("🚀 Testing Improved Chart Section Discovery & Scraping")
+    print("Testing Improved Chart Section Discovery & Scraping")
     print("=" * 80)
 
     scraper = BeatportUnifiedScraper()
 
     # Test 1: Chart Section Discovery
-    print("\n🔍 TEST 1: Chart Section Discovery")
+    print("\nTEST 1: Chart Section Discovery")
     chart_discovery = scraper.discover_chart_sections()
 
-    print(f"\n📊 Discovery Results:")
+    print(f"\nDiscovery Results:")
     summary = chart_discovery.get('summary', {})
     print(f"   • Top Charts sections: {summary.get('top_charts_sections', 0)}")
     print(f"   • Staff Picks sections: {summary.get('staff_picks_sections', 0)}")
@@ -4366,57 +4366,57 @@ def test_improved_chart_sections():
     print(f"   • Individual DJ charts: {summary.get('individual_dj_charts', 0)}")
 
     # Test 2: New/Improved Scraping Methods
-    print("\n🔥 TEST 2: Improved Chart Scraping Methods")
+    print("\nTEST 2: Improved Chart Scraping Methods")
 
     # Test Hype Top 100 (fixed URL)
     print("\n2a. Testing Hype Top 100 (fixed URL)...")
     hype_tracks = scraper.scrape_hype_top_100(limit=5)
     if hype_tracks:
-        print(f"   ✅ Found {len(hype_tracks)} tracks:")
+        print(f"   Found {len(hype_tracks)} tracks:")
         for track in hype_tracks[:3]:
             print(f"      • {track['artist']} - {track['title']}")
     else:
-        print("   ❌ No tracks found")
+        print("   No tracks found")
 
     # Test Top 100 Releases (new method)
     print("\n2b. Testing Top 100 Releases (new method)...")
     releases_tracks = scraper.scrape_top_100_releases(limit=5)
     if releases_tracks:
-        print(f"   ✅ Found {len(releases_tracks)} tracks:")
+        print(f"   Found {len(releases_tracks)} tracks:")
         for track in releases_tracks[:3]:
             print(f"      • {track['artist']} - {track['title']}")
     else:
-        print("   ❌ No tracks found")
+        print("   No tracks found")
 
     # Test Improved New Releases
     print("\n2c. Testing Improved New Releases...")
     new_releases = scraper.scrape_new_releases(limit=5)
     if new_releases:
-        print(f"   ✅ Found {len(new_releases)} tracks:")
+        print(f"   Found {len(new_releases)} tracks:")
         for track in new_releases[:3]:
             print(f"      • {track['artist']} - {track['title']}")
     else:
-        print("   ❌ No tracks found")
+        print("   No tracks found")
 
     # Test Improved DJ Charts
     print("\n2d. Testing Improved DJ Charts...")
     dj_charts = scraper.scrape_dj_charts(limit=5)
     if dj_charts:
-        print(f"   ✅ Found {len(dj_charts)} charts:")
+        print(f"   Found {len(dj_charts)} charts:")
         for chart in dj_charts[:3]:
             print(f"      • {chart['title']} by {chart['artist']}")
     else:
-        print("   ❌ No charts found")
+        print("   No charts found")
 
     # Test Improved Featured Charts
     print("\n2e. Testing Improved Featured Charts...")
     featured_charts = scraper.scrape_featured_charts(limit=5)
     if featured_charts:
-        print(f"   ✅ Found {len(featured_charts)} items:")
+        print(f"   Found {len(featured_charts)} items:")
         for item in featured_charts[:3]:
             print(f"      • {item['title']} by {item['artist']}")
     else:
-        print("   ❌ No items found")
+        print("   No items found")
 
     return {
         'chart_discovery': chart_discovery,
@@ -4429,22 +4429,22 @@ def test_improved_chart_sections():
 
 def main():
     """Test the unified Beatport scraper"""
-    print("🚀 Beatport Unified Scraper - Improved Chart Discovery")
+    print("Beatport Unified Scraper - Improved Chart Discovery")
     print("=" * 80)
 
     scraper = BeatportUnifiedScraper()
 
     # Test New on Beatport Hero first
-    print("\n🎯 NEW ON BEATPORT HERO TEST")
+    print("\nNEW ON BEATPORT HERO TEST")
     hero_tracks = scraper.scrape_new_on_beatport_hero(limit=10)
     if hero_tracks:
-        print(f"✅ Successfully extracted {len(hero_tracks)} tracks from hero slideshow")
+        print(f"Successfully extracted {len(hero_tracks)} tracks from hero slideshow")
         for i, track in enumerate(hero_tracks[:3]):  # Show first 3
             print(f"   {i+1}. {track.get('title', 'No title')} - {track.get('artist', 'No artist')}")
             print(f"      URL: {track.get('url', 'No URL')}")
             print(f"      Classes: {track.get('element_classes', 'No classes')}")
     else:
-        print("❌ No tracks found in hero slideshow")
+        print("No tracks found in hero slideshow")
 
     # Test improved chart sections
     print("\n🆕 IMPROVED CHART SECTIONS TEST")
@@ -4458,21 +4458,21 @@ def main():
     scraper.all_genres = discovered_genres
 
     # Test 1: Top 100
-    print("\n📊 TEST 1: Top 100 Chart")
+    print("\nTEST 1: Top 100 Chart")
     top_100 = scraper.scrape_top_100(limit=10)  # Test with 10 for now
 
     if top_100:
-        print(f"\n✅ Top 100 Sample (showing first 5):")
+        print(f"\nTop 100 Sample (showing first 5):")
         for track in top_100[:5]:
             print(f"   {track['position']}. {track['artist']} - {track['title']}")
 
         quality = scraper.test_data_quality(top_100)
-        print(f"\n📈 Data Quality: {quality['quality_score']:.1f}% ({quality['valid_tracks']}/{quality['total_tracks']} tracks)")
+        print(f"\nData Quality: {quality['quality_score']:.1f}% ({quality['valid_tracks']}/{quality['total_tracks']} tracks)")
     else:
-        print("❌ Failed to extract Top 100")
+        print("Failed to extract Top 100")
 
     # Test 2: Sample of discovered genres
-    print("\n🎵 TEST 2: Dynamic Genre Charts Sample")
+    print("\nTEST 2: Dynamic Genre Charts Sample")
     test_genres = scraper.all_genres[:5]  # Test first 5 discovered genres
 
     print(f"Testing {len(test_genres)} dynamically discovered genres...")
@@ -4482,12 +4482,12 @@ def main():
         tracks = scraper.scrape_genre_charts(genre, limit=5)  # 5 tracks per genre for testing
         if tracks:
             genre_results[genre['name']] = tracks
-            print(f"\n🎯 {genre['name']} Top 5:")
+            print(f"\n{genre['name']} Top 5:")
             for track in tracks[:3]:
                 print(f"   • {track['artist']} - {track['title']}")
 
     # Test 3: Full genre scraping (smaller sample)
-    print("\n🚀 TEST 3: Full Multi-Genre Scraping")
+    print("\nTEST 3: Full Multi-Genre Scraping")
     print("Testing parallel scraping of 10 genres...")
 
     sample_genres = scraper.all_genres[:10]
@@ -4497,7 +4497,7 @@ def main():
 
     # Results summary
     print("\n" + "=" * 80)
-    print("📋 FINAL RESULTS SUMMARY")
+    print("FINAL RESULTS SUMMARY")
     print("=" * 80)
 
     total_tracks = len(top_100) if top_100 else 0
@@ -4513,7 +4513,7 @@ def main():
     all_tracks = (top_100 or []) + [track for tracks in all_genre_results.values() for track in tracks]
     if all_tracks:
         overall_quality = scraper.test_data_quality(all_tracks)
-        print(f"\n📊 OVERALL DATA QUALITY")
+        print(f"\nOVERALL DATA QUALITY")
         print(f"• Quality Score: {overall_quality['quality_score']:.1f}%")
         print(f"• Valid Tracks: {overall_quality['valid_tracks']}/{overall_quality['total_tracks']}")
 
@@ -4536,27 +4536,27 @@ def main():
     try:
         with open('beatport_unified_results.json', 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
-        print(f"\n💾 Results saved to beatport_unified_results.json")
+        print(f"\nResults saved to beatport_unified_results.json")
     except Exception as e:
-        print(f"❌ Failed to save results: {e}")
+        print(f"Failed to save results: {e}")
 
     # Virtual playlist possibilities
     if overall_quality['quality_score'] > 70:
-        print(f"\n🎉 SUCCESS! Ready for virtual playlist creation")
-        print(f"📱 You can now create playlists for:")
+        print(f"\nSUCCESS! Ready for virtual playlist creation")
+        print(f"You can now create playlists for:")
         print(f"   • Beatport Top 100")
         for genre_name in list(all_genre_results.keys())[:5]:
             print(f"   • {genre_name} Top 100")
         if len(all_genre_results) > 5:
             print(f"   • ...and {len(all_genre_results) - 5} more genres!")
 
-        print(f"\n🔧 Integration Notes:")
+        print(f"\nIntegration Notes:")
         print(f"   • Artist and title data is clean and ready")
         print(f"   • {total_genres} genres confirmed working")
         print(f"   • Data quality: {overall_quality['quality_score']:.1f}%")
     else:
-        print(f"\n⚠️  Data quality needs improvement ({overall_quality['quality_score']:.1f}%)")
-        print(f"💡 Consider refining extraction methods")
+        print(f"\nData quality needs improvement ({overall_quality['quality_score']:.1f}%)")
+        print(f"Consider refining extraction methods")
 
 
 if __name__ == "__main__":

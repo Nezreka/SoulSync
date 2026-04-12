@@ -72,10 +72,10 @@ class ListenBrainzClient:
                 data = response.json()
                 if data.get('valid'):
                     self.username = data.get('user_name')
-                    logger.info(f"✅ ListenBrainz authenticated as: {self.username}")
+                    logger.info(f"ListenBrainz authenticated as: {self.username}")
                     return True
 
-            logger.warning("❌ Invalid ListenBrainz token")
+            logger.warning("Invalid ListenBrainz token")
             return False
         except Exception as e:
             logger.error(f"Error validating ListenBrainz token: {e}")
@@ -179,7 +179,7 @@ class ListenBrainzClient:
             if response and response.status_code == 200:
                 data = response.json()
                 playlists = data.get('playlists', [])
-                logger.info(f"📋 Fetched {len(playlists)} playlists created for {self.username}")
+                logger.info(f"Fetched {len(playlists)} playlists created for {self.username}")
                 return playlists
             elif response and response.status_code == 404:
                 logger.warning(f"User {self.username} not found")
@@ -215,7 +215,7 @@ class ListenBrainzClient:
             if response and response.status_code == 200:
                 data = response.json()
                 playlists = data.get('playlists', [])
-                logger.info(f"📋 Fetched {len(playlists)} user playlists for {self.username}")
+                logger.info(f"Fetched {len(playlists)} user playlists for {self.username}")
                 return playlists
             elif response and response.status_code == 404:
                 logger.warning(f"User {self.username} not found")
@@ -251,7 +251,7 @@ class ListenBrainzClient:
             if response and response.status_code == 200:
                 data = response.json()
                 playlists = data.get('playlists', [])
-                logger.info(f"📋 Fetched {len(playlists)} collaborative playlists for {self.username}")
+                logger.info(f"Fetched {len(playlists)} collaborative playlists for {self.username}")
                 return playlists
             elif response and response.status_code == 404:
                 logger.warning(f"User {self.username} not found")
@@ -291,7 +291,7 @@ class ListenBrainzClient:
                 data = response.json()
                 playlist = data.get('playlist', {})
                 track_count = len(playlist.get('track', []))
-                logger.info(f"📋 Fetched playlist '{playlist.get('title')}' with {track_count} tracks")
+                logger.info(f"Fetched playlist '{playlist.get('title')}' with {track_count} tracks")
                 return playlist
             elif response and response.status_code == 404:
                 logger.warning(f"Playlist {playlist_mbid} not found")
@@ -333,7 +333,7 @@ class ListenBrainzClient:
             if response.status_code == 200:
                 data = response.json()
                 playlists = data.get('playlists', [])
-                logger.info(f"🔍 Found {len(playlists)} playlists matching '{query}'")
+                logger.info(f"Found {len(playlists)} playlists matching '{query}'")
                 return playlists
             else:
                 logger.error(f"Failed to search playlists: {response.status_code}")

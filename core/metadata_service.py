@@ -212,8 +212,8 @@ class MetadataService:
 
     def _log_initialization(self):
         """Log initialization status"""
-        spotify_status = "✅ Authenticated" if self.spotify.is_spotify_authenticated() else "❌ Not authenticated"
-        fallback_status = "✅ Available" if self.itunes.is_authenticated() else "❌ Not available"
+        spotify_status = "Authenticated" if self.spotify.is_spotify_authenticated() else "Not authenticated"
+        fallback_status = "Available" if self.itunes.is_authenticated() else "Not available"
 
         logger.info(f"MetadataService initialized - Spotify: {spotify_status}, {self._fallback_source.capitalize()}: {fallback_status}")
         logger.info(f"Preferred provider: {self.preferred_provider}")

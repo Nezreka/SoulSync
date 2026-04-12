@@ -62,17 +62,17 @@ class Toast(QWidget):
     def apply_styling(self):
         """Apply styling based on toast type"""
         if self.toast_type == ToastType.SUCCESS:
-            icon = "✅"
+            icon = ""
             accent_color = "#1db954"  # Spotify green
             bg_color = "rgba(29, 185, 84, 0.15)"
             border_color = "rgba(29, 185, 84, 0.3)"
         elif self.toast_type == ToastType.ERROR:
-            icon = "❌"
+            icon = ""
             accent_color = "#f04747"
             bg_color = "rgba(240, 71, 71, 0.15)"
             border_color = "rgba(240, 71, 71, 0.3)"
         elif self.toast_type == ToastType.WARNING:
-            icon = "⚠️"
+            icon = ""
             accent_color = "#ffa500"
             bg_color = "rgba(255, 165, 0, 0.15)"
             border_color = "rgba(255, 165, 0, 0.3)"

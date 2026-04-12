@@ -474,7 +474,7 @@ class ServiceTestThread(QThread):
             
             # Basic validation first
             if not self.test_config.get('client_id') or not self.test_config.get('client_secret'):
-                return False, "✗ Please enter both Client ID and Client Secret"
+                return False, "Please enter both Client ID and Client Secret"
             
             # Save temporarily to test
             original_client_id = config_manager.get('spotify.client_id')
@@ -489,7 +489,7 @@ class ServiceTestThread(QThread):
                 
                 # Check if client was created successfully (has sp object)
                 if client.sp is None:
-                    message = "✗ Failed to create Spotify client.\nCheck your credentials."
+                    message = "Failed to create Spotify client.\nCheck your credentials."
                     success = False
                 else:
                     # Try a simple auth check with timeout
@@ -498,17 +498,17 @@ class ServiceTestThread(QThread):
                         if client.is_authenticated():
                             user_info = client.get_user_info()
                             username = user_info.get('display_name', 'Unknown') if user_info else 'Unknown'
-                            message = f"✓ Spotify connection successful!\nConnected as: {username}"
+                            message = f"Spotify connection successful!\nConnected as: {username}"
                             success = True
                         else:
-                            message = "✗ Spotify authentication failed.\nPlease complete the OAuth flow in your browser."
+                            message = "Spotify authentication failed.\nPlease complete the OAuth flow in your browser."
                             success = False
                     except Exception as auth_e:
-                        message = f"✗ Spotify authentication failed:\n{str(auth_e)}"
+                        message = f"Spotify authentication failed:\n{str(auth_e)}"
                         success = False
                         
             except Exception as client_e:
-                message = f"✗ Failed to create Spotify client:\n{str(client_e)}"
+                message = f"Failed to create Spotify client:\n{str(client_e)}"
                 success = False
             
             # Restore original values
@@ -524,7 +524,7 @@ class ServiceTestThread(QThread):
                 config_manager.set('spotify.client_secret', original_client_secret)
             except:
                 pass
-            return False, f"✗ Spotify test failed:\n{str(e)}"
+            return False, f"Spotify test failed:\n{str(e)}"
     
     def _test_tidal(self):
         """Test Tidal connection"""
@@ -533,7 +533,7 @@ class ServiceTestThread(QThread):
             
             # Basic validation first
             if not self.test_config.get('client_id') or not self.test_config.get('client_secret'):
-                return False, "✗ Please enter both Client ID and Client Secret"
+                return False, "Please enter both Client ID and Client Secret"
             
             # Save temporarily to test
             original_client_id = config_manager.get('tidal.client_id')
@@ -550,14 +550,14 @@ class ServiceTestThread(QThread):
                 if client.is_authenticated() or client._ensure_valid_token():
                     user_info = client.get_user_info()
                     username = user_info.get('display_name', 'Tidal User') if user_info else 'Tidal User'
-                    message = f"✓ Tidal connection successful!\nConnected as: {username}\nOAuth flow completed."
+                    message = f"Tidal connection successful!\nConnected as: {username}\nOAuth flow completed."
                     success = True
                 else:
-                    message = "✗ Tidal authentication failed.\nPlease complete the OAuth flow in your browser.\nCheck your credentials and redirect URI."
+                    message = "Tidal authentication failed.\nPlease complete the OAuth flow in your browser.\nCheck your credentials and redirect URI."
                     success = False
                     
             except Exception as client_e:
-                message = f"✗ Failed to create Tidal client:\n{str(client_e)}"
+                message = f"Failed to create Tidal client:\n{str(client_e)}"
                 success = False
             
             # Restore original values
@@ -573,7 +573,7 @@ class ServiceTestThread(QThread):
                 config_manager.set('tidal.client_secret', original_client_secret)
             except:
                 pass
-            return False, f"✗ Tidal test failed:\n{str(e)}"
+            return False, f"Tidal test failed:\n{str(e)}"
     
     def _test_plex(self):
         """Test Plex connection"""
@@ -591,10 +591,10 @@ class ServiceTestThread(QThread):
             client = PlexClient()
             if client.is_connected():
                 server_name = client.server.friendlyName if client.server else 'Unknown'
-                message = f"✓ Plex connection successful!\nServer: {server_name}"
+                message = f"Plex connection successful!\nServer: {server_name}"
                 success = True
             else:
-                message = "✗ Plex connection failed.\nCheck your server URL and token."
+                message = "Plex connection failed.\nCheck your server URL and token."
                 success = False
             
             # Restore original values
@@ -604,7 +604,7 @@ class ServiceTestThread(QThread):
             return success, message
             
         except Exception as e:
-            return False, f"✗ Plex test failed:\n{str(e)}"
+            return False, f"Plex test failed:\n{str(e)}"
     
     def _test_jellyfin(self):
         """Test Jellyfin connection"""
@@ -634,19 +634,19 @@ class ServiceTestThread(QThread):
                 data = response.json()
                 server_name = data.get('ServerName', 'Unknown')
                 version = data.get('Version', 'Unknown')
-                message = f"✓ Jellyfin connection successful!\nServer: {server_name}\nVersion: {version}"
+                message = f"Jellyfin connection successful!\nServer: {server_name}\nVersion: {version}"
                 return True, message
             elif response.status_code == 401:
-                return False, "✗ Jellyfin authentication failed.\nCheck your API key."
+                return False, "Jellyfin authentication failed.\nCheck your API key."
             else:
-                return False, f"✗ Jellyfin connection failed.\nHTTP {response.status_code}: {response.text}"
+                return False, f"Jellyfin connection failed.\nHTTP {response.status_code}: {response.text}"
                 
         except requests.exceptions.Timeout:
-            return False, "✗ Jellyfin connection timeout.\nCheck your server URL."
+            return False, "Jellyfin connection timeout.\nCheck your server URL."
         except requests.exceptions.ConnectionError:
-            return False, "✗ Cannot connect to Jellyfin server.\nCheck your server URL and network."
+            return False, "Cannot connect to Jellyfin server.\nCheck your server URL and network."
         except Exception as e:
-            return False, f"✗ Jellyfin test failed:\n{str(e)}"
+            return False, f"Jellyfin test failed:\n{str(e)}"
 
     def _test_navidrome(self):
         """Test Navidrome connection"""
@@ -695,23 +695,23 @@ class ServiceTestThread(QThread):
 
                 if subsonic_response.get('status') == 'ok':
                     version = subsonic_response.get('version', 'Unknown')
-                    message = f"✓ Navidrome connection successful!\nSubsonic API Version: {version}"
+                    message = f"Navidrome connection successful!\nSubsonic API Version: {version}"
                     return True, message
                 elif subsonic_response.get('status') == 'failed':
                     error = subsonic_response.get('error', {})
                     error_message = error.get('message', 'Unknown error')
-                    return False, f"✗ Navidrome authentication failed:\n{error_message}"
+                    return False, f"Navidrome authentication failed:\n{error_message}"
                 else:
-                    return False, "✗ Unexpected response from Navidrome server"
+                    return False, "Unexpected response from Navidrome server"
             else:
-                return False, f"✗ Navidrome connection failed.\nHTTP {response.status_code}: {response.text}"
+                return False, f"Navidrome connection failed.\nHTTP {response.status_code}: {response.text}"
 
         except requests.exceptions.Timeout:
-            return False, "✗ Navidrome connection timeout.\nCheck your server URL."
+            return False, "Navidrome connection timeout.\nCheck your server URL."
         except requests.exceptions.ConnectionError:
-            return False, "✗ Cannot connect to Navidrome server.\nCheck your server URL and network."
+            return False, "Cannot connect to Navidrome server.\nCheck your server URL and network."
         except Exception as e:
-            return False, f"✗ Navidrome test failed:\n{str(e)}"
+            return False, f"Navidrome test failed:\n{str(e)}"
 
     def _test_soulseek(self):
         """Test Soulseek connection"""
@@ -734,31 +734,31 @@ class ServiceTestThread(QThread):
             response = requests.get(f"{slskd_url}/api/v0/session", headers=headers, timeout=5)
             
             if response.status_code == 200:
-                return True, "✓ Soulseek connection successful!\nslskd is responding."
+                return True, "Soulseek connection successful!\nslskd is responding."
             elif response.status_code == 401:
-                return False, ("✗ Invalid API key\n\n"
+                return False, ("Invalid API key\n\n"
                              "Please check your slskd API key in the configuration.")
             else:
-                return False, (f"✗ Soulseek connection failed\nHTTP {response.status_code}\n\n"
+                return False, (f"Soulseek connection failed\nHTTP {response.status_code}\n\n"
                              "slskd is running but returned an error.")
                 
         except requests.exceptions.ConnectionError as e:
             if "refused" in str(e).lower():
-                return False, ("✗ Cannot connect to slskd\n\n"
+                return False, ("Cannot connect to slskd\n\n"
                              "slskd appears to not be running on the specified URL.\n\n"
                              "To fix this:\n"
                              "1. Install slskd from: https://github.com/slskd/slskd\n"
                              "2. Start slskd service\n"
                              "3. Ensure it's running on the correct port (default: 5030)")
             else:
-                return False, f"✗ Network error:\n{str(e)}"
+                return False, f"Network error:\n{str(e)}"
         except requests.exceptions.Timeout:
-            return False, ("✗ Connection timed out\n\n"
+            return False, ("Connection timed out\n\n"
                          "slskd is not responding. Check if it's running and accessible.")
         except requests.exceptions.RequestException as e:
-            return False, f"✗ Request failed:\n{str(e)}"
+            return False, f"Request failed:\n{str(e)}"
         except Exception as e:
-            return False, f"✗ Unexpected error:\n{str(e)}"
+            return False, f"Unexpected error:\n{str(e)}"
 
 class JellyfinDetectionThread(QThread):
     progress_updated = pyqtSignal(int, str)  # progress value, current url
@@ -1004,7 +1004,7 @@ class NavidromeDetectionThread(QThread):
                     print(f"Response data: {data}")
                     # Check if it's a valid Subsonic API response
                     if 'subsonic-response' in data:
-                        print(f"✓ Found Navidrome server at {url}")
+                        print(f"Found Navidrome server at {url}")
                         return True
                 except Exception as e:
                     print(f"JSON parse error: {e}")
@@ -1013,7 +1013,7 @@ class NavidromeDetectionThread(QThread):
             try:
                 root_response = requests.get(url, timeout=timeout)
                 if root_response.status_code == 200 and 'navidrome' in root_response.text.lower():
-                    print(f"✓ Found Navidrome web interface at {url}")
+                    print(f"Found Navidrome web interface at {url}")
                     return True
             except:
                 pass
@@ -1166,7 +1166,7 @@ class SettingsPage(QWidget):
         content_layout.addStretch()
         
         # Save button
-        self.save_btn = QPushButton("💾 Save Settings")
+        self.save_btn = QPushButton("Save Settings")
         self.save_btn.setFixedHeight(45)
         self.save_btn.clicked.connect(self.save_settings)
         self.save_btn.setStyleSheet("""
@@ -1333,7 +1333,7 @@ class SettingsPage(QWidget):
             
             # Update button text temporarily
             original_text = self.save_btn.text()
-            self.save_btn.setText("✓ Saved!")
+            self.save_btn.setText("Saved!")
             self.save_btn.setStyleSheet("""
                 QPushButton {
                     background: #1aa34a;
@@ -1397,20 +1397,20 @@ class SettingsPage(QWidget):
             # Create client and authenticate
             client = TidalClient()
             
-            self.tidal_auth_btn.setText("🔐 Authenticating...")
+            self.tidal_auth_btn.setText("Authenticating...")
             self.tidal_auth_btn.setEnabled(False)
             
             if client.authenticate():
-                QMessageBox.information(self, "Success", "✓ Tidal authentication successful!\nYou can now use Tidal playlists.")
-                self.tidal_auth_btn.setText("✅ Authenticated")
+                QMessageBox.information(self, "Success", "Tidal authentication successful!\nYou can now use Tidal playlists.")
+                self.tidal_auth_btn.setText("Authenticated")
             else:
-                QMessageBox.warning(self, "Authentication Failed", "✗ Tidal authentication failed.\nPlease check your credentials and try again.")
-                self.tidal_auth_btn.setText("🔐 Authenticate")
+                QMessageBox.warning(self, "Authentication Failed", "Tidal authentication failed.\nPlease check your credentials and try again.")
+                self.tidal_auth_btn.setText("Authenticate")
             
             self.tidal_auth_btn.setEnabled(True)
             
         except Exception as e:
-            self.tidal_auth_btn.setText("🔐 Authenticate")
+            self.tidal_auth_btn.setText("Authenticate")
             self.tidal_auth_btn.setEnabled(True)
             QMessageBox.critical(self, "Error", f"Failed to authenticate with Tidal:\n{str(e)}")
     
@@ -1826,7 +1826,7 @@ class SettingsPage(QWidget):
         
         # Success message
         location_type = "locally" if "localhost" in found_url or "127.0.0.1" in found_url else "on network"
-        success_label = QLabel(f"✓ Found Plex server running {location_type}!")
+        success_label = QLabel(f"Found Plex server running {location_type}!")
         success_label.setStyleSheet("color: #e5a00d; font-size: 13px; font-weight: bold;")
         success_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(success_label)
@@ -1937,7 +1937,7 @@ class SettingsPage(QWidget):
         
         # Success message
         location_type = "locally" if "localhost" in found_url or "127.0.0.1" in found_url else "on network"
-        success_label = QLabel(f"✓ Found Jellyfin server running {location_type}!")
+        success_label = QLabel(f"Found Jellyfin server running {location_type}!")
         success_label.setStyleSheet("color: #aa5cc3; font-size: 13px; font-weight: bold;")
         success_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(success_label)
@@ -2048,7 +2048,7 @@ class SettingsPage(QWidget):
         
         # Success message
         location_type = "locally" if "localhost" in found_url or "127.0.0.1" in found_url else "on network"
-        success_label = QLabel(f"✓ Found slskd running {location_type}!")
+        success_label = QLabel(f"Found slskd running {location_type}!")
         success_label.setStyleSheet("color: #1db954; font-size: 13px; font-weight: bold;")
         success_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(success_label)
@@ -2315,7 +2315,7 @@ class SettingsPage(QWidget):
         tidal_layout.addWidget(oauth_url_label)
         
         # Authenticate button
-        self.tidal_auth_btn = QPushButton("🔐 Authenticate")
+        self.tidal_auth_btn = QPushButton("Authenticate")
         self.tidal_auth_btn.setFixedHeight(30)
         self.tidal_auth_btn.setStyleSheet("""
             QPushButton {
@@ -2378,7 +2378,7 @@ class SettingsPage(QWidget):
         server_selection_layout.addLayout(toggle_container)
         
         # Restart warning (initially hidden)
-        self.restart_warning_frame = QLabel("⚠️ Server change requires restart - Save settings then restart SoulSync")
+        self.restart_warning_frame = QLabel("Server change requires restart - Save settings then restart SoulSync")
         self.restart_warning_frame.setStyleSheet("""
             color: #ffc107; 
             font-size: 11px; 
@@ -2764,7 +2764,7 @@ class SettingsPage(QWidget):
         database_layout.addWidget(workers_help)
         
         # Metadata Enhancement Settings
-        metadata_group = SettingsGroup("🎵 Metadata Enhancement")
+        metadata_group = SettingsGroup("Metadata Enhancement")
         metadata_layout = QVBoxLayout(metadata_group)
         metadata_layout.setContentsMargins(16, 20, 16, 16)
         metadata_layout.setSpacing(12)
@@ -2831,13 +2831,13 @@ class SettingsPage(QWidget):
         metadata_layout.addWidget(help_text)
         
         # Playlist Sync Settings
-        playlist_sync_group = SettingsGroup("🎶 Playlist Sync")
+        playlist_sync_group = SettingsGroup("Playlist Sync")
         playlist_sync_layout = QVBoxLayout(playlist_sync_group)
         playlist_sync_layout.setContentsMargins(16, 20, 16, 16)
         playlist_sync_layout.setSpacing(12)
         
         # Create backup checkbox
-        self.create_backup_checkbox = QCheckBox("🛡️ Create backup of existing playlists before sync")
+        self.create_backup_checkbox = QCheckBox("Create backup of existing playlists before sync")
         self.create_backup_checkbox.setChecked(True)
         self.create_backup_checkbox.setStyleSheet("""
             QCheckBox {
@@ -3367,12 +3367,12 @@ class SettingsPage(QWidget):
             # Show success toast
             from ui.components.toast_manager import ToastManager
             toast_manager = ToastManager(self)
-            toast_manager.show_toast(f"✓ Navidrome server detected: {found_url}", "success", 4000)
+            toast_manager.show_toast(f"Navidrome server detected: {found_url}", "success", 4000)
         else:
             # Show error toast
             from ui.components.toast_manager import ToastManager
             toast_manager = ToastManager(self)
-            toast_manager.show_toast("❌ No Navidrome servers found on the network", "error", 4000)
+            toast_manager.show_toast("No Navidrome servers found on the network", "error", 4000)
 
     def on_jellyfin_detection_completed(self, found_url):
         """Handle Jellyfin detection completion"""

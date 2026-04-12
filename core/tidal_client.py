@@ -472,9 +472,9 @@ class TidalClient:
             result = self._exchange_code_for_tokens()
             
             if result:
-                logger.info("✅ Token exchange successful")
+                logger.info("Token exchange successful")
             else:
-                logger.error("❌ Token exchange failed")
+                logger.error("Token exchange failed")
             
             return result
         except Exception as e:
