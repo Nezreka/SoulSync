@@ -977,12 +977,15 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE discovery_pool ADD COLUMN artist_genres TEXT")
                 logger.info("Added artist_genres column to discovery_pool table")
 
+            if 'source' not in discovery_pool_columns:
+                cursor.execute("ALTER TABLE discovery_pool ADD COLUMN source TEXT DEFAULT 'spotify'")
+                logger.info("Added source column to discovery_pool table")
+
             # Migration: Add iTunes columns to discovery_pool for dual-source discovery
             if 'itunes_track_id' not in discovery_pool_columns:
                 cursor.execute("ALTER TABLE discovery_pool ADD COLUMN itunes_track_id TEXT")
                 cursor.execute("ALTER TABLE discovery_pool ADD COLUMN itunes_album_id TEXT")
                 cursor.execute("ALTER TABLE discovery_pool ADD COLUMN itunes_artist_id TEXT")
-                cursor.execute("ALTER TABLE discovery_pool ADD COLUMN source TEXT DEFAULT 'spotify'")
                 logger.info("Added iTunes columns to discovery_pool table for dual-source discovery")
 
             # Migration: Add Deezer columns to discovery_pool for tri-source discovery
@@ -1008,9 +1011,12 @@ class MusicDatabase:
             cursor.execute("PRAGMA table_info(recent_releases)")
             recent_releases_columns = [column[1] for column in cursor.fetchall()]
 
+            if 'source' not in recent_releases_columns:
+                cursor.execute("ALTER TABLE recent_releases ADD COLUMN source TEXT DEFAULT 'spotify'")
+                logger.info("Added source column to recent_releases table")
+
             if 'album_itunes_id' not in recent_releases_columns:
                 cursor.execute("ALTER TABLE recent_releases ADD COLUMN album_itunes_id TEXT")
-                cursor.execute("ALTER TABLE recent_releases ADD COLUMN source TEXT DEFAULT 'spotify'")
                 logger.info("Added iTunes columns to recent_releases table for dual-source discovery")
 
             # Migration: Add Deezer column to recent_releases for tri-source discovery
@@ -1022,10 +1028,13 @@ class MusicDatabase:
             cursor.execute("PRAGMA table_info(discovery_recent_albums)")
             discovery_recent_albums_columns = [column[1] for column in cursor.fetchall()]
 
+            if 'source' not in discovery_recent_albums_columns:
+                cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN source TEXT DEFAULT 'spotify'")
+                logger.info("Added source column to discovery_recent_albums table")
+
             if 'album_itunes_id' not in discovery_recent_albums_columns:
                 cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN album_itunes_id TEXT")
                 cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN artist_itunes_id TEXT")
-                cursor.execute("ALTER TABLE discovery_recent_albums ADD COLUMN source TEXT DEFAULT 'spotify'")
                 logger.info("Added iTunes columns to discovery_recent_albums table for dual-source discovery")
 
             # Migration: Add Deezer columns to discovery_recent_albums for tri-source discovery
@@ -1284,7 +1293,7 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lap_profile ON liked_artists_pool (profile_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lap_status ON liked_artists_pool (profile_id, match_status)")
 
-            logger.info("Discovery tables created successfully")
+            logger.info("Discovery tables added/verified successfully")
 
         except Exception as e:
             logger.error(f"Error creating discovery tables: {e}")
@@ -1450,6 +1459,8 @@ class MusicDatabase:
                             include_remixes INTEGER DEFAULT 0,
                             include_acoustic INTEGER DEFAULT 0,
                             include_compilations INTEGER DEFAULT 0,
+                            include_instrumentals INTEGER DEFAULT 0,
+                            lookback_days INTEGER DEFAULT NULL,
                             itunes_artist_id TEXT,
                             deezer_artist_id TEXT,
                             discogs_artist_id TEXT,
@@ -1476,6 +1487,8 @@ class MusicDatabase:
                             include_remixes INTEGER DEFAULT 0,
                             include_acoustic INTEGER DEFAULT 0,
                             include_compilations INTEGER DEFAULT 0,
+                            include_instrumentals INTEGER DEFAULT 0,
+                            lookback_days INTEGER DEFAULT NULL,
                             itunes_artist_id TEXT,
                             deezer_artist_id TEXT,
                             discogs_artist_id TEXT
@@ -1489,6 +1502,7 @@ class MusicDatabase:
                             'last_scan_timestamp', 'created_at', 'updated_at', 'image_url',
                             'include_albums', 'include_eps', 'include_singles', 'include_live',
                             'include_remixes', 'include_acoustic', 'include_compilations',
+                            'include_instrumentals', 'lookback_days',
                             'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'profile_id']
                 shared_cols = [c for c in new_cols if c in old_cols]
                 cols_str = ', '.join(shared_cols)
@@ -1749,7 +1763,7 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_discogs_id ON albums (discogs_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_discogs_status ON albums (discogs_match_status)")
 
-            logger.info("Discogs enrichment columns added/verified")
+            logger.info("Discogs enrichment columns added/verified successfully")
 
         except Exception as e:
             logger.error(f"Error adding Discogs columns: {e}")
@@ -2217,6 +2231,8 @@ class MusicDatabase:
                             include_remixes INTEGER DEFAULT 0,
                             include_acoustic INTEGER DEFAULT 0,
                             include_compilations INTEGER DEFAULT 0,
+                            include_instrumentals INTEGER DEFAULT 0,
+                            lookback_days INTEGER DEFAULT NULL,
                             itunes_artist_id TEXT,
                             deezer_artist_id TEXT,
                             discogs_artist_id TEXT,
@@ -2231,6 +2247,7 @@ class MusicDatabase:
                                 'last_scan_timestamp', 'created_at', 'updated_at', 'image_url',
                                 'include_albums', 'include_eps', 'include_singles', 'include_live',
                                 'include_remixes', 'include_acoustic', 'include_compilations',
+                                'include_instrumentals', 'lookback_days',
                                 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'profile_id']
                     shared_cols = [c for c in new_cols if c in col_names]
                     cols_str = ', '.join(shared_cols)
@@ -2393,6 +2410,9 @@ class MusicDatabase:
                             itunes_track_id TEXT,
                             itunes_album_id TEXT,
                             itunes_artist_id TEXT,
+                            deezer_track_id TEXT,
+                            deezer_album_id TEXT,
+                            deezer_artist_id TEXT,
                             source TEXT NOT NULL DEFAULT 'spotify',
                             track_name TEXT NOT NULL,
                             artist_name TEXT NOT NULL,
@@ -2412,6 +2432,7 @@ class MusicDatabase:
 
                     new_cols = ['id', 'spotify_track_id', 'spotify_album_id', 'spotify_artist_id',
                                 'itunes_track_id', 'itunes_album_id', 'itunes_artist_id',
+                                'deezer_track_id', 'deezer_album_id', 'deezer_artist_id',
                                 'source', 'track_name', 'artist_name', 'album_name', 'album_cover_url',
                                 'duration_ms', 'popularity', 'release_date', 'is_new_release',
                                 'track_data_json', 'artist_genres', 'added_date', 'profile_id']
@@ -2486,6 +2507,7 @@ class MusicDatabase:
                             watchlist_artist_id INTEGER NOT NULL,
                             album_spotify_id TEXT,
                             album_itunes_id TEXT,
+                            album_deezer_id TEXT,
                             source TEXT NOT NULL DEFAULT 'spotify',
                             album_name TEXT NOT NULL,
                             release_date TEXT NOT NULL,
@@ -2498,8 +2520,8 @@ class MusicDatabase:
                     """)
 
                     new_cols = ['id', 'watchlist_artist_id', 'album_spotify_id', 'album_itunes_id',
-                                'source', 'album_name', 'release_date', 'album_cover_url',
-                                'track_count', 'added_date', 'profile_id']
+                                'album_deezer_id', 'source', 'album_name', 'release_date',
+                                'album_cover_url', 'track_count', 'added_date', 'profile_id']
                     shared_cols = [c for c in new_cols if c in old_cols]
                     cols_str = ', '.join(shared_cols)
 
@@ -2557,10 +2579,15 @@ class MusicDatabase:
                             source_artist_id TEXT NOT NULL,
                             similar_artist_spotify_id TEXT,
                             similar_artist_itunes_id TEXT,
+                            similar_artist_deezer_id TEXT,
                             similar_artist_name TEXT NOT NULL,
                             similarity_rank INTEGER DEFAULT 1,
                             occurrence_count INTEGER DEFAULT 1,
                             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            image_url TEXT,
+                            genres TEXT,
+                            popularity INTEGER DEFAULT 0,
+                            metadata_updated_at TIMESTAMP,
                             last_featured TIMESTAMP,
                             profile_id INTEGER DEFAULT 1,
                             UNIQUE(profile_id, source_artist_id, similar_artist_name)
@@ -2568,9 +2595,10 @@ class MusicDatabase:
                     """)
 
                     new_cols = ['id', 'source_artist_id', 'similar_artist_spotify_id',
-                                'similar_artist_itunes_id', 'similar_artist_name',
-                                'similarity_rank', 'occurrence_count', 'last_updated',
-                                'last_featured', 'profile_id']
+                                'similar_artist_itunes_id', 'similar_artist_deezer_id',
+                                'similar_artist_name', 'similarity_rank', 'occurrence_count',
+                                'last_updated', 'image_url', 'genres', 'popularity',
+                                'metadata_updated_at', 'last_featured', 'profile_id']
                     shared_cols = [c for c in new_cols if c in old_cols]
                     cols_str = ', '.join(shared_cols)
 
