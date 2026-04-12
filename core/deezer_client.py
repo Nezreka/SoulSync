@@ -72,9 +72,21 @@ class Track:
         if isinstance(album_data, dict):
             album_image_url = album_data.get('cover_xl') or album_data.get('cover_big') or album_data.get('cover_medium')
 
-        # Get artist name
+        # Get artist name(s) — use contributors for multi-artist tracks (feat. collabs)
         artist_data = track_data.get('artist', {})
         artist_name = artist_data.get('name', 'Unknown Artist') if isinstance(artist_data, dict) else 'Unknown Artist'
+        contributors = track_data.get('contributors', [])
+        if isinstance(contributors, list) and len(contributors) > 1:
+            artist_names = []
+            for c in contributors:
+                if isinstance(c, dict) and c.get('name'):
+                    artist_names.append(c['name'])
+            if artist_names:
+                all_artists = artist_names
+            else:
+                all_artists = [artist_name]
+        else:
+            all_artists = [artist_name]
 
         # Get album name
         album_name = ''
@@ -102,7 +114,7 @@ class Track:
         return cls(
             id=str(track_data.get('id', '')),
             name=track_data.get('title', ''),
-            artists=[artist_name],
+            artists=all_artists,
             album=album_name,
             duration_ms=track_data.get('duration', 0) * 1000,  # Deezer returns seconds
             popularity=track_data.get('rank', 0),
@@ -416,6 +428,15 @@ class DeezerClient:
         album_name = album_data.get('title', '') if isinstance(album_data, dict) else str(album_data) if album_data else ''
         album_id = str(album_data.get('id', '')) if isinstance(album_data, dict) else ''
 
+        # Use contributors for multi-artist tracks
+        contributors = track_data.get('contributors', [])
+        if isinstance(contributors, list) and len(contributors) > 1:
+            all_artists = [c['name'] for c in contributors if isinstance(c, dict) and c.get('name')]
+            if not all_artists:
+                all_artists = [artist_name]
+        else:
+            all_artists = [artist_name]
+
         return {
             'id': str(track_data.get('id', '')),
             'name': track_data.get('title', ''),
@@ -423,7 +444,7 @@ class DeezerClient:
             'disc_number': track_data.get('disk_number', 1),
             'duration_ms': track_data.get('duration', 0) * 1000,
             'explicit': track_data.get('explicit_lyrics', False),
-            'artists': [artist_name],
+            'artists': all_artists,
             'primary_artist': artist_name,
             'album': {
                 'id': album_id,
