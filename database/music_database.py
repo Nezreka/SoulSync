@@ -4877,9 +4877,11 @@ class MusicDatabase:
             params.append(f"%{self._normalize_for_comparison(title)}%")
 
         if artist:
-            where_conditions.append("unidecode_lower(artists.name) LIKE ?")
-            params.append(f"%{self._normalize_for_comparison(artist)}%")
-        
+            norm_artist = f"%{self._normalize_for_comparison(artist)}%"
+            where_conditions.append("(unidecode_lower(artists.name) LIKE ? OR unidecode_lower(COALESCE(tracks.track_artist, '')) LIKE ?)")
+            params.append(norm_artist)
+            params.append(norm_artist)
+
         # Add server filter if specified
         if server_source:
             where_conditions.append("tracks.server_source = ?")
@@ -4925,8 +4927,8 @@ class MusicDatabase:
         params = []
         
         for term in search_terms[:5]:  # Limit to 5 terms to avoid too broad search
-            like_conditions.append("(unidecode_lower(tracks.title) LIKE ? OR unidecode_lower(artists.name) LIKE ?)")
-            params.extend([f"%{term}%", f"%{term}%"])
+            like_conditions.append("(unidecode_lower(tracks.title) LIKE ? OR unidecode_lower(artists.name) LIKE ? OR unidecode_lower(COALESCE(tracks.track_artist, '')) LIKE ?)")
+            params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
         
         if not like_conditions:
             return []
