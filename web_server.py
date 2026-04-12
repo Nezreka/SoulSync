@@ -22830,7 +22830,7 @@ def _simple_monitor_task():
     Search cleanup and download cleanup are now handled by system automations."""
     print("Simple background monitor started")
 
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         try:
             with matched_context_lock:
                 pending_count = len(matched_downloads_context)
@@ -22856,6 +22856,8 @@ def _simple_monitor_task():
         except Exception as e:
             print(f"Simple monitor error: {e}")
             time.sleep(10)
+
+    print("Simple background monitor stopped")
 
 def start_simple_background_monitor():
     """Starts the simple background monitor thread."""
@@ -52130,7 +52132,7 @@ def _hydrabase_reconnect_loop():
     global _hydrabase_ws
     _consecutive_failures = 0
 
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(30)
         try:
             # Only attempt reconnect if auto_connect is enabled
@@ -52180,7 +52182,7 @@ def _hydrabase_reconnect_loop():
 
 def _emit_service_status_loop():
     """Background thread that pushes service status every 5 seconds."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(5)
         try:
             socketio.emit('status:update', _build_status_payload())
@@ -52189,7 +52191,7 @@ def _emit_service_status_loop():
 
 def _emit_watchlist_count_loop():
     """Background thread that pushes watchlist count every 10 seconds to each profile room."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
         try:
             database = get_database()
@@ -52202,7 +52204,7 @@ def _emit_watchlist_count_loop():
 
 def _emit_download_status_loop():
     """Background thread that pushes download batch status every 2 seconds to subscribed rooms."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
         try:
             live_transfers_lookup = get_cached_transfer_data()
@@ -52263,7 +52265,7 @@ def handle_profile_join(data):
 
 def _emit_system_stats_loop():
     """Background thread that pushes system stats every 10 seconds."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
         try:
             socketio.emit('dashboard:stats', _build_system_stats())
@@ -52272,7 +52274,7 @@ def _emit_system_stats_loop():
 
 def _emit_activity_feed_loop():
     """Background thread that pushes activity feed every 2 seconds."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
         try:
             with activity_feed_lock:
@@ -52283,7 +52285,7 @@ def _emit_activity_feed_loop():
 
 def _emit_db_stats_loop():
     """Background thread that pushes database stats every 10 seconds."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
         try:
             db = get_database()
@@ -52294,7 +52296,7 @@ def _emit_db_stats_loop():
 
 def _emit_wishlist_count_loop():
     """Background thread that pushes wishlist count every 10 seconds to each profile room."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
         try:
             from core.wishlist_service import get_wishlist_service
@@ -52340,7 +52342,7 @@ def _emit_rate_monitor_loop():
         'tidal': 'tidal_enrichment', 'qobuz': 'qobuz_enrichment',
     }
 
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
             from core.api_call_tracker import api_call_tracker
@@ -52410,7 +52412,7 @@ def _emit_enrichment_status_loop():
         'genius-enrichment': lambda: genius_worker,
     }
 
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
 
         # Auto-pause/resume rate-limited workers during downloads
@@ -52448,7 +52450,7 @@ def _emit_enrichment_status_loop():
 
 def _emit_tool_progress_loop():
     """Background thread that pushes all tool progress statuses every 1 second."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         # Stream status
         try:
@@ -52536,7 +52538,7 @@ def handle_discovery_unsubscribe(data):
 
 def _emit_sync_progress_loop():
     """Push sync progress to subscribed rooms every 1 second."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
             with sync_lock:
@@ -52560,7 +52562,7 @@ def _emit_discovery_progress_loop():
         'listenbrainz': lambda: listenbrainz_playlist_states,
         'spotify_public': lambda: spotify_public_discovery_states,
     }
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         for platform, get_states in platform_states.items():
             try:
@@ -52590,7 +52592,7 @@ def _emit_discovery_progress_loop():
 
 def _emit_scan_status_loop():
     """Push watchlist and media scan status every 2 seconds."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
         # Watchlist scan
         try:
@@ -52622,7 +52624,7 @@ def _emit_scan_status_loop():
 
 def _emit_automation_progress_loop():
     """Push automation:progress events every 1 second for running automations."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
             with automation_progress_lock:
@@ -52666,7 +52668,7 @@ def _emit_automation_progress_loop():
 
 def _emit_repair_progress_loop():
     """Push repair:progress events every 1 second for running repair jobs."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
             if repair_worker is None:
