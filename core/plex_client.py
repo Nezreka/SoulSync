@@ -277,13 +277,13 @@ class PlexClient:
         
         try:
             for playlist in self.server.playlists():
-                if playlist.playlistType == 'audio':
+                if getattr(playlist, 'playlistType', None) == 'audio':
                     playlist_info = PlexPlaylistInfo.from_plex_playlist(playlist)
                     playlists.append(playlist_info)
-            
+
             logger.info(f"Retrieved {len(playlists)} audio playlists")
             return playlists
-            
+
         except Exception as e:
             logger.error(f"Error fetching playlists: {e}")
             return []
@@ -294,7 +294,7 @@ class PlexClient:
         
         try:
             playlist = self.server.playlist(name)
-            if playlist.playlistType == 'audio':
+            if getattr(playlist, 'playlistType', None) == 'audio':
                 return PlexPlaylistInfo.from_plex_playlist(playlist)
             return None
             

@@ -20092,6 +20092,61 @@ def _post_process_matched_download(context_key, context, file_path):
             print(f"Post-processing failed: Missing spotify_artist context.")
             return
 
+        # ── UNKNOWN ARTIST GUARD ──
+        # If artist name is junk, attempt to resolve from track metadata before proceeding.
+        # This prevents files from landing in "Unknown Artist/" folders.
+        _junk_artist_names = {'', 'unknown', 'unknown artist', 'various artists', 'none', 'null'}
+        _artist_name = (spotify_artist.get('name', '') if isinstance(spotify_artist, dict) else '').strip()
+        if _artist_name.lower() in _junk_artist_names:
+            print(f"[Unknown Artist Guard] Artist name is '{_artist_name}' — attempting to resolve")
+            _resolved = False
+            track_info_guard = context.get("track_info", {}) or {}
+            original_search_guard = context.get("original_search_result", {}) or {}
+
+            # Try 1: Pull artist from track_info.artists
+            _ti_artists = track_info_guard.get('artists', [])
+            if isinstance(_ti_artists, list) and _ti_artists:
+                _first = _ti_artists[0]
+                _name = _first.get('name', '') if isinstance(_first, dict) else str(_first)
+                if _name and _name.strip().lower() not in _junk_artist_names:
+                    spotify_artist['name'] = _name.strip()
+                    print(f"[Unknown Artist Guard] Resolved from track_info.artists: '{_name}'")
+                    _resolved = True
+
+            # Try 2: Pull from original_search_result
+            if not _resolved:
+                _os_artist = original_search_guard.get('artist') or original_search_guard.get('artist_name') or ''
+                if isinstance(_os_artist, str) and _os_artist.strip().lower() not in _junk_artist_names:
+                    spotify_artist['name'] = _os_artist.strip()
+                    print(f"[Unknown Artist Guard] Resolved from original_search_result: '{_os_artist}'")
+                    _resolved = True
+
+            # Try 3: Re-fetch from metadata source using track ID
+            if not _resolved:
+                _track_id = track_info_guard.get('id') or track_info_guard.get('track_id') or ''
+                if _track_id:
+                    try:
+                        _fb_client = _get_metadata_fallback_client()
+                        if hasattr(_fb_client, 'get_track_details'):
+                            _details = _fb_client.get_track_details(str(_track_id))
+                            if _details and isinstance(_details, dict):
+                                _d_artists = _details.get('artists', [])
+                                if isinstance(_d_artists, list) and _d_artists:
+                                    _d_first = _d_artists[0]
+                                    _d_name = _d_first.get('name', '') if isinstance(_d_first, dict) else str(_d_first)
+                                    if _d_name and _d_name.strip().lower() not in _junk_artist_names:
+                                        spotify_artist['name'] = _d_name.strip()
+                                        print(f"[Unknown Artist Guard] Resolved from metadata API: '{_d_name}'")
+                                        _resolved = True
+                    except Exception as _guard_err:
+                        print(f"[Unknown Artist Guard] Metadata re-fetch failed: {_guard_err}")
+
+            if not _resolved:
+                print(f"[Unknown Artist Guard] Could not resolve artist — proceeding with '{_artist_name}'")
+
+            context['spotify_artist'] = spotify_artist
+        # ── END UNKNOWN ARTIST GUARD ──
+
         # Check if playlist folder mode is enabled (sync page playlists only)
         track_info = context.get("track_info", {})
         playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
