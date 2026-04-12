@@ -4888,25 +4888,27 @@ class MusicDatabase:
             return []
     
     def search_artists(self, query: str, limit: int = 50, server_source: str = None) -> List[DatabaseArtist]:
-        """Search artists by name, optionally filtered by server source."""
+        """Search artists by name, optionally filtered by server source.
+        Uses diacritic-insensitive matching so 'Tiesto' finds 'Tiësto'."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
+            norm_query = f"%{self._normalize_for_comparison(query)}%"
 
             if server_source:
                 cursor.execute("""
                     SELECT * FROM artists
-                    WHERE name LIKE ? AND server_source = ?
+                    WHERE unidecode_lower(name) LIKE ? AND server_source = ?
                     ORDER BY name
                     LIMIT ?
-                """, (f"%{query}%", server_source, limit))
+                """, (norm_query, server_source, limit))
             else:
                 cursor.execute("""
                     SELECT * FROM artists
-                    WHERE name LIKE ?
+                    WHERE unidecode_lower(name) LIKE ?
                     ORDER BY name
                     LIMIT ?
-                """, (f"%{query}%", limit))
+                """, (norm_query, limit))
             
             rows = cursor.fetchall()
             
