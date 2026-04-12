@@ -102,6 +102,7 @@
                             <option value="discover">Discover</option>
                             <option value="artists">Artists</option>
                             <option value="automations">Automations</option>
+                            <option value="active-downloads">Downloads</option>
                             <option value="library">Library</option>
                             <option value="stats">Listening Stats</option>
                             <option value="playlist-explorer">Playlist Explorer</option>
@@ -116,6 +117,7 @@
                             <label><input type="checkbox" value="discover" checked> Discover</label>
                             <label><input type="checkbox" value="artists" checked> Artists</label>
                             <label><input type="checkbox" value="automations" checked> Automations</label>
+                            <label><input type="checkbox" value="active-downloads" checked> Downloads</label>
                             <label><input type="checkbox" value="library" checked> Library</label>
                             <label><input type="checkbox" value="stats" checked> Listening Stats</label>
                             <label><input type="checkbox" value="playlist-explorer" checked> Playlist Explorer</label>
@@ -213,6 +215,11 @@
                 <button class="nav-button" data-page="automations">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
                     <span class="nav-text">Automations</span>
+                </button>
+                <button class="nav-button" data-page="active-downloads">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
+                    <span class="nav-text">Downloads</span>
+                    <span class="dl-nav-badge hidden" id="dl-nav-badge">0</span>
                 </button>
                 <button class="nav-button" data-page="library">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="14" y2="11"/></svg></span>
@@ -2622,6 +2629,31 @@
                     <div class="builder-content">
                         <div class="builder-sidebar" id="builder-sidebar"></div>
                         <div class="builder-canvas" id="builder-canvas"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Downloads Page -->
+            <div class="page" id="active-downloads-page">
+                <div class="adl-container">
+                    <div class="adl-header">
+                        <h2 class="adl-title"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Downloads</h2>
+                        <div class="adl-controls">
+                            <div class="adl-filter-pills" id="adl-filter-pills">
+                                <button class="adl-pill active" data-filter="all" onclick="adlSetFilter('all')">All</button>
+                                <button class="adl-pill" data-filter="active" onclick="adlSetFilter('active')">Active</button>
+                                <button class="adl-pill" data-filter="queued" onclick="adlSetFilter('queued')">Queued</button>
+                                <button class="adl-pill" data-filter="completed" onclick="adlSetFilter('completed')">Completed</button>
+                                <button class="adl-pill" data-filter="failed" onclick="adlSetFilter('failed')">Failed</button>
+                            </div>
+                            <div style="display:flex;align-items:center;gap:10px;">
+                                <span class="adl-count" id="adl-count"></span>
+                                <button class="adl-clear-btn" id="adl-clear-btn" onclick="adlClearCompleted()" style="display:none">Clear Completed</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="adl-list" id="adl-list">
+                        <div class="adl-empty" id="adl-empty">No downloads yet. Start one from Search, Sync, Discover, or Artists.</div>
                     </div>
                 </div>
             </div>

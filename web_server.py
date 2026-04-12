@@ -4630,12 +4630,20 @@ def get_status():
         download_mode = config_manager.get('download_source.mode', 'hybrid')
         _status_cache['soulseek']['source'] = download_mode
 
+        # Count active downloads for nav badge
+        active_dl_count = 0
+        with tasks_lock:
+            for t in download_tasks.values():
+                if t.get('status') in ('downloading', 'searching', 'post_processing', 'queued', 'pending'):
+                    active_dl_count += 1
+
         status_data = {
             'spotify': _status_cache['spotify'],
             'media_server': _status_cache['media_server'],
             'soulseek': _status_cache['soulseek'],
             'active_media_server': active_server,
-            'enrichment': _get_enrichment_status()
+            'enrichment': _get_enrichment_status(),
+            'active_downloads': active_dl_count,
         }
         return jsonify(status_data)
     except Exception as e:
@@ -29180,6 +29188,133 @@ def get_batched_download_statuses():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/downloads/all', methods=['GET'])
+def get_all_downloads_unified():
+    """
+    Unified downloads list for the centralized Downloads page.
+    Returns a flat list of all download tasks across all batches,
+    sorted: downloading/searching first, then queued, then completed/failed.
+    """
+    try:
+        limit = int(request.args.get('limit', 200))
+        status_priority = {
+            'downloading': 0, 'searching': 1, 'post_processing': 2,
+            'queued': 3, 'pending': 3,
+            'completed': 4, 'skipped': 5, 'already_owned': 5,
+            'not_found': 6, 'failed': 7, 'cancelled': 8,
+        }
+
+        items = []
+        with tasks_lock:
+            for task_id, task in download_tasks.items():
+                track_info = task.get('track_info') or {}
+                batch_id = task.get('batch_id', '')
+                batch = download_batches.get(batch_id, {})
+
+                # Extract track metadata — handle all format variations
+                title = ''
+                artist = ''
+                album = ''
+                artwork = ''
+                if isinstance(track_info, dict):
+                    title = track_info.get('title') or track_info.get('name') or track_info.get('track_name') or ''
+
+                    # Artist can be: string, list of strings, list of dicts with 'name'
+                    raw_artist = track_info.get('artist') or track_info.get('artist_name') or track_info.get('artists') or ''
+                    if isinstance(raw_artist, list):
+                        parts = []
+                        for a in raw_artist:
+                            if isinstance(a, dict):
+                                parts.append(a.get('name', ''))
+                            else:
+                                parts.append(str(a))
+                        artist = ', '.join(p for p in parts if p)
+                    elif isinstance(raw_artist, dict):
+                        artist = raw_artist.get('name', '')
+                    else:
+                        artist = str(raw_artist) if raw_artist else ''
+
+                    # Album can be: string or dict with 'name'
+                    raw_album = track_info.get('album') or track_info.get('album_name') or ''
+                    if isinstance(raw_album, dict):
+                        album = raw_album.get('name', '')
+                    else:
+                        album = str(raw_album) if raw_album else ''
+
+                    artwork = track_info.get('artwork_url') or track_info.get('image_url') or track_info.get('album_art') or ''
+                    # Try album images
+                    if not artwork:
+                        raw_alb = track_info.get('album')
+                        if isinstance(raw_alb, dict):
+                            images = raw_alb.get('images') or []
+                            if images and isinstance(images, list) and len(images) > 0:
+                                artwork = images[0].get('url', '') if isinstance(images[0], dict) else str(images[0])
+
+                status = task.get('status', 'queued')
+                items.append({
+                    'task_id': task_id,
+                    'title': title,
+                    'artist': artist,
+                    'album': album,
+                    'artwork': artwork,
+                    'status': status,
+                    'error': task.get('error_message'),
+                    'batch_id': batch_id,
+                    'batch_name': batch.get('playlist_name') or batch.get('album_name') or '',
+                    'batch_source': batch.get('source_page') or batch.get('initiated_from') or '',
+                    'track_index': task.get('track_index', 0),
+                    'batch_total': len(batch.get('queue', [])),
+                    'timestamp': task.get('status_change_time', 0),
+                    'priority': status_priority.get(status, 9),
+                })
+
+        # Sort: active first (by priority), then by timestamp desc within each group
+        items.sort(key=lambda x: (x['priority'], -x['timestamp']))
+
+        return jsonify({
+            'success': True,
+            'downloads': items[:limit],
+            'total': len(items),
+            'timestamp': time.time(),
+        })
+    except Exception as e:
+        logger.error(f"Error getting unified downloads: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/downloads/clear-completed', methods=['POST'])
+def clear_completed_downloads():
+    """Remove completed/failed/cancelled tasks from the download tracker."""
+    try:
+        terminal_statuses = {'completed', 'failed', 'not_found', 'cancelled', 'skipped', 'already_owned'}
+        cleared = 0
+        with tasks_lock:
+            task_ids_to_remove = [
+                tid for tid, task in download_tasks.items()
+                if task.get('status') in terminal_statuses
+            ]
+            for tid in task_ids_to_remove:
+                del download_tasks[tid]
+                cleared += 1
+            # Also clean up empty batches
+            empty_batches = []
+            for bid, batch in download_batches.items():
+                remaining = [t for t in batch.get('queue', []) if t in download_tasks]
+                if not remaining:
+                    empty_batches.append(bid)
+                else:
+                    batch['queue'] = remaining
+            for bid in empty_batches:
+                del download_batches[bid]
+                if bid in batch_locks:
+                    del batch_locks[bid]
+
+        return jsonify({'success': True, 'cleared': cleared})
+    except Exception as e:
+        logger.error(f"Error clearing completed downloads: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/downloads/cancel_task', methods=['POST'])
 def cancel_download_task():
     """
@@ -51793,12 +51928,23 @@ def _build_status_payload():
     if cooldown_remaining > 0:
         spotify_data['post_ban_cooldown'] = cooldown_remaining
 
+    # Count active downloads for nav badge
+    active_dl_count = 0
+    try:
+        with tasks_lock:
+            for t in download_tasks.values():
+                if t.get('status') in ('downloading', 'searching', 'post_processing', 'queued', 'pending'):
+                    active_dl_count += 1
+    except Exception:
+        pass
+
     return {
         'spotify': spotify_data,
         'media_server': _status_cache.get('media_server', {}),
         'soulseek': soulseek_data,
         'active_media_server': config_manager.get_active_media_server(),
-        'enrichment': _get_enrichment_status()
+        'enrichment': _get_enrichment_status(),
+        'active_downloads': active_dl_count,
     }
 
 def _build_watchlist_count_payload(profile_id=1):
