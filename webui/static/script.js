@@ -12121,9 +12121,13 @@ async function autoSavePlaylistM3U(playlistId) {
     const m3uContent = generateM3UContent(playlistId);
     if (!m3uContent) return;
 
-    // Skip M3U for albums — albums are already naturally grouped in media servers
-    const albumPrefixes = ['artist_album_', 'discover_album_', 'enhanced_search_album_', 'seasonal_album_', 'spotify_library_', 'beatport_release_', 'discover_cache_'];
-    if (albumPrefixes.some(p => playlistId.startsWith(p))) return;
+    // Skip M3U for non-playlist downloads — albums, singles, redownloads, etc.
+    const nonPlaylistPrefixes = [
+        'artist_album_', 'discover_album_', 'enhanced_search_album_', 'enhanced_search_track_',
+        'seasonal_album_', 'spotify_library_', 'beatport_release_', 'discover_cache_',
+        'issue_download_', 'library_redownload_', 'redownload_',
+    ];
+    if (nonPlaylistPrefixes.some(p => playlistId.startsWith(p))) return;
 
     const playlistName = process.playlist?.name || process.playlistName || 'Playlist';
     const artistName = process.artist?.name || '';
