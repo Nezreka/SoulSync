@@ -11944,6 +11944,7 @@ def get_track_tag_preview(track_id):
         db_data = {
             'title': track_data.get('title'),
             'artist_name': track_data.get('artist_name'),
+            'track_artist': track_data.get('track_artist'),
             'album_title': track_data.get('album_title'),
             'year': track_data.get('year'),
             'genres': album_genres,
