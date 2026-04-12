@@ -991,7 +991,7 @@ class PersonalizedPlaylistsService:
                                     all_tracks.append({
                                         'spotify_track_id': track['id'],
                                         'track_name': track['name'],
-                                        'artist_name': ', '.join([a['name'] for a in track.get('artists', [])]),
+                                        'artist_name': '/'.join([a['name'] for a in track.get('artists', [])]),
                                         'album_name': album_data.get('name', 'Unknown'),
                                         'album_cover_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
                                         'duration_ms': track.get('duration_ms', 0),
@@ -1029,7 +1029,7 @@ class PersonalizedPlaylistsService:
                                     all_tracks.append({
                                         'spotify_track_id': track_id,
                                         'track_name': track.get('name', ''),
-                                        'artist_name': ', '.join(artist_names) if artist_names else 'Unknown',
+                                        'artist_name': '/'.join(artist_names) if artist_names else 'Unknown',
                                         'album_name': album_name,
                                         'album_cover_url': album_cover,
                                         'duration_ms': track.get('duration_ms', 0),

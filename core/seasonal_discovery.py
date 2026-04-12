@@ -537,7 +537,7 @@ class SeasonalDiscoveryService:
                             seasonal_albums.append({
                                 'spotify_album_id': album.id,
                                 'album_name': album.name,
-                                'artist_name': ', '.join(album.artists) if album.artists else 'Various Artists',
+                                'artist_name': '/'.join(album.artists) if album.artists else 'Various Artists',
                                 'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
                                 'release_date': album.release_date if hasattr(album, 'release_date') else None,
                                 'popularity': getattr(album, 'popularity', 50)
@@ -567,7 +567,7 @@ class SeasonalDiscoveryService:
                             seasonal_albums.append({
                                 'spotify_album_id': album.id,  # Column name is spotify_album_id but stores iTunes ID too
                                 'album_name': album.name,
-                                'artist_name': ', '.join(album.artists) if album.artists else 'Various Artists',
+                                'artist_name': '/'.join(album.artists) if album.artists else 'Various Artists',
                                 'album_cover_url': album.image_url if hasattr(album, 'image_url') else None,
                                 'release_date': album.release_date if hasattr(album, 'release_date') else None,
                                 'popularity': 50  # iTunes has no popularity — default mid-range

@@ -18035,8 +18035,11 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
                 all_artists.append(a)
             else:
                 all_artists.append(str(a))
-        metadata['artist'] = ', '.join(all_artists)
-        print(f"Metadata: Using all artists: '{metadata['artist']}'")
+# Use "/" as separator for multi-artist tracks (ID3v2 standard, recognized by Plex)
+        # This allows Plex to properly identify individual artists instead of treating
+        # "Artist A, Artist B" as a single artist name
+        metadata['artist'] = '/'.join(all_artists)
+        print(f"🎵 Metadata: Using all artists: '{metadata['artist']}'")
     else:
         # Fallback to single artist
         metadata['artist'] = artist.get('name', '')
@@ -33143,8 +33146,9 @@ def _extract_artist_names(artists):
     return [_extract_artist_name(a) for a in (artists or [])]
 
 def _join_artist_names(artists):
-    """Join artist names from a list that may contain dicts or strings."""
-    return ', '.join(_extract_artist_names(artists))
+    """Join artist names from a list that may contain dicts or strings.
+    Uses '/' as separator for multi-artist tracks (ID3v2 standard, recognized by Plex)."""
+    return '/'.join(_extract_artist_names(artists))
 
 def _get_discovery_cache_key(title, artist):
     """Normalize title/artist for discovery cache lookup using matching_engine."""

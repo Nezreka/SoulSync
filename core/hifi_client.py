@@ -303,7 +303,8 @@ class HiFiClient:
                     names.append(a.get('name', ''))
                 elif isinstance(a, str):
                     names.append(a)
-            artist_name = ', '.join(n for n in names if n) or 'Unknown Artist'
+            # Use "/" as separator for multi-artist tracks (ID3v2 standard, recognized by Plex)
+            artist_name = '/'.join(n for n in names if n) or 'Unknown Artist'
         elif isinstance(artists_raw, dict):
             artist_name = artists_raw.get('name', 'Unknown Artist')
         elif isinstance(artists_raw, str):

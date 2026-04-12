@@ -305,7 +305,8 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
         written.append('title')
     if artist:
         audio.tags.delall('TPE1')
-        audio.tags.add(TPE1(encoding=3, text=[artist]))
+        artists = _split_multi_artist(artist)
+        audio.tags.add(TPE1(encoding=3, text=artists))
         written.append('artist')
     if album_artist:
         audio.tags.delall('TPE2')
@@ -346,7 +347,8 @@ def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
         audio['title'] = [title]
         written.append('title')
     if artist:
-        audio['artist'] = [artist]
+        artists = _split_multi_artist(artist)
+        audio['artist'] = artists
         written.append('artist')
     if album_artist:
         audio['albumartist'] = [album_artist]
@@ -380,7 +382,8 @@ def _write_mp4(audio, title, artist, album_artist, album, year, genre,
         audio['\xa9nam'] = [title]
         written.append('title')
     if artist:
-        audio['\xa9ART'] = [artist]
+        artists = _split_multi_artist(artist)
+        audio['\xa9ART'] = artists
         written.append('artist')
     if album_artist:
         audio['aART'] = [album_artist]
@@ -475,6 +478,19 @@ def _parse_track_num(val) -> Optional[int]:
         return int(str(val).split('/')[0])
     except (ValueError, IndexError):
         return None
+
+
+def _split_multi_artist(artist_str: str) -> List[str]:
+    """Split a multi-artist string into individual artist names.
+    
+    Handles the '/' separator used by ID3v2.4 for multi-artist tracks.
+    Returns a list of individual artist names.
+    """
+    if not artist_str:
+        return []
+    if '/' in artist_str:
+        return [a.strip() for a in artist_str.split('/') if a.strip()]
+    return [artist_str]
 
 
 def _normalize_for_compare(val) -> str:
