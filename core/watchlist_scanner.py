@@ -807,6 +807,12 @@ class WatchlistScanner:
                         logger.debug(f"Skipping {release_type}: {album_data.get('name', 'Unknown')} - user preference")
                         continue
 
+                    # Skip albums with placeholder track names (unreleased tracklist)
+                    # Spotify uses "Track 1", "Track 2", etc. for unannounced tracks
+                    if self._has_placeholder_tracks(tracks):
+                        logger.info(f"Skipping album with placeholder tracks (unreleased tracklist): {album_data.get('name', 'Unknown')}")
+                        continue
+
                     # Check each track
                     for track in tracks:
                         # Check content type filters (live, remix, acoustic, compilation)
@@ -1348,6 +1354,22 @@ class WatchlistScanner:
             return album_date > now
         except Exception:
             return False  # Error — assume released
+
+    def _has_placeholder_tracks(self, tracks: list) -> bool:
+        """Check if an album's tracks are mostly placeholders (unreleased/unannounced tracklist).
+        Spotify uses 'Track 1', 'Track 2', etc. for tracks whose names haven't been revealed."""
+        if not tracks or len(tracks) == 0:
+            return False
+        import re
+        placeholder_count = 0
+        for track in tracks:
+            name = track.get('name', '') if isinstance(track, dict) else getattr(track, 'name', '')
+            # Match "Track 1", "Track 2", ..., "Track 99" (case-insensitive)
+            if re.match(r'^track\s+\d+$', name.strip(), re.IGNORECASE):
+                placeholder_count += 1
+        # If more than half the tracks are placeholders, skip the album
+        # (some albums legitimately have a track called "Track X" but not most of them)
+        return placeholder_count > len(tracks) / 2
 
     def _should_include_release(self, track_count: int, watchlist_artist: WatchlistArtist) -> bool:
         """
@@ -2127,6 +2149,11 @@ class WatchlistScanner:
                                         tracks = album_data.get('tracks', {}).get('items', [])
 
                                     logger.debug(f"    Album {album_idx}: {album_data.get('name', 'Unknown')} ({len(tracks)} tracks)")
+
+                                    # Skip albums with placeholder tracks (unreleased tracklist)
+                                    if self._has_placeholder_tracks(tracks):
+                                        logger.info(f"    Skipping album with placeholder tracks: {album_data.get('name', 'Unknown')}")
+                                        continue
 
                                     # Determine if this is a new release (within last 30 days)
                                     is_new = False
