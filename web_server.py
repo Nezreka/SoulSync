@@ -4688,22 +4688,23 @@ def get_status():
             rate_limit_info = spotify_client.get_rate_limit_info() if (spotify_client and is_rate_limited) else None
             cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
 
+            # Read configured source once — no auth validation here, we do that explicitly below
+            configured_source = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
+
             if is_rate_limited or cooldown_remaining > 0:
                 # During rate limit or post-ban cooldown, skip the auth probe entirely.
                 # Probing Spotify here would reset the rate limit timer.
-                music_source = _get_metadata_fallback_source()
-                if music_source == 'spotify':
-                    music_source = 'deezer'  # Spotify rate limited — can't use it
+                music_source = 'deezer' if configured_source == 'spotify' else configured_source
                 spotify_response_time = 0
             else:
                 spotify_start = time.time()
                 spotify_connected = spotify_client.is_spotify_authenticated() if spotify_client else False
                 spotify_response_time = (time.time() - spotify_start) * 1000
-                # Use whatever the user configured as primary metadata source
-                music_source = _get_metadata_fallback_source()
-                # If user selected spotify but it's not authed, fall back
-                if music_source == 'spotify' and not spotify_connected:
-                    music_source = 'deezer'
+                # Use configured source; fall back to deezer only if Spotify isn't authenticated
+                if configured_source == 'spotify':
+                    music_source = 'spotify' if spotify_connected else 'deezer'
+                else:
+                    music_source = configured_source
 
             _status_cache['spotify'] = {
                 'connected': True,  # Always true — iTunes fallback is always available
