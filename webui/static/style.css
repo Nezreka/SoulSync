@@ -23211,19 +23211,21 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .artist-hero-badge[title="Qobuz"] img {
     filter: invert(1);
 }
-.artist-hero-badge[data-url] {
+a.artist-hero-badge {
     cursor: pointer;
+    text-decoration: none;
+    color: inherit;
 }
-.artist-hero-badge[data-url]:hover {
+a.artist-hero-badge:hover {
     background: rgba(255, 255, 255, 0.12);
     border-color: rgba(255, 255, 255, 0.2);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
-.artist-hero-badge[data-url]:hover img {
+a.artist-hero-badge:hover img {
     opacity: 1;
 }
-.artist-hero-badge:not([data-url]) {
+div.artist-hero-badge {
     cursor: default;
 }
 

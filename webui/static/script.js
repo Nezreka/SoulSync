@@ -36067,11 +36067,11 @@ function updateArtistDetailHeader(artist) {
     const badgesEl = document.getElementById('artists-hero-badges');
     if (badgesEl) {
         const _hb = (logo, fallback, title, url) => {
-            const attr = url ? `data-url="${_esc(url)}" onclick="window.open(this.dataset.url,'_blank')"` : '';
             const inner = logo
                 ? `<img src="${logo}" alt="${fallback}" onerror="this.parentNode.textContent='${fallback}'">`
                 : `<span style="font-size:9px;font-weight:700;">${fallback}</span>`;
-            return `<div class="artists-hero-badge" title="${title}" ${attr}>${inner}</div>`;
+            if (url) return `<a class="artists-hero-badge" title="${title}" href="${_esc(url)}" target="_blank" rel="noopener noreferrer">${inner}</a>`;
+            return `<div class="artists-hero-badge" title="${title}">${inner}</div>`;
         };
         const badges = [];
         if (info.spotify_artist_id) badges.push(_hb(SPOTIFY_LOGO_URL, 'SP', 'Spotify', `https://open.spotify.com/artist/${info.spotify_artist_id}`));
@@ -42906,11 +42906,11 @@ function updateArtistDetailPageHeaderWithData(artist) {
     const badgesContainer = document.getElementById("artist-hero-badges");
     if (badgesContainer) {
         const _hb = (logo, fallback, title, url) => {
-            const attr = url ? `data-url="${url}" onclick="window.open(this.dataset.url,'_blank')"` : '';
             const inner = logo
                 ? `<img src="${logo}" alt="${fallback}" onerror="this.parentNode.textContent='${fallback}'">`
                 : `<span style="font-size:9px;font-weight:700;">${fallback}</span>`;
-            return `<div class="artist-hero-badge" title="${title}" ${attr}>${inner}</div>`;
+            if (url) return `<a class="artist-hero-badge" title="${title}" href="${url}" target="_blank" rel="noopener noreferrer">${inner}</a>`;
+            return `<div class="artist-hero-badge" title="${title}">${inner}</div>`;
         };
 
         const adbSlug = artist.name ? artist.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '') : '';
@@ -44595,12 +44595,6 @@ function renderArtistMetaPanel(artist) {
             idBadges.appendChild(makeClickableBadge(src.svc, 'artist', artist[src.key], src.label));
         }
     });
-    if (artist.server_source) {
-        const srcBadge = document.createElement('span');
-        srcBadge.className = 'enhanced-id-badge server';
-        srcBadge.textContent = artist.server_source;
-        idBadges.appendChild(srcBadge);
-    }
     headerInfo.appendChild(idBadges);
     headerLeft.appendChild(headerInfo);
     header.appendChild(headerLeft);
