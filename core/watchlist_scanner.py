@@ -1542,10 +1542,13 @@ class WatchlistScanner:
                                 from difflib import SequenceMatcher
                                 album_sim = SequenceMatcher(None, album_name.lower(), lib_album.lower()).ratio()
                                 if album_sim < 0.85:
-                                    logger.debug(f"Track found but different album (allow_duplicates=True): '{original_title}' — library: '{lib_album}', wanted: '{album_name}'")
+                                    logger.info(f"[AllowDup] Different album — allowing: '{original_title}' (wanted: '{album_name}', library: '{lib_album}', sim: {album_sim:.2f})")
                                     continue  # Different album — allow it
+                                else:
+                                    logger.info(f"[AllowDup] Same album — skipping: '{original_title}' (wanted: '{album_name}', library: '{lib_album}', sim: {album_sim:.2f})")
                             else:
                                 # No album info in library — can't compare, allow it
+                                logger.info(f"[AllowDup] No album info in library — allowing: '{original_title}'")
                                 continue
                         logger.debug(f"Track found in library: '{original_title}' by '{artist_name}' (confidence: {confidence:.2f})")
                         return False  # Track exists in library
