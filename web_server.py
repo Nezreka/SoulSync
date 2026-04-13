@@ -21601,6 +21601,7 @@ def get_version_info():
                     "• Docker compose includes optional slskd service block",
                     "• Multi-stage Docker build reduces image size",
                     "• MusicBrainz recording ID backfilled from Navidrome during scan",
+                    "• AcoustID test connection no longer reports failure for valid API keys when library is empty",
                 ],
             },
             # v2.2 and earlier features moved to archive

@@ -329,7 +329,9 @@ class AcoustIDClient:
                 # Error code 4 is specifically "invalid API key"
                 if error_code == 4:
                     return False, "Invalid AcoustID API key - get one from https://acoustid.org/new-application"
-                return False, f"AcoustID API error: {error_msg}"
+                # Any other error (e.g. "invalid fingerprint") means the API key
+                # was accepted — the dummy test fingerprint is just rejected as expected
+                return True, "AcoustID API key is valid"
 
             # Status is 'ok' - key is valid
             return True, "AcoustID API key is valid"
