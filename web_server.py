@@ -5364,7 +5364,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'lidarr_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'lidarr_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -42376,6 +42376,39 @@ def refresh_your_artists():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/discover/your-artists/sources', methods=['GET'])
+def get_your_artists_sources():
+    """Return current source config + which services are connected."""
+    try:
+        enabled_raw = config_manager.get('discover.your_artists_sources', 'spotify,tidal,lastfm,deezer')
+        enabled = [s.strip() for s in enabled_raw.split(',') if s.strip()]
+
+        connected = []
+        # Spotify
+        if spotify_client and spotify_client.is_spotify_authenticated():
+            connected.append('spotify')
+        # Tidal
+        try:
+            if tidal_client and hasattr(tidal_client, '_ensure_valid_token') and tidal_client._ensure_valid_token():
+                connected.append('tidal')
+        except Exception:
+            pass
+        # Last.fm
+        if config_manager.get('lastfm.api_key', '') and config_manager.get('lastfm.session_key', ''):
+            connected.append('lastfm')
+        # Deezer
+        try:
+            deezer_cl = _get_deezer_client()
+            if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
+                connected.append('deezer')
+        except Exception:
+            pass
+
+        return jsonify({"success": True, "enabled": enabled, "connected": connected})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 _your_artists_refresh_lock = threading.Lock()
 _your_artists_refreshing = False
 
@@ -42408,9 +42441,14 @@ def _fetch_and_match_liked_artists(profile_id: int):
     database = get_database()
     fetched = 0
 
+    enabled_raw = config_manager.get('discover.your_artists_sources', 'spotify,tidal,lastfm,deezer')
+    enabled_sources = {s.strip() for s in enabled_raw.split(',') if s.strip()}
+
     # 1. Fetch from Spotify (followed artists)
     try:
-        if spotify_client and spotify_client.is_spotify_authenticated():
+        if 'spotify' not in enabled_sources:
+            print("[Your Artists] Spotify skipped (disabled in sources config)")
+        elif spotify_client and spotify_client.is_spotify_authenticated():
             print("[Your Artists] Fetching followed artists from Spotify...")
             artists = spotify_client.get_followed_artists()
             for a in artists:
@@ -42427,7 +42465,9 @@ def _fetch_and_match_liked_artists(profile_id: int):
 
     # 2. Fetch from Tidal (favorite artists)
     try:
-        if tidal_client and hasattr(tidal_client, 'get_favorite_artists'):
+        if 'tidal' not in enabled_sources:
+            print("[Your Artists] Tidal skipped (disabled in sources config)")
+        elif tidal_client and hasattr(tidal_client, 'get_favorite_artists'):
             tidal_auth = tidal_client._ensure_valid_token() if hasattr(tidal_client, '_ensure_valid_token') else False
             if tidal_auth:
                 print("[Your Artists] Fetching favorite artists from Tidal...")
@@ -42444,42 +42484,48 @@ def _fetch_and_match_liked_artists(profile_id: int):
 
     # 3. Fetch from Last.fm (top artists)
     try:
-        lastfm_key = config_manager.get('lastfm.api_key', '')
-        lastfm_secret = config_manager.get('lastfm.api_secret', '')
-        lastfm_session = config_manager.get('lastfm.session_key', '')
-        print(f"[Your Artists] Last.fm credentials: key={'yes' if lastfm_key else 'NO'}, secret={'yes' if lastfm_secret else 'NO'}, session={'yes' if lastfm_session else 'NO'}")
-        if lastfm_key and lastfm_secret and lastfm_session:
-            from core.lastfm_client import LastFMClient
-            lfm = LastFMClient(api_key=lastfm_key, api_secret=lastfm_secret, session_key=lastfm_session)
-            username = lfm.get_authenticated_username()
-            print(f"[Your Artists] Last.fm username resolved: {username or 'NONE'}")
-            if username:
-                print(f"[Your Artists] Fetching top artists from Last.fm ({username})...")
-                artists = lfm.get_user_top_artists(username, period='overall', limit=200)
-                for a in artists:
-                    database.upsert_liked_artist(
-                        artist_name=a['name'], source_service='lastfm',
-                        image_url=a.get('image_url'), profile_id=profile_id
-                    )
-                fetched += len(artists)
-                print(f"[Your Artists] Fetched {len(artists)} from Last.fm")
+        if 'lastfm' not in enabled_sources:
+            print("[Your Artists] Last.fm skipped (disabled in sources config)")
+        else:
+            lastfm_key = config_manager.get('lastfm.api_key', '')
+            lastfm_secret = config_manager.get('lastfm.api_secret', '')
+            lastfm_session = config_manager.get('lastfm.session_key', '')
+            print(f"[Your Artists] Last.fm credentials: key={'yes' if lastfm_key else 'NO'}, secret={'yes' if lastfm_secret else 'NO'}, session={'yes' if lastfm_session else 'NO'}")
+            if lastfm_key and lastfm_secret and lastfm_session:
+                from core.lastfm_client import LastFMClient
+                lfm = LastFMClient(api_key=lastfm_key, api_secret=lastfm_secret, session_key=lastfm_session)
+                username = lfm.get_authenticated_username()
+                print(f"[Your Artists] Last.fm username resolved: {username or 'NONE'}")
+                if username:
+                    print(f"[Your Artists] Fetching top artists from Last.fm ({username})...")
+                    artists = lfm.get_user_top_artists(username, period='overall', limit=200)
+                    for a in artists:
+                        database.upsert_liked_artist(
+                            artist_name=a['name'], source_service='lastfm',
+                            image_url=a.get('image_url'), profile_id=profile_id
+                        )
+                    fetched += len(artists)
+                    print(f"[Your Artists] Fetched {len(artists)} from Last.fm")
     except Exception as e:
         logger.error(f"[Your Artists] Last.fm fetch error: {e}")
 
     # 4. Fetch from Deezer (favorite artists — requires OAuth)
     try:
-        deezer_cl = _get_deezer_client()
-        if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
-            print("[Your Artists] Fetching favorite artists from Deezer...")
-            artists = deezer_cl.get_user_favorite_artists(limit=200)
-            for a in artists:
-                database.upsert_liked_artist(
-                    artist_name=a['name'], source_service='deezer',
-                    source_id=a.get('deezer_id'), source_id_type='deezer',
-                    image_url=a.get('image_url'), profile_id=profile_id
-                )
-            fetched += len(artists)
-            print(f"[Your Artists] Fetched {len(artists)} from Deezer")
+        if 'deezer' not in enabled_sources:
+            print("[Your Artists] Deezer skipped (disabled in sources config)")
+        else:
+            deezer_cl = _get_deezer_client()
+            if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
+                print("[Your Artists] Fetching favorite artists from Deezer...")
+                artists = deezer_cl.get_user_favorite_artists(limit=200)
+                for a in artists:
+                    database.upsert_liked_artist(
+                        artist_name=a['name'], source_service='deezer',
+                        source_id=a.get('deezer_id'), source_id_type='deezer',
+                        image_url=a.get('image_url'), profile_id=profile_id
+                    )
+                fetched += len(artists)
+                print(f"[Your Artists] Fetched {len(artists)} from Deezer")
     except Exception as e:
         logger.error(f"[Your Artists] Deezer fetch error: {e}")
 

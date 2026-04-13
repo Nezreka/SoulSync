@@ -269,7 +269,6 @@ body {
     gap: 8px;
     position: sticky;
     top: 0;
-    z-index: 10;
     overflow: hidden;
     flex-shrink: 0;
 
@@ -30228,6 +30227,9 @@ div.artist-hero-badge {
 .ya-refresh-btn { padding: 7px 10px; }
 .ya-refresh-btn:hover svg { transform: rotate(45deg); }
 .ya-refresh-btn svg { transition: transform 0.3s; }
+.ya-settings-btn { padding: 7px 10px; }
+.ya-settings-btn:hover svg { transform: rotate(60deg); }
+.ya-settings-btn svg { transition: transform 0.3s; }
 .ya-viewall-btn {
     background: rgba(var(--accent-rgb),0.1); border-color: rgba(var(--accent-rgb),0.2);
     color: rgba(var(--accent-rgb),0.9);
@@ -30238,6 +30240,52 @@ div.artist-hero-badge {
 }
 .ya-viewall-btn svg { transition: transform 0.2s; }
 .ya-viewall-btn:hover svg { transform: translateX(3px); }
+
+/* Your Artists Sources Modal */
+.ya-sources-modal {
+    background: linear-gradient(165deg, #1e1e32 0%, #181828 100%); border-radius: 16px;
+    width: 420px; max-width: 95vw;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06);
+    padding: 28px;
+}
+.ya-sources-modal h2 { font-size: 16px; font-weight: 700; color: #fff; margin: 0 0 4px; }
+.ya-sources-modal .ya-sources-desc { font-size: 12px; color: rgba(255,255,255,0.45); margin: 0 0 22px; }
+.ya-sources-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
+.ya-source-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-radius: 10px;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07);
+    cursor: pointer; transition: background 0.15s;
+}
+.ya-source-row:hover { background: rgba(255,255,255,0.07); }
+.ya-source-row.disconnected { opacity: 0.45; cursor: default; }
+.ya-source-row-left { display: flex; align-items: center; gap: 10px; }
+.ya-source-name { font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.85); }
+.ya-source-status { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 1px; }
+.ya-source-toggle {
+    width: 36px; height: 20px; border-radius: 10px; border: none; cursor: pointer;
+    background: rgba(255,255,255,0.12); position: relative; transition: background 0.2s; flex-shrink: 0;
+}
+.ya-source-toggle.on { background: var(--accent, #7c6af7); }
+.ya-source-toggle::after {
+    content: ''; position: absolute; top: 3px; left: 3px;
+    width: 14px; height: 14px; border-radius: 50%; background: #fff;
+    transition: transform 0.2s;
+}
+.ya-source-toggle.on::after { transform: translateX(16px); }
+.ya-sources-footer { display: flex; justify-content: flex-end; gap: 10px; }
+.ya-sources-save-btn {
+    padding: 9px 20px; border-radius: 10px; font-size: 13px; font-weight: 600;
+    background: var(--accent, #7c6af7); color: #fff; border: none; cursor: pointer;
+    transition: opacity 0.2s;
+}
+.ya-sources-save-btn:hover { opacity: 0.85; }
+.ya-sources-cancel-btn {
+    padding: 9px 16px; border-radius: 10px; font-size: 13px; font-weight: 600;
+    background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.6);
+    border: 1px solid rgba(255,255,255,0.08); cursor: pointer; transition: background 0.15s;
+}
+.ya-sources-cancel-btn:hover { background: rgba(255,255,255,0.1); }
 
 /* Your Artists Modal */
 .ya-modal {
