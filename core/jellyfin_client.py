@@ -1470,28 +1470,39 @@ class JellyfinClient:
         """Get all tracks from a specific playlist"""
         if not self.ensure_connection():
             return []
-        
+
         try:
-            params = {
-                'ParentId': playlist_id,
-                'IncludeItemTypes': 'Audio',
-                'Recursive': True,
-                'Fields': 'AlbumId,ArtistItems,Path,MediaSources',
-                'SortBy': 'SortName',
-                'SortOrder': 'Ascending'
-            }
-            
-            response = self._make_request(f'/Users/{self.user_id}/Items', params)
-            if not response:
-                return []
-            
             tracks = []
-            for item in response.get('Items', []):
-                tracks.append(JellyfinTrack(item, self))
-            
+            start_index = 0
+            limit = 1000
+
+            while True:
+                params = {
+                    'ParentId': playlist_id,
+                    'IncludeItemTypes': 'Audio',
+                    'Recursive': True,
+                    'Fields': 'AlbumId,ArtistItems,Path,MediaSources',
+                    'SortBy': 'SortName',
+                    'SortOrder': 'Ascending',
+                    'StartIndex': start_index,
+                    'Limit': limit,
+                }
+
+                response = self._make_request(f'/Users/{self.user_id}/Items', params)
+                if not response:
+                    break
+
+                batch = response.get('Items', [])
+                for item in batch:
+                    tracks.append(JellyfinTrack(item, self))
+
+                if len(batch) < limit:
+                    break  # Last page
+                start_index += limit
+
             logger.debug(f"Retrieved {len(tracks)} tracks from playlist {playlist_id}")
             return tracks
-            
+
         except Exception as e:
             logger.error(f"Error getting tracks for playlist {playlist_id}: {e}")
             return []
