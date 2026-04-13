@@ -10410,6 +10410,8 @@ def get_artist_image(artist_id):
             return jsonify({"success": True, "image_url": image_url})
         elif spotify_client and spotify_client.is_spotify_authenticated() and source_override != 'itunes':
             # Use Spotify directly
+            from core.api_call_tracker import api_call_tracker
+            api_call_tracker.record_call('spotify', endpoint='artist')
             artist_data = spotify_client.sp.artist(artist_id)
             if artist_data and artist_data.get('images'):
                 image_url = artist_data['images'][0]['url'] if artist_data['images'] else None
@@ -31382,6 +31384,8 @@ def get_playlist_tracks(playlist_id):
             while True:
                 if _spotify_rate_limited():
                     return jsonify({"error": "Spotify is currently rate limited. Please try again later."}), 429
+                from core.api_call_tracker import api_call_tracker
+                api_call_tracker.record_call('spotify', endpoint='current_user_saved_tracks')
                 results = spotify_client.sp.current_user_saved_tracks(limit=limit, offset=offset)
 
                 if not results or 'items' not in results:
@@ -31424,6 +31428,8 @@ def get_playlist_tracks(playlist_id):
         if _spotify_rate_limited():
             return jsonify({"error": "Spotify is currently rate limited. Please try again later."}), 429
         # Fetch raw playlist data to preserve full album objects
+        from core.api_call_tracker import api_call_tracker
+        api_call_tracker.record_call('spotify', endpoint='playlist')
         playlist_data = spotify_client.sp.playlist(playlist_id)
 
         # Fetch all tracks with full album data
@@ -31480,7 +31486,11 @@ def get_playlist_tracks(playlist_id):
                         'spotify_track_id': track_data['id']  # Also include as spotify_track_id for consistency
                     })
 
-            results = spotify_client.sp.next(results) if results['next'] else None
+            if results.get('next'):
+                api_call_tracker.record_call('spotify', endpoint='playlist_tracks_page')
+                results = spotify_client.sp.next(results)
+            else:
+                results = None
 
         # Convert playlist to dict
         playlist_dict = {
@@ -39791,6 +39801,8 @@ def watchlist_artist_config(artist_id):
             artist_info = None
             if not is_itunes_artist and spotify_client and spotify_client.is_authenticated() and spotify_id and not _spotify_rate_limited():
                 try:
+                    from core.api_call_tracker import api_call_tracker
+                    api_call_tracker.record_call('spotify', endpoint='artist')
                     artist_data = spotify_client.sp.artist(spotify_id)
                     if artist_data:
                         artist_info = {
@@ -41094,6 +41106,8 @@ def enrich_similar_artists():
         if uncached_ids:
             if source == 'spotify' and spotify_client and spotify_client.is_authenticated() and not _spotify_rate_limited():
                 try:
+                    from core.api_call_tracker import api_call_tracker
+                    api_call_tracker.record_call('spotify', endpoint='artists_batch')
                     batch_result = spotify_client.sp.artists(uncached_ids[:50])
                     if batch_result and 'artists' in batch_result:
                         for sp_artist in batch_result['artists']:
@@ -42800,6 +42814,8 @@ def get_your_artist_info(artist_id):
         # 3. Try Spotify API directly (genres, image, followers)
         try:
             if spotify_client and spotify_client.is_spotify_authenticated() and not artist_id.isdigit():
+                from core.api_call_tracker import api_call_tracker
+                api_call_tracker.record_call('spotify', endpoint='artist')
                 artist_data = spotify_client.sp.artist(artist_id)
                 if artist_data:
                     result.update({
@@ -43785,6 +43801,8 @@ def get_artist_map_explore():
             if not n['image_url'] and n.get('spotify_id'):
                 try:
                     if spotify_client and spotify_client.is_spotify_authenticated():
+                        from core.api_call_tracker import api_call_tracker
+                        api_call_tracker.record_call('spotify', endpoint='artist')
                         artist_data = spotify_client.sp.artist(n['spotify_id'])
                         if artist_data and artist_data.get('images'):
                             n['image_url'] = artist_data['images'][0]['url']
@@ -51567,6 +51585,9 @@ def import_album_process():
         artist_genres = album.get('genres', [])
         if not artist_genres and artist_id and not _spotify_rate_limited():
             try:
+                from core.api_call_tracker import api_call_tracker
+                if hasattr(spotify_client, 'sp') and spotify_client.sp:
+                    api_call_tracker.record_call('spotify', endpoint='artist')
                 sp_artist = spotify_client.sp.artist(artist_id) if hasattr(spotify_client, 'sp') and spotify_client.sp else None
                 if sp_artist:
                     artist_genres = sp_artist.get('genres', [])
@@ -51747,7 +51768,11 @@ def import_singles_process():
             if spotify_override and spotify_override.get('id'):
                 try:
                     override_id = spotify_override['id']
-                    sp_track = (spotify_client.sp.track(override_id) if hasattr(spotify_client, 'sp') and spotify_client.sp and not _spotify_rate_limited() else None)
+                    sp_track = None
+                    if hasattr(spotify_client, 'sp') and spotify_client.sp and not _spotify_rate_limited():
+                        from core.api_call_tracker import api_call_tracker
+                        api_call_tracker.record_call('spotify', endpoint='track')
+                        sp_track = spotify_client.sp.track(override_id)
                     if sp_track:
                         sp_track_artists = sp_track.get('artists', [])
                         spotify_track_data = {
@@ -51780,7 +51805,11 @@ def import_singles_process():
                                     'genres': []
                                 }
                                 try:
-                                    sp_a = (spotify_client.sp.artist(album_artists[0]['id']) if hasattr(spotify_client, 'sp') and spotify_client.sp and not _spotify_rate_limited() else None)
+                                    sp_a = None
+                                    if hasattr(spotify_client, 'sp') and spotify_client.sp and not _spotify_rate_limited():
+                                        from core.api_call_tracker import api_call_tracker
+                                        api_call_tracker.record_call('spotify', endpoint='artist')
+                                        sp_a = spotify_client.sp.artist(album_artists[0]['id'])
                                     if sp_a:
                                         spotify_artist_data['genres'] = sp_a.get('genres', [])
                                 except Exception:
@@ -51824,7 +51853,11 @@ def import_singles_process():
                                         'genres': []
                                     }
                                     try:
-                                        sp_a = (spotify_client.sp.artist(sp_artists[0]['id']) if hasattr(spotify_client, 'sp') and spotify_client.sp and not _spotify_rate_limited() else None)
+                                        sp_a = None
+                                        if hasattr(spotify_client, 'sp') and spotify_client.sp and not _spotify_rate_limited():
+                                            from core.api_call_tracker import api_call_tracker
+                                            api_call_tracker.record_call('spotify', endpoint='artist')
+                                            sp_a = spotify_client.sp.artist(sp_artists[0]['id'])
                                         if sp_a:
                                             spotify_artist_data['genres'] = sp_a.get('genres', [])
                                     except Exception:
