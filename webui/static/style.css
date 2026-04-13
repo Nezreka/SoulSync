@@ -40831,6 +40831,7 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
 
 .automations-container { padding: 20px 24px; }
 .automations-list { display: flex; flex-direction: column; gap: 0; }
+#automations-list-view { padding-bottom: 10vh; }
 
 /* --- Section Headers (System / My Automations) --- */
 .automations-section {
