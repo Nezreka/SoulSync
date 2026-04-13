@@ -50807,6 +50807,7 @@ tr.tag-diff-same {
     align-items: center;
     max-width: 100% !important;
     margin: 0 auto;
+    padding-bottom: 10vh;
 }
 
 /* Tab bar centered */
