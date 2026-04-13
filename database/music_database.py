@@ -6486,12 +6486,33 @@ class MusicDatabase:
                 spotify_json = json.dumps(spotify_track_data)
                 source_json = json.dumps(source_info or {})
 
-                # No duplicate found, insert the track
+                # When allow_duplicates is on, make the key unique per album so the same
+                # track from different albums can coexist in the wishlist
+                insert_track_id = track_id
+                if allow_duplicates:
+                    album_obj = spotify_track_data.get('album', {})
+                    album_id = album_obj.get('id', '') if isinstance(album_obj, dict) else ''
+                    if album_id:
+                        # Check if this exact track+album combo already exists
+                        composite_id = f"{track_id}::{album_id}"
+                        cursor.execute("SELECT id FROM wishlist_tracks WHERE spotify_track_id = ? AND profile_id = ?",
+                                       (composite_id, profile_id))
+                        if cursor.fetchone():
+                            logger.debug(f"Skipping wishlist entry — same track+album already in wishlist: '{track_name}' on '{album_obj.get('name', '')}'")
+                            return False
+                        # Check if base track_id exists (from a different album)
+                        cursor.execute("SELECT id FROM wishlist_tracks WHERE spotify_track_id = ? AND profile_id = ?",
+                                       (track_id, profile_id))
+                        if cursor.fetchone():
+                            # Same track exists from different album — use composite ID
+                            insert_track_id = composite_id
+
+                # Insert the track
                 cursor.execute("""
                     INSERT OR REPLACE INTO wishlist_tracks
                     (spotify_track_id, spotify_data, failure_reason, source_type, source_info, date_added, profile_id)
                     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
-                """, (track_id, spotify_json, failure_reason, source_type, source_json, profile_id))
+                """, (insert_track_id, spotify_json, failure_reason, source_type, source_json, profile_id))
 
                 conn.commit()
 
