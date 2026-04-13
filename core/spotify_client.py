@@ -1,6 +1,7 @@
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
 from typing import Dict, List, Optional, Any
+import re
 import time
 import threading
 from functools import wraps
@@ -10,6 +11,21 @@ from config.settings import config_manager
 from core.metadata_cache import get_metadata_cache
 
 logger = get_logger("spotify_client")
+
+def _upgrade_spotify_image_url(url: str) -> str:
+    """Upgrade a Spotify CDN image URL to the highest available resolution.
+
+    Album art URLs use the prefix 'ab67616d' and encode size as the 4-char hex
+    segment following '0000' (e.g. 'b273' = 640x640, '1e02' = 300x300).
+    Replacing it with '82c1' requests the original uploaded master (up to 2000px+).
+
+    This only applies to album art (ab67616d prefix). Artist images use a different
+    prefix (ab676161) and the 82c1 trick does not work for them — those are left
+    as-is since Spotify already returns them sorted largest-first.
+    """
+    if not url or 'i.scdn.co' not in url:
+        return url
+    return re.sub(r'(/image/ab67616d)0000[0-9a-f]{4}', r'\g<1>000082c1', url)
 
 # Global rate limiting variables
 _last_api_call_time = 0
@@ -352,7 +368,7 @@ class Track:
         if 'album' in track_data and 'images' in track_data['album']:
             images = track_data['album']['images']
             if images:
-                album_image_url = images[0]['url']
+                album_image_url = _upgrade_spotify_image_url(images[0]['url'])
 
         return cls(
             id=track_data['id'],
@@ -384,7 +400,7 @@ class Artist:
         # Get the largest image URL if available
         image_url = None
         if artist_data.get('images') and len(artist_data['images']) > 0:
-            image_url = artist_data['images'][0]['url']
+            image_url = _upgrade_spotify_image_url(artist_data['images'][0]['url'])
         
         return cls(
             id=artist_data['id'],
@@ -413,7 +429,7 @@ class Album:
         # Get the largest image URL if available
         image_url = None
         if album_data.get('images') and len(album_data['images']) > 0:
-            image_url = album_data['images'][0]['url']
+            image_url = _upgrade_spotify_image_url(album_data['images'][0]['url'])
 
         return cls(
             id=album_data['id'],

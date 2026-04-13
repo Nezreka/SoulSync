@@ -19127,7 +19127,7 @@ def _download_cover_art(album_info: dict, target_dir: str, context: dict = None)
             print(f"CAA upgrade failed — keeping existing cover.jpg")
             return
 
-        # Fallback to Spotify/iTunes/Deezer URL (typically 640x640)
+        # Fallback to Spotify/iTunes/Deezer URL
         if not image_data:
             art_url = album_info.get('album_image_url')
             # If album_info lacks the URL, try the context's spotify_album
@@ -19141,6 +19141,13 @@ def _download_cover_art(album_info: dict, target_dir: str, context: dict = None)
                         art_url = images[0].get('url') if isinstance(images[0], dict) else None
                 if art_url:
                     print(f"Using cover art URL from spotify_album context")
+            # Upgrade to highest available resolution before fetching
+            if art_url and 'i.scdn.co' in art_url:
+                from core.spotify_client import _upgrade_spotify_image_url
+                art_url = _upgrade_spotify_image_url(art_url)
+            elif art_url and 'mzstatic.com' in art_url:
+                import re as _re
+                art_url = _re.sub(r'\d+x\d+bb', '3000x3000bb', art_url)
             if not art_url:
                 print("No cover art URL available for download.")
                 return
