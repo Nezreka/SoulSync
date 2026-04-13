@@ -56554,6 +56554,116 @@ async function refreshYourArtists() {
     }
 }
 
+async function openYourArtistsSourcesModal() {
+    const existing = document.getElementById('ya-sources-modal-overlay');
+    if (existing) existing.remove();
+
+    // Fetch current config + connected services
+    let enabled = ['spotify', 'tidal', 'lastfm', 'deezer'];
+    let connected = [];
+    try {
+        const resp = await fetch('/api/discover/your-artists/sources');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.enabled) enabled = data.enabled;
+            if (data.connected) connected = data.connected;
+        }
+    } catch (e) {}
+
+    const sourceInfo = [
+        { id: 'spotify', label: 'Spotify',  icon: '🎵' },
+        { id: 'tidal',   label: 'Tidal',    icon: '🌊' },
+        { id: 'lastfm',  label: 'Last.fm',  icon: '📻' },
+        { id: 'deezer',  label: 'Deezer',   icon: '🎶' },
+    ];
+
+    const state = {};
+    sourceInfo.forEach(s => { state[s.id] = enabled.includes(s.id); });
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ya-sources-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    const rows = sourceInfo.map(s => {
+        const isConnected = connected.includes(s.id);
+        const isOn = state[s.id];
+        return `
+            <div class="ya-source-row${isConnected ? '' : ' disconnected'}" data-source="${s.id}" onclick="_yaSourceRowClick('${s.id}')">
+                <div class="ya-source-row-left">
+                    <span style="font-size:18px">${s.icon}</span>
+                    <div>
+                        <div class="ya-source-name">${s.label}</div>
+                        <div class="ya-source-status">${isConnected ? 'Connected' : 'Not connected'}</div>
+                    </div>
+                </div>
+                <button class="ya-source-toggle${isOn ? ' on' : ''}" id="ya-toggle-${s.id}" onclick="event.stopPropagation();_yaSourceToggle('${s.id}')"></button>
+            </div>`;
+    }).join('');
+
+    overlay.innerHTML = `
+        <div class="ya-sources-modal">
+            <h2>Your Artists Sources</h2>
+            <p class="ya-sources-desc">Choose which connected services contribute artists to this section.</p>
+            <div class="ya-sources-list">${rows}</div>
+            <div class="ya-sources-footer">
+                <button class="ya-sources-cancel-btn" onclick="document.getElementById('ya-sources-modal-overlay').remove()">Cancel</button>
+                <button class="ya-sources-save-btn" onclick="_yaSourcesSave()">Save</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    window._yaSourcesState = state;
+}
+
+function _yaSourceRowClick(id) {
+    // Don't allow toggling disconnected services
+    const row = document.querySelector(`.ya-source-row[data-source="${id}"]`);
+    if (row && row.classList.contains('disconnected')) return;
+    _yaSourceToggle(id);
+}
+
+function _yaSourceToggle(id) {
+    // Don't allow toggling disconnected services
+    const row = document.querySelector(`.ya-source-row[data-source="${id}"]`);
+    if (row && row.classList.contains('disconnected')) return;
+    window._yaSourcesState[id] = !window._yaSourcesState[id];
+    const btn = document.getElementById(`ya-toggle-${id}`);
+    if (btn) btn.classList.toggle('on', window._yaSourcesState[id]);
+}
+
+async function _yaSourcesSave() {
+    const enabledArr = Object.entries(window._yaSourcesState)
+        .filter(([, v]) => v).map(([k]) => k);
+    if (enabledArr.length === 0) {
+        showToast('Select at least one source', 'error');
+        return;
+    }
+    const enabled = enabledArr.join(',');
+    try {
+        const resp = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ discover: { your_artists_sources: enabled } })
+        });
+        if (resp.ok) {
+            document.getElementById('ya-sources-modal-overlay')?.remove();
+            showToast('Sources saved — refresh to apply', 'success');
+            // Update subtitle immediately
+            const sourceNames = { spotify: 'Spotify', tidal: 'Tidal', lastfm: 'Last.fm', deezer: 'Deezer' };
+            const subtitle = document.getElementById('your-artists-subtitle');
+            if (subtitle) {
+                const names = enabledArr.map(s => sourceNames[s] || s).join(' and ');
+                subtitle.textContent = `Artists you follow on ${names}`;
+            }
+        } else {
+            showToast('Failed to save sources', 'error');
+        }
+    } catch (e) {
+        showToast('Failed to save sources', 'error');
+    }
+}
+
 async function openYourArtistsModal() {
     const existing = document.getElementById('your-artists-modal-overlay');
     if (existing) existing.remove();
