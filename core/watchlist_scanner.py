@@ -1530,16 +1530,23 @@ class WatchlistScanner:
 
             for artist_name in artists_to_search:
                 for query_title in unique_title_variations:
-                    db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=album_name)
+                    # When allow_duplicates is on, skip album hint so we get title+artist matches only
+                    search_album = None if allow_duplicates else album_name
+                    db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=search_album)
 
                     if db_track and confidence >= 0.7:
-                        # When allow_duplicates is on, only skip if the same album matches
-                        if allow_duplicates and album_name and db_track.album_title:
-                            from difflib import SequenceMatcher
-                            album_sim = SequenceMatcher(None, album_name.lower(), db_track.album_title.lower()).ratio()
-                            if album_sim < 0.8:
-                                logger.debug(f"Track found but different album (allow_duplicates=True): '{original_title}' — library: '{db_track.album_title}', wanted: '{album_name}'")
-                                continue  # Different album — allow it
+                        # When allow_duplicates is on, only skip if the exact same album
+                        if allow_duplicates and album_name:
+                            lib_album = getattr(db_track, 'album_title', '') or ''
+                            if lib_album:
+                                from difflib import SequenceMatcher
+                                album_sim = SequenceMatcher(None, album_name.lower(), lib_album.lower()).ratio()
+                                if album_sim < 0.85:
+                                    logger.debug(f"Track found but different album (allow_duplicates=True): '{original_title}' — library: '{lib_album}', wanted: '{album_name}'")
+                                    continue  # Different album — allow it
+                            else:
+                                # No album info in library — can't compare, allow it
+                                continue
                         logger.debug(f"Track found in library: '{original_title}' by '{artist_name}' (confidence: {confidence:.2f})")
                         return False  # Track exists in library
             
