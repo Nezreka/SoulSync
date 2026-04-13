@@ -259,7 +259,7 @@ body {
             rgba(var(--accent-rgb), 0.14) 0%,
             rgba(var(--accent-rgb), 0.08) 30%,
             rgba(var(--accent-rgb), 0.03) 70%,
-            transparent 100%);
+            rgba(18, 18, 18, 1) 100%);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     border-top-right-radius: 20px;
     padding: 20px 24px;
@@ -267,8 +267,11 @@ body {
     flex-direction: column;
     justify-content: center;
     gap: 8px;
-    position: relative;
+    position: sticky;
+    top: 0;
+    z-index: 10;
     overflow: hidden;
+    flex-shrink: 0;
 
     /* Subtle inner glow */
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -534,6 +537,31 @@ body {
         0 10px 28px rgba(0, 0, 0, 0.5),
         0 4px 14px rgba(var(--accent-rgb), 0.1),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Compact idle state — collapsed when nothing is playing */
+.media-player.idle {
+    min-height: 0;
+    padding: 0;
+    margin: 4px 14px;
+}
+
+.media-player.idle .player-top-progress,
+.media-player.idle .media-header,
+.media-player.idle .media-controls-row,
+.media-player.idle .media-expanded {
+    display: none;
+}
+
+.media-player.idle .no-track-message {
+    padding: 10px 14px;
+    font-size: 0.75rem;
+    gap: 8px;
+}
+
+.media-player.idle .no-track-message svg {
+    width: 18px;
+    height: 18px;
 }
 
 /* Top progress bar - thin line across full width */
@@ -11894,7 +11922,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     flex-direction: column;
     gap: 15px;
     flex-grow: 1;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .sync-tab-content.active {

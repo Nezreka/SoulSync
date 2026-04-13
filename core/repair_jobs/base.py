@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import threading
 from typing import Any, Callable, Dict, List, Optional
 
 
@@ -29,6 +30,7 @@ class JobContext:
     mb_client: Any = None
     acoustid_client: Any = None
     metadata_cache: Any = None
+    stop_event: Optional[threading.Event] = None
 
     # Callbacks
     create_finding: Optional[Callable] = None
@@ -39,6 +41,8 @@ class JobContext:
 
     def check_stop(self) -> bool:
         """Return True if the worker should stop."""
+        if self.stop_event and self.stop_event.is_set():
+            return True
         return self.should_stop() if self.should_stop else False
 
     def is_spotify_rate_limited(self) -> bool:
@@ -55,11 +59,31 @@ class JobContext:
 
     def wait_if_paused(self):
         """Block until unpaused or stopped. Returns True if should stop."""
-        import time
         while self.is_paused and self.is_paused():
             if self.check_stop():
                 return True
-            time.sleep(1)
+            if self.stop_event:
+                self.stop_event.wait(0.2)
+            else:
+                import time
+                time.sleep(0.2)
+        return self.check_stop()
+
+    def sleep_or_stop(self, seconds: float, step: float = 0.2) -> bool:
+        """Sleep in small increments so stop requests can interrupt quickly."""
+        if seconds <= 0:
+            return self.check_stop()
+        remaining = seconds
+        while remaining > 0:
+            if self.check_stop():
+                return True
+            chunk = min(step, remaining)
+            if self.stop_event:
+                self.stop_event.wait(chunk)
+            else:
+                import time
+                time.sleep(chunk)
+            remaining -= chunk
         return self.check_stop()
 
 

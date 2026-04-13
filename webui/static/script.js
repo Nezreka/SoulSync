@@ -3043,6 +3043,10 @@ function initializeMediaPlayer() {
     const stopButton = document.getElementById('stop-button');
     const volumeSlider = document.getElementById('volume-slider');
 
+    // Start in idle state (no track playing)
+    const player = document.getElementById('media-player');
+    if (player && !currentTrack) player.classList.add('idle');
+
     // Initialize HTML5 audio player
     audioPlayer = document.getElementById('audio-player');
     if (audioPlayer) {
@@ -3129,8 +3133,9 @@ function setTrackInfo(track) {
     document.getElementById('play-button').disabled = false;
     document.getElementById('stop-button').disabled = false;
 
-    // Hide no track message
+    // Hide no track message and expand player
     document.getElementById('no-track-message').classList.add('hidden');
+    document.getElementById('media-player').classList.remove('idle');
 
     // Sync expanded player and media session
     updateNpTrackInfo();
@@ -3205,8 +3210,9 @@ function clearTrack() {
     // Hide loading animation
     hideLoadingAnimation();
 
-    // Show no track message
+    // Show no track message and collapse player
     document.getElementById('no-track-message').classList.remove('hidden');
+    document.getElementById('media-player').classList.add('idle');
 
     // Reset queue state
     npQueue = [];
@@ -6704,9 +6710,13 @@ function renderMusicPaths(paths) {
     container.innerHTML = paths.map((p, i) => `
         <div class="form-group music-path-row" style="margin-bottom: 4px;">
             <input type="text" class="music-path-input" value="${escapeHtml(p)}" placeholder="/music or C:\\Music" style="flex:1;">
-            <button class="test-button" onclick="this.closest('.music-path-row').remove()" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
+            <button class="test-button" onclick="_removeMusicPathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
         </div>
     `).join('');
+    // Attach auto-save to dynamically rendered inputs
+    container.querySelectorAll('.music-path-input').forEach(input => {
+        input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
+    });
 }
 
 function addMusicPathRow() {
@@ -6720,10 +6730,19 @@ function addMusicPathRow() {
     row.style.marginBottom = '4px';
     row.innerHTML = `
         <input type="text" class="music-path-input" value="" placeholder="/music or C:\\Music" style="flex:1;">
-        <button class="test-button" onclick="this.closest('.music-path-row').remove()" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
+        <button class="test-button" onclick="_removeMusicPathRow(this)" style="padding: 8px 12px; color: #ef5350; border-color: rgba(239,83,80,0.3);">&times;</button>
     `;
     container.appendChild(row);
-    row.querySelector('input').focus();
+    const input = row.querySelector('input');
+    input.focus();
+    // Auto-save when the user finishes typing a path
+    input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
+}
+
+function _removeMusicPathRow(btn) {
+    btn.closest('.music-path-row').remove();
+    // Auto-save after removing a path
+    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
 }
 
 function collectMusicPaths() {
@@ -12108,9 +12127,13 @@ async function autoSavePlaylistM3U(playlistId) {
     const m3uContent = generateM3UContent(playlistId);
     if (!m3uContent) return;
 
-    // Skip M3U for albums — albums are already naturally grouped in media servers
-    const albumPrefixes = ['artist_album_', 'discover_album_', 'enhanced_search_album_', 'seasonal_album_', 'spotify_library_', 'beatport_release_', 'discover_cache_'];
-    if (albumPrefixes.some(p => playlistId.startsWith(p))) return;
+    // Skip M3U for non-playlist downloads — albums, singles, redownloads, etc.
+    const nonPlaylistPrefixes = [
+        'artist_album_', 'discover_album_', 'enhanced_search_album_', 'enhanced_search_track_',
+        'seasonal_album_', 'spotify_library_', 'beatport_release_', 'discover_cache_',
+        'issue_download_', 'library_redownload_', 'redownload_',
+    ];
+    if (nonPlaylistPrefixes.some(p => playlistId.startsWith(p))) return;
 
     const playlistName = process.playlist?.name || process.playlistName || 'Playlist';
     const artistName = process.artist?.name || '';
@@ -12166,7 +12189,14 @@ function generateM3UContent(playlistId) {
 
     tracks.forEach((track, index) => {
         const durationSeconds = track.duration_ms ? Math.floor(track.duration_ms / 1000) : -1;
-        const artists = Array.isArray(track.artists) ? track.artists.join(', ') : (track.artists || 'Unknown Artist');
+        let artists = 'Unknown Artist';
+        if (Array.isArray(track.artists)) {
+            artists = track.artists.map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : String(a)).filter(Boolean).join(', ') || 'Unknown Artist';
+        } else if (typeof track.artists === 'string') {
+            artists = track.artists;
+        } else if (track.artist) {
+            artists = typeof track.artist === 'object' ? (track.artist.name || 'Unknown Artist') : String(track.artist);
+        }
 
         // Check library match status from the modal UI
         const matchEl = document.getElementById(`match-${playlistId}-${index}`);
@@ -15560,6 +15590,11 @@ function processModalStatusUpdate(playlistId, data) {
             if (failedOrCancelledCount > 0) completionParts.push(`${failedOrCancelledCount} failed`);
             const completionMessage = `Download complete! ${completionParts.join(', ')}.`;
             showToast(completionMessage, 'success');
+
+            // Refresh server playlists tab so it reflects newly synced tracks
+            if (typeof loadServerPlaylists === 'function') {
+                setTimeout(() => loadServerPlaylists(), 2000);
+            }
 
             // Auto-close wishlist modal when completed (for auto-processing)
             if (playlistId === 'wishlist') {

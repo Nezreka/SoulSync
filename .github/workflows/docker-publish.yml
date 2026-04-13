@@ -11,6 +11,7 @@ on:
     branches:
       - main
       - master
+        default: '2.3'
 
 jobs:
   build-and-push:

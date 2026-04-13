@@ -337,7 +337,8 @@ class UnknownArtistFixerJob(RepairJob):
             except Exception as e:
                 logger.debug(f"Title search failed for '{title}': {e}")
             # Rate limit courtesy
-            time.sleep(0.2)
+            if context.sleep_or_stop(0.2):
+                return None
 
         return None
 

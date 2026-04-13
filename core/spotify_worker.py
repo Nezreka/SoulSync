@@ -8,6 +8,7 @@ from datetime import datetime, date, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.spotify_client import SpotifyClient, SpotifyRateLimitError
+from core.worker_utils import interruptible_sleep
 
 logger = get_logger("spotify_worker")
 
@@ -31,6 +32,7 @@ class SpotifyWorker:
         self.paused = False
         self.should_stop = False
         self.thread = None
+        self._stop_event = threading.Event()
 
         # Current item being processed (for UI tooltip)
         self.current_item = None
@@ -66,6 +68,7 @@ class SpotifyWorker:
             return
         self.running = True
         self.should_stop = False
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         logger.info("Spotify background worker started")
@@ -76,8 +79,9 @@ class SpotifyWorker:
         logger.info("Stopping Spotify worker...")
         self.should_stop = True
         self.running = False
+        self._stop_event.set()
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=1)
         logger.info("Spotify worker stopped")
 
     def pause(self):
@@ -167,7 +171,7 @@ class SpotifyWorker:
         while not self.should_stop:
             try:
                 if self.paused:
-                    time.sleep(1)
+                    interruptible_sleep(self._stop_event, 1)
                     continue
 
                 # Rate limit guard — if globally rate limited, sleep until ban expires
@@ -175,7 +179,7 @@ class SpotifyWorker:
                     info = self.client.get_rate_limit_info()
                     remaining = info['remaining_seconds'] if info else 60
                     logger.debug(f"Spotify globally rate limited, sleeping {remaining}s...")
-                    time.sleep(min(remaining, 60))  # Check again every 60s max
+                    interruptible_sleep(self._stop_event, min(remaining, 60))  # Check again every 60s max
                     continue
 
                 # Daily budget guard — worker-only cap to avoid saturating Spotify rate limits
@@ -184,7 +188,7 @@ class SpotifyWorker:
                     resets_in = budget['resets_in_seconds']
                     logger.info(f"Daily enrichment budget exhausted ({budget['used']}/{budget['limit']}), "
                                 f"resets in {resets_in // 3600}h {(resets_in % 3600) // 60}m")
-                    time.sleep(min(resets_in, 300))  # Check every 5 min max
+                    interruptible_sleep(self._stop_event, min(resets_in, 300))  # Check every 5 min max
                     continue
 
                 # Post-ban cooldown guard — after ban expires, wait before resuming
@@ -192,7 +196,7 @@ class SpotifyWorker:
                 cooldown = self.client.get_post_ban_cooldown_remaining()
                 if cooldown > 0:
                     logger.debug(f"Post-ban cooldown active ({cooldown}s left), sleeping...")
-                    time.sleep(min(cooldown, 60))
+                    interruptible_sleep(self._stop_event, min(cooldown, 60))
                     continue
 
                 # Auth guard — check if Spotify client is configured (no API call).
@@ -203,7 +207,7 @@ class SpotifyWorker:
                     self.client.reload_config()
                     if not self.client.is_spotify_authenticated():
                         logger.debug("Spotify not authenticated, sleeping 30s...")
-                        time.sleep(30)
+                        interruptible_sleep(self._stop_event, 30)
                         continue
 
                 self.current_item = None
@@ -211,7 +215,7 @@ class SpotifyWorker:
 
                 if not item:
                     logger.debug("No pending items, sleeping...")
-                    time.sleep(10)
+                    interruptible_sleep(self._stop_event, 10)
                     continue
 
                 self.current_item = item
@@ -229,14 +233,14 @@ class SpotifyWorker:
 
                 self._process_item(item)
                 self._increment_daily_budget()
-                time.sleep(self.inter_item_sleep)
+                interruptible_sleep(self._stop_event, self.inter_item_sleep)
 
             except SpotifyRateLimitError:
                 logger.debug("Spotify rate limit hit in worker loop, will retry after ban expires")
-                time.sleep(10)
+                interruptible_sleep(self._stop_event, 10)
             except Exception as e:
                 logger.error(f"Error in worker loop: {e}")
-                time.sleep(5)
+                interruptible_sleep(self._stop_event, 5)
 
         self.current_item = None
         logger.info("Spotify worker thread finished")
@@ -542,7 +546,7 @@ class SpotifyWorker:
                 self._mark_status('album', db_id, 'not_found')
                 self.stats['not_found'] += 1
 
-            time.sleep(self.batch_inter_item_sleep)
+            interruptible_sleep(self._stop_event, self.batch_inter_item_sleep)
 
         logger.info(f"Album batch for '{artist_name}': {matched_count}/{len(db_albums)} matched")
 
@@ -615,7 +619,7 @@ class SpotifyWorker:
                 self._mark_status('track', db_id, 'not_found')
                 self.stats['not_found'] += 1
 
-            time.sleep(self.batch_inter_item_sleep)
+            interruptible_sleep(self._stop_event, self.batch_inter_item_sleep)
 
         logger.info(f"Track batch for '{album_name}': {matched_count}/{len(db_tracks)} matched")
 

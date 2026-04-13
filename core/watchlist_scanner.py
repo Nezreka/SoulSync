@@ -807,6 +807,12 @@ class WatchlistScanner:
                         logger.debug(f"Skipping {release_type}: {album_data.get('name', 'Unknown')} - user preference")
                         continue
 
+                    # Skip albums with placeholder track names (unreleased tracklist)
+                    # Spotify uses "Track 1", "Track 2", etc. for unannounced tracks
+                    if self._has_placeholder_tracks(tracks):
+                        logger.info(f"Skipping album with placeholder tracks (unreleased tracklist): {album_data.get('name', 'Unknown')}")
+                        continue
+
                     # Check each track
                     for track in tracks:
                         # Check content type filters (live, remix, acoustic, compilation)
@@ -1349,6 +1355,22 @@ class WatchlistScanner:
         except Exception:
             return False  # Error — assume released
 
+    def _has_placeholder_tracks(self, tracks: list) -> bool:
+        """Check if an album's tracks are mostly placeholders (unreleased/unannounced tracklist).
+        Spotify uses 'Track 1', 'Track 2', etc. for tracks whose names haven't been revealed."""
+        if not tracks or len(tracks) == 0:
+            return False
+        import re
+        placeholder_count = 0
+        for track in tracks:
+            name = track.get('name', '') if isinstance(track, dict) else getattr(track, 'name', '')
+            # Match "Track 1", "Track 2", ..., "Track 99" (case-insensitive)
+            if re.match(r'^track\s+\d+$', name.strip(), re.IGNORECASE):
+                placeholder_count += 1
+        # If more than half the tracks are placeholders, skip the album
+        # (some albums legitimately have a track called "Track X" but not most of them)
+        return placeholder_count > len(tracks) / 2
+
     def _should_include_release(self, track_count: int, watchlist_artist: WatchlistArtist) -> bool:
         """
         Check if a release should be included based on user's preferences.
@@ -1502,15 +1524,29 @@ class WatchlistScanner:
             unique_title_variations = list(dict.fromkeys(title_variations))
             
             # Search for each artist with each title variation
-            
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
+
             for artist_name in artists_to_search:
                 for query_title in unique_title_variations:
-                    # Use same database check as modals with server awareness
-                    from config.settings import config_manager
-                    active_server = config_manager.get_active_media_server()
-                    db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=album_name)
-                    
+                    # When allow_duplicates is on, skip album hint so we get title+artist matches only
+                    search_album = None if allow_duplicates else album_name
+                    db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=search_album)
+
                     if db_track and confidence >= 0.7:
+                        # When allow_duplicates is on, only skip if the exact same album
+                        if allow_duplicates and album_name:
+                            lib_album = getattr(db_track, 'album_title', '') or ''
+                            if lib_album:
+                                from difflib import SequenceMatcher
+                                album_sim = SequenceMatcher(None, album_name.lower(), lib_album.lower()).ratio()
+                                if album_sim < 0.85:
+                                    logger.debug(f"Track found but different album (allow_duplicates=True): '{original_title}' — library: '{lib_album}', wanted: '{album_name}'")
+                                    continue  # Different album — allow it
+                            else:
+                                # No album info in library — can't compare, allow it
+                                continue
                         logger.debug(f"Track found in library: '{original_title}' by '{artist_name}' (confidence: {confidence:.2f})")
                         return False  # Track exists in library
             
@@ -2127,6 +2163,11 @@ class WatchlistScanner:
                                         tracks = album_data.get('tracks', {}).get('items', [])
 
                                     logger.debug(f"    Album {album_idx}: {album_data.get('name', 'Unknown')} ({len(tracks)} tracks)")
+
+                                    # Skip albums with placeholder tracks (unreleased tracklist)
+                                    if self._has_placeholder_tracks(tracks):
+                                        logger.info(f"    Skipping album with placeholder tracks: {album_data.get('name', 'Unknown')}")
+                                        continue
 
                                     # Determine if this is a new release (within last 30 days)
                                     is_new = False

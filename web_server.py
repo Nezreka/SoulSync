@@ -21,18 +21,20 @@ from urllib.parse import urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, redirect, send_file, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from utils.logging_config import get_logger
+from utils.logging_config import get_logger, setup_logging
 from utils.async_helpers import run_async
 
 # --- Core Application Imports ---
 # Import the same core clients and config manager used by the GUI app
 from config.settings import config_manager
 
-# Initialize logger
-logger = get_logger("web_server")
+# Setup logging early to avoid any import-time logs from being swallowed
+_log_level = config_manager.get('logging.level', 'INFO')
+_log_path = config_manager.get('logging.path', 'logs/app.log')
+logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-SOULSYNC_VERSION = "2.2"
+SOULSYNC_VERSION = "2.3"
 
 # Dedicated source reuse logger — writes to logs/source_reuse.log
 import logging as _logging
@@ -2517,27 +2519,41 @@ class WebUIDownloadMonitor:
         self.monitoring = False
         self.monitor_thread = None
         self.monitored_batches = set()
+        self._lock = threading.Lock()
         
     def start_monitoring(self, batch_id):
         """Start monitoring a download batch"""
-        self.monitored_batches.add(batch_id)
-        if not self.monitoring:
-            self.monitoring = True
-            self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-            self.monitor_thread.start()
-            print(f"Started download monitor for batch {batch_id}")
+        with self._lock:
+            self.monitored_batches.add(batch_id)
+            if not self.monitoring:
+                self.monitoring = True
+                self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+                self.monitor_thread.start()
+                print(f"Started download monitor for batch {batch_id}")
     
     def stop_monitoring(self, batch_id):
         """Stop monitoring a specific batch"""
-        self.monitored_batches.discard(batch_id)
-        if not self.monitored_batches:
+        with self._lock:
+            self.monitored_batches.discard(batch_id)
+            if not self.monitored_batches:
+                self.monitoring = False
+                print(f"Stopped download monitor (no active batches)")
+
+    def shutdown(self):
+        """Stop the monitor loop and clear active batch tracking."""
+        with self._lock:
             self.monitoring = False
-            print(f"Stopped download monitor (no active batches)")
+            self.monitored_batches.clear()
+            self.monitor_thread = None
+        print("Download monitor shutdown requested")
     
     def _monitor_loop(self):
         """Main monitoring loop - checks downloads every 1 second for responsive web UX"""
         while self.monitoring and self.monitored_batches:
             try:
+                if globals().get('IS_SHUTTING_DOWN', False):
+                    self.monitoring = False
+                    break
                 self._check_all_downloads()
                 time.sleep(1)  # 1-second polling for fast web UI updates
             except Exception as e:
@@ -2624,6 +2640,8 @@ class WebUIDownloadMonitor:
                                 completed_tasks.append((batch_id, task_id))
 
         # ---- All work below runs WITHOUT tasks_lock held ----
+        if globals().get('IS_SHUTTING_DOWN', False) or not self.monitoring:
+            return
 
         # Execute deferred operations from _should_retry_task (network calls, nested locks)
         for op in deferred_ops:
@@ -3206,6 +3224,8 @@ def validate_and_heal_batch_states():
     This is the server-side equivalent of the frontend's worker count validation.
     """
     try:
+        if globals().get('IS_SHUTTING_DOWN', False):
+            return
         import time
         current_time = time.time()
 
@@ -3310,15 +3330,41 @@ def validate_and_heal_batch_states():
 
 # Start periodic batch healing (every 30 seconds)
 import threading
+_batch_healing_timer = None
+_batch_healing_timer_lock = threading.Lock()
+
+def _schedule_batch_healing_timer(delay_seconds=30.0):
+    """Schedule the next batch healing cycle."""
+    global _batch_healing_timer
+    if globals().get('IS_SHUTTING_DOWN', False):
+        return
+
+    timer = threading.Timer(delay_seconds, start_batch_healing_timer)
+    timer.daemon = True
+    with _batch_healing_timer_lock:
+        _batch_healing_timer = timer
+    timer.start()
+
+def _cancel_batch_healing_timer():
+    """Cancel the current batch healing timer if one exists."""
+    global _batch_healing_timer
+    with _batch_healing_timer_lock:
+        timer = _batch_healing_timer
+        _batch_healing_timer = None
+    if timer:
+        timer.cancel()
+
 def start_batch_healing_timer():
     """Start periodic batch state validation and healing"""
     try:
+        if globals().get('IS_SHUTTING_DOWN', False):
+            return
         validate_and_heal_batch_states()
     except Exception as e:
         print(f"[Batch Healing Timer] Error: {e}")
     finally:
         # Schedule next healing cycle
-        threading.Timer(30.0, start_batch_healing_timer).start()
+        _schedule_batch_healing_timer(30.0)
 
 # Start the healing timer when the server starts
 start_batch_healing_timer()
@@ -3332,35 +3378,85 @@ def cleanup_monitor():
     """Clean up background monitor on shutdown"""
     if download_monitor.monitoring:
         print("Flask shutdown detected, stopping download monitor...")
-        download_monitor.monitoring = False
-        download_monitor.monitored_batches.clear()
+        download_monitor.shutdown()
         # Give the thread a moment to exit cleanly
         time.sleep(0.5)
         
     # Clean up batch locks to prevent memory leaks
-    with tasks_lock:
-        batch_locks.clear()
-        print("Cleaned up batch locks")
+    try:
+        acquired = tasks_lock.acquire(timeout=1.0)
+        if acquired:
+            try:
+                batch_locks.clear()
+                print("Cleaned up batch locks")
+            finally:
+                tasks_lock.release()
+        else:
+            print("Skipped batch lock cleanup - tasks_lock busy")
+    except Exception as e:
+        print(f"Error cleaning up batch locks: {e}")
 
 # Global shutdown flag
 IS_SHUTTING_DOWN = False
 
-def signal_handler(signum, frame):
-    """Handle SIGINT (Ctrl+C) and SIGTERM"""
-    global IS_SHUTTING_DOWN
-    print(f"Signal {signum} received, cleaning up...")
-    IS_SHUTTING_DOWN = True
-    cleanup_monitor()
-    
-    # Stop automation engine
+def _shutdown_executor(executor, name):
+    """Shut down a ThreadPoolExecutor without waiting for long-running tasks."""
+    if executor is None:
+        return
     try:
-        if automation_engine:
-            print("Stopping automation engine...")
-            automation_engine.stop()
+        print(f"Shutting down {name}...")
+        executor.shutdown(wait=False, cancel_futures=True)
     except Exception as e:
-        print(f"Error stopping automation engine: {e}")
+        print(f"Error shutting down {name}: {e}")
 
-    # Persist API call history
+def _stop_component(component, name, method_names=("stop", "shutdown")):
+    """Call a best-effort stop method on a component if it has one."""
+    if component is None:
+        return
+    for method_name in method_names:
+        method = getattr(component, method_name, None)
+        if callable(method):
+            try:
+                print(f"Stopping {name}...")
+                method()
+            except Exception as e:
+                print(f"Error stopping {name}: {e}")
+            return
+
+def _stop_components_parallel(components):
+    """Stop multiple components concurrently and wait for all stop calls to finish."""
+    stop_threads = []
+
+    for component, name in components:
+        if component is None:
+            continue
+
+        thread = threading.Thread(
+            target=_stop_component,
+            args=(component, name),
+            name=f"shutdown-{name.replace(' ', '-')}",
+        )
+        thread.start()
+        stop_threads.append((name, thread))
+
+    for name, thread in stop_threads:
+        thread.join()
+
+def _shutdown_runtime_components():
+    """Best-effort shutdown for timers, monitors, workers, and executors."""
+    global IS_SHUTTING_DOWN
+    if IS_SHUTTING_DOWN:
+        return
+
+    IS_SHUTTING_DOWN = True
+    _cancel_batch_healing_timer()
+
+    cleanup_monitor()
+
+    _stop_component(web_scan_manager, "web scan manager")
+    _stop_component(automation_engine, "automation engine")
+
+    # Persist API call history before shutting down worker pools.
     try:
         from core.api_call_tracker import api_call_tracker
         api_call_tracker.save()
@@ -3368,13 +3464,57 @@ def signal_handler(signum, frame):
     except Exception as e:
         print(f"Error saving API call history: {e}")
 
-    # Shutdown executor to prevent new tasks
-    try:
-        print("Shutting down missing_download_executor...")
-        missing_download_executor.shutdown(wait=False, cancel_futures=True)
-    except Exception as e:
-        print(f"Error shutting down executor: {e}")
+    # Stop the active DB update worker before tearing down the executor it runs on.
+    # This lets an in-flight update observe should_stop and exit cleanly.
+    _stop_component(db_update_worker, "db update worker")
+    _stop_component(metadata_update_runtime_worker, "metadata update worker")
 
+    # Stop long-lived worker components in parallel so shutdown waits for the
+    # slowest worker instead of serially burning the timeout for each one.
+    _stop_components_parallel([
+        (mb_worker, "musicbrainz worker"),
+        (audiodb_worker, "audiodb worker"),
+        (discogs_worker, "discogs worker"),
+        (deezer_worker, "deezer worker"),
+        (spotify_enrichment_worker, "spotify enrichment worker"),
+        (itunes_enrichment_worker, "itunes enrichment worker"),
+        (lastfm_worker, "lastfm worker"),
+        (genius_worker, "genius worker"),
+        (tidal_enrichment_worker, "tidal enrichment worker"),
+        (qobuz_enrichment_worker, "qobuz enrichment worker"),
+        (hydrabase_worker, "hydrabase worker"),
+        (soulid_worker, "soulid worker"),
+        (listening_stats_worker, "listening stats worker"),
+        (repair_worker, "repair worker"),
+    ])
+
+    # Shut down executor pools so their worker threads stop keeping the process alive.
+    for executor, name in [
+        (stream_executor, "stream executor"),
+        (db_update_executor, "db update executor"),
+        (quality_scanner_executor, "quality scanner executor"),
+        (duplicate_cleaner_executor, "duplicate cleaner executor"),
+        (retag_executor, "retag executor"),
+        (sync_executor, "sync executor"),
+        (missing_download_executor, "missing download executor"),
+        (tidal_discovery_executor, "tidal discovery executor"),
+        (deezer_discovery_executor, "deezer discovery executor"),
+        (spotify_public_discovery_executor, "spotify public discovery executor"),
+        (youtube_discovery_executor, "youtube discovery executor"),
+        (beatport_discovery_executor, "beatport discovery executor"),
+        (listenbrainz_discovery_executor, "listenbrainz discovery executor"),
+        (similar_artists_executor, "similar artists executor"),
+        (metadata_update_executor, "metadata update executor"),
+    ]:
+        _shutdown_executor(executor, name)
+
+    # Give daemon cleanup threads a moment to observe the shutdown flag.
+    time.sleep(0.2)
+
+def signal_handler(signum, frame):
+    """Handle SIGINT (Ctrl+C) and SIGTERM"""
+    print(f"Signal {signum} received, cleaning up...")
+    _shutdown_runtime_components()
     sys.exit(0)
 
 # Register cleanup handlers
@@ -3385,7 +3525,14 @@ def _atexit_save_history():
     except Exception:
         pass
 
+def _atexit_shutdown():
+    try:
+        _shutdown_runtime_components()
+    except Exception:
+        pass
+
 atexit.register(_atexit_save_history)
+atexit.register(_atexit_shutdown)
 atexit.register(cleanup_monitor)
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
@@ -18444,7 +18591,7 @@ def _embed_source_ids(audio_file, metadata: dict):
                 _pp_album_name = metadata.get('album', '')
                 _pp_artist_name = metadata.get('album_artist', '') or metadata.get('artist', '')
                 if _pp_album_name and _pp_artist_name:
-                    conn = database._get_connection()
+                    conn = get_database()._get_connection()
                     try:
                         cursor = conn.cursor()
                         cursor.execute("""
@@ -20133,6 +20280,61 @@ def _post_process_matched_download(context_key, context, file_path):
             print(f"Post-processing failed: Missing spotify_artist context.")
             return
 
+        # ── UNKNOWN ARTIST GUARD ──
+        # If artist name is junk, attempt to resolve from track metadata before proceeding.
+        # This prevents files from landing in "Unknown Artist/" folders.
+        _junk_artist_names = {'', 'unknown', 'unknown artist', 'various artists', 'none', 'null'}
+        _artist_name = (spotify_artist.get('name', '') if isinstance(spotify_artist, dict) else '').strip()
+        if _artist_name.lower() in _junk_artist_names:
+            print(f"[Unknown Artist Guard] Artist name is '{_artist_name}' — attempting to resolve")
+            _resolved = False
+            track_info_guard = context.get("track_info", {}) or {}
+            original_search_guard = context.get("original_search_result", {}) or {}
+
+            # Try 1: Pull artist from track_info.artists
+            _ti_artists = track_info_guard.get('artists', [])
+            if isinstance(_ti_artists, list) and _ti_artists:
+                _first = _ti_artists[0]
+                _name = _first.get('name', '') if isinstance(_first, dict) else str(_first)
+                if _name and _name.strip().lower() not in _junk_artist_names:
+                    spotify_artist['name'] = _name.strip()
+                    print(f"[Unknown Artist Guard] Resolved from track_info.artists: '{_name}'")
+                    _resolved = True
+
+            # Try 2: Pull from original_search_result
+            if not _resolved:
+                _os_artist = original_search_guard.get('artist') or original_search_guard.get('artist_name') or ''
+                if isinstance(_os_artist, str) and _os_artist.strip().lower() not in _junk_artist_names:
+                    spotify_artist['name'] = _os_artist.strip()
+                    print(f"[Unknown Artist Guard] Resolved from original_search_result: '{_os_artist}'")
+                    _resolved = True
+
+            # Try 3: Re-fetch from metadata source using track ID
+            if not _resolved:
+                _track_id = track_info_guard.get('id') or track_info_guard.get('track_id') or ''
+                if _track_id:
+                    try:
+                        _fb_client = _get_metadata_fallback_client()
+                        if hasattr(_fb_client, 'get_track_details'):
+                            _details = _fb_client.get_track_details(str(_track_id))
+                            if _details and isinstance(_details, dict):
+                                _d_artists = _details.get('artists', [])
+                                if isinstance(_d_artists, list) and _d_artists:
+                                    _d_first = _d_artists[0]
+                                    _d_name = _d_first.get('name', '') if isinstance(_d_first, dict) else str(_d_first)
+                                    if _d_name and _d_name.strip().lower() not in _junk_artist_names:
+                                        spotify_artist['name'] = _d_name.strip()
+                                        print(f"[Unknown Artist Guard] Resolved from metadata API: '{_d_name}'")
+                                        _resolved = True
+                    except Exception as _guard_err:
+                        print(f"[Unknown Artist Guard] Metadata re-fetch failed: {_guard_err}")
+
+            if not _resolved:
+                print(f"[Unknown Artist Guard] Could not resolve artist — proceeding with '{_artist_name}'")
+
+            context['spotify_artist'] = spotify_artist
+        # ── END UNKNOWN ARTIST GUARD ──
+
         # Check if playlist folder mode is enabled (sync page playlists only)
         track_info = context.get("track_info", {})
         playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
@@ -21332,180 +21534,120 @@ def get_version_info():
         "sections": [
             {
                 "title": "Centralized Downloads Page",
-                "description": "Live view of every download across the entire app in one place",
+                "description": "Live view of every download across the entire app — tracks from Sync, Discover, Artists, Search, and Wishlist all in one place",
                 "features": [
-                    "• New Downloads page in sidebar — shows all tracks from Sync, Discover, Artists, Search, and Wishlist",
-                    "• Live-updating list with filter pills: All, Active, Queued, Completed, Failed",
-                    "• Section headers group downloads by status with track counts",
-                    "• Track position display (3 of 19) for album and playlist batches",
-                    "• Album art, artist/album metadata, batch context, and error messages per row",
+                    "• New Downloads page in sidebar with live-updating list and nav badge",
+                    "• Filter pills: All, Active, Queued, Completed, Failed",
+                    "• Track position (3 of 19), album art, batch context, and error details per row",
                     "• Clear Completed button removes finished items from the tracker",
-                    "• Nav badge shows active download count from any page via WebSocket",
                 ],
-                "usage_note": "Click Downloads in the sidebar to see all active and recent downloads. The badge updates in real-time from any page."
+                "usage_note": "Click Downloads in the sidebar. The badge updates in real-time from any page."
             },
             {
                 "title": "First-Run Setup Wizard",
-                "description": "New full-screen guided setup for first-time users",
+                "description": "Full-screen guided setup that walks new users through configuration and their first download",
                 "features": [
-                    "• 7-step wizard: Welcome, Metadata Source, Download Source, Paths & Media Server, Add Artists, First Download, Done",
-                    "• All 6 download sources available: Soulseek, YouTube, HiFi, Tidal, Qobuz, Deezer — with inline config and test buttons",
-                    "• Path fields default to /app/downloads and /app/Transfer with lock/unlock for Docker users",
-                    "• Media server connection (Plex/Jellyfin/Navidrome) with inline test",
-                    "• Add artists to watchlist with live search — shows watchlist status, add/remove in place",
-                    "• First download step searches metadata, finds best match, and downloads through the full pipeline",
-                    "• All settings save to DB identically to the Settings page — no difference in behavior",
+                    "• 7-step wizard: Welcome, Metadata Source, Download Source, Paths, Media Server, Add Artists, First Download",
+                    "• All 6 download sources with inline config and test buttons",
+                    "• Locked path defaults for Docker users (/app/downloads, /app/Transfer)",
+                    "• Add artists to watchlist with live search and remove in place",
+                    "• First download goes through the full matched download pipeline with metadata",
+                    "• Auto-shows on fresh installs, skippable, all settings save to DB",
+                    "• Done page with tips grid covering Sync, Wishlist, Automations, Notifications, Help, and Settings",
                 ],
-                "usage_note": "Open with ?setup=1 URL parameter or openSetupWizard() from browser console. First-run auto-detection coming soon."
+                "usage_note": "Auto-shows for new users. Re-open anytime with ?setup=1 in the URL."
+            },
+            {
+                "title": "Graceful Shutdown & Stability",
+                "description": "Application now shuts down cleanly within 1 second instead of 60+",
+                "features": [
+                    "• All background workers use interruptible sleep — respond to shutdown signals immediately",
+                    "• Docker containers no longer force-kill, preventing SQLite WAL corruption",
+                    "• Parallel component shutdown for scan managers, repair workers, executors",
+                    "• Download monitor thread safety with proper locking",
+                    "• Logging initialized early so import-time diagnostic messages are captured",
+                    "• Database initialization fixed for fresh installs — all migrations run in a single cycle",
+                ],
+                "usage_note": "Docker users: containers now stop gracefully within the default 10-second timeout."
+            },
+            {
+                "title": "Unknown Artist Prevention",
+                "description": "Multi-layer defense against tracks downloading as 'Unknown Artist'",
+                "features": [
+                    "• Metadata cache now rejects tracks with junk artist names — prevents caching incomplete data",
+                    "• Post-processing 3-tier fallback: check track_info, search result, then re-fetch from metadata API",
+                    "• Files never land in 'Unknown Artist' folders — guard runs before folder creation and tag embedding",
+                ],
+            },
+            {
+                "title": "Deezer Multi-Artist Tagging",
+                "description": "Feature tracks now tag all credited artists using Deezer's contributors field",
+                "features": [
+                    "• ARTIST tag includes all contributors (e.g. 'Kraftklub, Domiziana') instead of just the primary",
+                    "• Album artist tag unchanged — folder organization unaffected",
+                    "• Falls back gracefully when contributors field is absent (search results)",
+                ],
             },
             {
                 "title": "Music Videos — Search & Download from YouTube",
-                "description": "New Music Videos tab in enhanced and global search for finding and downloading music videos",
+                "description": "Music Videos tab in enhanced and global search",
                 "features": [
-                    "• Music Videos pill tab alongside Spotify/Deezer/iTunes/Discogs in both search bars",
-                    "• YouTube search returns video cards with 16:9 thumbnails, duration, channel name, view count",
-                    "• Click any video to download — circular progress ring on thumbnail, green checkmark on completion",
-                    "• Metadata matching — searches your primary source for clean artist/title before saving",
-                    "• Saves to configurable Music Videos directory as Artist/Title-video.mp4 (Plex global folder format)",
-                    "• Plex video type suffixes supported: -video, -lyrics, -live, -concert, -interview, -behindthescenes"
+                    "• Video cards with thumbnails, duration, channel name, view count",
+                    "• Click to download with progress ring — metadata matched before saving",
+                    "• Saves to configurable Music Videos directory (Plex format)",
                 ],
-                "usage_note": "Set your Music Videos directory in Settings > Downloads, then search for any artist in the search bar and click the Music Videos tab."
+                "usage_note": "Set your Music Videos directory in Settings > Downloads, then use the Music Videos tab in search."
             },
             {
                 "title": "Lidarr Download Source (Development)",
-                "description": "Use Lidarr as a download source for Usenet and torrent content",
+                "description": "7th download source for Usenet and torrent content via Lidarr",
                 "features": [
-                    "• 7th download source alongside Soulseek, YouTube, Tidal, Qobuz, HiFi, and Deezer",
-                    "• SoulSync handles discovery and matching, Lidarr handles downloading via its indexers",
-                    "• Configure with just URL + API key in Settings > Downloads",
+                    "• SoulSync handles discovery and matching, Lidarr handles downloading",
+                    "• Configure with URL + API key in Settings > Downloads",
                     "• Available as standalone source or in Hybrid mode priority order",
-                    "• Currently in development — basic album search and download flow functional"
                 ],
-                "usage_note": "Requires a running Lidarr instance with configured indexers and download clients. Set Download Source to 'Lidarr Only (Development)' or add to Hybrid order."
+                "usage_note": "Requires a running Lidarr instance. Set Download Source to 'Lidarr Only (Development)' or add to Hybrid order."
             },
             {
-                "title": "Metadata Pipeline Overhaul — Fix Unknown Artist & Source Selection",
-                "description": "Major fix for tracks downloading as 'Unknown Artist' and Spotify being used when Deezer/iTunes was selected",
+                "title": "Matching & Quality Improvements",
+                "description": "Better album matching, per-track artist support, and placeholder detection",
                 "features": [
-                    "• Fixed playlist pipeline (discover → sync → wishlist → download) losing artist, track number, and album year data",
-                    "• All discovery workers now respect your configured primary metadata source instead of always using Spotify",
-                    "• Centralized metadata source selection in core/metadata_service.py — one source of truth for all features",
-                    "• Fixed Deezer metadata cache returning incomplete data (missing track_number, release_date) from search result cache",
-                    "• Sync completion toast now shows which specific tracks failed to match (not just a count)",
-                    "• New 'Fix Unknown Artists' maintenance job — scans library for Unknown Artist tracks and corrects metadata, tags, and file paths",
-                    "• One-time migration purges stale discovery and Deezer cache entries on first startup after update"
+                    "• Album matching uses full similarity instead of word subset — 'Paradise' no longer matches 'Club Paradise'",
+                    "• Artist gate prevents wrong-artist downloads (Soulseek < 0.25, YouTube < 0.15 threshold)",
+                    "• Word boundary matching for artists — 'muse' no longer matches 'museum'",
+                    "• Watchlist scanner skips albums with placeholder tracks ('Track 1', 'Track 2') from unreleased tracklists",
+                    "• Per-track artist column for compilations and DJ mixes — tag writer uses track artist, not album artist",
+                    "• Centralized metadata source selection — all features respect your configured source",
                 ],
-                "usage_note": "If you have existing Unknown Artist tracks, run the Fix Unknown Artists job from Settings > Maintenance."
-            },
-            {
-                "title": "Matching Engine — Artist Verification Gate",
-                "description": "Prevents downloading tracks from completely wrong artists on Soulseek and YouTube",
-                "features": [
-                    "• New artist gate rejects candidates where the artist doesn't match the target (Soulseek: < 0.25, YouTube: < 0.15)",
-                    "• Fixed artist substring matching — 'muse' no longer matches 'museum', 'art' no longer matches 'heart'",
-                    "• Artist similarity now compared per path segment instead of full filename — misspelled artist names still match correctly",
-                    "• YouTube artist weight increased from 10% to 20% to reduce wrong-uploader matches",
-                    "• Seasonal discovery, personalized playlists, and playlist explorer all use configured source instead of Spotify"
-                ],
-                "usage_note": "No action needed — matching improvements apply automatically to all new downloads."
-            },
-            {
-                "title": "Deezer User Playlists — Browse & Download Your Library",
-                "description": "New Deezer tab on the Sync page shows your personal playlists via ARL token — same flow as Spotify",
-                "features": [
-                    "• Click Refresh to load all your Deezer playlists with track counts",
-                    "• Click any playlist to view tracks, then Download Missing or Sync — no discovery step needed",
-                    "• Existing Deezer URL import moved to 'Deezer Link' tab (unchanged)",
-                    "• ARL token field added to Connections tab alongside Downloads tab with bidirectional sync",
-                    "• Album release dates fetched for proper $year template variable support"
-                ],
-                "usage_note": "Configure your ARL token in Settings > Connections or Downloads, then open the Deezer tab on the Sync page."
-            },
-            {
-                "title": "Qobuz Token Auth — CAPTCHA Bypass",
-                "description": "Qobuz added reCAPTCHA to their login — token auth lets you paste your session token directly",
-                "features": [
-                    "• New 'Auth Token' field on both Connections and Downloads tabs for Qobuz",
-                    "• Log into play.qobuz.com in your browser, copy X-User-Auth-Token from DevTools, paste it in",
-                    "• Bypasses the CAPTCHA entirely — existing email/password login still works if your session is active",
-                    "• Token is validated and saved as a normal session — identical to email/password login"
-                ],
-                "usage_note": "If Qobuz email/password login fails, use the Auth Token field instead."
-            },
-            {
-                "title": "Streaming Source Matching — Artist Gate",
-                "description": "Tidal, Qobuz, HiFi, and Deezer downloads no longer match to wrong artists",
-                "features": [
-                    "• Artist similarity gate rejects candidates below 0.4 match threshold",
-                    "• Streaming source threshold raised from 0.55 to 0.60",
-                    "• No more fallback to lenient Soulseek filename matcher for structured API sources",
-                    "• Fixed single-char artist containment bug (e.g. 'B小町' no longer matches 'B.B. King')",
-                    "• YouTube and Soulseek matching completely unchanged"
-                ],
-                "usage_note": "Downloads from official sources are now much more accurate. Check Download History for verification details."
-            },
-            {
-                "title": "Download History — Source Provenance",
-                "description": "Collapsible download history with full source tracking and AcoustID verification badges",
-                "features": [
-                    "• Expected vs Downloaded comparison — shows what you asked for vs what the source provided",
-                    "• Mismatched downloads highlighted in red for easy identification",
-                    "• AcoustID verification badge per entry: Verified (green), Failed (red), Skipped (orange), Off (gray)",
-                    "• Source filename, track ID, and artist saved with every download",
-                    "• Click anywhere on an entry to expand/collapse details"
-                ],
-                "usage_note": "Click 'Download History' on the Dashboard to see source provenance for new downloads."
             },
             {
                 "title": "Fixes & Improvements",
-                "description": "Bug fixes, quality of life improvements, and new settings",
+                "description": "60+ commits of bug fixes, UX improvements, and infrastructure",
                 "features": [
-                    "• Dismissed maintenance findings no longer reappear on next scan — dedup check now includes dismissed status",
-                    "• Orphan file detector: increased path matching depth to 4 segments + filename parsing fallback for unreadable tags",
-                    "• Media player: rapid play clicks no longer create duplicate audio streams requiring browser refresh",
-                    "• Logs directory auto-created on startup — prevents crash for non-Docker installations",
-                    "• Stale discovery data re-processed in automation pipeline — tracks with missing metadata get re-enriched",
-                    "• Artist names no longer stored as lowercase — fixed static method shadowing instance method. Run a database update to fix existing names.",
-                    "• Watchlist scanner skips future/unreleased albums — no more garbage downloads from albums not yet out",
-                    "• Playlist sync tracks now tagged with correct track numbers instead of always 01",
-                    "• Emby playlist sync fixed — integer IDs now accepted alongside Jellyfin GUIDs",
-                    "• Discovery fix search now tries all metadata sources (Spotify → Deezer → iTunes) with automatic fallback",
-                    "• Album completeness scanner skips zero-track albums to prevent auto-fill errors",
-                    "• Global search string escaping fixed — albums with newlines in metadata no longer crash",
-                    "• Download history timestamps fixed — no longer always showing 'Just now'",
-                    "• Discogs added to enrichment service whitelist — Enrich button now works for Discogs",
-                    "• Settings Connections tab redesigned with collapsible accordion services and brand-colored dots",
-                    "• Metadata source filter on Library page — filter artists by matched/unmatched to any service",
-                    "• Database Maintenance UI — VACUUM and incremental vacuum in Settings > Advanced",
-                    "• Music Library Paths setting — configure where your music files live for tag writing and file detection",
-                    "• Replace lower quality files on import — opt-in toggle in Settings > Library",
-                    "• HiFi API instance health check in Settings > Downloads",
-                    "• Debug test activity feed message removed from startup",
-                    "• Global search downloads now create bubble snapshots on Dashboard and Search page",
-                    "• Dead file findings now offer 'Remove from DB' option alongside 'Re-download' — works in bulk fix too",
-                    "• Deezer ARL sync and download modals rehydrate after page refresh",
-                    "• Deezer album data (release dates, cover art) cached in metadata cache — subsequent playlist loads are near-instant"
-                ]
-            },
-            {
-                "title": "Artist Map — Visualize Your Music Universe",
-                "description": "Three interactive canvas-based visualization modes on the Discover page",
-                "features": [
-                    "• Watchlist Constellation — your watched artists as large nodes with similar artists orbiting around them",
-                    "• Genre Map — browse all artists by genre with a sidebar picker, ring-packed clusters, no artist cap",
-                    "• Artist Explorer — deep-dive any artist, ring 1 (direct similar) + ring 2 (extended network)",
-                    "• On-the-fly discovery — exploring an unknown artist fetches similar artists from MusicMap in real-time and caches them",
-                    "• Invalid artist names validated against Spotify/iTunes before loading the map",
-                    "• Offscreen canvas buffer rendering with LOD — handles 1000+ nodes smoothly",
-                    "• Image proxy endpoint solves CORS for canvas — Deezer, Last.fm, Discogs images now render on bubbles",
-                    "• Direct CORS fetch first (zero server load), proxy only as fallback for non-CORS CDNs",
-                    "• Server-side 5-minute cache on all map endpoints — switching genres and reopening is instant",
-                    "• Cache auto-invalidates on watchlist changes, scans, and new similar artist discoveries",
-                    "• Keyboard shortcuts (?, F for fit, S for search), mouse wheel zoom, click-to-explore",
-                    "• Hover constellation effect with fade animation, rich tooltips with genre tags"
+                    "• Plex playlists crash on Tag objects fixed — safe attribute access for non-playlist items",
+                    "• Music library paths now auto-save when added/removed on settings page",
+                    "• M3U files no longer created for single track downloads — only playlists",
+                    "• M3U [object Object] artist bug fixed — handles all artist format variations",
+                    "• Album year update 'database not defined' error fixed in post-processing",
+                    "• Sync tab content scrolling fixed — long lists no longer clipped",
+                    "• Hybrid download status shows green when any serverless source is in the order",
+                    "• Serverless sources (YouTube, HiFi, Qobuz) always show green in service status",
+                    "• Repeated slskd 401 errors suppressed after first warning",
+                    "• Download clients reload paths when settings change (no restart needed)",
+                    "• watchlist_artists table migrations include all provider ID columns in rebuilds",
+                    "• Emojis removed from all Python log and print statements",
+                    "• Interactive help coverage expanded with 30+ new entries",
+                    "• Docker compose includes optional slskd service block",
+                    "• Multi-stage Docker build reduces image size",
+                    "• MusicBrainz recording ID backfilled from Navidrome during scan",
                 ],
-                "usage_note": "Navigate to Discover and click the Artist Map section. Choose Watchlist, Genre, or Explorer mode."
             },
+            # v2.2 and earlier features moved to archive
+        ]
+    }
+    return jsonify(version_data)
+
+_OLD_V22_NOTES = """
             {
                 "title": "Wing It — Download or Sync Without Discovery",
                 "description": "Bypass metadata discovery and use raw track names directly",
@@ -22159,9 +22301,7 @@ def get_version_info():
                     "• Wishlist process API endpoint for external apps"
                 ]
             }
-        ]
-    }
-    return jsonify(version_data)
+"""  # end of _OLD_V22_NOTES
 
 _OLD_V2_NOTES = r"""
                 "features": [
@@ -22726,7 +22866,7 @@ def _simple_monitor_task():
     Search cleanup and download cleanup are now handled by system automations."""
     print("Simple background monitor started")
 
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         try:
             with matched_context_lock:
                 pending_count = len(matched_downloads_context)
@@ -22752,6 +22892,8 @@ def _simple_monitor_task():
         except Exception as e:
             print(f"Simple monitor error: {e}")
             time.sleep(10)
+
+    print("Simple background monitor stopped")
 
 def start_simple_background_monitor():
     """Starts the simple background monitor thread."""
@@ -30419,7 +30561,7 @@ def get_server_playlists():
                 raw_playlists = plex_client.server.playlists()
                 logger.info(f"[ServerPlaylists] Plex returned {len(raw_playlists)} total playlists")
                 for playlist in raw_playlists:
-                    if playlist.playlistType == 'audio':
+                    if getattr(playlist, 'playlistType', None) == 'audio':
                         playlists_data.append({
                             'id': str(playlist.ratingKey),
                             'name': playlist.title,
@@ -40717,6 +40859,7 @@ metadata_update_state = {
 }
 
 metadata_update_worker = None
+metadata_update_runtime_worker = None
 metadata_update_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="metadata_update")
 
 # ===============================
@@ -44831,7 +44974,7 @@ def _old_get_listenbrainz_playlist_tracks_DEPRECATED(playlist_mbid):
 @app.route('/api/metadata/start', methods=['POST'])
 def start_metadata_update():
     """Start the metadata update process - EXACT copy of dashboard.py logic"""
-    global metadata_update_worker, metadata_update_state
+    global metadata_update_worker, metadata_update_runtime_worker, metadata_update_state
     
     try:
         # Check if already running
@@ -44899,6 +45042,7 @@ def start_metadata_update():
         
         # Start the metadata update worker - EXACTLY like dashboard.py
         def run_metadata_update():
+            global metadata_update_runtime_worker
             try:
                 metadata_worker = WebMetadataUpdateWorker(
                     None,  # Artists will be loaded in the worker thread - EXACTLY like dashboard.py
@@ -44907,12 +45051,15 @@ def start_metadata_update():
                     active_server,
                     refresh_interval_days
                 )
+                metadata_update_runtime_worker = metadata_worker
                 metadata_worker.run()
             except Exception as e:
                 print(f"Error in metadata update worker: {e}")
                 metadata_update_state['status'] = 'error'
                 metadata_update_state['error'] = str(e)
                 add_activity_item("", "Metadata Error", str(e), "Now")
+            finally:
+                metadata_update_runtime_worker = None
         
         metadata_update_worker = metadata_update_executor.submit(run_metadata_update)
         
@@ -52046,7 +52193,7 @@ def _hydrabase_reconnect_loop():
     global _hydrabase_ws
     _consecutive_failures = 0
 
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(30)
         try:
             # Only attempt reconnect if auto_connect is enabled
@@ -52096,7 +52243,7 @@ def _hydrabase_reconnect_loop():
 
 def _emit_service_status_loop():
     """Background thread that pushes service status every 5 seconds."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(5)
         try:
             socketio.emit('status:update', _build_status_payload())
@@ -52105,7 +52252,7 @@ def _emit_service_status_loop():
 
 def _emit_watchlist_count_loop():
     """Background thread that pushes watchlist count every 10 seconds to each profile room."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
         try:
             database = get_database()
@@ -52118,7 +52265,7 @@ def _emit_watchlist_count_loop():
 
 def _emit_download_status_loop():
     """Background thread that pushes download batch status every 2 seconds to subscribed rooms."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
         try:
             live_transfers_lookup = get_cached_transfer_data()
@@ -52179,7 +52326,7 @@ def handle_profile_join(data):
 
 def _emit_system_stats_loop():
     """Background thread that pushes system stats every 10 seconds."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
         try:
             socketio.emit('dashboard:stats', _build_system_stats())
@@ -52188,7 +52335,7 @@ def _emit_system_stats_loop():
 
 def _emit_activity_feed_loop():
     """Background thread that pushes activity feed every 2 seconds."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
         try:
             with activity_feed_lock:
@@ -52199,7 +52346,7 @@ def _emit_activity_feed_loop():
 
 def _emit_db_stats_loop():
     """Background thread that pushes database stats every 10 seconds."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
         try:
             db = get_database()
@@ -52210,7 +52357,7 @@ def _emit_db_stats_loop():
 
 def _emit_wishlist_count_loop():
     """Background thread that pushes wishlist count every 10 seconds to each profile room."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(10)
         try:
             from core.wishlist_service import get_wishlist_service
@@ -52256,7 +52403,7 @@ def _emit_rate_monitor_loop():
         'tidal': 'tidal_enrichment', 'qobuz': 'qobuz_enrichment',
     }
 
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
             from core.api_call_tracker import api_call_tracker
@@ -52326,7 +52473,7 @@ def _emit_enrichment_status_loop():
         'genius-enrichment': lambda: genius_worker,
     }
 
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
 
         # Auto-pause/resume rate-limited workers during downloads
@@ -52364,7 +52511,7 @@ def _emit_enrichment_status_loop():
 
 def _emit_tool_progress_loop():
     """Background thread that pushes all tool progress statuses every 1 second."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         # Stream status
         try:
@@ -52452,7 +52599,7 @@ def handle_discovery_unsubscribe(data):
 
 def _emit_sync_progress_loop():
     """Push sync progress to subscribed rooms every 1 second."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
             with sync_lock:
@@ -52476,7 +52623,7 @@ def _emit_discovery_progress_loop():
         'listenbrainz': lambda: listenbrainz_playlist_states,
         'spotify_public': lambda: spotify_public_discovery_states,
     }
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         for platform, get_states in platform_states.items():
             try:
@@ -52506,7 +52653,7 @@ def _emit_discovery_progress_loop():
 
 def _emit_scan_status_loop():
     """Push watchlist and media scan status every 2 seconds."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
         # Watchlist scan
         try:
@@ -52538,7 +52685,7 @@ def _emit_scan_status_loop():
 
 def _emit_automation_progress_loop():
     """Push automation:progress events every 1 second for running automations."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
             with automation_progress_lock:
@@ -52582,7 +52729,7 @@ def _emit_automation_progress_loop():
 
 def _emit_repair_progress_loop():
     """Push repair:progress events every 1 second for running repair jobs."""
-    while True:
+    while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
             if repair_worker is None:
@@ -52626,12 +52773,6 @@ def _emit_repair_progress_loop():
 
 
 if __name__ == '__main__':
-    # Initialize logging for web server
-    from utils.logging_config import setup_logging
-    log_level = config_manager.get('logging.level', 'INFO')
-    log_path = config_manager.get('logging.path', 'logs/app.log')
-    logger = setup_logging(log_level, log_path)
-
     print("Starting SoulSync Web UI Server...")
     print("Open your browser and navigate to http://127.0.0.1:8008")
     

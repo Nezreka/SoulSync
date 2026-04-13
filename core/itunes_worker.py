@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.itunes_client import iTunesClient
+from core.worker_utils import interruptible_sleep
 
 logger = get_logger("itunes_worker")
 
@@ -34,6 +35,7 @@ class iTunesWorker:
         self.paused = False
         self.should_stop = False
         self.thread = None
+        self._stop_event = threading.Event()
 
         # Current item being processed (for UI tooltip)
         self.current_item = None
@@ -66,6 +68,7 @@ class iTunesWorker:
             return
         self.running = True
         self.should_stop = False
+        self._stop_event.clear()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         logger.info("iTunes background worker started")
@@ -76,8 +79,9 @@ class iTunesWorker:
         logger.info("Stopping iTunes worker...")
         self.should_stop = True
         self.running = False
+        self._stop_event.set()
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=1)
         logger.info("iTunes worker stopped")
 
     def pause(self):
@@ -116,7 +120,7 @@ class iTunesWorker:
         while not self.should_stop:
             try:
                 if self.paused:
-                    time.sleep(1)
+                    interruptible_sleep(self._stop_event, 1)
                     continue
 
                 # No auth check needed — iTunes API requires no authentication
@@ -126,7 +130,7 @@ class iTunesWorker:
 
                 if not item:
                     logger.debug("No pending items, sleeping...")
-                    time.sleep(10)
+                    interruptible_sleep(self._stop_event, 10)
                     continue
 
                 self.current_item = item
@@ -147,13 +151,13 @@ class iTunesWorker:
                 # Sleep depends on item type — search items need more delay
                 item_type = item.get('type', '')
                 if item_type in ('album_batch', 'track_batch'):
-                    time.sleep(self.batch_inter_item_sleep)
+                    interruptible_sleep(self._stop_event, self.batch_inter_item_sleep)
                 else:
-                    time.sleep(self.inter_item_sleep)
+                    interruptible_sleep(self._stop_event, self.inter_item_sleep)
 
             except Exception as e:
                 logger.error(f"Error in worker loop: {e}")
-                time.sleep(5)
+                interruptible_sleep(self._stop_event, 5)
 
         self.current_item = None
         logger.info("iTunes worker thread finished")
@@ -444,7 +448,7 @@ class iTunesWorker:
                 self._mark_status('album', db_id, 'not_found')
                 self.stats['not_found'] += 1
 
-            time.sleep(self.batch_inter_item_sleep)
+            interruptible_sleep(self._stop_event, self.batch_inter_item_sleep)
 
         logger.info(f"Album batch for '{artist_name}': {matched_count}/{len(db_albums)} matched")
 
@@ -516,7 +520,7 @@ class iTunesWorker:
                 self._mark_status('track', db_id, 'not_found')
                 self.stats['not_found'] += 1
 
-            time.sleep(self.batch_inter_item_sleep)
+            interruptible_sleep(self._stop_event, self.batch_inter_item_sleep)
 
         logger.info(f"Track batch for '{album_name}': {matched_count}/{len(db_tracks)} matched")
 
