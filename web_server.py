@@ -10458,17 +10458,17 @@ def get_artist_discography(artist_id):
                         active_source = 'spotify'
                 elif source_override == 'itunes':
                     itunes_cl = _get_itunes_client()
-                    albums = itunes_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                    albums = itunes_cl.get_artist_albums(artist_id, album_type='album,single')
                     if albums:
                         active_source = 'itunes'
                 elif source_override == 'deezer':
                     deezer_cl = _get_deezer_client()
-                    albums = deezer_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                    albums = deezer_cl.get_artist_albums(artist_id, album_type='album,single')
                     if albums:
                         active_source = 'deezer'
                 elif source_override == 'discogs':
                     discogs_cl = _get_discogs_client()
-                    albums = discogs_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                    albums = discogs_cl.get_artist_albums(artist_id, album_type='album,single')
                     if albums:
                         active_source = 'discogs'
                 elif source_override == 'hydrabase':
@@ -10479,7 +10479,7 @@ def get_artist_discography(artist_id):
                         hb_cl = _get_itunes_client()
                     else:
                         hb_cl = spotify_client
-                    albums = hb_cl.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                    albums = hb_cl.get_artist_albums(artist_id, album_type='album,single')
                     if albums:
                         active_source = plugin or 'hydrabase'
 
@@ -10506,7 +10506,7 @@ def get_artist_discography(artist_id):
                         search_artists = cl.search_artists(artist_name, limit=5)
                         if search_artists:
                             best = next((a for a in search_artists if a.name.lower() == artist_name.lower()), search_artists[0])
-                            albums = cl.get_artist_albums(best.id, album_type='album,single', limit=50)
+                            albums = cl.get_artist_albums(best.id, album_type='album,single')
                             if albums:
                                 active_source = source_override
 
@@ -10544,7 +10544,7 @@ def get_artist_discography(artist_id):
             try:
                 if is_numeric_id:
                     # It's a numeric ID (iTunes/Deezer), use directly
-                    albums = fallback_client.get_artist_albums(artist_id, album_type='album,single', limit=50)
+                    albums = fallback_client.get_artist_albums(artist_id, album_type='album,single')
                     if albums:
                         active_source = fallback_source
                         print(f"Got {len(albums)} albums from {fallback_source} (direct ID)")
@@ -10563,7 +10563,7 @@ def get_artist_discography(artist_id):
                             best_match = fallback_artists[0]
 
                         print(f"Found {fallback_source} artist: {best_match.name} (ID: {best_match.id})")
-                        albums = fallback_client.get_artist_albums(best_match.id, album_type='album,single', limit=50)
+                        albums = fallback_client.get_artist_albums(best_match.id, album_type='album,single')
                         if albums:
                             active_source = fallback_source
                             print(f"Got {len(albums)} albums from {fallback_source} (name search)")
@@ -48064,7 +48064,7 @@ def playlist_explorer_build_tree():
             try:
                 # skip_cache only supported by spotify_client — other clients don't cache this call
                 _skip = {'skip_cache': True} if hasattr(active_client, 'sp') else {}
-                all_albums = active_client.get_artist_albums(artist_id, album_type='album,single', limit=50, **_skip)
+                all_albums = active_client.get_artist_albums(artist_id, album_type='album,single', **_skip)
             except Exception as e:
                 return {'success': False, 'error': f'Album fetch failed: {e}'}
 
@@ -49269,7 +49269,7 @@ def get_spotify_artist_discography(artist_name):
         print(f"Found Spotify artist: {artist.name} (ID: {spotify_artist_id}, confidence: {highest_score:.3f})")
 
         # Get all albums (albums, singles, and compilations)
-        all_albums = spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single,compilation', limit=50)
+        all_albums = spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single,compilation')
 
         if not all_albums:
             return {

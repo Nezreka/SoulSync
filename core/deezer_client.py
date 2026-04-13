@@ -635,26 +635,37 @@ class DeezerClient:
             '_raw_data': artist_data
         }
 
-    def get_artist_albums_list(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
+    def get_artist_albums_list(self, artist_id: str, album_type: str = 'album,single', limit: int = 200) -> List[Album]:
         """Get albums by artist ID — returns Album dataclass list (metadata source interface).
 
-        Matches iTunesClient.get_artist_albums() interface."""
-        data = self._api_get(f'artist/{artist_id}/albums', {'limit': min(limit, 100)})
-        if not data or 'data' not in data:
-            return []
-
+        Matches iTunesClient.get_artist_albums() interface.
+        Paginates through all results up to the requested limit."""
         albums = []
+        all_raw = []
         requested_types = [t.strip() for t in album_type.split(',')]
+        offset = 0
+        page_size = 100  # Deezer API max per request
 
-        for album_data in data['data']:
-            album = Album.from_deezer_album(album_data)
+        while offset < limit:
+            fetch_limit = min(page_size, limit - offset)
+            data = self._api_get(f'artist/{artist_id}/albums', {'limit': fetch_limit, 'index': offset})
+            if not data or 'data' not in data or len(data['data']) == 0:
+                break
 
-            if album_type != 'album,single':
-                if album.album_type not in requested_types:
-                    if not (album.album_type == 'ep' and 'single' in requested_types):
-                        continue
+            for album_data in data['data']:
+                all_raw.append(album_data)
+                album = Album.from_deezer_album(album_data)
 
-            albums.append(album)
+                if album_type != 'album,single':
+                    if album.album_type not in requested_types:
+                        if not (album.album_type == 'ep' and 'single' in requested_types):
+                            continue
+
+                albums.append(album)
+
+            if len(data['data']) < fetch_limit:
+                break  # Last page
+            offset += len(data['data'])
 
         cache = get_metadata_cache()
         # Deezer's /artist/{id}/albums endpoint doesn't include artist info on each album.
@@ -663,7 +674,7 @@ class DeezerClient:
         if albums and albums[0].artists:
             artist_stub = {'id': int(artist_id) if artist_id.isdigit() else 0, 'name': albums[0].artists[0]}
         entries = []
-        for ad in data['data']:
+        for ad in all_raw:
             if ad.get('id'):
                 if artist_stub and not ad.get('artist'):
                     ad['artist'] = artist_stub

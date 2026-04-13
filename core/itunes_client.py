@@ -991,7 +991,7 @@ class iTunesClient:
 
         return None
     
-    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
+    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 200) -> List[Album]:
         """
         Get albums by artist ID
 
