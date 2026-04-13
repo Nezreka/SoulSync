@@ -83,8 +83,8 @@ class Track:
         # Extract album image (highest quality)
         album_image_url = None
         if 'artworkUrl100' in track_data:
-            # Replace 100x100 with 600x600 for higher quality
-            album_image_url = track_data['artworkUrl100'].replace('100x100bb', '600x600bb')
+            # Replace 100x100 with 3000x3000 for highest available quality
+            album_image_url = track_data['artworkUrl100'].replace('100x100bb', '3000x3000bb')
         
         # Get artist name(s) - prefer clean name from ID lookup if available
         if clean_artist_name:
@@ -136,7 +136,7 @@ class Artist:
         # iTunes artist search doesn't reliably return images
         image_url = None
         if 'artworkUrl100' in artist_data:
-            image_url = artist_data['artworkUrl100'].replace('100x100bb', '600x600bb')
+            image_url = artist_data['artworkUrl100'].replace('100x100bb', '3000x3000bb')
         
         # Build external URLs
         external_urls = {}
@@ -173,8 +173,8 @@ class Album:
         # Get highest quality artwork
         image_url = None
         if album_data.get('artworkUrl100'):
-            image_url = album_data['artworkUrl100'].replace('100x100bb', '600x600bb')
-        
+            image_url = album_data['artworkUrl100'].replace('100x100bb', '3000x3000bb')
+
         # Build external URLs
         external_urls = {}
         if 'collectionViewUrl' in album_data:
@@ -633,12 +633,12 @@ class iTunesClient:
             # Reconstruct Spotify-compatible format from cached raw iTunes data
             image_url = None
             if cached.get('artworkUrl100'):
-                image_url = cached['artworkUrl100'].replace('100x100bb', '600x600bb')
+                image_url = cached['artworkUrl100'].replace('100x100bb', '3000x3000bb')
 
             images = []
             if image_url:
                 images = [
-                    {'url': image_url, 'height': 600, 'width': 600},
+                    {'url': image_url, 'height': 3000, 'width': 3000},
                     {'url': cached['artworkUrl100'].replace('100x100bb', '300x300bb'), 'height': 300, 'width': 300},
                     {'url': cached['artworkUrl100'], 'height': 100, 'width': 100}
                 ]
@@ -681,13 +681,13 @@ class iTunesClient:
                 # Normalize to Spotify-compatible format
                 image_url = None
                 if album_data.get('artworkUrl100'):
-                    image_url = album_data['artworkUrl100'].replace('100x100bb', '600x600bb')
+                    image_url = album_data['artworkUrl100'].replace('100x100bb', '3000x3000bb')
 
                 # Build images array like Spotify (multiple sizes)
                 images = []
                 if image_url:
                     images = [
-                        {'url': image_url, 'height': 600, 'width': 600},
+                        {'url': image_url, 'height': 3000, 'width': 3000},
                         {'url': album_data['artworkUrl100'].replace('100x100bb', '300x300bb'), 'height': 300, 'width': 300},
                         {'url': album_data['artworkUrl100'], 'height': 100, 'width': 100}
                     ]
