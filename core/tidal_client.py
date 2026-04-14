@@ -1,3 +1,4 @@
+import os
 import requests
 import time
 import re
@@ -119,7 +120,8 @@ class TidalClient:
         self.alt_base_url = "https://api.tidal.com/v1"  # Alternative API base
         self.auth_url = "https://login.tidal.com/authorize"
         self.token_url = "https://auth.tidal.com/v1/oauth2/token"
-        self.redirect_uri = "http://127.0.0.1:8889/tidal/callback"  # Default, will be updated from config
+        _tidal_port = int(os.environ.get('SOULSYNC_TIDAL_CALLBACK_PORT', 8889))
+        self.redirect_uri = f"http://127.0.0.1:{_tidal_port}/tidal/callback"  # Default, will be updated from config
         self.session = requests.Session()
         self.auth_server = None
         self.auth_code = None
@@ -347,7 +349,7 @@ class TidalClient:
                 pass  # Suppress server logs
         
         try:
-            port = 8889
+            port = int(os.environ.get('SOULSYNC_TIDAL_CALLBACK_PORT', 8889))
             self.auth_server = HTTPServer(('localhost', port), CallbackHandler)
             server_thread = threading.Thread(target=self.auth_server.serve_forever)
             server_thread.daemon = True
