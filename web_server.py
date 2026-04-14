@@ -30700,12 +30700,24 @@ def get_server_playlist_tracks(playlist_id):
                     break
 
         # Build combined view with two-pass matching (exact then fuzzy)
+        import re as _re
         from difflib import SequenceMatcher
+
+        def _norm_title(t):
+            """Strip feat./ft., remaster, and edition qualifiers for comparison only."""
+            # feat./ft. — e.g. (feat. Artist), [ft. Artist]
+            t = _re.sub(r'\s*[\(\[](?:feat|ft)\.?[^\)\]]*[\)\]]', '', t, flags=_re.IGNORECASE)
+            # Remaster/Remastered — e.g. (2019 Remaster), (Remastered), (2019 Remastered Version)
+            t = _re.sub(r'\s*[\(\[](?:\d{4}\s+)?remaster(?:ed)?(?:\s+version)?\s*[\)\]]', '', t, flags=_re.IGNORECASE)
+            # Edition qualifiers — e.g. (Deluxe Edition), (Special Edition), [Anniversary Edition]
+            t = _re.sub(r'\s*[\(\[](?:deluxe|special|anniversary|legacy|expanded|limited)(?:\s+edition)?\s*[\)\]]', '', t, flags=_re.IGNORECASE)
+            return t.lower().strip()
+
         combined = []
         used_server_indices = set()
         unmatched_source = []  # (index_in_combined, src_dict) for fuzzy second pass
 
-        # Pass 1: Exact title match
+        # Pass 1: Exact title match (normalized — strips feat./ft. qualifiers)
         for i, src in enumerate(source_tracks):
             src_name = src.get('name', '')
             src_artist = src.get('artist', '')
@@ -30719,11 +30731,12 @@ def get_server_playlist_tracks(playlist_id):
                 'duration_ms': src.get('duration_ms', 0), 'position': src.get('position', i),
             }
 
+            src_norm = _norm_title(src_name)
             best_idx = -1
             for j, svr in enumerate(server_tracks):
                 if j in used_server_indices:
                     continue
-                if svr['title'].lower().strip() == src_name.lower().strip():
+                if _norm_title(svr['title']) == src_norm:
                     best_idx = j
                     break
 
@@ -30745,16 +30758,16 @@ def get_server_playlist_tracks(playlist_id):
                 })
                 unmatched_source.append((idx, src_entry))
 
-        # Pass 2: Fuzzy match on remaining unmatched source tracks
+        # Pass 2: Fuzzy match on remaining unmatched source tracks (normalized keys)
         for combo_idx, src_entry in unmatched_source:
-            src_key = f"{src_entry['artist']} {src_entry['name']}".lower().strip()
+            src_key = f"{src_entry['artist']} {_norm_title(src_entry['name'])}".strip()
             best_score = 0.0
             best_j = -1
             for j, svr in enumerate(server_tracks):
                 if j in used_server_indices:
                     continue
-                svr_key = f"{svr['artist']} {svr['title']}".lower().strip()
-                score = SequenceMatcher(None, src_key, svr_key).ratio()
+                svr_key = f"{svr['artist']} {_norm_title(svr['title'])}".strip().lower()
+                score = SequenceMatcher(None, src_key.lower(), svr_key).ratio()
                 if score > best_score and score >= 0.75:
                     best_score = score
                     best_j = j
@@ -30904,23 +30917,11 @@ def server_playlist_add_track(playlist_id):
             if not new_item:
                 return jsonify({"success": False, "error": "Track not found on server"}), 404
 
-            logger.info(f"[ServerPlaylist] Adding track: '{new_item.title}' (ratingKey={new_item.ratingKey}) at position={position} to playlist '{playlist_name}'")
+            logger.info(f"[ServerPlaylist] Adding track: '{new_item.title}' (ratingKey={new_item.ratingKey}) to playlist '{playlist_name}'")
 
-            if position is not None:
-                # Rebuild playlist with track inserted at correct position
-                current_items = list(raw_playlist.items())
-                logger.info(f"[ServerPlaylist] Current playlist has {len(current_items)} tracks, inserting at pos {position}")
-                pos = max(0, min(int(position), len(current_items)))
-                current_items.insert(pos, new_item)
-                # Delete old and recreate directly (avoid update_playlist's backup logic)
-                raw_playlist.delete()
-                from plexapi.playlist import Playlist
-                new_pl = Playlist.create(plex_client.server, playlist_name, items=current_items)
-                new_id = str(new_pl.ratingKey)
-                logger.info(f"[ServerPlaylist] Recreated playlist with {len(current_items)} tracks, new ID: {new_id}")
-            else:
-                raw_playlist.addItems([new_item])
-                new_id = str(raw_playlist.ratingKey)
+            raw_playlist.addItems([new_item])
+            new_id = str(raw_playlist.ratingKey)
+            logger.info(f"[ServerPlaylist] Added track to playlist, playlist ID: {new_id}")
             return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
 
         elif active_server == 'jellyfin' and jellyfin_client:
