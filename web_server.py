@@ -2887,7 +2887,25 @@ class WebUIDownloadMonitor:
                 sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
                 print(f"Task failed after 3 error retry attempts")
                 task['status'] = 'failed'
-                task['error_message'] = f'Soulseek transfer errored 3 times for "{track_label}"{sources_str} — all sources failed or became unavailable'
+                # Tidal-specific error: check if this was a quality issue.
+                # task['username'] is popped on error-retry (line ~2866) so we can't rely on it;
+                # used_sources keys are formatted as "{username}_{filename}", so startswith is exact.
+                is_tidal = any(s.startswith('tidal_') for s in tried_sources)
+                if is_tidal:
+                    tidal_quality = config_manager.get('tidal_download.quality', 'lossless')
+                    allow_fb = config_manager.get('tidal_download.allow_fallback', True)
+                    if tidal_quality == 'hires' and not allow_fb:
+                        task['error_message'] = (
+                            f'Tidal download failed for "{track_label}" — HiRes quality is unavailable for this track '
+                            f'on your account or in your region. Enable "Quality Fallback" in Tidal settings to fall back to Lossless.'
+                        )
+                    else:
+                        task['error_message'] = (
+                            f'Tidal download failed for "{track_label}"{sources_str} — '
+                            f'check Tidal authentication and quality settings.'
+                        )
+                else:
+                    task['error_message'] = f'Soulseek transfer errored 3 times for "{track_label}"{sources_str} — all sources failed or became unavailable'
 
                 # CRITICAL: Notify batch manager so track is added to permanently_failed_tracks
                 batch_id = task.get('batch_id')
