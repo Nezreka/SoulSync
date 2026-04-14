@@ -738,6 +738,49 @@ class DeezerClient:
             logger.error(f"Error fetching Deezer favorite artists: {e}")
             return []
 
+    @rate_limited
+    def get_user_favorite_albums(self, limit: int = 200) -> list:
+        """Fetch user's favorite albums from Deezer. Requires OAuth access token.
+        Returns list of dicts with deezer_id, album_name, artist_name, image_url, release_date, total_tracks."""
+        if not self._access_token:
+            logger.debug("Deezer not user-authenticated — cannot fetch favorite albums")
+            return []
+        try:
+            albums = []
+            index = 0
+            while len(albums) < limit:
+                data = self._api_get('user/me/albums', params={
+                    'limit': min(100, limit - len(albums)),
+                    'index': index
+                })
+                if not data or 'data' not in data:
+                    break
+                items = data['data']
+                if not items:
+                    break
+                for a in items:
+                    artist_name = ''
+                    if isinstance(a.get('artist'), dict):
+                        artist_name = a['artist'].get('name', '')
+                    albums.append({
+                        'deezer_id': str(a.get('id', '')),
+                        'album_name': a.get('title', ''),
+                        'artist_name': artist_name,
+                        'image_url': a.get('cover_xl') or a.get('cover_big') or a.get('cover_medium', ''),
+                        'release_date': a.get('release_date', ''),
+                        'total_tracks': a.get('nb_tracks', 0),
+                    })
+                if not data.get('next'):
+                    break
+                index += len(items)
+                time.sleep(0.3)
+
+            logger.info(f"Retrieved {len(albums)} favorite albums from Deezer")
+            return albums
+        except Exception as e:
+            logger.error(f"Error fetching Deezer favorite albums: {e}")
+            return []
+
     # ==================== Stub Methods (match iTunesClient interface) ====================
 
     def get_user_playlists(self) -> List[Playlist]:

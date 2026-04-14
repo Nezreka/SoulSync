@@ -1358,6 +1358,30 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lap_profile ON liked_artists_pool (profile_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lap_status ON liked_artists_pool (profile_id, match_status)")
 
+            # Liked albums pool — aggregated saved/liked albums from connected services
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS liked_albums_pool (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    album_name TEXT NOT NULL,
+                    artist_name TEXT NOT NULL,
+                    normalized_key TEXT NOT NULL,
+                    spotify_album_id TEXT,
+                    tidal_album_id TEXT,
+                    deezer_album_id TEXT,
+                    image_url TEXT,
+                    release_date TEXT,
+                    total_tracks INTEGER DEFAULT 0,
+                    source_services TEXT DEFAULT '[]',
+                    profile_id INTEGER DEFAULT 1,
+                    last_fetched_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(profile_id, normalized_key)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lalp_profile ON liked_albums_pool (profile_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lalp_spotify ON liked_albums_pool (spotify_album_id)")
+
             logger.info("Discovery tables added/verified successfully")
 
         except Exception as e:
@@ -9296,6 +9320,181 @@ class MusicDatabase:
             return cursor.rowcount
         except Exception as e:
             logger.error(f"Error clearing liked artists: {e}")
+            return 0
+
+    # ==================== Liked Albums Pool Methods ====================
+
+    @staticmethod
+    def _normalize_album_key(artist_name: str, album_name: str) -> str:
+        """Normalize artist+album into a dedup key."""
+        import unicodedata
+        def _norm(s):
+            if not s:
+                return ''
+            n = unicodedata.normalize('NFKD', s)
+            n = ''.join(c for c in n if not unicodedata.combining(c))
+            n = n.lower().strip()
+            if n.startswith('the '):
+                n = n[4:]
+            return ' '.join(n.split())
+        return f"{_norm(artist_name)}::{_norm(album_name)}"
+
+    def upsert_liked_album(self, album_name: str, artist_name: str, source_service: str,
+                           source_id: str = None, source_id_type: str = None,
+                           image_url: str = None, release_date: str = None,
+                           total_tracks: int = 0, profile_id: int = 1) -> bool:
+        """Insert or merge a liked album into the pool. Deduplicates by normalized artist+album key."""
+        try:
+            import json
+            if self._is_placeholder_image(image_url):
+                image_url = None
+            normalized = self._normalize_album_key(artist_name, album_name)
+            if not normalized or '::' not in normalized:
+                return False
+
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "SELECT id, source_services FROM liked_albums_pool WHERE profile_id = ? AND normalized_key = ?",
+                (profile_id, normalized)
+            )
+            existing = cursor.fetchone()
+
+            if existing:
+                current_sources = json.loads(existing['source_services'] or '[]')
+                if source_service not in current_sources:
+                    current_sources.append(source_service)
+
+                set_parts = [
+                    "source_services = ?",
+                    "updated_at = CURRENT_TIMESTAMP",
+                    "last_fetched_at = CURRENT_TIMESTAMP",
+                ]
+                params = [json.dumps(current_sources)]
+
+                if source_id and source_id_type:
+                    col = {'spotify': 'spotify_album_id', 'tidal': 'tidal_album_id',
+                           'deezer': 'deezer_album_id'}.get(source_id_type)
+                    if col:
+                        set_parts.append(f"{col} = COALESCE({col}, ?)")
+                        params.append(source_id)
+                if image_url:
+                    set_parts.append("image_url = COALESCE(image_url, ?)")
+                    params.append(image_url)
+                if release_date:
+                    set_parts.append("release_date = COALESCE(release_date, ?)")
+                    params.append(release_date)
+                if total_tracks:
+                    set_parts.append("total_tracks = COALESCE(NULLIF(total_tracks, 0), ?)")
+                    params.append(total_tracks)
+
+                params.extend([profile_id, normalized])
+                cursor.execute(
+                    f"UPDATE liked_albums_pool SET {', '.join(set_parts)} WHERE profile_id = ? AND normalized_key = ?",
+                    params
+                )
+            else:
+                sources_json = json.dumps([source_service])
+                id_cols = {'spotify': 'spotify_album_id', 'tidal': 'tidal_album_id',
+                           'deezer': 'deezer_album_id'}
+                col_values = {v: None for v in id_cols.values()}
+                if source_id and source_id_type and source_id_type in id_cols:
+                    col_values[id_cols[source_id_type]] = source_id
+
+                cursor.execute("""
+                    INSERT INTO liked_albums_pool
+                    (album_name, artist_name, normalized_key, spotify_album_id, tidal_album_id,
+                     deezer_album_id, image_url, release_date, total_tracks, source_services,
+                     profile_id, last_fetched_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (
+                    album_name, artist_name, normalized,
+                    col_values['spotify_album_id'], col_values['tidal_album_id'],
+                    col_values['deezer_album_id'],
+                    image_url, release_date, total_tracks or 0,
+                    sources_json, profile_id
+                ))
+
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error upserting liked album '{album_name}' by '{artist_name}': {e}")
+            return False
+
+    def get_liked_albums(self, profile_id: int = 1, page: int = 1, per_page: int = 50,
+                         search: str = None, source_filter: str = None,
+                         sort: str = 'artist_name') -> dict:
+        """Get liked albums from the pool. Returns {albums: [...], total: N}."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            where = ["profile_id = ?"]
+            params = [profile_id]
+            if search:
+                where.append("(album_name LIKE ? COLLATE NOCASE OR artist_name LIKE ? COLLATE NOCASE)")
+                params.extend([f"%{search}%", f"%{search}%"])
+            if source_filter:
+                where.append("source_services LIKE ?")
+                params.append(f'%"{source_filter}"%')
+
+            where_clause = " AND ".join(where)
+
+            cursor.execute(f"SELECT COUNT(*) FROM liked_albums_pool WHERE {where_clause}", params)
+            total = cursor.fetchone()[0]
+
+            order = {
+                'artist_name': 'artist_name COLLATE NOCASE, album_name COLLATE NOCASE',
+                'album_name': 'album_name COLLATE NOCASE',
+                'recent': 'created_at DESC',
+                'release_date': 'release_date DESC',
+            }.get(sort, 'artist_name COLLATE NOCASE')
+
+            offset = (page - 1) * per_page
+            cursor.execute(f"""
+                SELECT * FROM liked_albums_pool
+                WHERE {where_clause}
+                ORDER BY {order}
+                LIMIT ? OFFSET ?
+            """, params + [per_page, offset])
+
+            import json
+            albums = []
+            for r in cursor.fetchall():
+                d = dict(r)
+                d['source_services'] = json.loads(d['source_services'] or '[]')
+                albums.append(d)
+
+            return {'albums': albums, 'total': total}
+        except Exception as e:
+            logger.error(f"Error getting liked albums: {e}")
+            return {'albums': [], 'total': 0}
+
+    def get_liked_albums_last_fetch(self, profile_id: int = 1):
+        """Get the most recent fetch timestamp."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT MAX(last_fetched_at) FROM liked_albums_pool WHERE profile_id = ?",
+                (profile_id,)
+            )
+            row = cursor.fetchone()
+            return row[0] if row and row[0] else None
+        except Exception:
+            return None
+
+    def clear_liked_albums(self, profile_id: int = 1) -> int:
+        """Clear all liked albums for a profile."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM liked_albums_pool WHERE profile_id = ?", (profile_id,))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error clearing liked albums: {e}")
             return 0
 
     # ==================== Track Download Provenance Methods ====================

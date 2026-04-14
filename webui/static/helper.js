@@ -2290,6 +2290,11 @@ const HELPER_CONTENT = {
         description: 'Carousel of artists from your watchlist. Quick access to view their latest releases, discography, or manage watchlist settings.',
     },
 
+    '#your-albums-section': {
+        title: 'Your Albums',
+        description: 'Albums you\'ve saved or liked across connected services (Spotify, Tidal, Deezer). Shows which are already in your library and lets you download missing ones.',
+    },
+
     // ─── PERSONAL SETTINGS ─────────────────────────────────────────
 
     '#personal-settings-btn': {
