@@ -72526,29 +72526,9 @@ async function _serverSelectTrack(trackIndex, mode, newTrackId, el) {
             // Update playlist ID if server recreated it (Plex deletes+recreates)
             if (data.new_playlist_id) _serverEditorState.playlistId = data.new_playlist_id;
 
-            // Update local state directly — don't re-run the matcher which would
-            // lose the user's explicit assignment if titles don't match exactly
-            const trackEntry = _serverEditorState.tracks[trackIndex];
-            if (trackEntry && mode === 'add') {
-                // Fill the empty slot with the selected track info
-                const svrTitle = el.querySelector('.server-search-result-title')?.textContent || '';
-                const svrArtist = (el.querySelector('.server-search-result-meta')?.textContent || '').split('·')[0].trim();
-                const svrThumb = el.querySelector('.server-search-result-art img')?.src || '';
-                trackEntry.server_track = { id: newTrackId, title: svrTitle, artist: svrArtist, thumb: svrThumb };
-                trackEntry.match_status = 'matched';
-                // Calculate real title similarity so the badge is accurate
-                const srcName = trackEntry.source_track?.name || '';
-                const srcArtist = trackEntry.source_track?.artist || '';
-                const srcKey = `${srcArtist} ${srcName}`.trim().toLowerCase();
-                const svrKey = `${svrArtist} ${svrTitle}`.trim().toLowerCase();
-                trackEntry.confidence = srcKey && svrKey ? calculateStringSimilarity(srcKey, svrKey) : 0;
-                _renderCompareColumns(_serverEditorState.tracks);
-                _updateCompareStats(_serverEditorState.tracks);
-                _setupScrollLinking();
-            } else {
-                // For replace mode, re-fetch to get the updated server state
-                _openServerCompareView(_serverEditorState.playlistId, _serverEditorState.playlistName, _serverEditorState.mirroredPlaylist);
-            }
+            // Re-fetch from server so the compare view reflects the actual server state
+            // and the matching algorithm can correctly wire up the newly added/replaced track
+            _openServerCompareView(_serverEditorState.playlistId, _serverEditorState.playlistName, _serverEditorState.mirroredPlaylist);
         } else {
             showToast(data.error || 'Failed to update track', 'error');
             if (btn) { btn.disabled = false; btn.textContent = 'Select'; }
