@@ -62,7 +62,59 @@ def get_primary_client():
 
     This is THE single source of truth for "which client should I call?"
     """
-    return _get_client_for_source(get_primary_source())
+    return get_client_for_source(get_primary_source())
+
+
+def get_client_for_source(source: str):
+    """Get the client object for an exact metadata source.
+
+    Returns the matching client or None if that source is unavailable.
+    No fallback swaps.
+    """
+    if source == 'spotify':
+        try:
+            import importlib
+            ws = importlib.import_module('web_server')
+            sc = getattr(ws, 'spotify_client', None)
+            if sc and sc.is_spotify_authenticated():
+                return sc
+        except Exception:
+            pass
+        return None
+
+    if source == 'deezer':
+        return get_deezer_client()
+
+    if source == 'discogs':
+        return get_discogs_client()
+
+    if source == 'hydrabase':
+        return get_hydrabase_client(allow_fallback=False)
+
+    if source == 'itunes':
+        return get_itunes_client()
+
+    return None
+
+
+def get_album_tracks_for_source(source: str, album_id: str, client: Any = None):
+    """Get album tracks for an exact source.
+
+    Returns Spotify-compatible dict/list data or None.
+    No fallback swaps.
+    """
+    if client is None:
+        client = get_client_for_source(source)
+    if not client:
+        return None
+
+    try:
+        fetch = getattr(client, 'get_album_tracks_dict', None) if source == 'hydrabase' else getattr(client, 'get_album_tracks', None)
+        if not fetch:
+            return None
+        return fetch(album_id)
+    except Exception:
+        return None
 
 
 def get_deezer_client():
@@ -122,8 +174,12 @@ def get_discogs_client(token: Optional[str] = None):
         return client
 
 
-def get_hydrabase_client():
-    """Return current Hydrabase client if connected, else iTunes fallback."""
+def get_hydrabase_client(allow_fallback: bool = True):
+    """Return current Hydrabase client if connected.
+
+    If allow_fallback is True, return iTunes fallback when Hydrabase is not
+    connected. If False, return None instead.
+    """
     try:
         import importlib
         ws = importlib.import_module('web_server')
@@ -132,7 +188,9 @@ def get_hydrabase_client():
             return client
     except Exception:
         pass
-    return get_itunes_client()
+    if allow_fallback:
+        return get_itunes_client()
+    return None
 
 
 def clear_cached_metadata_clients():
@@ -206,7 +264,7 @@ class MetadataService:
         self.preferred_provider = preferred_provider
         self.spotify = SpotifyClient()
         self._fallback_source = get_primary_source()
-        self.itunes = _get_client_for_source(self._fallback_source)
+        self.itunes = get_client_for_source(self._fallback_source)
 
         self._log_initialization()
 
@@ -378,7 +436,7 @@ class MetadataService:
         self.spotify.reload_config()
         new_source = get_primary_source()
         self._fallback_source = new_source
-        self.itunes = _get_client_for_source(new_source)
+        self.itunes = get_client_for_source(new_source)
         self._log_initialization()
 
 

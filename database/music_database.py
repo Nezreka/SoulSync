@@ -6426,10 +6426,10 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Use Spotify track ID as unique identifier
+                # Use track ID as unique identifier. Field name stays legacy-compatible.
                 track_id = spotify_track_data.get('id')
                 if not track_id:
-                    logger.error("Cannot add track to wishlist: missing Spotify track ID")
+                    logger.error("Cannot add track to wishlist: missing track ID")
                     return False
 
                 track_name = spotify_track_data.get('name', 'Unknown Track')
