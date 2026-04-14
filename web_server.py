@@ -42815,6 +42815,248 @@ def _backfill_liked_artist_images(database, profile_id: int, search_clients: dic
         logger.debug(f"[Your Artists] Image backfill error: {e}")
 
 
+# ── Your Albums (Liked Albums Pool) ──
+
+@app.route('/api/discover/your-albums', methods=['GET'])
+def get_your_albums():
+    """Get liked albums with library ownership status, paginated."""
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 48, type=int)
+        search = request.args.get('search', '', type=str).strip()
+        status_filter = request.args.get('status', 'all', type=str)
+        source_filter = request.args.get('source', '', type=str).strip()
+        sort = request.args.get('sort', 'artist_name', type=str)
+
+        # Auto-trigger refresh if stale (>24h or empty)
+        last_fetch = database.get_liked_albums_last_fetch(profile_id)
+        stale = True
+        if last_fetch:
+            from datetime import datetime, timedelta
+            try:
+                if isinstance(last_fetch, str):
+                    last_dt = datetime.fromisoformat(last_fetch.replace('Z', '+00:00'))
+                else:
+                    last_dt = last_fetch
+                stale = (datetime.now() - last_dt.replace(tzinfo=None)) > timedelta(hours=24)
+            except Exception:
+                stale = True
+        if stale:
+            _trigger_your_albums_refresh(profile_id)
+
+        # Fetch all (ownership check requires full set)
+        all_result = database.get_liked_albums(
+            profile_id=profile_id, page=1, per_page=100000,
+            search=search, source_filter=source_filter or None, sort=sort
+        )
+        all_albums = all_result['albums']
+
+        if not all_albums:
+            return jsonify({
+                "success": True, "albums": [], "total": 0,
+                "page": page, "per_page": per_page, "stale": stale,
+                "stats": {"total": 0, "owned": 0, "missing": 0}
+            })
+
+        # Ownership check — same strategy as Spotify library endpoint
+        library_spotify_ids = database.get_library_spotify_album_ids(profile_id)
+        library_album_names = database.get_library_album_names()
+
+        owned_count = 0
+        for album in all_albums:
+            if album.get('spotify_album_id') and album['spotify_album_id'] in library_spotify_ids:
+                album['in_library'] = True
+            elif (album['artist_name'].lower(), album['album_name'].lower()) in library_album_names:
+                album['in_library'] = True
+            else:
+                album['in_library'] = False
+            if album['in_library']:
+                owned_count += 1
+
+        # Apply status filter
+        if status_filter == 'missing':
+            filtered = [a for a in all_albums if not a['in_library']]
+        elif status_filter == 'owned':
+            filtered = [a for a in all_albums if a['in_library']]
+        else:
+            filtered = all_albums
+
+        filtered_total = len(filtered)
+        offset = (page - 1) * per_page
+        albums = filtered[offset:offset + per_page]
+
+        stats = {
+            'total': all_result['total'],
+            'owned': owned_count,
+            'missing': all_result['total'] - owned_count,
+        }
+
+        return jsonify({
+            "success": True, "albums": albums,
+            "total": filtered_total, "page": page, "per_page": per_page,
+            "stale": stale, "stats": stats,
+        })
+    except Exception as e:
+        logger.error(f"Error getting your albums: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/your-albums/refresh', methods=['POST'])
+def refresh_your_albums():
+    """Force-trigger a fetch cycle for liked albums. ?clear=true wipes pool first."""
+    try:
+        profile_id = get_current_profile_id()
+        if request.args.get('clear', '').lower() == 'true':
+            database = get_database()
+            cleared = database.clear_liked_albums(profile_id)
+            print(f"[Your Albums] Cleared {cleared} entries before refresh")
+        _trigger_your_albums_refresh(profile_id)
+        return jsonify({"success": True, "message": "Refresh started"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/your-albums/sources', methods=['GET'])
+def get_your_albums_sources():
+    """Return current source config + which services are connected (albums)."""
+    try:
+        enabled_raw = config_manager.get('discover.your_albums_sources', 'spotify,tidal,deezer')
+        enabled = [s.strip() for s in enabled_raw.split(',') if s.strip()]
+
+        connected = []
+        if spotify_client and spotify_client.is_spotify_authenticated():
+            connected.append('spotify')
+        try:
+            if tidal_client and hasattr(tidal_client, '_ensure_valid_token') and tidal_client._ensure_valid_token():
+                connected.append('tidal')
+        except Exception:
+            pass
+        try:
+            deezer_cl = _get_deezer_client()
+            deezer_oauth = deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated()
+            deezer_arl = (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
+                          and soulseek_client.deezer_dl.is_authenticated())
+            if deezer_oauth or deezer_arl:
+                connected.append('deezer')
+        except Exception:
+            pass
+
+        return jsonify({"success": True, "enabled": enabled, "connected": connected})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+_your_albums_refresh_lock = threading.Lock()
+_your_albums_refreshing = False
+
+def _trigger_your_albums_refresh(profile_id: int):
+    """Start background album fetch if not already running."""
+    global _your_albums_refreshing
+    if _your_albums_refreshing:
+        return
+    with _your_albums_refresh_lock:
+        if _your_albums_refreshing:
+            return
+        _your_albums_refreshing = True
+
+    def _run():
+        global _your_albums_refreshing
+        try:
+            _fetch_liked_albums(profile_id)
+        except Exception as e:
+            logger.error(f"Your albums refresh failed: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            _your_albums_refreshing = False
+
+    threading.Thread(target=_run, daemon=True, name="YourAlbumsRefresh").start()
+
+
+def _fetch_liked_albums(profile_id: int):
+    """Background worker: fetch liked/saved albums from all connected services."""
+    database = get_database()
+    fetched = 0
+
+    enabled_raw = config_manager.get('discover.your_albums_sources', 'spotify,tidal,deezer')
+    enabled_sources = {s.strip() for s in enabled_raw.split(',') if s.strip()}
+
+    # 1. Fetch from Spotify (saved albums)
+    try:
+        if 'spotify' not in enabled_sources:
+            print("[Your Albums] Spotify skipped (disabled in sources config)")
+        elif spotify_client and spotify_client.is_spotify_authenticated():
+            print("[Your Albums] Fetching saved albums from Spotify...")
+            albums = spotify_client.get_saved_albums()
+            for a in albums:
+                database.upsert_liked_album(
+                    album_name=a['album_name'], artist_name=a['artist_name'],
+                    source_service='spotify',
+                    source_id=a['spotify_album_id'], source_id_type='spotify',
+                    image_url=a.get('image_url'), release_date=a.get('release_date'),
+                    total_tracks=a.get('total_tracks', 0), profile_id=profile_id
+                )
+            fetched += len(albums)
+            print(f"[Your Albums] Fetched {len(albums)} from Spotify")
+    except Exception as e:
+        logger.error(f"[Your Albums] Spotify fetch error: {e}")
+
+    # 2. Fetch from Tidal (favorite albums)
+    try:
+        if 'tidal' not in enabled_sources:
+            print("[Your Albums] Tidal skipped (disabled in sources config)")
+        elif tidal_client and hasattr(tidal_client, 'get_favorite_albums'):
+            tidal_auth = tidal_client._ensure_valid_token() if hasattr(tidal_client, '_ensure_valid_token') else False
+            if tidal_auth:
+                print("[Your Albums] Fetching favorite albums from Tidal...")
+                albums = tidal_client.get_favorite_albums(limit=500)
+                for a in albums:
+                    database.upsert_liked_album(
+                        album_name=a['album_name'], artist_name=a['artist_name'],
+                        source_service='tidal',
+                        source_id=a.get('tidal_id'), source_id_type='tidal',
+                        image_url=a.get('image_url'), release_date=a.get('release_date'),
+                        total_tracks=a.get('total_tracks', 0), profile_id=profile_id
+                    )
+                fetched += len(albums)
+                print(f"[Your Albums] Fetched {len(albums)} from Tidal")
+    except Exception as e:
+        logger.error(f"[Your Albums] Tidal fetch error: {e}")
+
+    # 3. Fetch from Deezer (favorite albums — OAuth or ARL)
+    try:
+        if 'deezer' not in enabled_sources:
+            print("[Your Albums] Deezer skipped (disabled in sources config)")
+        else:
+            deezer_cl = _get_deezer_client()
+            albums = []
+            if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
+                print("[Your Albums] Fetching favorite albums from Deezer (OAuth)...")
+                albums = deezer_cl.get_user_favorite_albums(limit=500)
+            elif (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
+                  and soulseek_client.deezer_dl.is_authenticated()):
+                print("[Your Albums] Fetching favorite albums from Deezer (ARL)...")
+                albums = soulseek_client.deezer_dl.get_user_favorite_albums(limit=500)
+            for a in albums:
+                database.upsert_liked_album(
+                    album_name=a['album_name'], artist_name=a['artist_name'],
+                    source_service='deezer',
+                    source_id=a.get('deezer_id'), source_id_type='deezer',
+                    image_url=a.get('image_url'), release_date=a.get('release_date'),
+                    total_tracks=a.get('total_tracks', 0), profile_id=profile_id
+                )
+            fetched += len(albums)
+            if albums:
+                print(f"[Your Albums] Fetched {len(albums)} from Deezer")
+    except Exception as e:
+        logger.error(f"[Your Albums] Deezer fetch error: {e}")
+
+    print(f"[Your Albums] Total fetched: {fetched}")
+
+
 @app.route('/api/discover/your-artists/info/<artist_id>', methods=['GET'])
 def get_your_artist_info(artist_id):
     """Get artist info for the Your Artists info modal. Checks library, cache, then API."""

@@ -354,7 +354,7 @@ function initializeWebSocket() {
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
     socket.on('enrichment:soulid', (data) => updateSoulIDStatusFromData(data));
-    socket.on('enrichment:listening-stats', () => {}); // Status only, no UI update needed
+    socket.on('enrichment:listening-stats', () => { }); // Status only, no UI update needed
     socket.on('repair:progress', (data) => updateRepairJobProgressFromData(data));
 
     // Phase 4 event listeners (tool progress)
@@ -797,16 +797,16 @@ function applyAccentColor(hex) {
         if (s === 0) { const v = Math.round(l * 255); return [v, v, v]; }
         const hue2rgb = (p, q, t) => {
             if (t < 0) t += 1; if (t > 1) t -= 1;
-            if (t < 1/6) return p + (q - p) * 6 * t;
-            if (t < 1/2) return q;
-            if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            if (t < 1 / 6) return p + (q - p) * 6 * t;
+            if (t < 1 / 2) return q;
+            if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
             return p;
         };
         const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
         const p = 2 * l - q;
-        return [Math.round(hue2rgb(p, q, h + 1/3) * 255),
-                Math.round(hue2rgb(p, q, h) * 255),
-                Math.round(hue2rgb(p, q, h - 1/3) * 255)];
+        return [Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+        Math.round(hue2rgb(p, q, h) * 255),
+        Math.round(hue2rgb(p, q, h - 1 / 3) * 255)];
     }
 
     const light = hslToRgb(h, s, lightL);
@@ -915,7 +915,7 @@ function applyReduceEffects(enabled) {
 }
 
 // Bootstrap accent and reduce-effects from localStorage instantly (prevents flash)
-(function() {
+(function () {
     if (localStorage.getItem('soulsync-reduce-effects') === '1') {
         document.body.classList.add('reduce-effects');
     }
@@ -1376,7 +1376,7 @@ async function handleProfileClick(profile) {
         const r = await fetch('/api/profiles');
         const d = await r.json();
         profileCount = (d.profiles || []).length;
-    } catch (e) {}
+    } catch (e) { }
 
     if (profile.has_pin && profileCount > 1) {
         showPinDialog(profile);
@@ -1784,7 +1784,7 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
                 libraries = plexData.libraries;
             }
         }
-    } catch (e) {}
+    } catch (e) { }
 
     if (serverType === 'none') {
         try {
@@ -1797,7 +1797,7 @@ async function renderPersonalSettingsServerLibrary(container, profileData) {
                     users = jellyData.users || [];
                 }
             }
-        } catch (e) {}
+        } catch (e) { }
     }
 
     if (serverType === 'none') {
@@ -2024,8 +2024,8 @@ async function testPersonalListenBrainz() {
     try {
         const res = await fetch('/api/profiles/me/listenbrainz/test', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({token, base_url: baseUrl})
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, base_url: baseUrl })
         });
         const data = await res.json();
         if (data.success) {
@@ -2052,14 +2052,14 @@ async function connectPersonalListenBrainz() {
     try {
         const res = await fetch('/api/profiles/me/listenbrainz', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({token, base_url: baseUrl})
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, base_url: baseUrl })
         });
         const data = await res.json();
         if (data.success) {
             showToast(`Connected to ListenBrainz as ${data.username}`, 'success');
             // Re-render as connected
-            renderPersonalSettingsLB({connected: true, username: data.username, base_url: baseUrl, source: 'profile'});
+            renderPersonalSettingsLB({ connected: true, username: data.username, base_url: baseUrl, source: 'profile' });
             // Refresh LB playlists on discover page
             _invalidateListenBrainzCache();
             if (typeof initializeListenBrainzTabs === 'function') {
@@ -2077,7 +2077,7 @@ async function connectPersonalListenBrainz() {
 
 async function disconnectPersonalListenBrainz() {
     try {
-        await fetch('/api/profiles/me/listenbrainz', {method: 'DELETE'});
+        await fetch('/api/profiles/me/listenbrainz', { method: 'DELETE' });
         showToast('ListenBrainz disconnected', 'info');
         // Re-render as disconnected — re-fetch to check if global fallback exists
         const res = await fetch('/api/profiles/me/listenbrainz');
@@ -2096,10 +2096,10 @@ async function disconnectPersonalListenBrainz() {
 function _invalidateListenBrainzCache() {
     if (typeof listenbrainzPlaylistsLoaded !== 'undefined') listenbrainzPlaylistsLoaded = false;
     if (typeof listenbrainzPlaylistsCache !== 'undefined') {
-        try { Object.keys(listenbrainzPlaylistsCache).forEach(k => delete listenbrainzPlaylistsCache[k]); } catch(e) {}
+        try { Object.keys(listenbrainzPlaylistsCache).forEach(k => delete listenbrainzPlaylistsCache[k]); } catch (e) { }
     }
     if (typeof listenbrainzTracksCache !== 'undefined') {
-        try { Object.keys(listenbrainzTracksCache).forEach(k => delete listenbrainzTracksCache[k]); } catch(e) {}
+        try { Object.keys(listenbrainzTracksCache).forEach(k => delete listenbrainzTracksCache[k]); } catch (e) { }
     }
 }
 
@@ -2318,7 +2318,7 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
 
     const isAdmin = currentProfile && currentProfile.is_admin;
     const isEditingAdmin = profileSettings.is_admin;
-    const editColors = ['#6366f1','#ec4899','#10b981','#f59e0b','#3b82f6','#ef4444','#8b5cf6','#14b8a6'];
+    const editColors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#14b8a6'];
     const pageLabels = {
         dashboard: 'Dashboard', sync: 'Sync', downloads: 'Search', discover: 'Discover',
         artists: 'Artists', automations: 'Automations', library: 'Library', stats: 'Listening Stats',
@@ -3004,7 +3004,7 @@ async function loadPageData(pageId) {
                     if (hsData.peer_count !== null && hsData.peer_count !== undefined) {
                         document.getElementById('hydra-peer-count').textContent = `Peers: ${hsData.peer_count}`;
                     }
-                } catch (e) {}
+                } catch (e) { }
                 // Load comparisons
                 loadHydrabaseComparisons();
                 break;
@@ -5067,7 +5067,7 @@ function startSidebarVisualizer() {
         }
         drawBars();
 
-    // ── Wave ──
+        // ── Wave ──
     } else if (type === 'wave') {
         const canvas = container.querySelector('.sidebar-viz-canvas');
         if (!canvas) return;
@@ -5111,7 +5111,7 @@ function startSidebarVisualizer() {
         }
         drawWave();
 
-    // ── Spectrum (mountain/terrain fill) ──
+        // ── Spectrum (mountain/terrain fill) ──
     } else if (type === 'spectrum') {
         const canvas = container.querySelector('.sidebar-viz-canvas');
         if (!canvas) return;
@@ -5185,7 +5185,7 @@ function startSidebarVisualizer() {
         }
         drawSpectrum();
 
-    // ── Mirror (bars from center outward) ──
+        // ── Mirror (bars from center outward) ──
     } else if (type === 'mirror') {
         const bars = container.querySelectorAll('.sidebar-viz-mirror-bar');
         if (bars.length === 0) return;
@@ -5211,7 +5211,7 @@ function startSidebarVisualizer() {
         }
         drawMirror();
 
-    // ── Equalizer (bars with falling peak indicators) ──
+        // ── Equalizer (bars with falling peak indicators) ──
     } else if (type === 'equalizer') {
         const wraps = container.querySelectorAll('.sidebar-viz-eq-wrap');
         if (wraps.length === 0) return;
@@ -5626,11 +5626,11 @@ function switchSettingsTab(tab) {
     });
     // Re-apply conditional visibility (quality profile, source containers, etc.)
     if (typeof updateDownloadSourceUI === 'function') {
-        try { updateDownloadSourceUI(); } catch(e) {}
+        try { updateDownloadSourceUI(); } catch (e) { }
     }
     // Load DB maintenance info when switching to Advanced tab
     if (tab === 'advanced' && typeof loadDbMaintenanceInfo === 'function') {
-        try { loadDbMaintenanceInfo(); } catch(e) {}
+        try { loadDbMaintenanceInfo(); } catch (e) { }
     }
 }
 
@@ -5951,7 +5951,7 @@ async function loadSettingsData() {
                     fbSelect.value = 'hydrabase';
                 }
             }
-        }).catch(() => {});
+        }).catch(() => { });
 
         // Populate Download settings (right column)
         document.getElementById('download-path').value = settings.soulseek?.download_path || './downloads';
@@ -6018,7 +6018,7 @@ async function loadSettingsData() {
             cb.checked = val !== false;
         });
         // Apply service disabled state to child tags
-        ['spotify','itunes','musicbrainz','deezer','audiodb','tidal','qobuz','lastfm','genius'].forEach(svc => {
+        ['spotify', 'itunes', 'musicbrainz', 'deezer', 'audiodb', 'tidal', 'qobuz', 'lastfm', 'genius'].forEach(svc => {
             const master = document.getElementById('embed-' + svc);
             if (master) toggleServiceTags(master, svc);
         });
@@ -6909,7 +6909,7 @@ async function hydrabaseConnect() {
 async function hydrabaseDisconnect() {
     try {
         await fetch('/api/hydrabase/disconnect', { method: 'POST' });
-    } catch (e) {}
+    } catch (e) { }
     _hydrabaseConnected = false;
     document.getElementById('hydra-connection-status').textContent = 'Disconnected';
     document.getElementById('hydra-connection-status').style.color = '#888';
@@ -8312,7 +8312,7 @@ async function logoutQobuz() {
 const PATH_INPUT_IDS = {
     download: 'download-path',
     transfer: 'transfer-path',
-    staging:  'staging-path',
+    staging: 'staging-path',
     'music-videos': 'music-videos-path'
 };
 
@@ -8924,7 +8924,7 @@ function initializeSearchModeToggle() {
     }
 
     // Expose tab switch globally (onclick from HTML)
-    window._switchEnhSourceTab = function(sourceName) {
+    window._switchEnhSourceTab = function (sourceName) {
         if (!_enhancedSearchData || !_enhancedSearchData.sources) return;
         const src = _enhancedSearchData.sources[sourceName];
         if (!src) return;
@@ -13557,38 +13557,38 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
                     }
                 }
             } else {
-            try {
-                const response = await fetch('/api/wishlist/stats');
-                const data = await response.json();
+                try {
+                    const response = await fetch('/api/wishlist/stats');
+                    const data = await response.json();
 
-                // AUTO-CLOSE DETECTION: If auto-processing started, close modal and notify user (once)
-                if (data.is_auto_processing) {
-                    if (!_wishlistAutoProcessingNotified) {
-                        console.log('🤖 [Wishlist] Auto-processing detected, closing overview modal');
-                        closeWishlistOverviewModal();
-                        showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
-                        _wishlistAutoProcessingNotified = true;
+                    // AUTO-CLOSE DETECTION: If auto-processing started, close modal and notify user (once)
+                    if (data.is_auto_processing) {
+                        if (!_wishlistAutoProcessingNotified) {
+                            console.log('🤖 [Wishlist] Auto-processing detected, closing overview modal');
+                            closeWishlistOverviewModal();
+                            showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
+                            _wishlistAutoProcessingNotified = true;
+                        }
+                        return; // Exit interval
                     }
-                    return; // Exit interval
-                }
 
-                // Update remaining seconds if timer expired
-                if (remainingSeconds <= 0) {
-                    remainingSeconds = data.next_run_in_seconds || 0;
+                    // Update remaining seconds if timer expired
+                    if (remainingSeconds <= 0) {
+                        remainingSeconds = data.next_run_in_seconds || 0;
 
-                    // Also update cycle in case it changed
-                    const newCycle = data.current_cycle || 'albums';
-                    const newCycleText = newCycle === 'albums' ? 'Albums/EPs' : 'Singles';
+                        // Also update cycle in case it changed
+                        const newCycle = data.current_cycle || 'albums';
+                        const newCycleText = newCycle === 'albums' ? 'Albums/EPs' : 'Singles';
 
-                    const timerElement = document.getElementById('wishlist-next-auto-timer');
-                    if (timerElement) {
-                        const countdownText = formatCountdownTime(remainingSeconds);
-                        timerElement.textContent = `Next Auto: ${newCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+                        const timerElement = document.getElementById('wishlist-next-auto-timer');
+                        if (timerElement) {
+                            const countdownText = formatCountdownTime(remainingSeconds);
+                            timerElement.textContent = `Next Auto: ${newCycleText}${countdownText ? ' in ' + countdownText : ''}`;
+                        }
                     }
+                } catch (error) {
+                    console.debug('Error updating wishlist countdown:', error);
                 }
-            } catch (error) {
-                console.debug('Error updating wishlist countdown:', error);
-            }
             } // end else (HTTP fallback)
         }
 
@@ -14790,7 +14790,7 @@ async function startMissingTracksProcess(playlistId) {
                 const selectedIndices = new Set([...checkedCbs].map(cb => parseInt(cb.dataset.trackIndex)));
                 console.log(`🔲 [Track Selection] Total checkboxes: ${allCbs.length}, Checked: ${checkedCbs.length}`);
                 console.log(`🔲 [Track Selection] Checked indices:`, [...selectedIndices]);
-                console.log(`🔲 [Track Selection] process.tracks has ${process.tracks.length} items, first: "${process.tracks[0]?.name}", last: "${process.tracks[process.tracks.length-1]?.name}"`);
+                console.log(`🔲 [Track Selection] process.tracks has ${process.tracks.length} items, first: "${process.tracks[0]?.name}", last: "${process.tracks[process.tracks.length - 1]?.name}"`);
                 // Stamp each selected track with its original table index so the backend
                 // maps status updates back to the correct modal row
                 selectedTracks = process.tracks
@@ -17501,12 +17501,12 @@ function _openNotifPanel() {
         </div>
         <div class="notif-panel-body">
             ${entries.length === 0 ? '<div class="notif-panel-empty">No notifications yet</div>' :
-              entries.map(e => {
-                  const icon = _notifIcons[e.type] || 'ℹ';
-                  const ago = _notifTimeAgo(e.timestamp);
-                  const unreadDot = e.read ? '' : '<span class="notif-entry-unread"></span>';
-                  const learnMore = e.helpSection ? `<span class="notif-entry-link" onclick="event.stopPropagation(); _closeNotifPanel(); navigateToDocsSection('${e.helpSection}')">Learn more →</span>` : '';
-                  return `
+            entries.map(e => {
+                const icon = _notifIcons[e.type] || 'ℹ';
+                const ago = _notifTimeAgo(e.timestamp);
+                const unreadDot = e.read ? '' : '<span class="notif-entry-unread"></span>';
+                const learnMore = e.helpSection ? `<span class="notif-entry-link" onclick="event.stopPropagation(); _closeNotifPanel(); navigateToDocsSection('${e.helpSection}')">Learn more →</span>` : '';
+                return `
                     <div class="notif-entry notif-entry-${e.type}">
                         ${unreadDot}
                         <span class="notif-entry-icon notif-icon-${e.type}">${icon}</span>
@@ -17515,7 +17515,7 @@ function _openNotifPanel() {
                             <div class="notif-entry-meta">${ago}${learnMore}</div>
                         </div>
                     </div>`;
-              }).join('')}
+            }).join('')}
         </div>
     `;
 
@@ -17613,7 +17613,7 @@ function _downloadMusicVideo(cardEl, video) {
                     if (errorIcon) errorIcon.classList.remove('hidden');
                     cardEl.onclick = () => _downloadMusicVideo(cardEl, video);
                 }
-            } catch (e) {}
+            } catch (e) { }
         }, 500);
     }).catch(e => {
         cardEl.classList.remove('downloading');
@@ -17854,7 +17854,7 @@ async function _gsFetchSourceStream(src, query) {
                     if (_gsState.activeSource === src && _gsState.data) {
                         _gsRender(_gsState.data);
                     }
-                } catch (e) {}
+                } catch (e) { }
             }
         }
         _gsRenderTabs();
@@ -17885,7 +17885,7 @@ function _gsRender(data) {
             h += '<div class="enh-video-grid">';
             h += videos.map(v => {
                 const dur = v.duration ? `${Math.floor(v.duration / 60)}:${String(v.duration % 60).padStart(2, '0')}` : '';
-                const views = v.view_count >= 1000000 ? `${(v.view_count/1000000).toFixed(1)}M` : v.view_count >= 1000 ? `${(v.view_count/1000).toFixed(1)}K` : (v.view_count || '');
+                const views = v.view_count >= 1000000 ? `${(v.view_count / 1000000).toFixed(1)}M` : v.view_count >= 1000 ? `${(v.view_count / 1000).toFixed(1)}K` : (v.view_count || '');
                 const vJson = btoa(unescape(encodeURIComponent(JSON.stringify(v))));
                 return `<div class="enh-video-card" data-video-id="${v.video_id}" data-video="${vJson}" onclick="_gsClickVideo(this)">
                     <div class="enh-video-thumb"><img src="${v.thumbnail}" alt="" loading="lazy" onerror="this.style.display='none'"><div class="enh-video-play">▶</div>
@@ -18444,8 +18444,8 @@ function populateVersionModal(versionData, updateInfo) {
             <div class="version-update-banner-text">
                 <strong>${isDocker ? 'Repo update detected' : 'New update available'}</strong>
                 <span>${isDocker
-                    ? 'A new update has been pushed to the repo. The Docker image will be updated soon — no action needed yet.'
-                    : `Your version: ${updateInfo.current_sha || 'unknown'} &rarr; Latest: ${updateInfo.latest_sha || 'unknown'}`}</span>
+                ? 'A new update has been pushed to the repo. The Docker image will be updated soon — no action needed yet.'
+                : `Your version: ${updateInfo.current_sha || 'unknown'} &rarr; Latest: ${updateInfo.latest_sha || 'unknown'}`}</span>
             </div>
         `;
         container.appendChild(banner);
@@ -21798,7 +21798,7 @@ function renderHistoryEntry(entry) {
         const srcArtist = entry.source_artist || '';
         if (srcTitle || srcArtist) {
             const isMismatch = (srcTitle && entry.title && srcTitle.toLowerCase() !== entry.title.toLowerCase())
-                            || (srcArtist && entry.artist_name && srcArtist.toLowerCase() !== entry.artist_name.toLowerCase());
+                || (srcArtist && entry.artist_name && srcArtist.toLowerCase() !== entry.artist_name.toLowerCase());
             const mismatchClass = isMismatch ? ' lh-prov-mismatch' : '';
             lines.push(`<span class="lh-prov-label">Downloaded:</span> <span class="${mismatchClass}">${escapeHtml(srcTitle || '?')} <span class="lh-prov-dim">by</span> ${escapeHtml(srcArtist || '?')}</span>`);
         }
@@ -22513,7 +22513,7 @@ async function openBlacklistModal() {
 
         body.innerHTML = data.entries.map(e => {
             const displayFile = (e.blocked_filename || '').replace(/\\/g, '/').split('/').pop() || 'Unknown';
-            const svc = e.blocked_username && ['youtube','tidal','qobuz','hifi','deezer_dl'].includes(e.blocked_username) ? e.blocked_username : 'soulseek';
+            const svc = e.blocked_username && ['youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl'].includes(e.blocked_username) ? e.blocked_username : 'soulseek';
             const icon = serviceIcons[svc] || '🔍';
             const ago = e.created_at ? timeAgo(e.created_at) : '';
             return `
@@ -28189,7 +28189,7 @@ function initializeSyncPage() {
                     } else if (container) {
                         container.innerHTML = `<div class="playlist-placeholder">Deezer ARL not configured. Add your ARL token in Settings &gt; Downloads to see your playlists here.</div>`;
                     }
-                }).catch(() => {});
+                }).catch(() => { });
             }
 
             // Auto-load mirrored playlists on first tab activation
@@ -32040,9 +32040,9 @@ async function startSpotifyPublicDownloadMissing(urlHash) {
 
 const URL_HISTORY_MAX = 10;
 const URL_HISTORY_SOURCES = {
-    youtube:          { key: 'soulsync-url-history-youtube',         icon: '▶',  inputId: 'youtube-url-input',          containerId: 'youtube-url-history',          loadFn: () => parseYouTubePlaylist() },
-    deezer:           { key: 'soulsync-url-history-deezer',          icon: '🎵', inputId: 'deezer-url-input',           containerId: 'deezer-url-history',           loadFn: () => loadDeezerPlaylist() },
-    'spotify-public': { key: 'soulsync-url-history-spotify-public', icon: '🎧', inputId: 'spotify-public-url-input',   containerId: 'spotify-public-url-history',   loadFn: () => parseSpotifyPublicUrl() }
+    youtube: { key: 'soulsync-url-history-youtube', icon: '▶', inputId: 'youtube-url-input', containerId: 'youtube-url-history', loadFn: () => parseYouTubePlaylist() },
+    deezer: { key: 'soulsync-url-history-deezer', icon: '🎵', inputId: 'deezer-url-input', containerId: 'deezer-url-history', loadFn: () => loadDeezerPlaylist() },
+    'spotify-public': { key: 'soulsync-url-history-spotify-public', icon: '🎧', inputId: 'spotify-public-url-input', containerId: 'spotify-public-url-history', loadFn: () => parseSpotifyPublicUrl() }
 };
 
 function getUrlHistory(source) {
@@ -32692,18 +32692,18 @@ function openYouTubeDiscoveryModal(urlHash) {
         const isMirrored = state.is_mirrored_playlist;
         const modalTitle = isMirrored ? '🎵 Mirrored Playlist Discovery' :
             isSpotifyPublic ? '🎵 Spotify Playlist Discovery' :
-            isDeezer ? '🎵 Deezer Playlist Discovery' :
-            isTidal ? '🎵 Tidal Playlist Discovery' :
-            isBeatport ? '🎵 Beatport Chart Discovery' :
-                isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
-                    '🎵 YouTube Playlist Discovery';
+                isDeezer ? '🎵 Deezer Playlist Discovery' :
+                    isTidal ? '🎵 Tidal Playlist Discovery' :
+                        isBeatport ? '🎵 Beatport Chart Discovery' :
+                            isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
+                                '🎵 YouTube Playlist Discovery';
         const sourceLabel = isMirrored ? (state.mirrored_source ? state.mirrored_source.charAt(0).toUpperCase() + state.mirrored_source.slice(1) : 'Source') :
             isSpotifyPublic ? 'Spotify' :
-            isDeezer ? 'Deezer' :
-            isTidal ? 'Tidal' :
-            isBeatport ? 'Beatport' :
-                isListenBrainz ? 'LB' :
-                    'YT';
+                isDeezer ? 'Deezer' :
+                    isTidal ? 'Tidal' :
+                        isBeatport ? 'Beatport' :
+                            isListenBrainz ? 'LB' :
+                                'YT';
 
         const modalHtml = `
             <div class="modal-overlay" id="youtube-discovery-modal-${urlHash}">
@@ -33316,10 +33316,10 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
             const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
             const platform = state?.is_mirrored_playlist ? 'mirrored' :
                 (state?.is_spotify_public_playlist ? 'spotify_public' :
-                (state?.is_deezer_playlist ? 'deezer' :
-                (state?.is_listenbrainz_playlist ? 'listenbrainz' :
-                (state?.is_tidal_playlist ? 'tidal' :
-                    (state?.is_beatport_playlist ? 'beatport' : 'youtube')))));
+                    (state?.is_deezer_playlist ? 'deezer' :
+                        (state?.is_listenbrainz_playlist ? 'listenbrainz' :
+                            (state?.is_tidal_playlist ? 'tidal' :
+                                (state?.is_beatport_playlist ? 'beatport' : 'youtube')))));
             actionsCell.innerHTML = generateDiscoveryActionButton(result, urlHash, platform);
         }
     });
@@ -36055,7 +36055,7 @@ function updateArtistDetailHeader(artist) {
                         if (heroBg) heroBg.style.backgroundImage = `url('${d.image_url}')`;
                         artist.image_url = d.image_url;
                     }
-                }).catch(() => {});
+                }).catch(() => { });
         }
     }
 
@@ -39315,7 +39315,7 @@ function _openRateModal(serviceKey) {
         const main = results[0];
         const epHistories = isSpotify ? results.slice(1).filter(Boolean) : [];
         _renderRateChart(main.history || [], main.rate_limit || 60, accent, epHistories);
-    }).catch(() => {});
+    }).catch(() => { });
 
     if (isSpotify) {
         _updateSpotifyEndpoints();
@@ -40030,21 +40030,21 @@ async function showWatchlistModal() {
 
                     <div class="watchlist-artists-grid" id="watchlist-artists-list">
                         ${artistsData.artists.map(artist => {
-                            const pills = [];
-                            if (artist.include_albums) pills.push('<span class="watchlist-pill watchlist-pill-active">Albums</span>');
-                            if (artist.include_eps) pills.push('<span class="watchlist-pill watchlist-pill-active">EPs</span>');
-                            if (artist.include_singles) pills.push('<span class="watchlist-pill watchlist-pill-active">Singles</span>');
-                            if (artist.include_live) pills.push('<span class="watchlist-pill watchlist-pill-filter">Live</span>');
-                            if (artist.include_remixes) pills.push('<span class="watchlist-pill watchlist-pill-filter">Remixes</span>');
-                            if (artist.include_acoustic) pills.push('<span class="watchlist-pill watchlist-pill-filter">Acoustic</span>');
-                            if (artist.include_compilations) pills.push('<span class="watchlist-pill watchlist-pill-filter">Compilations</span>');
-                            const sourceBadges = [];
-                            if (artist.spotify_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-spotify">Spotify</span>');
-                            if (artist.itunes_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-itunes">iTunes</span>');
-                            if (artist.deezer_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-deezer">Deezer</span>');
-                            if (artist.discogs_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-discogs">Discogs</span>');
-                            const artistPrimaryId = artist.spotify_artist_id || artist.itunes_artist_id || artist.deezer_artist_id || artist.discogs_artist_id;
-                            return `
+            const pills = [];
+            if (artist.include_albums) pills.push('<span class="watchlist-pill watchlist-pill-active">Albums</span>');
+            if (artist.include_eps) pills.push('<span class="watchlist-pill watchlist-pill-active">EPs</span>');
+            if (artist.include_singles) pills.push('<span class="watchlist-pill watchlist-pill-active">Singles</span>');
+            if (artist.include_live) pills.push('<span class="watchlist-pill watchlist-pill-filter">Live</span>');
+            if (artist.include_remixes) pills.push('<span class="watchlist-pill watchlist-pill-filter">Remixes</span>');
+            if (artist.include_acoustic) pills.push('<span class="watchlist-pill watchlist-pill-filter">Acoustic</span>');
+            if (artist.include_compilations) pills.push('<span class="watchlist-pill watchlist-pill-filter">Compilations</span>');
+            const sourceBadges = [];
+            if (artist.spotify_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-spotify">Spotify</span>');
+            if (artist.itunes_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-itunes">iTunes</span>');
+            if (artist.deezer_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-deezer">Deezer</span>');
+            if (artist.discogs_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-discogs">Discogs</span>');
+            const artistPrimaryId = artist.spotify_artist_id || artist.itunes_artist_id || artist.deezer_artist_id || artist.discogs_artist_id;
+            return `
                             <div class="watchlist-artist-card"
                                  data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}"
                                  data-artist-id="${artistPrimaryId}">
@@ -40209,9 +40209,9 @@ function _populateLinkedProviderSection(artistId, artistName, spotifyId, itunesI
                 <span class="wl-linked-icon">${src.icon}</span>
                 <span class="wl-linked-label">${src.label}</span>
                 <span class="wl-linked-status">${matched
-                    ? `<span class="wl-linked-id" title="${escapeHtml(src.id)}">${shortId}</span>`
-                    : '<span class="wl-linked-none">Not matched</span>'
-                }</span>
+                ? `<span class="wl-linked-id" title="${escapeHtml(src.id)}">${shortId}</span>`
+                : '<span class="wl-linked-none">Not matched</span>'
+            }</span>
                 <button class="wl-linked-fix-btn" onclick="_openSourceSearch('${src.key}', '${escapeForInlineJs(artistId)}', '${escapeForInlineJs(artistName)}')">${matched ? 'Fix' : 'Match'}</button>
                 ${matched ? `<button class="wl-linked-clear-btn" onclick="_clearSourceMatch('${src.key}', '${escapeForInlineJs(artistId)}', '${escapeForInlineJs(artistName)}')" title="Clear this match">&times;</button>` : ''}
             </div>`;
@@ -40782,11 +40782,11 @@ function toggleGlobalOverrideOptions() {
 function toggleGlobalIncludeAll() {
     const checked = document.getElementById('global-include-all').checked;
     ['global-include-albums', 'global-include-eps', 'global-include-singles',
-     'global-include-live', 'global-include-remixes', 'global-include-acoustic',
-     'global-include-compilations', 'global-include-instrumentals'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.checked = checked;
-    });
+        'global-include-live', 'global-include-remixes', 'global-include-acoustic',
+        'global-include-compilations', 'global-include-instrumentals'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.checked = checked;
+        });
 }
 
 /**
@@ -42960,10 +42960,10 @@ function renderArtistEnrichmentCoverage(enrichment) {
         <div class="artist-enrich-title">Enrichment Coverage</div>
         <div class="artist-enrich-grid">
             ${services.map((s, i) => {
-                const pct = enrichment[s.key] || 0;
-                const offset = circ - (circ * pct / 100);
-                const delay = (i * 0.08).toFixed(2);
-                return `<div class="artist-enrich-circle">
+        const pct = enrichment[s.key] || 0;
+        const offset = circ - (circ * pct / 100);
+        const delay = (i * 0.08).toFixed(2);
+        return `<div class="artist-enrich-circle">
                     <div class="artist-enrich-ring" style="--ring-color:${s.color}">
                         <svg viewBox="0 0 48 48">
                             <circle class="ring-bg" cx="24" cy="24" r="${r}"/>
@@ -42975,7 +42975,7 @@ function renderArtistEnrichmentCoverage(enrichment) {
                     </div>
                     <span class="artist-enrich-label">${s.name}</span>
                 </div>`;
-            }).join('')}
+    }).join('')}
         </div>
     `;
 }
@@ -44564,7 +44564,7 @@ function renderArtistMetaPanel(artist) {
         img.className = 'enhanced-artist-meta-image';
         img.src = artist.thumb_url;
         img.alt = artist.name || '';
-        img.onerror = function() { this.style.display = 'none'; };
+        img.onerror = function () { this.style.display = 'none'; };
         headerLeft.appendChild(img);
     }
 
@@ -44884,7 +44884,7 @@ function renderAlbumRow(album, type) {
         img.src = album.thumb_url;
         img.alt = '';
         img.loading = 'lazy';
-        img.onerror = function() {
+        img.onerror = function () {
             const fallback = document.createElement('div');
             fallback.className = 'enhanced-album-thumb-fallback';
             fallback.innerHTML = '&#127925;';
@@ -45003,7 +45003,7 @@ function renderExpandedAlbumHeader(album) {
         img.className = 'enhanced-expanded-art';
         img.src = album.thumb_url;
         img.alt = album.title || '';
-        img.onerror = function() { this.style.display = 'none'; };
+        img.onerror = function () { this.style.display = 'none'; };
         header.appendChild(img);
     }
 
@@ -45605,12 +45605,16 @@ function _showMobileTrackActions(track, album) {
 
     const actions = [];
     if (track.file_path) {
-        actions.push({ icon: '▶', label: 'Play', action: () => {
-            playLibraryTrack({ id: track.id, title: track.title, file_path: track.file_path, bitrate: track.bitrate, artist_id: artistDetailPageState.enhancedData?.artist?.id, album_id: album.id }, album.title || '', artistName);
-        }});
-        actions.push({ icon: '+', label: 'Add to Queue', action: () => {
-            addToQueue({ title: track.title || 'Unknown', artist: artistName, album: album.title || '', file_path: track.file_path, filename: track.file_path, is_library: true, image_url: albumArt, id: track.id, artist_id: artistDetailPageState.enhancedData?.artist?.id, album_id: album.id, bitrate: track.bitrate });
-        }});
+        actions.push({
+            icon: '▶', label: 'Play', action: () => {
+                playLibraryTrack({ id: track.id, title: track.title, file_path: track.file_path, bitrate: track.bitrate, artist_id: artistDetailPageState.enhancedData?.artist?.id, album_id: album.id }, album.title || '', artistName);
+            }
+        });
+        actions.push({
+            icon: '+', label: 'Add to Queue', action: () => {
+                addToQueue({ title: track.title || 'Unknown', artist: artistName, album: album.title || '', file_path: track.file_path, filename: track.file_path, is_library: true, image_url: albumArt, id: track.id, artist_id: artistDetailPageState.enhancedData?.artist?.id, album_id: album.id, bitrate: track.bitrate });
+            }
+        });
     }
     if (admin && track.file_path) {
         actions.push({ icon: '✎', label: 'Write Tags', action: () => showTagPreview(track.id) });
@@ -46022,7 +46026,7 @@ async function showTrackRedownloadModal(track, album) {
 
     const artistName = artistDetailPageState.enhancedData?.artist?.name || '';
     const ext = (track.file_path || '').split('.').pop().toUpperCase();
-    const fmt = ['FLAC','MP3','OPUS','OGG','M4A','WAV'].includes(ext) ? ext : '';
+    const fmt = ['FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV'].includes(ext) ? ext : '';
 
     overlay.innerHTML = `
         <div class="redownload-modal">
@@ -47206,7 +47210,7 @@ async function doManualMatchSearch(service, entityType, query, container, entity
                 img.className = 'enhanced-match-result-img';
                 img.src = result.image;
                 img.alt = '';
-                img.onerror = function() { this.style.display = 'none'; };
+                img.onerror = function () { this.style.display = 'none'; };
                 row.appendChild(img);
             } else {
                 const placeholder = document.createElement('div');
@@ -47804,7 +47808,7 @@ async function showReorganizeModal(albumId) {
             const settings = await settingsResp.json();
             savedTemplate = settings.file_organization?.templates?.album_path || savedTemplate;
         }
-    } catch (_) {}
+    } catch (_) { }
     html += '<input type="text" id="reorganize-template-input" class="reorganize-template-input" ';
     html += `value="${savedTemplate.replace(/"/g, '&quot;')}" `;
     html += 'placeholder="$albumartist/$album/$track - $title" spellcheck="false">';
@@ -52221,6 +52225,7 @@ async function loadDiscoverPage() {
     await Promise.all([
         loadDiscoverHero(),
         loadYourArtists(),
+        loadYourAlbums(),
         loadSpotifyLibrarySection(),
         loadDiscoverRecentReleases(),
         loadSeasonalContent(),  // Seasonal discovery
@@ -52586,7 +52591,7 @@ async function openRecommendedArtistsModal() {
         modal.className = 'modal-overlay';
         document.body.appendChild(modal);
 
-        modal.addEventListener('click', function(e) {
+        modal.addEventListener('click', function (e) {
             if (e.target === modal) closeRecommendedArtistsModal();
         });
     }
@@ -52739,13 +52744,13 @@ function renderRecommendedArtistsModal(modal, artists) {
                 </div>
                 <div class="recommended-artists-grid" id="recommended-artists-grid">
                     ${artists.map(artist => {
-                        const genreTags = (artist.genres || []).slice(0, 3).map(g =>
-                            `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
-                        ).join('');
-                        const similarText = artist.occurrence_count > 1
-                            ? `Similar to ${artist.occurrence_count} in your watchlist`
-                            : 'Similar to an artist in your watchlist';
-                        return `
+        const genreTags = (artist.genres || []).slice(0, 3).map(g =>
+            `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
+        ).join('');
+        const similarText = artist.occurrence_count > 1
+            ? `Similar to ${artist.occurrence_count} in your watchlist`
+            : 'Similar to an artist in your watchlist';
+        return `
                             <div class="recommended-artist-card"
                                  data-artist-name="${escapeHtml(artist.artist_name).toLowerCase()}"
                                  data-artist-id="${artist.artist_id}">
@@ -52771,7 +52776,7 @@ function renderRecommendedArtistsModal(modal, artists) {
                                 </div>
                             </div>
                         `;
-                    }).join('')}
+    }).join('')}
                 </div>
             </div>
         </div>
@@ -52780,7 +52785,7 @@ function renderRecommendedArtistsModal(modal, artists) {
     // Event delegation for card clicks and watchlist buttons
     const grid = modal.querySelector('#recommended-artists-grid');
     if (grid) {
-        grid.addEventListener('click', function(e) {
+        grid.addEventListener('click', function (e) {
             const watchlistBtn = e.target.closest('.recommended-card-watchlist-btn');
             if (watchlistBtn) {
                 e.stopPropagation();
@@ -53093,6 +53098,406 @@ async function loadDiscoverRecentReleases() {
         if (carousel) {
             carousel.innerHTML = '<div class="discover-empty"><p>Failed to load recent releases</p></div>';
         }
+    }
+}
+
+// ===============================
+// ===============================
+// YOUR ALBUMS SECTION
+// ===============================
+
+let yourAlbums = [];
+let yourAlbumsPage = 1;
+let yourAlbumsTotal = 0;
+const YOUR_ALBUMS_PAGE_SIZE = 48;
+let _yourAlbumsSearchTimeout = null;
+
+function debouncedYourAlbumsSearch() {
+    clearTimeout(_yourAlbumsSearchTimeout);
+    _yourAlbumsSearchTimeout = setTimeout(() => {
+        yourAlbumsPage = 1;
+        loadYourAlbumsGrid();
+    }, 400);
+}
+
+async function loadYourAlbums() {
+    const section = document.getElementById('your-albums-section');
+    if (!section) return;
+    try {
+        const resp = await fetch('/api/discover/your-albums?page=1&per_page=48&status=all');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.success) return;
+
+        const totalCount = (data.stats && data.stats.total) || 0;
+        if (totalCount === 0 && !data.stale) return; // Nothing to show yet
+
+        section.style.display = '';
+        yourAlbums = data.albums || [];
+        yourAlbumsTotal = data.total || 0;
+        yourAlbumsPage = 1;
+
+        const subtitle = document.getElementById('your-albums-subtitle');
+        if (subtitle && data.stats) {
+            const s = data.stats;
+            subtitle.textContent = `${s.total} albums \u00B7 ${s.owned} owned \u00B7 ${s.missing} missing`;
+        }
+
+        const filters = document.getElementById('your-albums-filters');
+        if (filters && totalCount > 0) filters.style.display = '';
+
+        const downloadBtn = document.getElementById('your-albums-download-btn');
+        if (downloadBtn && data.stats && data.stats.missing > 0) downloadBtn.style.display = '';
+
+        _renderYourAlbumsGrid(yourAlbums);
+        _renderYourAlbumsPagination(yourAlbumsTotal, yourAlbumsPage);
+
+        if (data.stale && totalCount === 0) {
+            const grid = document.getElementById('your-albums-grid');
+            if (grid) grid.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Fetching your albums from connected services...</p></div>';
+            _pollYourAlbums();
+        }
+    } catch (e) {
+        console.error('Error loading your albums:', e);
+    }
+}
+
+function _pollYourAlbums() {
+    let attempts = 0;
+    const poll = setInterval(async () => {
+        attempts++;
+        if (attempts > 12) { clearInterval(poll); return; }
+        try {
+            const resp = await fetch('/api/discover/your-albums?page=1&per_page=48&status=all');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (!data.success) return;
+            const total = (data.stats && data.stats.total) || 0;
+            if (total > 0) {
+                clearInterval(poll);
+                loadYourAlbums();
+            }
+        } catch (e) { }
+    }, 5000);
+}
+
+async function loadYourAlbumsGrid() {
+    const grid = document.getElementById('your-albums-grid');
+    if (!grid) return;
+    grid.innerHTML = '<div class="discover-loading"><div class="loading-spinner"></div><p>Loading...</p></div>';
+    try {
+        const search = (document.getElementById('your-albums-search')?.value || '').trim();
+        const status = document.getElementById('your-albums-status-filter')?.value || 'all';
+        const sort = document.getElementById('your-albums-sort')?.value || 'artist_name';
+        const params = new URLSearchParams({ page: yourAlbumsPage, per_page: YOUR_ALBUMS_PAGE_SIZE, sort, status });
+        if (search) params.set('search', search);
+        const resp = await fetch(`/api/discover/your-albums?${params}`);
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error);
+        yourAlbums = data.albums || [];
+        yourAlbumsTotal = data.total || 0;
+        const subtitle = document.getElementById('your-albums-subtitle');
+        if (subtitle && data.stats) {
+            const s = data.stats;
+            subtitle.textContent = `${s.total} albums \u00B7 ${s.owned} owned \u00B7 ${s.missing} missing`;
+        }
+        _renderYourAlbumsGrid(yourAlbums);
+        _renderYourAlbumsPagination(yourAlbumsTotal, yourAlbumsPage);
+    } catch (e) {
+        console.error('Error loading your albums grid:', e);
+        grid.innerHTML = '<div class="spotify-library-empty"><p>Failed to load albums</p></div>';
+    }
+}
+
+function _renderYourAlbumsGrid(albums) {
+    const grid = document.getElementById('your-albums-grid');
+    if (!grid) return;
+    if (!albums || albums.length === 0) {
+        grid.innerHTML = '<div class="spotify-library-empty"><p>No albums found</p></div>';
+        return;
+    }
+    let html = '';
+    albums.forEach((album, index) => {
+        const coverUrl = album.image_url || '/static/placeholder-album.png';
+        const year = album.release_date ? album.release_date.substring(0, 4) : '';
+        const badgeClass = album.in_library ? 'owned' : 'missing';
+        const badgeIcon = album.in_library ? '\u2713' : '\u2193';
+        const trackInfo = album.total_tracks ? `${album.total_tracks} tracks` : '';
+        const meta = [year, trackInfo].filter(Boolean).join(' \u00B7 ');
+        const sources = (album.source_services || []).join(', ');
+        html += `
+            <div class="spotify-library-card" onclick="openYourAlbumDownload(${index})" title="${escapeHtml(album.album_name)} \u2014 ${escapeHtml(album.artist_name)}">
+                <div class="spotify-library-card-img">
+                    <img src="${coverUrl}" alt="${escapeHtml(album.album_name)}" loading="lazy">
+                    <div class="spotify-library-card-badge ${badgeClass}">${badgeIcon}</div>
+                </div>
+                <div class="spotify-library-card-info">
+                    <p class="spotify-library-card-title">${escapeHtml(album.album_name)}</p>
+                    <p class="spotify-library-card-artist">${escapeHtml(album.artist_name)}</p>
+                    <p class="spotify-library-card-meta">${escapeHtml(meta)}</p>
+                </div>
+            </div>`;
+    });
+    grid.innerHTML = html;
+}
+
+function _renderYourAlbumsPagination(total, page) {
+    const container = document.getElementById('your-albums-pagination');
+    if (!container) return;
+    if (total <= YOUR_ALBUMS_PAGE_SIZE) { container.style.display = 'none'; return; }
+    container.style.display = '';
+    const totalPages = Math.ceil(total / YOUR_ALBUMS_PAGE_SIZE);
+    const start = (page - 1) * YOUR_ALBUMS_PAGE_SIZE + 1;
+    const end = Math.min(page * YOUR_ALBUMS_PAGE_SIZE, total);
+    container.innerHTML = `
+        <button class="spotify-library-page-btn" onclick="_yourAlbumsPrevPage()" ${page <= 1 ? 'disabled' : ''}>&larr; Previous</button>
+        <span class="spotify-library-page-info">${start}\u2013${end} of ${total}</span>
+        <button class="spotify-library-page-btn" onclick="_yourAlbumsNextPage()" ${page >= totalPages ? 'disabled' : ''}>Next &rarr;</button>
+    `;
+}
+
+function _yourAlbumsPrevPage() {
+    if (yourAlbumsPage > 1) { yourAlbumsPage--; loadYourAlbumsGrid(); }
+}
+function _yourAlbumsNextPage() {
+    const totalPages = Math.ceil(yourAlbumsTotal / YOUR_ALBUMS_PAGE_SIZE);
+    if (yourAlbumsPage < totalPages) { yourAlbumsPage++; loadYourAlbumsGrid(); }
+}
+
+async function openYourAlbumDownload(index) {
+    const album = yourAlbums[index];
+    if (!album) { showToast('Album data not found', 'error'); return; }
+    showLoadingOverlay(`Loading tracks for ${album.album_name}...`);
+    try {
+        // Prefer Spotify ID, fall back to Deezer, then search by name
+        let albumData = null;
+        const nameParams = new URLSearchParams({ name: album.album_name || '', artist: album.artist_name || '' });
+        if (album.spotify_album_id) {
+            const r = await fetch(`/api/discover/album/spotify/${album.spotify_album_id}?${nameParams}`);
+            if (r.ok) albumData = await r.json();
+        }
+        if (!albumData && album.deezer_album_id) {
+            const r = await fetch(`/api/discover/album/deezer/${album.deezer_album_id}?${nameParams}`);
+            if (r.ok) albumData = await r.json();
+        }
+        if (!albumData) {
+            // Last resort — search by name
+            const r = await fetch(`/api/discover/album/spotify/search?${nameParams}`);
+            if (r.ok) albumData = await r.json();
+        }
+        if (!albumData || !albumData.tracks || albumData.tracks.length === 0) {
+            throw new Error('No tracks found for this album');
+        }
+        const tracks = albumData.tracks.map(track => {
+            let artists = track.artists || albumData.artists || [{ name: album.artist_name }];
+            if (Array.isArray(artists)) artists = artists.map(a => a.name || a);
+            return {
+                id: track.id, name: track.name, artists,
+                album: {
+                    id: albumData.id, name: albumData.name,
+                    album_type: albumData.album_type || 'album',
+                    total_tracks: albumData.total_tracks || 0,
+                    release_date: albumData.release_date || '',
+                    images: albumData.images || []
+                },
+                duration_ms: track.duration_ms || 0,
+                track_number: track.track_number || 0
+            };
+        });
+        const virtualId = `your_albums_${album.spotify_album_id || album.deezer_album_id || album.tidal_album_id || index}`;
+        await openDownloadMissingModalForYouTube(virtualId, albumData.name, tracks,
+            { name: album.artist_name, source: albumData.source || 'spotify' },
+            {
+                id: albumData.id, name: albumData.name, album_type: albumData.album_type || 'album',
+                total_tracks: albumData.total_tracks || 0, release_date: albumData.release_date || '',
+                images: albumData.images || []
+            }
+        );
+        hideLoadingOverlay();
+    } catch (e) {
+        console.error('Error opening your album download:', e);
+        showToast(`Failed to load album: ${e.message}`, 'error');
+        hideLoadingOverlay();
+    }
+}
+
+async function refreshYourAlbums() {
+    const btn = document.getElementById('your-albums-refresh-btn');
+    if (btn) btn.disabled = true;
+    const subtitle = document.getElementById('your-albums-subtitle');
+    if (subtitle) subtitle.textContent = 'Refreshing from connected services...';
+    try {
+        await fetch('/api/discover/your-albums/refresh?clear=true', { method: 'POST' });
+        showToast('Refresh started — checking for new albums...', 'info');
+        const poll = setInterval(async () => {
+            try {
+                const resp = await fetch('/api/discover/your-albums?page=1&per_page=48');
+                const data = await resp.json();
+                if (data.success && data.stats && data.stats.total > 0) {
+                    clearInterval(poll);
+                    loadYourAlbums();
+                    if (btn) btn.disabled = false;
+                }
+            } catch (e) { }
+        }, 4000);
+        setTimeout(() => { clearInterval(poll); if (btn) btn.disabled = false; }, 60000);
+    } catch (e) {
+        showToast('Failed to start refresh', 'error');
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function openYourAlbumsSourcesModal() {
+    const existing = document.getElementById('ya-albums-sources-modal-overlay');
+    if (existing) existing.remove();
+
+    let enabled = ['spotify', 'tidal', 'deezer'];
+    let connected = [];
+    try {
+        const resp = await fetch('/api/discover/your-albums/sources');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.enabled) enabled = data.enabled;
+            if (data.connected) connected = data.connected;
+        }
+    } catch (e) { }
+
+    const sourceInfo = [
+        { id: 'spotify', label: 'Spotify', icon: '\uD83C\uDFB5' },
+        { id: 'tidal', label: 'Tidal', icon: '\uD83C\uDF0A' },
+        { id: 'deezer', label: 'Deezer', icon: '\uD83C\uDFB6' },
+    ];
+    const state = {};
+    sourceInfo.forEach(s => { state[s.id] = enabled.includes(s.id); });
+
+    const overlay = document.createElement('div');
+    overlay.id = 'ya-albums-sources-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    const rows = sourceInfo.map(s => {
+        const isConnected = connected.includes(s.id);
+        const isOn = state[s.id];
+        return `
+            <div class="ya-source-row${isConnected ? '' : ' disconnected'}" data-yaa-source="${s.id}" onclick="_yaaSourceRowClick('${s.id}')">
+                <div class="ya-source-row-left">
+                    <span style="font-size:18px">${s.icon}</span>
+                    <div>
+                        <div class="ya-source-name">${s.label}</div>
+                        <div class="ya-source-status">${isConnected ? 'Connected' : 'Not connected'}</div>
+                    </div>
+                </div>
+                <button class="ya-source-toggle${isOn ? ' on' : ''}" id="yaa-toggle-${s.id}" onclick="event.stopPropagation();_yaaSourceToggle('${s.id}')"></button>
+            </div>`;
+    }).join('');
+
+    overlay.innerHTML = `
+        <div class="ya-sources-modal">
+            <h2>Your Albums Sources</h2>
+            <p class="ya-sources-desc">Choose which connected services contribute albums to this section.</p>
+            <div class="ya-sources-list">${rows}</div>
+            <div class="ya-sources-footer">
+                <button class="ya-sources-cancel-btn" onclick="document.getElementById('ya-albums-sources-modal-overlay').remove()">Cancel</button>
+                <button class="ya-sources-save-btn" onclick="_yaaSourcesSave()">Save</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    window._yaaSourcesState = state;
+}
+
+function _yaaSourceRowClick(id) {
+    const row = document.querySelector(`.ya-source-row[data-yaa-source="${id}"]`);
+    if (row && row.classList.contains('disconnected')) return;
+    _yaaSourceToggle(id);
+}
+function _yaaSourceToggle(id) {
+    const row = document.querySelector(`.ya-source-row[data-yaa-source="${id}"]`);
+    if (row && row.classList.contains('disconnected')) return;
+    window._yaaSourcesState[id] = !window._yaaSourcesState[id];
+    const btn = document.getElementById(`yaa-toggle-${id}`);
+    if (btn) btn.classList.toggle('on', window._yaaSourcesState[id]);
+}
+async function _yaaSourcesSave() {
+    const enabledArr = Object.entries(window._yaaSourcesState).filter(([, v]) => v).map(([k]) => k);
+    if (enabledArr.length === 0) { showToast('Select at least one source', 'error'); return; }
+    try {
+        const resp = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ discover: { your_albums_sources: enabledArr.join(',') } })
+        });
+        if (resp.ok) {
+            document.getElementById('ya-albums-sources-modal-overlay')?.remove();
+            showToast('Sources saved — refresh to apply', 'success');
+            const sourceNames = { spotify: 'Spotify', tidal: 'Tidal', deezer: 'Deezer' };
+            const subtitle = document.getElementById('your-albums-subtitle');
+            if (subtitle) {
+                const names = enabledArr.map(s => sourceNames[s] || s).join(' and ');
+                subtitle.textContent = `Albums you\u2019ve saved on ${names}`;
+            }
+        } else {
+            showToast('Failed to save sources', 'error');
+        }
+    } catch (e) {
+        showToast('Failed to save sources', 'error');
+    }
+}
+
+async function downloadMissingYourAlbums() {
+    try {
+        const resp = await fetch('/api/discover/your-albums?page=1&per_page=1000&status=missing');
+        const data = await resp.json();
+        if (!data.success || !data.albums || data.albums.length === 0) {
+            showToast('No missing albums to download', 'info');
+            return;
+        }
+        const missing = data.albums.filter(a => !a.in_library);
+        if (missing.length === 0) { showToast('All albums are already in your library!', 'success'); return; }
+        if (!confirm(`Download ${missing.length} missing album${missing.length > 1 ? 's' : ''} from your saved albums?`)) return;
+        showToast(`Starting download for ${missing.length} albums...`, 'info');
+        for (let i = 0; i < missing.length; i++) {
+            const album = missing[i];
+            try {
+                showToast(`Queuing ${i + 1}/${missing.length}: ${album.album_name}`, 'info');
+                const nameParams = new URLSearchParams({ name: album.album_name || '', artist: album.artist_name || '' });
+                let albumData = null;
+                if (album.spotify_album_id) {
+                    const r = await fetch(`/api/discover/album/spotify/${album.spotify_album_id}?${nameParams}`);
+                    if (r.ok) albumData = await r.json();
+                }
+                if (!albumData && album.deezer_album_id) {
+                    const r = await fetch(`/api/discover/album/deezer/${album.deezer_album_id}?${nameParams}`);
+                    if (r.ok) albumData = await r.json();
+                }
+                if (!albumData || !albumData.tracks || albumData.tracks.length === 0) continue;
+                const tracks = albumData.tracks.map(track => {
+                    let artists = track.artists || albumData.artists || [{ name: album.artist_name }];
+                    if (Array.isArray(artists)) artists = artists.map(a => a.name || a);
+                    return {
+                        id: track.id, name: track.name, artists,
+                        album: {
+                            id: albumData.id, name: albumData.name, album_type: albumData.album_type || 'album',
+                            total_tracks: albumData.total_tracks || 0, release_date: albumData.release_date || '',
+                            images: albumData.images || []
+                        },
+                        duration_ms: track.duration_ms || 0, track_number: track.track_number || 0
+                    };
+                });
+                const virtualId = `your_albums_${album.spotify_album_id || album.deezer_album_id || i}`;
+                await openDownloadMissingModalForYouTube(virtualId, albumData.name, tracks,
+                    { name: album.artist_name, source: albumData.source || 'spotify' },
+                    {
+                        id: albumData.id, name: albumData.name, album_type: albumData.album_type || 'album',
+                        total_tracks: albumData.total_tracks || 0, release_date: albumData.release_date || '',
+                        images: albumData.images || []
+                    }
+                );
+            } catch (err) { console.error(`Error queuing ${album.album_name}:`, err); }
+        }
+    } catch (e) {
+        console.error('Error downloading missing your albums:', e);
+        showToast(`Error: ${e.message}`, 'error');
     }
 }
 
@@ -56237,7 +56642,7 @@ function _pollYourArtists() {
                 window._yaPoller = null;
                 loadYourArtists(); // Re-render with real data
             }
-        } catch (e) {}
+        } catch (e) { }
     }, 5000);
 }
 
@@ -56410,14 +56815,14 @@ async function openYourArtistInfoModal(poolId) {
                 <div class="ya-info-section-title">${relLabel}</div>
                 <div class="ya-info-related">
                     ${related.slice(0, 12).map(r => {
-                        const rImg = r.image_url || '';
-                        const rType = r.type === 'watchlist';
-                        return `<div class="ya-info-related-item" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); setTimeout(() => openYourArtistInfoModal_direct(${JSON.stringify({
-                            id: r.id, name: r.name, image_url: rImg,
-                            spotify_id: r.spotify_id || '', itunes_id: r.itunes_id || '',
-                            deezer_id: r.deezer_id || '', discogs_id: r.discogs_id || '',
-                            type: r.type
-                        }).replace(/"/g, '&quot;')}), 100)">
+                const rImg = r.image_url || '';
+                const rType = r.type === 'watchlist';
+                return `<div class="ya-info-related-item" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); setTimeout(() => openYourArtistInfoModal_direct(${JSON.stringify({
+                    id: r.id, name: r.name, image_url: rImg,
+                    spotify_id: r.spotify_id || '', itunes_id: r.itunes_id || '',
+                    deezer_id: r.deezer_id || '', discogs_id: r.discogs_id || '',
+                    type: r.type
+                }).replace(/"/g, '&quot;')}), 100)">
                             <div class="ya-info-related-img">
                                 ${rImg ? `<img src="${escapeHtml(rImg)}" alt="">` : '<span>&#9835;</span>'}
                             </div>
@@ -56426,7 +56831,7 @@ async function openYourArtistInfoModal(poolId) {
                                 ${rType ? '<div class="ya-info-related-badge">★ Watchlist</div>' : ''}
                             </div>
                         </div>`;
-                    }).join('')}
+            }).join('')}
                     ${related.length > 12 ? `<div class="ya-info-related-more">+${related.length - 12} more</div>` : ''}
                 </div>
             </div>`;
@@ -56546,7 +56951,7 @@ async function refreshYourArtists() {
                     if (btn) { btn.disabled = false; btn.style.opacity = ''; }
                     showToast(`Found ${data.total} artists from your services`, 'success');
                 }
-            } catch (e) {}
+            } catch (e) { }
         }, 5000);
     } catch (err) {
         showToast('Failed to start refresh', 'error');
@@ -56568,13 +56973,13 @@ async function openYourArtistsSourcesModal() {
             if (data.enabled) enabled = data.enabled;
             if (data.connected) connected = data.connected;
         }
-    } catch (e) {}
+    } catch (e) { }
 
     const sourceInfo = [
-        { id: 'spotify', label: 'Spotify',  icon: '🎵' },
-        { id: 'tidal',   label: 'Tidal',    icon: '🌊' },
-        { id: 'lastfm',  label: 'Last.fm',  icon: '📻' },
-        { id: 'deezer',  label: 'Deezer',   icon: '🎶' },
+        { id: 'spotify', label: 'Spotify', icon: '🎵' },
+        { id: 'tidal', label: 'Tidal', icon: '🌊' },
+        { id: 'lastfm', label: 'Last.fm', icon: '📻' },
+        { id: 'deezer', label: 'Deezer', icon: '🎶' },
     ];
 
     const state = {};
@@ -56773,7 +57178,7 @@ async function _yaLoadModal() {
     }
 }
 
-function loadDiscoveryBlacklist() {}
+function loadDiscoveryBlacklist() { }
 
 // ── Artist Map — Circle-packed staged canvas visualization ──
 const _artMap = {
@@ -57323,125 +57728,125 @@ function _artMapRender() {
         const n = _artMap.hoveredNode || (_artMap._constellationCache ? (_artMap._nodeById || {})[_artMap._constellationCache.nodeId] : null);
         if (!n) { _artMap._constellationFade = 0; _artMap._constellationCache = null; }
         if (n) {
-        ctx.save();
-        ctx.translate(_artMap.offsetX, _artMap.offsetY);
-        ctx.scale(z, z);
+            ctx.save();
+            ctx.translate(_artMap.offsetX, _artMap.offsetY);
+            ctx.scale(z, z);
 
-        // Cache connected node lookup (don't recompute every frame)
-        if (!_artMap._constellationCache || _artMap._constellationCache.nodeId !== n.id) {
-            const connectedIds = new Set();
-            if (n.type === 'watchlist') {
-                for (const e of _artMap.edges) {
-                    if (e.source === n.id) connectedIds.add(e.target);
-                }
-            } else {
-                const sourceIds = new Set();
-                for (const e of _artMap.edges) {
-                    if (e.target === n.id) sourceIds.add(e.source);
-                }
-                for (const sid of sourceIds) {
-                    connectedIds.add(sid);
+            // Cache connected node lookup (don't recompute every frame)
+            if (!_artMap._constellationCache || _artMap._constellationCache.nodeId !== n.id) {
+                const connectedIds = new Set();
+                if (n.type === 'watchlist') {
                     for (const e of _artMap.edges) {
-                        if (e.source === sid) connectedIds.add(e.target);
+                        if (e.source === n.id) connectedIds.add(e.target);
+                    }
+                } else {
+                    const sourceIds = new Set();
+                    for (const e of _artMap.edges) {
+                        if (e.target === n.id) sourceIds.add(e.source);
+                    }
+                    for (const sid of sourceIds) {
+                        connectedIds.add(sid);
+                        for (const e of _artMap.edges) {
+                            if (e.source === sid) connectedIds.add(e.target);
+                        }
                     }
                 }
-            }
-            const nById = _artMap._nodeById || {};
-            _artMap._constellationCache = {
-                nodeId: n.id,
-                nodes: [n, ...[...connectedIds].map(id => nById[id]).filter(Boolean)],
-            };
-        }
-
-        const highlightNodes = _artMap._constellationCache.nodes;
-
-        if (highlightNodes.length > 1) {
-            // Semi-transparent dark overlay on entire visible area
-            ctx.save();
-            ctx.resetTransform();
-            ctx.globalAlpha = 0.6 * cFade;
-            ctx.fillStyle = '#0a0a14';
-            ctx.fillRect(0, 0, _artMap.canvas.width, _artMap.canvas.height);
-            ctx.globalAlpha = 1;
-            ctx.restore();
-
-            // Draw glowing connection lines
-            for (const cn of highlightNodes) {
-                if (cn === n) continue;
-                ctx.beginPath();
-                ctx.moveTo(n.x, n.y);
-                ctx.lineTo(cn.x, cn.y);
-                // Gradient line
-                const lineGrad = ctx.createLinearGradient(n.x, n.y, cn.x, cn.y);
-                lineGrad.addColorStop(0, `rgba(138,43,226,${0.5 * cFade})`);
-                lineGrad.addColorStop(1, `rgba(138,43,226,${0.15 * cFade})`);
-                ctx.strokeStyle = lineGrad;
-                ctx.lineWidth = 2;
-                ctx.stroke();
+                const nById = _artMap._nodeById || {};
+                _artMap._constellationCache = {
+                    nodeId: n.id,
+                    nodes: [n, ...[...connectedIds].map(id => nById[id]).filter(Boolean)],
+                };
             }
 
-            // Redraw highlighted nodes on top
-            ctx.globalAlpha = cFade;
-            for (const hn of highlightNodes) {
-                const r = hn.radius;
-                const isW = hn.type === 'watchlist';
-                const isHov = hn === n;
+            const highlightNodes = _artMap._constellationCache.nodes;
 
-                // Glow
-                if (isHov) {
+            if (highlightNodes.length > 1) {
+                // Semi-transparent dark overlay on entire visible area
+                ctx.save();
+                ctx.resetTransform();
+                ctx.globalAlpha = 0.6 * cFade;
+                ctx.fillStyle = '#0a0a14';
+                ctx.fillRect(0, 0, _artMap.canvas.width, _artMap.canvas.height);
+                ctx.globalAlpha = 1;
+                ctx.restore();
+
+                // Draw glowing connection lines
+                for (const cn of highlightNodes) {
+                    if (cn === n) continue;
                     ctx.beginPath();
-                    ctx.arc(hn.x, hn.y, r + 8, 0, Math.PI * 2);
-                    ctx.strokeStyle = 'rgba(138,43,226,0.4)';
-                    ctx.lineWidth = 6;
+                    ctx.moveTo(n.x, n.y);
+                    ctx.lineTo(cn.x, cn.y);
+                    // Gradient line
+                    const lineGrad = ctx.createLinearGradient(n.x, n.y, cn.x, cn.y);
+                    lineGrad.addColorStop(0, `rgba(138,43,226,${0.5 * cFade})`);
+                    lineGrad.addColorStop(1, `rgba(138,43,226,${0.15 * cFade})`);
+                    ctx.strokeStyle = lineGrad;
+                    ctx.lineWidth = 2;
                     ctx.stroke();
                 }
 
-                // Circle + image
-                ctx.save();
-                ctx.beginPath();
-                ctx.arc(hn.x, hn.y, r, 0, Math.PI * 2);
-                ctx.closePath();
-                ctx.clip();
+                // Redraw highlighted nodes on top
+                ctx.globalAlpha = cFade;
+                for (const hn of highlightNodes) {
+                    const r = hn.radius;
+                    const isW = hn.type === 'watchlist';
+                    const isHov = hn === n;
 
-                const img = _artMap.images[hn.id];
-                if (img) {
-                    ctx.drawImage(img, hn.x - r, hn.y - r, r * 2, r * 2);
-                    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-                    ctx.fillRect(hn.x - r, hn.y - r, r * 2, r * 2);
-                } else {
-                    ctx.fillStyle = isW ? '#1a0a30' : '#141420';
-                    ctx.fillRect(hn.x - r, hn.y - r, r * 2, r * 2);
+                    // Glow
+                    if (isHov) {
+                        ctx.beginPath();
+                        ctx.arc(hn.x, hn.y, r + 8, 0, Math.PI * 2);
+                        ctx.strokeStyle = 'rgba(138,43,226,0.4)';
+                        ctx.lineWidth = 6;
+                        ctx.stroke();
+                    }
+
+                    // Circle + image
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(hn.x, hn.y, r, 0, Math.PI * 2);
+                    ctx.closePath();
+                    ctx.clip();
+
+                    const img = _artMap.images[hn.id];
+                    if (img) {
+                        ctx.drawImage(img, hn.x - r, hn.y - r, r * 2, r * 2);
+                        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+                        ctx.fillRect(hn.x - r, hn.y - r, r * 2, r * 2);
+                    } else {
+                        ctx.fillStyle = isW ? '#1a0a30' : '#141420';
+                        ctx.fillRect(hn.x - r, hn.y - r, r * 2, r * 2);
+                    }
+                    ctx.restore();
+
+                    // Border
+                    ctx.beginPath();
+                    ctx.arc(hn.x, hn.y, r, 0, Math.PI * 2);
+                    ctx.strokeStyle = isHov ? 'rgba(255,255,255,0.7)' : isW ? 'rgba(138,43,226,0.5)' : 'rgba(255,255,255,0.3)';
+                    ctx.lineWidth = isHov ? 3 : 1.5;
+                    ctx.stroke();
+
+                    // Name
+                    const fontSize = isW ? Math.max(14, r * 0.14) : Math.max(8, r * 0.3);
+                    ctx.font = `${isW ? '700' : '600'} ${fontSize}px system-ui`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = '#fff';
+                    const maxC = isW ? 20 : 12;
+                    const label = hn.name.length > maxC ? hn.name.substring(0, maxC - 1) + '…' : hn.name;
+                    ctx.fillText(label, hn.x, hn.y);
                 }
-                ctx.restore();
-
-                // Border
+                ctx.globalAlpha = 1;
+            } else {
+                // Single node, no connections
                 ctx.beginPath();
-                ctx.arc(hn.x, hn.y, r, 0, Math.PI * 2);
-                ctx.strokeStyle = isHov ? 'rgba(255,255,255,0.7)' : isW ? 'rgba(138,43,226,0.5)' : 'rgba(255,255,255,0.3)';
-                ctx.lineWidth = isHov ? 3 : 1.5;
+                ctx.arc(n.x, n.y, n.radius + 4, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                ctx.lineWidth = 3;
                 ctx.stroke();
-
-                // Name
-                const fontSize = isW ? Math.max(14, r * 0.14) : Math.max(8, r * 0.3);
-                ctx.font = `${isW ? '700' : '600'} ${fontSize}px system-ui`;
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillStyle = '#fff';
-                const maxC = isW ? 20 : 12;
-                const label = hn.name.length > maxC ? hn.name.substring(0, maxC - 1) + '…' : hn.name;
-                ctx.fillText(label, hn.x, hn.y);
             }
-            ctx.globalAlpha = 1;
-        } else {
-            // Single node, no connections
-            ctx.beginPath();
-            ctx.arc(n.x, n.y, n.radius + 4, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-            ctx.lineWidth = 3;
-            ctx.stroke();
-        }
 
-        ctx.restore();
+            ctx.restore();
         } // end if(n)
     } else if (_artMap.hoveredNode && !_artMap._constellationActive) {
         // Pre-constellation: just show a simple highlight ring (instant, no delay)
@@ -58065,11 +58470,11 @@ async function _openArtistMapExplorerWithName(name) {
         function _gc(x, y, r) {
             const cx = Math.floor(x / CELL), cy = Math.floor(y / CELL);
             for (let dx = -3; dx <= 3; dx++) for (let dy = -3; dy <= 3; dy++) {
-                const cell = grid[`${cx+dx},${cy+dy}`];
+                const cell = grid[`${cx + dx},${cy + dy}`];
                 if (!cell) continue;
                 for (const p of cell) {
-                    const ddx = x-p.x, ddy = y-p.y;
-                    if (ddx*ddx+ddy*ddy < (r+p.radius+BUF)*(r+p.radius+BUF)) return true;
+                    const ddx = x - p.x, ddy = y - p.y;
+                    if (ddx * ddx + ddy * ddy < (r + p.radius + BUF) * (r + p.radius + BUF)) return true;
                 }
             }
             return false;
@@ -58533,11 +58938,11 @@ async function openYourArtistInfoModal_direct(node) {
     let bestId = '', bestSource = '';
     // Check what the active source is
     const activeSource = window._yaActiveSource || 'spotify';
-    const sourceOrder = activeSource === 'spotify' ? ['spotify_id','itunes_id','deezer_id','discogs_id']
-        : activeSource === 'itunes' ? ['itunes_id','spotify_id','deezer_id','discogs_id']
-        : activeSource === 'deezer' ? ['deezer_id','spotify_id','itunes_id','discogs_id']
-        : ['spotify_id','itunes_id','deezer_id','discogs_id'];
-    const sourceMap = {spotify_id:'spotify', itunes_id:'itunes', deezer_id:'deezer', discogs_id:'discogs'};
+    const sourceOrder = activeSource === 'spotify' ? ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id']
+        : activeSource === 'itunes' ? ['itunes_id', 'spotify_id', 'deezer_id', 'discogs_id']
+            : activeSource === 'deezer' ? ['deezer_id', 'spotify_id', 'itunes_id', 'discogs_id']
+                : ['spotify_id', 'itunes_id', 'deezer_id', 'discogs_id'];
+    const sourceMap = { spotify_id: 'spotify', itunes_id: 'itunes', deezer_id: 'deezer', discogs_id: 'discogs' };
     for (const key of sourceOrder) {
         if (node[key]) { bestId = node[key]; bestSource = sourceMap[key]; break; }
     }
@@ -58962,8 +59367,8 @@ async function openGenreDeepDive(genre) {
     const _esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     const _fmtNum = (n) => {
         if (!n) return '';
-        if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
-        if (n >= 1000) return (n/1000).toFixed(0) + 'K';
+        if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(0) + 'K';
         return n.toString();
     };
     const _fmtDur = (ms) => {
@@ -59031,12 +59436,12 @@ async function openGenreDeepDive(genre) {
                 <h3 class="genre-dive-section-title"><span class="genre-dive-icon">🎤</span> Artists in ${_esc(genre)}</h3>
                 <div class="genre-dive-artists">
                     ${data.artists.map(a => {
-                        // Always open on Artists page with discography — pass source for correct routing
-                        const imgUrl = _esc(a.image_url || '');
-                        const artSource = _esc(a.source || '');
-                        const clickAction = `onclick="document.getElementById('genre-deep-dive-modal').remove();navigateToPage('artists');setTimeout(()=>selectArtistForDetail({id:'${_esc(a.entity_id)}',name:'${_esc(a.name)}',image_url:'${imgUrl}'},{source:'${artSource}'}),300)"`;
-                        const srcClass = (a.source || '').toLowerCase();
-                        return `<div class="genre-dive-artist" ${clickAction}>
+                // Always open on Artists page with discography — pass source for correct routing
+                const imgUrl = _esc(a.image_url || '');
+                const artSource = _esc(a.source || '');
+                const clickAction = `onclick="document.getElementById('genre-deep-dive-modal').remove();navigateToPage('artists');setTimeout(()=>selectArtistForDetail({id:'${_esc(a.entity_id)}',name:'${_esc(a.name)}',image_url:'${imgUrl}'},{source:'${artSource}'}),300)"`;
+                const srcClass = (a.source || '').toLowerCase();
+                return `<div class="genre-dive-artist" ${clickAction}>
                             <div class="genre-dive-artist-img" style="${a.image_url ? `background-image:url('${_esc(a.image_url)}')` : ''}">
                                 ${!a.image_url ? '<span>🎤</span>' : ''}
                             </div>
@@ -59045,7 +59450,7 @@ async function openGenreDeepDive(genre) {
                             ${a.followers ? `<div class="genre-dive-artist-meta">${_fmtNum(a.followers)} followers</div>` : ''}
                             ${a.library_id ? '<div class="genre-dive-artist-badge">In Library</div>' : ''}
                         </div>`;
-                    }).join('')}
+            }).join('')}
                 </div>
             </div>`;
         }
@@ -59057,8 +59462,8 @@ async function openGenreDeepDive(genre) {
                 <h3 class="genre-dive-section-title"><span class="genre-dive-icon">🎵</span> Popular Tracks</h3>
                 <div class="genre-dive-tracks">
                     ${data.tracks.map((t, i) => {
-                        const tSrcClass = (t.source || '').toLowerCase();
-                        return `
+                const tSrcClass = (t.source || '').toLowerCase();
+                return `
                         <div class="genre-dive-track" onclick="document.getElementById('genre-deep-dive-modal').remove();openCacheDiscoverAlbum('genre_dive_tracks',${i})">
                             <div class="genre-dive-track-num">${i + 1}</div>
                             <div class="genre-dive-track-img" style="${t.image_url ? `background-image:url('${_esc(t.image_url)}')` : ''}">
@@ -62116,7 +62521,7 @@ async function loadRepairJobs() {
                 const settingsRows = Object.entries(job.settings).map(([key, val]) => {
                     const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                     const inputType = typeof val === 'boolean' ? 'checkbox' :
-                                     typeof val === 'number' ? 'number' : 'text';
+                        typeof val === 'number' ? 'number' : 'text';
                     const inputVal = inputType === 'checkbox' ?
                         (val ? ' checked' : '') :
                         ` value="${val}"`;
@@ -62158,7 +62563,7 @@ async function loadRepairJobs() {
                         <button class="repair-run-btn" onclick="runRepairJobNow('${job.job_id}')"
                                 title="Run now">&#9654;</button>
                         ${Object.keys(job.settings || {}).length > 0 ?
-                            `<button class="repair-settings-btn" onclick="expandRepairJobSettings('${job.job_id}')"
+                    `<button class="repair-settings-btn" onclick="expandRepairJobSettings('${job.job_id}')"
                                      title="Settings">&#9881;</button>` : ''}
                         <button class="repair-help-btn" onclick="event.stopPropagation(); showRepairJobHelp('${job.job_id}')"
                                 title="About this job">?</button>
@@ -62583,19 +62988,19 @@ async function openCacheHealthModal() {
                 <div class="cache-health-section-title">By Source</div>
                 <div class="cache-health-source-bars">
                     ${(() => {
-                        const allSources = {...(s.by_source || {})};
-                        if (s.total_musicbrainz) allSources['musicbrainz'] = s.total_musicbrainz;
-                        const maxCount = Math.max(...Object.values(allSources), 1);
-                        return Object.entries(allSources).map(([src, count]) => {
-                            const pct = Math.round(count / maxCount * 100);
-                            const color = src === 'spotify' ? '#1DB954' : src === 'itunes' ? '#FC3C44' : src === 'deezer' ? '#A238FF' : src === 'musicbrainz' ? '#BA478F' : '#666';
-                            return `<div class="cache-health-source-row">
+                const allSources = { ...(s.by_source || {}) };
+                if (s.total_musicbrainz) allSources['musicbrainz'] = s.total_musicbrainz;
+                const maxCount = Math.max(...Object.values(allSources), 1);
+                return Object.entries(allSources).map(([src, count]) => {
+                    const pct = Math.round(count / maxCount * 100);
+                    const color = src === 'spotify' ? '#1DB954' : src === 'itunes' ? '#FC3C44' : src === 'deezer' ? '#A238FF' : src === 'musicbrainz' ? '#BA478F' : '#666';
+                    return `<div class="cache-health-source-row">
                                 <span class="cache-health-source-name">${src === 'musicbrainz' ? 'MusicBrainz' : src}</span>
                                 <div class="cache-health-source-track"><div class="cache-health-source-fill" style="width:${pct}%;background:${color}"></div></div>
                                 <span class="cache-health-source-count">${count.toLocaleString()}</span>
                             </div>`;
-                        }).join('');
-                    })()}
+                }).join('');
+            })()}
                 </div>
             </div>
 
@@ -63832,7 +64237,7 @@ async function loadRepairHistory() {
             const duration = run.duration_seconds ? `${run.duration_seconds.toFixed(1)}s` : '-';
             const age = formatCacheAge(run.started_at);
             const statusClass = run.status === 'completed' ? 'success' :
-                                run.status === 'failed' ? 'error' : 'running';
+                run.status === 'failed' ? 'error' : 'running';
 
             // Build stat pills
             const stats = [];
@@ -63990,8 +64395,10 @@ async function loadStatsData() {
 
     if (!data.success) {
         // Cache not available — show empty state, user should hit Sync
-        data = { overview: {}, top_artists: [], top_albums: [], top_tracks: [],
-                 timeline: [], genres: [], recent: [], health: {} };
+        data = {
+            overview: {}, top_artists: [], top_albums: [], top_tracks: [],
+            timeline: [], genres: [], recent: [], health: {}
+        };
     }
 
     const overview = data.overview || {};
@@ -64038,7 +64445,7 @@ async function loadStatsData() {
             <span class="stats-ranked-num">${i + 1}</span>
             ${item.image_url ? `<img class="stats-ranked-img" src="${item.image_url}" alt="" onerror="this.style.display='none'">` : ''}
             <div class="stats-ranked-info">
-                <div class="stats-ranked-name">${item.id ? `<a class="stats-artist-link" onclick="navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${item.id}','${_esc(item.name).replace(/'/g,"\\'")}'),300)">${_esc(item.name)}</a>` : _esc(item.name)}${item.soul_id && !item.soul_id.startsWith('soul_unnamed_') ? ' <img src="/static/trans2.png" style="width:12px;height:12px;vertical-align:middle;opacity:0.5;" title="SoulID">' : ''}</div>
+                <div class="stats-ranked-name">${item.id ? `<a class="stats-artist-link" onclick="navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${item.id}','${_esc(item.name).replace(/'/g, "\\'")}'),300)">${_esc(item.name)}</a>` : _esc(item.name)}${item.soul_id && !item.soul_id.startsWith('soul_unnamed_') ? ' <img src="/static/trans2.png" style="width:12px;height:12px;vertical-align:middle;opacity:0.5;" title="SoulID">' : ''}</div>
                 <div class="stats-ranked-meta">${item.global_listeners ? _fmt(item.global_listeners) + ' global listeners' : ''}</div>
             </div>
             <span class="stats-ranked-count">${_fmt(item.play_count)} plays</span>
@@ -64052,7 +64459,7 @@ async function loadStatsData() {
             ${item.image_url ? `<img class="stats-ranked-img" src="${item.image_url}" alt="" onerror="this.style.display='none'">` : ''}
             <div class="stats-ranked-info">
                 <div class="stats-ranked-name">${_esc(item.name)}</div>
-                <div class="stats-ranked-meta">${item.artist_id ? `<a class="stats-artist-link" onclick="navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${item.artist_id}','${_esc(item.artist||'').replace(/'/g,"\\'")}'),300)">${_esc(item.artist || '')}</a>` : _esc(item.artist || '')}</div>
+                <div class="stats-ranked-meta">${item.artist_id ? `<a class="stats-artist-link" onclick="navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${item.artist_id}','${_esc(item.artist || '').replace(/'/g, "\\'")}'),300)">${_esc(item.artist || '')}</a>` : _esc(item.artist || '')}</div>
             </div>
             <span class="stats-ranked-count">${_fmt(item.play_count)} plays</span>
         </div>
@@ -64065,9 +64472,9 @@ async function loadStatsData() {
             ${item.image_url ? `<img class="stats-ranked-img" src="${item.image_url}" alt="" onerror="this.style.display='none'">` : ''}
             <div class="stats-ranked-info">
                 <div class="stats-ranked-name">${_esc(item.name)}</div>
-                <div class="stats-ranked-meta">${item.artist_id ? `<a class="stats-artist-link" onclick="navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${item.artist_id}','${_esc(item.artist||'').replace(/'/g,"\\'")}'),300)">${_esc(item.artist || '')}</a>` : _esc(item.artist || '')}${item.album ? ' · ' + _esc(item.album) : ''}</div>
+                <div class="stats-ranked-meta">${item.artist_id ? `<a class="stats-artist-link" onclick="navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${item.artist_id}','${_esc(item.artist || '').replace(/'/g, "\\'")}'),300)">${_esc(item.artist || '')}</a>` : _esc(item.artist || '')}${item.album ? ' · ' + _esc(item.album) : ''}</div>
             </div>
-            <button class="stats-play-btn" onclick="event.stopPropagation();playStatsTrack('${_esc(item.name).replace(/'/g,"\\'")}','${_esc(item.artist||'').replace(/'/g,"\\'")}','${_esc(item.album||'').replace(/'/g,"\\'")}')" title="Play">▶</button>
+            <button class="stats-play-btn" onclick="event.stopPropagation();playStatsTrack('${_esc(item.name).replace(/'/g, "\\'")}','${_esc(item.artist || '').replace(/'/g, "\\'")}','${_esc(item.album || '').replace(/'/g, "\\'")}')" title="Play">▶</button>
             <span class="stats-ranked-count">${_fmt(item.play_count)} plays</span>
         </div>
     `);
@@ -64103,9 +64510,9 @@ function _renderTopArtistsVisual(artists) {
 
     el.innerHTML = `<div class="stats-artist-bubbles">
         ${top5.map((a, i) => {
-            const pct = Math.round((a.play_count / maxPlays) * 100);
-            const size = 44 + (4 - i) * 6; // Largest first: 68, 62, 56, 50, 44
-            return `<div class="stats-artist-bubble" onclick="${a.id ? `navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${a.id}','${_esc(a.name).replace(/'/g,"\\\\'")}'),300)` : ''}" style="cursor:${a.id ? 'pointer' : 'default'}">
+        const pct = Math.round((a.play_count / maxPlays) * 100);
+        const size = 44 + (4 - i) * 6; // Largest first: 68, 62, 56, 50, 44
+        return `<div class="stats-artist-bubble" onclick="${a.id ? `navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${a.id}','${_esc(a.name).replace(/'/g, "\\\\'")}'),300)` : ''}" style="cursor:${a.id ? 'pointer' : 'default'}">
                 <div class="stats-bubble-img" style="width:${size}px;height:${size}px;${a.image_url ? `background-image:url('${a.image_url}')` : ''}">
                     ${!a.image_url ? `<span>${(a.name || '?')[0]}</span>` : ''}
                 </div>
@@ -64115,7 +64522,7 @@ function _renderTopArtistsVisual(artists) {
                 <div class="stats-bubble-name">${_esc(a.name)}</div>
                 <div class="stats-bubble-count">${_fmt(a.play_count)}</div>
             </div>`;
-        }).join('')}
+    }).join('')}
     </div>`;
 }
 
@@ -64396,7 +64803,7 @@ function _renderRecentPlays(tracks) {
 
     el.innerHTML = tracks.map(t => `
         <div class="stats-recent-item">
-            <button class="stats-play-btn stats-play-btn-sm" onclick="event.stopPropagation();playStatsTrack('${_esc(t.title).replace(/'/g,"\\'")}','${_esc(t.artist||'').replace(/'/g,"\\'")}','${_esc(t.album||'').replace(/'/g,"\\'")}')" title="Play">▶</button>
+            <button class="stats-play-btn stats-play-btn-sm" onclick="event.stopPropagation();playStatsTrack('${_esc(t.title).replace(/'/g, "\\'")}','${_esc(t.artist || '').replace(/'/g, "\\'")}','${_esc(t.album || '').replace(/'/g, "\\'")}')" title="Play">▶</button>
             <span class="stats-recent-title">${_esc(t.title)}</span>
             <span class="stats-recent-artist">${_esc(t.artist || '')}</span>
             <span class="stats-recent-time">${_ago(t.played_at)}</span>
@@ -64437,7 +64844,7 @@ async function importPageRefreshStaging() {
         const totalSize = importPageState.stagingFiles.reduce((s, f) => s + (f.size || 0), 0);
         const sizeStr = totalSize > 1073741824 ? `${(totalSize / 1073741824).toFixed(1)} GB`
             : totalSize > 1048576 ? `${(totalSize / 1048576).toFixed(0)} MB`
-            : `${(totalSize / 1024).toFixed(0)} KB`;
+                : `${(totalSize / 1024).toFixed(0)} KB`;
         document.getElementById('import-page-staging-stats').textContent =
             `${importPageState.stagingFiles.length} file${importPageState.stagingFiles.length !== 1 ? 's' : ''}${totalSize ? ' · ' + sizeStr : ''}`;
 
@@ -64593,7 +65000,7 @@ function _renderSuggestionCard(a) {
         <img src="${a.image_url || '/static/placeholder.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder.png'">
         <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
         <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
-        <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0,4) : ''}</div>
+        <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0, 4) : ''}</div>
     </div>`;
 }
 
@@ -64621,7 +65028,7 @@ async function importPageSearchAlbum() {
                 <img src="${a.image_url || '/static/placeholder.png'}" alt="${_escAttr(a.name)}" loading="lazy" onerror="this.src='/static/placeholder.png'">
                 <div class="import-page-album-card-title" title="${_escAttr(a.name)}">${_esc(a.name)}</div>
                 <div class="import-page-album-card-artist" title="${_escAttr(a.artist)}">${_esc(a.artist)}</div>
-                <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0,4) : ''}</div>
+                <div class="import-page-album-card-meta">${a.total_tracks} tracks · ${a.release_date ? a.release_date.substring(0, 4) : ''}</div>
             </div>
         `).join('');
         document.getElementById('import-page-album-clear-btn').classList.remove('hidden');
@@ -64648,7 +65055,7 @@ async function importPageSelectAlbum(albumId) {
         }
         const resp = await fetch('/api/import/album/match', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(matchBody)
         });
         const data = await resp.json();
@@ -64667,7 +65074,7 @@ async function importPageSelectAlbum(albumId) {
             <div class="import-page-album-hero-info">
                 <div class="import-page-album-hero-title">${_esc(album.name)}</div>
                 <div class="import-page-album-hero-artist">${_esc(album.artist)}</div>
-                <div class="import-page-album-hero-meta">${album.total_tracks} tracks · ${album.release_date ? album.release_date.substring(0,4) : ''}</div>
+                <div class="import-page-album-hero-meta">${album.total_tracks} tracks · ${album.release_date ? album.release_date.substring(0, 4) : ''}</div>
             </div>
         `;
 
@@ -64737,9 +65144,9 @@ function importPageRenderMatchList() {
                 <span class="import-page-match-track">${_esc(m.spotify_track.name)}</span>
                 <span class="import-page-match-file ${file ? 'has-file' : ''}">
                     ${file
-                        ? `<span class="import-page-match-file-name">${_esc(file.filename)}</span>
+                ? `<span class="import-page-match-file-name">${_esc(file.filename)}</span>
                            <span class="import-page-match-confidence ${confClass}">${confPercent}%</span>`
-                        : `<span class="import-page-match-drop-zone">Drop a file here</span>`}
+                : `<span class="import-page-match-drop-zone">Drop a file here</span>`}
                 </span>
                 <span>${file ? `<button class="import-page-match-unmatch" onclick="event.stopPropagation(); importPageUnmatchTrack(${idx})">✕</button>` : ''}</span>
             </div>
@@ -64759,7 +65166,7 @@ function importPageRenderMatchList() {
             return m.staging_file && m.staging_file.filename === f.filename;
         });
         if (autoUsed) return;
-        unmatchedFiles.push({file: f, index: i});
+        unmatchedFiles.push({ file: f, index: i });
     });
 
     const poolChips = document.getElementById('import-page-pool-chips');
@@ -64768,7 +65175,7 @@ function importPageRenderMatchList() {
     if (unmatchedFiles.length === 0) {
         poolChips.innerHTML = '<span class="import-page-pool-empty">All files matched</span>';
     } else {
-        poolChips.innerHTML = unmatchedFiles.map(({file, index}) => `
+        poolChips.innerHTML = unmatchedFiles.map(({ file, index }) => `
             <span class="import-page-file-chip ${importPageState.tapSelectedChip === index ? 'selected' : ''}"
                   draggable="true" ondragstart="importPageStartDrag(event, ${index})"
                   onclick="event.stopPropagation(); importPageTapSelectChip(${index})">
@@ -65161,7 +65568,7 @@ async function _importQueueRunJob(entry, job) {
             if (job.type === 'album') {
                 resp = await fetch('/api/import/album/process', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         album: job.albumData,
                         matches: [job.items[i]]
@@ -65170,7 +65577,7 @@ async function _importQueueRunJob(entry, job) {
             } else {
                 resp = await fetch('/api/import/singles/process', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ files: [job.items[i]] })
                 });
             }
@@ -65229,8 +65636,8 @@ function _importQueueRender() {
         return `
             <div class="import-page-queue-item">
                 ${j.imageUrl
-                    ? `<img class="import-page-queue-art" src="${j.imageUrl}" onerror="this.src='/static/placeholder.png'">`
-                    : `<div class="import-page-queue-art" style="background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;font-size:18px;color:rgba(255,255,255,0.3);">&#9834;</div>`}
+                ? `<img class="import-page-queue-art" src="${j.imageUrl}" onerror="this.src='/static/placeholder.png'">`
+                : `<div class="import-page-queue-art" style="background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;font-size:18px;color:rgba(255,255,255,0.3);">&#9834;</div>`}
                 <div class="import-page-queue-info">
                     <div class="import-page-queue-name">${_esc(j.label)}</div>
                     <div class="import-page-queue-detail">${_esc(j.sublabel)}</div>
@@ -66146,7 +66553,7 @@ async function loadDiscoveryPoolStats() {
         const failedEl = document.getElementById('discovery-pool-failed-count');
         if (matchedEl) matchedEl.textContent = data.stats.matched || 0;
         if (failedEl) failedEl.textContent = data.stats.failed || 0;
-    } catch (e) {}
+    } catch (e) { }
 }
 
 async function openDiscoveryPoolModal(playlistId = null) {
@@ -66397,8 +66804,8 @@ function renderPoolList() {
                 const md = e.matched_data || {};
                 const matchedName = md.name || '';
                 return (e.original_title || '').toLowerCase().includes(query) ||
-                       (e.original_artist || '').toLowerCase().includes(query) ||
-                       matchedName.toLowerCase().includes(query);
+                    (e.original_artist || '').toLowerCase().includes(query) ||
+                    matchedName.toLowerCase().includes(query);
             });
         }
         if (entries.length === 0) {
@@ -67059,104 +67466,154 @@ const AUTO_HUB_GROUPS = [
 
 const AUTO_HUB_RECIPES = [
     // Sync & Playlists
-    { id: 'spotify-auto-sync', icon: '\uD83D\uDD01', name: 'Spotify Playlist Auto-Sync', desc: 'Refresh all mirrored playlists every 6 hours to keep them in sync with Spotify.',
-      category: 'Sync', difficulty: 'beginner', when: { type: 'schedule', config: { interval: 6, unit: 'hours' } }, do: { type: 'refresh_mirrored', config: {} }, then: [] },
-    { id: 'release-radar-pipeline', icon: '\uD83D\uDCE1', name: 'Release Radar Pipeline', desc: 'Every Friday, refresh mirrored playlists, discover new tracks, then sync. Chain 3 automations for a full pipeline.',
-      category: 'Sync', difficulty: 'intermediate', when: { type: 'weekly_time', config: { days: ['friday'], time: '18:00' } }, do: { type: 'refresh_mirrored', config: {} }, then: [],
-      chain: ['Refresh Mirrored', 'Discover Playlist', 'Sync Playlist'], note: 'Create 3 separate automations and chain them with signals for the full pipeline.' },
-    { id: 'discover-weekly-grab', icon: '\uD83C\uDFB5', name: 'Discover Weekly Grab', desc: 'Every Monday, refresh your mirrored Discover Weekly to capture the new playlist before Spotify replaces it.',
-      category: 'Sync', difficulty: 'beginner', when: { type: 'weekly_time', config: { days: ['monday'], time: '08:00' } }, do: { type: 'refresh_mirrored', config: {} }, then: [] },
-    { id: 'playlist-change-watcher', icon: '\uD83D\uDD14', name: 'Playlist Change Watcher', desc: 'Get a Discord notification whenever any tracked playlist changes.',
-      category: 'Sync', difficulty: 'beginner', when: { type: 'playlist_changed', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'discord_webhook', config: {} }] },
-    { id: 'new-mirror-discovery', icon: '\uD83D\uDD0D', name: 'New Mirror Auto-Discovery', desc: 'Automatically discover tracks when you mirror a new playlist.',
-      category: 'Sync', difficulty: 'beginner', when: { type: 'mirrored_playlist_created', config: {} }, do: { type: 'discover_playlist', config: {} }, then: [] },
+    {
+        id: 'spotify-auto-sync', icon: '\uD83D\uDD01', name: 'Spotify Playlist Auto-Sync', desc: 'Refresh all mirrored playlists every 6 hours to keep them in sync with Spotify.',
+        category: 'Sync', difficulty: 'beginner', when: { type: 'schedule', config: { interval: 6, unit: 'hours' } }, do: { type: 'refresh_mirrored', config: {} }, then: []
+    },
+    {
+        id: 'release-radar-pipeline', icon: '\uD83D\uDCE1', name: 'Release Radar Pipeline', desc: 'Every Friday, refresh mirrored playlists, discover new tracks, then sync. Chain 3 automations for a full pipeline.',
+        category: 'Sync', difficulty: 'intermediate', when: { type: 'weekly_time', config: { days: ['friday'], time: '18:00' } }, do: { type: 'refresh_mirrored', config: {} }, then: [],
+        chain: ['Refresh Mirrored', 'Discover Playlist', 'Sync Playlist'], note: 'Create 3 separate automations and chain them with signals for the full pipeline.'
+    },
+    {
+        id: 'discover-weekly-grab', icon: '\uD83C\uDFB5', name: 'Discover Weekly Grab', desc: 'Every Monday, refresh your mirrored Discover Weekly to capture the new playlist before Spotify replaces it.',
+        category: 'Sync', difficulty: 'beginner', when: { type: 'weekly_time', config: { days: ['monday'], time: '08:00' } }, do: { type: 'refresh_mirrored', config: {} }, then: []
+    },
+    {
+        id: 'playlist-change-watcher', icon: '\uD83D\uDD14', name: 'Playlist Change Watcher', desc: 'Get a Discord notification whenever any tracked playlist changes.',
+        category: 'Sync', difficulty: 'beginner', when: { type: 'playlist_changed', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'discord_webhook', config: {} }]
+    },
+    {
+        id: 'new-mirror-discovery', icon: '\uD83D\uDD0D', name: 'New Mirror Auto-Discovery', desc: 'Automatically discover tracks when you mirror a new playlist.',
+        category: 'Sync', difficulty: 'beginner', when: { type: 'mirrored_playlist_created', config: {} }, do: { type: 'discover_playlist', config: {} }, then: []
+    },
     // New Music Discovery
-    { id: 'complete-new-release', icon: '\uD83D\uDE80', name: 'Complete New Release Pipeline', desc: 'Full hands-free chain: scan watchlist \u2192 process wishlist \u2192 quality scan \u2192 notify. Requires 3 automations linked by signals.',
-      category: 'Discovery', difficulty: 'advanced', when: { type: 'schedule', config: { interval: 12, unit: 'hours' } }, do: { type: 'scan_watchlist', config: {} }, then: [{ type: 'fire_signal', config: { signal_name: 'watchlist_done' } }],
-      chain: ['Scan Watchlist', '\u26A1 watchlist_done', 'Process Wishlist', '\u26A1 wishlist_done', 'Quality Scan', 'Discord'],
-      note: 'Create 3 automations: (1) Schedule\u2192Scan Watchlist\u2192fire watchlist_done, (2) Signal watchlist_done\u2192Process Wishlist\u2192fire wishlist_done, (3) Signal wishlist_done\u2192Quality Scan\u2192Discord.' },
-    { id: 'new-release-monitor', icon: '\uD83D\uDD14', name: 'New Release Monitor', desc: 'Scan your watchlist for new releases every 12 hours.',
-      category: 'Discovery', difficulty: 'beginner', when: { type: 'schedule', config: { interval: 12, unit: 'hours' } }, do: { type: 'scan_watchlist', config: {} }, then: [] },
-    { id: 'artist-watch-alert', icon: '\uD83C\uDFA4', name: 'Artist Watch Alert', desc: 'Get a Telegram notification when you add a new artist to your watchlist.',
-      category: 'Discovery', difficulty: 'beginner', when: { type: 'watchlist_artist_added', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'telegram', config: {} }] },
-    { id: 'discovery-pool-refresh', icon: '\uD83C\uDF10', name: 'Discovery Pool Refresh', desc: 'Refresh the discovery pool every night at 2 AM with fresh recommendations.',
-      category: 'Discovery', difficulty: 'beginner', when: { type: 'daily_time', config: { time: '02:00' } }, do: { type: 'update_discovery_pool', config: {} }, then: [] },
-    { id: 'nightly-wishlist', icon: '\uD83C\uDF19', name: 'Nightly Wishlist Processor', desc: 'Process your wishlist at 3 AM every night while you sleep.',
-      category: 'Discovery', difficulty: 'beginner', when: { type: 'daily_time', config: { time: '03:00' } }, do: { type: 'process_wishlist', config: {} }, then: [] },
+    {
+        id: 'complete-new-release', icon: '\uD83D\uDE80', name: 'Complete New Release Pipeline', desc: 'Full hands-free chain: scan watchlist \u2192 process wishlist \u2192 quality scan \u2192 notify. Requires 3 automations linked by signals.',
+        category: 'Discovery', difficulty: 'advanced', when: { type: 'schedule', config: { interval: 12, unit: 'hours' } }, do: { type: 'scan_watchlist', config: {} }, then: [{ type: 'fire_signal', config: { signal_name: 'watchlist_done' } }],
+        chain: ['Scan Watchlist', '\u26A1 watchlist_done', 'Process Wishlist', '\u26A1 wishlist_done', 'Quality Scan', 'Discord'],
+        note: 'Create 3 automations: (1) Schedule\u2192Scan Watchlist\u2192fire watchlist_done, (2) Signal watchlist_done\u2192Process Wishlist\u2192fire wishlist_done, (3) Signal wishlist_done\u2192Quality Scan\u2192Discord.'
+    },
+    {
+        id: 'new-release-monitor', icon: '\uD83D\uDD14', name: 'New Release Monitor', desc: 'Scan your watchlist for new releases every 12 hours.',
+        category: 'Discovery', difficulty: 'beginner', when: { type: 'schedule', config: { interval: 12, unit: 'hours' } }, do: { type: 'scan_watchlist', config: {} }, then: []
+    },
+    {
+        id: 'artist-watch-alert', icon: '\uD83C\uDFA4', name: 'Artist Watch Alert', desc: 'Get a Telegram notification when you add a new artist to your watchlist.',
+        category: 'Discovery', difficulty: 'beginner', when: { type: 'watchlist_artist_added', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'telegram', config: {} }]
+    },
+    {
+        id: 'discovery-pool-refresh', icon: '\uD83C\uDF10', name: 'Discovery Pool Refresh', desc: 'Refresh the discovery pool every night at 2 AM with fresh recommendations.',
+        category: 'Discovery', difficulty: 'beginner', when: { type: 'daily_time', config: { time: '02:00' } }, do: { type: 'update_discovery_pool', config: {} }, then: []
+    },
+    {
+        id: 'nightly-wishlist', icon: '\uD83C\uDF19', name: 'Nightly Wishlist Processor', desc: 'Process your wishlist at 3 AM every night while you sleep.',
+        category: 'Discovery', difficulty: 'beginner', when: { type: 'daily_time', config: { time: '03:00' } }, do: { type: 'process_wishlist', config: {} }, then: []
+    },
     // Library Maintenance
-    { id: 'full-library-maintenance', icon: '\uD83E\uDDF9', name: 'Full Library Maintenance', desc: 'Run full cleanup every Saturday at 5 AM \u2014 dedup, quarantine, wishlist tidy.',
-      category: 'Maintenance', difficulty: 'intermediate', when: { type: 'weekly_time', config: { days: ['saturday'], time: '05:00' } }, do: { type: 'full_cleanup', config: {} }, then: [] },
-    { id: 'post-batch-cleanup', icon: '\uD83E\uDDF9', name: 'Post-Batch Cleanup', desc: 'Run a full cleanup after any batch download completes.',
-      category: 'Maintenance', difficulty: 'beginner', when: { type: 'batch_complete', config: {} }, do: { type: 'full_cleanup', config: {} }, then: [] },
-    { id: 'weekly-db-backup', icon: '\uD83D\uDCBE', name: 'Weekly Database Backup', desc: 'Back up your database every Sunday at 4 AM.',
-      category: 'Maintenance', difficulty: 'beginner', when: { type: 'weekly_time', config: { days: ['sunday'], time: '04:00' } }, do: { type: 'backup_database', config: {} }, then: [] },
-    { id: 'quality-assurance', icon: '\u2705', name: 'Quality Assurance Pipeline', desc: 'After a library scan completes, run a quality scan and fire a signal when done.',
-      category: 'Maintenance', difficulty: 'intermediate', when: { type: 'library_scan_completed', config: {} }, do: { type: 'start_quality_scan', config: {} }, then: [{ type: 'fire_signal', config: { signal_name: 'quality_done' } }] },
-    { id: 'import-cleanup', icon: '\uD83D\uDCE5', name: 'Import Cleanup', desc: 'Automatically scan the library after an import completes to keep things tidy.',
-      category: 'Maintenance', difficulty: 'intermediate', when: { type: 'import_completed', config: {} }, do: { type: 'scan_library', config: {} }, then: [] },
+    {
+        id: 'full-library-maintenance', icon: '\uD83E\uDDF9', name: 'Full Library Maintenance', desc: 'Run full cleanup every Saturday at 5 AM \u2014 dedup, quarantine, wishlist tidy.',
+        category: 'Maintenance', difficulty: 'intermediate', when: { type: 'weekly_time', config: { days: ['saturday'], time: '05:00' } }, do: { type: 'full_cleanup', config: {} }, then: []
+    },
+    {
+        id: 'post-batch-cleanup', icon: '\uD83E\uDDF9', name: 'Post-Batch Cleanup', desc: 'Run a full cleanup after any batch download completes.',
+        category: 'Maintenance', difficulty: 'beginner', when: { type: 'batch_complete', config: {} }, do: { type: 'full_cleanup', config: {} }, then: []
+    },
+    {
+        id: 'weekly-db-backup', icon: '\uD83D\uDCBE', name: 'Weekly Database Backup', desc: 'Back up your database every Sunday at 4 AM.',
+        category: 'Maintenance', difficulty: 'beginner', when: { type: 'weekly_time', config: { days: ['sunday'], time: '04:00' } }, do: { type: 'backup_database', config: {} }, then: []
+    },
+    {
+        id: 'quality-assurance', icon: '\u2705', name: 'Quality Assurance Pipeline', desc: 'After a library scan completes, run a quality scan and fire a signal when done.',
+        category: 'Maintenance', difficulty: 'intermediate', when: { type: 'library_scan_completed', config: {} }, do: { type: 'start_quality_scan', config: {} }, then: [{ type: 'fire_signal', config: { signal_name: 'quality_done' } }]
+    },
+    {
+        id: 'import-cleanup', icon: '\uD83D\uDCE5', name: 'Import Cleanup', desc: 'Automatically scan the library after an import completes to keep things tidy.',
+        category: 'Maintenance', difficulty: 'intermediate', when: { type: 'import_completed', config: {} }, do: { type: 'scan_library', config: {} }, then: []
+    },
     // Notifications & Alerts
-    { id: 'download-failure-alert', icon: '\u274C', name: 'Download Failure Alert', desc: 'Get notified via Discord when a download fails.',
-      category: 'Alerts', difficulty: 'beginner', when: { type: 'download_failed', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'discord_webhook', config: {} }] },
-    { id: 'quarantine-alert', icon: '\u26A0\uFE0F', name: 'Quarantine Alert', desc: 'Get a Pushbullet alert when a file is quarantined.',
-      category: 'Alerts', difficulty: 'beginner', when: { type: 'download_quarantined', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'pushbullet', config: {} }] },
-    { id: 'batch-complete-notify', icon: '\uD83C\uDFC1', name: 'Batch Complete Notification', desc: 'Get a Telegram message when a batch download finishes.',
-      category: 'Alerts', difficulty: 'beginner', when: { type: 'batch_complete', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'telegram', config: {} }] },
+    {
+        id: 'download-failure-alert', icon: '\u274C', name: 'Download Failure Alert', desc: 'Get notified via Discord when a download fails.',
+        category: 'Alerts', difficulty: 'beginner', when: { type: 'download_failed', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'discord_webhook', config: {} }]
+    },
+    {
+        id: 'quarantine-alert', icon: '\u26A0\uFE0F', name: 'Quarantine Alert', desc: 'Get a Pushbullet alert when a file is quarantined.',
+        category: 'Alerts', difficulty: 'beginner', when: { type: 'download_quarantined', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'pushbullet', config: {} }]
+    },
+    {
+        id: 'batch-complete-notify', icon: '\uD83C\uDFC1', name: 'Batch Complete Notification', desc: 'Get a Telegram message when a batch download finishes.',
+        category: 'Alerts', difficulty: 'beginner', when: { type: 'batch_complete', config: {} }, do: { type: 'notify_only', config: {} }, then: [{ type: 'telegram', config: {} }]
+    },
     // Power User Chains
-    { id: 'full-hands-free', icon: '\uD83E\uDD16', name: 'Full Hands-Free Pipeline', desc: 'The ultimate automation chain: scan \u2192 process \u2192 download \u2192 clean \u2192 notify. Requires 5 automations linked by signals.',
-      category: 'Chains', difficulty: 'advanced', when: { type: 'schedule', config: { interval: 12, unit: 'hours' } }, do: { type: 'scan_watchlist', config: {} }, then: [{ type: 'fire_signal', config: { signal_name: 'scan_done' } }],
-      chain: ['Scan Watchlist', '\u26A1 scan_done', 'Process Wishlist', '\u26A1 process_done', 'Full Cleanup', '\u26A1 cleanup_done', 'Quality Scan', 'Discord'],
-      note: 'Build 4-5 automations, each firing a signal for the next step. Start small and add stages.' },
-    { id: 'staggered-nightly', icon: '\uD83C\uDF03', name: 'Staggered Nightly Pipeline', desc: 'Spread tasks across the night: 1 AM scan, 2 AM process, 3 AM cleanup, 4 AM backup.',
-      category: 'Chains', difficulty: 'intermediate', when: { type: 'daily_time', config: { time: '01:00' } }, do: { type: 'scan_watchlist', config: {} }, then: [],
-      chain: ['1:00 Scan', '2:00 Process', '3:00 Cleanup', '4:00 Backup'],
-      note: 'Create 4 daily_time automations at staggered hours. No signals needed \u2014 just timing.' },
+    {
+        id: 'full-hands-free', icon: '\uD83E\uDD16', name: 'Full Hands-Free Pipeline', desc: 'The ultimate automation chain: scan \u2192 process \u2192 download \u2192 clean \u2192 notify. Requires 5 automations linked by signals.',
+        category: 'Chains', difficulty: 'advanced', when: { type: 'schedule', config: { interval: 12, unit: 'hours' } }, do: { type: 'scan_watchlist', config: {} }, then: [{ type: 'fire_signal', config: { signal_name: 'scan_done' } }],
+        chain: ['Scan Watchlist', '\u26A1 scan_done', 'Process Wishlist', '\u26A1 process_done', 'Full Cleanup', '\u26A1 cleanup_done', 'Quality Scan', 'Discord'],
+        note: 'Build 4-5 automations, each firing a signal for the next step. Start small and add stages.'
+    },
+    {
+        id: 'staggered-nightly', icon: '\uD83C\uDF03', name: 'Staggered Nightly Pipeline', desc: 'Spread tasks across the night: 1 AM scan, 2 AM process, 3 AM cleanup, 4 AM backup.',
+        category: 'Chains', difficulty: 'intermediate', when: { type: 'daily_time', config: { time: '01:00' } }, do: { type: 'scan_watchlist', config: {} }, then: [],
+        chain: ['1:00 Scan', '2:00 Process', '3:00 Cleanup', '4:00 Backup'],
+        note: 'Create 4 daily_time automations at staggered hours. No signals needed \u2014 just timing.'
+    },
 ];
 
 const AUTO_HUB_GUIDES = [
-    { id: 'auto-sync-playlists', icon: '\uD83D\uDD01', title: 'Auto-Sync Your Spotify Playlists', subtitle: 'Mirror a Spotify playlist and schedule automatic refreshes.', difficulty: 'beginner',
-      steps: [
-          'Go to the <strong>Playlists</strong> page and find a Spotify playlist you want to track.',
-          'Click <strong>Mirror Playlist</strong> to create a local copy.',
-          'Go to <strong>Automations</strong> and click <strong>New Automation</strong>.',
-          'Set WHEN to <strong>Schedule \u2192 Every 6 hours</strong>.',
-          'Set DO to <strong>Refresh Mirrored Playlists</strong>.',
-          'Save and enable \u2014 your playlist will now stay in sync automatically.'
-      ], relatedRecipes: ['spotify-auto-sync', 'discover-weekly-grab'] },
-    { id: 'discord-download-alerts', icon: '\uD83D\uDCE2', title: 'Get Discord Alerts for Downloads', subtitle: 'Set up Discord webhook notifications for download events.', difficulty: 'beginner',
-      steps: [
-          'In Discord, go to your channel\'s settings \u2192 <strong>Integrations \u2192 Webhooks</strong>.',
-          'Create a webhook and copy the URL.',
-          'In SoulSync, go to <strong>Settings \u2192 Notifications</strong> and paste the Discord webhook URL.',
-          'Go to <strong>Automations \u2192 New Automation</strong>.',
-          'Set WHEN to <strong>Download Failed</strong> (or any event), DO to <strong>Notify Only</strong>, THEN to <strong>Discord</strong>.'
-      ], relatedRecipes: ['download-failure-alert', 'batch-complete-notify'] },
-    { id: 'hands-free-pipeline', icon: '\uD83E\uDD16', title: 'Build a Hands-Free Library Pipeline', subtitle: 'Chain watchlist scanning, wishlist processing, and cleanup with signals.', difficulty: 'intermediate',
-      steps: [
-          'Create Automation 1: <strong>Schedule (12h) \u2192 Scan Watchlist</strong>, THEN fire signal <code>scan_done</code>.',
-          'Create Automation 2: <strong>Signal scan_done \u2192 Process Wishlist</strong>, THEN fire signal <code>process_done</code>.',
-          'Create Automation 3: <strong>Signal process_done \u2192 Full Cleanup</strong>.',
-          'Enable all three automations.',
-          'Test by manually running Automation 1 \u2014 watch the chain execute.',
-          'Add a THEN notification (Discord/Telegram) to the last automation for completion alerts.',
-          'Adjust the schedule interval based on how often you want new music checked.'
-      ], relatedRecipes: ['complete-new-release', 'full-hands-free'] },
-    { id: 'signal-chains', icon: '\u26A1', title: 'Set Up Signal Chains', subtitle: 'Use fire_signal and signal_received to link automations together.', difficulty: 'advanced',
-      steps: [
-          'Understand the concept: <strong>fire_signal</strong> is a THEN action that emits a named signal. <strong>signal_received</strong> is a WHEN trigger that listens for it.',
-          'In your first automation, add a THEN action \u2192 <strong>Fire Signal</strong> and name it (e.g., <code>step1_done</code>).',
-          'Create a second automation with WHEN \u2192 <strong>Signal Received</strong> \u2192 signal name <code>step1_done</code>.',
-          'The second automation will fire automatically when the first one completes.',
-          'Chain up to 5 levels deep (safety limit). SoulSync detects cycles automatically.',
-          'Use descriptive signal names like <code>watchlist_scanned</code> or <code>cleanup_finished</code>.'
-      ], relatedRecipes: ['quality-assurance', 'complete-new-release'] },
-    { id: 'nightly-maintenance', icon: '\uD83C\uDF19', title: 'Schedule Nightly Maintenance', subtitle: 'Set up backup, cleanup, and quality scans to run overnight.', difficulty: 'intermediate',
-      steps: [
-          'Create a <strong>Daily Time (04:00) \u2192 Backup Database</strong> automation.',
-          'Create a <strong>Weekly Time (Saturday, 05:00) \u2192 Full Cleanup</strong> automation.',
-          'Create a <strong>Daily Time (02:00) \u2192 Update Discovery Pool</strong> automation.',
-          'Stagger times by at least 1 hour to avoid resource contention.',
-          'Add Discord/Telegram notifications to any you want alerts for.'
-      ], relatedRecipes: ['weekly-db-backup', 'full-library-maintenance', 'staggered-nightly'] },
+    {
+        id: 'auto-sync-playlists', icon: '\uD83D\uDD01', title: 'Auto-Sync Your Spotify Playlists', subtitle: 'Mirror a Spotify playlist and schedule automatic refreshes.', difficulty: 'beginner',
+        steps: [
+            'Go to the <strong>Playlists</strong> page and find a Spotify playlist you want to track.',
+            'Click <strong>Mirror Playlist</strong> to create a local copy.',
+            'Go to <strong>Automations</strong> and click <strong>New Automation</strong>.',
+            'Set WHEN to <strong>Schedule \u2192 Every 6 hours</strong>.',
+            'Set DO to <strong>Refresh Mirrored Playlists</strong>.',
+            'Save and enable \u2014 your playlist will now stay in sync automatically.'
+        ], relatedRecipes: ['spotify-auto-sync', 'discover-weekly-grab']
+    },
+    {
+        id: 'discord-download-alerts', icon: '\uD83D\uDCE2', title: 'Get Discord Alerts for Downloads', subtitle: 'Set up Discord webhook notifications for download events.', difficulty: 'beginner',
+        steps: [
+            'In Discord, go to your channel\'s settings \u2192 <strong>Integrations \u2192 Webhooks</strong>.',
+            'Create a webhook and copy the URL.',
+            'In SoulSync, go to <strong>Settings \u2192 Notifications</strong> and paste the Discord webhook URL.',
+            'Go to <strong>Automations \u2192 New Automation</strong>.',
+            'Set WHEN to <strong>Download Failed</strong> (or any event), DO to <strong>Notify Only</strong>, THEN to <strong>Discord</strong>.'
+        ], relatedRecipes: ['download-failure-alert', 'batch-complete-notify']
+    },
+    {
+        id: 'hands-free-pipeline', icon: '\uD83E\uDD16', title: 'Build a Hands-Free Library Pipeline', subtitle: 'Chain watchlist scanning, wishlist processing, and cleanup with signals.', difficulty: 'intermediate',
+        steps: [
+            'Create Automation 1: <strong>Schedule (12h) \u2192 Scan Watchlist</strong>, THEN fire signal <code>scan_done</code>.',
+            'Create Automation 2: <strong>Signal scan_done \u2192 Process Wishlist</strong>, THEN fire signal <code>process_done</code>.',
+            'Create Automation 3: <strong>Signal process_done \u2192 Full Cleanup</strong>.',
+            'Enable all three automations.',
+            'Test by manually running Automation 1 \u2014 watch the chain execute.',
+            'Add a THEN notification (Discord/Telegram) to the last automation for completion alerts.',
+            'Adjust the schedule interval based on how often you want new music checked.'
+        ], relatedRecipes: ['complete-new-release', 'full-hands-free']
+    },
+    {
+        id: 'signal-chains', icon: '\u26A1', title: 'Set Up Signal Chains', subtitle: 'Use fire_signal and signal_received to link automations together.', difficulty: 'advanced',
+        steps: [
+            'Understand the concept: <strong>fire_signal</strong> is a THEN action that emits a named signal. <strong>signal_received</strong> is a WHEN trigger that listens for it.',
+            'In your first automation, add a THEN action \u2192 <strong>Fire Signal</strong> and name it (e.g., <code>step1_done</code>).',
+            'Create a second automation with WHEN \u2192 <strong>Signal Received</strong> \u2192 signal name <code>step1_done</code>.',
+            'The second automation will fire automatically when the first one completes.',
+            'Chain up to 5 levels deep (safety limit). SoulSync detects cycles automatically.',
+            'Use descriptive signal names like <code>watchlist_scanned</code> or <code>cleanup_finished</code>.'
+        ], relatedRecipes: ['quality-assurance', 'complete-new-release']
+    },
+    {
+        id: 'nightly-maintenance', icon: '\uD83C\uDF19', title: 'Schedule Nightly Maintenance', subtitle: 'Set up backup, cleanup, and quality scans to run overnight.', difficulty: 'intermediate',
+        steps: [
+            'Create a <strong>Daily Time (04:00) \u2192 Backup Database</strong> automation.',
+            'Create a <strong>Weekly Time (Saturday, 05:00) \u2192 Full Cleanup</strong> automation.',
+            'Create a <strong>Daily Time (02:00) \u2192 Update Discovery Pool</strong> automation.',
+            'Stagger times by at least 1 hour to avoid resource contention.',
+            'Add Discord/Telegram notifications to any you want alerts for.'
+        ], relatedRecipes: ['weekly-db-backup', 'full-library-maintenance', 'staggered-nightly']
+    },
 ];
 
 const AUTO_HUB_TIPS = [
@@ -67172,80 +67629,104 @@ const AUTO_HUB_TIPS = [
 
 const AUTO_HUB_REFERENCE = {
     triggers: [
-        { group: 'Time-Based', items: [
-            { type: 'schedule', label: 'Schedule', desc: 'Repeating interval (e.g., every 6 hours)' },
-            { type: 'daily_time', label: 'Daily Time', desc: 'Every day at a specific time (e.g., 03:00)' },
-            { type: 'weekly_time', label: 'Weekly Time', desc: 'Specific days + time (e.g., Saturday at 05:00)' },
-        ]},
-        { group: 'Download Events', items: [
-            { type: 'track_downloaded', label: 'Track Downloaded', desc: 'Fires when a single track download completes' },
-            { type: 'batch_complete', label: 'Batch Complete', desc: 'Fires when a batch download job finishes' },
-            { type: 'download_failed', label: 'Download Failed', desc: 'Fires when a download fails or errors out' },
-            { type: 'download_quarantined', label: 'File Quarantined', desc: 'Fires when a downloaded file is quarantined for quality issues' },
-        ]},
-        { group: 'Watchlist & Wishlist', items: [
-            { type: 'watchlist_new_release', label: 'New Release Found', desc: 'Fires when a watched artist has a new release' },
-            { type: 'watchlist_scan_completed', label: 'Watchlist Scan Done', desc: 'Fires after a full watchlist scan completes' },
-            { type: 'watchlist_artist_added', label: 'Artist Watched', desc: 'Fires when a new artist is added to the watchlist' },
-            { type: 'watchlist_artist_removed', label: 'Artist Unwatched', desc: 'Fires when an artist is removed from the watchlist' },
-            { type: 'wishlist_item_added', label: 'Wishlist Item Added', desc: 'Fires when a new item is added to the wishlist' },
-            { type: 'wishlist_processing_completed', label: 'Wishlist Processed', desc: 'Fires after the wishlist processor completes a run' },
-        ]},
-        { group: 'Playlists', items: [
-            { type: 'playlist_synced', label: 'Playlist Synced', desc: 'Fires when a playlist sync operation completes' },
-            { type: 'playlist_changed', label: 'Playlist Changed', desc: 'Fires when a tracked playlist has changes detected' },
-            { type: 'mirrored_playlist_created', label: 'Playlist Mirrored', desc: 'Fires when a new mirrored playlist is created' },
-            { type: 'discovery_completed', label: 'Discovery Complete', desc: 'Fires when playlist discovery finishes' },
-        ]},
-        { group: 'Library & System', items: [
-            { type: 'app_started', label: 'App Started', desc: 'Fires once when SoulSync starts up' },
-            { type: 'import_completed', label: 'Import Complete', desc: 'Fires when a library import operation finishes' },
-            { type: 'library_scan_completed', label: 'Library Scan Done', desc: 'Fires after a full library scan completes' },
-            { type: 'quality_scan_completed', label: 'Quality Scan Done', desc: 'Fires when a quality scan finishes' },
-            { type: 'duplicate_scan_completed', label: 'Duplicate Scan Done', desc: 'Fires when the duplicate scanner finishes' },
-            { type: 'database_update_completed', label: 'Database Updated', desc: 'Fires after a database update operation' },
-        ]},
-        { group: 'Signals', items: [
-            { type: 'signal_received', label: 'Signal Received', desc: 'Fires when a named signal is emitted by another automation\'s fire_signal THEN action' },
-        ]},
+        {
+            group: 'Time-Based', items: [
+                { type: 'schedule', label: 'Schedule', desc: 'Repeating interval (e.g., every 6 hours)' },
+                { type: 'daily_time', label: 'Daily Time', desc: 'Every day at a specific time (e.g., 03:00)' },
+                { type: 'weekly_time', label: 'Weekly Time', desc: 'Specific days + time (e.g., Saturday at 05:00)' },
+            ]
+        },
+        {
+            group: 'Download Events', items: [
+                { type: 'track_downloaded', label: 'Track Downloaded', desc: 'Fires when a single track download completes' },
+                { type: 'batch_complete', label: 'Batch Complete', desc: 'Fires when a batch download job finishes' },
+                { type: 'download_failed', label: 'Download Failed', desc: 'Fires when a download fails or errors out' },
+                { type: 'download_quarantined', label: 'File Quarantined', desc: 'Fires when a downloaded file is quarantined for quality issues' },
+            ]
+        },
+        {
+            group: 'Watchlist & Wishlist', items: [
+                { type: 'watchlist_new_release', label: 'New Release Found', desc: 'Fires when a watched artist has a new release' },
+                { type: 'watchlist_scan_completed', label: 'Watchlist Scan Done', desc: 'Fires after a full watchlist scan completes' },
+                { type: 'watchlist_artist_added', label: 'Artist Watched', desc: 'Fires when a new artist is added to the watchlist' },
+                { type: 'watchlist_artist_removed', label: 'Artist Unwatched', desc: 'Fires when an artist is removed from the watchlist' },
+                { type: 'wishlist_item_added', label: 'Wishlist Item Added', desc: 'Fires when a new item is added to the wishlist' },
+                { type: 'wishlist_processing_completed', label: 'Wishlist Processed', desc: 'Fires after the wishlist processor completes a run' },
+            ]
+        },
+        {
+            group: 'Playlists', items: [
+                { type: 'playlist_synced', label: 'Playlist Synced', desc: 'Fires when a playlist sync operation completes' },
+                { type: 'playlist_changed', label: 'Playlist Changed', desc: 'Fires when a tracked playlist has changes detected' },
+                { type: 'mirrored_playlist_created', label: 'Playlist Mirrored', desc: 'Fires when a new mirrored playlist is created' },
+                { type: 'discovery_completed', label: 'Discovery Complete', desc: 'Fires when playlist discovery finishes' },
+            ]
+        },
+        {
+            group: 'Library & System', items: [
+                { type: 'app_started', label: 'App Started', desc: 'Fires once when SoulSync starts up' },
+                { type: 'import_completed', label: 'Import Complete', desc: 'Fires when a library import operation finishes' },
+                { type: 'library_scan_completed', label: 'Library Scan Done', desc: 'Fires after a full library scan completes' },
+                { type: 'quality_scan_completed', label: 'Quality Scan Done', desc: 'Fires when a quality scan finishes' },
+                { type: 'duplicate_scan_completed', label: 'Duplicate Scan Done', desc: 'Fires when the duplicate scanner finishes' },
+                { type: 'database_update_completed', label: 'Database Updated', desc: 'Fires after a database update operation' },
+            ]
+        },
+        {
+            group: 'Signals', items: [
+                { type: 'signal_received', label: 'Signal Received', desc: 'Fires when a named signal is emitted by another automation\'s fire_signal THEN action' },
+            ]
+        },
     ],
     actions: [
-        { group: 'Downloads & Sync', items: [
-            { type: 'playlist_pipeline', label: 'Playlist Pipeline', desc: 'Full lifecycle: refresh → discover → sync → download missing' },
-            { type: 'process_wishlist', label: 'Process Wishlist', desc: 'Download all pending wishlist items' },
-            { type: 'refresh_mirrored', label: 'Refresh Mirrored', desc: 'Refresh all mirrored playlists from their sources' },
-            { type: 'sync_playlist', label: 'Sync Playlist', desc: 'Sync a specific playlist to your library' },
-            { type: 'discover_playlist', label: 'Discover Playlist', desc: 'Run track discovery on mirrored playlists' },
-            { type: 'scan_watchlist', label: 'Scan Watchlist', desc: 'Check watched artists for new releases' },
-            { type: 'update_discovery_pool', label: 'Update Discovery', desc: 'Refresh the discovery pool with new recommendations' },
-        ]},
-        { group: 'Library Tools', items: [
-            { type: 'scan_library', label: 'Scan Library', desc: 'Full scan of local music library files' },
-            { type: 'start_quality_scan', label: 'Quality Scan', desc: 'Check library tracks for quality issues' },
-            { type: 'start_database_update', label: 'Update Database', desc: 'Run a database update/maintenance operation' },
-            { type: 'backup_database', label: 'Backup Database', desc: 'Create a backup of the music database' },
-        ]},
-        { group: 'Cleanup', items: [
-            { type: 'full_cleanup', label: 'Full Cleanup', desc: 'Run all cleanup tasks: dedup, quarantine, wishlist tidy' },
-            { type: 'run_duplicate_cleaner', label: 'Duplicate Cleaner', desc: 'Find and handle duplicate tracks' },
-            { type: 'clear_quarantine', label: 'Clear Quarantine', desc: 'Remove all quarantined files' },
-            { type: 'cleanup_wishlist', label: 'Clean Wishlist', desc: 'Remove completed/invalid wishlist items' },
-            { type: 'clean_search_history', label: 'Clean Search History', desc: 'Clear old search history entries' },
-            { type: 'clean_completed_downloads', label: 'Clean Downloads', desc: 'Remove completed download records' },
-        ]},
-        { group: 'Other', items: [
-            { type: 'notify_only', label: 'Notify Only', desc: 'No action \u2014 just trigger THEN notifications. Great for testing.' },
-        ]},
+        {
+            group: 'Downloads & Sync', items: [
+                { type: 'playlist_pipeline', label: 'Playlist Pipeline', desc: 'Full lifecycle: refresh → discover → sync → download missing' },
+                { type: 'process_wishlist', label: 'Process Wishlist', desc: 'Download all pending wishlist items' },
+                { type: 'refresh_mirrored', label: 'Refresh Mirrored', desc: 'Refresh all mirrored playlists from their sources' },
+                { type: 'sync_playlist', label: 'Sync Playlist', desc: 'Sync a specific playlist to your library' },
+                { type: 'discover_playlist', label: 'Discover Playlist', desc: 'Run track discovery on mirrored playlists' },
+                { type: 'scan_watchlist', label: 'Scan Watchlist', desc: 'Check watched artists for new releases' },
+                { type: 'update_discovery_pool', label: 'Update Discovery', desc: 'Refresh the discovery pool with new recommendations' },
+            ]
+        },
+        {
+            group: 'Library Tools', items: [
+                { type: 'scan_library', label: 'Scan Library', desc: 'Full scan of local music library files' },
+                { type: 'start_quality_scan', label: 'Quality Scan', desc: 'Check library tracks for quality issues' },
+                { type: 'start_database_update', label: 'Update Database', desc: 'Run a database update/maintenance operation' },
+                { type: 'backup_database', label: 'Backup Database', desc: 'Create a backup of the music database' },
+            ]
+        },
+        {
+            group: 'Cleanup', items: [
+                { type: 'full_cleanup', label: 'Full Cleanup', desc: 'Run all cleanup tasks: dedup, quarantine, wishlist tidy' },
+                { type: 'run_duplicate_cleaner', label: 'Duplicate Cleaner', desc: 'Find and handle duplicate tracks' },
+                { type: 'clear_quarantine', label: 'Clear Quarantine', desc: 'Remove all quarantined files' },
+                { type: 'cleanup_wishlist', label: 'Clean Wishlist', desc: 'Remove completed/invalid wishlist items' },
+                { type: 'clean_search_history', label: 'Clean Search History', desc: 'Clear old search history entries' },
+                { type: 'clean_completed_downloads', label: 'Clean Downloads', desc: 'Remove completed download records' },
+            ]
+        },
+        {
+            group: 'Other', items: [
+                { type: 'notify_only', label: 'Notify Only', desc: 'No action \u2014 just trigger THEN notifications. Great for testing.' },
+            ]
+        },
     ],
     thenActions: [
-        { group: 'Notifications', items: [
-            { type: 'discord_webhook', label: 'Discord Webhook', desc: 'Send a message to a Discord channel via webhook' },
-            { type: 'telegram', label: 'Telegram', desc: 'Send a message to a Telegram chat via bot' },
-            { type: 'pushbullet', label: 'Pushbullet', desc: 'Send a push notification via Pushbullet' },
-        ]},
-        { group: 'Chaining', items: [
-            { type: 'fire_signal', label: 'Fire Signal', desc: 'Emit a named signal that other automations can listen for with signal_received' },
-        ]},
+        {
+            group: 'Notifications', items: [
+                { type: 'discord_webhook', label: 'Discord Webhook', desc: 'Send a message to a Discord channel via webhook' },
+                { type: 'telegram', label: 'Telegram', desc: 'Send a message to a Telegram chat via bot' },
+                { type: 'pushbullet', label: 'Pushbullet', desc: 'Send a push notification via Pushbullet' },
+            ]
+        },
+        {
+            group: 'Chaining', items: [
+                { type: 'fire_signal', label: 'Fire Signal', desc: 'Emit a named signal that other automations can listen for with signal_received' },
+            ]
+        },
     ],
 };
 
@@ -67340,7 +67821,7 @@ async function loadAutomations() {
             const progRes = await fetch('/api/automations/progress');
             const progData = await progRes.json();
             if (!progData.error) updateAutomationProgressFromData(progData);
-        } catch (e) {}
+        } catch (e) { }
     } catch (err) {
         list.innerHTML = ''; empty.style.display = '';
         if (statsBar) statsBar.innerHTML = '';
@@ -67682,9 +68163,9 @@ function _buildHubGuides() {
                 <div class="auto-hub-guide-related">
                     <span class="auto-hub-guide-related-label">Related:</span>
                     ${g.relatedRecipes.map(rId => {
-                        const recipe = AUTO_HUB_RECIPES.find(r => r.id === rId);
-                        return recipe ? `<button class="auto-hub-guide-related-link" onclick="event.stopPropagation(); useHubRecipe('${rId}')">${recipe.icon} ${_esc(recipe.name)}</button>` : '';
-                    }).join('')}
+            const recipe = AUTO_HUB_RECIPES.find(r => r.id === rId);
+            return recipe ? `<button class="auto-hub-guide-related-link" onclick="event.stopPropagation(); useHubRecipe('${rId}')">${recipe.icon} ${_esc(recipe.name)}</button>` : '';
+        }).join('')}
                 </div>
             ` : ''}
         `;
@@ -68121,7 +68602,8 @@ function _autoFormatTrigger(type, config) {
         const sig = config.signal_name || 'unknown';
         return 'Signal: ' + sig;
     }
-    const labels = { app_started: 'App Started', track_downloaded: 'Track Downloaded', batch_complete: 'Batch Complete',
+    const labels = {
+        app_started: 'App Started', track_downloaded: 'Track Downloaded', batch_complete: 'Batch Complete',
         watchlist_new_release: 'New Release Found', playlist_synced: 'Playlist Synced',
         playlist_changed: 'Playlist Changed', discovery_completed: 'Discovery Complete',
         wishlist_processing_completed: 'Wishlist Processed', watchlist_scan_completed: 'Watchlist Scan Done',
@@ -68130,7 +68612,8 @@ function _autoFormatTrigger(type, config) {
         watchlist_artist_added: 'Artist Watched', watchlist_artist_removed: 'Artist Unwatched',
         import_completed: 'Import Complete', mirrored_playlist_created: 'Playlist Mirrored',
         quality_scan_completed: 'Quality Scan Done', duplicate_scan_completed: 'Duplicate Scan Done',
-        library_scan_completed: 'Library Scan Done', signal_received: 'Signal Received' };
+        library_scan_completed: 'Library Scan Done', signal_received: 'Signal Received'
+    };
     let label = labels[type] || type || 'Unknown';
     if (config && config.conditions && config.conditions.length) {
         const first = config.conditions[0];
@@ -68140,7 +68623,8 @@ function _autoFormatTrigger(type, config) {
     return label;
 }
 function _autoFormatAction(type) {
-    const labels = { process_wishlist: 'Process Wishlist', scan_watchlist: 'Scan Watchlist',
+    const labels = {
+        process_wishlist: 'Process Wishlist', scan_watchlist: 'Scan Watchlist',
         scan_library: 'Scan Library', refresh_mirrored: 'Refresh Mirrored',
         sync_playlist: 'Sync Playlist', discover_playlist: 'Discover Playlist',
         notify_only: 'Notify Only',
@@ -68151,7 +68635,8 @@ function _autoFormatAction(type) {
         refresh_beatport_cache: 'Refresh Beatport Cache', clean_search_history: 'Clean Search History',
         clean_completed_downloads: 'Clean Completed Downloads',
         full_cleanup: 'Full Cleanup',
-        playlist_pipeline: 'Playlist Pipeline' };
+        playlist_pipeline: 'Playlist Pipeline'
+    };
     return labels[type] || type || 'Unknown';
 }
 function _autoFormatNotify(type) {
@@ -68170,15 +68655,15 @@ function _autoParseUTC(ts) {
 function _autoTimeAgo(ts) {
     if (!ts) return 'Never';
     const d = (Date.now() - _autoParseUTC(ts)) / 1000;
-    if (d < 60) return 'just now'; if (d < 3600) return Math.floor(d/60) + 'm ago';
-    if (d < 86400) return Math.floor(d/3600) + 'h ago'; return Math.floor(d/86400) + 'd ago';
+    if (d < 60) return 'just now'; if (d < 3600) return Math.floor(d / 60) + 'm ago';
+    if (d < 86400) return Math.floor(d / 3600) + 'h ago'; return Math.floor(d / 86400) + 'd ago';
 }
 function _autoTimeUntil(ts) {
     if (!ts) return '';
     const d = (_autoParseUTC(ts) - Date.now()) / 1000;
     if (d <= 0) return 'soon'; if (d < 60) return 'in ' + Math.ceil(d) + 's';
-    if (d < 3600) return 'in ' + Math.ceil(d/60) + 'm'; if (d < 86400) return 'in ' + Math.round(d/3600) + 'h';
-    return 'in ' + Math.round(d/86400) + 'd';
+    if (d < 3600) return 'in ' + Math.ceil(d / 60) + 'm'; if (d < 86400) return 'in ' + Math.round(d / 3600) + 'h';
+    return 'in ' + Math.round(d / 86400) + 'd';
 }
 
 // --- Live countdown for "Next: in Xs" ---
@@ -68403,7 +68888,7 @@ function _renderResultStats(resultJson, actionType) {
     var fields = _RESULT_DISPLAY_MAP[actionType];
     var items = [];
     if (fields) {
-        fields.forEach(function(f) {
+        fields.forEach(function (f) {
             var val = resultJson[f.key];
             if (val == null) return;
             if (f.hideZero && (val === 0 || val === '0')) return;
@@ -68411,15 +68896,15 @@ function _renderResultStats(resultJson, actionType) {
         });
     } else {
         // Generic fallback: show all non-status, non-underscore keys
-        Object.keys(resultJson).forEach(function(k) {
+        Object.keys(resultJson).forEach(function (k) {
             if (k === 'status' || k.startsWith('_')) return;
-            var label = k.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+            var label = k.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
             items.push({ label: label, value: resultJson[k] });
         });
     }
     if (items.length === 0) return '';
     var html = '<div class="history-stats-grid">';
-    items.forEach(function(it) {
+    items.forEach(function (it) {
         html += '<div class="history-stat-item"><div class="history-stat-label">' + _esc(it.label) + '</div><div class="history-stat-value">' + _esc(String(it.value)) + '</div></div>';
     });
     html += '</div>';
@@ -68436,7 +68921,7 @@ async function showAutomationHistory(automationId, automationName, actionType) {
     }
     modal.innerHTML = '<div class="modal-container automation-history-modal"><div class="history-modal-header"><h3>Run History: ' + _esc(automationName) + '</h3><button class="history-close-btn" onclick="document.getElementById(\'automation-history-modal\').style.display=\'none\'">&times;</button></div><div class="history-modal-body"><div class="history-loading">Loading...</div></div></div>';
     modal.style.display = 'flex';
-    modal.onclick = function(e) { if (e.target === modal) modal.style.display = 'none'; };
+    modal.onclick = function (e) { if (e.target === modal) modal.style.display = 'none'; };
 
     try {
         const res = await fetch('/api/automations/' + automationId + '/history?limit=50');
@@ -68448,7 +68933,7 @@ async function showAutomationHistory(automationId, automationName, actionType) {
             return;
         }
         let html = '<div class="history-entries">';
-        data.history.forEach(function(entry) {
+        data.history.forEach(function (entry) {
             const statusClass = 'history-status-' + (entry.status || 'completed');
             const statusLabel = (entry.status || 'completed').charAt(0).toUpperCase() + (entry.status || 'completed').slice(1);
             const timeAgo = _autoTimeAgo(entry.started_at);
@@ -68470,7 +68955,7 @@ async function showAutomationHistory(automationId, automationName, actionType) {
             }
             if (hasLogs) {
                 html += '<div id="' + entryId + '" class="history-log-section">';
-                entry.log_lines.forEach(function(log) {
+                entry.log_lines.forEach(function (log) {
                     html += '<div class="history-log-line history-log-' + (log.type || 'info') + '">' + _esc(log.text || '') + '</div>';
                 });
                 html += '</div>';
@@ -68534,9 +69019,9 @@ async function saveAutomation() {
     try {
         let res;
         if (_autoBuilder.editId) {
-            res = await fetch('/api/automations/' + _autoBuilder.editId, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+            res = await fetch('/api/automations/' + _autoBuilder.editId, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         } else {
-            res = await fetch('/api/automations', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+            res = await fetch('/api/automations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         }
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -68569,7 +69054,7 @@ async function showAutomationBuilder(editId) {
         if (Array.isArray(allAutos)) allAutos.forEach(a => { if (a.group_name) groupSet.add(a.group_name); });
         const datalist = document.getElementById('builder-group-list');
         if (datalist) datalist.innerHTML = [...groupSet].sort().map(g => `<option value="${_escAttr(g)}">`).join('');
-    } catch (e) {}
+    } catch (e) { }
 
     // If editing, load automation data
     if (editId) {
@@ -68764,9 +69249,9 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
             <label>Every</label>
             <input type="number" id="cfg-${slotKey}-interval" value="${interval}" min="1" style="width:70px;">
             <select id="cfg-${slotKey}-unit">
-                <option value="minutes"${unit==='minutes'?' selected':''}>Minutes</option>
-                <option value="hours"${unit==='hours'?' selected':''}>Hours</option>
-                <option value="days"${unit==='days'?' selected':''}>Days</option>
+                <option value="minutes"${unit === 'minutes' ? ' selected' : ''}>Minutes</option>
+                <option value="hours"${unit === 'hours' ? ' selected' : ''}>Hours</option>
+                <option value="days"${unit === 'days' ? ' selected' : ''}>Days</option>
             </select>
         </div>`;
     }
@@ -68780,7 +69265,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
     if (blockType === 'weekly_time') {
         const timeVal = config.time || '03:00';
         const selectedDays = config.days || [];
-        const allDays = [['mon','Mon'],['tue','Tue'],['wed','Wed'],['thu','Thu'],['fri','Fri'],['sat','Sat'],['sun','Sun']];
+        const allDays = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
         let dayHtml = '<div class="config-row"><label>Days</label><div class="day-picker" id="cfg-' + slotKey + '-days">';
         allDays.forEach(([val, lbl]) => {
             const active = selectedDays.includes(val) ? ' active' : '';
@@ -68804,9 +69289,9 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         return `<div class="config-row">
             <label>Category</label>
             <select id="cfg-${slotKey}-category">
-                <option value="all"${cat==='all'?' selected':''}>All</option>
-                <option value="albums"${cat==='albums'?' selected':''}>Albums</option>
-                <option value="singles"${cat==='singles'?' selected':''}>Singles</option>
+                <option value="all"${cat === 'all' ? ' selected' : ''}>All</option>
+                <option value="albums"${cat === 'albums' ? ' selected' : ''}>Albums</option>
+                <option value="singles"${cat === 'singles' ? ' selected' : ''}>Singles</option>
             </select>
         </div>`;
     }
@@ -68816,7 +69301,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         return `<div class="config-row">
             <label>Signal Name</label>
             <input type="text" id="cfg-${slotKey}-signal_name" value="${sigName}"
-                list="known-signals-list-${slotKey}" placeholder="e.g. library_ready"
+                list="known-signals-list-${slotKey}" placeholder="e.g. libraryReady"
                 oninput="this.value = this.value.toLowerCase().replace(/[^a-z0-9_\\-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')"
                 style="font-family:monospace;">
             <datalist id="known-signals-list-${slotKey}">
@@ -68831,7 +69316,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         return `<div class="config-row">
             <label>Signal Name</label>
             <input type="text" id="cfg-${slotKey}-signal_name" value="${sigName}"
-                list="known-signals-fire-${slotKey}" placeholder="e.g. library_ready"
+                list="known-signals-fire-${slotKey}" placeholder="e.g. libraryReady"
                 oninput="this.value = this.value.toLowerCase().replace(/[^a-z0-9_\\-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '')"
                 style="font-family:monospace;">
             <datalist id="known-signals-fire-${slotKey}">
@@ -69011,8 +69496,8 @@ function _renderConditionBuilder(slotKey, blockDef, config) {
     html += `<div class="config-row condition-header">
         <label>Match</label>
         <select id="cfg-${slotKey}-match" class="condition-match-select">
-            <option value="all"${match==='all'?' selected':''}>All conditions</option>
-            <option value="any"${match==='any'?' selected':''}>Any condition</option>
+            <option value="all"${match === 'all' ? ' selected' : ''}>All conditions</option>
+            <option value="any"${match === 'any' ? ' selected' : ''}>Any condition</option>
         </select>
     </div>`;
 
@@ -69040,7 +69525,7 @@ function _renderConditionRow(slotKey, index, fields, cond) {
     const value = cond ? _escAttr(cond.value) : '';
 
     let fieldOpts = '';
-    fields.forEach(f => { fieldOpts += `<option value="${f}"${f===field?' selected':''}>${f}</option>`; });
+    fields.forEach(f => { fieldOpts += `<option value="${f}"${f === field ? ' selected' : ''}>${f}</option>`; });
 
     // For playlist-related triggers, use a mirrored playlist dropdown instead of free text
     const triggerType = _autoBuilder.when ? _autoBuilder.when.type : '';
@@ -69052,10 +69537,10 @@ function _renderConditionRow(slotKey, index, fields, cond) {
     return `<div class="condition-row" data-index="${index}">
         <select class="cond-field" data-slot="${slotKey}" data-idx="${index}">${fieldOpts}</select>
         <select class="cond-operator" data-slot="${slotKey}" data-idx="${index}">
-            <option value="equals"${operator==='equals'?' selected':''}>equals</option>
-            <option value="contains"${operator==='contains'?' selected':''}>contains</option>
-            <option value="starts_with"${operator==='starts_with'?' selected':''}>starts with</option>
-            <option value="not_contains"${operator==='not_contains'?' selected':''}>not contains</option>
+            <option value="equals"${operator === 'equals' ? ' selected' : ''}>equals</option>
+            <option value="contains"${operator === 'contains' ? ' selected' : ''}>contains</option>
+            <option value="starts_with"${operator === 'starts_with' ? ' selected' : ''}>starts with</option>
+            <option value="not_contains"${operator === 'not_contains' ? ' selected' : ''}>not contains</option>
         </select>
         ${valueHtml}
         <button class="remove-condition-btn" onclick="_autoRemoveCondition('${slotKey}',${index})">\u2715</button>
@@ -69265,7 +69750,7 @@ function _readPlacedConfig(slotKey) {
 
 function _findBlockDef(type) {
     if (!_autoBlocks) return null;
-    for (const cat of ['triggers','actions','notifications']) {
+    for (const cat of ['triggers', 'actions', 'notifications']) {
         const found = (_autoBlocks[cat] || []).find(b => b.type === type);
         if (found) return found;
     }
@@ -69308,7 +69793,7 @@ function _autoDrop(e, slotKey) {
             _autoBuilder[slotKey] = { type: data.type, config: {} };
         }
         _renderBuilderCanvas();
-    } catch (err) {}
+    } catch (err) { }
 }
 
 // Click-to-add (alternative to drag)
@@ -69476,7 +69961,7 @@ function renderIssueCard(issue) {
     const admin = isEnhancedAdmin();
 
     let snapshot = {};
-    try { snapshot = typeof issue.snapshot_data === 'string' ? JSON.parse(issue.snapshot_data || '{}') : (issue.snapshot_data || {}); } catch (e) {}
+    try { snapshot = typeof issue.snapshot_data === 'string' ? JSON.parse(issue.snapshot_data || '{}') : (issue.snapshot_data || {}); } catch (e) { }
 
     const entityLabel = issue.entity_type === 'track' ? 'Track' : (issue.entity_type === 'album' ? 'Album' : 'Artist');
     const entityName = snapshot.title || snapshot.name || `${entityLabel} #${issue.entity_id}`;
@@ -69566,8 +70051,8 @@ function showReportIssueModal(entityType, entityId, entityName, artistName, albu
             <label class="report-issue-label">What's the problem?</label>
             <div class="report-issue-category-grid" id="report-issue-categories">
                 ${Object.entries(ISSUE_CATEGORIES)
-                    .filter(([, cat]) => !cat.applies || cat.applies.includes(entityType))
-                    .map(([key, cat]) => `
+            .filter(([, cat]) => !cat.applies || cat.applies.includes(entityType))
+            .map(([key, cat]) => `
                     <div class="report-issue-category-card" data-category="${_escAttr(key)}" onclick="selectIssueCategory(this, '${_escAttr(key)}')">
                         <div class="report-issue-category-icon">${cat.icon}</div>
                         <div class="report-issue-category-label">${_esc(cat.label)}</div>
@@ -69728,7 +70213,7 @@ function renderIssueDetail(issue, body, footer, titleEl) {
     const statusMeta = ISSUE_STATUS_META[issue.status] || ISSUE_STATUS_META.open;
 
     let snapshot = {};
-    try { snapshot = typeof issue.snapshot_data === 'string' ? JSON.parse(issue.snapshot_data || '{}') : (issue.snapshot_data || {}); } catch (e) {}
+    try { snapshot = typeof issue.snapshot_data === 'string' ? JSON.parse(issue.snapshot_data || '{}') : (issue.snapshot_data || {}); } catch (e) { }
 
     const entityLabel = issue.entity_type === 'track' ? 'Track' : (issue.entity_type === 'album' ? 'Album' : 'Artist');
     const entityName = snapshot.title || snapshot.name || `${entityLabel} #${issue.entity_id}`;
@@ -70370,7 +70855,7 @@ async function loadIssuesBadge() {
             badge.textContent = openCount;
             badge.classList.toggle('hidden', openCount === 0);
         }
-    } catch (e) {}
+    } catch (e) { }
 }
 
 // ===== END ISSUES PAGE =====
@@ -70833,7 +71318,7 @@ function _explorerLoadPlaylists() {
                 explorerRenderPickerCards(activeSource);
             }
         })
-        .catch(() => {});
+        .catch(() => { });
 }
 
 function explorerSwitchPickerTab(source) {
@@ -71124,9 +71609,9 @@ function _explorerRenderRoot(meta) {
             <div class="explorer-node explorer-node-root" id="explorer-root">
                 <div class="explorer-node-glow"></div>
                 ${meta.playlist_image
-                    ? `<img class="explorer-node-img" src="${meta.playlist_image}" alt="">`
-                    : '<div class="explorer-node-img-placeholder">&#9835;</div>'
-                }
+            ? `<img class="explorer-node-img" src="${meta.playlist_image}" alt="">`
+            : '<div class="explorer-node-img-placeholder">&#9835;</div>'
+        }
                 <div class="explorer-node-label">
                     <div class="explorer-node-label-sub">SOURCE</div>
                     <div class="explorer-node-label-main">${meta.playlist_name}</div>
@@ -71177,9 +71662,9 @@ function _explorerRenderArtistNode(artist, index) {
                  id="explorer-node-${safeKey}" data-key="${safeKey}"
                  onclick="${hasError || albumCount === 0 ? '' : `explorerToggleArtist('${safeKey}')`}">
                 ${artist.image_url
-                    ? `<img class="explorer-node-img" src="${artist.image_url}" alt="" loading="lazy">`
-                    : ''
-                }
+            ? `<img class="explorer-node-img" src="${artist.image_url}" alt="" loading="lazy">`
+            : ''
+        }
                 <div class="explorer-node-label">
                     <div class="explorer-node-label-main">${artist.name || 'Unknown'}</div>
                     <div class="explorer-node-label-meta">${hasError ? 'Not found' : albumCount + ' album' + (albumCount !== 1 ? 's' : '')}</div>
@@ -71223,9 +71708,9 @@ function explorerToggleArtist(key) {
                              onclick="explorerToggleAlbum('${id}'); event.stopPropagation();"
                              title="${(album.title || '').replace(/"/g, '&quot;')}\n${album.year || ''} · ${typeLabel} · ${album.track_count || '?'} tracks${owned ? '\n✓ Already in library' : ''}${inPlaylist ? '\n♫ Track from this playlist' : ''}\nClick to select · Double-click for tracklist">
                             ${album.image_url
-                                ? `<img class="explorer-node-img" src="${album.image_url}" alt="" loading="lazy">`
-                                : ''
-                            }
+                        ? `<img class="explorer-node-img" src="${album.image_url}" alt="" loading="lazy">`
+                        : ''
+                    }
                             <div class="explorer-node-label">
                                 <div class="explorer-node-label-main">${album.title || 'Unknown'}</div>
                                 <div class="explorer-node-label-meta">${album.year || ''} &middot; ${album.track_count || '?'} tracks</div>
@@ -71592,7 +72077,7 @@ async function _explorerWishlistSubmit(artistSections) {
                                 item.classList.add('error');
                             }
                         }
-                    } catch (e) {}
+                    } catch (e) { }
                 }
             }
         } catch (e) {
@@ -71883,14 +72368,14 @@ async function loadServerPlaylists() {
 
     // Show skeleton loader
     if (container) {
-        container.innerHTML = `<div class="server-pl-grid">${Array.from({length: 6}, (_, i) => `
+        container.innerHTML = `<div class="server-pl-grid">${Array.from({ length: 6 }, (_, i) => `
             <div class="server-pl-card server-pl-skeleton" style="animation-delay: ${i * 0.06}s">
                 <div class="server-pl-card-top">
                     <div class="skeleton-box" style="width:44px;height:44px;border-radius:12px"></div>
                     <div class="skeleton-box" style="width:28px;height:28px;border-radius:8px"></div>
                 </div>
                 <div class="server-pl-card-body">
-                    <div class="skeleton-box" style="width:${60 + Math.random()*30}%;height:14px;border-radius:4px;margin-bottom:8px"></div>
+                    <div class="skeleton-box" style="width:${60 + Math.random() * 30}%;height:14px;border-radius:4px;margin-bottom:8px"></div>
                     <div class="skeleton-box" style="width:40%;height:11px;border-radius:4px"></div>
                 </div>
                 <div class="server-pl-card-footer" style="border-top:1px solid rgba(255,255,255,0.05);padding-top:12px">
@@ -71907,7 +72392,7 @@ async function loadServerPlaylists() {
         ]);
         const data = await serverRes.json();
         let mirroredAll = [];
-        try { mirroredAll = await mirroredRes.json(); } catch (_) {}
+        try { mirroredAll = await mirroredRes.json(); } catch (_) { }
         if (!Array.isArray(mirroredAll)) mirroredAll = [];
 
         if (!data.success || !data.playlists) {
@@ -72455,7 +72940,7 @@ async function _serverSearchExecute() {
 
         results.innerHTML = data.tracks.map((t, i) => {
             const ext = (t.file_path || '').split('.').pop().toUpperCase();
-            const format = ['FLAC','MP3','OPUS','OGG','M4A','AAC','WAV'].includes(ext) ? (ext === 'M4A' ? 'AAC' : ext) : '';
+            const format = ['FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'AAC', 'WAV'].includes(ext) ? (ext === 'M4A' ? 'AAC' : ext) : '';
             const dur = _formatDurationMs(t.duration);
             const bitrateStr = t.bitrate ? `${t.bitrate}k` : '';
             return `

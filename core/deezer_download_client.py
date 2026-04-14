@@ -323,6 +323,53 @@ class DeezerDownloadClient:
         logger.info(f"Fetched {len(artists)} favorite artists from Deezer (ARL)")
         return artists
 
+    def get_user_favorite_albums(self, limit: int = 200) -> list:
+        """Fetch the authenticated user's favorite albums via public API with ARL cookies."""
+        if not self._authenticated or not self._user_data:
+            return []
+        user_id = self._user_data.get('USER_ID')
+        if not user_id:
+            return []
+
+        albums = []
+        index = 0
+        while len(albums) < limit:
+            try:
+                resp = self._session.get(
+                    f'https://api.deezer.com/user/{user_id}/albums',
+                    params={'index': index, 'limit': min(100, limit - len(albums))},
+                    timeout=15
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if 'error' in data:
+                    logger.warning(f"Deezer albums error: {data['error']}")
+                    break
+                items = data.get('data', [])
+                if not items:
+                    break
+                for a in items:
+                    artist_name = ''
+                    if isinstance(a.get('artist'), dict):
+                        artist_name = a['artist'].get('name', '')
+                    albums.append({
+                        'deezer_id': str(a.get('id', '')),
+                        'album_name': a.get('title', ''),
+                        'artist_name': artist_name,
+                        'image_url': a.get('cover_xl') or a.get('cover_big') or a.get('cover_medium', ''),
+                        'release_date': a.get('release_date', ''),
+                        'total_tracks': a.get('nb_tracks', 0),
+                    })
+                if not data.get('next'):
+                    break
+                index += len(items)
+            except Exception as e:
+                logger.error(f"Error fetching favorite albums at index {index}: {e}")
+                break
+
+        logger.info(f"Fetched {len(albums)} favorite albums from Deezer (ARL)")
+        return albums
+
     def get_playlist_tracks(self, playlist_id: str) -> Optional[dict]:
         """Fetch full playlist details with tracks via public API (ARL cookies grant private access)."""
         try:
