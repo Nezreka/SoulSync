@@ -54,10 +54,11 @@ def _title_matches(file_title, mb_title):
     return ratio >= TITLE_SIMILARITY_THRESHOLD
 
 
-def _read_mbid_from_file(file_path):
-    """Read the MusicBrainz recording MBID from an audio file's tags.
+def _read_file_tags(file_path):
+    """Read the MusicBrainz recording MBID and embedded title from an audio file's tags.
 
-    Returns (mbid_string, format_name) or (None, None) if not present.
+    Returns (mbid_string, embedded_title, format_name) or (None, None, None) if not readable.
+    The embedded_title may be None if no TITLE tag is present.
     """
     try:
         from mutagen import File as MutagenFile
@@ -68,42 +69,51 @@ def _read_mbid_from_file(file_path):
 
         audio = MutagenFile(file_path)
         if audio is None:
-            return None, None
+            return None, None, None
 
         if isinstance(audio.tags, ID3):
-            # MP3: UFID frame
+            # MP3: UFID frame for MBID
+            mbid = None
             ufid_key = f'UFID:{_MBID_TAG_KEYS["mp3_ufid_owner"]}'
             ufid = audio.tags.get(ufid_key)
             if ufid and ufid.data:
-                return ufid.data.decode('ascii', errors='ignore'), 'mp3'
-            # Also check TXXX fallback (some taggers use this)
-            for key in ['TXXX:MusicBrainz Track Id', 'TXXX:MUSICBRAINZ_TRACKID']:
-                txxx = audio.tags.get(key)
-                if txxx and txxx.text:
-                    return txxx.text[0], 'mp3'
-            return None, None
+                mbid = ufid.data.decode('ascii', errors='ignore')
+            else:
+                # Also check TXXX fallback (some taggers use this)
+                for key in ['TXXX:MusicBrainz Track Id', 'TXXX:MUSICBRAINZ_TRACKID']:
+                    txxx = audio.tags.get(key)
+                    if txxx and txxx.text:
+                        mbid = txxx.text[0]
+                        break
+            # Embedded title from TIT2 frame
+            tit2 = audio.tags.get('TIT2')
+            embedded_title = tit2.text[0] if tit2 and tit2.text else None
+            return mbid, embedded_title, 'mp3' if mbid else None
 
         elif isinstance(audio, (FLAC, OggVorbis)):
             vals = audio.get(_MBID_TAG_KEYS['vorbis'], [])
             if not vals:
                 vals = audio.get('musicbrainz_trackid', [])
-            if vals:
-                return vals[0], 'flac' if isinstance(audio, FLAC) else 'ogg'
-            return None, None
+            mbid = vals[0] if vals else None
+            title_vals = audio.get('title', [])
+            embedded_title = title_vals[0] if title_vals else None
+            fmt = 'flac' if isinstance(audio, FLAC) else 'ogg'
+            return mbid, embedded_title, fmt if mbid else None
 
         elif isinstance(audio, MP4):
             vals = audio.get(_MBID_TAG_KEYS['mp4'], [])
+            mbid = None
             if vals:
                 raw = vals[0]
-                if isinstance(raw, bytes):
-                    return raw.decode('utf-8', errors='ignore'), 'mp4'
-                return str(raw), 'mp4'
-            return None, None
+                mbid = raw.decode('utf-8', errors='ignore') if isinstance(raw, bytes) else str(raw)
+            title_vals = audio.get('\xa9nam', [])
+            embedded_title = title_vals[0] if title_vals else None
+            return mbid, embedded_title, 'mp4' if mbid else None
 
-        return None, None
+        return None, None, None
     except Exception as e:
-        logger.debug("Error reading MBID from %s: %s", file_path, e)
-        return None, None
+        logger.debug("Error reading tags from %s: %s", file_path, e)
+        return None, None, None
 
 
 def _remove_mbid_from_file(file_path):
@@ -275,11 +285,14 @@ class MbidMismatchDetectorJob(RepairJob):
                 result.scanned += 1
                 continue
 
-            # Read MBID from file tags
-            mbid, fmt = _read_mbid_from_file(resolved)
+            # Read MBID and embedded title from file tags
+            mbid, embedded_title, fmt = _read_file_tags(resolved)
             if not mbid:
                 result.scanned += 1
                 continue
+
+            # Use the embedded TITLE tag for comparison; fall back to DB title only if absent
+            file_title = embedded_title if embedded_title else title
 
             # Validate the MBID against MusicBrainz
             checked += 1
@@ -318,13 +331,13 @@ class MbidMismatchDetectorJob(RepairJob):
                             mb_artist = credit['artist'].get('name', '')
                             break
 
-                # Compare: does the MBID's title match the file's title?
-                if not _title_matches(title, mb_title):
+                # Compare: does the MBID's title match the file's embedded title?
+                if not _title_matches(file_title, mb_title):
                     self._create_mismatch_finding(
                         context, result, track_id, title, artist_name, album_title,
                         resolved, album_thumb, artist_thumb, mbid,
                         mb_title=mb_title, mb_artist=mb_artist,
-                        reason=f'MBID points to "{mb_title}" by {mb_artist}, expected "{title}"'
+                        reason=f'MBID points to "{mb_title}" by {mb_artist}, expected "{file_title}"'
                     )
 
             except Exception as e:
