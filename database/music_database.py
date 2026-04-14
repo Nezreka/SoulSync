@@ -9513,6 +9513,16 @@ class MusicDatabase:
             if not track_id and file_path:
                 cursor.execute("SELECT id FROM tracks WHERE file_path = ? LIMIT 1", (file_path,))
                 row = cursor.fetchone()
+                if not row:
+                    # Fallback: match by filename suffix (handles server path vs local path differences)
+                    import os as _os
+                    fname = _os.path.basename(file_path.replace('\\', '/'))
+                    if fname:
+                        cursor.execute(
+                            "SELECT id FROM tracks WHERE file_path LIKE ? OR file_path LIKE ? LIMIT 1",
+                            (f'%/{fname}', f'%\\{fname}')
+                        )
+                        row = cursor.fetchone()
                 if row:
                     track_id = str(row[0])
 
@@ -9575,6 +9585,33 @@ class MusicDatabase:
             return dict(row) if row else None
         except Exception as e:
             logger.error(f"Error getting download by file path: {e}")
+            return None
+
+    def get_download_by_filename(self, filename: str, link_track_id: str = None) -> Optional[dict]:
+        """Find a download record by filename suffix (handles server vs local path mismatches).
+        Optionally back-links the track_id on the found record for future fast lookups."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            # Match using both separator styles to handle Windows vs Unix paths
+            cursor.execute("""
+                SELECT * FROM track_downloads
+                WHERE file_path LIKE ? OR file_path LIKE ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (f'%/{filename}', f'%\\{filename}'))
+            row = cursor.fetchone()
+            if row and link_track_id:
+                # Back-link this record so future track_id lookups work directly
+                cursor.execute(
+                    "UPDATE track_downloads SET track_id = ? WHERE id = ? AND track_id IS NULL",
+                    (str(link_track_id), row['id'])
+                )
+                conn.commit()
+            conn.close()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error getting download by filename: {e}")
             return None
 
     # ==================== Discovery Pool Methods ====================

@@ -14362,7 +14362,7 @@ def get_track_source_info(track_id):
         downloads = database.get_track_downloads(str(track_id))
 
         if not downloads:
-            # Try matching by file path as fallback
+            # Try matching by file path as fallback (exact, then filename suffix)
             conn = database._get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (track_id,))
@@ -14372,6 +14372,15 @@ def get_track_source_info(track_id):
                 dl = database.get_download_by_file_path(row['file_path'])
                 if dl:
                     downloads = [dl]
+                else:
+                    # Path format mismatch (e.g. Plex path vs local Windows path) —
+                    # fall back to filename-only match and back-link the track_id
+                    import os as _os
+                    fname = _os.path.basename(row['file_path'].replace('\\', '/'))
+                    if fname:
+                        dl = database.get_download_by_filename(fname, link_track_id=track_id)
+                        if dl:
+                            downloads = [dl]
 
         return jsonify({"success": True, "downloads": downloads})
     except Exception as e:
