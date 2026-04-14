@@ -72385,31 +72385,39 @@ async function loadServerPlaylists() {
     }
 
     try {
-        // Fetch server playlists and mirrored playlists in parallel
-        const [serverRes, mirroredRes] = await Promise.all([
+        // Fetch server playlists, mirrored playlists, and sync history names in parallel
+        const [serverRes, mirroredRes, historyNamesRes] = await Promise.all([
             fetch('/api/server/playlists'),
             fetch('/api/mirrored-playlists'),
+            fetch('/api/sync/history/names'),
         ]);
         const data = await serverRes.json();
         let mirroredAll = [];
         try { mirroredAll = await mirroredRes.json(); } catch (_) { }
         if (!Array.isArray(mirroredAll)) mirroredAll = [];
+        let historyNames = [];
+        try { historyNames = await historyNamesRes.json(); } catch (_) { }
+        if (!Array.isArray(historyNames)) historyNames = [];
 
         if (!data.success || !data.playlists) {
             if (container) container.innerHTML = `<div class="playlist-placeholder">${data.error || 'Could not load server playlists'}</div>`;
             return;
         }
 
-        // Only show server playlists that have a matching mirrored playlist
+        // Only show server playlists that have a matching mirrored playlist or sync history entry
         const mirroredNames = new Set(mirroredAll.map(p => p.name.trim().toLowerCase()));
-        const filtered = data.playlists.filter(pl => mirroredNames.has(pl.name.trim().toLowerCase()));
+        const syncedNames = new Set(historyNames.map(n => n.trim().toLowerCase()));
+        const filtered = data.playlists.filter(pl => {
+            const key = pl.name.trim().toLowerCase();
+            return mirroredNames.has(key) || syncedNames.has(key);
+        });
 
         _serverPlaylists = filtered;
         const title = document.getElementById('server-tab-title');
         if (title) title.textContent = `Server Playlists (${data.server_type ? data.server_type.charAt(0).toUpperCase() + data.server_type.slice(1) : ''})`;
 
         if (filtered.length === 0) {
-            if (container) container.innerHTML = '<div class="playlist-placeholder">No synced playlists found. Only server playlists that match your mirrored playlists are shown here.</div>';
+            if (container) container.innerHTML = '<div class="playlist-placeholder">No synced playlists found. Only server playlists that have been synced via SoulSync are shown here.</div>';
             return;
         }
 
