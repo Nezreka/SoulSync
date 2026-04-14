@@ -28732,13 +28732,100 @@ def _try_staging_match(task_id, batch_id, track):
         context_key = f"staging_{task_id}"
         with tasks_lock:
             track_info = download_tasks.get(task_id, {}).get('track_info', {})
+        if not isinstance(track_info, dict):
+            track_info = {}
+
+        # Build spotify_artist / spotify_album context so post-processing can apply
+        # the path template. Without these, _post_process_matched_download returns
+        # early and the file stays at the transfer root with its original filename.
+        # Mirror the context-building logic from the sync modal worker.
+        has_explicit_context = track_info.get('_is_explicit_album_download', False)
+
+        if has_explicit_context:
+            explicit_artist = track_info.get('_explicit_artist_context', {})
+            if isinstance(explicit_artist, str):
+                explicit_artist = {'name': explicit_artist}
+            elif not isinstance(explicit_artist, dict):
+                explicit_artist = {}
+            spotify_artist_ctx = {
+                'id': explicit_artist.get('id', 'staging'),
+                'name': explicit_artist.get('name', track_artist),
+                'genres': explicit_artist.get('genres', [])
+            }
+            explicit_album = track_info.get('_explicit_album_context', {})
+            if not isinstance(explicit_album, dict):
+                explicit_album = {}
+            _album_image_url = explicit_album.get('image_url')
+            if not _album_image_url and explicit_album.get('images'):
+                _imgs = explicit_album['images']
+                if isinstance(_imgs, list) and _imgs:
+                    _album_image_url = _imgs[0].get('url') if isinstance(_imgs[0], dict) else None
+            spotify_album_ctx = {
+                'id': explicit_album.get('id', 'staging'),
+                'name': explicit_album.get('name', getattr(track, 'album', '') or ''),
+                'release_date': explicit_album.get('release_date', ''),
+                'image_url': _album_image_url,
+                'album_type': explicit_album.get('album_type', 'album'),
+                'total_tracks': explicit_album.get('total_tracks', 0),
+                'total_discs': explicit_album.get('total_discs', 1),
+                'artists': explicit_album.get('artists', [{'name': spotify_artist_ctx.get('name', '')}])
+            }
+            is_album_ctx = True
+            has_clean_data = True
+        else:
+            fallback_album = track_info.get('album', {})
+            if isinstance(fallback_album, str):
+                fallback_album = {'name': fallback_album}
+            elif not isinstance(fallback_album, dict):
+                fallback_album = {}
+            track_album_name = getattr(track, 'album', '') or fallback_album.get('name', '') or ''
+            spotify_artist_ctx = {
+                'id': 'staging',
+                'name': track_artist or 'Unknown',
+                'genres': []
+            }
+            spotify_album_ctx = {
+                'id': 'staging',
+                'name': track_album_name,
+                'release_date': fallback_album.get('release_date', ''),
+                'image_url': fallback_album.get('image_url'),
+                'album_type': fallback_album.get('album_type', 'album'),
+                'total_tracks': fallback_album.get('total_tracks', 0),
+                'total_discs': fallback_album.get('total_discs', 1),
+                'artists': [{'name': track_artist}] if track_artist else []
+            }
+            is_album_ctx = bool(
+                track_album_name and
+                track_album_name.strip() and
+                track_album_name.lower() not in ('unknown album', '') and
+                track_album_name.lower() != track_title.lower()
+            )
+            has_clean_data = bool(track_title and track_artist and track_album_name)
+
+        track_number = (
+            track_info.get('track_number', 0) or
+            getattr(track, 'track_number', 0) or 0
+        )
+        disc_number = (
+            track_info.get('disc_number', 1) or
+            getattr(track, 'disc_number', 1) or 1
+        )
+
         context = {
             'track_info': track_info,
+            'spotify_artist': spotify_artist_ctx,
+            'spotify_album': spotify_album_ctx,
             'original_search_result': {
                 'title': track_title,
                 'artist': track_artist,
                 'spotify_clean_title': track_title,
+                'spotify_clean_album': spotify_album_ctx.get('name', ''),
+                'spotify_clean_artist': track_artist,
+                'track_number': track_number,
+                'disc_number': disc_number,
             },
+            'is_album_download': is_album_ctx,
+            'has_clean_spotify_data': has_clean_data,
             'staging_source': True,
         }
 

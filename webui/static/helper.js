@@ -3600,6 +3600,10 @@ function closeHelperSearch() {
 
 const WHATS_NEW = {
     '2.2': [
+        // --- April 14, 2026 ---
+        { date: 'April 14, 2026' },
+        { title: 'Fix Staging Files Ignoring Path Template',        desc: 'Files matched from the Staging folder were copied to the transfer root with their original filename instead of applying the configured path template. Post-processing now receives full artist/album context for staging matches' },
+
         // --- April 4, 2026 ---
         { date: 'April 4, 2026' },
         { title: 'Artist Map — Visualize Your Music Universe',       desc: 'Three interactive canvas modes: Watchlist Constellation (your artists + similar), Genre Map (browse by genre with sidebar), and Artist Explorer (deep-dive any artist). Offscreen buffer rendering handles 1000+ nodes', page: 'discover' },
