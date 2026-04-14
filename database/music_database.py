@@ -10289,6 +10289,17 @@ class MusicDatabase:
             logger.debug(f"Error deleting sync history entry: {e}")
             return False
 
+    def get_sync_history_playlist_names(self):
+        """Return distinct playlist names ever synced (for server playlist filtering)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT playlist_name FROM sync_history WHERE playlist_name != ''")
+            return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting sync history playlist names: {e}")
+            return []
+
     def get_sync_history_stats(self):
         """Return counts grouped by source."""
         try:

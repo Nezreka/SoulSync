@@ -30405,6 +30405,16 @@ def delete_sync_history_entry_api(entry_id):
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/sync/history/names', methods=['GET'])
+def get_sync_history_playlist_names():
+    """Return distinct playlist names ever synced, for server playlist cross-reference."""
+    try:
+        db = MusicDatabase()
+        names = db.get_sync_history_playlist_names()
+        return jsonify(names)
+    except Exception as e:
+        return jsonify([])
+
 # ===============================
 # == UNIFIED MISSING TRACKS API ==
 # ===============================
