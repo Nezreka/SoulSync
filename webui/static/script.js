@@ -5515,7 +5515,7 @@ function validateFileOrganizationTemplates() {
     // Valid variables for each template type
     const validVars = {
         album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$disc', '$discnum', '$year', '$quality'],
-        single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$year', '$quality'],
+        single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$year', '$quality'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality']
     };
 
