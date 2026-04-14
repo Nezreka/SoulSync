@@ -6062,6 +6062,7 @@ async function loadSettingsData() {
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
+        document.getElementById('m3u-entry-base-path').value = settings.m3u_export?.entry_base_path || '';
 
         // Populate UI Appearance settings
         const accentPreset = settings.ui_appearance?.accent_preset || '#1db954';
@@ -7254,7 +7255,8 @@ async function saveSettings(quiet = false) {
             staging_path: document.getElementById('staging-path').value || './Staging'
         },
         m3u_export: {
-            enabled: document.getElementById('m3u-export-enabled').checked
+            enabled: document.getElementById('m3u-export-enabled').checked,
+            entry_base_path: document.getElementById('m3u-entry-base-path').value || ''
         },
         ui_appearance: {
             accent_preset: document.getElementById('accent-preset')?.value || '#1db954',
@@ -8313,7 +8315,8 @@ const PATH_INPUT_IDS = {
     download: 'download-path',
     transfer: 'transfer-path',
     staging: 'staging-path',
-    'music-videos': 'music-videos-path'
+    'music-videos': 'music-videos-path',
+    'm3u-entry-base': 'm3u-entry-base-path'
 };
 
 function togglePathLock(pathType, btn) {
@@ -12115,6 +12118,7 @@ async function autoSavePlaylistM3U(playlistId) {
      * Automatically save M3U file server-side for playlist modals only.
      * Albums are skipped — they're already grouped by media servers.
      * The server checks the m3u_export.enabled setting before writing.
+     * Uses real DB file paths via /api/generate-playlist-m3u.
      */
     const process = activeDownloadProcesses[playlistId];
     if (!process || !process.tracks || process.tracks.length === 0) {
@@ -12123,9 +12127,6 @@ async function autoSavePlaylistM3U(playlistId) {
 
     const modal = document.getElementById(`download-missing-modal-${playlistId}`);
     if (!modal) return;
-
-    const m3uContent = generateM3UContent(playlistId);
-    if (!m3uContent) return;
 
     // Skip M3U for non-playlist downloads — albums, singles, redownloads, etc.
     const nonPlaylistPrefixes = [
@@ -12142,16 +12143,17 @@ async function autoSavePlaylistM3U(playlistId) {
     const year = releaseDate ? releaseDate.substring(0, 4) : '';
 
     try {
-        const response = await fetch('/api/save-playlist-m3u', {
+        const response = await fetch('/api/generate-playlist-m3u', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 playlist_name: playlistName,
-                m3u_content: m3uContent,
+                tracks: _extractM3UTracks(process.tracks),
                 context_type: 'playlist',
                 artist_name: artistName,
                 album_name: albumName,
-                year: year
+                year: year,
+                save_to_disk: true
             })
         });
 
@@ -12248,6 +12250,7 @@ async function exportPlaylistAsM3U(playlistId) {
     /**
      * Export the tracks from the download missing tracks modal as an M3U playlist file.
      * Downloads via browser AND saves server-side to the relevant folder (force=true).
+     * Uses real DB file paths via /api/generate-playlist-m3u.
      */
     console.log(`📋 Exporting playlist ${playlistId} as M3U`);
 
@@ -12257,22 +12260,40 @@ async function exportPlaylistAsM3U(playlistId) {
         return;
     }
 
-    // Generate M3U content using shared function
-    const m3uContent = generateM3UContent(playlistId);
-    if (!m3uContent) {
+    const playlistName = process.playlist?.name || process.playlistName || 'Playlist';
+    const albumPrefixes = ['artist_album_', 'discover_album_', 'enhanced_search_album_', 'seasonal_album_', 'spotify_library_', 'beatport_release_', 'discover_cache_'];
+    const isAlbumExport = albumPrefixes.some(p => playlistId.startsWith(p));
+    const releaseDate = process.album?.release_date || '';
+    const year = releaseDate ? releaseDate.substring(0, 4) : '';
+
+    let m3uContent, foundCount, missingCount;
+    try {
+        const response = await fetch('/api/generate-playlist-m3u', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist_name: playlistName,
+                tracks: _extractM3UTracks(process.tracks),
+                context_type: isAlbumExport ? 'album' : 'playlist',
+                artist_name: process.artist?.name || '',
+                album_name: process.album?.name || '',
+                year: year,
+                save_to_disk: true,
+                force: true
+            })
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Unknown error');
+        m3uContent = data.m3u_content;
+        foundCount = (data.stats?.found || 0) + (data.stats?.downloaded || 0);
+        missingCount = data.stats?.missing || 0;
+    } catch (error) {
         showToast('Failed to generate M3U content', 'error');
+        console.error('M3U export error:', error);
         return;
     }
 
-    const playlistName = process.playlist?.name || process.playlistName || 'Playlist';
-
-    // Parse summary from content for toast message
-    const summaryMatch = m3uContent.match(/#FOUND_IN_LIBRARY:(\d+)\n#DOWNLOADED:(\d+)\n#MISSING:(\d+)/);
-    const foundCount = summaryMatch ? parseInt(summaryMatch[1]) : 0;
-    const downloadedCount = summaryMatch ? parseInt(summaryMatch[2]) : 0;
-    const missingCount = summaryMatch ? parseInt(summaryMatch[3]) : 0;
-
-    // Create a Blob and download it via browser
+    // Browser download
     const blob = new Blob([m3uContent], { type: 'audio/x-mpegurl;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -12283,33 +12304,24 @@ async function exportPlaylistAsM3U(playlistId) {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    // Also save server-side to the relevant folder (force=true bypasses setting check)
-    const albumPrefixes = ['artist_album_', 'discover_album_', 'enhanced_search_album_', 'seasonal_album_', 'spotify_library_', 'beatport_release_', 'discover_cache_'];
-    const isAlbumExport = albumPrefixes.some(p => playlistId.startsWith(p));
+    showToast(`Exported M3U: ${foundCount} available, ${missingCount} missing`, 'success');
+    console.log(`✅ Exported M3U - Total: ${process.tracks.length}, Available: ${foundCount}, Missing: ${missingCount}`);
+}
 
-    try {
-        const releaseDate = process.album?.release_date || '';
-        const year = releaseDate ? releaseDate.substring(0, 4) : '';
-        await fetch('/api/save-playlist-m3u', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                playlist_name: playlistName,
-                m3u_content: m3uContent,
-                context_type: isAlbumExport ? 'album' : 'playlist',
-                artist_name: process.artist?.name || '',
-                album_name: process.album?.name || '',
-                year: year,
-                force: true
-            })
-        });
-    } catch (error) {
-        console.debug('Server-side M3U save error (non-critical):', error);
-    }
-
-    const availableCount = foundCount + downloadedCount;
-    showToast(`Exported M3U: ${availableCount} available, ${missingCount} missing`, 'success');
-    console.log(`✅ Exported M3U - Total: ${process.tracks.length}, Available: ${availableCount}, Missing: ${missingCount}`);
+function _extractM3UTracks(tracks) {
+    /** Extract simplified track data for the /api/generate-playlist-m3u endpoint. */
+    return tracks.map(t => {
+        let artist = '';
+        if (Array.isArray(t.artists)) {
+            const first = t.artists[0];
+            artist = typeof first === 'object' ? (first.name || '') : String(first || '');
+        } else if (typeof t.artists === 'string') {
+            artist = t.artists;
+        } else if (t.artist) {
+            artist = typeof t.artist === 'object' ? (t.artist.name || '') : String(t.artist);
+        }
+        return { name: t.name || '', artist, duration_ms: t.duration_ms || 0 };
+    });
 }
 
 // ==================================================================================

@@ -481,7 +481,8 @@ class ConfigManager:
                 "replace_lower_quality": False
             },
             "m3u_export": {
-                "enabled": False
+                "enabled": False,
+                "entry_base_path": ""
             },
             "youtube": {
                 "cookies_browser": "",      # "", "chrome", "firefox", "edge", "brave", "opera", "safari"

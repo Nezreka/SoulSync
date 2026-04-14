@@ -4893,6 +4893,164 @@ def save_playlist_m3u():
         logger.error(f"Error saving M3U file: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
+@app.route('/api/generate-playlist-m3u', methods=['POST'])
+def generate_playlist_m3u():
+    """Generate M3U content with real file paths resolved from the library DB.
+    Each track entry uses its actual stored file_path rather than a synthesised
+    Artist - Title.mp3 string, so media servers can locate the files.
+    An optional entry_base_path prefix (from settings) is prepended to every path.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data"}), 400
+
+        playlist_name = data.get('playlist_name', 'Playlist')
+        tracks = data.get('tracks', [])          # [{name, artist, duration_ms}, ...]
+        context_type = data.get('context_type', 'playlist')
+        artist_name_ctx = data.get('artist_name', '')
+        album_name = data.get('album_name', '')
+        year = data.get('year', '')
+        save_to_disk = data.get('save_to_disk', False)
+        force = data.get('force', False)
+
+        raw_base = config_manager.get('m3u_export.entry_base_path', '') or ''
+        entry_base_path = raw_base.rstrip('/\\')
+
+        db = get_database()
+        active_server = config_manager.get_active_media_server()
+
+        # --- fuzzy matching helpers (same logic as library_check_tracks) ---
+        import re as _re
+        from difflib import SequenceMatcher
+        try:
+            from unidecode import unidecode as _unidecode
+        except ImportError:
+            _unidecode = lambda x: x
+
+        def _norm(text):
+            return _unidecode(text).lower().strip() if text else ''
+
+        def _clean(text):
+            s = _norm(text)
+            s = _re.sub(r'\s*[\[\(].*?[\]\)]', '', s)
+            s = _re.sub(r'\s*-\s*', ' ', s)
+            s = _re.sub(r'\s*feat\..*', '', s)
+            s = _re.sub(r'\s*featuring.*', '', s)
+            s = _re.sub(r'\s*ft\..*', '', s)
+            s = _re.sub(r'\s*\d{4}\s*remaster.*', '', s)
+            s = _re.sub(r'\s*remaster(ed)?.*', '', s)
+            return _re.sub(r'\s+', ' ', s).strip()
+
+        # Group tracks by primary artist to minimise DB queries
+        from collections import defaultdict
+        artist_groups = defaultdict(list)
+        for idx, t in enumerate(tracks):
+            artist_groups[t.get('artist', '') or ''].append((idx, t))
+
+        file_path_map = {}
+        for artist, group in artist_groups.items():
+            if not artist:
+                for idx, _ in group:
+                    file_path_map[idx] = None
+                continue
+
+            db_tracks = db.search_tracks(artist=artist, limit=500, server_source=active_server)
+            if not db_tracks:
+                for idx, _ in group:
+                    file_path_map[idx] = None
+                continue
+
+            db_entries = [(_norm(t.title), _clean(t.title), t) for t in db_tracks]
+
+            for idx, track in group:
+                name = track.get('name', '')
+                if not name:
+                    file_path_map[idx] = None
+                    continue
+                s_norm, s_clean = _norm(name), _clean(name)
+                matched = None
+                for db_n, db_c, db_t in db_entries:
+                    if s_norm == db_n or s_clean == db_c:
+                        matched = db_t
+                        break
+                    if max(SequenceMatcher(None, s_norm, db_n).ratio(),
+                           SequenceMatcher(None, s_clean, db_c).ratio()) >= 0.7:
+                        matched = db_t
+                        break
+                file_path_map[idx] = matched.file_path if matched else None
+
+        # --- build M3U content ---
+        import datetime as _dt
+        found_count = 0
+        missing_count = 0
+        lines = [
+            '#EXTM3U',
+            f'#PLAYLIST:{playlist_name}',
+            f'#GENERATED:{_dt.datetime.utcnow().isoformat()}Z',
+            '',
+        ]
+
+        for idx, track in enumerate(tracks):
+            name = track.get('name', '') or 'Unknown'
+            artist = track.get('artist', '') or 'Unknown Artist'
+            dur_s = int((track.get('duration_ms') or 0) / 1000) or -1
+            file_path = file_path_map.get(idx)
+
+            lines.append(f'#EXTINF:{dur_s},{artist} - {name}')
+            if file_path:
+                found_count += 1
+                lines.append('#STATUS:FOUND_IN_LIBRARY')
+                entry = f'{entry_base_path}/{file_path}' if entry_base_path else file_path
+                lines.append(entry.replace('\\', '/'))
+            else:
+                missing_count += 1
+                lines.append('#STATUS:MISSING')
+                safe = _re.sub(r'[/\\?%*:|"<>]', '-', f'{artist} - {name}')
+                lines.append(f'# NOT AVAILABLE: {safe}')
+            lines.append('')
+
+        lines += [
+            '#SUMMARY',
+            f'#TOTAL_TRACKS:{len(tracks)}',
+            f'#FOUND_IN_LIBRARY:{found_count}',
+            '#DOWNLOADED:0',
+            f'#MISSING:{missing_count}',
+        ]
+        m3u_content = '\n'.join(lines)
+
+        # --- optionally save to disk ---
+        saved_path = None
+        if save_to_disk and (force or config_manager.get('m3u_export.enabled', False)):
+            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+            m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name,
+                                              artist_name_ctx, album_name, year)
+            os.makedirs(m3u_folder, exist_ok=True)
+            if context_type == 'album' and artist_name_ctx and album_name:
+                safe_fn = _sanitize_filename(f'{artist_name_ctx} - {album_name}')
+            else:
+                safe_fn = _sanitize_filename(playlist_name)
+            m3u_path = os.path.join(m3u_folder, f'{safe_fn}.m3u')
+            with open(m3u_path, 'w', encoding='utf-8') as f:
+                f.write(m3u_content)
+            saved_path = m3u_path
+            logger.info(f"Saved M3U file: {m3u_path}")
+
+        return jsonify({
+            "success": True,
+            "m3u_content": m3u_content,
+            "stats": {"found": found_count, "downloaded": 0, "missing": missing_count},
+            "path": saved_path
+        })
+
+    except Exception as e:
+        logger.error(f"Error generating M3U: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 def _build_system_stats():
     """Build system statistics dict — shared by HTTP handler and WebSocket emitter."""
     import psutil

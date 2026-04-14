@@ -4697,6 +4697,17 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>M3U Entry Base Path:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="m3u-entry-base-path" placeholder="e.g. /mnt/music (leave empty for relative paths)" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('m3u-entry-base', this)">Unlock</button>
+                                    </div>
+                                    <div class="setting-help-text">
+                                        Optional prefix added to every track path in exported M3U files. Use this when your media server needs absolute paths (e.g. <code>/mnt/music</code>).
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Download Source:</label>
                                     <select id="download-source-mode" class="form-select"
                                         onchange="updateDownloadSourceUI()">
