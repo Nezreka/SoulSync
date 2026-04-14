@@ -282,6 +282,47 @@ class DeezerDownloadClient:
         logger.info(f"Fetched {len(playlists)} user playlists from Deezer")
         return playlists
 
+    def get_user_favorite_artists(self, limit: int = 200) -> list:
+        """Fetch the authenticated user's favorite artists via public API with ARL cookies."""
+        if not self._authenticated or not self._user_data:
+            return []
+        user_id = self._user_data.get('USER_ID')
+        if not user_id:
+            return []
+
+        artists = []
+        index = 0
+        while len(artists) < limit:
+            try:
+                resp = self._session.get(
+                    f'https://api.deezer.com/user/{user_id}/artists',
+                    params={'index': index, 'limit': min(100, limit - len(artists))},
+                    timeout=15
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if 'error' in data:
+                    logger.warning(f"Deezer artists error: {data['error']}")
+                    break
+                items = data.get('data', [])
+                if not items:
+                    break
+                for a in items:
+                    artists.append({
+                        'deezer_id': str(a.get('id', '')),
+                        'name': a.get('name', ''),
+                        'image_url': a.get('picture_xl') or a.get('picture_big') or a.get('picture_medium', ''),
+                    })
+                if not data.get('next'):
+                    break
+                index += len(items)
+            except Exception as e:
+                logger.error(f"Error fetching favorite artists at index {index}: {e}")
+                break
+
+        logger.info(f"Fetched {len(artists)} favorite artists from Deezer (ARL)")
+        return artists
+
     def get_playlist_tracks(self, playlist_id: str) -> Optional[dict]:
         """Fetch full playlist details with tracks via public API (ARL cookies grant private access)."""
         try:

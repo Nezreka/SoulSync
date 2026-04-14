@@ -42405,10 +42405,13 @@ def get_your_artists_sources():
         # Last.fm
         if config_manager.get('lastfm.api_key', '') and config_manager.get('lastfm.session_key', ''):
             connected.append('lastfm')
-        # Deezer
+        # Deezer — OAuth token OR ARL token both count as connected
         try:
             deezer_cl = _get_deezer_client()
-            if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
+            deezer_oauth = deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated()
+            deezer_arl = (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
+                          and soulseek_client.deezer_dl.is_authenticated())
+            if deezer_oauth or deezer_arl:
                 connected.append('deezer')
         except Exception:
             pass
@@ -42518,22 +42521,28 @@ def _fetch_and_match_liked_artists(profile_id: int):
     except Exception as e:
         logger.error(f"[Your Artists] Last.fm fetch error: {e}")
 
-    # 4. Fetch from Deezer (favorite artists — requires OAuth)
+    # 4. Fetch from Deezer (favorite artists — OAuth or ARL)
     try:
         if 'deezer' not in enabled_sources:
             print("[Your Artists] Deezer skipped (disabled in sources config)")
         else:
             deezer_cl = _get_deezer_client()
+            artists = []
             if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
-                print("[Your Artists] Fetching favorite artists from Deezer...")
+                print("[Your Artists] Fetching favorite artists from Deezer (OAuth)...")
                 artists = deezer_cl.get_user_favorite_artists(limit=200)
-                for a in artists:
-                    database.upsert_liked_artist(
-                        artist_name=a['name'], source_service='deezer',
-                        source_id=a.get('deezer_id'), source_id_type='deezer',
-                        image_url=a.get('image_url'), profile_id=profile_id
-                    )
-                fetched += len(artists)
+            elif (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
+                  and soulseek_client.deezer_dl.is_authenticated()):
+                print("[Your Artists] Fetching favorite artists from Deezer (ARL)...")
+                artists = soulseek_client.deezer_dl.get_user_favorite_artists(limit=200)
+            for a in artists:
+                database.upsert_liked_artist(
+                    artist_name=a['name'], source_service='deezer',
+                    source_id=a.get('deezer_id'), source_id_type='deezer',
+                    image_url=a.get('image_url'), profile_id=profile_id
+                )
+            fetched += len(artists)
+            if artists:
                 print(f"[Your Artists] Fetched {len(artists)} from Deezer")
     except Exception as e:
         logger.error(f"[Your Artists] Deezer fetch error: {e}")
