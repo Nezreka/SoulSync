@@ -49711,15 +49711,16 @@ def start_oauth_callback_servers():
     
     # Start Spotify callback server
     def run_spotify_server():
+        spotify_port = int(os.environ.get('SOULSYNC_SPOTIFY_CALLBACK_PORT', 8888))
         try:
-            bind_addr = ('0.0.0.0', 8888)
+            bind_addr = ('0.0.0.0', spotify_port)
             spotify_server = HTTPServer(bind_addr, SpotifyCallbackHandler)
             _oauth_logger.info(f"Spotify OAuth callback server listening on {bind_addr[0]}:{bind_addr[1]}")
             print(f"Started Spotify OAuth callback server on {bind_addr[0]}:{bind_addr[1]}")
             spotify_server.serve_forever()
         except OSError as e:
-            _oauth_logger.error(f"Failed to start Spotify callback server on port 8888: {e} — port may already be in use")
-            print(f"Failed to start Spotify callback server on port 8888: {e}")
+            _oauth_logger.error(f"Failed to start Spotify callback server on port {spotify_port}: {e} — port may already be in use")
+            print(f"Failed to start Spotify callback server on port {spotify_port}: {e}")
         except Exception as e:
             _oauth_logger.error(f"Failed to start Spotify callback server: {e}")
             print(f"Failed to start Spotify callback server: {e}")
@@ -49789,9 +49790,10 @@ def start_oauth_callback_servers():
     
     def run_tidal_server():
         try:
-            tidal_server = HTTPServer(('0.0.0.0', 8889), TidalCallbackHandler)
-            print("Started Tidal OAuth callback server on port 8889")
-            print(f"Tidal server listening on all interfaces, port 8889")
+            tidal_port = int(os.environ.get('SOULSYNC_TIDAL_CALLBACK_PORT', 8889))
+            tidal_server = HTTPServer(('0.0.0.0', tidal_port), TidalCallbackHandler)
+            print(f"Started Tidal OAuth callback server on port {tidal_port}")
+            print(f"Tidal server listening on all interfaces, port {tidal_port}")
             tidal_server.serve_forever()
         except Exception as e:
             print(f"Failed to start Tidal callback server: {e}")

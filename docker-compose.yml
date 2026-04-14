@@ -20,10 +20,15 @@ services:
       - SOULSYNC_CONFIG_PATH=/app/config/config.json
       # Set timezone (change to your timezone)
       - TZ=America/New_York
+      # OAuth callback ports. If 8888/8889 conflict with another container (e.g. Gluetun),
+      # change the port numbers below AND update the matching port mappings in the ports section.
+      # Then update the redirect URI in SoulSync → Settings → Connections to match.
+      - SOULSYNC_SPOTIFY_CALLBACK_PORT=8888
+      - SOULSYNC_TIDAL_CALLBACK_PORT=8889
     ports:
-      - "8008:8008" # Main web app
-      - "8888:8888" # Spotify OAuth callback
-      - "8889:8889" # Tidal OAuth callback
+      - "8008:8008"   # Main web app
+      - "8888:8888"   # Spotify OAuth callback — keep in sync with SOULSYNC_SPOTIFY_CALLBACK_PORT above
+      - "8889:8889"   # Tidal OAuth callback   — keep in sync with SOULSYNC_TIDAL_CALLBACK_PORT above
     volumes:
       # Persistent data volumes
       - ./config:/app/config
