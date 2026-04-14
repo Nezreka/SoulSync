@@ -63657,7 +63657,15 @@ function _renderFindingDetail(f) {
         case 'incomplete_album':
             if (d.artist) rows.push(['Artist', d.artist]);
             if (d.album_title) rows.push(['Album', d.album_title]);
-            if (d.spotify_album_id) rows.push(['Spotify ID', d.spotify_album_id]);
+            if (d.primary_source && d.primary_album_id) {
+                const primaryLabel = d.primary_source.charAt(0).toUpperCase() + d.primary_source.slice(1);
+                rows.push([`${primaryLabel} ID`, d.primary_album_id]);
+                if (d.spotify_album_id && d.primary_source !== 'spotify') {
+                    rows.push(['Spotify ID', d.spotify_album_id]);
+                }
+            } else if (d.spotify_album_id) {
+                rows.push(['Spotify ID', d.spotify_album_id]);
+            }
             let incHtml = media + _gridRows(rows);
             const actual = d.actual_tracks || 0, expected = d.expected_tracks || 0;
             if (expected > 0) {
@@ -63671,6 +63679,7 @@ function _renderFindingDetail(f) {
                 incHtml += `<div class="repair-detail-sublist">${d.missing_tracks.map(t => `
                     <div class="repair-detail-subitem">
                         <strong>#${t.track_number || '?'} ${_escFinding(t.name || t.title || 'Unknown')}</strong>
+                        ${t.source && t.source !== 'spotify' ? `<span>Source: ${_escFinding(t.source)}${t.source_track_id ? ` · ID: ${_escFinding(t.source_track_id)}` : ''}</span>` : ''}
                         ${t.duration_ms ? `<span>Duration: ${Math.round(t.duration_ms / 1000)}s</span>` : ''}
                     </div>`).join('')}</div>`;
             }
