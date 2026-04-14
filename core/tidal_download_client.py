@@ -448,6 +448,8 @@ class TidalDownloadClient:
 
             MIN_AUDIO_SIZE = 100 * 1024  # 100KB
 
+            quality_error_reasons = []
+
             for q_key in chain:
                 q_info = QUALITY_MAP[q_key]
 
@@ -456,18 +458,24 @@ class TidalDownloadClient:
                     self.session.audio_quality = q_info['tidal_quality']
                     stream = track.get_stream()
                     if not stream or not stream.manifest_mime_type:
+                        reason = f"{q_key}: no stream returned"
                         logger.warning(f"Quality {q_key} returned no stream, trying next")
+                        quality_error_reasons.append(reason)
                         continue
                     logger.info(f"Got Tidal stream at quality: {q_key}")
                 except Exception as e:
+                    reason = f"{q_key}: {type(e).__name__}: {e}"
                     logger.warning(f"Quality {q_key} unavailable: {e}")
+                    quality_error_reasons.append(reason)
                     continue
 
                 # --- Step 2: Parse manifest ---
                 manifest = stream.get_stream_manifest()
                 urls = manifest.get_urls()
                 if not urls:
+                    reason = f"{q_key}: manifest returned no URLs"
                     logger.warning(f"No download URLs for quality {q_key}, trying next")
+                    quality_error_reasons.append(reason)
                     continue
 
                 download_url = urls[0]
@@ -482,6 +490,20 @@ class TidalDownloadClient:
                     extension = 'm4a'
                 else:
                     extension = q_info.get('extension', 'flac')
+
+                # Verify quality wasn't silently downgraded: if HiRes was requested but the
+                # codec/manifest points to standard FLAC, log a clear warning.
+                if q_key == 'hires' and codec:
+                    codec_lower = codec.lower()
+                    if 'flac' in codec_lower or 'alac' in codec_lower:
+                        # HiRes should be 24-bit — we can't confirm bit-depth from the codec
+                        # string alone, but we log the received codec so users can diagnose.
+                        logger.info(f"HiRes stream codec: {codec} (verify file bit-depth after download)")
+                    elif 'mp4a' in codec_lower or 'aac' in codec_lower:
+                        logger.warning(
+                            f"HiRes requested but received AAC stream (codec: {codec}) — "
+                            f"account may not have HiRes subscription or track isn't available in HiRes"
+                        )
 
                 # Build output filename
                 safe_name = re.sub(r'[<>:"/\\|?*]', '_', display_name)
@@ -533,6 +555,7 @@ class TidalDownloadClient:
 
                 except Exception as dl_err:
                     logger.warning(f"Download failed at quality {q_key}: {dl_err}")
+                    quality_error_reasons.append(f"{q_key}: download error: {type(dl_err).__name__}: {dl_err}")
                     out_path.unlink(missing_ok=True)
                     continue
 
@@ -542,6 +565,7 @@ class TidalDownloadClient:
                         f"Tidal download too small at {q_key} ({downloaded} bytes) — "
                         f"likely a stub/preview for '{display_name}'. Trying next quality."
                     )
+                    quality_error_reasons.append(f"{q_key}: file too small ({downloaded} bytes), likely a stub")
                     out_path.unlink(missing_ok=True)
                     continue
 
@@ -555,6 +579,7 @@ class TidalDownloadClient:
                             f"Cannot extract FLAC from MP4 container at {q_key} — "
                             f"deleting and trying next quality"
                         )
+                        quality_error_reasons.append(f"{q_key}: FLAC extraction from MP4 container failed")
                         out_path.unlink(missing_ok=True)
                         continue
 
@@ -565,6 +590,7 @@ class TidalDownloadClient:
                         f"Final file too small after processing at {q_key} "
                         f"({final_size} bytes) — trying next quality"
                     )
+                    quality_error_reasons.append(f"{q_key}: final file too small after extraction ({final_size} bytes)")
                     out_path.unlink(missing_ok=True)
                     continue
 
@@ -572,8 +598,21 @@ class TidalDownloadClient:
                 logger.info(f"Tidal download complete ({q_key}): {out_path} ({final_size / (1024*1024):.1f} MB)")
                 return str(out_path)
 
-            # All quality tiers exhausted
-            logger.error(f"No Tidal quality tier produced a valid download for '{display_name}'")
+            # All quality tiers exhausted — build a diagnostic message
+            # Re-use quality_key/allow_fallback already read above to stay consistent
+            # with how the chain was built (avoids config-change-mid-download inconsistency).
+            reasons_str = '; '.join(quality_error_reasons) if quality_error_reasons else 'unknown'
+            if quality_key == 'hires' and not allow_fallback:
+                hint = (
+                    " HiRes quality is unavailable for this track on your account or in your region. "
+                    "Enable 'Quality Fallback' in Tidal settings to fall back to Lossless automatically."
+                )
+            else:
+                hint = ""
+            logger.error(
+                f"No Tidal quality tier produced a valid download for '{display_name}'."
+                f"{hint} Failure reasons: [{reasons_str}]"
+            )
             return None
 
         except Exception as e:
