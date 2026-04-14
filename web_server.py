@@ -51901,6 +51901,12 @@ def import_album_process():
             except Exception:
                 pass
 
+        # Compute total_discs across all matched tracks for multi-disc subfolder support
+        total_discs = max(
+            (m['spotify_track'].get('disc_number', 1) for m in matches if m.get('spotify_track')),
+            default=1
+        )
+
         for match in matches:
             staging_file = match.get('staging_file')
             spotify_track = match.get('spotify_track')
@@ -51929,6 +51935,7 @@ def import_album_process():
                     'name': album_name,
                     'release_date': album.get('release_date', ''),
                     'total_tracks': album.get('total_tracks', len(matches)),
+                    'total_discs': total_discs,
                     'image_url': album.get('image_url', '')
                 },
                 'track_info': {
