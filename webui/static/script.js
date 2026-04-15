@@ -5562,9 +5562,7 @@ function validateFileOrganizationTemplates() {
         if (singlePath.startsWith('/')) {
             errors.push('Single template cannot start with /');
         }
-        if (!singlePath.includes('/')) {
-            errors.push('Single template must include at least one folder (use / separator)');
-        }
+        // Note: single template is allowed to have no slash (flat file: "$artist - $title")
         if (singlePath.includes('//')) {
             errors.push('Single template cannot have consecutive slashes //');
         }

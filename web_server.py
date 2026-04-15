@@ -17424,9 +17424,14 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
         }
 
         folder_path, filename_base = _get_file_path_from_template(template_context, 'single_path')
-        if folder_path and filename_base:
-            final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
-            os.makedirs(os.path.join(transfer_dir, folder_path), exist_ok=True)
+        if filename_base:
+            # folder_path may be '' for flat templates like "$artist - $title" (no subfolders)
+            if folder_path:
+                final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
+                os.makedirs(os.path.join(transfer_dir, folder_path), exist_ok=True)
+            else:
+                final_path = os.path.join(transfer_dir, filename_base + file_ext)
+                os.makedirs(transfer_dir, exist_ok=True)
             return final_path, True
         else:
             # Fallback
