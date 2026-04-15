@@ -256,7 +256,7 @@ class AlbumCompletenessJob(RepairJob):
             album_id = self._get_album_id_for_source(source, album_ids)
             if not album_id:
                 continue
-            api_tracks = self._get_album_tracks(context, source, album_id)
+            api_tracks = self._get_album_tracks(source, album_id)
             items = self._extract_track_items(api_tracks)
             if items:
                 return len(items)
@@ -288,7 +288,7 @@ class AlbumCompletenessJob(RepairJob):
             source_album_id = self._get_album_id_for_source(source, album_ids)
             if not source_album_id:
                 continue
-            api_tracks = self._get_album_tracks(context, source, source_album_id)
+            api_tracks = self._get_album_tracks(source, source_album_id)
             if self._extract_track_items(api_tracks):
                 break
 
@@ -353,14 +353,13 @@ class AlbumCompletenessJob(RepairJob):
     def _get_album_id_for_source(self, source: str, album_ids: dict) -> str:
         return album_ids.get(source, '')
 
-    def _get_album_tracks(self, context: JobContext, source: str, album_id: str):
+    def _get_album_tracks(self, source: str, album_id: str):
         """Fetch album tracks from a specific source."""
         try:
             if source not in ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase'):
                 return None
 
-            client = context.spotify_client if source == 'spotify' else None
-            return get_album_tracks_for_source(source, album_id, client=client)
+            return get_album_tracks_for_source(source, album_id)
         except Exception as e:
             logger.debug("Error getting %s album tracks for %s: %s", source.capitalize(), album_id, e)
             return None

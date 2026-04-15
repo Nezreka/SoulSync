@@ -105,7 +105,6 @@ class RepairWorker:
         self._on_job_finish = None   # (job_id, status, result) -> None
 
         # Lazy client accessors
-        self._spotify_client = None
         self._itunes_client = None
         self._mb_client = None
         self._acoustid_client = None
@@ -151,13 +150,12 @@ class RepairWorker:
     # ------------------------------------------------------------------
     @property
     def spotify_client(self):
-        if self._spotify_client is None:
-            try:
-                from core.spotify_client import SpotifyClient
-                self._spotify_client = SpotifyClient()
-            except Exception as e:
-                logger.error("Failed to initialize SpotifyClient: %s", e)
-        return self._spotify_client
+        try:
+            from core.metadata_service import get_client_for_source
+            return get_client_for_source('spotify')
+        except Exception as e:
+            logger.error("Failed to resolve shared Spotify client: %s", e)
+            return None
 
     @property
     def itunes_client(self):
