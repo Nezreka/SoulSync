@@ -45153,6 +45153,14 @@ function renderExpandedAlbumHeader(album) {
         writeTagsBtn.onclick = (e) => { e.stopPropagation(); writeAlbumTags(album.id); };
         enrichRow.appendChild(writeTagsBtn);
 
+        const rgAlbumBtn = document.createElement('button');
+        rgAlbumBtn.className = 'enhanced-rg-album-btn';
+        rgAlbumBtn.innerHTML = '&#9835; ReplayGain';
+        rgAlbumBtn.title = 'Analyze ReplayGain for all tracks in this album (writes track + album gain)';
+        rgAlbumBtn.dataset.albumId = album.id;
+        rgAlbumBtn.onclick = (e) => { e.stopPropagation(); analyzeAlbumReplayGain(album.id, rgAlbumBtn); };
+        enrichRow.appendChild(rgAlbumBtn);
+
         const reorganizeBtn = document.createElement('button');
         reorganizeBtn.className = 'enhanced-reorganize-album-btn';
         reorganizeBtn.innerHTML = '&#128193; Reorganize';
@@ -45392,6 +45400,12 @@ function _buildTrackRow(track, album, admin) {
             tagBtn.innerHTML = '&#9998;';
             tagBtn.title = 'Write tags to file';
             tagTd.appendChild(tagBtn);
+
+            const rgBtn = document.createElement('button');
+            rgBtn.className = 'enhanced-rg-btn';
+            rgBtn.textContent = 'RG';
+            rgBtn.title = 'Analyze & write ReplayGain (track gain)';
+            tagTd.appendChild(rgBtn);
         }
         tr.appendChild(tagTd);
 
@@ -45553,6 +45567,13 @@ function _attachTableDelegation(table, album) {
         if (target.closest('.enhanced-write-tag-btn')) {
             e.stopPropagation();
             showTagPreview(track.id);
+            return;
+        }
+
+        // ReplayGain analyze button (admin)
+        if (target.closest('.enhanced-rg-btn')) {
+            e.stopPropagation();
+            analyzeTrackReplayGain(track.id, target.closest('.enhanced-rg-btn'));
             return;
         }
 
@@ -47763,6 +47784,142 @@ function _pollBatchWriteTagsStatus() {
     }
 
     _batchWriteTagsPollTimer = setTimeout(poll, 800);
+}
+
+// ── ReplayGain Analysis ──
+
+let _rgBatchPollTimer = null;
+let _rgAlbumPollTimer = null;
+
+/**
+ * Analyze a single track and write track-level ReplayGain tags.
+ * Synchronous on the server side (~1–3 s). Shows spinner on the button.
+ */
+async function analyzeTrackReplayGain(trackId, btn) {
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '…';
+    }
+    try {
+        const res = await fetch(`/api/library/track/${trackId}/analyze-replaygain`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`ReplayGain written: ${data.track_gain} (${data.lufs} LUFS)`, 'success');
+        } else {
+            showToast(`ReplayGain failed: ${data.error}`, 'error');
+        }
+    } catch (err) {
+        showToast('ReplayGain analysis failed', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'RG';
+        }
+    }
+}
+
+/**
+ * Analyze all tracks in an album and write track + album ReplayGain tags.
+ * Kicks off a background job; polls for progress.
+ */
+async function analyzeAlbumReplayGain(albumId, btn) {
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '&#9835; Analyzing…';
+    }
+    try {
+        const res = await fetch(`/api/library/album/${albumId}/analyze-replaygain`, { method: 'POST' });
+        const data = await res.json();
+        if (!data.success) {
+            showToast(`ReplayGain: ${data.error}`, 'error');
+            if (btn) { btn.disabled = false; btn.innerHTML = '&#9835; ReplayGain'; }
+            return;
+        }
+        showToast('Album ReplayGain analysis started…', 'info');
+        _pollAlbumRgStatus(albumId, btn);
+    } catch (err) {
+        showToast('Failed to start album ReplayGain analysis', 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = '&#9835; ReplayGain'; }
+    }
+}
+
+function _pollAlbumRgStatus(albumId, btn) {
+    if (_rgAlbumPollTimer) clearTimeout(_rgAlbumPollTimer);
+
+    async function poll() {
+        try {
+            const res = await fetch(`/api/library/album/${albumId}/analyze-replaygain/status`);
+            const state = await res.json();
+
+            if (state.status === 'running') {
+                const pct = state.total > 0 ? Math.round(state.processed / state.total * 100) : 0;
+                showToast(`ReplayGain: ${state.processed}/${state.total} tracks (${pct}%)`, 'info');
+                _rgAlbumPollTimer = setTimeout(poll, 1200);
+            } else if (state.status === 'done') {
+                const msg = `ReplayGain done: ${state.analyzed} analyzed, ${state.failed} failed`;
+                showToast(msg, state.failed > 0 ? 'warning' : 'success');
+                if (btn) { btn.disabled = false; btn.innerHTML = '&#9835; ReplayGain'; }
+                _rgAlbumPollTimer = null;
+            }
+        } catch (err) {
+            console.error('ReplayGain album poll failed:', err);
+            if (btn) { btn.disabled = false; btn.innerHTML = '&#9835; ReplayGain'; }
+            _rgAlbumPollTimer = null;
+        }
+    }
+
+    _rgAlbumPollTimer = setTimeout(poll, 1000);
+}
+
+/**
+ * Analyze selected tracks (track gain only — they may span albums).
+ */
+async function batchAnalyzeReplayGainSelected() {
+    const trackIds = Array.from(artistDetailPageState.selectedTracks);
+    if (trackIds.length === 0) return;
+
+    try {
+        const res = await fetch('/api/library/tracks/analyze-replaygain-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_ids: trackIds }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+            showToast(`ReplayGain: ${data.error}`, 'error');
+            return;
+        }
+        showToast(`ReplayGain analysis started for ${trackIds.length} tracks…`, 'info');
+        _pollBatchRgStatus();
+    } catch (err) {
+        showToast('Failed to start batch ReplayGain analysis', 'error');
+    }
+}
+
+function _pollBatchRgStatus() {
+    if (_rgBatchPollTimer) clearTimeout(_rgBatchPollTimer);
+
+    async function poll() {
+        try {
+            const res = await fetch('/api/library/tracks/analyze-replaygain-batch/status');
+            const state = await res.json();
+
+            if (state.status === 'running') {
+                const pct = state.total > 0 ? Math.round(state.processed / state.total * 100) : 0;
+                showToast(`ReplayGain: ${state.processed}/${state.total} (${pct}%) — ${state.current_track}`, 'info');
+                _rgBatchPollTimer = setTimeout(poll, 1000);
+            } else if (state.status === 'done') {
+                const msg = `ReplayGain done: ${state.analyzed} written, ${state.failed} failed`;
+                showToast(msg, state.failed > 0 ? 'warning' : 'success');
+                _rgBatchPollTimer = null;
+            }
+        } catch (err) {
+            console.error('ReplayGain batch poll failed:', err);
+            _rgBatchPollTimer = null;
+        }
+    }
+
+    _rgBatchPollTimer = setTimeout(poll, 800);
 }
 
 // ── Reorganize Album Files ──
