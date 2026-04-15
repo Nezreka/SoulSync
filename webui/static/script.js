@@ -71743,7 +71743,7 @@ function explorerRenderPickerCards(source) {
         const isReady = pct >= 50;
         const isActive = _explorer.playlistId === p.id;
         const isFullyDiscovered = pct === 100;
-        const wasExplored = p.explored || false;
+        const wasExplored = !!(p.explored_at || p.explored);
         const wishlisted = p.wishlisted_count || 0;
         const inLibrary = p.in_library_count || 0;
 
@@ -71967,10 +71967,10 @@ async function explorerBuildTree() {
         if (progress) progress.style.display = 'none';
         _explorerUpdateCount();
 
-        // Mark playlist as explored (persists in session for badge display)
+        // Mark playlist as explored (server persists via explored_at; update local copy too)
         const exploredPl = _explorer._playlists.find(p => p.id === playlistId);
         if (exploredPl) {
-            exploredPl.explored = true;
+            exploredPl.explored_at = new Date().toISOString();
             // Update card badge without full re-render
             const card = document.querySelector(`.explorer-picker-card[data-id="${playlistId}"]`);
             if (card) {

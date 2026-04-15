@@ -517,6 +517,9 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_arh_automation_id ON automation_run_history(automation_id)")
 
+            # Add explored_at to mirrored_playlists (migration)
+            self._add_mirrored_playlist_explored_column(cursor)
+
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
             self._add_automation_system_column(cursor)
@@ -684,6 +687,17 @@ class MusicDatabase:
             logger.error(f"Error initializing database: {e}")
             raise
     
+    def _add_mirrored_playlist_explored_column(self, cursor):
+        """Add explored_at column to mirrored_playlists to persist explore badge."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'explored_at' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN explored_at TIMESTAMP DEFAULT NULL")
+                logger.info("Added explored_at column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding explored_at column to mirrored_playlists: {e}")
+
     def _add_automation_notify_columns(self, cursor):
         """Add notification and result columns to automations table."""
         try:
@@ -10489,6 +10503,21 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting mirrored playlists: {e}")
             return []
+
+    def mark_mirrored_playlist_explored(self, playlist_id: int) -> bool:
+        """Set explored_at to now for a mirrored playlist."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET explored_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (playlist_id,)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error marking playlist {playlist_id} as explored: {e}")
+            return False
 
     def get_mirrored_playlist(self, playlist_id: int) -> Optional[Dict]:
         """Return a single mirrored playlist by id."""
