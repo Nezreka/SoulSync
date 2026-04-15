@@ -3585,6 +3585,21 @@ async function updateStreamStatus() {
                 // Stream is ready - start audio playback
                 console.log('🎵 Stream ready, starting audio playback');
                 stopStreamStatusPolling();
+                // Restore player UI if JS state was wiped (e.g. page refresh)
+                if (!currentTrack && data.track_info) {
+                    const ti = data.track_info;
+                    setTrackInfo({
+                        title: ti.name || ti.title || 'Unknown Track',
+                        artist: ti.artist || 'Unknown Artist',
+                        album: ti.album || 'Unknown Album',
+                        filename: ti.filename || '',
+                        is_library: !!ti.is_library,
+                        image_url: ti.image_url || null,
+                        id: ti.id || null,
+                        artist_id: ti.artist_id || null,
+                        album_id: ti.album_id || null,
+                    });
+                }
                 await startAudioPlayback();
                 break;
 
@@ -3660,6 +3675,21 @@ function updateStreamStatusFromData(data) {
         case 'ready':
             console.log('🎵 Stream ready, starting audio playback');
             stopStreamStatusPolling();
+            // Restore player UI if JS state was wiped (e.g. page refresh)
+            if (!currentTrack && data.track_info) {
+                const ti = data.track_info;
+                setTrackInfo({
+                    title: ti.name || ti.title || 'Unknown Track',
+                    artist: ti.artist || 'Unknown Artist',
+                    album: ti.album || 'Unknown Album',
+                    filename: ti.filename || '',
+                    is_library: !!ti.is_library,
+                    image_url: ti.image_url || null,
+                    id: ti.id || null,
+                    artist_id: ti.artist_id || null,
+                    album_id: ti.album_id || null,
+                });
+            }
             startAudioPlayback();
             break;
         case 'error':
