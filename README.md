@@ -8,7 +8,7 @@
 
 > **IMPORTANT**: Configure file sharing in slskd to avoid Soulseek bans. Set up shared folders at `http://localhost:5030/shares`.
 
-**Community**: [Discord](https://discord.gg/wGvKqVQwmy) | **Support**: [GitHub Issues](https://github.com/Nezreka/SoulSync/issues) | **Donate**: [Ko-fi](https://ko-fi.com/boulderbadgedad)
+**Community**: [Discord](https://discord.gg/wGvKqVQwmy) | [Reddit](https://old.reddit.com/r/ssync/) | **Website**: [ssync.net](https://www.ssync.net/) | **Support**: [GitHub Issues](https://github.com/Nezreka/SoulSync/issues) | **Donate**: [Ko-fi](https://ko-fi.com/boulderbadgedad)
 
 ---
 
