@@ -2,6 +2,7 @@
 
 import time
 
+from core.metadata_service import get_primary_source
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -108,8 +109,10 @@ class MetadataGapFillerJob(RepairJob):
                 )
             found_fields = {}
 
-            # Try Spotify enrichment first (most reliable for ISRC)
-            if spotify_track_id and context.spotify_client and not context.is_spotify_rate_limited():
+            # Try Spotify enrichment for ISRC — only when Spotify is the configured primary source.
+            # If Deezer/iTunes is primary, Spotify may still be authenticated for playlist sync
+            # but should not be called here, as it burns API quota unnecessarily.
+            if spotify_track_id and context.spotify_client and not context.is_spotify_rate_limited() and get_primary_source() == 'spotify':
                 try:
                     track_data = context.spotify_client.get_track_details(spotify_track_id)
                     if track_data:
