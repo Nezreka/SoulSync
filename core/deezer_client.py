@@ -1114,7 +1114,7 @@ class DeezerClient:
                 'name': data.get('title', ''),
                 'description': data.get('description', ''),
                 'track_count': total_tracks,
-                'image_url': data.get('picture_medium', ''),
+                'image_url': data.get('picture_xl') or data.get('picture_big') or data.get('picture_medium', ''),
                 'owner': data.get('creator', {}).get('name', ''),
                 'tracks': tracks,
             }

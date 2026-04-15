@@ -957,7 +957,7 @@ def _register_automation_handlers():
             log_line=f'Starting sync: {len(tracks_json)} tracks', log_type='success')
         threading.Thread(
             target=_run_sync_task,
-            args=(sync_id, pl['name'], tracks_json, auto_id),
+            args=(sync_id, pl['name'], tracks_json, auto_id, 1, pl.get('image_url', '')),
             daemon=True,
             name=f'auto-sync-{playlist_id}'
         ).start()
@@ -17391,7 +17391,8 @@ def parse_youtube_playlist(url):
                 'tracks': tracks,
                 'track_count': len(tracks),
                 'url': url,
-                'source': 'youtube'
+                'source': 'youtube',
+                'image_url': playlist_info.get('thumbnail', '') or '',
             }
             
             print(f"Successfully parsed YouTube playlist: {len(tracks)} tracks extracted")
@@ -34410,14 +34411,15 @@ def start_tidal_sync(playlist_id):
         
         with sync_lock:
             sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
-        
+
         # Submit sync task
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id())
+        playlist_image_url = getattr(state['playlist'], 'image_url', '')
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
         active_sync_workers[sync_playlist_id] = future
-        
+
         print(f"Started Tidal sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
         return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
-        
+
     except Exception as e:
         print(f"Error starting Tidal sync: {e}")
         return jsonify({"error": str(e)}), 500
@@ -35338,7 +35340,8 @@ def start_deezer_sync(playlist_id):
             sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
 
         # Submit sync task
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id())
+        playlist_image_url = state['playlist'].get('image_url', '')
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
         active_sync_workers[sync_playlist_id] = future
 
         print(f"Started Deezer sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
@@ -36175,7 +36178,8 @@ def start_spotify_public_sync(url_hash):
             sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
 
         # Submit sync task
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id())
+        playlist_image_url = state['playlist'].get('image_url', '')
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
         active_sync_workers[sync_playlist_id] = future
 
         print(f"Started Spotify Public sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
@@ -37204,14 +37208,15 @@ def start_youtube_sync(url_hash):
         
         with sync_lock:
             sync_states[sync_playlist_id] = {"status": "starting", "progress": {}}
-        
+
         # Submit sync task
-        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id())
+        playlist_image_url = state['playlist'].get('image_url', '')
+        future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
         active_sync_workers[sync_playlist_id] = future
-        
+
         print(f"Started YouTube sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
         return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
-        
+
     except Exception as e:
         print(f"Error starting YouTube sync: {e}")
         return jsonify({"error": str(e)}), 500
@@ -37834,16 +37839,21 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
         print(f"Sync finished for {playlist_id} - state updated")
 
         # Set playlist poster image if available (Plex, Jellyfin, Emby)
-        if playlist_image_url and getattr(result, 'synced_tracks', 0) > 0:
+        _synced = getattr(result, 'synced_tracks', 0)
+        print(f"[PLAYLIST IMAGE] image_url={playlist_image_url!r}, synced_tracks={_synced}")
+        if playlist_image_url and _synced > 0:
             try:
                 active_server = config_manager.get_active_media_server()
+                print(f"[PLAYLIST IMAGE] active_server={active_server}")
                 if active_server == 'plex' and plex_client:
-                    plex_client.set_playlist_image(playlist_name, playlist_image_url)
+                    ok = plex_client.set_playlist_image(playlist_name, playlist_image_url)
+                    print(f"[PLAYLIST IMAGE] Plex upload result: {ok}")
                 elif active_server in ('jellyfin', 'emby') and jellyfin_client:
-                    jellyfin_client.set_playlist_image(playlist_name, playlist_image_url)
+                    ok = jellyfin_client.set_playlist_image(playlist_name, playlist_image_url)
+                    print(f"[PLAYLIST IMAGE] Jellyfin upload result: {ok}")
                 # Navidrome doesn't support custom playlist images
             except Exception as img_err:
-                print(f"Could not set playlist image: {img_err}")
+                print(f"[PLAYLIST IMAGE] Exception: {img_err}")
 
         # Record sync history completion with per-track data
         try:

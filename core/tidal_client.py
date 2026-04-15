@@ -1180,6 +1180,17 @@ class TidalClient:
                 public=playlist_attrs.get('accessType', '') == "PUBLIC"
             )
 
+            # Extract cover image URL from relationships (same logic as get_user_playlists_metadata_only)
+            try:
+                relationships = playlist_data.get('relationships', {})
+                image_rel = relationships.get('image', {}).get('data', {})
+                if image_rel:
+                    image_id = image_rel.get('id', '')
+                    if image_id:
+                        playlist.image_url = f"https://resources.tidal.com/images/{image_id.replace('-', '/')}/640x640.jpg"
+            except Exception:
+                pass
+
             logger.info(f"Retrieved Tidal playlist '{playlist.name}' with {len(tracks)} tracks")
             return playlist
 
