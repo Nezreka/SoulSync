@@ -3590,11 +3590,13 @@ async function updateStreamStatus() {
                 break;
 
             case 'stopped':
-                // Handle stopped state
+                // Handle stopped state — do NOT clear track here; explicit stop (handleStop)
+                // calls clearTrack() directly. Clearing here collapses the player mid-playback
+                // when the backend transitions to 'stopped' after audio naturally ends or during
+                // queue track transitions.
                 console.log('🛑 Stream stopped');
                 stopStreamStatusPolling();
                 hideLoadingAnimation();
-                clearTrack();
                 break;
         }
 
@@ -3661,10 +3663,11 @@ function updateStreamStatusFromData(data) {
             clearTrack();
             break;
         case 'stopped':
+            // Do NOT clear track here — explicit stop (handleStop) calls clearTrack() directly.
+            // Clearing here collapses the player after audio naturally ends or during queue transitions.
             console.log('🛑 Stream stopped');
             stopStreamStatusPolling();
             hideLoadingAnimation();
-            clearTrack();
             break;
     }
 }
