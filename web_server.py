@@ -37127,7 +37127,7 @@ def _run_listenbrainz_discovery_worker(state_key):
         state['status'] = 'complete'
         state['discovery_progress'] = 100
 
-        playlist_name = playlist['name']
+        playlist_name = playlist.get('name') or playlist.get('title') or 'Unknown Playlist'
         source_label = discovery_source.upper()
         add_activity_item("", f"ListenBrainz Discovery Complete ({source_label})", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
 
@@ -45099,6 +45099,185 @@ def refresh_listenbrainz():
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+# ========================================
+# LAST.FM TRACK RADIO
+# ========================================
+
+@app.route('/api/lastfm/configured', methods=['GET'])
+def lastfm_configured():
+    """Return whether a Last.fm API key is configured (used to gate the Radio section)."""
+    lf = lastfm_worker.client if lastfm_worker else None
+    return jsonify({"configured": bool(lf and lf.api_key)})
+
+
+@app.route('/api/lastfm/search/tracks', methods=['GET'])
+def lastfm_search_tracks():
+    """Search Last.fm for tracks matching a query string.
+
+    Query params:
+        q: search query (track name, artist name, or both)
+
+    Returns:
+        JSON list of {name, artist, mbid, listeners}
+    """
+    try:
+        q = request.args.get('q', '').strip()
+        if not q or len(q) < 2:
+            return jsonify({"success": False, "error": "Query too short", "results": []}), 400
+
+        lf = lastfm_worker.client if lastfm_worker else None
+        if not lf or not lf.api_key:
+            return jsonify({"success": False, "error": "Last.fm not configured", "results": []}), 400
+
+        # Use raw API call to get multiple results (search_track only returns best match)
+        data = lf._make_request('track.search', {'track': q, 'limit': 8})
+        if not data:
+            return jsonify({"success": True, "results": []})
+
+        raw = data.get('results', {}).get('trackmatches', {}).get('track', [])
+        if not isinstance(raw, list):
+            raw = [raw] if raw else []
+
+        results = []
+        for t in raw:
+            # Last.fm image array: [{#text: url, size: small/medium/large/extralarge}]
+            image_url = lf.get_best_image(t.get('image', []))
+            results.append({
+                'name': t.get('name', ''),
+                'artist': t.get('artist', ''),
+                'mbid': t.get('mbid', ''),
+                'listeners': int(t.get('listeners', 0)),
+                'image_url': image_url or '',
+            })
+        return jsonify({"success": True, "results": results})
+
+    except Exception as e:
+        print(f"Error searching Last.fm tracks: {e}")
+        return jsonify({"success": False, "error": str(e), "results": []}), 500
+
+
+@app.route('/api/lastfm/radio/generate', methods=['POST'])
+def lastfm_radio_generate():
+    """Generate a Last.fm Radio playlist from a seed track.
+
+    Body JSON:
+        track_name:  seed track title
+        artist_name: seed artist name
+
+    Creates/updates a 'lastfm_radio' playlist in the DB and adds it to
+    listenbrainz_playlist_states in 'fresh' phase, ready for discovery.
+
+    Returns:
+        {success, playlist_mbid, title, track_count}
+    """
+    try:
+        data = request.get_json() or {}
+        track_name = (data.get('track_name') or '').strip()
+        artist_name = (data.get('artist_name') or '').strip()
+
+        if not track_name or not artist_name:
+            return jsonify({"success": False, "error": "track_name and artist_name are required"}), 400
+
+        lf = lastfm_worker.client if lastfm_worker else None
+        if not lf or not lf.api_key:
+            return jsonify({"success": False, "error": "Last.fm not configured"}), 400
+
+        # Fetch similar tracks from Last.fm
+        similar = lf.get_similar_tracks(artist_name, track_name, limit=25)
+        if not similar:
+            return jsonify({"success": False, "error": "No similar tracks found on Last.fm"}), 404
+
+        # Persist to DB via manager
+        lb_manager, _username, _source = _get_profile_lb_manager()
+        playlist_mbid = lb_manager.save_lastfm_radio_playlist(track_name, artist_name, similar)
+        title = f"Last.fm Radio: {track_name} by {artist_name}"
+
+        # Build playlist dict that mirrors the LB playlist format expected by the discovery pipeline
+        playlist_data = {
+            'identifier': f"lastfm_radio/{playlist_mbid}",
+            'name': title,
+            'title': title,
+            'creator': 'Last.fm',
+            'tracks': [
+                {
+                    'track_name': t['name'],
+                    'artist_name': t['artist'],
+                    'album_name': '',
+                    'duration_ms': 0,
+                }
+                for t in similar
+            ],
+        }
+
+        # Upsert into in-memory state (fresh phase — not yet discovered)
+        state_key = _lb_state_key(playlist_mbid)
+        if state_key not in listenbrainz_playlist_states:
+            listenbrainz_playlist_states[state_key] = {
+                'playlist_mbid': playlist_mbid,
+                'playlist': playlist_data,
+                'phase': 'fresh',
+                'status': 'fresh',
+                'discovery_progress': 0,
+                'spotify_matches': 0,
+                'spotify_total': len(similar),
+                'discovery_results': [],
+                'created_at': time.time(),
+                'last_accessed': time.time(),
+            }
+        else:
+            # Refresh existing state (new seed data) but preserve phase if already discovered
+            state = listenbrainz_playlist_states[state_key]
+            if state['phase'] not in ('discovering',):
+                state['playlist'] = playlist_data
+                state['spotify_total'] = len(similar)
+                state['last_accessed'] = time.time()
+
+        print(f"Last.fm Radio generated: '{title}' ({len(similar)} tracks) → {playlist_mbid}")
+        return jsonify({
+            "success": True,
+            "playlist_mbid": playlist_mbid,
+            "title": title,
+            "track_count": len(similar),
+        })
+
+    except Exception as e:
+        print(f"Error generating Last.fm radio: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/listenbrainz/lastfm-radio', methods=['GET'])
+def get_listenbrainz_lastfm_radio():
+    """Get cached Last.fm Radio playlists (from DB cache).
+
+    Does NOT require ListenBrainz authentication — Last.fm Radio playlists are
+    generated independently of the LB account.
+    """
+    try:
+        lb_manager, username, source = _get_profile_lb_manager()
+        playlists = lb_manager.get_cached_playlists('lastfm_radio')
+
+        formatted = [
+            {
+                "playlist": {
+                    "identifier": f"https://listenbrainz.org/playlist/{p['playlist_mbid']}",
+                    "title": p['title'],
+                    "creator": p['creator'],
+                    "annotation": p.get('annotation', {}),
+                    "track": [],
+                }
+            }
+            for p in playlists
+        ]
+        return jsonify({"success": True, "playlists": formatted, "count": len(formatted), "username": username, "source": source})
+    except Exception as e:
+        print(f"Error getting Last.fm radio playlists: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 # ========================================
 # LISTENBRAINZ PLAYLIST MANAGEMENT (Discovery System)

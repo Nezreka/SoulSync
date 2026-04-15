@@ -518,6 +518,38 @@ class LastFMClient:
 
         return None
 
+    @rate_limited
+    def get_similar_tracks(self, artist_name: str, track_title: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Get tracks similar to the given track.
+
+        Returns:
+            List of track dicts with: name, artist, match (0.0–1.0), mbid
+        """
+        data = self._make_request('track.getsimilar', {
+            'artist': artist_name,
+            'track': track_title,
+            'autocorrect': 1,
+            'limit': limit
+        })
+        if not data:
+            return []
+
+        tracks = data.get('similartracks', {}).get('track', [])
+        if not isinstance(tracks, list):
+            tracks = [tracks] if tracks else []
+
+        result = []
+        for t in tracks:
+            artist = t.get('artist', {})
+            result.append({
+                'name': t.get('name', ''),
+                'artist': artist.get('name', '') if isinstance(artist, dict) else str(artist),
+                'match': float(t.get('match', 0)),
+                'mbid': t.get('mbid', ''),
+            })
+        return result
+
     # ── Utility Methods ──
 
     def get_best_image(self, images: List) -> Optional[str]:

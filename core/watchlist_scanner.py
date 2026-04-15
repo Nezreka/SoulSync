@@ -695,6 +695,9 @@ class WatchlistScanner:
             logger.info("Updating seasonal content...")
             self._populate_seasonal_content()
 
+            # Generate Last.fm Radio playlists for top tracks (max once per week)
+            self._generate_lastfm_radio_playlists()
+
             # Sync Spotify library cache (runs after main scan)
             try:
                 if self.spotify_client and self.spotify_client.is_rate_limited():
@@ -3349,6 +3352,82 @@ class WatchlistScanner:
 
         except Exception as e:
             logger.error(f"Error populating seasonal content: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _generate_lastfm_radio_playlists(self):
+        """Generate Last.fm Radio playlists from the user's top 3 most-played tracks.
+
+        Runs at most once per week (throttled via config key 'lastfm_radio.last_generated').
+        Requires a Last.fm API key to be configured.
+        Stores playlists in DB under playlist_type='lastfm_radio' via ListenBrainzManager.
+        """
+        try:
+            from datetime import datetime, timedelta
+            from config.settings import config_manager
+            from database.music_database import get_database
+
+            # Weekly throttle
+            last_generated_str = config_manager.get('lastfm_radio.last_generated', '')
+            if last_generated_str:
+                try:
+                    last_generated = datetime.fromisoformat(last_generated_str)
+                    if datetime.now() - last_generated < timedelta(days=7):
+                        logger.info("Last.fm radio: skipping — generated within the last 7 days")
+                        return
+                except ValueError:
+                    pass  # Malformed timestamp — proceed
+
+            # Require Last.fm API key
+            api_key = config_manager.get('lastfm.api_key', '')
+            if not api_key:
+                logger.info("Last.fm radio: skipping — no API key configured")
+                return
+
+            # Get top 3 most-played tracks over the last 30 days
+            db = get_database()
+            top_tracks = db.get_top_tracks(time_range='30d', limit=3)
+            if not top_tracks:
+                logger.info("Last.fm radio: skipping — no listening history found")
+                return
+
+            logger.info(f"Last.fm radio: generating playlists for {len(top_tracks)} top tracks")
+
+            from core.lastfm_client import LastFMClient
+            from core.listenbrainz_manager import ListenBrainzManager
+
+            client = LastFMClient(api_key=api_key)
+            # Use profile_id=1 as a sensible default; the scanner runs globally
+            lb_manager = ListenBrainzManager(str(db.database_path), profile_id=1)
+
+            generated = 0
+            for track in top_tracks:
+                track_name = track.get('name', '')
+                artist_name = track.get('artist', '')
+                if not track_name or not artist_name:
+                    continue
+
+                try:
+                    similar = client.get_similar_tracks(artist_name, track_name, limit=25)
+                    if not similar:
+                        logger.info(f"Last.fm radio: no similar tracks for '{artist_name} - {track_name}'")
+                        continue
+
+                    playlist_mbid = lb_manager.save_lastfm_radio_playlist(track_name, artist_name, similar)
+                    logger.info(
+                        f"Last.fm radio: saved '{track_name}' by '{artist_name}' "
+                        f"→ {playlist_mbid} ({len(similar)} tracks)"
+                    )
+                    generated += 1
+                except Exception as track_err:
+                    logger.warning(f"Last.fm radio: error processing '{track_name}': {track_err}")
+
+            if generated > 0:
+                config_manager.set('lastfm_radio.last_generated', datetime.now().isoformat())
+                logger.info(f"Last.fm radio: generated {generated} playlists, throttle updated")
+
+        except Exception as e:
+            logger.error(f"Error in _generate_lastfm_radio_playlists: {e}")
             import traceback
             traceback.print_exc()
 

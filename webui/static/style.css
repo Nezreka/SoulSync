@@ -40896,6 +40896,124 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
     text-decoration: underline;
 }
 
+/* Last.fm Track Radio — search bar & dropdown */
+.lastfm-radio-search {
+    margin-bottom: 16px;
+}
+.lastfm-radio-search-row {
+    position: relative;
+}
+.lastfm-radio-input-wrap {
+    position: relative;
+}
+.lastfm-radio-input-wrap input {
+    width: 100%;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    color: #fff;
+    font-size: 13px;
+    padding: 9px 14px;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.15s;
+}
+.lastfm-radio-input-wrap input:focus {
+    border-color: rgba(255,255,255,0.28);
+}
+.lastfm-radio-input-wrap input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.lastfm-radio-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: #1a1a2a;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px;
+    z-index: 200;
+    overflow: hidden;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+    padding: 4px;
+}
+.lastfm-radio-searching {
+    padding: 12px;
+    display: flex;
+    justify-content: center;
+}
+.lastfm-radio-result {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.12s;
+}
+.lastfm-radio-result:hover {
+    background: rgba(255,255,255,0.07);
+}
+.lastfm-radio-result-art {
+    width: 40px;
+    height: 40px;
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: rgba(255,255,255,0.05);
+}
+.lastfm-radio-result-art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.lastfm-radio-art-empty {
+    width: 100%;
+    height: 100%;
+    background: rgba(255,255,255,0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: rgba(255,255,255,0.2);
+}
+.lastfm-radio-art-empty::after { content: '♪'; }
+.lastfm-radio-result-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.lastfm-radio-result-track {
+    font-size: 13px;
+    color: #fff;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.lastfm-radio-result-artist {
+    font-size: 11px;
+    color: rgba(255,255,255,0.45);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* Loading state shown in the playlists container while generating */
+.lastfm-radio-generating {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 32px 16px;
+    color: rgba(255,255,255,0.5);
+    font-size: 13px;
+}
+.lastfm-radio-generating .server-search-spinner {
+    margin: 0;
+}
+
 /* ===========================
    AUTOMATIONS PAGE
    =========================== */
