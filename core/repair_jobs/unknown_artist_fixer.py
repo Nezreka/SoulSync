@@ -8,9 +8,8 @@ import os
 import re
 import shutil
 import sys
-import time
 
-from core.metadata_service import get_client_for_source, get_primary_client, get_primary_source
+from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -18,6 +17,8 @@ from utils.logging_config import get_logger
 logger = get_logger("repair_job.unknown_artist_fixer")
 
 _UNKNOWN_NAMES = {'unknown artist', 'unknown', ''}
+_TRACK_ID_SOURCES = {'spotify', 'deezer', 'itunes'}
+_TITLE_SEARCH_SOURCES = {'spotify', 'deezer', 'itunes', 'hydrabase'}
 
 # Sidecar extensions to move alongside audio files
 _SIDECAR_EXTS = {'.lrc', '.jpg', '.jpeg', '.png', '.nfo', '.txt', '.cue'}
@@ -249,6 +250,7 @@ class UnknownArtistFixerJob(RepairJob):
         Returns dict with artist, album, track_number, year, etc. or None."""
 
         title = track['title'] or ''
+        primary_source = get_primary_source()
 
         # Priority 1: Read embedded file tags
         try:
@@ -269,95 +271,159 @@ class UnknownArtistFixerJob(RepairJob):
         except Exception as e:
             logger.debug(f"Failed to read tags from {resolved_path}: {e}")
 
-        # Priority 2: Look up by source track ID using the appropriate client.
-        # Try the primary source's ID first, then fall back to any available ID
-        # with its matching client so we never pass a Deezer/iTunes ID to Spotify
-        # (or vice-versa).
-        _primary = get_primary_source()
-        _id_candidates = []
-        for _src in [_primary] + [s for s in ('spotify', 'deezer', 'itunes') if s != _primary]:
-            _tid = track.get(f'{_src}_track_id')
-            if _tid:
-                _id_candidates.append((_src, _tid))
-        source_id = None
-        _lookup_client = None
-        for _src, _tid in _id_candidates:
-            _c = get_client_for_source(_src)
-            if _c:
-                source_id = _tid
-                _lookup_client = _c
-                break
-        if source_id and _lookup_client:
+        # Priority 2: Look up by source track ID
+        for source, source_id in self._iter_source_track_ids(track, primary_source):
+            client = get_client_for_source(source)
+            if not client or not hasattr(client, 'get_track_details'):
+                continue
             try:
-                details = _lookup_client.get_track_details(str(source_id))
-                if details and details.get('primary_artist'):
-                    artist = details['primary_artist']
-                    if artist.lower() not in _UNKNOWN_NAMES:
-                        album = details.get('album', {})
-                        album_name = album.get('name', '') if isinstance(album, dict) else str(album)
-                        return {
-                            'artist': artist,
-                            'album': album_name,
-                            'title': details.get('name', title),
-                            'track_number': details.get('track_number'),
-                            'disc_number': details.get('disc_number', 1),
-                            'year': (album.get('release_date', '') or '')[:4] if isinstance(album, dict) else '',
-                            'image_url': album.get('images', [{}])[0].get('url', '') if isinstance(album, dict) and album.get('images') else '',
-                            'source': 'track_id_lookup',
-                            'confidence': 0.95,
-                        }
+                details = client.get_track_details(str(source_id))
+                corrected = self._build_corrected_metadata(
+                    details,
+                    fallback_title=title,
+                    source=f"{source}_track_id_lookup",
+                    confidence=0.95,
+                )
+                if corrected:
+                    return corrected
             except Exception as e:
-                logger.debug(f"Track ID lookup failed for {source_id}: {e}")
+                logger.debug(f"Track ID lookup failed for {source} {source_id}: {e}")
 
-        # Priority 3: Search by title using the configured primary metadata source
-        _search_client = get_primary_client()
-        if title and _search_client:
-            try:
-                results = _search_client.search_tracks(title, limit=5)
-                if results:
-                    # Score candidates
-                    from difflib import SequenceMatcher
-                    best = None
-                    best_score = 0
-                    for r in results:
-                        name_sim = SequenceMatcher(None, title.lower(), r.name.lower()).ratio()
-                        # Boost if album matches
-                        album_name = r.album if hasattr(r, 'album') else ''
-                        if album_name and track.get('album_title'):
-                            album_sim = SequenceMatcher(None, track['album_title'].lower(), album_name.lower()).ratio()
-                            name_sim = (name_sim * 0.7) + (album_sim * 0.3)
-                        if name_sim > best_score:
-                            best_score = name_sim
-                            best = r
+        # Priority 3: Search by title
+        if title:
+            for source in self._iter_source_priority(primary_source, _TITLE_SEARCH_SOURCES):
+                client = get_client_for_source(source)
+                if not client or not hasattr(client, 'search_tracks'):
+                    continue
+                try:
+                    results = client.search_tracks(title, limit=5)
+                    if not results:
+                        continue
 
-                    if best and best_score >= 0.7:
-                        artist = best.artists[0] if best.artists else ''
-                        if artist and artist.lower() not in _UNKNOWN_NAMES:
-                            # Get full details for track_number
+                    best, best_score = self._pick_best_track_candidate(title, track.get('album_title'), results)
+                    if not best or best_score < 0.7:
+                        continue
+
+                    full_details = None
+                    if hasattr(client, 'get_track_details') and getattr(best, 'id', None):
+                        try:
+                            full_details = client.get_track_details(str(best.id))
+                        except Exception:
                             full_details = None
-                            try:
-                                full_details = _search_client.get_track_details(best.id)
-                            except Exception:
-                                pass
-                            album_data = full_details.get('album', {}) if full_details else {}
-                            return {
-                                'artist': artist,
-                                'album': best.album if hasattr(best, 'album') else '',
-                                'title': best.name,
-                                'track_number': full_details.get('track_number') if full_details else None,
-                                'disc_number': full_details.get('disc_number', 1) if full_details else 1,
-                                'year': (album_data.get('release_date', '') or '')[:4] if isinstance(album_data, dict) else '',
-                                'image_url': getattr(best, 'image_url', '') or '',
-                                'source': 'title_search',
-                                'confidence': round(best_score, 3),
-                            }
-            except Exception as e:
-                logger.debug(f"Title search failed for '{title}': {e}")
-            # Rate limit courtesy
-            if context.sleep_or_stop(0.2):
-                return None
+
+                    corrected = self._build_corrected_metadata(
+                        full_details or best,
+                        fallback_title=title,
+                        source=f"{source}_title_search",
+                        confidence=round(best_score, 3),
+                    )
+                    if corrected:
+                        return corrected
+                except Exception as e:
+                    logger.debug(f"Title search failed for '{title}' via {source}: {e}")
+                # Rate limit courtesy
+                if context.sleep_or_stop(0.2):
+                    return None
 
         return None
+
+    @staticmethod
+    def _get_track_value(payload, key, default=None):
+        if isinstance(payload, dict):
+            return payload.get(key, default)
+        return getattr(payload, key, default)
+
+    def _iter_source_track_ids(self, track: dict, primary_source: str):
+        source_fields = {
+            'spotify': 'spotify_track_id',
+            'deezer': 'deezer_track_id',
+            'itunes': 'itunes_track_id',
+        }
+        ordered_sources = [source for source in self._iter_source_priority(primary_source, _TRACK_ID_SOURCES) if source in source_fields]
+        for source in ordered_sources:
+            source_id = track.get(source_fields[source])
+            if source_id:
+                yield source, source_id
+
+    @staticmethod
+    def _iter_source_priority(primary_source: str, allowed_sources: set[str]):
+        return [source for source in get_source_priority(primary_source) if source in allowed_sources]
+
+    def _pick_best_track_candidate(self, title: str, album_title: str, results):
+        from difflib import SequenceMatcher
+
+        best = None
+        best_score = 0.0
+        title_lower = title.lower()
+        album_lower = album_title.lower() if album_title else ''
+
+        for candidate in results:
+            candidate_name = self._get_track_value(candidate, 'name', '') or ''
+            if not candidate_name:
+                continue
+            name_sim = SequenceMatcher(None, title_lower, candidate_name.lower()).ratio()
+
+            candidate_album = self._get_track_value(candidate, 'album', '') or ''
+            if album_lower and candidate_album:
+                if isinstance(candidate_album, dict):
+                    candidate_album = candidate_album.get('name') or candidate_album.get('title') or ''
+                album_sim = SequenceMatcher(None, album_lower, str(candidate_album).lower()).ratio()
+                name_sim = (name_sim * 0.7) + (album_sim * 0.3)
+
+            if name_sim > best_score:
+                best_score = name_sim
+                best = candidate
+
+        return best, best_score
+
+    def _build_corrected_metadata(self, payload, fallback_title: str, source: str, confidence: float):
+        if not payload:
+            return None
+
+        artist = self._get_track_value(payload, 'primary_artist', '') or ''
+        artists = self._get_track_value(payload, 'artists', []) or []
+        if not artist and artists:
+            if isinstance(artists, list):
+                first_artist = artists[0]
+                if isinstance(first_artist, dict):
+                    artist = first_artist.get('name', '')
+                else:
+                    artist = str(first_artist)
+
+        artist = (artist or '').strip()
+        if not artist or artist.lower() in _UNKNOWN_NAMES:
+            return None
+
+        album = self._get_track_value(payload, 'album', {}) or {}
+        if isinstance(album, dict):
+            album_name = album.get('name', '') or album.get('title', '') or ''
+            year = (album.get('release_date', '') or '')[:4]
+            image_url = ''
+            images = album.get('images') or []
+            if images:
+                first_image = images[0]
+                if isinstance(first_image, dict):
+                    image_url = first_image.get('url', '') or ''
+        else:
+            album_name = str(album)
+            year = ''
+            image_url = ''
+
+        image_url = self._get_track_value(payload, 'image_url', image_url) or image_url
+
+        title = self._get_track_value(payload, 'name', fallback_title) or fallback_title
+
+        return {
+            'artist': artist,
+            'album': album_name,
+            'title': title,
+            'track_number': self._get_track_value(payload, 'track_number'),
+            'disc_number': self._get_track_value(payload, 'disc_number', 1) or 1,
+            'year': year,
+            'image_url': image_url,
+            'source': source,
+            'confidence': confidence,
+        }
 
     def _apply_fix(self, context, track, corrected, resolved_path,
                    expected_rel, transfer, fix_tags, reorganize_files):

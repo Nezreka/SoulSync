@@ -64089,6 +64089,8 @@ function _renderFindingDetail(f) {
             if (d.album) rows.push(['Album', d.album]);
             if (d.title) rows.push(['Title', d.title]);
             if (d.spotify_track_id) rows.push(['Spotify ID', d.spotify_track_id]);
+            if (d.resolved_source) rows.push(['Resolved Source', d.resolved_source]);
+            if (d.resolved_track_id) rows.push(['Resolved Track ID', d.resolved_track_id]);
             if (d.found_fields && typeof d.found_fields === 'object') {
                 Object.entries(d.found_fields).forEach(([k, v]) => {
                     rows.push([`Found: ${k}`, String(v), 'success']);
