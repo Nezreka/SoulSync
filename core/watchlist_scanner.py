@@ -418,6 +418,26 @@ class WatchlistScanner:
             return False
         return self.spotify_client.is_spotify_authenticated()
 
+    def _spotify_is_primary_source(self) -> bool:
+        """Check if Spotify is both authenticated and the configured primary metadata source.
+
+        Use this (not _spotify_available_for_run) when deciding whether to fetch
+        album/artist data from Spotify.  Plain auth is not sufficient — the user
+        may have Spotify connected only for playlist sync while Deezer/iTunes
+        serves as the metadata source, and calling Spotify for data in that case
+        burns API quota unnecessarily.
+
+        _spotify_available_for_run() is still used for Spotify-specific features
+        (e.g. library-cache sync) that must run regardless of primary source.
+        """
+        if not self._spotify_available_for_run():
+            return False
+        try:
+            from core.metadata_service import get_primary_source
+            return get_primary_source() == 'spotify'
+        except Exception:
+            return False
+
     def _get_active_client_and_artist_id(self, watchlist_artist: WatchlistArtist):
         """
         Get the appropriate client and artist ID based on active provider.
@@ -627,7 +647,7 @@ class WatchlistScanner:
             if self.spotify_client and self.spotify_client.is_rate_limited():
                 self._disable_spotify_for_run("global Spotify rate limit active")
             providers_to_backfill = ['itunes', 'deezer']
-            if self._spotify_available_for_run():
+            if self._spotify_is_primary_source():
                 providers_to_backfill.append('spotify')
             try:
                 from config.settings import config_manager as _cfg
@@ -1764,8 +1784,8 @@ class WatchlistScanner:
             searched_spotify_id = None
             searched_fallback_id = None
             try:
-                # Try Spotify search
-                if self._spotify_available_for_run():
+                # Try Spotify search (only when Spotify is the configured primary source)
+                if self._spotify_is_primary_source():
                     searched_results = self.spotify_client.search_artists(artist_name, limit=1)
                     if searched_results and len(searched_results) > 0:
                         searched_spotify_id = searched_results[0].id
@@ -1801,8 +1821,8 @@ class WatchlistScanner:
                         'popularity': 0
                     }
 
-                    # Try to match on Spotify
-                    if self._spotify_available_for_run():
+                    # Try to match on Spotify (only when Spotify is the configured primary source)
+                    if self._spotify_is_primary_source():
                         try:
                             spotify_results = self.spotify_client.search_artists(artist_name_to_match, limit=1)
                             if spotify_results and len(spotify_results) > 0:
@@ -2013,7 +2033,7 @@ class WatchlistScanner:
             logger.info("Populating discovery pool from similar artists...")
 
             # Determine which sources are available
-            spotify_available = self._spotify_available_for_run()
+            spotify_available = self._spotify_is_primary_source()
 
             # Import fallback metadata client (iTunes or Deezer)
             itunes_client, fallback_source = _get_fallback_metadata_client()
@@ -2650,7 +2670,7 @@ class WatchlistScanner:
             albums_checked = 0
 
             # Determine available sources
-            spotify_available = self._spotify_available_for_run()
+            spotify_available = self._spotify_is_primary_source()
 
             # Get fallback metadata client (iTunes or Deezer)
             itunes_client, fallback_source = _get_fallback_metadata_client()
@@ -2885,7 +2905,7 @@ class WatchlistScanner:
                            f"{profile['avg_daily_plays']:.1f} avg daily plays")
 
             # Determine available sources
-            spotify_available = self._spotify_available_for_run()
+            spotify_available = self._spotify_is_primary_source()
             itunes_client, fallback_source = _get_fallback_metadata_client()
 
             # Process each available source

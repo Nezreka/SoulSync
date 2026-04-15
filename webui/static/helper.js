@@ -3600,6 +3600,10 @@ function closeHelperSearch() {
 
 const WHATS_NEW = {
     '2.2': [
+        // --- April 15, 2026 ---
+        { date: 'April 15, 2026' },
+        { title: 'Fix Spotify API Leaking When Deezer/iTunes is Primary', desc: 'Spotify was being called for watchlist album scanning, similar artist discovery, repair jobs, and the Artists page search even when another source was set as primary. All data-fetching now respects the configured primary source. Spotify playlist sync is unaffected' },
+
         // --- April 14, 2026 ---
         { date: 'April 14, 2026' },
         { title: 'Fix Staging Files Ignoring Path Template',        desc: 'Files matched from the Staging folder were copied to the transfer root with their original filename instead of applying the configured path template. Post-processing now receives full artist/album context for staging matches' },

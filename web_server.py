@@ -15803,8 +15803,8 @@ def search_match():
                 artist_matches = hydrabase_client.search_artists(query, limit=8)
                 provider = 'hydrabase'
             else:
-                artist_matches = spotify_client.search_artists(query, limit=8)
-                provider = _detect_provider(artist_matches, spotify_client)
+                artist_matches = _get_metadata_fallback_client().search_artists(query, limit=8)
+                provider = _get_metadata_fallback_source()
             results = []
 
             for artist in artist_matches:
@@ -15840,8 +15840,8 @@ def search_match():
                 if not artist_id:
                     return jsonify({"error": "Artist ID required for album search"}), 400
                 # Get artist's albums and filter by query
-                album_matches = spotify_client.get_artist_albums(artist_id)
-                provider = _detect_provider(album_matches, spotify_client)
+                album_matches = _get_metadata_fallback_client().get_artist_albums(artist_id)
+                provider = _get_metadata_fallback_source()
 
             results = []
             for album in album_matches:

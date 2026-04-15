@@ -10,6 +10,7 @@ import shutil
 import sys
 import time
 
+from core.metadata_service import get_client_for_source, get_primary_client, get_primary_source
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -268,12 +269,27 @@ class UnknownArtistFixerJob(RepairJob):
         except Exception as e:
             logger.debug(f"Failed to read tags from {resolved_path}: {e}")
 
-        # Priority 2: Look up by source track ID
-        source_id = (track.get('spotify_track_id') or track.get('deezer_track_id')
-                     or track.get('itunes_track_id'))
-        if source_id and context.spotify_client:
+        # Priority 2: Look up by source track ID using the appropriate client.
+        # Try the primary source's ID first, then fall back to any available ID
+        # with its matching client so we never pass a Deezer/iTunes ID to Spotify
+        # (or vice-versa).
+        _primary = get_primary_source()
+        _id_candidates = []
+        for _src in [_primary] + [s for s in ('spotify', 'deezer', 'itunes') if s != _primary]:
+            _tid = track.get(f'{_src}_track_id')
+            if _tid:
+                _id_candidates.append((_src, _tid))
+        source_id = None
+        _lookup_client = None
+        for _src, _tid in _id_candidates:
+            _c = get_client_for_source(_src)
+            if _c:
+                source_id = _tid
+                _lookup_client = _c
+                break
+        if source_id and _lookup_client:
             try:
-                details = context.spotify_client.get_track_details(str(source_id))
+                details = _lookup_client.get_track_details(str(source_id))
                 if details and details.get('primary_artist'):
                     artist = details['primary_artist']
                     if artist.lower() not in _UNKNOWN_NAMES:
@@ -293,10 +309,11 @@ class UnknownArtistFixerJob(RepairJob):
             except Exception as e:
                 logger.debug(f"Track ID lookup failed for {source_id}: {e}")
 
-        # Priority 3: Search by title
-        if title and context.spotify_client:
+        # Priority 3: Search by title using the configured primary metadata source
+        _search_client = get_primary_client()
+        if title and _search_client:
             try:
-                results = context.spotify_client.search_tracks(title, limit=5)
+                results = _search_client.search_tracks(title, limit=5)
                 if results:
                     # Score candidates
                     from difflib import SequenceMatcher
@@ -319,7 +336,7 @@ class UnknownArtistFixerJob(RepairJob):
                             # Get full details for track_number
                             full_details = None
                             try:
-                                full_details = context.spotify_client.get_track_details(best.id)
+                                full_details = _search_client.get_track_details(best.id)
                             except Exception:
                                 pass
                             album_data = full_details.get('album', {}) if full_details else {}
