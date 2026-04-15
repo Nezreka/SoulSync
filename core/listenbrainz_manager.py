@@ -331,18 +331,24 @@ class ListenBrainzManager:
         conn = self._get_db_connection()
         cursor = conn.cursor()
 
-        # For each playlist type, keep only the 25 most recent
-        playlist_types = ['created_for', 'user', 'collaborative']
+        # For each playlist type, keep only the N most recent
+        # lastfm_radio keeps fewer since they're auto-regenerated weekly
+        playlist_type_limits = {
+            'created_for': 25,
+            'user': 25,
+            'collaborative': 25,
+            'lastfm_radio': 5,
+        }
 
-        for playlist_type in playlist_types:
+        for playlist_type, keep_count in playlist_type_limits.items():
             try:
-                # Get IDs of playlists to delete (all except 25 most recent)
+                # Get IDs of playlists to delete (all except keep_count most recent)
                 cursor.execute("""
                     SELECT id FROM listenbrainz_playlists
                     WHERE playlist_type = ? AND profile_id = ?
                     ORDER BY last_updated DESC
-                    LIMIT -1 OFFSET 25
-                """, (playlist_type, self.profile_id))
+                    LIMIT -1 OFFSET ?
+                """, (playlist_type, self.profile_id, keep_count))
 
                 old_playlist_ids = [row[0] for row in cursor.fetchall()]
 
@@ -361,6 +367,85 @@ class ListenBrainzManager:
 
         conn.commit()
         conn.close()
+
+    def save_lastfm_radio_playlist(self, seed_track: str, seed_artist: str, similar_tracks: List[Dict]) -> str:
+        """
+        Persist a Last.fm similar-tracks playlist to the DB under playlist_type='lastfm_radio'.
+
+        Uses a deterministic playlist_mbid derived from the seed so re-generating the same
+        seed upserts (refreshes) rather than creating duplicates.
+
+        Args:
+            seed_track:     The seed track title.
+            seed_artist:    The seed artist name.
+            similar_tracks: List of dicts with {name, artist, match, mbid} from LastFMClient.get_similar_tracks().
+
+        Returns:
+            The playlist_mbid string.
+        """
+        import hashlib
+        mbid_hash = hashlib.md5(f"{seed_artist.lower()}:{seed_track.lower()}".encode()).hexdigest()[:12]
+        playlist_mbid = f"lastfm_radio_{mbid_hash}"
+        title = f"Last.fm Radio: {seed_track} by {seed_artist}"
+        track_count = len(similar_tracks)
+
+        conn = self._get_db_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute("""
+                SELECT id FROM listenbrainz_playlists
+                WHERE playlist_mbid = ? AND profile_id = ?
+            """, (playlist_mbid, self.profile_id))
+            existing = cursor.fetchone()
+
+            if existing:
+                playlist_id = existing[0]
+                # Delete old tracks so we can re-insert fresh ones
+                cursor.execute("DELETE FROM listenbrainz_tracks WHERE playlist_id = ?", (playlist_id,))
+                cursor.execute("""
+                    UPDATE listenbrainz_playlists
+                    SET title = ?, track_count = ?, last_updated = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (title, track_count, playlist_id))
+                logger.info(f"Updated Last.fm radio playlist '{title}' ({track_count} tracks)")
+            else:
+                cursor.execute("""
+                    INSERT INTO listenbrainz_playlists
+                    (playlist_mbid, title, creator, playlist_type, track_count, annotation_data, profile_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (playlist_mbid, title, 'Last.fm', 'lastfm_radio', track_count, '{}', self.profile_id))
+                playlist_id = cursor.lastrowid
+                logger.info(f"Saved new Last.fm radio playlist '{title}' ({track_count} tracks)")
+
+            # Insert tracks
+            for idx, t in enumerate(similar_tracks):
+                cursor.execute("""
+                    INSERT OR REPLACE INTO listenbrainz_tracks
+                    (playlist_id, position, track_name, artist_name, album_name,
+                     duration_ms, recording_mbid, release_mbid, album_cover_url, additional_metadata)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    playlist_id, idx,
+                    t.get('name', ''),
+                    t.get('artist', ''),
+                    '',          # album unknown at this stage
+                    0,           # duration unknown
+                    t.get('mbid', '') or '',
+                    '',
+                    None,
+                    '{}',
+                ))
+
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error saving Last.fm radio playlist: {e}")
+            raise
+        finally:
+            conn.close()
+
+        return playlist_mbid
 
     def has_cached_playlists(self) -> bool:
         """Check if there are any cached playlists in the database"""

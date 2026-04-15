@@ -32744,20 +32744,23 @@ function openYouTubeDiscoveryModal(urlHash) {
         const isBeatport = state.is_beatport_playlist;
         const isListenBrainz = state.is_listenbrainz_playlist;
         const isMirrored = state.is_mirrored_playlist;
+        const isLastfmRadio = typeof urlHash === 'string' && urlHash.startsWith('lastfm_radio_');
         const modalTitle = isMirrored ? '🎵 Mirrored Playlist Discovery' :
             isSpotifyPublic ? '🎵 Spotify Playlist Discovery' :
                 isDeezer ? '🎵 Deezer Playlist Discovery' :
                     isTidal ? '🎵 Tidal Playlist Discovery' :
                         isBeatport ? '🎵 Beatport Chart Discovery' :
-                            isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
-                                '🎵 YouTube Playlist Discovery';
+                            isLastfmRadio ? '📻 Last.fm Radio Discovery' :
+                                isListenBrainz ? '🎵 ListenBrainz Playlist Discovery' :
+                                    '🎵 YouTube Playlist Discovery';
         const sourceLabel = isMirrored ? (state.mirrored_source ? state.mirrored_source.charAt(0).toUpperCase() + state.mirrored_source.slice(1) : 'Source') :
             isSpotifyPublic ? 'Spotify' :
                 isDeezer ? 'Deezer' :
                     isTidal ? 'Tidal' :
                         isBeatport ? 'Beatport' :
-                            isListenBrainz ? 'LB' :
-                                'YT';
+                            isLastfmRadio ? 'Last.fm' :
+                                isListenBrainz ? 'LB' :
+                                    'YT';
 
         const modalHtml = `
             <div class="modal-overlay" id="youtube-discovery-modal-${urlHash}">
@@ -32765,7 +32768,7 @@ function openYouTubeDiscoveryModal(urlHash) {
                     <div class="modal-header">
                         <h2>${modalTitle}</h2>
                         <div class="modal-subtitle">${state.playlist.name} (${state.playlist.tracks.length} tracks)</div>
-                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz, isMirrored, isDeezer, isSpotifyPublic)}</div>
+                        <div class="modal-description">${getModalDescription(state.phase, isTidal, isBeatport, isListenBrainz, isMirrored, isDeezer, isSpotifyPublic, isLastfmRadio)}</div>
                         <button class="modal-close-btn" onclick="closeYouTubeDiscoveryModal('${urlHash}')">✕</button>
                     </div>
 
@@ -33186,8 +33189,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
     }
 }
 
-function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false, isMirrored = false, isDeezer = false, isSpotifyPublic = false) {
-    const source = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'Spotify' : (isDeezer ? 'Deezer' : (isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube')))));
+function getModalDescription(phase, isTidal = false, isBeatport = false, isListenBrainz = false, isMirrored = false, isDeezer = false, isSpotifyPublic = false, isLastfmRadio = false) {
+    const source = isMirrored ? 'mirrored' : (isSpotifyPublic ? 'Spotify' : (isDeezer ? 'Deezer' : (isLastfmRadio ? 'Last.fm Radio' : (isListenBrainz ? 'ListenBrainz' : (isBeatport ? 'Beatport' : (isTidal ? 'Tidal' : 'YouTube'))))));
     switch (phase) {
         case 'fresh':
             return `Ready to discover clean ${currentMusicSourceName} metadata for ${source} tracks...`;
@@ -33378,14 +33381,25 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
         }
     });
 
-    // Update action buttons if discovery is complete (progress = 100%)
-    if (status.progress >= 100) {
+    // Update action buttons and description when discovery is complete.
+    // status.complete is explicitly set by LB/WS polling callers; only act when transitioning
+    // from 'discovering' to avoid interfering with download/sync phases of other playlist types.
+    if (status.complete) {
         const state = listenbrainzPlaylistStates[urlHash] || youtubePlaylistStates[urlHash];
-        if (state && state.phase === 'discovered') {
+        if (state && state.phase === 'discovering') {
+            state.phase = 'discovered';
             const actionButtonsContainer = document.querySelector(`#youtube-discovery-modal-${urlHash} .modal-footer-left`);
             if (actionButtonsContainer) {
                 actionButtonsContainer.innerHTML = getModalActionButtons(urlHash, 'discovered', state);
                 console.log(`✨ Updated action buttons for completed discovery: ${urlHash}`);
+            }
+            const descEl = document.querySelector(`#youtube-discovery-modal-${urlHash} .modal-description`);
+            if (descEl) descEl.textContent = 'Discovery complete! View the results below.';
+        } else if (state && state.phase === 'discovered') {
+            // Already discovered — ensure buttons are correct (e.g. after rehydration)
+            const actionButtonsContainer = document.querySelector(`#youtube-discovery-modal-${urlHash} .modal-footer-left`);
+            if (actionButtonsContainer && actionButtonsContainer.querySelector('.modal-info')) {
+                actionButtonsContainer.innerHTML = getModalActionButtons(urlHash, 'discovered', state);
             }
         }
     }
@@ -34076,6 +34090,8 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
                 socket.emit('discovery:unsubscribe', { ids: [playlistMbid] }); delete _discoveryProgressCallbacks[playlistMbid];
                 if (listenbrainzPlaylistStates[playlistMbid]) listenbrainzPlaylistStates[playlistMbid].phase = 'discovered';
                 updateYouTubeModalButtons(playlistMbid, 'discovered');
+                const _descElWs = document.querySelector(`#youtube-discovery-modal-${playlistMbid} .modal-description`);
+                if (_descElWs) _descElWs.textContent = 'Discovery complete! View the results below.';
                 const playlistIdEl = `discover-lb-playlist-${playlistMbid}`;
                 const syncBtn = document.getElementById(`${playlistIdEl}-sync-btn`);
                 if (syncBtn) syncBtn.style.display = 'inline-block';
@@ -34157,6 +34173,10 @@ function startListenBrainzDiscoveryPolling(playlistMbid) {
 
                 // Update modal buttons to show sync and download buttons
                 updateYouTubeModalButtons(playlistMbid, 'discovered');
+
+                // Update modal description to "Discovery complete!"
+                const descEl = document.querySelector(`#youtube-discovery-modal-${playlistMbid} .modal-description`);
+                if (descEl) descEl.textContent = 'Discovery complete! View the results below.';
 
                 // Show sync button in playlist listing (hidden by default until discovered)
                 const playlistId = `discover-lb-playlist-${playlistMbid}`;
@@ -52456,6 +52476,7 @@ async function loadDiscoverPage() {
         loadCacheLabelExplorer(),       // From metadata cache
         loadCacheDeepCuts(),            // From metadata cache
         loadCacheGenreExplorer(),       // From metadata cache
+        initializeLastfmRadioSection(),  // Last.fm Radio section (gated on API key)
         initializeListenBrainzTabs(),  // ListenBrainz playlists (tabbed)
         loadDecadeBrowserTabs(),  // Time Machine (tabbed by decade)
         loadGenreBrowserTabs(),  // Browse by Genre (tabbed by genre)
@@ -55236,27 +55257,189 @@ let listenbrainzTracksCache = {}; // Store tracks for each playlist
 let activeListenBrainzTab = 'recommendations'; // Track active tab
 let activeListenBrainzSubTab = null; // Track active sub-tab within recommendations
 
+// ── Last.fm Track Radio ──────────────────────────────────────────────────────
+
+let _lastfmRadioDebounceTimer = null;
+let _lastfmRadioSelected = null; // {name, artist}
+
+function debouncedLastfmTrackSearch(query) {
+    clearTimeout(_lastfmRadioDebounceTimer);
+    const q = (query || '').trim();
+    if (!q) {
+        document.getElementById('lastfm-radio-dropdown').style.display = 'none';
+        return;
+    }
+    _lastfmRadioDebounceTimer = setTimeout(() => _runLastfmTrackSearch(q), 400);
+}
+
+async function _runLastfmTrackSearch(q) {
+    if (q.length < 2) return;
+    const dropdown = document.getElementById('lastfm-radio-dropdown');
+    // Show a mini spinner while fetching
+    dropdown.innerHTML = '<div class="lastfm-radio-searching"><div class="server-search-spinner" style="width:14px;height:14px;margin:0 auto;"></div></div>';
+    dropdown.style.display = 'block';
+    try {
+        const res = await fetch(`/api/lastfm/search/tracks?q=${encodeURIComponent(q)}`);
+        if (!res.ok) { dropdown.style.display = 'none'; return; }
+        const data = await res.json();
+        if (!data.results || data.results.length === 0) {
+            dropdown.style.display = 'none';
+            return;
+        }
+        dropdown.innerHTML = data.results.map(t => {
+            const imgHtml = t.image_url
+                ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'lastfm-radio-art-empty\\'></div>'">`
+                : '<div class="lastfm-radio-art-empty"></div>';
+            const listeners = t.listeners > 0
+                ? `<span class="lastfm-radio-result-listeners">${(t.listeners / 1000).toFixed(0)}k listeners</span>`
+                : '';
+            return `
+                <div class="lastfm-radio-result" onclick="selectLastfmRadioTrack(decodeURIComponent('${encodeURIComponent(t.name)}'), decodeURIComponent('${encodeURIComponent(t.artist)}'))">
+                    <div class="lastfm-radio-result-art">${imgHtml}</div>
+                    <div class="lastfm-radio-result-meta">
+                        <span class="lastfm-radio-result-track">${t.name}</span>
+                        <span class="lastfm-radio-result-artist">${t.artist}${listeners ? ' · ' + t.listeners.toLocaleString() + ' listeners' : ''}</span>
+                    </div>
+                </div>`;
+        }).join('');
+        dropdown.style.display = 'block';
+    } catch (e) {
+        console.error('Last.fm search error:', e);
+        dropdown.style.display = 'none';
+    }
+}
+
+function selectLastfmRadioTrack(name, artist) {
+    // Close dropdown and update input to show selection
+    document.getElementById('lastfm-radio-dropdown').style.display = 'none';
+    document.getElementById('lastfm-radio-input').value = `${name} — ${artist}`;
+    document.getElementById('lastfm-radio-input').blur();
+    // Immediately kick off generation
+    _generateLastfmRadioFor(name, artist);
+}
+
+function clearLastfmRadioSelection() {
+    document.getElementById('lastfm-radio-input').value = '';
+    document.getElementById('lastfm-radio-dropdown').style.display = 'none';
+}
+
+// Keep generateLastfmRadio as public alias (called by nothing now but harmless)
+async function generateLastfmRadio() {
+    const input = (document.getElementById('lastfm-radio-input').value || '').trim();
+    if (!input) return;
+    // Parse "Track — Artist" format if present
+    const parts = input.split(' — ');
+    if (parts.length >= 2) {
+        await _generateLastfmRadioFor(parts[0].trim(), parts[1].trim());
+    }
+}
+
+async function _generateLastfmRadioFor(name, artist) {
+    const container = document.getElementById('lastfm-radio-playlists');
+    const input = document.getElementById('lastfm-radio-input');
+
+    // Show loading state in the playlists area
+    if (container) {
+        container.innerHTML = `
+            <div class="lastfm-radio-generating">
+                <div class="server-search-spinner"></div>
+                <p>Building radio for <strong>${name}</strong> by <strong>${artist}</strong>…</p>
+            </div>`;
+    }
+    if (input) input.disabled = true;
+
+    try {
+        const res = await fetch('/api/lastfm/radio/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_name: name, artist_name: artist }),
+        });
+        const data = await res.json();
+        if (!data.success) {
+            if (container) container.innerHTML = '';
+            showToast(data.error || 'Failed to generate radio', 'error');
+            return;
+        }
+        // Reload all radio playlist cards
+        await _loadLastfmRadioPlaylists();
+    } catch (e) {
+        if (container) container.innerHTML = '';
+        showToast('Error generating Last.fm radio', 'error');
+        console.error(e);
+    } finally {
+        if (input) input.disabled = false;
+    }
+}
+
+async function initializeLastfmRadioSection() {
+    try {
+        const cfgRes = await fetch('/api/lastfm/configured');
+        if (!cfgRes.ok) return;
+        const { configured } = await cfgRes.json();
+        const section = document.getElementById('lastfm-radio-section');
+        if (!section) return;
+        if (!configured) {
+            section.style.display = 'none';
+            return;
+        }
+        section.style.display = '';
+        await _loadLastfmRadioPlaylists();
+    } catch (e) {
+        console.error('Error initializing Last.fm Radio section:', e);
+    }
+}
+
+async function _loadLastfmRadioPlaylists() {
+    const container = document.getElementById('lastfm-radio-playlists');
+    if (!container) return;
+    try {
+        const res = await fetch('/api/discover/listenbrainz/lastfm-radio');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.success || !data.playlists || data.playlists.length === 0) {
+            container.innerHTML = '';
+            return;
+        }
+        // Reuse the same LB playlist card builder — cards are identical
+        container.innerHTML = buildListenBrainzPlaylistsHtml(data.playlists, 'lastfm_radio');
+        loadTracksForPlaylists(data.playlists);
+    } catch (e) {
+        console.error('Error loading Last.fm radio playlists:', e);
+    }
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+    const section = document.getElementById('lastfm-radio-search-section');
+    if (section && !section.contains(e.target)) {
+        const dd = document.getElementById('lastfm-radio-dropdown');
+        if (dd) dd.style.display = 'none';
+    }
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+
 async function initializeListenBrainzTabs() {
     try {
         console.log('🧠 Initializing ListenBrainz tabs...');
 
-        // Fetch all playlists types
+        // Fetch all playlist types
         const [createdForRes, userPlaylistsRes, collaborativeRes] = await Promise.all([
             fetch('/api/discover/listenbrainz/created-for'),
             fetch('/api/discover/listenbrainz/user-playlists'),
-            fetch('/api/discover/listenbrainz/collaborative')
+            fetch('/api/discover/listenbrainz/collaborative'),
         ]);
 
         console.log('📡 API Responses:', {
             createdFor: createdForRes.status,
             userPlaylists: userPlaylistsRes.status,
-            collaborative: collaborativeRes.status
+            collaborative: collaborativeRes.status,
         });
 
         const tabs = [
             { id: 'recommendations', label: '🎁 Recommendations', hasData: false },
             { id: 'user', label: '📚 Your Playlists', hasData: false },
-            { id: 'collaborative', label: '🤝 Collaborative', hasData: false }
+            { id: 'collaborative', label: '🤝 Collaborative', hasData: false },
         ];
 
         // Track LB username for header display
@@ -55699,17 +55882,17 @@ function displayListenBrainzTracks(tracks, playlistId) {
         metaElement.textContent = `by ${creator} • ${tracks.length} track${tracks.length !== 1 ? 's' : ''}`;
     }
 
-    // Simple SVG placeholder for missing album art
-    const placeholderImage = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIGZpbGw9IiMzMzMiLz48cGF0aCBkPSJNMjAgMTBDMTguMzQzMSAxMCAxNyAxMS4zNDMxIDE3IDEzQzE3IDE0LjY1NjkgMTguMzQzMSAxNiAyMCAxNkMyMS42NTY5IDE2IDIzIDE0LjY1NjkgMjMgMTNDMjMgMTEuMzQzMSAyMS42NTY5IDEwIDIwIDEwWk0yNSAyMEgyNUMyNSAxOC44OTU0IDI0LjEwNDYgMTggMjMgMThIMTdDMTUuODk1NCAxOCAxNSAxOC44OTU0IDE1IDIwVjI4QzE1IDI5LjEwNDYgMTUuODk1NCAzMCAxNyAzMEgyM0MyNC4xMDQ2IDMwIDI1IDI5LjEwNDYgMjUgMjhWMjBaIiBmaWxsPSIjNjY2Ii8+PC9zdmc+';
+    // Simple SVG placeholder for missing album art (music note icon)
+    const placeholderImage = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIGZpbGw9IiMyYTJhMmEiLz48cGF0aCBkPSJNMjQgMTJ2MTIuNUEzLjUgMy41IDAgMSAxIDIwLjUgMjFWMTZsLTUgMXY5YTMuNSAzLjUgMCAxIDEtMy41LTMuNVYxM2wxMi0zeiIgZmlsbD0iIzU1NSIvPjwvc3ZnPg==';
 
     let html = '<div class="discover-playlist-tracks-compact">';
     tracks.forEach((track, index) => {
         const coverUrl = track.album_cover_url || placeholderImage;
         const durationMin = Math.floor(track.duration_ms / 60000);
         const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
-        const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
+        const duration = track.duration_ms > 0 ? `${durationMin}:${durationSec.toString().padStart(2, '0')}` : '';
 
-        const albumName = escapeHtml(track.album_name || 'Unknown Album');
+        const albumName = track.album_name ? escapeHtml(track.album_name) : '';
 
         html += `
             <div class="discover-playlist-track-compact" data-track-index="${index}">

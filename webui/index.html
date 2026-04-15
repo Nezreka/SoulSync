@@ -3823,6 +3823,35 @@
                         </div>
                     </div>
 
+                    <!-- Last.fm Track Radio (hidden until Last.fm API key configured) -->
+                    <div class="discover-section" id="lastfm-radio-section" style="display:none;">
+                        <div class="discover-section-header">
+                            <div>
+                                <h2 class="discover-section-title">📻 Last.fm Radio</h2>
+                                <p class="discover-section-subtitle">Search a track to generate a similar-tracks playlist</p>
+                            </div>
+                        </div>
+
+                        <!-- Search bar -->
+                        <div class="lastfm-radio-search" id="lastfm-radio-search-section">
+                            <div class="lastfm-radio-search-row">
+                                <div class="lastfm-radio-input-wrap">
+                                    <input type="text" id="lastfm-radio-input"
+                                           placeholder="Search a track to generate a radio..."
+                                           autocomplete="off"
+                                           oninput="debouncedLastfmTrackSearch(this.value)"
+                                           onkeydown="if(event.key==='Escape')clearLastfmRadioSelection()">
+                                    <div id="lastfm-radio-dropdown" class="lastfm-radio-dropdown" style="display:none;"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Generated radio playlist cards -->
+                        <div id="lastfm-radio-playlists">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
                     <!-- ListenBrainz Playlists (Tabbed) -->
                     <div class="discover-section">
                         <div class="discover-section-header">
