@@ -12734,6 +12734,287 @@ def get_write_tags_batch_status():
         return jsonify(state)
 
 
+
+# ── ReplayGain Analysis endpoints ──
+
+from core.replaygain import (
+    analyze_track as _rg_analyze_track,
+    write_replaygain_tags as _rg_write_tags,
+    is_ffmpeg_available as _rg_ffmpeg_available,
+    RG_REFERENCE_LUFS as _RG_REFERENCE_LUFS,
+)
+
+# State machine for album-level ReplayGain jobs
+_rg_album_state = {
+    'status': 'idle',   # idle | running | done
+    'album_id': None,
+    'total': 0,
+    'processed': 0,
+    'analyzed': 0,
+    'failed': 0,
+    'current_track': '',
+    'errors': [],
+}
+_rg_album_lock = threading.Lock()
+
+# State machine for selected-tracks batch ReplayGain jobs
+_rg_batch_state = {
+    'status': 'idle',
+    'total': 0,
+    'processed': 0,
+    'analyzed': 0,
+    'failed': 0,
+    'current_track': '',
+    'errors': [],
+}
+_rg_batch_lock = threading.Lock()
+
+
+@app.route('/api/library/track/<int:track_id>/analyze-replaygain', methods=['POST'])
+def analyze_track_replaygain(track_id):
+    """
+    Analyze a single track and write ReplayGain track-level tags immediately.
+    Synchronous — runs FFmpeg inline (typically 1–3 s per track).
+    """
+    if not _rg_ffmpeg_available():
+        return jsonify({'success': False, 'error': 'ffmpeg not found on PATH'}), 500
+
+    database = get_database()
+    conn = database._get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM tracks WHERE id = ?", (str(track_id),))
+    row = cursor.fetchone()
+    if not row:
+        return jsonify({'success': False, 'error': 'Track not found'}), 404
+
+    file_path = _resolve_library_file_path(dict(row).get('file_path'))
+    if not file_path:
+        return jsonify({'success': False, 'error': 'File not found on disk'}), 404
+
+    try:
+        lufs, peak_dbfs = _rg_analyze_track(file_path)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+    track_gain_db = _RG_REFERENCE_LUFS - lufs
+
+    file_lock = _get_file_lock(file_path)
+    with file_lock:
+        ok = _rg_write_tags(file_path, track_gain_db, peak_dbfs)
+
+    if not ok:
+        return jsonify({'success': False, 'error': 'Failed to write tags to file'}), 500
+
+    return jsonify({
+        'success': True,
+        'track_gain': f"{track_gain_db:+.2f} dB",
+        'track_peak': f"{10 ** (peak_dbfs / 20.0):.6f}",
+        'lufs': round(lufs, 2),
+    })
+
+
+@app.route('/api/library/album/<int:album_id>/analyze-replaygain', methods=['POST'])
+def analyze_album_replaygain(album_id):
+    """
+    Analyze all tracks in an album and write both track-level and album-level
+    ReplayGain tags.  Runs in a background thread — poll /status for progress.
+    """
+    with _rg_album_lock:
+        if _rg_album_state['status'] == 'running':
+            return jsonify({'success': False, 'error': 'An album ReplayGain job is already running'}), 409
+
+    if not _rg_ffmpeg_available():
+        return jsonify({'success': False, 'error': 'ffmpeg not found on PATH'}), 500
+
+    database = get_database()
+    conn = database._get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM tracks WHERE album_id = ? ORDER BY track_number, title",
+        (album_id,)
+    )
+    tracks = [dict(r) for r in cursor.fetchall()]
+    if not tracks:
+        return jsonify({'success': False, 'error': 'No tracks found for this album'}), 404
+
+    with _rg_album_lock:
+        _rg_album_state.update({
+            'status': 'running',
+            'album_id': album_id,
+            'total': len(tracks),
+            'processed': 0,
+            'analyzed': 0,
+            'failed': 0,
+            'current_track': '',
+            'errors': [],
+        })
+
+    def _run_album():
+        lufs_values = []
+        peak_values = []
+        track_results = []  # (file_path, track_gain_db, peak_dbfs)
+
+        # Pass 1: analyze every track
+        for track in tracks:
+            file_path = _resolve_library_file_path(track.get('file_path'))
+            title = track.get('title') or track.get('file_path') or ''
+            with _rg_album_lock:
+                _rg_album_state['current_track'] = title
+
+            if not file_path:
+                with _rg_album_lock:
+                    _rg_album_state['failed'] += 1
+                    _rg_album_state['errors'].append({'track': title, 'error': 'File not found'})
+                    _rg_album_state['processed'] += 1
+                track_results.append(None)
+                continue
+
+            try:
+                lufs, peak_dbfs = _rg_analyze_track(file_path)
+                lufs_values.append(lufs)
+                peak_values.append(peak_dbfs)
+                track_gain_db = _RG_REFERENCE_LUFS - lufs
+                track_results.append((file_path, track_gain_db, peak_dbfs))
+                with _rg_album_lock:
+                    _rg_album_state['analyzed'] += 1
+                    _rg_album_state['processed'] += 1
+            except Exception as e:
+                with _rg_album_lock:
+                    _rg_album_state['failed'] += 1
+                    _rg_album_state['errors'].append({'track': title, 'error': str(e)})
+                    _rg_album_state['processed'] += 1
+                track_results.append(None)
+
+        # Compute album gain from tracks that analyzed successfully
+        album_gain_db = None
+        album_peak_dbfs = None
+        if lufs_values:
+            mean_lufs = sum(lufs_values) / len(lufs_values)
+            album_gain_db = _RG_REFERENCE_LUFS - mean_lufs
+            album_peak_dbfs = max(peak_values)
+
+        # Pass 2: write tags to every successfully analyzed track
+        for i, track in enumerate(tracks):
+            entry = track_results[i]
+            if entry is None:
+                continue
+            file_path, track_gain_db, peak_dbfs = entry
+            try:
+                file_lock = _get_file_lock(file_path)
+                with file_lock:
+                    _rg_write_tags(file_path, track_gain_db, peak_dbfs,
+                                   album_gain_db, album_peak_dbfs)
+            except Exception as e:
+                with _rg_album_lock:
+                    _rg_album_state['failed'] += 1
+                    _rg_album_state['errors'].append({'track': track.get('title', ''), 'error': str(e)})
+
+        with _rg_album_lock:
+            _rg_album_state['status'] = 'done'
+            _rg_album_state['current_track'] = ''
+
+    threading.Thread(target=_run_album, daemon=True, name='RgAlbum').start()
+    return jsonify({'success': True})
+
+
+@app.route('/api/library/album/<int:album_id>/analyze-replaygain/status', methods=['GET'])
+def get_album_replaygain_status(album_id):
+    """Poll the status of a running album ReplayGain job."""
+    with _rg_album_lock:
+        state = dict(_rg_album_state)
+        state['errors'] = list(_rg_album_state['errors'])
+    return jsonify(state)
+
+
+@app.route('/api/library/tracks/analyze-replaygain-batch', methods=['POST'])
+def analyze_tracks_replaygain_batch():
+    """
+    Analyze a set of selected tracks and write track-level ReplayGain tags.
+    No album gain is computed (tracks may span multiple albums).
+    Runs in a background thread — poll /status for progress.
+    """
+    with _rg_batch_lock:
+        if _rg_batch_state['status'] == 'running':
+            return jsonify({'success': False, 'error': 'A batch ReplayGain job is already running'}), 409
+
+    if not _rg_ffmpeg_available():
+        return jsonify({'success': False, 'error': 'ffmpeg not found on PATH'}), 500
+
+    data = request.get_json() or {}
+    track_ids = data.get('track_ids', [])
+    if not track_ids:
+        return jsonify({'success': False, 'error': 'No track IDs provided'}), 400
+
+    database = get_database()
+    conn = database._get_connection()
+    cursor = conn.cursor()
+    placeholders = ','.join('?' for _ in track_ids)
+    cursor.execute(
+        f"SELECT * FROM tracks WHERE id IN ({placeholders})",
+        [str(tid) for tid in track_ids]
+    )
+    tracks = [dict(r) for r in cursor.fetchall()]
+
+    if not tracks:
+        return jsonify({'success': False, 'error': 'No valid tracks found'}), 404
+
+    with _rg_batch_lock:
+        _rg_batch_state.update({
+            'status': 'running',
+            'total': len(tracks),
+            'processed': 0,
+            'analyzed': 0,
+            'failed': 0,
+            'current_track': '',
+            'errors': [],
+        })
+
+    def _run_batch():
+        for track in tracks:
+            file_path = _resolve_library_file_path(track.get('file_path'))
+            title = track.get('title') or track.get('file_path') or ''
+            with _rg_batch_lock:
+                _rg_batch_state['current_track'] = title
+
+            if not file_path:
+                with _rg_batch_lock:
+                    _rg_batch_state['failed'] += 1
+                    _rg_batch_state['errors'].append({'track': title, 'error': 'File not found'})
+                    _rg_batch_state['processed'] += 1
+                continue
+
+            try:
+                lufs, peak_dbfs = _rg_analyze_track(file_path)
+                track_gain_db = _RG_REFERENCE_LUFS - lufs
+                file_lock = _get_file_lock(file_path)
+                with file_lock:
+                    _rg_write_tags(file_path, track_gain_db, peak_dbfs)
+                with _rg_batch_lock:
+                    _rg_batch_state['analyzed'] += 1
+                    _rg_batch_state['processed'] += 1
+            except Exception as e:
+                with _rg_batch_lock:
+                    _rg_batch_state['failed'] += 1
+                    _rg_batch_state['errors'].append({'track': title, 'error': str(e)})
+                    _rg_batch_state['processed'] += 1
+
+        with _rg_batch_lock:
+            _rg_batch_state['status'] = 'done'
+            _rg_batch_state['current_track'] = ''
+
+    threading.Thread(target=_run_batch, daemon=True, name='RgBatch').start()
+    return jsonify({'success': True})
+
+
+@app.route('/api/library/tracks/analyze-replaygain-batch/status', methods=['GET'])
+def get_tracks_replaygain_batch_status():
+    """Poll the status of a running batch ReplayGain job."""
+    with _rg_batch_lock:
+        state = dict(_rg_batch_state)
+        state['errors'] = list(_rg_batch_state['errors'])
+    return jsonify(state)
+
+
 # ── Reorganize Album Files endpoint ──
 
 _reorganize_state = {

@@ -40,6 +40,11 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         'has_cover_art': False,
         'format': None,
         'error': None,
+        # ReplayGain (None if not present in file)
+        'replaygain_track_gain': None,
+        'replaygain_track_peak': None,
+        'replaygain_album_gain': None,
+        'replaygain_album_peak': None,
     }
 
     if not file_path or not os.path.exists(file_path):
@@ -117,6 +122,17 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
 
     except Exception as e:
         result['error'] = str(e)
+
+    # Read existing ReplayGain tags (additive — never raises)
+    try:
+        from core.replaygain import read_replaygain_tags
+        rg = read_replaygain_tags(file_path)
+        result['replaygain_track_gain'] = rg.get('track_gain')
+        result['replaygain_track_peak'] = rg.get('track_peak')
+        result['replaygain_album_gain'] = rg.get('album_gain')
+        result['replaygain_album_peak'] = rg.get('album_peak')
+    except Exception:
+        pass
 
     return result
 

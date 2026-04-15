@@ -44815,6 +44815,57 @@ textarea.enhanced-meta-field-input {
     transform: scale(1.1);
 }
 
+/* Per-track ReplayGain button — sits beside the pencil in col-writetag */
+.enhanced-rg-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: 1px solid rgba(147, 112, 219, 0.15);
+    background: rgba(147, 112, 219, 0.04);
+    color: rgba(147, 112, 219, 0.5);
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+    padding: 0;
+}
+.enhanced-rg-btn:hover {
+    background: rgba(147, 112, 219, 0.12);
+    color: rgba(147, 112, 219, 0.9);
+    border-color: rgba(147, 112, 219, 0.4);
+    transform: scale(1.1);
+}
+.enhanced-rg-btn:disabled {
+    opacity: 0.4;
+    cursor: wait;
+    transform: none;
+}
+
+/* Album-level ReplayGain button in the album header action row */
+.enhanced-rg-album-btn {
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    background: rgba(147, 112, 219, 0.06);
+    border: 1px solid rgba(147, 112, 219, 0.15);
+    color: rgba(147, 112, 219, 0.6);
+    transition: all 0.15s ease;
+}
+.enhanced-rg-album-btn:hover {
+    background: rgba(147, 112, 219, 0.12);
+    color: rgba(147, 112, 219, 0.9);
+    border-color: rgba(147, 112, 219, 0.35);
+}
+.enhanced-rg-album-btn:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
 .enhanced-write-tags-album-btn {
     padding: 6px 14px;
     border-radius: 8px;
@@ -45091,9 +45142,18 @@ textarea.enhanced-meta-field-input {
     background: rgba(29, 185, 84, 0.15);
     border-color: rgba(29, 185, 84, 0.4);
 }
+.enhanced-bulk-btn.rg-analyze {
+    background: rgba(147, 112, 219, 0.08);
+    border-color: rgba(147, 112, 219, 0.2);
+    color: rgba(147, 112, 219, 0.9);
+}
+.enhanced-bulk-btn.rg-analyze:hover {
+    background: rgba(147, 112, 219, 0.15);
+    border-color: rgba(147, 112, 219, 0.4);
+}
 
 .col-writetag {
-    width: 36px;
+    width: 60px;
     text-align: center;
 }
 
