@@ -177,8 +177,8 @@ def test_album_completeness_uses_primary_provider_first(monkeypatch):
     monkeypatch.setattr(
         album_completeness_module,
         "get_album_tracks_for_source",
-        lambda source, album_id, client=None: (
-            calls.append((source, album_id, client)) or
+        lambda source, album_id: (
+            calls.append((source, album_id)) or
             (
                 deezer_client.get_album_tracks(album_id) if source == "deezer" else
                 itunes_client.get_album_tracks(album_id) if source == "itunes" else
@@ -192,7 +192,7 @@ def test_album_completeness_uses_primary_provider_first(monkeypatch):
     missing_tracks = job._find_missing_tracks(context, "deezer", 42, album_ids)
 
     assert expected_total == 2
-    assert calls == [("deezer", "deezer-album", None), ("deezer", "deezer-album", None)]
+    assert calls == [("deezer", "deezer-album"), ("deezer", "deezer-album")]
     assert deezer_client.calls == ["deezer-album", "deezer-album"]
     assert context.spotify_client.calls == []
     assert itunes_client.calls == []
@@ -227,8 +227,8 @@ def test_album_completeness_supports_discogs_primary(monkeypatch):
     monkeypatch.setattr(
         album_completeness_module,
         "get_album_tracks_for_source",
-        lambda source, album_id, client=None: (
-            calls.append((source, album_id, client)) or
+        lambda source, album_id: (
+            calls.append((source, album_id)) or
             (
                 discogs_client.get_album_tracks(album_id) if source == "discogs" else
                 itunes_client.get_album_tracks(album_id) if source == "itunes" else
@@ -243,7 +243,7 @@ def test_album_completeness_supports_discogs_primary(monkeypatch):
     missing_tracks = job._find_missing_tracks(context, "discogs", 42, album_ids)
 
     assert expected_total == 3
-    assert calls == [("discogs", "discogs-release", None), ("discogs", "discogs-release", None)]
+    assert calls == [("discogs", "discogs-release"), ("discogs", "discogs-release")]
     assert discogs_client.calls == ["discogs-release", "discogs-release"]
     assert context.spotify_client.calls == []
     assert itunes_client.calls == []
@@ -278,8 +278,8 @@ def test_album_completeness_supports_hydrabase_primary(monkeypatch):
     monkeypatch.setattr(
         album_completeness_module,
         "get_album_tracks_for_source",
-        lambda source, album_id, client=None: (
-            calls.append((source, album_id, client)) or
+        lambda source, album_id: (
+            calls.append((source, album_id)) or
             (
                 hydrabase_client.get_album_tracks_dict(album_id) if source == "hydrabase" else
                 itunes_client.get_album_tracks(album_id) if source == "itunes" else
@@ -294,7 +294,7 @@ def test_album_completeness_supports_hydrabase_primary(monkeypatch):
     missing_tracks = job._find_missing_tracks(context, "hydrabase", 42, album_ids)
 
     assert expected_total == 4
-    assert calls == [("hydrabase", "soul-album", None), ("hydrabase", "soul-album", None)]
+    assert calls == [("hydrabase", "soul-album"), ("hydrabase", "soul-album")]
     assert hydrabase_client.calls == ["soul-album", "soul-album"]
     assert context.spotify_client.calls == []
     assert itunes_client.calls == []

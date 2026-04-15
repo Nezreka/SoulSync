@@ -97,14 +97,13 @@ def get_client_for_source(source: str):
     return None
 
 
-def get_album_tracks_for_source(source: str, album_id: str, client: Any = None):
+def get_album_tracks_for_source(source: str, album_id: str):
     """Get album tracks for an exact source.
 
     Returns Spotify-compatible dict/list data or None.
     No fallback swaps.
     """
-    if client is None:
-        client = get_client_for_source(source)
+    client = get_client_for_source(source)
     if not client:
         return None
 
