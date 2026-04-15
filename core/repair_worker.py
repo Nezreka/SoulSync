@@ -18,7 +18,11 @@ from difflib import SequenceMatcher
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.metadata_service import get_album_tracks_for_source, get_primary_source
+from core.metadata_service import (
+    get_album_tracks_for_source,
+    get_source_priority,
+    get_primary_source,
+)
 from core.repair_jobs import get_all_jobs
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -1930,17 +1934,7 @@ class RepairWorker:
             'hydrabase': hydrabase_album_id,
         }
 
-        def _source_priority(source_name: str):
-            supported = ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase')
-            ordered = []
-            if source_name in supported:
-                ordered.append(source_name)
-            for source in supported:
-                if source not in ordered:
-                    ordered.append(source)
-            return ordered
-
-        for source in _source_priority(primary_source):
+        for source in get_source_priority(primary_source):
             fid = album_sources.get(source, '')
             if not fid:
                 continue
