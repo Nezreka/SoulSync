@@ -26143,6 +26143,7 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
             // Transform to YouTube modal format
             const transformed = {
                 progress: data.progress, spotify_matches: data.spotify_matches, spotify_total: data.spotify_total,
+                complete: data.complete,
                 results: (data.results || []).map((r, i) => {
                     const isFound = r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track;
                     return {
@@ -26197,6 +26198,7 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
                 progress: status.progress,
                 spotify_matches: status.spotify_matches,
                 spotify_total: status.spotify_total,
+                complete: status.complete,
                 results: status.results.map((result, index) => {
                     const isFound = result.status === 'found' ||
                         result.status === '✅ Found' ||
@@ -27586,6 +27588,7 @@ function startDeezerDiscoveryPolling(fakeUrlHash, playlistId) {
             }
             const transformed = {
                 progress: data.progress, spotify_matches: data.spotify_matches, spotify_total: data.spotify_total,
+                complete: data.complete,
                 results: (data.results || []).map((r, i) => {
                     const isFound = r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track;
                     return {
@@ -27639,6 +27642,7 @@ function startDeezerDiscoveryPolling(fakeUrlHash, playlistId) {
                 progress: status.progress,
                 spotify_matches: status.spotify_matches,
                 spotify_total: status.spotify_total,
+                complete: status.complete,
                 results: status.results.map((result, index) => {
                     const isFound = result.status === 'found' ||
                         result.status === '✅ Found' ||
@@ -31468,6 +31472,7 @@ function startSpotifyPublicDiscoveryPolling(fakeUrlHash, urlHash) {
             }
             const transformed = {
                 progress: data.progress, spotify_matches: data.spotify_matches, spotify_total: data.spotify_total,
+                complete: data.complete,
                 results: (data.results || []).map((r, i) => {
                     const isFound = r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track;
                     return {
@@ -31521,6 +31526,7 @@ function startSpotifyPublicDiscoveryPolling(fakeUrlHash, urlHash) {
                 progress: status.progress,
                 spotify_matches: status.spotify_matches,
                 spotify_total: status.spotify_total,
+                complete: status.complete,
                 results: status.results.map((result, index) => {
                     const isFound = result.status === 'found' ||
                         result.status === '✅ Found' ||
