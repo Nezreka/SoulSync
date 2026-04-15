@@ -3,6 +3,7 @@
 from core.metadata_service import (
     get_album_tracks_for_source,
     get_primary_source,
+    get_source_priority,
 )
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -252,7 +253,7 @@ class AlbumCompletenessJob(RepairJob):
 
     def _get_expected_total(self, context, primary_source, album_ids):
         """Try to get the expected track count from the active metadata provider first."""
-        for source in self._iter_source_priority(primary_source):
+        for source in get_source_priority(primary_source):
             album_id = self._get_album_id_for_source(source, album_ids)
             if not album_id:
                 continue
@@ -284,7 +285,7 @@ class AlbumCompletenessJob(RepairJob):
                 conn.close()
 
         api_tracks = None
-        for source in self._iter_source_priority(primary_source):
+        for source in get_source_priority(primary_source):
             source_album_id = self._get_album_id_for_source(source, album_ids)
             if not source_album_id:
                 continue
@@ -336,29 +337,12 @@ class AlbumCompletenessJob(RepairJob):
         except Exception:
             return 'deezer'
 
-    def _iter_source_priority(self, primary_source: str):
-        """Yield supported sources in priority order."""
-        supported = ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase')
-        ordered = []
-
-        if primary_source in supported:
-            ordered.append(primary_source)
-
-        for source in supported:
-            if source not in ordered:
-                ordered.append(source)
-
-        return ordered
-
     def _get_album_id_for_source(self, source: str, album_ids: dict) -> str:
         return album_ids.get(source, '')
 
     def _get_album_tracks(self, source: str, album_id: str):
         """Fetch album tracks from a specific source."""
         try:
-            if source not in ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase'):
-                return None
-
             return get_album_tracks_for_source(source, album_id)
         except Exception as e:
             logger.debug("Error getting %s album tracks for %s: %s", source.capitalize(), album_id, e)

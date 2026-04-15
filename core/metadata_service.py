@@ -17,6 +17,9 @@ logger = get_logger("metadata_service")
 
 MetadataProvider = Literal["spotify", "itunes", "auto"]
 
+# Ordered by fallback preference. Higher-priority sources appear earlier.
+METADATA_SOURCE_PRIORITY = ('deezer', 'itunes', 'spotify', 'discogs', 'hydrabase')
+
 _client_cache_lock = threading.RLock()
 _client_cache: Dict[str, Any] = {}
 
@@ -63,6 +66,20 @@ def get_primary_client():
     This is THE single source of truth for "which client should I call?"
     """
     return get_client_for_source(get_primary_source())
+
+
+def get_source_priority(preferred_source: str):
+    """Return supported sources with the preferred source first."""
+    ordered = []
+
+    if preferred_source in METADATA_SOURCE_PRIORITY:
+        ordered.append(preferred_source)
+
+    for source in METADATA_SOURCE_PRIORITY:
+        if source not in ordered:
+            ordered.append(source)
+
+    return ordered
 
 
 def get_client_for_source(source: str):
