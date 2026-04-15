@@ -18,6 +18,11 @@ from difflib import SequenceMatcher
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.metadata_service import (
+    get_album_tracks_for_source,
+    get_source_priority,
+    get_primary_source,
+)
 from core.repair_jobs import get_all_jobs
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -104,7 +109,6 @@ class RepairWorker:
         self._on_job_finish = None   # (job_id, status, result) -> None
 
         # Lazy client accessors
-        self._spotify_client = None
         self._itunes_client = None
         self._mb_client = None
         self._acoustid_client = None
@@ -150,13 +154,12 @@ class RepairWorker:
     # ------------------------------------------------------------------
     @property
     def spotify_client(self):
-        if self._spotify_client is None:
-            try:
-                from core.spotify_client import SpotifyClient
-                self._spotify_client = SpotifyClient()
-            except Exception as e:
-                logger.error("Failed to initialize SpotifyClient: %s", e)
-        return self._spotify_client
+        try:
+            from core.metadata_service import get_client_for_source
+            return get_client_for_source('spotify')
+        except Exception as e:
+            logger.error("Failed to resolve shared Spotify client: %s", e)
+            return None
 
     @property
     def itunes_client(self):
@@ -1743,7 +1746,9 @@ class RepairWorker:
             track_number = mt.get('track_number', 0)
             disc_number = mt.get('disc_number', 1)
             track_artists = mt.get('artists', [])
-            spotify_track_id = mt.get('spotify_track_id', '')
+            source = mt.get('source', '') or 'spotify'
+            source_track_id = mt.get('source_track_id', '') or mt.get('track_id', '') or mt.get('spotify_track_id', '')
+            spotify_track_id = mt.get('spotify_track_id', '') or (source_track_id if source == 'spotify' else '')
             artist_search = track_artists[0] if track_artists else artist_name
 
             if not track_name:
@@ -1809,7 +1814,7 @@ class RepairWorker:
                     logger.warning("File operation failed for '%s': %s", track_name, result.get('error'))
 
             # Phase 4: Wishlist fallback
-            if spotify_track_id:
+            if source_track_id:
                 try:
                     # Build album images from finding thumb URL
                     album_images = []
@@ -1818,7 +1823,7 @@ class RepairWorker:
                         album_images = [{'url': album_thumb, 'height': 300, 'width': 300}]
 
                     wishlist_data = {
-                        'id': spotify_track_id,
+                        'id': source_track_id,
                         'name': track_name,
                         'artists': [{'name': a} for a in track_artists] if track_artists else [{'name': artist_name}],
                         'album': {
@@ -1832,6 +1837,7 @@ class RepairWorker:
                         'duration_ms': mt.get('duration_ms', 0),
                         'track_number': track_number,
                         'disc_number': disc_number,
+                        'uri': f"{source}:track:{source_track_id}" if source and source_track_id else '',
                     }
                     source_info = {
                         'album_title': album_title,
@@ -1839,6 +1845,8 @@ class RepairWorker:
                         'track_number': track_number,
                         'disc_number': disc_number,
                         'spotify_album_id': spotify_album_id,
+                        'source': source,
+                        'source_track_id': source_track_id,
                         'is_album': True,
                         'reason': 'album_completeness_auto_fill',
                     }
@@ -1860,7 +1868,7 @@ class RepairWorker:
                     track_details.append({'track': track_name, 'status': 'skipped', 'reason': f'wishlist error: {e}'})
             else:
                 skipped_count += 1
-                track_details.append({'track': track_name, 'status': 'skipped', 'reason': 'no spotify_track_id for wishlist'})
+                track_details.append({'track': track_name, 'status': 'skipped', 'reason': 'no source_track_id for wishlist'})
 
         # Build result message
         parts = []
@@ -1885,11 +1893,18 @@ class RepairWorker:
 
     def _refetch_missing_tracks(self, album_id, details):
         """Re-fetch missing track list from APIs when the stored list is empty."""
+        configured_primary_source = get_primary_source()
         spotify_album_id = details.get('spotify_album_id', '')
         itunes_album_id = details.get('itunes_album_id', '')
         deezer_album_id = details.get('deezer_album_id', '')
-        logger.debug("Refetch missing tracks for album %s: spotify=%s, itunes=%s, deezer=%s",
-                      album_id, spotify_album_id, itunes_album_id, deezer_album_id)
+        discogs_album_id = details.get('discogs_album_id', '')
+        hydrabase_album_id = details.get('hydrabase_album_id', '')
+        primary_source = details.get('primary_source') or configured_primary_source
+        logger.debug(
+            "Refetch missing tracks for album %s: primary=%s spotify=%s itunes=%s deezer=%s discogs=%s hydrabase=%s",
+            album_id, primary_source, spotify_album_id, itunes_album_id, deezer_album_id, discogs_album_id,
+            hydrabase_album_id
+        )
 
         # Get track numbers we already own
         owned_numbers = set()
@@ -1909,32 +1924,27 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-        # Try Spotify first
+        current_source = primary_source
         api_tracks = None
-        if spotify_album_id:
-            try:
-                sp = self.spotify_client
-                if sp and hasattr(sp, 'get_album_tracks'):
-                    api_tracks = sp.get_album_tracks(spotify_album_id)
-            except Exception as e:
-                logger.debug("Refetch: Spotify album tracks failed for %s: %s", spotify_album_id, e)
+        album_sources = {
+            'spotify': spotify_album_id,
+            'itunes': itunes_album_id,
+            'deezer': deezer_album_id,
+            'discogs': discogs_album_id,
+            'hydrabase': hydrabase_album_id,
+        }
 
-        # Try fallback client (iTunes/Deezer)
-        if not api_tracks or 'items' not in (api_tracks or {}):
-            itunes = self.itunes_client
-            if itunes:
-                is_deezer = type(itunes).__name__ == 'DeezerClient'
-                primary_id = deezer_album_id if is_deezer else itunes_album_id
-                secondary_id = itunes_album_id if is_deezer else deezer_album_id
-                for fid in [primary_id, secondary_id]:
-                    if not fid:
-                        continue
-                    try:
-                        api_tracks = itunes.get_album_tracks(fid)
-                        if api_tracks and 'items' in api_tracks:
-                            break
-                    except Exception as e:
-                        logger.debug("Refetch: fallback album tracks failed for %s: %s", fid, e)
+        for source in get_source_priority(primary_source):
+            fid = album_sources.get(source, '')
+            if not fid:
+                continue
+            try:
+                api_tracks = get_album_tracks_for_source(source, fid)
+                if api_tracks and 'items' in (api_tracks or {}):
+                    current_source = source
+                    break
+            except Exception as e:
+                logger.debug("Refetch: %s album tracks failed for %s: %s", source, fid, e)
 
         if not api_tracks or 'items' not in api_tracks:
             return []
@@ -1953,6 +1963,9 @@ class RepairWorker:
                     'track_number': tn,
                     'name': item.get('name', ''),
                     'disc_number': item.get('disc_number', 1),
+                    'source': current_source or 'spotify',
+                    'source_track_id': item.get('id', ''),
+                    'track_id': item.get('id', ''),
                     'spotify_track_id': item.get('id', ''),
                     'duration_ms': item.get('duration_ms', 0),
                     'artists': track_artists,
