@@ -506,12 +506,12 @@ body {
     );
 }
 
-/* ── Floating Mini Media Player — fixed bottom-right ─────────────────────── */
+/* ── Floating Mini Media Player — sits left of the bell/help buttons ────── */
 .media-player {
     position: fixed;
-    bottom: 88px;
-    right: 16px;
-    width: 360px;
+    bottom: 24px;
+    right: 132px;
+    width: 340px;
     background: linear-gradient(180deg,
             rgba(24, 24, 24, 0.97) 0%,
             rgba(16, 16, 16, 0.99) 50%,
@@ -5057,10 +5057,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
    NOTIFICATION SYSTEM — Compact toasts + bell button + notification panel
    ================================================================================== */
 
-/* Toast container — bottom-right, above the mini player */
+/* Toast container — bottom-right, above the mini player + bell/help row */
 .toast-container {
     position: fixed;
-    bottom: 174px;
+    bottom: 104px;
     right: 24px;
     z-index: 99999;
     pointer-events: none;
