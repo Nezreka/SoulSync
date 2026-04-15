@@ -506,67 +506,90 @@ body {
     );
 }
 
-/* Media Player Section - Premium Compact Design */
+/* ── Floating Mini Media Player — fixed bottom-right ─────────────────────── */
 .media-player {
+    position: fixed;
+    bottom: 88px;
+    right: 16px;
+    width: 360px;
     background: linear-gradient(180deg,
             rgba(24, 24, 24, 0.97) 0%,
             rgba(16, 16, 16, 0.99) 50%,
             rgba(10, 10, 10, 1.0) 100%);
-    backdrop-filter: blur(16px) saturate(1.2);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(20px) saturate(1.3);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 14px;
-    margin: 8px 14px;
-    padding: 0;
     overflow: hidden;
-    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s ease;
     box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.45),
-        0 2px 8px rgba(0, 0, 0, 0.3),
+        0 12px 40px rgba(0, 0, 0, 0.55),
+        0 4px 12px rgba(0, 0, 0, 0.35),
         inset 0 1px 0 rgba(255, 255, 255, 0.07);
-    position: relative;
-    min-height: 120px;
-    flex-shrink: 0;
+    z-index: 99998;
 }
 
 .media-player:hover {
-    border-color: rgba(var(--accent-rgb), 0.18);
-    border-top-color: rgba(var(--accent-rgb), 0.22);
+    border-color: rgba(var(--accent-rgb), 0.2);
+    border-top-color: rgba(var(--accent-rgb), 0.25);
     box-shadow:
-        0 10px 28px rgba(0, 0, 0, 0.5),
-        0 4px 14px rgba(var(--accent-rgb), 0.1),
+        0 16px 48px rgba(0, 0, 0, 0.6),
+        0 4px 16px rgba(var(--accent-rgb), 0.12),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
-/* Compact idle state — collapsed when nothing is playing */
+/* Hidden when nothing is playing — widget disappears entirely */
 .media-player.idle {
-    min-height: 0;
-    padding: 0;
-    margin: 4px 14px;
-}
-
-.media-player.idle .player-top-progress,
-.media-player.idle .media-header,
-.media-player.idle .media-controls-row,
-.media-player.idle .media-expanded {
     display: none;
 }
 
-.media-player.idle .no-track-message {
-    padding: 10px 14px;
-    font-size: 0.75rem;
-    gap: 8px;
+/* Mini player body — horizontal: art | info | controls */
+.mini-player-body {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px 10px;
+    cursor: pointer;
 }
 
-.media-player.idle .no-track-message svg {
-    width: 18px;
-    height: 18px;
+/* Compact prev/next nav buttons */
+.mini-nav-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.45);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.18s ease, background 0.18s ease;
+    padding: 0;
+    flex-shrink: 0;
 }
 
-/* Top progress bar - thin line across full width */
+.mini-nav-btn:hover:not(:disabled) {
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.mini-nav-btn:disabled {
+    opacity: 0.22;
+    cursor: not-allowed;
+}
+
+/* Controls cluster in the mini player */
+.mini-player-controls {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+}
+
+/* Top progress bar - flush full-width line at the very top of the mini player */
 .player-top-progress {
-    padding: 0 14px;
-    padding-top: 10px;
+    padding: 0;
 }
 
 .player-top-progress .progress-bar-container {
@@ -5034,10 +5057,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
    NOTIFICATION SYSTEM — Compact toasts + bell button + notification panel
    ================================================================================== */
 
-/* Toast container — bottom-right, above the bell/helper buttons */
+/* Toast container — bottom-right, above the mini player */
 .toast-container {
     position: fixed;
-    bottom: 84px;
+    bottom: 174px;
     right: 24px;
     z-index: 99999;
     pointer-events: none;

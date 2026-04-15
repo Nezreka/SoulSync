@@ -3059,7 +3059,7 @@ function initializeMediaPlayer() {
 
         // Set initial volume
         audioPlayer.volume = 0.7; // 70%
-        volumeSlider.value = 70;
+        if (volumeSlider) volumeSlider.value = 70;
     }
 
     // Track title click handled by initExpandedPlayer's media-player click handler
@@ -3067,7 +3067,7 @@ function initializeMediaPlayer() {
     // Media controls
     playButton.addEventListener('click', handlePlayPause);
     stopButton.addEventListener('click', handleStop);
-    volumeSlider.addEventListener('input', handleVolumeChange);
+    if (volumeSlider) volumeSlider.addEventListener('input', handleVolumeChange);
 
     // Progress bar controls
     const progressBar = document.getElementById('progress-bar');
@@ -3083,7 +3083,13 @@ function initializeMediaPlayer() {
     }
 
     // Update volume slider styling
-    volumeSlider.addEventListener('input', updateVolumeSliderAppearance);
+    if (volumeSlider) volumeSlider.addEventListener('input', updateVolumeSliderAppearance);
+
+    // Mini player prev / next buttons
+    const miniPrevBtn = document.getElementById('mini-prev-btn');
+    const miniNextBtn = document.getElementById('mini-next-btn');
+    if (miniPrevBtn) miniPrevBtn.addEventListener('click', (e) => { e.stopPropagation(); playPreviousInQueue(); });
+    if (miniNextBtn) miniNextBtn.addEventListener('click', (e) => { e.stopPropagation(); playNextInQueue(); });
 }
 
 function toggleMediaPlayerExpansion() {
@@ -3325,6 +3331,7 @@ function handleProgressBarChange(event) {
 
 function updateVolumeSliderAppearance() {
     const slider = document.getElementById('volume-slider');
+    if (!slider) return;
     const value = slider.value;
     slider.style.setProperty('--volume-percent', `${value}%`);
 }
@@ -4169,7 +4176,7 @@ function initExpandedPlayer() {
         mediaPlayer.style.cursor = 'pointer';
         mediaPlayer.addEventListener('click', (e) => {
             // Don't open modal when clicking controls (let expand-hint through)
-            if (e.target.closest('.play-button, .stop-button, .volume-slider, .volume-control, .progress-bar, .volume-icon') && !e.target.closest('.expand-hint')) return;
+            if (e.target.closest('.play-button, .stop-button, .volume-slider, .volume-control, .progress-bar, .volume-icon, .mini-nav-btn') && !e.target.closest('.expand-hint')) return;
             if (currentTrack) openNowPlayingModal();
         });
     }
@@ -4821,16 +4828,20 @@ function renderNpQueue() {
 }
 
 function updateNpPrevNextButtons() {
+    const canPrev = npQueueIndex > 0 || (audioPlayer && audioPlayer.currentTime > 3);
+    const canNext = npQueue.length > 0 && (npShuffleOn ? npQueue.length > 1 : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all'));
+
+    // Full Now Playing modal buttons
     const prevBtn = document.getElementById('np-prev-btn');
     const nextBtn = document.getElementById('np-next-btn');
-    if (prevBtn) {
-        const canPrev = npQueueIndex > 0 || (audioPlayer && audioPlayer.currentTime > 3);
-        prevBtn.disabled = !canPrev;
-    }
-    if (nextBtn) {
-        const canNext = npQueue.length > 0 && (npShuffleOn ? npQueue.length > 1 : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all'));
-        nextBtn.disabled = !canNext;
-    }
+    if (prevBtn) prevBtn.disabled = !canPrev;
+    if (nextBtn) nextBtn.disabled = !canNext;
+
+    // Mini player buttons
+    const miniPrevBtn = document.getElementById('mini-prev-btn');
+    const miniNextBtn = document.getElementById('mini-next-btn');
+    if (miniPrevBtn) miniPrevBtn.disabled = !canPrev;
+    if (miniNextBtn) miniNextBtn.disabled = !canNext;
 }
 
 function handlePlayerKeyboardShortcuts(event) {
