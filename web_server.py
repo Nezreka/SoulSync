@@ -49288,6 +49288,7 @@ def playlist_explorer_build_tree():
                 if idx < len(artist_groups) - 1:
                     time.sleep(0.2)
 
+            get_database().mark_mirrored_playlist_explored(playlist_id)
             yield json.dumps({"type": "complete", "total_artists": len(artist_groups), "total_albums": total_albums}) + '\n'
 
         return Response(generate(), mimetype='application/x-ndjson', headers={
