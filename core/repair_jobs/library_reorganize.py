@@ -16,8 +16,8 @@ import os
 import re
 import shutil
 import sys
-import time
 
+from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -758,10 +758,10 @@ class LibraryReorganizeJob(RepairJob):
         return years
 
     def _lookup_years_from_api(self, context, missing_pairs) -> dict:
-        """Batch-lookup release years from Spotify/iTunes/Deezer for albums not found in DB.
+        """Batch-lookup release years from the configured metadata providers for albums not found in DB.
 
         Args:
-            context: JobContext with spotify_client, config_manager
+            context: JobContext with config_manager
             missing_pairs: set of (artist, album) tuples needing year lookup
 
         Returns:
@@ -771,37 +771,17 @@ class LibraryReorganizeJob(RepairJob):
         if not missing_pairs:
             return years
 
-        # Determine which client to use
-        search_client = None
-        source_name = 'unknown'
-        if context.spotify_client and hasattr(context.spotify_client, 'search_albums'):
-            try:
-                if context.spotify_client.is_spotify_authenticated():
-                    search_client = context.spotify_client
-                    source_name = 'Spotify'
-            except Exception:
-                pass
-
-        if not search_client:
-            # Try fallback (iTunes/Deezer)
-            try:
-                from core.metadata_service import get_primary_client
-                search_client = get_primary_client()
-                source_name = 'fallback'
-            except Exception:
-                pass
-
-        if not search_client or not hasattr(search_client, 'search_albums'):
-            return years
+        primary_source = get_primary_source()
+        source_priority = get_source_priority(primary_source)
 
         # Cap lookups to avoid excessive API calls
         max_lookups = 200
         pairs_list = list(missing_pairs)[:max_lookups]
-        logger.info("Looking up %d album years from %s API", len(pairs_list), source_name)
+        logger.info("Looking up %d album years from configured metadata providers", len(pairs_list))
 
         if context.report_progress:
             context.report_progress(
-                phase=f'Looking up {len(pairs_list)} album years from {source_name}...',
+                phase=f'Looking up {len(pairs_list)} album years from metadata providers...',
                 log_line=f'Fetching release years for {len(pairs_list)} albums',
                 log_type='info'
             )
@@ -809,22 +789,27 @@ class LibraryReorganizeJob(RepairJob):
         for artist, album in pairs_list:
             if context.check_stop():
                 break
-            try:
-                results = search_client.search_albums(f"{artist} {album}", limit=3)
-                if results:
-                    for r in results:
-                        release_date = getattr(r, 'release_date', '') or ''
-                        if release_date and len(release_date) >= 4:
-                            year_str = release_date[:4]
-                            if year_str.isdigit():
-                                key = (artist.lower(), album.lower())
-                                years[key] = year_str
-                                break
-                import time
-                if context.sleep_or_stop(0.1):  # Rate limit courtesy
-                    break
-            except Exception as e:
-                logger.debug("API year lookup failed for %s - %s: %s", artist, album, e)
+            key = (artist.lower(), album.lower())
+            for source_name in source_priority:
+                try:
+                    search_client = get_client_for_source(source_name)
+                    if not search_client or not hasattr(search_client, 'search_albums'):
+                        continue
+                    results = search_client.search_albums(f"{artist} {album}", limit=3)
+                    if results:
+                        for r in results:
+                            release_date = getattr(r, 'release_date', '') or ''
+                            if release_date and len(release_date) >= 4:
+                                year_str = release_date[:4]
+                                if year_str.isdigit():
+                                    years[key] = year_str
+                                    break
+                        if key in years:
+                            break
+                    if context.sleep_or_stop(0.1):  # Rate limit courtesy
+                        return years
+                except Exception as e:
+                    logger.debug("API year lookup failed for %s - %s via %s: %s", artist, album, source_name, e)
 
         logger.info("API year lookup: found %d/%d years", len(years), len(pairs_list))
         return years
