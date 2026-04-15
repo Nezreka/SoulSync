@@ -1,8 +1,9 @@
 """Track Number Repair Job — fixes embedded track number tags and filename prefixes.
 
 Detects albums where 3+ files share the same track number (the "all tracks = 01"
-bug pattern), then uses cascading API lookups (Spotify → iTunes → MusicBrainz →
-AudioDB) to resolve the correct tracklist and repair each file.
+bug pattern), then uses cascading API lookups in metadata-source priority order
+before falling back to MusicBrainz and AudioDB to resolve the correct tracklist
+and repair each file.
 """
 
 import os
@@ -10,6 +11,12 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.metadata_service import (
+    get_album_tracks_for_source,
+    get_client_for_source,
+    get_primary_source,
+    get_source_priority,
+)
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -24,6 +31,14 @@ _PLACEHOLDER_IDS = {
     'unknown', 'none', 'null', '',
 }
 
+_SOURCE_ALBUM_ID_COLUMNS = (
+    ('spotify', 'spotify_album_id'),
+    ('itunes', 'itunes_album_id'),
+    ('deezer', 'deezer_id'),
+    ('discogs', 'discogs_id'),
+    ('hydrabase', 'soul_id'),
+)
+
 
 @register_job
 class TrackNumberRepairJob(RepairJob):
@@ -32,8 +47,9 @@ class TrackNumberRepairJob(RepairJob):
     description = 'Detects mismatched track numbers using API lookups (dry run by default)'
     help_text = (
         'Scans album folders and compares each file\'s track number against the correct '
-        'tracklist from Spotify or iTunes. If a file\'s embedded track number doesn\'t match '
-        'the API data, the job creates a finding showing what needs to change.\n\n'
+        'tracklist from the configured metadata sources. If a file\'s embedded track '
+        'number doesn\'t match the API data, the job creates a finding showing what '
+        'needs to change.\n\n'
         'In dry run mode (default), no files are modified — you review each proposed change '
         'in the Findings tab and decide what to approve. Disable dry run in settings to let '
         'the job automatically rename and re-number files.\n\n'
@@ -187,7 +203,7 @@ class TrackNumberRepairJob(RepairJob):
         logger.info("Anomaly detected in %s — %d files share track number(s): %s",
                      os.path.basename(folder_path), sum(duped.values()), duped)
 
-        # Resolve album tracklist via cascading fallbacks
+        # Resolve album tracklist via source-aware cascading fallbacks
         api_tracks = self._resolve_album_tracklist(file_track_data, folder_path, context, scan_state)
         if not api_tracks:
             result.skipped += len(filenames)
@@ -253,38 +269,24 @@ class TrackNumberRepairJob(RepairJob):
 
         cache = scan_state['album_tracks_cache']
         folder_name = os.path.basename(folder_path)
+        primary_source = get_primary_source()
+        source_priority = get_source_priority(primary_source)
 
-        # Fallback 0: Check DB first — if these files are tracked and their album
-        # has a spotify_album_id, use that directly without reading file tags
-        db_album_id, db_spotify_album_id, db_itunes_album_id = _lookup_album_ids_from_db(
-            file_track_data, context
-        )
-        if db_spotify_album_id and _is_valid_album_id(db_spotify_album_id):
-            tracks = _get_album_tracklist(db_spotify_album_id, context, cache)
-            if tracks:
-                logger.info("[Repair] %s — resolved via DB spotify_album_id: %s", folder_name, db_spotify_album_id)
-                return tracks
-        if db_itunes_album_id and _is_valid_album_id(db_itunes_album_id):
-            tracks = _get_album_tracklist(db_itunes_album_id, context, cache)
-            if tracks:
-                logger.info("[Repair] %s — resolved via DB itunes_album_id: %s", folder_name, db_itunes_album_id)
-                return tracks
+        # Fallback 0: Check DB first. If any tracked file already has source IDs,
+        # prefer the configured source order and use the first available album ID.
+        source_album_ids = _lookup_album_ids_from_db(file_track_data, context)
 
         # Collect available IDs from file tags (fallback when DB has no IDs)
-        spotify_album_id = None
-        itunes_album_id = None
         spotify_track_id = None
         mb_album_id = None
         album_name = None
         artist_name = None
 
         for fpath, fname, _ in file_track_data:
-            if not spotify_album_id or not itunes_album_id:
+            if 'spotify' not in source_album_ids or 'itunes' not in source_album_ids:
                 aid, source = _read_album_id_from_file(fpath)
-                if aid and source == 'spotify' and not spotify_album_id:
-                    spotify_album_id = aid
-                elif aid and source == 'itunes' and not itunes_album_id:
-                    itunes_album_id = aid
+                if aid and source in ('spotify', 'itunes') and source not in source_album_ids:
+                    source_album_ids[source] = aid
 
             if not spotify_track_id:
                 spotify_track_id = _read_spotify_track_id_from_file(fpath)
@@ -295,31 +297,27 @@ class TrackNumberRepairJob(RepairJob):
             if not album_name:
                 album_name, artist_name = _read_album_artist_from_file(fpath)
 
-            if spotify_album_id and itunes_album_id and spotify_track_id and mb_album_id and album_name:
+            if source_album_ids and spotify_track_id and mb_album_id and album_name:
                 break
 
-        # Fallback 1: Spotify album ID from file tags
-        if spotify_album_id and _is_valid_album_id(spotify_album_id):
-            tracks = _get_album_tracklist(spotify_album_id, context, cache)
-            if tracks:
-                logger.info("[Repair] %s — resolved via Spotify album ID: %s", folder_name, spotify_album_id)
-                return tracks
+        # Fallback 1: Album IDs from DB / file tags, using source priority
+        for source in source_priority:
+            album_id = source_album_ids.get(source)
+            if album_id and _is_valid_album_id(album_id):
+                tracks = _get_album_tracklist(source, album_id, cache)
+                if tracks:
+                    logger.info("[Repair] %s — resolved via %s album ID: %s",
+                                folder_name, source, album_id)
+                    return tracks
 
-        # Fallback 2: iTunes album ID
-        if itunes_album_id and _is_valid_album_id(itunes_album_id):
-            tracks = _get_album_tracklist(itunes_album_id, context, cache)
-            if tracks:
-                logger.info("[Repair] %s — resolved via iTunes album ID: %s", folder_name, itunes_album_id)
-                return tracks
-
-        # Fallback 3: Spotify track ID → discover album ID
-        client = context.spotify_client
-        if spotify_track_id and client and client.is_spotify_authenticated() and not context.is_spotify_rate_limited():
+        # Fallback 2: Spotify track ID → discover album ID
+        client = get_client_for_source('spotify')
+        if spotify_track_id and client:
             try:
                 track_details = client.get_track_details(spotify_track_id)
                 if track_details and track_details.get('album', {}).get('id'):
                     real_album_id = track_details['album']['id']
-                    tracks = _get_album_tracklist(real_album_id, context, cache)
+                    tracks = _get_album_tracklist('spotify', real_album_id, cache)
                     if tracks:
                         logger.info("[Repair] %s — resolved via Spotify track ID %s → album %s",
                                     folder_name, spotify_track_id, real_album_id)
@@ -327,29 +325,35 @@ class TrackNumberRepairJob(RepairJob):
             except Exception as e:
                 logger.debug("Spotify track lookup failed for %s: %s", spotify_track_id, e)
 
-        # Fallback 4: Search Spotify/iTunes by album name + artist
-        if album_name and client and not context.is_spotify_rate_limited():
-            try:
-                query = f"{artist_name} {album_name}" if artist_name else album_name
-                results = client.search_albums(query, limit=5)
-                if results:
-                    best = results[0]
-                    tracks = _get_album_tracklist(best.id, context, cache)
-                    if tracks:
-                        logger.info("[Repair] %s — resolved via album search: '%s' → %s",
-                                    folder_name, query, best.id)
-                        return tracks
-            except Exception as e:
-                logger.debug("Album search failed for '%s': %s", album_name, e)
+        # Fallback 3: Search metadata sources by album name + artist
+        if album_name:
+            query = f"{artist_name} {album_name}" if artist_name else album_name
+            for source in source_priority:
+                client = get_client_for_source(source)
+                if not client or not hasattr(client, 'search_albums'):
+                    continue
+                try:
+                    results = client.search_albums(query, limit=5)
+                    if results:
+                        best = results[0]
+                        best_album_id = getattr(best, 'id', None) if not isinstance(best, dict) else best.get('id')
+                        if best_album_id:
+                            tracks = _get_album_tracklist(source, str(best_album_id), cache)
+                            if tracks:
+                                logger.info("[Repair] %s — resolved via %s album search: '%s' → %s",
+                                            folder_name, source, query, best_album_id)
+                                return tracks
+                except Exception as e:
+                    logger.debug("%s album search failed for '%s': %s", source.capitalize(), album_name, e)
 
-        # Fallback 5: MusicBrainz album ID from tags
+        # Fallback 4: MusicBrainz album ID from tags
         if mb_album_id:
             tracks = _get_tracklist_from_musicbrainz(mb_album_id, context, cache)
             if tracks:
                 logger.info("[Repair] %s — resolved via MusicBrainz album ID: %s", folder_name, mb_album_id)
                 return tracks
 
-        # Fallback 6: AudioDB → MusicBrainz
+        # Fallback 5: AudioDB → MusicBrainz
         if album_name and artist_name:
             adb_mb_id = _get_musicbrainz_id_via_audiodb(artist_name, album_name, context)
             if adb_mb_id and adb_mb_id != mb_album_id:
@@ -800,25 +804,36 @@ def _update_db_file_path(db, old_path: str, new_path: str):
 
 
 def _lookup_album_ids_from_db(file_track_data: List[Tuple[str, str, Any]],
-                              context: JobContext) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+                              context: JobContext) -> Dict[str, Optional[str]]:
     """Look up album IDs from the database using file paths.
 
     Checks if any of the files in this folder are tracked in the DB, and if so,
-    returns the album's (album_id, spotify_album_id, itunes_album_id).
+    returns a mapping of metadata source -> album ID.
     This avoids expensive file tag reads and API calls when the DB already knows.
     """
     if not context.db:
-        return None, None, None
+        return {}
 
     conn = None
     try:
         conn = context.db._get_connection()
         cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(albums)")
+        album_columns = {row[1] for row in cursor.fetchall()}
+
+        selected_sources = [
+            (source, column)
+            for source, column in _SOURCE_ALBUM_ID_COLUMNS
+            if column in album_columns
+        ]
+        if not selected_sources:
+            return {}
 
         # Try each file path until we find one tracked in the DB
         for fpath, _, _ in file_track_data:
-            cursor.execute("""
-                SELECT t.album_id, al.spotify_album_id, al.itunes_album_id
+            select_cols = ", ".join(f"al.{column}" for _source, column in selected_sources)
+            cursor.execute(f"""
+                SELECT {select_cols}
                 FROM tracks t
                 JOIN albums al ON al.id = t.album_id
                 WHERE t.file_path = ?
@@ -826,7 +841,11 @@ def _lookup_album_ids_from_db(file_track_data: List[Tuple[str, str, Any]],
             """, (fpath,))
             row = cursor.fetchone()
             if row:
-                return row[0], row[1], row[2]
+                return {
+                    source: str(row[idx])
+                    for idx, (source, _column) in enumerate(selected_sources)
+                    if row[idx]
+                }
 
     except Exception as e:
         logger.debug("Error looking up album IDs from DB: %s", e)
@@ -834,7 +853,7 @@ def _lookup_album_ids_from_db(file_track_data: List[Tuple[str, str, Any]],
         if conn:
             conn.close()
 
-    return None, None, None
+    return {}
 
 
 def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any]],
@@ -1018,52 +1037,53 @@ def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
     return True
 
 
-def _get_album_tracklist(album_id: str, context: JobContext,
-                         cache: dict) -> Optional[List[Dict]]:
-    """Fetch an album tracklist from Spotify or iTunes, with per-scan caching.
+def _normalize_album_track_items(data) -> List[Dict[str, Any]]:
+    """Normalize album track payloads to a list of dicts."""
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    items = data.get('items')
+    if isinstance(items, list):
+        return items
+    tracks = data.get('tracks')
+    if isinstance(tracks, list):
+        return tracks
+    if isinstance(tracks, dict):
+        nested_items = tracks.get('items')
+        if isinstance(nested_items, list):
+            return nested_items
+    return []
+
+
+def _get_album_tracklist(source: str, album_id: str, cache: dict) -> Optional[List[Dict]]:
+    """Fetch an album tracklist from a specific source, with per-scan caching.
 
     Returns a list of dicts with at least 'name' and 'track_number' keys,
     or None if lookup fails.
     """
-    if album_id in cache:
-        return cache[album_id]
+    cache_key = f"{source}:{album_id}"
+    if cache_key in cache:
+        return cache[cache_key]
 
     result = None
 
-    # Try Spotify first
-    client = context.spotify_client
-    if client and client.is_spotify_authenticated() and not context.is_spotify_rate_limited():
-        try:
-            data = client.get_album_tracks(album_id)
-            if data and 'items' in data and data['items']:
-                result = [
-                    {
-                        'name': item.get('name', ''),
-                        'track_number': item.get('track_number'),
-                        'disc_number': item.get('disc_number', 1),
-                    }
-                    for item in data['items']
-                ]
-        except Exception as e:
-            logger.debug("Spotify get_album_tracks failed for %s: %s", album_id, e)
+    try:
+        data = get_album_tracks_for_source(source, album_id)
+        items = _normalize_album_track_items(data)
+        if items:
+            result = [
+                {
+                    'name': item.get('name', '') if isinstance(item, dict) else getattr(item, 'name', ''),
+                    'track_number': item.get('track_number') if isinstance(item, dict) else getattr(item, 'track_number', None),
+                    'disc_number': item.get('disc_number', 1) if isinstance(item, dict) else getattr(item, 'disc_number', 1),
+                }
+                for item in items
+            ]
+    except Exception as e:
+        logger.debug("%s get_album_tracks failed for %s: %s", source.capitalize(), album_id, e)
 
-    # Fallback to iTunes
-    if not result and context.itunes_client:
-        try:
-            data = context.itunes_client.get_album_tracks(album_id)
-            if data and 'items' in data and data['items']:
-                result = [
-                    {
-                        'name': item.get('name', ''),
-                        'track_number': item.get('track_number'),
-                        'disc_number': item.get('disc_number', 1),
-                    }
-                    for item in data['items']
-                ]
-        except Exception as e:
-            logger.debug("iTunes get_album_tracks failed for %s: %s", album_id, e)
-
-    cache[album_id] = result
+    cache[cache_key] = result
     return result
 
 
