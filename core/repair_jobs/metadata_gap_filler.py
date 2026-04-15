@@ -1,8 +1,6 @@
 """Metadata Gap Filler Job — finds tracks missing key metadata and locates it from APIs."""
 
-import time
-
-from core.metadata_service import get_primary_source
+from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -40,6 +38,7 @@ class MetadataGapFillerJob(RepairJob):
         settings = self._get_settings(context)
         fill_isrc = settings.get('fill_isrc', True)
         fill_mb_id = settings.get('fill_musicbrainz_id', True)
+        source_priority = get_source_priority(get_primary_source())
 
         # Build WHERE clauses for missing fields (only columns that exist on tracks)
         conditions = []
@@ -53,27 +52,47 @@ class MetadataGapFillerJob(RepairJob):
 
         where = " OR ".join(conditions)
 
-        # Fetch tracks with gaps, prioritizing those with spotify_track_id
+        # Fetch tracks with gaps, prioritizing those with source track IDs.
         tracks = []
         conn = None
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(tracks)")
+            track_columns = {column[1] for column in cursor.fetchall()}
+
+            select_cols = [
+                "t.id",
+                "t.title",
+                "ar.name",
+                "al.title",
+                "t.isrc",
+                "t.musicbrainz_recording_id",
+                "al.thumb_url",
+                "ar.thumb_url",
+            ]
+            column_map = [
+                ("spotify_track_id", "t.spotify_track_id"),
+                ("itunes_track_id", "t.itunes_track_id"),
+                ("deezer_track_id", "t.deezer_track_id"),
+            ]
+            column_index = {}
+            for alias, column in column_map:
+                if column.split('.', 1)[1] in track_columns:
+                    column_index[alias] = len(select_cols)
+                    select_cols.append(f"{column} AS {alias}")
+
             cursor.execute(f"""
-                SELECT t.id, t.title, ar.name, al.title, t.spotify_track_id,
-                       t.isrc, t.musicbrainz_recording_id,
-                       al.thumb_url, ar.thumb_url
+                SELECT {', '.join(select_cols)}
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
                 WHERE t.title IS NOT NULL AND t.title != ''
                   AND ({where})
-                ORDER BY
-                    CASE WHEN t.spotify_track_id IS NOT NULL AND t.spotify_track_id != '' THEN 0 ELSE 1 END,
-                    t.id
                 LIMIT 500
             """)
             tracks = cursor.fetchall()
+            tracks = sorted(tracks, key=lambda row: _track_row_priority(row, column_index, source_priority))
         except Exception as e:
             logger.error("Error fetching tracks with metadata gaps: %s", e, exc_info=True)
             result.errors += 1
@@ -97,7 +116,12 @@ class MetadataGapFillerJob(RepairJob):
             if i % 20 == 0 and context.wait_if_paused():
                 return result
 
-            track_id, title, artist_name, album_title, spotify_track_id, isrc, mb_id, album_thumb, artist_thumb = row
+            track_id, title, artist_name, album_title, isrc, mb_id, album_thumb, artist_thumb = row[:8]
+            source_track_ids = {
+                'spotify': row[column_index['spotify_track_id']] if 'spotify_track_id' in column_index else None,
+                'itunes': row[column_index['itunes_track_id']] if 'itunes_track_id' in column_index else None,
+                'deezer': row[column_index['deezer_track_id']] if 'deezer_track_id' in column_index else None,
+            }
             result.scanned += 1
 
             if context.report_progress:
@@ -108,20 +132,29 @@ class MetadataGapFillerJob(RepairJob):
                     log_type='info'
                 )
             found_fields = {}
+            resolved_source = None
+            resolved_track_id = None
 
-            # Try Spotify enrichment for ISRC — only when Spotify is the configured primary source.
-            # If Deezer/iTunes is primary, Spotify may still be authenticated for playlist sync
-            # but should not be called here, as it burns API quota unnecessarily.
-            if spotify_track_id and context.spotify_client and not context.is_spotify_rate_limited() and get_primary_source() == 'spotify':
-                try:
-                    track_data = context.spotify_client.get_track_details(spotify_track_id)
-                    if track_data:
-                        if fill_isrc and not isrc:
-                            ext_ids = track_data.get('external_ids', {})
-                            if ext_ids.get('isrc'):
-                                found_fields['isrc'] = ext_ids['isrc']
-                except Exception as e:
-                    logger.debug("Spotify enrichment failed for track %s: %s", track_id, e)
+            # Try source-aware track detail lookups only when ISRC enrichment is enabled.
+            if fill_isrc and not isrc:
+                for source in source_priority:
+                    track_source_id = source_track_ids.get(source)
+                    if not track_source_id:
+                        continue
+                    try:
+                        client = get_client_for_source(source)
+                        if not client or not hasattr(client, 'get_track_details'):
+                            continue
+                        track_data = client.get_track_details(track_source_id)
+                        if track_data:
+                            isrc_value = _extract_isrc(track_data)
+                            if isrc_value:
+                                found_fields['isrc'] = isrc_value
+                                resolved_source = source
+                                resolved_track_id = track_source_id
+                                break
+                    except Exception as e:
+                        logger.debug("%s enrichment failed for track %s: %s", source.capitalize(), track_id, e)
 
             # Try MusicBrainz for MB recording ID
             if fill_mb_id and not mb_id and context.mb_client:
@@ -161,7 +194,9 @@ class MetadataGapFillerJob(RepairJob):
                                 'title': title,
                                 'artist': artist_name,
                                 'album': album_title,
-                                'spotify_track_id': spotify_track_id,
+                                'track_ids': source_track_ids,
+                                'resolved_source': resolved_source,
+                                'resolved_track_id': resolved_track_id,
                                 'found_fields': found_fields,
                                 'album_thumb_url': album_thumb or None,
                                 'artist_thumb_url': artist_thumb or None,
@@ -175,7 +210,7 @@ class MetadataGapFillerJob(RepairJob):
                 result.skipped += 1
 
             # Rate limit API calls
-            if spotify_track_id:
+            if fill_isrc and any(source_track_ids.values()):
                 if context.sleep_or_stop(0.5):
                     return result
 
@@ -215,3 +250,48 @@ class MetadataGapFillerJob(RepairJob):
         finally:
             if conn:
                 conn.close()
+
+
+def _extract_isrc(track_data):
+    """Extract ISRC from a track detail payload."""
+    if not track_data or not isinstance(track_data, dict):
+        return None
+
+    external_ids = track_data.get('external_ids')
+    if isinstance(external_ids, dict):
+        isrc = external_ids.get('isrc')
+        if isrc:
+            return isrc
+
+    isrc = track_data.get('isrc')
+    if isrc:
+        return isrc
+
+    raw_data = track_data.get('raw_data')
+    if isinstance(raw_data, dict):
+        external_ids = raw_data.get('external_ids')
+        if isinstance(external_ids, dict) and external_ids.get('isrc'):
+            return external_ids['isrc']
+        if raw_data.get('isrc'):
+            return raw_data['isrc']
+
+    return None
+
+
+def _track_row_priority(row, column_index, source_priority):
+    """Sort rows by the first source track ID available in priority order."""
+    source_columns = {
+        'spotify': 'spotify_track_id',
+        'itunes': 'itunes_track_id',
+        'deezer': 'deezer_track_id',
+    }
+
+    for idx, source in enumerate(source_priority):
+        column_name = source_columns.get(source)
+        if not column_name:
+            continue
+        column_pos = column_index.get(column_name)
+        if column_pos is not None and row[column_pos]:
+            return idx
+
+    return len(source_priority)
