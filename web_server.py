@@ -53833,7 +53833,14 @@ def _emit_repair_progress_loop():
 if __name__ == '__main__':
     print("Starting SoulSync Web UI Server...")
     print("Open your browser and navigate to http://127.0.0.1:8008")
-    
+
+    # Dump SOULSYNC_* env vars for diagnostics (helps debug Docker/Unraid env issues)
+    _soulsync_env = {k: v for k, v in os.environ.items() if k.startswith('SOULSYNC_')}
+    if _soulsync_env:
+        print(f"[Startup] SOULSYNC environment variables: {_soulsync_env}")
+    else:
+        print("[Startup] No SOULSYNC_* environment variables detected")
+
     # Start OAuth callback servers
     print("Starting OAuth callback servers...")
     start_oauth_callback_servers()
