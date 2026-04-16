@@ -25163,21 +25163,25 @@ def start_database_update():
 
         data = request.get_json()
         full_refresh = data.get('full_refresh', False)
+        deep_scan = data.get('deep_scan', False)
         active_server = config_manager.get_active_media_server()
 
+        scan_type = "Deep scan" if deep_scan else ("Full" if full_refresh else "Incremental")
         db_update_state.update({
             "status": "running",
-            "phase": "Initializing...",
+            "phase": f"{scan_type}: Initializing...",
             "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": ""
         })
-        
+
         # Add activity for database update start
-        update_type = "Full" if full_refresh else "Incremental"
         server_name = active_server.capitalize()
-        add_activity_item("", "Database Update", f"Starting {update_type.lower()} update from {server_name}...", "Now")
-        
-        # Submit the worker function to the executor
-        db_update_executor.submit(_run_db_update_task, full_refresh, active_server)
+        add_activity_item("", "Database Update", f"Starting {scan_type.lower()} update from {server_name}...", "Now")
+
+        # Submit the appropriate worker
+        if deep_scan:
+            db_update_executor.submit(_run_deep_scan_task, active_server)
+        else:
+            db_update_executor.submit(_run_db_update_task, full_refresh, active_server)
 
     return jsonify({"success": True, "message": "Database update started."})
 
