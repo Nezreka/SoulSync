@@ -18994,10 +18994,23 @@ def _embed_source_ids(audio_file, metadata: dict):
         # Shared post-processing context for modular lookups
         track_title = metadata.get('title', '')
         artist_name = metadata.get('album_artist', '') or metadata.get('artist', '')
+
+        # Extract batch-level artist name for stable MB release cache keys.
+        # When downloading an album batch, all tracks should use the same artist key
+        # to guarantee they hit the same preflight-cached release MBID.
+        _track_info_for_pp = context.get('track_info', {}) or {}
+        _explicit_artist_for_pp = _track_info_for_pp.get('_explicit_artist_context') if isinstance(_track_info_for_pp, dict) else None
+        _batch_artist_name = None
+        if isinstance(_explicit_artist_for_pp, dict) and _explicit_artist_for_pp.get('name'):
+            _batch_artist_name = _explicit_artist_for_pp['name']
+        elif isinstance(_explicit_artist_for_pp, str) and _explicit_artist_for_pp:
+            _batch_artist_name = _explicit_artist_for_pp
+
         pp = {
             'id_tags': id_tags,
             'track_title': track_title,
             'artist_name': artist_name,
+            'batch_artist_name': _batch_artist_name,
             'metadata': metadata,
             'recording_mbid': None,
             'artist_mbid': None,
@@ -19809,7 +19822,10 @@ def _pp_lookup_musicbrainz(pp, _names_match):
             # Use normalized key (strips edition suffixes) so "Album (Deluxe Edition)"
             # and "Album (Deluxe)" and "Album" all share the same cached MBID.
             # This prevents Navidrome from splitting one album into multiple entries.
-            _artist_key = artist_name.lower().strip()
+            # Prefer batch-level artist name (from album download context) for the cache key
+            # so all tracks in the batch hit the same preflight-cached entry, even if
+            # per-track metadata spells the artist slightly differently.
+            _artist_key = (pp.get('batch_artist_name') or artist_name).lower().strip()
             _rc_key_norm = (_normalize_album_cache_key(album_name_for_mb), _artist_key)
             _rc_key_exact = (album_name_for_mb.lower().strip(), _artist_key)
             with _mb_release_cache_lock:
@@ -19871,6 +19887,9 @@ def _pp_lookup_musicbrainz(pp, _names_match):
                 if isinstance(text_rep, dict) and text_rep.get('script'):
                     id_tags['SCRIPT'] = text_rep['script']
                 if release_detail.get('asin'): id_tags['ASIN'] = release_detail['asin']
+                # Picard-style: pull recording MBID from the release tracklist
+                # instead of using the independent match_recording() result.
+                # This guarantees the recording ID is consistent with the release.
                 _trk_num = metadata.get('track_number')
                 _disc_num = metadata.get('disc_number') or 1
                 if _trk_num and media_list:
@@ -19879,8 +19898,15 @@ def _pp_lookup_musicbrainz(pp, _names_match):
                         for medium in media_list:
                             if medium.get('position', 1) == _disc_num_int:
                                 for mtrack in (medium.get('tracks') or medium.get('track-list', [])):
-                                    if mtrack.get('position') == _trk_num_int and mtrack.get('id'):
-                                        id_tags['MUSICBRAINZ_RELEASETRACKID'] = mtrack['id']
+                                    if mtrack.get('position') == _trk_num_int:
+                                        if mtrack.get('id'):
+                                            id_tags['MUSICBRAINZ_RELEASETRACKID'] = mtrack['id']
+                                        # Override recording MBID with the one from this release's tracklist
+                                        _release_recording = mtrack.get('recording', {})
+                                        if _release_recording.get('id'):
+                                            pp['recording_mbid'] = _release_recording['id']
+                                            id_tags['MUSICBRAINZ_RECORDING_ID'] = _release_recording['id']
+                                            print(f"MusicBrainz recording from release tracklist: {_release_recording['id']}")
                                         break
                                 break
                     except (ValueError, TypeError):
@@ -21299,12 +21325,30 @@ def _post_process_matched_download(context_key, context, file_path):
         except Exception as repair_err:
             print(f"[Post-Process] Repair folder registration failed: {repair_err}")
 
+        # ALBUM CONSISTENCY: Register completed file for post-batch MB tag reconciliation
+        try:
+            completed_path = context.get('_final_processed_path', final_path)
+            batch_id_for_consistency = context.get('batch_id')
+            if completed_path and batch_id_for_consistency and album_info and album_info.get('is_album'):
+                _original_search = context.get('original_search_result', {})
+                _file_info = {
+                    'path': str(completed_path),
+                    'track_number': album_info.get('track_number', 1),
+                    'disc_number': album_info.get('disc_number', 1),
+                    'title': _original_search.get('spotify_clean_title', '') or album_info.get('clean_track_name', ''),
+                }
+                with tasks_lock:
+                    if batch_id_for_consistency in download_batches:
+                        download_batches[batch_id_for_consistency].setdefault('_consistency_files', []).append(_file_info)
+        except Exception as cons_err:
+            print(f"[Post-Process] Album consistency registration failed: {cons_err}")
+
         # WISHLIST REMOVAL: Check if this track should be removed from wishlist after successful download
         try:
             _check_and_remove_from_wishlist(context)
         except Exception as wishlist_error:
             print(f"[Post-Process] Error checking wishlist removal: {wishlist_error}")
-        
+
         # Call completion callback for missing downloads tasks to start next batch
         task_id = context.get('task_id')
         batch_id = context.get('batch_id')
@@ -27492,6 +27536,38 @@ def _on_download_completed(batch_id, task_id, success=True):
                 if repair_worker:
                     repair_worker.process_batch(batch_id)
 
+                # ALBUM CONSISTENCY: Picard-style post-batch pass — pick ONE MusicBrainz
+                # release and overwrite album-level tags on all files to guarantee consistency.
+                # This is the safety net: even if per-track MB lookups drifted (different cache
+                # keys, API hiccups), this pass forces every file to share the same release MBID,
+                # album artist ID, release group ID, etc. — preventing Navidrome album splits.
+                _cons_files = batch.get('_consistency_files', [])
+                if batch.get('is_album_download') and _cons_files and len(_cons_files) >= 2:
+                    _cons_album = batch.get('album_context', {})
+                    _cons_artist = batch.get('artist_context', {})
+                    _cons_album_name = _cons_album.get('name', '') if isinstance(_cons_album, dict) else ''
+                    _cons_artist_name = _cons_artist.get('name', '') if isinstance(_cons_artist, dict) else ''
+                    if _cons_album_name and _cons_artist_name:
+                        try:
+                            _cons_mb_svc = mb_worker.mb_service if mb_worker else None
+                            if _cons_mb_svc and config_manager.get('musicbrainz.embed_tags', True):
+                                from core.album_consistency import run_album_consistency
+                                _cons_result = run_album_consistency(
+                                    file_infos=_cons_files,
+                                    album_name=_cons_album_name,
+                                    artist_name=_cons_artist_name,
+                                    mb_service=_cons_mb_svc,
+                                    total_discs=_cons_album.get('total_discs', 1),
+                                    file_lock_fn=_get_file_lock,
+                                )
+                                if _cons_result.get('success'):
+                                    print(f"[Album Consistency] {_cons_result['tags_written']}/{_cons_result['total_files']} files "
+                                          f"harmonized to release {_cons_result.get('release_mbid', '')[:8]}...")
+                                elif _cons_result.get('error'):
+                                    print(f"[Album Consistency] Skipped: {_cons_result['error']}")
+                        except Exception as cons_err:
+                            print(f"[Album Consistency] Failed (non-fatal): {cons_err}")
+
                 # Mark that wishlist processing is starting (prevents premature cleanup)
                 batch['wishlist_processing_started'] = True
 
@@ -30646,6 +30722,34 @@ def _check_batch_completion_v2(batch_id):
                 # REPAIR: Scan all album folders from this batch for track number issues
                 if repair_worker:
                     repair_worker.process_batch(batch_id)
+
+                # ALBUM CONSISTENCY: Same Picard-style pass as the primary completion path
+                _cons_files = batch.get('_consistency_files', [])
+                if batch.get('is_album_download') and _cons_files and len(_cons_files) >= 2:
+                    _cons_album = batch.get('album_context', {})
+                    _cons_artist = batch.get('artist_context', {})
+                    _cons_album_name = _cons_album.get('name', '') if isinstance(_cons_album, dict) else ''
+                    _cons_artist_name = _cons_artist.get('name', '') if isinstance(_cons_artist, dict) else ''
+                    if _cons_album_name and _cons_artist_name:
+                        try:
+                            _cons_mb_svc = mb_worker.mb_service if mb_worker else None
+                            if _cons_mb_svc and config_manager.get('musicbrainz.embed_tags', True):
+                                from core.album_consistency import run_album_consistency
+                                _cons_result = run_album_consistency(
+                                    file_infos=_cons_files,
+                                    album_name=_cons_album_name,
+                                    artist_name=_cons_artist_name,
+                                    mb_service=_cons_mb_svc,
+                                    total_discs=_cons_album.get('total_discs', 1),
+                                    file_lock_fn=_get_file_lock,
+                                )
+                                if _cons_result.get('success'):
+                                    print(f"[Album Consistency V2] {_cons_result['tags_written']}/{_cons_result['total_files']} files "
+                                          f"harmonized to release {_cons_result.get('release_mbid', '')[:8]}...")
+                                elif _cons_result.get('error'):
+                                    print(f"[Album Consistency V2] Skipped: {_cons_result['error']}")
+                        except Exception as cons_err:
+                            print(f"[Album Consistency V2] Failed (non-fatal): {cons_err}")
 
         # Process wishlist outside of the lock to prevent threading issues
         if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
