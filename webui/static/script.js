@@ -2801,6 +2801,12 @@ function initializeWatchlist() {
         watchlistButton.addEventListener('click', showWatchlistModal);
     }
 
+    // Add wishlist button click handler (global init so it works on all pages)
+    const wishlistButton = document.getElementById('wishlist-button');
+    if (wishlistButton) {
+        wishlistButton.addEventListener('click', handleWishlistButtonClick);
+    }
+
     // Update watchlist count initially
     updateWatchlistButtonCount();
 
@@ -25095,12 +25101,6 @@ async function loadDashboardData() {
 
     // Attach event listeners for tool help buttons
     initializeToolHelpButtons();
-
-    // Attach event listener for the wishlist button
-    const wishlistButton = document.getElementById('wishlist-button');
-    if (wishlistButton) {
-        wishlistButton.addEventListener('click', handleWishlistButtonClick);
-    }
 
     // Initial load of retag stats
     loadRetagStats();
