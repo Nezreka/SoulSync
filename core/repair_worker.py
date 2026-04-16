@@ -840,6 +840,7 @@ class RepairWorker:
             'missing_lossy_copy': self._fix_missing_lossy_copy,
             'unwanted_content': self._fix_unwanted_content,
             'unknown_artist': self._fix_unknown_artist,
+            'acoustid_mismatch': self._fix_acoustid_mismatch,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1508,6 +1509,108 @@ class RepairWorker:
 
         return {'success': True, 'action': 'fixed_unknown_artist',
                 'message': f'Fixed: {corrected_artist} - {corrected_title}'}
+
+    def _fix_acoustid_mismatch(self, entity_type, entity_id, file_path, details):
+        """Fix an AcoustID mismatch. Actions:
+           'retag' (default): Update DB title/artist to match the actual audio content
+           'redownload': Add the expected (correct) track to wishlist and delete the wrong file
+           'delete': Just delete the wrong file and DB record
+        """
+        fix_action = details.get('_fix_action', 'retag')
+        track_id = entity_id
+
+        if fix_action == 'delete':
+            # Delete file + DB record
+            if file_path:
+                resolved = _resolve_file_path(file_path, self.transfer_folder)
+                if resolved and os.path.exists(resolved):
+                    try:
+                        os.remove(resolved)
+                    except Exception as e:
+                        logger.warning("Could not delete file %s: %s", resolved, e)
+            if track_id:
+                try:
+                    conn = self.db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    return {'success': False, 'error': f'DB delete failed: {e}'}
+            return {'success': True, 'action': 'deleted',
+                    'message': f'Deleted wrong file: {os.path.basename(file_path or "")}'}
+
+        if fix_action == 'redownload':
+            # Add expected track to wishlist, then delete the wrong file
+            expected_title = details.get('expected_title', '')
+            expected_artist = details.get('expected_artist', '')
+            album_title = details.get('album_title', '')
+            if expected_title and expected_artist:
+                try:
+                    import json, uuid
+                    track_data = {
+                        'id': f'acoustid_fix_{uuid.uuid4().hex[:8]}',
+                        'name': expected_title,
+                        'artists': [{'name': expected_artist}],
+                        'album': {'name': album_title} if album_title else {'name': expected_title},
+                    }
+                    self.db.add_to_wishlist(
+                        spotify_track_data=track_data,
+                        failure_reason='AcoustID mismatch — re-downloading correct track',
+                        source_type='repair',
+                    )
+                    logger.info("Added '%s' by '%s' to wishlist for re-download",
+                                expected_title, expected_artist)
+                except Exception as e:
+                    logger.warning("Could not add to wishlist: %s", e)
+            # Delete wrong file
+            if file_path:
+                resolved = _resolve_file_path(file_path, self.transfer_folder)
+                if resolved and os.path.exists(resolved):
+                    try:
+                        os.remove(resolved)
+                    except Exception:
+                        pass
+            if track_id:
+                try:
+                    conn = self.db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
+            return {'success': True, 'action': 'redownload',
+                    'message': f'Added "{expected_title}" to wishlist, removed wrong file'}
+
+        # Default: retag — update DB record to match the actual audio content
+        aid_title = details.get('acoustid_title', '')
+        aid_artist = details.get('acoustid_artist', '')
+        if not aid_title:
+            return {'success': False, 'error': 'No AcoustID title available to retag'}
+
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            # Update track title
+            cursor.execute("UPDATE tracks SET title = ? WHERE id = ?", (aid_title, track_id))
+            # Update artist if we have one and it differs
+            if aid_artist:
+                cursor.execute("SELECT id FROM artists WHERE LOWER(name) = LOWER(?)", (aid_artist,))
+                row = cursor.fetchone()
+                if row:
+                    cursor.execute("UPDATE tracks SET artist_id = ? WHERE id = ?", (row[0], track_id))
+                else:
+                    cursor.execute("INSERT INTO artists (name) VALUES (?)", (aid_artist,))
+                    cursor.execute("UPDATE tracks SET artist_id = ? WHERE id = ?",
+                                   (cursor.lastrowid, track_id))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            return {'success': False, 'error': f'DB update failed: {e}'}
+
+        return {'success': True, 'action': 'retagged',
+                'message': f'Updated to: "{aid_title}" by {aid_artist}'}
 
     def _fix_mbid_mismatch(self, entity_type, entity_id, file_path, details):
         """Remove the mismatched MusicBrainz recording ID from the audio file."""
