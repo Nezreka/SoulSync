@@ -42,6 +42,7 @@ def create_api_blueprint():
     from .retag import register_routes as reg_retag
     from .listenbrainz import register_routes as reg_listenbrainz
     from .cache import register_routes as reg_cache
+    from .request import register_routes as reg_request
 
     # ---- rate-limit only /api/v1 routes (not the whole app) ----
     limiter.limit("60 per minute")(bp)
@@ -59,6 +60,7 @@ def create_api_blueprint():
     reg_retag(bp)
     reg_listenbrainz(bp)
     reg_cache(bp)
+    reg_request(bp)
 
     # ---- error handlers (scoped to this Blueprint) ----
     @bp.errorhandler(400)

@@ -1835,6 +1835,42 @@ def _register_automation_handlers():
     automation_engine.register_action_handler('clean_search_history', _auto_clean_search_history)
     automation_engine.register_action_handler('clean_completed_downloads', _auto_clean_completed_downloads)
 
+    def _auto_search_and_download(config):
+        """Search for a track and download the best match."""
+        automation_id = config.get('_automation_id')
+        query = config.get('query', '').strip()
+        # Event-triggered: pull query from event data (e.g. webhook_received)
+        if not query:
+            event_data = config.get('_event_data', {})
+            query = (event_data.get('query', '') or '').strip()
+        if not query:
+            if automation_id:
+                _update_automation_progress(automation_id,
+                    log_line='No search query provided', log_type='error')
+            return {'status': 'error', 'error': 'No search query provided'}
+        try:
+            if automation_id:
+                _update_automation_progress(automation_id,
+                    phase='Searching', log_line=f'Searching: {query}', log_type='info')
+            result = run_async(soulseek_client.search_and_download_best(query))
+            if result:
+                if automation_id:
+                    _update_automation_progress(automation_id,
+                        log_line=f'Download started for: {query}', log_type='success')
+                return {'status': 'completed', 'query': query, 'download_id': result}
+            else:
+                if automation_id:
+                    _update_automation_progress(automation_id,
+                        log_line=f'No match found for: {query}', log_type='warning')
+                return {'status': 'not_found', 'query': query, 'error': 'No match found'}
+        except Exception as e:
+            if automation_id:
+                _update_automation_progress(automation_id,
+                    log_line=f'Error: {e}', log_type='error')
+            return {'status': 'error', 'query': query, 'error': str(e)}
+
+    automation_engine.register_action_handler('search_and_download', _auto_search_and_download)
+
     # Register progress tracking callbacks
     def _progress_init(aid, name, action_type):
         _init_automation_progress(aid, name, action_type)
@@ -2108,6 +2144,7 @@ try:
         'tidal_client': tidal_client,
         'matching_engine': matching_engine,
         'config_manager': config_manager,
+        'automation_engine': automation_engine,
         'hydrabase_client': None,       # updated after Hydrabase init
         'hydrabase_worker': None,       # updated after Hydrabase init
     }
@@ -6350,6 +6387,10 @@ def get_automation_blocks():
                  {"key": "signal_name", "type": "signal_input", "label": "Signal Name"}
              ],
              "variables": ["signal_name"]},
+            # Webhook trigger
+            {"type": "webhook_received", "label": "Webhook Received", "icon": "globe",
+             "description": "When an external API request is received (POST /api/v1/request)", "available": True,
+             "variables": ["query", "request_id", "source"]},
         ],
         "actions": [
             {"type": "process_wishlist", "label": "Process Wishlist", "icon": "list", "description": "Retry failed downloads from wishlist", "available": True,
@@ -6414,6 +6455,12 @@ def get_automation_blocks():
              "description": "Full library comparison without losing enrichment data", "available": True},
             {"type": "run_script", "label": "Run Script", "icon": "terminal",
              "description": "Execute a script from the scripts folder", "available": True},
+            {"type": "search_and_download", "label": "Search & Download", "icon": "download",
+             "description": "Search for a track and download the best match", "available": True,
+             "config_fields": [
+                 {"key": "query", "type": "text", "label": "Search Query",
+                  "placeholder": "Artist - Track (leave empty to use trigger's query)"}
+             ]},
         ],
         "notifications": [
             {"type": "discord_webhook", "label": "Discord Webhook", "icon": "message", "description": "Send a Discord notification", "available": True,
