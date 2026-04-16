@@ -13851,11 +13851,11 @@ async function selectWishlistCategory(category) {
 
         const tracksList = document.getElementById('wishlist-tracks-list');
         const categoryTracksSection = document.getElementById('wishlist-category-tracks');
-        const categoryGrid = document.querySelector('.wishlist-category-grid');
+        const nebulaEl = document.getElementById('wishlist-nebula');
         const downloadBtn = document.getElementById('wishlist-download-btn');
         const categoryName = document.getElementById('wishlist-category-name');
 
-        categoryGrid.style.display = 'none';
+        if (nebulaEl) nebulaEl.style.display = 'none';
         categoryTracksSection.style.display = 'block';
         downloadBtn.style.display = 'inline-block';
         categoryName.textContent = category === 'albums' ? 'Albums / EPs' : 'Singles';
@@ -14131,18 +14131,7 @@ function _attachWishlistDelegation(container) {
 }
 
 function backToCategories() {
-    const categoryTracksSection = document.getElementById('wishlist-category-tracks');
-    const categoryGrid = document.querySelector('.wishlist-category-grid');
-    const downloadBtn = document.getElementById('wishlist-download-btn');
-    const batchBar = document.getElementById('wishlist-batch-bar');
-    const trackSearch = document.getElementById('wishlist-track-search-input');
-
-    categoryTracksSection.style.display = 'none';
-    categoryGrid.style.display = 'grid';
-    downloadBtn.style.display = 'none';
-    if (batchBar) batchBar.style.display = 'none';
-    if (trackSearch) trackSearch.value = '';
-    window.selectedWishlistCategory = null;
+    _nebulaBack();
 }
 
 function toggleAlbumTracks(albumId) {
@@ -40496,100 +40485,181 @@ async function initializeWatchlistPage() {
 async function initializeWishlistPage() {
     try {
         const emptyEl = document.getElementById('wishlist-page-empty');
-        const categoriesEl = document.getElementById('wishlist-page-categories');
+        const nebulaEl = document.getElementById('wishlist-nebula');
         const countEl = document.getElementById('wishlist-page-count');
         const tracksSection = document.getElementById('wishlist-category-tracks');
+        const statsStrip = document.getElementById('wishlist-stats-strip');
 
-        // Fetch stats and cycle
-        const [statsRes, cycleRes] = await Promise.all([
+        const [statsRes, cycleRes, albumRes, singleRes] = await Promise.all([
             fetch('/api/wishlist/stats').then(r => r.json()),
             fetch('/api/wishlist/cycle').then(r => r.json()),
+            fetch('/api/wishlist/tracks?category=albums').then(r => r.json()),
+            fetch('/api/wishlist/tracks?category=singles').then(r => r.json()),
         ]);
 
         const { singles = 0, albums = 0, total = 0 } = statsRes;
         const currentCycle = cycleRes.cycle || 'albums';
 
-        // Update count
         if (countEl) countEl.textContent = `${total} track${total !== 1 ? 's' : ''}`;
-
-        // Update nav badge
         const navBadge = document.getElementById('wishlist-nav-badge');
-        if (navBadge) {
-            navBadge.textContent = total;
-            navBadge.classList.toggle('hidden', total === 0);
-        }
+        if (navBadge) { navBadge.textContent = total; navBadge.classList.toggle('hidden', total === 0); }
 
-        // Stats strip
         const statAlbums = document.getElementById('wishlist-stat-albums');
         const statSingles = document.getElementById('wishlist-stat-singles');
         const statCycle = document.getElementById('wishlist-stat-cycle');
-        const statsStrip = document.getElementById('wishlist-stats-strip');
         if (statAlbums) statAlbums.textContent = albums;
         if (statSingles) statSingles.textContent = singles;
         if (statCycle) statCycle.textContent = currentCycle === 'albums' ? 'Albums/EPs' : 'Singles';
 
-        // Empty state
         if (total === 0) {
             if (emptyEl) emptyEl.style.display = '';
-            if (categoriesEl) categoriesEl.style.display = 'none';
+            if (nebulaEl) nebulaEl.style.display = 'none';
             if (tracksSection) tracksSection.style.display = 'none';
             if (statsStrip) statsStrip.style.display = 'none';
             wishlistPageState.isInitialized = true;
             return;
         }
         if (emptyEl) emptyEl.style.display = 'none';
-        if (categoriesEl) categoriesEl.style.display = '';
+        if (nebulaEl) nebulaEl.style.display = '';
+        if (tracksSection) tracksSection.style.display = 'none';
         if (statsStrip) statsStrip.style.display = '';
 
-        // Reset to category view
-        if (tracksSection) tracksSection.style.display = 'none';
-        if (categoriesEl) categoriesEl.style.display = '';
-
-        // Update category cards
-        const albumsCountEl = document.getElementById('wishlist-page-albums-count');
-        const singlesCountEl = document.getElementById('wishlist-page-singles-count');
-        const albumsBadge = document.getElementById('wishlist-page-albums-badge');
-        const singlesBadge = document.getElementById('wishlist-page-singles-badge');
-
-        if (albumsCountEl) albumsCountEl.textContent = `${albums} tracks`;
-        if (singlesCountEl) singlesCountEl.textContent = `${singles} tracks`;
-        if (albumsBadge) albumsBadge.style.display = currentCycle === 'albums' ? '' : 'none';
-        if (singlesBadge) singlesBadge.style.display = currentCycle === 'singles' ? '' : 'none';
-
-        // Add/remove next-in-queue class
-        const albumCard = categoriesEl.querySelector('[data-category="albums"]');
-        const singleCard = categoriesEl.querySelector('[data-category="singles"]');
-        if (albumCard) albumCard.classList.toggle('next-in-queue', currentCycle === 'albums');
-        if (singleCard) singleCard.classList.toggle('next-in-queue', currentCycle === 'singles');
-
-        // Load mosaic covers
-        try {
-            const [albumTracksData, singleTracksData] = await Promise.all([
-                fetch('/api/wishlist/tracks?category=albums&limit=50').then(r => r.json()),
-                fetch('/api/wishlist/tracks?category=singles&limit=50').then(r => r.json()),
-            ]);
-            const albumCovers = extractUniqueCoverImages(albumTracksData.tracks || [], 20);
-            const singleCovers = extractUniqueCoverImages(singleTracksData.tracks || [], 20);
-
-            const albumsMosaic = document.getElementById('wishlist-page-albums-mosaic');
-            const singlesMosaic = document.getElementById('wishlist-page-singles-mosaic');
-            if (albumsMosaic) albumsMosaic.innerHTML = generateMosaicBackground(albumCovers);
-            if (singlesMosaic) singlesMosaic.innerHTML = generateMosaicBackground(singleCovers);
-        } catch (e) {
-            console.debug('Could not load mosaic covers:', e);
-        }
-
-        // Start countdown timer
-        const nextRunSeconds = statsRes.next_run_in_seconds || 0;
-        const nextCycleText = currentCycle === 'albums' ? 'Albums/EPs' : 'Singles';
-        startWishlistCountdownTimer(currentCycle, nextRunSeconds);
-
+        _renderWishlistNebula(albumRes.tracks || [], singleRes.tracks || []);
+        startWishlistCountdownTimer(currentCycle, statsRes.next_run_in_seconds || 0);
         wishlistPageState.isInitialized = true;
 
     } catch (error) {
         console.error('Error initializing wishlist page:', error);
         showToast('Failed to load wishlist', 'error');
     }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   WISHLIST NEBULA — Artist orbs with album/single satellites
+   ═══════════════════════════════════════════════════════════════════ */
+
+function _renderWishlistNebula(albumTracks, singleTracks) {
+    const field = document.getElementById('wl-nebula-field');
+    if (!field) return;
+
+    const artistMap = new Map();
+    function _parse(track, type) {
+        let sd = track.spotify_data;
+        if (typeof sd === 'string') { try { sd = JSON.parse(sd); } catch (e) { return null; } }
+        if (!sd) return null;
+        const raw = sd.album;
+        const albumName = (typeof raw === 'string' ? raw : raw?.name) || 'Unknown';
+        const albumImage = (typeof raw === 'object' && raw?.images?.[0]?.url) || '';
+        let artist = 'Unknown Artist';
+        if (sd.artists?.[0]?.name) artist = sd.artists[0].name;
+        else if (typeof sd.artists?.[0] === 'string') artist = sd.artists[0];
+        return { track: sd.name || 'Unknown', artist, album: albumName, image: albumImage, type, id: track.spotify_track_id || track.id || '' };
+    }
+
+    for (const t of albumTracks) { const p = _parse(t, 'album'); if (p) { if (!artistMap.has(p.artist)) artistMap.set(p.artist, { albums: new Map(), singles: [] }); const a = artistMap.get(p.artist); if (!a.albums.has(p.album)) a.albums.set(p.album, { image: p.image, tracks: [] }); a.albums.get(p.album).tracks.push(p); } }
+    for (const t of singleTracks) { const p = _parse(t, 'single'); if (p) { if (!artistMap.has(p.artist)) artistMap.set(p.artist, { albums: new Map(), singles: [] }); artistMap.get(p.artist).singles.push(p); } }
+
+    if (artistMap.size === 0) { field.innerHTML = '<div class="wl-nebula-empty">Your wishlist is empty</div>'; return; }
+
+    const sorted = [...artistMap.entries()].sort((a, b) => {
+        const ac = [...a[1].albums.values()].reduce((s, al) => s + al.tracks.length, 0) + a[1].singles.length;
+        const bc = [...b[1].albums.values()].reduce((s, al) => s + al.tracks.length, 0) + b[1].singles.length;
+        return bc - ac;
+    });
+
+    function _hue(n) { let h = 0; for (let i = 0; i < n.length; i++) h = n.charCodeAt(i) + ((h << 5) - h); return Math.abs(h) % 360; }
+
+    let html = '';
+    for (const [name, data] of sorted) {
+        const total = [...data.albums.values()].reduce((s, a) => s + a.tracks.length, 0) + data.singles.length;
+        const hue = _hue(name);
+        const sz = total >= 10 ? 'orb-lg' : total >= 4 ? 'orb-md' : 'orb-sm';
+        let img = '';
+        for (const [, ad] of data.albums) { if (ad.image) { img = ad.image; break; } }
+        if (!img && data.singles.length) img = data.singles[0].image || '';
+
+        html += `<div class="wl-orb-group" data-artist="${escapeHtml(name)}">`;
+        html += `<div class="wl-orb ${sz}" style="--orb-hue:${hue}" onclick="_toggleOrbExpand(this)">`;
+        html += `<div class="wl-orb-glow"></div>`;
+        html += img ? `<img class="wl-orb-img" src="${img}" alt="" loading="lazy">` : `<div class="wl-orb-initials">${escapeHtml(name.substring(0, 2).toUpperCase())}</div>`;
+        html += `<div class="wl-orb-ring"></div>`;
+        html += `</div>`;
+        html += `<div class="wl-orb-label">${escapeHtml(name)}</div>`;
+        html += `<div class="wl-orb-meta">${total} track${total !== 1 ? 's' : ''}</div>`;
+
+        html += `<div class="wl-orb-expanded">`;
+        if (data.albums.size > 0) {
+            html += `<div class="wl-orb-albums">`;
+            for (const [an, ad] of data.albums) {
+                html += `<div class="wl-satellite" data-album="${escapeHtml(an)}">`;
+                html += `<div class="wl-satellite-art">${ad.image ? `<img src="${ad.image}" alt="">` : ''}</div>`;
+                html += `<div class="wl-satellite-info"><div class="wl-satellite-name">${escapeHtml(an)}</div><div class="wl-satellite-count">${ad.tracks.length} tracks</div></div>`;
+                html += `<button class="wl-satellite-remove" onclick="event.stopPropagation();_removeWishlistAlbum('${escapeHtml(an)}')" title="Remove">&#10005;</button>`;
+                html += `</div>`;
+            }
+            html += `</div>`;
+        }
+        if (data.singles.length > 0) {
+            html += `<div class="wl-orb-singles">`;
+            for (const s of data.singles) {
+                html += `<div class="wl-single-pill" data-track-id="${escapeHtml(s.id)}">`;
+                if (s.image) html += `<img class="wl-pill-art" src="${s.image}" alt="">`;
+                html += `<span class="wl-pill-name">${escapeHtml(s.track)}</span>`;
+                html += `<button class="wl-pill-remove" onclick="event.stopPropagation();_removeWishlistTrack('${escapeHtml(s.id)}')" title="Remove">&#10005;</button>`;
+                html += `</div>`;
+            }
+            html += `</div>`;
+        }
+        html += `</div></div>`;
+    }
+    field.innerHTML = html;
+}
+
+function _toggleOrbExpand(el) {
+    const g = el.closest('.wl-orb-group');
+    if (!g) return;
+    const was = g.classList.contains('expanded');
+    document.querySelectorAll('.wl-orb-group.expanded').forEach(o => o.classList.remove('expanded'));
+    if (!was) g.classList.add('expanded');
+}
+
+async function _removeWishlistAlbum(albumName) {
+    if (!await showConfirmDialog({ title: 'Remove Album', message: `Remove all tracks from "${albumName}"?`, confirmText: 'Remove', destructive: true })) return;
+    try {
+        const res = await fetch('/api/wishlist/remove-album', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ album_name: albumName }) });
+        const data = await res.json();
+        if (data.success) { showToast(`Removed "${albumName}"`, 'success'); wishlistPageState.isInitialized = false; await initializeWishlistPage(); await updateWishlistCount(); }
+        else showToast(data.error || 'Failed', 'error');
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+async function _removeWishlistTrack(trackId) {
+    try {
+        const res = await fetch('/api/wishlist/remove-track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spotify_track_id: trackId }) });
+        const data = await res.json();
+        if (data.success) { const p = document.querySelector(`.wl-single-pill[data-track-id="${trackId}"]`); if (p) p.remove(); showToast('Removed', 'success'); await updateWishlistCount(); }
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+function _filterNebula() {
+    const q = (document.getElementById('wl-nebula-search')?.value || '').toLowerCase().trim();
+    document.querySelectorAll('.wl-orb-group').forEach(g => {
+        const a = (g.dataset.artist || '').toLowerCase();
+        const albums = [...g.querySelectorAll('.wl-satellite')].map(s => (s.dataset.album || '').toLowerCase());
+        const match = !q || a.includes(q) || albums.some(al => al.includes(q));
+        g.style.display = match ? '' : 'none';
+        if (!match) g.classList.remove('expanded');
+    });
+}
+
+function _nebulaBack() {
+    const t = document.getElementById('wishlist-category-tracks');
+    const n = document.getElementById('wishlist-nebula');
+    if (t) t.style.display = 'none';
+    if (n) n.style.display = '';
+    window.selectedWishlistCategory = null;
+    wishlistPageState.isInitialized = false;
+    initializeWishlistPage();
 }
 
 /**
