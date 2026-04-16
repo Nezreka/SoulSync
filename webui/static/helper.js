@@ -3610,6 +3610,7 @@ const WHATS_NEW = {
         { title: 'Fix "Replace Lower Quality" Setting Not Persisting', desc: 'The import section appeared twice in the settings save payload — the second instance (with only staging_path) overwrote the first (with replace_lower_quality). Merged into a single block' },
         { title: 'Inbound Music Request API', desc: 'New POST /api/v1/request endpoint — trigger downloads from Discord bots, Home Assistant, curl, or any external tool. Async with status polling and optional notify_url callback. New "Webhook Received" automation trigger and "Search & Download" action in the Automation Hub' },
         { title: 'Fix Spotify Enrichment Worker Infinite Loop', desc: 'Artists with an existing Spotify ID but no match status got stuck in the enrichment queue — the worker processed them every 3 seconds forever without marking them as done. Now correctly marks them as matched' },
+        { title: 'Reject Qobuz 30-Second Samples', desc: 'Qobuz previews (30s samples for tracks requiring a subscription or region-restricted) are now detected and rejected. Checks the API sample flag before downloading, and validates file duration after download as a safety net' },
 
         // --- April 14, 2026 ---
         { date: 'April 14, 2026' },

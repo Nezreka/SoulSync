@@ -974,6 +974,12 @@ class QobuzClient:
                 logger.error("No Qobuz stream available at any quality")
                 return None
 
+            # Qobuz returns sample=True for 30-second previews (no subscription or region-restricted)
+            if stream_data.get('sample', False):
+                logger.warning(f"Qobuz returned a 30s sample for '{display_name}' — "
+                               f"track may require a Qobuz subscription or is region-restricted. Skipping.")
+                return None
+
             download_url = stream_data['url']
 
             # Determine file extension from stream response
@@ -1064,6 +1070,23 @@ class QobuzClient:
                 )
                 out_path.unlink(missing_ok=True)
                 return None
+
+            # Safety net: detect 30-second samples by checking actual file duration.
+            # Qobuz previews are valid audio files (~2-5MB) that pass the size check above.
+            try:
+                from mutagen import File as MutagenFile
+                audio = MutagenFile(str(out_path))
+                if audio and audio.info and audio.info.length:
+                    duration_s = audio.info.length
+                    if duration_s < 35:
+                        logger.warning(
+                            f"Qobuz download is only {duration_s:.0f}s — likely a 30s sample/preview "
+                            f"for '{display_name}'. Deleting."
+                        )
+                        out_path.unlink(missing_ok=True)
+                        return None
+            except Exception as e:
+                logger.debug(f"Could not check audio duration (non-fatal): {e}")
 
             final_size = out_path.stat().st_size if out_path.exists() else 0
             logger.info(f"Qobuz download complete: {out_path} ({final_size / (1024*1024):.1f} MB)")
