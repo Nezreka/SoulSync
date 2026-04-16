@@ -14621,6 +14621,7 @@ def library_delete_track(track_id):
                 track_info = cursor.fetchone()
 
             # Delete file from disk if requested
+            file_error = None
             if delete_file and track_info and track_info['file_path']:
                 resolved = _resolve_library_file_path(track_info['file_path'])
                 if resolved and os.path.exists(resolved):
@@ -14630,6 +14631,10 @@ def library_delete_track(track_id):
                         logger.info(f"Deleted file from disk: {resolved}")
                     except Exception as e:
                         logger.warning(f"Failed to delete file: {e}")
+                        file_error = str(e)
+                else:
+                    logger.warning(f"Could not resolve file path for deletion: {track_info['file_path']} (resolved={resolved})")
+                    file_error = _get_file_not_found_error(track_info['file_path'])
 
             # Add to blacklist if requested
             if add_blacklist and track_info and track_info['file_path']:
@@ -14651,7 +14656,10 @@ def library_delete_track(track_id):
             if cursor.rowcount == 0:
                 return jsonify({"success": False, "error": "Track not found"}), 404
 
-            return jsonify({"success": True, "deleted_count": cursor.rowcount, "file_deleted": file_deleted, "blacklisted": blacklisted})
+            result = {"success": True, "deleted_count": cursor.rowcount, "file_deleted": file_deleted, "blacklisted": blacklisted}
+            if delete_file and not file_deleted and file_error:
+                result["file_error"] = file_error
+            return jsonify(result)
     except Exception as e:
         print(f"Error deleting track {track_id}: {e}")
         import traceback
