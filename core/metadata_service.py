@@ -128,6 +128,8 @@ def get_album_tracks_for_source(source: str, album_id: str):
         fetch = getattr(client, 'get_album_tracks_dict', None) if source == 'hydrabase' else getattr(client, 'get_album_tracks', None)
         if not fetch:
             return None
+        if source == 'spotify':
+            return fetch(album_id, allow_fallback=False)
         return fetch(album_id)
     except Exception:
         return None
