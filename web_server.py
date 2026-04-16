@@ -6103,6 +6103,67 @@ def update_automation_endpoint(automation_id):
         logger.error(f"Error updating automation: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/automations/group', methods=['PUT'])
+def batch_update_automation_group():
+    """Batch update group_name for multiple automations (rename group, delete group, drag-drop)."""
+    try:
+        data = request.get_json()
+        automation_ids = data.get('automation_ids', [])
+        group_name = data.get('group_name')  # None/null = ungroup
+
+        if not automation_ids or not isinstance(automation_ids, list):
+            return jsonify({"error": "automation_ids must be a non-empty list"}), 400
+
+        # Sanitize IDs to integers
+        try:
+            automation_ids = [int(aid) for aid in automation_ids]
+        except (ValueError, TypeError):
+            return jsonify({"error": "automation_ids must contain integers"}), 400
+
+        db = get_database()
+        updated = db.batch_update_group(automation_ids, group_name)
+
+        return jsonify({"success": True, "updated": updated})
+    except Exception as e:
+        logger.error(f"Error batch updating automation group: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/automations/bulk-toggle', methods=['POST'])
+def bulk_toggle_automations():
+    """Bulk enable/disable multiple automations."""
+    try:
+        data = request.get_json()
+        automation_ids = data.get('automation_ids', [])
+        enabled = data.get('enabled', True)
+
+        if not automation_ids or not isinstance(automation_ids, list):
+            return jsonify({"error": "automation_ids must be a non-empty list"}), 400
+
+        try:
+            automation_ids = [int(aid) for aid in automation_ids]
+        except (ValueError, TypeError):
+            return jsonify({"error": "automation_ids must contain integers"}), 400
+
+        db = get_database()
+        updated = db.bulk_set_enabled(automation_ids, bool(enabled))
+
+        # Reschedule/cancel affected automations
+        if automation_engine and updated > 0:
+            for aid in automation_ids:
+                auto = db.get_automation(aid)
+                if auto:
+                    if auto.get('enabled'):
+                        automation_engine.schedule_automation(auto)
+                    else:
+                        automation_engine.cancel_automation(aid)
+
+        return jsonify({"success": True, "updated": updated})
+    except Exception as e:
+        logger.error(f"Error bulk toggling automations: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/automations/<int:automation_id>', methods=['DELETE'])
 def delete_automation_endpoint(automation_id):
     """Delete an automation. System automations cannot be deleted."""
