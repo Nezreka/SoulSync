@@ -517,6 +517,87 @@ class WatchlistScanner:
 
         return None
 
+    def backfill_watchlist_artist_images(self, profile_id: int) -> int:
+        """Backfill missing watchlist artist images using cached metadata and existing album art."""
+        try:
+            conn = self.database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, artist_name, spotify_artist_id, itunes_artist_id,
+                       deezer_artist_id, discogs_artist_id
+                FROM watchlist_artists
+                WHERE profile_id = ? AND (image_url IS NULL OR image_url = '' OR image_url = 'None'
+                      OR image_url NOT LIKE 'http%')
+            """, (profile_id,))
+            imageless = cursor.fetchall()
+
+            if not imageless:
+                return 0
+
+            logger.info("Backfilling images for %s watchlist artists (profile %s)...", len(imageless), profile_id)
+            filled = 0
+            for row in imageless:
+                name = row['artist_name']
+                img = None
+
+                # 1. Check metadata cache for artist image
+                cursor.execute("""
+                    SELECT image_url FROM metadata_cache_entities
+                    WHERE entity_type = 'artist' AND name = ? COLLATE NOCASE
+                      AND image_url IS NOT NULL AND image_url LIKE 'http%'
+                    LIMIT 1
+                """, (name,))
+                cr = cursor.fetchone()
+                if cr:
+                    img = cr['image_url']
+
+                # 2. Deezer direct URL (no API call needed)
+                if not img and row['deezer_artist_id']:
+                    img = f"https://api.deezer.com/artist/{row['deezer_artist_id']}/image?size=big"
+
+                # 3. Deezer ID from cache (artist may have a Deezer match we haven't stored on watchlist)
+                if not img:
+                    cursor.execute("""
+                        SELECT entity_id FROM metadata_cache_entities
+                        WHERE entity_type = 'artist' AND source = 'deezer'
+                          AND name = ? COLLATE NOCASE LIMIT 1
+                    """, (name,))
+                    dz = cursor.fetchone()
+                    if dz and dz['entity_id']:
+                        img = f"https://api.deezer.com/artist/{dz['entity_id']}/image?size=big"
+
+                # 4. Album art fallback (iTunes artists have no artist images)
+                if not img:
+                    cursor.execute("""
+                        SELECT image_url FROM metadata_cache_entities
+                        WHERE entity_type = 'album' AND image_url LIKE 'http%'
+                          AND artist_name = ? COLLATE NOCASE LIMIT 1
+                    """, (name,))
+                    alb = cursor.fetchone()
+                    if alb:
+                        img = alb['image_url']
+
+                if img:
+                    aid = (row['spotify_artist_id'] or row['itunes_artist_id']
+                           or row['deezer_artist_id'] or row['discogs_artist_id'])
+                    if aid:
+                        self.database.update_watchlist_artist_image(aid, img)
+                    else:
+                        # No external IDs — update by internal row ID directly
+                        cursor.execute("""
+                            UPDATE watchlist_artists SET image_url = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        """, (img, row['id']))
+                        conn.commit()
+                    filled += 1
+
+            if filled:
+                logger.info("Backfilled %s/%s watchlist artist images (profile %s)", filled, len(imageless), profile_id)
+            return filled
+        except Exception as e:
+            logger.debug("Error backfilling watchlist artist images for profile %s: %s", profile_id, e, exc_info=True)
+            return 0
+
     def get_artist_discography_for_watchlist(self, watchlist_artist: WatchlistArtist, last_scan_timestamp: Optional[datetime] = None) -> Optional[List]:
         """
         Get artist's discography using the active provider, with proper ID resolution.
@@ -836,6 +917,9 @@ class WatchlistScanner:
                             continue
 
                         tracks = album_data['tracks']['items']
+                        if self._has_placeholder_tracks(tracks):
+                            logger.info("Skipping album with placeholder tracks: %s", album_data.get('name', album.name))
+                            continue
                         if not self._should_include_release(len(tracks), artist):
                             continue
 

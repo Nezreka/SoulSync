@@ -39836,82 +39836,10 @@ def start_watchlist_scan():
                     except Exception as backfill_error:
                         print(f"Error during {_bf_provider} ID backfilling: {backfill_error}")
                         # Continue with next provider
-
-                # IMAGE BACKFILL — fix watchlist artists with missing images
-                # Uses DB-only lookups (metadata cache + album art) — no API calls
                 try:
-                    conn = database._get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT id, artist_name, spotify_artist_id, itunes_artist_id,
-                               deezer_artist_id, discogs_artist_id
-                        FROM watchlist_artists
-                        WHERE profile_id = ? AND (image_url IS NULL OR image_url = '' OR image_url = 'None'
-                              OR image_url NOT LIKE 'http%')
-                    """, (scan_profile_id,))
-                    imageless = cursor.fetchall()
-
-                    if imageless:
-                        print(f"Backfilling images for {len(imageless)} watchlist artists...")
-                        filled = 0
-                        for row in imageless:
-                            name = row['artist_name']
-                            nn = name.lower().strip()
-                            img = None
-
-                            # 1. Check metadata cache for artist image
-                            cursor.execute("""
-                                SELECT image_url FROM metadata_cache_entities
-                                WHERE entity_type = 'artist' AND name = ? COLLATE NOCASE
-                                  AND image_url IS NOT NULL AND image_url LIKE 'http%'
-                                LIMIT 1
-                            """, (name,))
-                            cr = cursor.fetchone()
-                            if cr:
-                                img = cr['image_url']
-
-                            # 2. Deezer direct URL (no API call needed)
-                            if not img and row['deezer_artist_id']:
-                                img = f"https://api.deezer.com/artist/{row['deezer_artist_id']}/image?size=big"
-
-                            # 3. Deezer ID from cache (artist may have a Deezer match we haven't stored on watchlist)
-                            if not img:
-                                cursor.execute("""
-                                    SELECT entity_id FROM metadata_cache_entities
-                                    WHERE entity_type = 'artist' AND source = 'deezer'
-                                      AND name = ? COLLATE NOCASE LIMIT 1
-                                """, (name,))
-                                dz = cursor.fetchone()
-                                if dz and dz['entity_id']:
-                                    img = f"https://api.deezer.com/artist/{dz['entity_id']}/image?size=big"
-
-                            # 4. Album art fallback (iTunes artists have no artist images)
-                            if not img:
-                                cursor.execute("""
-                                    SELECT image_url FROM metadata_cache_entities
-                                    WHERE entity_type = 'album' AND image_url LIKE 'http%'
-                                      AND artist_name = ? COLLATE NOCASE LIMIT 1
-                                """, (name,))
-                                alb = cursor.fetchone()
-                                if alb:
-                                    img = alb['image_url']
-
-                            if img:
-                                aid = (row['spotify_artist_id'] or row['itunes_artist_id']
-                                       or row['deezer_artist_id'] or row['discogs_artist_id'])
-                                if aid:
-                                    database.update_watchlist_artist_image(aid, img)
-                                else:
-                                    # No external IDs — update by internal row ID directly
-                                    cursor.execute("""
-                                        UPDATE watchlist_artists SET image_url = ?, updated_at = CURRENT_TIMESTAMP
-                                        WHERE id = ?
-                                    """, (img, row['id']))
-                                    conn.commit()
-                                filled += 1
-
-                        if filled:
-                            print(f"Backfilled {filled}/{len(imageless)} watchlist artist images")
+                    filled = scanner.backfill_watchlist_artist_images(scan_profile_id)
+                    if filled:
+                        print(f"Backfilled {filled} watchlist artist images")
                 except Exception as img_err:
                     print(f"Image backfill error: {img_err}")
 
@@ -40702,6 +40630,14 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
                 watchlist_artists.extend(database.get_watchlist_artists(profile_id=p['id']))
             scanner = get_watchlist_scanner(spotify_client)
             all_profiles = scan_profiles  # Used later for discovery pool population
+
+            for p in scan_profiles:
+                try:
+                    filled = scanner.backfill_watchlist_artist_images(p['id'])
+                    if filled:
+                        print(f"Backfilled {filled} watchlist artist images for profile {p['id']}")
+                except Exception as img_err:
+                    print(f"Image backfill error for profile {p['id']}: {img_err}")
 
             # Initialize detailed progress tracking (same as manual scan)
             watchlist_scan_state = {
