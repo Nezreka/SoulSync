@@ -7473,6 +7473,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin: -28px -24px 20px -24px;
     position: relative;
     overflow: visible;
+    z-index: 10;
     background: linear-gradient(180deg,
             rgba(var(--accent-rgb), 0.10) 0%,
             rgba(var(--accent-rgb), 0.04) 40%,
@@ -34646,7 +34647,7 @@ div.artist-hero-badge {
     top: calc(100% + 12px);
     /* 12px gap below button */
     transform: translateX(-50%) translateY(-5px);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -34907,7 +34908,7 @@ div.artist-hero-badge {
     left: 50%;
     top: calc(100% + 12px);
     transform: translateX(-50%) translateY(-5px);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -35129,7 +35130,7 @@ div.artist-hero-badge {
     left: 50%;
     top: calc(100% + 12px);
     transform: translateX(-50%) translateY(-5px);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -35333,7 +35334,7 @@ div.artist-hero-badge {
     left: 50%;
     top: calc(100% + 12px);
     transform: translateX(-50%) translateY(-5px);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -35598,7 +35599,7 @@ div.artist-hero-badge {
     left: 50%;
     top: calc(100% + 12px);
     transform: translateX(-50%) translateY(-5px);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -35829,7 +35830,7 @@ div.artist-hero-badge {
     left: 50%;
     top: calc(100% + 12px);
     transform: translateX(-50%) translateY(-5px);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -36027,7 +36028,7 @@ div.artist-hero-badge {
     left: 50%;
     top: calc(100% + 12px);
     transform: translateX(-50%) translateY(-5px);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -36253,7 +36254,7 @@ div.artist-hero-badge {
     left: 50%;
     top: calc(100% + 12px);
     transform: translateX(-50%) translateY(-5px);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -36479,7 +36480,7 @@ div.artist-hero-badge {
     left: 50%;
     top: calc(100% + 12px);
     transform: translateX(-50%) translateY(-5px);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -36705,7 +36706,7 @@ div.artist-hero-badge {
     left: 50%;
     top: calc(100% + 12px);
     transform: translateX(-50%) translateY(-5px);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -36923,7 +36924,7 @@ div.artist-hero-badge {
     top: calc(100% + 8px);
     left: 50%;
     transform: translateX(-50%);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: opacity 0.2s ease, visibility 0.2s ease;
@@ -37169,7 +37170,7 @@ div.artist-hero-badge {
     left: 50%;
     top: calc(100% + 12px);
     transform: translateX(-50%) translateY(-5px);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -37372,7 +37373,7 @@ div.artist-hero-badge {
     left: 50%;
     top: calc(100% + 12px);
     transform: translateX(-50%) translateY(-5px);
-    z-index: 1000;
+    z-index: 5000;
     opacity: 0;
     visibility: hidden;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
