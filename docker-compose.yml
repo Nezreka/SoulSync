@@ -22,7 +22,7 @@ services:
       - TZ=America/New_York
       # OAuth callback ports. If 8888/8889 conflict with another container (e.g. Gluetun),
       # change the port numbers below AND update the matching port mappings in the ports section.
-      # Then update the redirect URI in SoulSync → Settings → Connections to match.
+      # Then update the redirect URI in SoulSync → Settings → Connections AND in your Spotify/Tidal developer dashboard to match.
       - SOULSYNC_SPOTIFY_CALLBACK_PORT=8888
       - SOULSYNC_TIDAL_CALLBACK_PORT=8889
     ports:

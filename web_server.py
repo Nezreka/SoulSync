@@ -6950,8 +6950,12 @@ def auth_spotify():
             if is_docker and host == '127.0.0.1':
                 host = 'localhost'
 
-            # Check if the redirect_uri uses port 8008 (main app) vs 8888 (standalone)
-            uses_main_port = ':8008' in configured_uri or ':8888' not in configured_uri
+            # Check if the redirect_uri uses port 8008 (main app) vs the standalone callback server.
+            # A localhost URI (127.0.0.1/localhost) on a non-8008 port → standalone callback server.
+            # A custom domain or port 8008 → main Flask app (or reverse proxy to it).
+            uses_main_port = ':8008' in configured_uri or (
+                '127.0.0.1' not in configured_uri and 'localhost' not in configured_uri
+            )
 
             if is_remote or is_docker:
                 # Show instructions for remote/docker access
@@ -6980,7 +6984,10 @@ def auth_spotify():
                     </html>
                     '''
                 else:
-                    # redirect_uri still points to port 8888 — show manual steps AND suggest switching
+                    # redirect_uri points to the standalone callback server — show manual steps AND suggest switching
+                    import re as _re
+                    _port_match = _re.search(r':(\d+)/', configured_uri)
+                    callback_server_port = _port_match.group(1) if _port_match else str(os.environ.get('SOULSYNC_SPOTIFY_CALLBACK_PORT', '8888'))
                     return f'''
                     <html>
                     <head>
@@ -7008,7 +7015,7 @@ def auth_spotify():
 
                         <div class="warning">
                             <strong>Using a reverse proxy?</strong> Your redirect URI is set to <code style="display:inline; padding: 2px 6px;">{configured_uri}</code>
-                            which uses port 8888. If you're behind a reverse proxy (Caddy, Nginx, Traefik), change the
+                            which uses port {callback_server_port}. If you're behind a reverse proxy (Caddy, Nginx, Traefik), change the
                             redirect URI in SoulSync settings to use your proxy URL on the main port instead, e.g.:<br>
                             <code style="display:inline; padding: 2px 6px; background: #e8f5e9;">https://{host}/callback</code><br>
                             Then update the same URI in your <a href="https://developer.spotify.com/dashboard" target="_blank">Spotify Dashboard</a>.
@@ -7019,11 +7026,11 @@ def auth_spotify():
                         <p><a href="{auth_url}" target="_blank" style="font-size: 18px; color: #1DB954;">{auth_url}</a></p>
                         <hr>
                         <p><strong>Step 2:</strong> After authorizing, you'll see a blank page. The URL will look like:</p>
-                        <code>http://127.0.0.1:8888/callback?code=...</code>
+                        <code>http://127.0.0.1:{callback_server_port}/callback?code=...</code>
                         <p><strong>Step 3:</strong> Change <code style="display: inline; background: #ffe6e6; padding: 2px 6px;">127.0.0.1</code> to <code style="display: inline; background: #e8f5e9; padding: 2px 6px;">{host}</code> and press Enter:
                             <button class="copy-btn" onclick="copyIP()">Copy IP</button>
                         </p>
-                        <code class="highlight">http://{host}:8888/callback?code=...</code>
+                        <code class="highlight">http://{host}:{callback_server_port}/callback?code=...</code>
                         <p>Authentication will then complete!</p>
 
                         <script>
@@ -50083,7 +50090,7 @@ def start_oauth_callback_servers():
                     return
 
                 query_params = urllib.parse.parse_qs(parsed_url.query)
-                _oauth_logger.info(f"Spotify callback received on port 8888: {self.path}")
+                _oauth_logger.info(f"Spotify callback received: {self.path}")
 
                 if 'code' in query_params:
                     auth_code = query_params['code'][0]
@@ -50187,7 +50194,12 @@ def start_oauth_callback_servers():
     
     # Start Spotify callback server
     def run_spotify_server():
-        spotify_port = int(os.environ.get('SOULSYNC_SPOTIFY_CALLBACK_PORT', 8888))
+        _env_val = os.environ.get('SOULSYNC_SPOTIFY_CALLBACK_PORT')
+        spotify_port = int(_env_val) if _env_val else 8888
+        if _env_val:
+            print(f"[OAuth] SOULSYNC_SPOTIFY_CALLBACK_PORT={_env_val!r} — binding Spotify callback server on port {spotify_port}")
+        else:
+            print(f"[OAuth] SOULSYNC_SPOTIFY_CALLBACK_PORT not set — using default port {spotify_port}")
         try:
             bind_addr = ('0.0.0.0', spotify_port)
             spotify_server = HTTPServer(bind_addr, SpotifyCallbackHandler)
@@ -50265,8 +50277,13 @@ def start_oauth_callback_servers():
             pass  # Suppress server logs
     
     def run_tidal_server():
+        _env_val = os.environ.get('SOULSYNC_TIDAL_CALLBACK_PORT')
+        tidal_port = int(_env_val) if _env_val else 8889
+        if _env_val:
+            print(f"[OAuth] SOULSYNC_TIDAL_CALLBACK_PORT={_env_val!r} — binding Tidal callback server on port {tidal_port}")
+        else:
+            print(f"[OAuth] SOULSYNC_TIDAL_CALLBACK_PORT not set — using default port {tidal_port}")
         try:
-            tidal_port = int(os.environ.get('SOULSYNC_TIDAL_CALLBACK_PORT', 8889))
             tidal_server = HTTPServer(('0.0.0.0', tidal_port), TidalCallbackHandler)
             print(f"Started Tidal OAuth callback server on port {tidal_port}")
             print(f"Tidal server listening on all interfaces, port {tidal_port}")
