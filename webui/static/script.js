@@ -46295,9 +46295,18 @@ async function deleteLibraryTrack(trackId, albumId) {
         if (!result.success) throw new Error(result.error);
 
         let msg = 'Track removed from library';
-        if (result.file_deleted) msg = 'Track deleted from library and disk';
+        let toastType = 'success';
+        if (result.file_deleted) {
+            msg = 'Track deleted from library and disk';
+        } else if (result.file_error) {
+            msg = 'Track removed from library but file could not be deleted';
+            toastType = 'warning';
+        }
         if (result.blacklisted) msg += ' (source blacklisted)';
-        showToast(msg, 'success');
+        showToast(msg, toastType);
+        if (result.file_error) {
+            showToast(result.file_error, 'error', 8000);
+        }
 
         if (artistDetailPageState.enhancedData) {
             const albums = artistDetailPageState.enhancedData.albums || [];
