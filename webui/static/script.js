@@ -434,6 +434,12 @@ function _updateHeroBtnCount(buttonId, badgeId, count) {
 function handleWatchlistCountUpdate(data) {
     if (data.success) {
         _updateHeroBtnCount('watchlist-button', 'watchlist-badge', data.count);
+        // Update sidebar nav badge
+        const wlNavBadge = document.getElementById('watchlist-nav-badge');
+        if (wlNavBadge) {
+            wlNavBadge.textContent = data.count;
+            wlNavBadge.classList.toggle('hidden', data.count === 0);
+        }
         const watchlistButton = document.getElementById('watchlist-button');
         if (watchlistButton) {
             const countdownText = data.next_run_in_seconds ? formatCountdownTime(data.next_run_in_seconds) : '';
@@ -520,6 +526,12 @@ function handleDashboardDbStats(stats) {
 function handleDashboardWishlistCount(data) {
     const count = data.count || 0;
     _updateHeroBtnCount('wishlist-button', 'wishlist-badge', count);
+    // Update sidebar nav badge
+    const wlNavBadge = document.getElementById('wishlist-nav-badge');
+    if (wlNavBadge) {
+        wlNavBadge.textContent = count;
+        wlNavBadge.classList.toggle('hidden', count === 0);
+    }
     const wishlistButton = document.getElementById('wishlist-button');
     if (wishlistButton) {
         if (count === 0) {
@@ -25730,6 +25742,12 @@ async function updateWishlistCount() {
         const count = data.count || 0;
 
         _updateHeroBtnCount('wishlist-button', 'wishlist-badge', count);
+        // Update sidebar nav badge
+        const wlNavBadge = document.getElementById('wishlist-nav-badge');
+        if (wlNavBadge) {
+            wlNavBadge.textContent = count;
+            wlNavBadge.classList.toggle('hidden', count === 0);
+        }
         const wishlistButton = document.getElementById('wishlist-button');
         if (wishlistButton) {
             if (count === 0) {
@@ -40228,6 +40246,12 @@ async function updateWatchlistButtonCount() {
 
         if (data.success) {
             _updateHeroBtnCount('watchlist-button', 'watchlist-badge', data.count);
+            // Update sidebar nav badge
+            const wlNavBadge = document.getElementById('watchlist-nav-badge');
+            if (wlNavBadge) {
+                wlNavBadge.textContent = data.count;
+                wlNavBadge.classList.toggle('hidden', data.count === 0);
+            }
             const watchlistButton = document.getElementById('watchlist-button');
             if (watchlistButton) {
                 const countdownText = data.next_run_in_seconds ? formatCountdownTime(data.next_run_in_seconds) : '';
