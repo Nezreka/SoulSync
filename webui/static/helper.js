@@ -3608,6 +3608,7 @@ const WHATS_NEW = {
         { title: 'Fix Allow Duplicates Setting Not Saving', desc: 'The "Allow duplicate tracks across albums" toggle was never persisted — it silently reset to ON on every page reload. Now saves correctly' },
         { title: 'Fix Wishlist Dropping Cross-Album Tracks', desc: 'Wishlist cleanup was removing same-titled tracks from different albums even when Allow Duplicates was enabled. Cleanup now respects the setting — same song from different albums can coexist in the wishlist' },
         { title: 'Fix "Replace Lower Quality" Setting Not Persisting', desc: 'The import section appeared twice in the settings save payload — the second instance (with only staging_path) overwrote the first (with replace_lower_quality). Merged into a single block' },
+        { title: 'Inbound Music Request API', desc: 'New POST /api/v1/request endpoint — trigger downloads from Discord bots, Home Assistant, curl, or any external tool. Async with status polling and optional notify_url callback. New "Webhook Received" automation trigger and "Search & Download" action in the Automation Hub' },
 
         // --- April 14, 2026 ---
         { date: 'April 14, 2026' },
