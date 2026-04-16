@@ -3602,6 +3602,7 @@ const WHATS_NEW = {
     '2.2': [
         // --- April 15, 2026 ---
         { date: 'April 15, 2026' },
+        { title: 'Picard-Style MusicBrainz Album Consistency', desc: 'Recording MBIDs now pulled from the matched release tracklist instead of independent searches. Batch-level artist name used for stable cache keys. Post-batch consistency pass rewrites album-level tags on all files to guarantee identical MusicBrainz IDs — prevents Navidrome album splits' },
         { title: 'Fix Spotify API Leaking When Deezer/iTunes is Primary', desc: 'Spotify was being called for watchlist album scanning, similar artist discovery, repair jobs, and the Artists page search even when another source was set as primary. All data-fetching now respects the configured primary source. Spotify playlist sync is unaffected' },
         { title: 'Fix OAuth Callback Port Hardcoding', desc: 'Custom callback ports (SOULSYNC_SPOTIFY_CALLBACK_PORT / SOULSYNC_TIDAL_CALLBACK_PORT) are now respected in auth instruction pages and log messages instead of always showing 8888. Added startup diagnostics logging for callback port binding' },
         { title: 'Fix Wishlist Button on Non-Dashboard Pages', desc: 'Wishlist button click handler moved to global init so it works from any page, not just the dashboard' },
