@@ -6682,10 +6682,16 @@ class MusicDatabase:
             return False
 
     def remove_wishlist_duplicates(self, profile_id: int = 1) -> int:
-        """Remove duplicate tracks from wishlist based on track name + artist.
+        """Remove duplicate tracks from wishlist.
+        When allow_duplicate_tracks is True, only removes exact duplicates
+        (same name + artist + album). When False, removes any track with the
+        same name + artist regardless of album.
         Keeps the oldest entry (by date_added) for each duplicate set.
         Returns the number of duplicates removed."""
         try:
+            from config.settings import config_manager
+            allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
+
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
@@ -6699,7 +6705,7 @@ class MusicDatabase:
                 all_tracks = cursor.fetchall()
 
                 # Track seen tracks and duplicates to remove
-                seen_tracks = {}  # Key: (track_name, artist_name), Value: track_id to keep
+                seen_tracks = {}  # Value: track row id to keep
                 duplicates_to_remove = []
 
                 for track in all_tracks:
@@ -6714,7 +6720,13 @@ class MusicDatabase:
                         else:
                             artist_name = 'unknown'
 
-                        key = (track_name, artist_name)
+                        if allow_duplicates:
+                            # Include album in the key so same song from different albums survives
+                            album = track_data.get('album', {})
+                            album_name = (album.get('name', '') if isinstance(album, dict) else str(album)).lower()
+                            key = (track_name, artist_name, album_name)
+                        else:
+                            key = (track_name, artist_name)
 
                         if key in seen_tracks:
                             # Duplicate found - mark for removal
@@ -6735,7 +6747,8 @@ class MusicDatabase:
                     removed_count += 1
 
                 conn.commit()
-                logger.info(f"Removed {removed_count} duplicate tracks from wishlist")
+                if removed_count > 0:
+                    logger.info(f"Removed {removed_count} duplicate tracks from wishlist (allow_duplicates={allow_duplicates})")
                 return removed_count
 
         except Exception as e:
