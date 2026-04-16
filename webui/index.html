@@ -6772,32 +6772,32 @@
                         </div>
                     </div>
 
-                    <!-- Category grid -->
-                    <div class="wishlist-category-grid" id="wishlist-page-categories">
-                        <div class="wishlist-category-card" data-category="albums" onclick="selectWishlistCategory('albums')">
-                            <div class="wishlist-mosaic-bg" id="wishlist-page-albums-mosaic"></div>
-                            <div class="wishlist-category-content">
-                                <div class="wishlist-category-icon">&#128191;</div>
-                                <div class="wishlist-category-title">Albums / EPs</div>
-                                <div class="wishlist-category-count" id="wishlist-page-albums-count">0 tracks</div>
-                                <div class="wishlist-category-badge" id="wishlist-page-albums-badge" style="display: none;">Next in Queue</div>
+                    <!-- Nebula view — artist orbs with album satellites -->
+                    <div class="wl-nebula" id="wishlist-nebula">
+                        <!-- Action bar -->
+                        <div class="wl-nebula-bar">
+                            <input type="text" class="wl-nebula-search" id="wl-nebula-search" placeholder="Search artists, albums..." oninput="_filterNebula()">
+                            <div class="wl-nebula-bar-actions">
+                                <button class="watchlist-action-btn watchlist-action-primary" onclick="selectWishlistCategory('albums')">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    Albums
+                                </button>
+                                <button class="watchlist-action-btn watchlist-action-secondary" onclick="selectWishlistCategory('singles')">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    Singles
+                                </button>
                             </div>
                         </div>
-                        <div class="wishlist-category-card" data-category="singles" onclick="selectWishlistCategory('singles')">
-                            <div class="wishlist-mosaic-bg" id="wishlist-page-singles-mosaic"></div>
-                            <div class="wishlist-category-content">
-                                <div class="wishlist-category-icon">&#127925;</div>
-                                <div class="wishlist-category-title">Singles</div>
-                                <div class="wishlist-category-count" id="wishlist-page-singles-count">0 tracks</div>
-                                <div class="wishlist-category-badge" id="wishlist-page-singles-badge" style="display: none;">Next in Queue</div>
-                            </div>
+                        <!-- Artist orbs container -->
+                        <div class="wl-nebula-field" id="wl-nebula-field">
+                            <!-- Populated by JS: artist orbs with album fans -->
                         </div>
                     </div>
 
-                    <!-- Track list (hidden until category selected) -->
+                    <!-- Legacy track list (used by selectWishlistCategory for download flow) -->
                     <div id="wishlist-category-tracks" class="wishlist-category-tracks" style="display: none;">
                         <div class="wishlist-category-header">
-                            <button class="wishlist-back-btn" onclick="backToCategories()">&#8592; Back</button>
+                            <button class="wishlist-back-btn" onclick="_nebulaBack()">&#8592; Back</button>
                             <span id="wishlist-category-name" class="wishlist-category-name"></span>
                             <div class="wishlist-category-header-right">
                                 <button class="wishlist-select-all-btn" id="wishlist-select-all-btn" onclick="toggleWishlistSelectAll()">Select All</button>
@@ -6805,10 +6805,6 @@
                                     Download Selection
                                 </button>
                             </div>
-                        </div>
-                        <div class="wishlist-track-search-container">
-                            <svg class="wishlist-track-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="rgba(255,255,255,0.35)"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-                            <input type="text" id="wishlist-track-search-input" class="wishlist-track-search-input" placeholder="Filter tracks..." oninput="filterWishlistTracks()">
                         </div>
                         <div class="wishlist-batch-bar" id="wishlist-batch-bar" style="display: none;">
                             <span class="wishlist-batch-count" id="wishlist-batch-count">0 selected</span>

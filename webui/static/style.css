@@ -57217,8 +57217,83 @@ body.reduce-effects *::after {
     color: rgba(255, 255, 255, 0.3);
 }
 
-/* ── Category cards upgrade ── */
-#wishlist-page-categories {
+/* ═══════════════════════════════════════════════════════════════════
+   WISHLIST NEBULA
+   ═══════════════════════════════════════════════════════════════════ */
+.wl-nebula { position: relative; }
+.wl-nebula-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.wl-nebula-search { flex: 1; min-width: 200px; padding: 10px 16px; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; background: rgba(255,255,255,0.03); color: #fff; font-size: 13px; transition: all 0.2s; box-sizing: border-box; }
+.wl-nebula-search:focus { border-color: rgba(var(--accent-rgb),0.4); background: rgba(255,255,255,0.05); box-shadow: 0 0 12px rgba(var(--accent-rgb),0.1); outline: none; }
+.wl-nebula-search::placeholder { color: rgba(255,255,255,0.25); }
+.wl-nebula-bar-actions { display: flex; gap: 8px; }
+
+.wl-nebula-field { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; padding: 10px 0 30px; }
+.wl-nebula-empty { width: 100%; text-align: center; padding: 60px 20px; color: rgba(255,255,255,0.2); font-size: 14px; }
+
+/* ── Orb group ── */
+.wl-orb-group { display: flex; flex-direction: column; align-items: center; gap: 6px; transition: all 0.4s cubic-bezier(0.4,0,0.2,1); position: relative; }
+.wl-orb-group.expanded { background: rgba(255,255,255,0.02); border-radius: 16px; padding: 16px; box-shadow: 0 0 30px rgba(0,0,0,0.3); z-index: 5; flex-basis: 100%; max-width: 600px; }
+
+/* ── Orb ── */
+.wl-orb { position: relative; border-radius: 50%; cursor: pointer; overflow: hidden; transition: all 0.35s cubic-bezier(0.4,0,0.2,1); }
+.wl-orb.orb-sm { width: 70px; height: 70px; }
+.wl-orb.orb-md { width: 90px; height: 90px; }
+.wl-orb.orb-lg { width: 110px; height: 110px; }
+.wl-orb:hover { transform: scale(1.1); }
+.wl-orb-group.expanded .wl-orb { transform: scale(1.05); }
+
+.wl-orb-glow { position: absolute; inset: -4px; border-radius: 50%; background: conic-gradient(from 0deg, hsla(var(--orb-hue),70%,55%,0.4), hsla(calc(var(--orb-hue)+60),70%,55%,0.2), hsla(var(--orb-hue),70%,55%,0.4)); animation: orbGlowSpin 8s linear infinite; z-index: 0; filter: blur(3px); }
+@keyframes orbGlowSpin { to { transform: rotate(360deg); } }
+
+.wl-orb-img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; position: relative; z-index: 1; }
+.wl-orb-initials { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 800; color: hsla(var(--orb-hue),70%,75%,0.9); background: hsla(var(--orb-hue),40%,15%,0.9); border-radius: 50%; position: relative; z-index: 1; }
+.wl-orb-ring { position: absolute; inset: -2px; border-radius: 50%; border: 2px solid hsla(var(--orb-hue),60%,50%,0.3); z-index: 2; pointer-events: none; }
+.wl-orb-group.expanded .wl-orb-ring { border-color: hsla(var(--orb-hue),70%,60%,0.6); box-shadow: 0 0 16px hsla(var(--orb-hue),70%,50%,0.3); }
+
+.wl-orb-label { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.7); text-align: center; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wl-orb-meta { font-size: 9px; color: rgba(255,255,255,0.3); text-align: center; }
+
+/* ── Expanded ── */
+.wl-orb-expanded { display: none; width: 100%; margin-top: 10px; }
+.wl-orb-group.expanded .wl-orb-expanded { display: block; animation: expandFadeIn 0.3s ease; }
+@keyframes expandFadeIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── Satellites (albums) ── */
+.wl-orb-albums { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.wl-satellite { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; transition: all 0.15s; }
+.wl-satellite:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.1); }
+.wl-satellite-art { width: 44px; height: 44px; border-radius: 6px; overflow: hidden; flex-shrink: 0; background: rgba(255,255,255,0.05); }
+.wl-satellite-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wl-satellite-info { flex: 1; min-width: 0; }
+.wl-satellite-name { font-size: 12px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wl-satellite-count { font-size: 10px; color: rgba(255,255,255,0.35); }
+.wl-satellite-remove { width: 22px; height: 22px; border-radius: 50%; border: none; background: transparent; color: rgba(255,255,255,0.2); font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s; flex-shrink: 0; }
+.wl-satellite:hover .wl-satellite-remove { opacity: 1; }
+.wl-satellite-remove:hover { background: rgba(239,68,68,0.15); color: #f87171; }
+
+/* ── Single pills ── */
+.wl-orb-singles { display: flex; flex-wrap: wrap; gap: 6px; }
+.wl-single-pill { display: flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 20px; font-size: 11px; color: rgba(255,255,255,0.6); transition: all 0.15s; }
+.wl-single-pill:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.1); color: #fff; }
+.wl-pill-art { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.wl-pill-name { max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wl-pill-remove { width: 16px; height: 16px; border-radius: 50%; border: none; background: transparent; color: rgba(255,255,255,0.2); font-size: 9px; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s; flex-shrink: 0; }
+.wl-single-pill:hover .wl-pill-remove { opacity: 1; }
+.wl-pill-remove:hover { background: rgba(239,68,68,0.15); color: #f87171; }
+
+@media (max-width: 768px) {
+    .wl-nebula-bar { flex-direction: column; }
+    .wl-nebula-bar-actions { width: 100%; }
+    .wl-nebula-bar-actions button { flex: 1; }
+    .wl-orb.orb-lg { width: 80px; height: 80px; }
+    .wl-orb.orb-md { width: 70px; height: 70px; }
+    .wl-orb.orb-sm { width: 60px; height: 60px; }
+    .wl-nebula-field { gap: 14px; }
+    .wl-orb-group.expanded { max-width: 100%; }
+}
+
+/* ── Legacy (hidden) ── */
+#wishlist-page-categories { display: none;
     margin-bottom: 24px;
 }
 
