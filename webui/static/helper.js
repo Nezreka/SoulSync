@@ -3602,6 +3602,8 @@ const WHATS_NEW = {
     '2.2': [
         // --- April 15, 2026 ---
         { date: 'April 15, 2026' },
+        { title: 'Dashboard Library Status Card', desc: 'Smart card on the Dashboard showing your library state — server connection, track counts, last refresh time. Guides new users through setup, shows empty-library prompts, and lets you trigger a scan directly from the dashboard', page: 'dashboard' },
+        { title: 'AcoustID Scanner Upgrade', desc: 'Now scans your full library (not just Transfer) to detect wrong downloads. Actionable fixes: retag with correct metadata, re-download the right track, or delete the wrong file. Enabled by default, runs daily' },
         { title: 'Tools Page', desc: 'All tool cards (Database Updater, Quality Scanner, Duplicate Cleaner, Retag, Backups, Cache, etc.) and Library Maintenance moved from the Dashboard to a dedicated Tools page in the sidebar. Dashboard shows a quick-link card', page: 'tools' },
         { title: 'Watchlist & Wishlist Sidebar Pages', desc: 'Watchlist and Wishlist promoted from modals to full sidebar pages. All features preserved — artist grid, scan controls, batch operations, live activity, countdown timers, category cards with mosaic backgrounds. Header buttons now navigate to the pages', page: 'watchlist' },
         { title: 'Picard-Style MusicBrainz Album Consistency', desc: 'Recording MBIDs now pulled from the matched release tracklist instead of independent searches. Batch-level artist name used for stable cache keys. Post-batch consistency pass rewrites album-level tags on all files to guarantee identical MusicBrainz IDs — prevents Navidrome album splits' },

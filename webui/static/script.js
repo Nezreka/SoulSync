@@ -381,6 +381,9 @@ function initializeWebSocket() {
 }
 
 function handleServiceStatusUpdate(data) {
+    // Cache for library status card
+    _lastServiceStatus = data;
+
     // Same logic as fetchAndUpdateServiceStatus response handler
     updateServiceStatus('spotify', data.spotify);
     updateServiceStatus('media-server', data.media_server);
@@ -25173,9 +25176,10 @@ async function loadDashboardData() {
     stopWishlistCountPolling(); // Ensure no duplicates
     wishlistCountInterval = setInterval(updateWishlistCount, 10000);
 
-    // Initial load of service status and system statistics
+    // Initial load of service status, system statistics, and library status
     await fetchAndUpdateServiceStatus();
     await fetchAndUpdateSystemStats();
+    await fetchAndUpdateDbStats();
 
     // Service status is already polled globally (line 311)
     // System stats polling kept here (dashboard-specific)
@@ -25221,8 +25225,318 @@ async function fetchAndUpdateDbStats() {
 }
 
 function updateDashboardStatCards(stats) {
-    // You can expand this later to update the main stat cards
-    // For now, we focus on the updater tool itself.
+    // Update the Library Status card on the dashboard
+    updateLibraryStatusCard(stats);
+}
+
+/**
+ * Smart Library Status card on the Dashboard.
+ * Shows different states: no server, empty library, healthy library, scanning.
+ */
+function updateLibraryStatusCard(dbStats) {
+    const card = document.getElementById('library-status-card');
+    if (!card) return;
+
+    const title = document.getElementById('library-status-title');
+    const subtitle = document.getElementById('library-status-subtitle');
+    const statsRow = document.getElementById('library-status-stats');
+    const scanBtn = document.getElementById('library-status-scan-btn');
+    const scanLabel = document.getElementById('library-status-scan-label');
+    const deepBtn = document.getElementById('library-status-deep-btn');
+    const progressDiv = document.getElementById('library-status-progress');
+    const messageDiv = document.getElementById('library-status-message');
+
+    const artists = dbStats ? (dbStats.artists || 0) : 0;
+    const albums = dbStats ? (dbStats.albums || 0) : 0;
+    const tracks = dbStats ? (dbStats.tracks || 0) : 0;
+    const sizeMb = dbStats ? (dbStats.database_size_mb || 0) : 0;
+    const lastUpdate = dbStats ? dbStats.last_update : null;
+    const serverSource = dbStats ? dbStats.server_source : null;
+
+    // Check if a scan is in progress
+    const isScanning = window._libraryStatusScanning || false;
+
+    // Determine state
+    const serverConnected = _lastServiceStatus && _lastServiceStatus.media_server && _lastServiceStatus.media_server.connected;
+    const serverType = _lastServiceStatus && _lastServiceStatus.active_media_server;
+    const hasData = tracks > 0;
+    const hasServer = !!serverType && serverType !== 'none';
+
+    // Reset classes
+    card.className = 'library-status-card';
+
+    if (isScanning) {
+        // State: Scanning
+        card.classList.add('scanning');
+        if (title) title.textContent = 'Library Scan';
+        if (subtitle) subtitle.textContent = 'Updating library database...';
+        if (scanBtn) {
+            scanBtn.style.display = '';
+            scanBtn.classList.add('scanning');
+            scanLabel.textContent = 'Stop';
+            scanBtn.disabled = false;
+        }
+        if (deepBtn) deepBtn.style.display = 'none';
+        if (statsRow) statsRow.style.display = hasData ? '' : 'none';
+        if (progressDiv) progressDiv.style.display = '';
+        if (messageDiv) messageDiv.style.display = 'none';
+
+    } else if (!hasServer) {
+        // State: No server configured
+        card.classList.add('needs-setup');
+        if (title) title.textContent = 'No Media Server';
+        if (subtitle) subtitle.textContent = 'Connect a server to get started';
+        if (scanBtn) scanBtn.style.display = 'none';
+        if (deepBtn) deepBtn.style.display = 'none';
+        if (statsRow) statsRow.style.display = 'none';
+        if (progressDiv) progressDiv.style.display = 'none';
+        if (messageDiv) {
+            messageDiv.style.display = '';
+            messageDiv.innerHTML = 'SoulSync needs a media server to manage your library. '
+                + 'Go to <span class="link" onclick="navigateToPage(\'settings\')">Settings</span> '
+                + 'to connect Plex, Jellyfin, or Navidrome.';
+        }
+
+    } else if (!serverConnected) {
+        // State: Server configured but not connected
+        card.classList.add('needs-setup');
+        const serverName = _capitalize(serverType);
+        if (title) title.textContent = `${serverName} — Disconnected`;
+        if (subtitle) subtitle.textContent = 'Cannot reach your media server';
+        if (scanBtn) scanBtn.style.display = 'none';
+        if (deepBtn) deepBtn.style.display = 'none';
+        if (statsRow) statsRow.style.display = 'none';
+        if (progressDiv) progressDiv.style.display = 'none';
+        if (messageDiv) {
+            messageDiv.style.display = '';
+            messageDiv.innerHTML = `Your ${serverName} server is configured but not responding. `
+                + 'Check that it\'s running and the connection details are correct in '
+                + '<span class="link" onclick="navigateToPage(\'settings\')">Settings</span>.';
+        }
+
+    } else if (!hasData) {
+        // State: Server connected but library is empty
+        card.classList.add('empty-library');
+        const serverName = _capitalize(serverType);
+        if (title) title.textContent = `${serverName} Connected`;
+        if (subtitle) subtitle.textContent = 'Library database is empty';
+        if (scanBtn) {
+            scanBtn.style.display = '';
+            scanBtn.classList.remove('scanning');
+            scanLabel.textContent = 'Scan Now';
+            scanBtn.disabled = false;
+        }
+        if (deepBtn) deepBtn.style.display = 'none';
+        if (statsRow) statsRow.style.display = 'none';
+        if (progressDiv) progressDiv.style.display = 'none';
+        if (messageDiv) {
+            messageDiv.style.display = '';
+            messageDiv.innerHTML = 'Your server is connected but SoulSync hasn\'t imported your library yet. '
+                + 'Click <strong>Scan Now</strong> to pull your artists, albums, and tracks into SoulSync.';
+        }
+
+    } else {
+        // State: Healthy library with data
+        card.classList.add('has-data');
+        const serverName = _capitalize(serverType);
+        let lastRefreshText = 'Never';
+        if (lastUpdate) {
+            const d = new Date(lastUpdate);
+            if (!isNaN(d.getTime())) {
+                lastRefreshText = typeof _formatTimeAgo === 'function' ? _formatTimeAgo(d) : d.toLocaleDateString();
+            }
+        }
+        if (title) title.textContent = `${serverName} Library`;
+        if (subtitle) subtitle.textContent = `Last refreshed ${lastRefreshText}`;
+        if (scanBtn) {
+            scanBtn.style.display = '';
+            scanBtn.classList.remove('scanning');
+            scanLabel.textContent = 'Refresh';
+            scanBtn.disabled = false;
+        }
+        if (deepBtn) deepBtn.style.display = '';
+        if (statsRow) {
+            statsRow.style.display = '';
+            document.getElementById('library-status-artists').textContent = artists.toLocaleString();
+            document.getElementById('library-status-albums').textContent = albums.toLocaleString();
+            document.getElementById('library-status-tracks').textContent = tracks.toLocaleString();
+            document.getElementById('library-status-size').textContent = sizeMb < 1 ? `${Math.round(sizeMb * 1024)} KB` : `${sizeMb.toFixed(1)} MB`;
+        }
+        if (progressDiv) progressDiv.style.display = 'none';
+        if (messageDiv) messageDiv.style.display = 'none';
+    }
+}
+
+// Track last service status for library card
+let _lastServiceStatus = null;
+const _origFetchServiceStatus = typeof fetchAndUpdateServiceStatus === 'function' ? fetchAndUpdateServiceStatus : null;
+
+function _capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
+
+/**
+ * Dashboard library scan button handler — triggers incremental DB update.
+ */
+async function dashboardLibraryScan(fullRefresh = false) {
+    const scanBtn = document.getElementById('library-status-scan-btn');
+    const scanLabel = document.getElementById('library-status-scan-label');
+
+    // If already scanning, stop it
+    if (window._libraryStatusScanning) {
+        try {
+            await fetch('/api/database/update/stop', { method: 'POST' });
+            window._libraryStatusScanning = false;
+            showToast('Library scan stopped', 'info');
+            // Refresh the card
+            try {
+                const r = await fetch('/api/database/stats');
+                if (r.ok) updateLibraryStatusCard(await r.json());
+            } catch (e) {}
+        } catch (e) {
+            showToast('Failed to stop scan', 'error');
+        }
+        return;
+    }
+
+    // Start scan
+    try {
+        window._libraryStatusScanning = true;
+        updateLibraryStatusCard(null); // Update to scanning state
+
+        const response = await fetch('/api/database/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ full_refresh: fullRefresh })
+        });
+        const data = await response.json();
+        if (!data.success) {
+            window._libraryStatusScanning = false;
+            showToast(data.error || 'Failed to start scan', 'error');
+            return;
+        }
+
+        showToast('Library scan started', 'success');
+
+        // Poll for progress
+        const pollInterval = setInterval(async () => {
+            try {
+                const statusResp = await fetch('/api/database/update/status');
+                if (!statusResp.ok) return;
+                const status = await statusResp.json();
+
+                const phase = document.getElementById('library-status-phase');
+                const barFill = document.getElementById('library-status-bar-fill');
+                const detail = document.getElementById('library-status-progress-detail');
+
+                if (phase) phase.textContent = status.phase || 'Scanning...';
+                if (barFill) barFill.style.width = `${status.progress || 0}%`;
+                if (detail && status.processed !== undefined) {
+                    detail.textContent = `${status.processed} / ${status.total || '?'}`;
+                }
+
+                if (status.status === 'completed' || status.status === 'error' || status.status === 'idle') {
+                    clearInterval(pollInterval);
+                    window._libraryStatusScanning = false;
+
+                    if (status.status === 'completed') {
+                        showToast('Library scan complete', 'success');
+                    } else if (status.status === 'error') {
+                        showToast(`Scan error: ${status.error_message || 'Unknown'}`, 'error');
+                    }
+
+                    // Refresh stats
+                    try {
+                        const r = await fetch('/api/database/stats');
+                        if (r.ok) updateLibraryStatusCard(await r.json());
+                    } catch (e) {}
+                }
+            } catch (e) {
+                clearInterval(pollInterval);
+                window._libraryStatusScanning = false;
+            }
+        }, 2000);
+
+    } catch (e) {
+        window._libraryStatusScanning = false;
+        showToast(`Scan failed: ${e.message}`, 'error');
+    }
+}
+
+/**
+ * Dashboard deep scan — finds new tracks, removes stale ones, preserves enrichment data.
+ */
+async function dashboardLibraryDeepScan() {
+    if (window._libraryStatusScanning) {
+        showToast('A scan is already running', 'warning');
+        return;
+    }
+
+    if (!await showConfirmDialog({
+        title: 'Deep Scan Library',
+        message: 'A deep scan re-checks every track in your media server library.\n\n' +
+                 '• Adds any new tracks that were missed\n' +
+                 '• Removes tracks no longer on your server\n' +
+                 '• Preserves all existing metadata and enrichment data\n\n' +
+                 'This may take a while for large libraries. Continue?',
+    })) return;
+
+    // Use the same scan flow as dashboardLibraryScan but with deep_scan flag
+    try {
+        window._libraryStatusScanning = true;
+        updateLibraryStatusCard(null);
+
+        const response = await fetch('/api/database/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deep_scan: true })
+        });
+        const data = await response.json();
+        if (!data.success) {
+            window._libraryStatusScanning = false;
+            showToast(data.error || 'Failed to start deep scan', 'error');
+            try { const r = await fetch('/api/database/stats'); if (r.ok) updateLibraryStatusCard(await r.json()); } catch (e) {}
+            return;
+        }
+
+        showToast('Deep scan started — this may take a while', 'success');
+
+        const pollInterval = setInterval(async () => {
+            try {
+                const statusResp = await fetch('/api/database/update/status');
+                if (!statusResp.ok) return;
+                const status = await statusResp.json();
+
+                const phase = document.getElementById('library-status-phase');
+                const barFill = document.getElementById('library-status-bar-fill');
+                const detail = document.getElementById('library-status-progress-detail');
+
+                if (phase) phase.textContent = status.phase || 'Deep scanning...';
+                if (barFill) barFill.style.width = `${status.progress || 0}%`;
+                if (detail && status.processed !== undefined) {
+                    detail.textContent = `${status.processed} / ${status.total || '?'}`;
+                }
+
+                if (status.status === 'completed' || status.status === 'error' || status.status === 'idle') {
+                    clearInterval(pollInterval);
+                    window._libraryStatusScanning = false;
+
+                    if (status.status === 'completed') {
+                        showToast('Deep scan complete', 'success');
+                    } else if (status.status === 'error') {
+                        showToast(`Deep scan error: ${status.error_message || 'Unknown'}`, 'error');
+                    }
+
+                    try { const r = await fetch('/api/database/stats'); if (r.ok) updateLibraryStatusCard(await r.json()); } catch (e) {}
+                }
+            } catch (e) {
+                clearInterval(pollInterval);
+                window._libraryStatusScanning = false;
+            }
+        }, 2000);
+
+    } catch (e) {
+        window._libraryStatusScanning = false;
+        showToast(`Deep scan failed: ${e.message}`, 'error');
+    }
 }
 
 /**
@@ -38872,6 +39186,9 @@ async function fetchAndUpdateServiceStatus() {
         if (!response.ok) return;
 
         const data = await response.json();
+
+        // Cache for library status card
+        _lastServiceStatus = data;
 
         // Update service status indicators and text (dashboard)
         updateServiceStatus('spotify', data.spotify);
