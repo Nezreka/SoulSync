@@ -39961,6 +39961,15 @@ def start_watchlist_scan():
                         import traceback
                         traceback.print_exc()
 
+                    # Generate Last.fm radio playlists (weekly refresh)
+                    print("Starting Last.fm radio generation...")
+                    watchlist_scan_state['current_phase'] = 'generating_lastfm_radio'
+                    try:
+                        scanner._generate_lastfm_radio_playlists()
+                        print("Last.fm radio generation complete")
+                    except Exception as lastfm_error:
+                        print(f"Error generating Last.fm radio playlists: {lastfm_error}")
+
                     # Sync Spotify library cache
                     print("Syncing Spotify library cache...")
                     watchlist_scan_state['current_phase'] = 'syncing_spotify_library'
@@ -40874,6 +40883,21 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
                     traceback.print_exc()
                     _update_automation_progress(automation_id,
                                                  log_line=f'Seasonal error: {seasonal_error}', log_type='error')
+
+                # Generate Last.fm radio playlists (weekly refresh)
+                print("Starting Last.fm radio generation...")
+                watchlist_scan_state['current_phase'] = 'generating_lastfm_radio'
+                _update_automation_progress(automation_id, progress=99, phase='Generating Last.fm radio',
+                                             log_line='Building Last.fm radio playlists...', log_type='info')
+                try:
+                    scanner._generate_lastfm_radio_playlists()
+                    print("Last.fm radio generation complete")
+                    _update_automation_progress(automation_id,
+                                                 log_line='Last.fm radio playlists updated', log_type='success')
+                except Exception as lastfm_error:
+                    print(f"Error generating Last.fm radio playlists: {lastfm_error}")
+                    _update_automation_progress(automation_id,
+                                                 log_line=f'Last.fm radio error: {lastfm_error}', log_type='error')
 
                 # Sync Spotify library cache
                 print("Syncing Spotify library cache...")
