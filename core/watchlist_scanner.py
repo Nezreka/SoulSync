@@ -13,6 +13,12 @@ import requests
 from bs4 import BeautifulSoup
 from database.music_database import get_database, WatchlistArtist
 from core.spotify_client import SpotifyClient
+from core.metadata_service import (
+    get_album_tracks_for_source,
+    get_client_for_source,
+    get_primary_source,
+    get_source_priority,
+)
 from core.wishlist_service import get_wishlist_service
 from core.matching_engine import MusicMatchingEngine
 from utils.logging_config import get_logger
@@ -344,6 +350,16 @@ class ScanResult:
     success: bool
     error_message: Optional[str] = None
 
+
+@dataclass
+class WatchlistDiscographyResult:
+    """Resolved watchlist artist discography for a specific metadata source."""
+    source: str
+    client: Any
+    artist_id: str
+    albums: List[Any]
+    image_url: Optional[str] = None
+
 class WatchlistScanner:
     """Service for scanning watched artists for new releases"""
     
@@ -428,10 +444,209 @@ class WatchlistScanner:
         if not self._spotify_available_for_run():
             return False
         try:
-            from core.metadata_service import get_primary_source
             return get_primary_source() == 'spotify'
         except Exception:
             return False
+
+    def _watchlist_source_priority(self) -> List[str]:
+        """Return watchlist scan sources in the configured priority order."""
+        return list(get_source_priority(get_primary_source()))
+
+    @staticmethod
+    def _artist_id_attribute_for_source(source: str) -> Optional[str]:
+        """Return the watchlist artist attribute that stores the given source ID."""
+        return {
+            'spotify': 'spotify_artist_id',
+            'itunes': 'itunes_artist_id',
+            'deezer': 'deezer_artist_id',
+            'discogs': 'discogs_artist_id',
+        }.get(source)
+
+    @staticmethod
+    def _extract_entity_id(value: Any) -> Optional[str]:
+        """Extract an ID from a dataclass, dict, or plain object."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            return value.get('id') or value.get('artist_id') or value.get('release_id')
+        return getattr(value, 'id', None) or getattr(value, 'artist_id', None) or getattr(value, 'release_id', None)
+
+    def _cache_watchlist_artist_source_id(self, watchlist_artist: WatchlistArtist, source: str, source_id: str) -> None:
+        """Cache a resolved artist ID for a watchlist artist when we have a storage column."""
+        if not source_id:
+            return
+
+        if source == 'spotify':
+            self.database.update_watchlist_spotify_id(watchlist_artist.id, source_id)
+            watchlist_artist.spotify_artist_id = source_id
+        elif source == 'itunes':
+            self.database.update_watchlist_itunes_id(watchlist_artist.id, source_id)
+            watchlist_artist.itunes_artist_id = source_id
+        elif source == 'deezer':
+            self.database.update_watchlist_deezer_id(watchlist_artist.id, source_id)
+            watchlist_artist.deezer_artist_id = source_id
+        elif source == 'discogs':
+            self.database.update_watchlist_discogs_id(watchlist_artist.id, source_id)
+            watchlist_artist.discogs_artist_id = source_id
+
+    def _resolve_watchlist_artist_source_id(self, watchlist_artist: WatchlistArtist, source: str, client: Any) -> Optional[str]:
+        """Resolve the artist ID for an exact source, searching by name if needed."""
+        attr = self._artist_id_attribute_for_source(source)
+        stored_id = getattr(watchlist_artist, attr, None) if attr else None
+        if stored_id:
+            return stored_id
+
+        if not client or not hasattr(client, 'search_artists'):
+            return None
+
+        try:
+            search_results = client.search_artists(watchlist_artist.artist_name, limit=1)
+        except Exception as e:
+            logger.debug("Could not search %s for %s: %s", source, watchlist_artist.artist_name, e)
+            return None
+
+        if not search_results:
+            return None
+
+        found_id = self._extract_entity_id(search_results[0])
+        if found_id and attr:
+            self._cache_watchlist_artist_source_id(watchlist_artist, source, found_id)
+        return found_id
+
+    @staticmethod
+    def _get_artist_image_from_data(artist_data: Any) -> Optional[str]:
+        """Extract an image URL from artist payloads across providers."""
+        if not artist_data:
+            return None
+
+        if isinstance(artist_data, dict):
+            images = artist_data.get('images') or []
+            if images:
+                first_image = images[0]
+                if isinstance(first_image, dict):
+                    return first_image.get('url')
+            return (
+                artist_data.get('image_url')
+                or artist_data.get('thumb_url')
+                or artist_data.get('cover_image')
+                or artist_data.get('picture_xl')
+                or artist_data.get('picture_big')
+                or artist_data.get('picture_medium')
+            )
+
+        images = getattr(artist_data, 'images', None)
+        if images:
+            first_image = images[0]
+            if isinstance(first_image, dict):
+                return first_image.get('url')
+        return (
+            getattr(artist_data, 'image_url', None)
+            or getattr(artist_data, 'thumb_url', None)
+            or getattr(artist_data, 'cover_image', None)
+        )
+
+    def _get_artist_image_for_source(self, watchlist_artist: WatchlistArtist, source: str, client: Any, artist_id: str) -> Optional[str]:
+        """Fetch an artist image for a specific source."""
+        if not client or not artist_id or not hasattr(client, 'get_artist'):
+            return None
+
+        try:
+            artist_data = client.get_artist(artist_id)
+        except Exception as e:
+            logger.debug("Could not fetch artist image for %s on %s: %s", watchlist_artist.artist_name, source, e)
+            return None
+
+        return self._get_artist_image_from_data(artist_data)
+
+    def _get_album_data_for_source(self, source: str, client: Any, album_id: str, album_name: str = '') -> Optional[Dict[str, Any]]:
+        """Fetch album data for a specific source and normalize track payloads when needed."""
+        if not client or not album_id or not hasattr(client, 'get_album'):
+            return None
+
+        try:
+            album_data = client.get_album(album_id)
+        except Exception as e:
+            logger.debug("Could not fetch album %s on %s: %s", album_id, source, e)
+            album_data = None
+
+        if not album_data:
+            return None
+
+        # Some providers return album metadata without embedded tracks; normalize that shape.
+        tracks = album_data.get('tracks') if isinstance(album_data, dict) else None
+        if not tracks:
+            track_items = get_album_tracks_for_source(source, album_id)
+            if track_items:
+                if not isinstance(album_data, dict):
+                    try:
+                        album_data = dict(album_data)
+                    except Exception:
+                        album_data = {'name': album_name or album_id}
+                if isinstance(track_items, dict):
+                    album_data['tracks'] = track_items
+                else:
+                    album_data['tracks'] = {'items': track_items}
+
+        return album_data
+
+    @staticmethod
+    def _extract_track_items(album_data: Any) -> List[Dict[str, Any]]:
+        """Normalize track payloads from different album formats to a list of items."""
+        if not album_data:
+            return []
+
+        tracks = None
+        if isinstance(album_data, dict):
+            tracks = album_data.get('tracks')
+        else:
+            tracks = getattr(album_data, 'tracks', None)
+
+        if not tracks:
+            return []
+
+        if isinstance(tracks, dict):
+            items = tracks.get('items') or tracks.get('data') or []
+            return list(items) if isinstance(items, list) else []
+
+        if isinstance(tracks, list):
+            return tracks
+
+        return []
+
+    def _resolve_watchlist_discography_for_source(
+        self,
+        watchlist_artist: WatchlistArtist,
+        source: str,
+        last_scan_timestamp: Optional[datetime] = None,
+    ) -> Optional[WatchlistDiscographyResult]:
+        """Resolve a watchlist artist to a specific source and fetch its discography."""
+        client = get_client_for_source(source)
+        if not client:
+            return None
+
+        artist_id = self._resolve_watchlist_artist_source_id(watchlist_artist, source, client)
+        if not artist_id:
+            return None
+
+        albums = self._get_artist_discography_with_client(
+            client,
+            artist_id,
+            last_scan_timestamp,
+            lookback_days=watchlist_artist.lookback_days,
+        )
+        if not albums:
+            return None
+
+        image_url = self._get_artist_image_for_source(watchlist_artist, source, client, artist_id)
+        return WatchlistDiscographyResult(
+            source=source,
+            client=client,
+            artist_id=artist_id,
+            albums=albums,
+            image_url=image_url,
+        )
 
     def _get_active_client_and_artist_id(self, watchlist_artist: WatchlistArtist):
         """
@@ -495,26 +710,21 @@ class WatchlistScanner:
 
     def get_artist_image_url(self, watchlist_artist: WatchlistArtist) -> Optional[str]:
         """
-        Get artist image URL using the active provider.
+        Get artist image URL using the configured source priority.
 
         Returns:
             Image URL string or None if not available
         """
-        client, artist_id, provider = self._get_active_client_and_artist_id(watchlist_artist)
-        if not client or not artist_id:
-            return None
-
-        try:
-            artist_data = client.get_artist(artist_id)
-            if artist_data:
-                # Handle both Spotify and iTunes response formats
-                if 'images' in artist_data and artist_data['images']:
-                    return artist_data['images'][0].get('url')
-                elif 'image_url' in artist_data:
-                    return artist_data['image_url']
-        except Exception as e:
-            logger.debug(f"Could not fetch artist image for {watchlist_artist.artist_name}: {e}")
-
+        for source in self._watchlist_source_priority():
+            client = get_client_for_source(source)
+            if not client:
+                continue
+            artist_id = self._resolve_watchlist_artist_source_id(watchlist_artist, source, client)
+            if not artist_id:
+                continue
+            image_url = self._get_artist_image_for_source(watchlist_artist, source, client, artist_id)
+            if image_url:
+                return image_url
         return None
 
     def backfill_watchlist_artist_images(self, profile_id: int) -> int:
@@ -598,57 +808,25 @@ class WatchlistScanner:
             logger.debug("Error backfilling watchlist artist images for profile %s: %s", profile_id, e, exc_info=True)
             return 0
 
-    def get_artist_discography_for_watchlist(self, watchlist_artist: WatchlistArtist, last_scan_timestamp: Optional[datetime] = None) -> Optional[List]:
+    def get_artist_discography_for_watchlist(self, watchlist_artist: WatchlistArtist, last_scan_timestamp: Optional[datetime] = None) -> Optional[WatchlistDiscographyResult]:
         """
-        Get artist's discography using the active provider, with proper ID resolution.
-        This is the provider-aware version of get_artist_discography.
+        Get artist's discography using the configured source priority, with proper ID resolution.
+        Returns the first provider that can actually return albums.
 
         Args:
             watchlist_artist: WatchlistArtist object (has both spotify and itunes IDs)
             last_scan_timestamp: Only return releases after this date (for incremental scans)
 
         Returns:
-            List of albums or None on error
+            WatchlistDiscographyResult or None on error
         """
-        client, artist_id, provider = self._get_active_client_and_artist_id(watchlist_artist)
-        if not client or not artist_id:
-            logger.warning(f"No valid client/ID for {watchlist_artist.artist_name}")
-            return None
+        for source in self._watchlist_source_priority():
+            result = self._resolve_watchlist_discography_for_source(watchlist_artist, source, last_scan_timestamp)
+            if result:
+                return result
 
-        albums = self._get_artist_discography_with_client(client, artist_id, last_scan_timestamp, lookback_days=watchlist_artist.lookback_days)
-
-        # If primary provider returned nothing, try the other provider as fallback
-        if not albums:
-            fallback_id = None
-            fallback_client = None
-
-            if provider == 'spotify':
-                fallback_client = self.metadata_service.itunes
-                fallback_id = watchlist_artist.itunes_artist_id
-                # If no iTunes ID stored, search by name and cache it
-                if not fallback_id:
-                    try:
-                        search_results = fallback_client.search_artists(watchlist_artist.artist_name, limit=1)
-                        if search_results:
-                            fallback_id = search_results[0].id
-                            logger.info(f"Resolved iTunes ID {fallback_id} for {watchlist_artist.artist_name}")
-                            self.database.update_watchlist_artist_itunes_id(
-                                watchlist_artist.spotify_artist_id or str(watchlist_artist.id),
-                                fallback_id
-                            )
-                            watchlist_artist.itunes_artist_id = fallback_id
-                    except Exception as e:
-                        logger.debug(f"Could not resolve iTunes ID for {watchlist_artist.artist_name}: {e}")
-
-            elif provider == 'itunes':
-                fallback_client = self.metadata_service.spotify
-                fallback_id = watchlist_artist.spotify_artist_id
-
-            if fallback_client and fallback_id:
-                logger.info(f"{provider.capitalize()} returned no albums for {watchlist_artist.artist_name}, falling back to {'iTunes' if provider == 'spotify' else 'Spotify'}")
-                albums = self._get_artist_discography_with_client(fallback_client, fallback_id, last_scan_timestamp, lookback_days=watchlist_artist.lookback_days)
-
-        return albums
+        logger.warning(f"No valid client/ID for {watchlist_artist.artist_name}")
+        return None
 
     def _apply_global_watchlist_overrides(self, watchlist_artists: List[WatchlistArtist]):
         """Apply global watchlist release-type overrides to a batch of artists."""
@@ -796,15 +974,13 @@ class WatchlistScanner:
         _emit('scan_started', profile_id=profile_id, total_artists=len(watchlist_artists))
 
         # Rate-limit-aware backfill of artist IDs for the providers we can safely resolve.
-        providers_to_backfill = ['itunes', 'deezer']
-        if self.spotify_client and self.spotify_client.is_spotify_authenticated():
-            providers_to_backfill.append('spotify')
-        try:
-            from config.settings import config_manager as _cfg
-            if _cfg.get('discogs.token', ''):
-                providers_to_backfill.append('discogs')
-        except Exception:
-            pass
+        providers_to_backfill = []
+        for source in self._watchlist_source_priority():
+            if source == 'spotify':
+                if self._spotify_available_for_run():
+                    providers_to_backfill.append(source)
+            elif source in {'itunes', 'deezer', 'discogs'} and get_client_for_source(source):
+                providers_to_backfill.append(source)
 
         for provider in providers_to_backfill:
             try:
@@ -855,8 +1031,46 @@ class WatchlistScanner:
                 _emit('cancelled', processed=i, total=len(watchlist_artists))
                 break
 
+            source_artist_id = (
+                artist.spotify_artist_id
+                or artist.itunes_artist_id
+                or artist.deezer_artist_id
+                or artist.discogs_artist_id
+                or str(artist.id)
+            )
+
             try:
-                artist_image_url = self.get_artist_image_url(artist) or ''
+                discography_result = self.get_artist_discography_for_watchlist(artist, artist.last_scan_timestamp)
+                if discography_result is None:
+                    scan_results.append(ScanResult(
+                        artist_name=artist.artist_name,
+                        spotify_artist_id=source_artist_id,
+                        albums_checked=0,
+                        new_tracks_found=0,
+                        tracks_added_to_wishlist=0,
+                        success=False,
+                        error_message="Failed to get artist discography",
+                    ))
+                    _emit(
+                        'artist_error',
+                        artist_name=artist.artist_name,
+                        profile_id=profile_id,
+                        error_message="Failed to get artist discography",
+                    )
+                    continue
+
+                if isinstance(discography_result, list):
+                    albums = discography_result
+                    artist_image_url = self.get_artist_image_url(artist) or ''
+                    album_fetcher = lambda album_id, album_name='': self.metadata_service.get_album(album_id)
+                else:
+                    source = discography_result.source
+                    client = discography_result.client
+                    albums = discography_result.albums
+                    source_artist_id = discography_result.artist_id
+                    artist_image_url = discography_result.image_url or self.get_artist_image_url(artist) or ''
+                    album_fetcher = lambda album_id, album_name='': self._get_album_data_for_source(source, client, album_id, album_name)
+
                 absolute_index = artist_index_offset + i + 1
                 if scan_state is not None:
                     scan_state.update({
@@ -880,25 +1094,6 @@ class WatchlistScanner:
                     artist_image_url=artist_image_url,
                 )
 
-                albums = self.get_artist_discography_for_watchlist(artist, artist.last_scan_timestamp)
-                if albums is None:
-                    scan_results.append(ScanResult(
-                        artist_name=artist.artist_name,
-                        spotify_artist_id=artist.spotify_artist_id or '',
-                        albums_checked=0,
-                        new_tracks_found=0,
-                        tracks_added_to_wishlist=0,
-                        success=False,
-                        error_message="Failed to get artist discography",
-                    ))
-                    _emit(
-                        'artist_error',
-                        artist_name=artist.artist_name,
-                        profile_id=profile_id,
-                        error_message="Failed to get artist discography",
-                    )
-                    continue
-
                 if scan_state is not None:
                     scan_state.update({
                         'current_phase': 'checking_albums',
@@ -911,26 +1106,39 @@ class WatchlistScanner:
 
                 for album_index, album in enumerate(albums):
                     try:
-                        album_data = self.metadata_service.get_album(album.id)
-                        if not album_data or 'tracks' not in album_data:
+                        album_data = album_fetcher(album.id, getattr(album, 'name', ''))
+                        tracks = self._extract_track_items(album_data)
+                        if not album_data or not tracks:
                             logger.debug("Skipping album %s (id=%s): no track data returned", album.name, album.id)
                             continue
 
-                        tracks = album_data['tracks']['items']
+                        album_name = getattr(album, 'name', '')
+                        if isinstance(album_data, dict):
+                            album_name = album_data.get('name', album_name)
+                        else:
+                            album_name = getattr(album_data, 'name', album_name)
+
                         if self._has_placeholder_tracks(tracks):
-                            logger.info("Skipping album with placeholder tracks: %s", album_data.get('name', album.name))
+                            logger.info("Skipping album with placeholder tracks: %s", album_name)
                             continue
                         if not self._should_include_release(len(tracks), artist):
                             continue
 
                         album_image_url = ''
-                        if 'images' in album_data and album_data['images']:
-                            album_image_url = album_data['images'][0]['url']
+                        album_images = []
+                        if isinstance(album_data, dict):
+                            album_images = album_data.get('images') or []
+                        else:
+                            album_images = getattr(album_data, 'images', None) or []
+                        if album_images:
+                            first_image = album_images[0]
+                            if isinstance(first_image, dict):
+                                album_image_url = first_image.get('url', '')
 
                         if scan_state is not None:
                             scan_state.update({
                                 'albums_checked': album_index + 1,
-                                'current_album': album.name,
+                                'current_album': album_name,
                                 'current_album_image_url': album_image_url,
                                 'current_phase': f'checking_album_{album_index + 1}_of_{len(albums)}',
                             })
@@ -938,7 +1146,7 @@ class WatchlistScanner:
                         _emit(
                             'album_started',
                             artist_name=artist.artist_name,
-                            album_name=album.name,
+                            album_name=album_name,
                             album_index=album_index + 1,
                             total_albums=len(albums),
                             album_image_url=album_image_url,
@@ -952,7 +1160,7 @@ class WatchlistScanner:
                             if scan_state is not None:
                                 scan_state['current_track_name'] = track_name
 
-                            if self.is_track_missing_from_library(track, album_name=album_data.get('name')):
+                            if self.is_track_missing_from_library(track, album_name=album_name):
                                 artist_new_tracks += 1
                                 if scan_state is not None:
                                     scan_state['tracks_found_this_scan'] += 1
@@ -984,7 +1192,7 @@ class WatchlistScanner:
 
                 scan_results.append(ScanResult(
                     artist_name=artist.artist_name,
-                    spotify_artist_id=artist.spotify_artist_id or '',
+                    spotify_artist_id=source_artist_id or artist.spotify_artist_id or '',
                     albums_checked=len(albums),
                     new_tracks_found=artist_new_tracks,
                     tracks_added_to_wishlist=artist_added_tracks,
@@ -1005,7 +1213,6 @@ class WatchlistScanner:
                 try:
                     if scan_state is not None:
                         scan_state['current_phase'] = 'fetching_similar_artists'
-                    source_artist_id = artist.spotify_artist_id or artist.itunes_artist_id or str(artist.id)
                     artist_profile_id = getattr(artist, 'profile_id', profile_id)
                     spotify_authenticated = self.spotify_client and self.spotify_client.is_spotify_authenticated()
                     if self.database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated, profile_id=artist_profile_id):
@@ -1013,7 +1220,7 @@ class WatchlistScanner:
                         self._backfill_similar_artists_itunes_ids(source_artist_id, profile_id=artist_profile_id)
                     else:
                         logger.info("Fetching similar artists for %s (profile %s)...", artist.artist_name, artist_profile_id)
-                        self.update_similar_artists(artist, profile_id=artist_profile_id)
+                        self.update_similar_artists(artist, profile_id=artist_profile_id, source_artist_id=source_artist_id)
                         logger.info("Similar artists updated for %s", artist.artist_name)
                 except Exception as similar_error:
                     logger.warning("Failed to update similar artists for %s: %s", artist.artist_name, similar_error)
@@ -1027,7 +1234,7 @@ class WatchlistScanner:
                 logger.error("Error scanning artist %s: %s", artist.artist_name, e)
                 scan_results.append(ScanResult(
                     artist_name=artist.artist_name,
-                    spotify_artist_id=artist.spotify_artist_id or '',
+                    spotify_artist_id=source_artist_id,
                     albums_checked=0,
                     new_tracks_found=0,
                     tracks_added_to_wishlist=0,
@@ -2107,7 +2314,13 @@ class WatchlistScanner:
             logger.error(f"Error backfilling similar artists {fallback_source if 'fallback_source' in dir() else 'fallback'} IDs: {e}")
             return 0
 
-    def update_similar_artists(self, watchlist_artist: WatchlistArtist, limit: int = 10, profile_id: int = 1) -> bool:
+    def update_similar_artists(
+        self,
+        watchlist_artist: WatchlistArtist,
+        limit: int = 10,
+        profile_id: int = 1,
+        source_artist_id: Optional[str] = None,
+    ) -> bool:
         """
         Fetch and store similar artists for a watchlist artist.
         Called after each artist scan to build discovery pool.
@@ -2125,8 +2338,15 @@ class WatchlistScanner:
 
             logger.info(f"Found {len(similar_artists)} similar artists for {watchlist_artist.artist_name}")
 
-            # Use consistent source artist ID (prefer Spotify, fall back to iTunes or internal ID)
-            source_artist_id = watchlist_artist.spotify_artist_id or watchlist_artist.itunes_artist_id or str(watchlist_artist.id)
+            # Use the ID that matched the scan source when available; otherwise fall back to any known ID.
+            source_artist_id = (
+                source_artist_id
+                or watchlist_artist.spotify_artist_id
+                or watchlist_artist.itunes_artist_id
+                or watchlist_artist.deezer_artist_id
+                or watchlist_artist.discogs_artist_id
+                or str(watchlist_artist.id)
+            )
 
             # Store each similar artist in database
             stored_count = 0

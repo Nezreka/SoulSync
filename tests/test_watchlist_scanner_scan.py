@@ -22,6 +22,32 @@ if "spotipy" not in sys.modules:
     sys.modules["spotipy"] = spotipy
     sys.modules["spotipy.oauth2"] = oauth2
 
+if "config.settings" not in sys.modules:
+    config_pkg = types.ModuleType("config")
+    settings_mod = types.ModuleType("config.settings")
+
+    class _DummyConfigManager:
+        def get(self, key, default=None):
+            return default
+
+        def get_active_media_server(self):
+            return "plex"
+
+    settings_mod.config_manager = _DummyConfigManager()
+    config_pkg.settings = settings_mod
+    sys.modules["config"] = config_pkg
+    sys.modules["config.settings"] = settings_mod
+
+if "core.matching_engine" not in sys.modules:
+    matching_engine_mod = types.ModuleType("core.matching_engine")
+
+    class _DummyMatchingEngine:
+        def clean_title(self, title):
+            return title
+
+    matching_engine_mod.MusicMatchingEngine = _DummyMatchingEngine
+    sys.modules["core.matching_engine"] = matching_engine_mod
+
 import core.watchlist_scanner as watchlist_scanner_module
 from core.watchlist_scanner import WatchlistScanner
 
@@ -39,6 +65,31 @@ class _FakeMetadataService:
 
     def get_album(self, album_id):
         return self._album_data
+
+
+class _FakeSourceClient:
+    def __init__(self, *, artist_id: str, albums, image_url: str):
+        self.artist_id = artist_id
+        self.albums = list(albums)
+        self.image_url = image_url
+        self.search_calls = []
+        self.album_calls = []
+        self.artist_calls = []
+
+    def search_artists(self, query, limit=1):
+        self.search_calls.append((query, limit))
+        return [types.SimpleNamespace(id=self.artist_id, name=query)]
+
+    def get_artist_albums(self, artist_id, album_type='album,single', limit=50, **kwargs):
+        self.album_calls.append((artist_id, album_type, limit, kwargs))
+        return list(self.albums)
+
+    def get_artist(self, artist_id):
+        self.artist_calls.append(artist_id)
+        return {
+            "id": artist_id,
+            "images": [{"url": self.image_url}] if self.image_url else [],
+        }
 
 
 class _FakeDB:
@@ -255,3 +306,71 @@ def test_scan_watchlist_artists_honors_cancel_check(monkeypatch):
     assert scan_state["status"] == "cancelled"
     assert scan_state["summary"]["cancelled"] is True
     assert scan_state["summary"]["successful_scans"] == 1
+
+
+def test_get_artist_discography_for_watchlist_prefers_primary_source(monkeypatch):
+    monkeypatch.setattr(watchlist_scanner_module, "time", types.SimpleNamespace(sleep=lambda *_args, **_kwargs: None))
+    monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(watchlist_scanner_module, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+
+    deezer_album = types.SimpleNamespace(id="dz-album", name="Deezer Album", release_date=None)
+    spotify_album = types.SimpleNamespace(id="sp-album", name="Spotify Album", release_date=None)
+
+    deezer_client = _FakeSourceClient(artist_id="dz-artist", albums=[deezer_album], image_url="https://example.com/deezer.jpg")
+    spotify_client = _FakeSourceClient(artist_id="sp-artist", albums=[spotify_album], image_url="https://example.com/spotify.jpg")
+
+    def fake_get_client_for_source(source):
+        return {"deezer": deezer_client, "spotify": spotify_client}.get(source)
+
+    monkeypatch.setattr(watchlist_scanner_module, "get_client_for_source", fake_get_client_for_source)
+
+    artist = _build_artist()
+    artist.spotify_artist_id = "sp-artist"
+    artist.deezer_artist_id = "dz-artist"
+
+    scanner = _build_scanner({"tracks": {"items": []}}, [artist])
+    scanner._database.has_fresh_similar_artists = lambda *args, **kwargs: False
+    scanner._get_lookback_period_setting = lambda: "30"
+    scanner._get_rescan_cutoff = lambda: None
+
+    result = scanner.get_artist_discography_for_watchlist(artist, None)
+
+    assert result is not None
+    assert result.source == "deezer"
+    assert result.artist_id == "dz-artist"
+    assert result.albums and result.albums[0].id == "dz-album"
+    assert deezer_client.album_calls
+    assert spotify_client.album_calls == []
+
+
+def test_get_artist_discography_for_watchlist_falls_back_when_primary_empty(monkeypatch):
+    monkeypatch.setattr(watchlist_scanner_module, "time", types.SimpleNamespace(sleep=lambda *_args, **_kwargs: None))
+    monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(watchlist_scanner_module, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+
+    deezer_client = _FakeSourceClient(artist_id="dz-artist", albums=[], image_url="https://example.com/deezer.jpg")
+    spotify_album = types.SimpleNamespace(id="sp-album", name="Spotify Album", release_date=None)
+    spotify_client = _FakeSourceClient(artist_id="sp-artist", albums=[spotify_album], image_url="https://example.com/spotify.jpg")
+
+    def fake_get_client_for_source(source):
+        return {"deezer": deezer_client, "spotify": spotify_client}.get(source)
+
+    monkeypatch.setattr(watchlist_scanner_module, "get_client_for_source", fake_get_client_for_source)
+
+    artist = _build_artist()
+    artist.spotify_artist_id = "sp-artist"
+    artist.deezer_artist_id = "dz-artist"
+
+    scanner = _build_scanner({"tracks": {"items": []}}, [artist])
+    scanner._database.has_fresh_similar_artists = lambda *args, **kwargs: False
+    scanner._get_lookback_period_setting = lambda: "30"
+    scanner._get_rescan_cutoff = lambda: None
+
+    result = scanner.get_artist_discography_for_watchlist(artist, None)
+
+    assert result is not None
+    assert result.source == "spotify"
+    assert result.artist_id == "sp-artist"
+    assert result.albums and result.albums[0].id == "sp-album"
+    assert deezer_client.album_calls
+    assert spotify_client.album_calls
