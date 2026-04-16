@@ -1,8 +1,14 @@
-"""AcoustID Background Scanner Job — fingerprints tracks to detect wrong downloads."""
+"""AcoustID Scanner Job — fingerprints library tracks to detect wrong downloads.
+
+Scans the entire library (not just Transfer) by resolving DB file paths to
+actual files on disk. Creates actionable findings that can be fixed:
+  - 'retag': Update DB metadata to match what the file actually is
+  - 'redownload': Add the expected track to wishlist and delete the wrong file
+  - 'delete': Remove the wrong file and its DB record
+"""
 
 import os
 import re
-import time
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -19,29 +25,33 @@ AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.
 class AcoustIDScannerJob(RepairJob):
     job_id = 'acoustid_scanner'
     display_name = 'AcoustID Scanner'
-    description = 'Fingerprints tracks to detect wrong downloads'
+    description = 'Fingerprints library tracks to detect wrong downloads'
     help_text = (
-        'Generates audio fingerprints using the AcoustID/Chromaprint service and compares '
-        'the identified recording against what you expected to download. This catches cases '
-        'where the wrong song was served — even if the filename looks correct.\n\n'
-        'The job processes tracks in batches and saves a checkpoint so it can resume where '
-        'it left off across runs. Requires an AcoustID API key (set in Settings).\n\n'
+        'Scans your music library by fingerprinting audio files and comparing '
+        'them against the AcoustID database. Detects cases where the wrong song '
+        'was downloaded — even if the filename and tags look correct.\n\n'
+        'When a mismatch is found, you can:\n'
+        '• Retag — update the DB record to match the actual audio content\n'
+        '• Redownload — add the correct track to your wishlist and remove the wrong file\n'
+        '• Delete — remove the wrong file entirely\n\n'
+        'The job processes tracks in batches with checkpointing so it resumes '
+        'where it left off across runs. Requires an AcoustID API key (Settings).\n\n'
         'Settings:\n'
-        '- Fingerprint Threshold: Minimum AcoustID match confidence (0.0 - 1.0)\n'
-        '- Title Similarity: How closely the identified title must match your expected title\n'
+        '- Fingerprint Threshold: Minimum AcoustID match confidence (0.0–1.0)\n'
+        '- Title Similarity: How closely the identified title must match\n'
         '- Artist Similarity: How closely the identified artist must match\n'
-        '- Batch Size: Number of tracks to process per scan run'
+        '- Batch Size: Tracks per scan run (checkpoint saved between batches)'
     )
     icon = 'repair-icon-acoustid'
-    default_enabled = False
-    default_interval_hours = 168
+    default_enabled = True
+    default_interval_hours = 24
     default_settings = {
         'fingerprint_threshold': 0.80,
         'title_similarity': 0.70,
         'artist_similarity': 0.60,
-        'batch_size': 50,
+        'batch_size': 200,
     }
-    auto_fix = False
+    auto_fix = False  # User chooses fix action per finding
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -50,7 +60,7 @@ class AcoustIDScannerJob(RepairJob):
         fp_threshold = settings.get('fingerprint_threshold', 0.80)
         title_threshold = settings.get('title_similarity', 0.70)
         artist_threshold = settings.get('artist_similarity', 0.60)
-        batch_size = settings.get('batch_size', 50)
+        batch_size = settings.get('batch_size', 200)
 
         # Get AcoustID client
         acoustid_client = context.acoustid_client
@@ -62,64 +72,56 @@ class AcoustIDScannerJob(RepairJob):
                 logger.warning("AcoustID client not available: %s", e)
                 return result
 
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
-            logger.warning("Transfer folder does not exist: %s", transfer)
+        # Load all library tracks from DB with their file paths
+        db_tracks = self._load_db_tracks(context)
+        if not db_tracks:
+            logger.info("No library tracks with file paths found")
             return result
 
-        # Read checkpoint (last processed file path) to resume from
-        checkpoint = None
+        # Read checkpoint (last processed track ID) to resume from
+        checkpoint_id = None
         if context.config_manager:
-            checkpoint = context.config_manager.get(
-                f'repair.jobs.{self.job_id}.checkpoint', None
+            checkpoint_id = context.config_manager.get(
+                f'repair.jobs.{self.job_id}.checkpoint_id', None
             )
 
-        # Collect all audio files
-        audio_files = []
-        for root, _dirs, files in os.walk(transfer):
-            if context.check_stop():
-                return result
-            for fname in sorted(files):
-                ext = os.path.splitext(fname)[1].lower()
-                if ext in AUDIO_EXTENSIONS:
-                    audio_files.append(os.path.join(root, fname))
-
-        # Sort for deterministic order (important for checkpoint)
-        audio_files.sort()
+        # Build ordered list of (track_id, info) sorted by ID for deterministic order
+        track_list = sorted(db_tracks.items(), key=lambda x: x[0])
 
         # Skip past checkpoint if resuming
-        if checkpoint:
-            try:
-                idx = audio_files.index(checkpoint)
-                audio_files = audio_files[idx + 1:]
-                logger.info("Resuming AcoustID scan from checkpoint (%d files remaining)", len(audio_files))
-            except ValueError:
-                logger.debug("Checkpoint file not found, starting from beginning")
+        if checkpoint_id is not None:
+            original_len = len(track_list)
+            track_list = [(tid, info) for tid, info in track_list if tid > checkpoint_id]
+            if len(track_list) < original_len:
+                logger.info("Resuming AcoustID scan from checkpoint ID %s (%d tracks remaining)",
+                            checkpoint_id, len(track_list))
 
-        total = len(audio_files)
+        total = len(track_list)
+        if context.report_progress:
+            context.report_progress(phase=f'Scanning {total} library tracks...', total=total)
         if context.update_progress:
             context.update_progress(0, total)
 
-        # Build a lookup of known tracks from DB for comparison
-        db_tracks = self._load_db_tracks(context)
-
-        if context.report_progress:
-            context.report_progress(phase=f'Fingerprinting {total} files...', total=total)
-
         batch_count = 0
-        for i, fpath in enumerate(audio_files):
+        for i, (track_id, track_info) in enumerate(track_list):
             if context.check_stop():
-                # Save checkpoint before stopping
-                self._save_checkpoint(context, fpath)
+                self._save_checkpoint_id(context, track_id)
                 return result
             if i % 10 == 0 and context.wait_if_paused():
-                self._save_checkpoint(context, fpath)
+                self._save_checkpoint_id(context, track_id)
                 return result
+
+            # Resolve the DB path to an actual file on disk
+            file_path = track_info.get('file_path', '')
+            resolved = self._resolve_path(file_path, context)
+            if not resolved:
+                result.skipped += 1
+                continue
 
             result.scanned += 1
             batch_count += 1
 
-            fname = os.path.basename(fpath)
+            fname = os.path.basename(resolved)
             if context.report_progress:
                 context.report_progress(
                     scanned=i + 1, total=total,
@@ -130,46 +132,37 @@ class AcoustIDScannerJob(RepairJob):
 
             try:
                 self._scan_file(
-                    fpath, acoustid_client, db_tracks, context, result,
+                    resolved, track_id, track_info, acoustid_client, context, result,
                     fp_threshold, title_threshold, artist_threshold
                 )
             except Exception as e:
                 logger.debug("Error scanning %s: %s", fname, e)
                 result.errors += 1
 
-            # Rate limit: pause between batches
+            # Rate limit: pause between batches to avoid hammering AcoustID API
             if batch_count >= batch_size:
                 batch_count = 0
-                self._save_checkpoint(context, fpath)
+                self._save_checkpoint_id(context, track_id)
                 if context.sleep_or_stop(2):
                     return result
 
             if context.update_progress and (i + 1) % 10 == 0:
                 context.update_progress(i + 1, total)
 
-        # Clear checkpoint on completion
-        self._save_checkpoint(context, None)
+        # Clear checkpoint on full completion
+        self._save_checkpoint_id(context, None)
 
         if context.update_progress:
             context.update_progress(total, total)
 
-        logger.info("AcoustID scan: %d files scanned, %d mismatches found, %d errors",
-                     result.scanned, result.findings_created, result.errors)
+        logger.info("AcoustID scan: %d scanned, %d skipped, %d mismatches, %d errors",
+                     result.scanned, result.skipped, result.findings_created, result.errors)
         return result
 
-    def _scan_file(self, fpath, acoustid_client, db_tracks, context, result,
+    def _scan_file(self, fpath, track_id, expected, acoustid_client, context, result,
                    fp_threshold, title_threshold, artist_threshold):
         """Fingerprint a single file and check for mismatches."""
         fname = os.path.basename(fpath)
-
-        # Get expected title/artist from DB or filename
-        expected = db_tracks.get(os.path.normpath(fpath))
-        if not expected:
-            # Try to extract from filename: "01 - Artist - Title.flac" or "01 Title.flac"
-            base = os.path.splitext(fname)[0]
-            # Strip leading track number
-            base = re.sub(r'^\d{1,3}[\s.\-_]*', '', base)
-            expected = {'title': base, 'artist': '', 'track_id': None}
 
         # Fingerprint the file
         try:
@@ -178,29 +171,18 @@ class AcoustIDScannerJob(RepairJob):
             logger.debug("Fingerprint failed for %s: %s", fname, e)
             result.errors += 1
             if context.report_progress:
-                context.report_progress(
-                    log_line=f'Error: {fname} — {e}',
-                    log_type='error'
-                )
+                context.report_progress(log_line=f'Error: {fname} — {e}', log_type='error')
             return
 
         if not fp_result or not fp_result.get('recordings'):
-            # No match — could be API error, rare track, or invalid key
-            # Don't create findings for "no match" — these flood the list
-            # and are usually not actionable. Only log for visibility.
             if context.report_progress:
-                context.report_progress(
-                    log_line=f'No match: {fname}',
-                    log_type='skip'
-                )
+                context.report_progress(log_line=f'No match: {fname}', log_type='skip')
             return
 
-        # Check best recording match
         best_score = fp_result.get('best_score', 0)
         if best_score < fp_threshold:
-            return  # Low confidence fingerprint, skip
+            return
 
-        # Compare best AcoustID result against expected
         best_recording = fp_result['recordings'][0]
         aid_title = best_recording.get('title', '')
         aid_artist = best_recording.get('artist', '')
@@ -217,7 +199,6 @@ class AcoustIDScannerJob(RepairJob):
         title_sim = SequenceMatcher(None, norm_expected_title, norm_aid_title).ratio()
         artist_sim = SequenceMatcher(None, norm_expected_artist, norm_aid_artist).ratio() if norm_expected_artist else 1.0
 
-        # If both title AND artist match well, no issue
         if title_sim >= title_threshold and artist_sim >= artist_threshold:
             return
 
@@ -234,13 +215,14 @@ class AcoustIDScannerJob(RepairJob):
                 finding_type='acoustid_mismatch',
                 severity=severity,
                 entity_type='track',
-                entity_id=str(expected.get('track_id') or ''),
+                entity_id=str(track_id),
                 file_path=fpath,
-                title=f'Possible wrong download: {fname}',
+                title=f'Wrong download: "{expected["title"]}" is actually "{aid_title}"',
                 description=(
                     f'Expected "{expected["title"]}" by {expected["artist"]}, '
-                    f'but fingerprint matches "{aid_title}" by {aid_artist} '
-                    f'(fp: {best_score:.0%}, title: {title_sim:.0%}, artist: {artist_sim:.0%})'
+                    f'but audio fingerprint matches "{aid_title}" by {aid_artist} '
+                    f'(fingerprint: {best_score:.0%}, title match: {title_sim:.0%}, '
+                    f'artist match: {artist_sim:.0%})'
                 ),
                 details={
                     'expected_title': expected['title'],
@@ -252,20 +234,22 @@ class AcoustIDScannerJob(RepairJob):
                     'artist_similarity': round(artist_sim, 3),
                     'album_thumb_url': expected.get('album_thumb_url'),
                     'artist_thumb_url': expected.get('artist_thumb_url'),
+                    'album_title': expected.get('album_title', ''),
+                    'track_number': expected.get('track_number'),
                 }
             )
             result.findings_created += 1
 
     def _load_db_tracks(self, context: JobContext) -> dict:
-        """Load all tracks from DB keyed by normalized file_path."""
+        """Load all tracks from DB keyed by track ID."""
         tracks = {}
         conn = None
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT t.id, t.title, ar.name, t.file_path,
-                       al.thumb_url, ar.thumb_url
+                SELECT t.id, t.title, ar.name, t.file_path, t.track_number,
+                       al.title AS album_title, al.thumb_url, ar.thumb_url
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -273,13 +257,15 @@ class AcoustIDScannerJob(RepairJob):
                   AND t.title IS NOT NULL AND t.title != ''
             """)
             for row in cursor.fetchall():
-                track_id, title, artist_name, file_path, album_thumb, artist_thumb = row
-                tracks[os.path.normpath(file_path)] = {
-                    'track_id': track_id,
-                    'title': title or '',
-                    'artist': artist_name or '',
-                    'album_thumb_url': album_thumb or None,
-                    'artist_thumb_url': artist_thumb or None,
+                track_id = row[0]
+                tracks[track_id] = {
+                    'title': row[1] or '',
+                    'artist': row[2] or '',
+                    'file_path': row[3] or '',
+                    'track_number': row[4],
+                    'album_title': row[5] or '',
+                    'album_thumb_url': row[6] or None,
+                    'artist_thumb_url': row[7] or None,
                 }
         except Exception as e:
             logger.error("Error loading tracks from DB: %s", e)
@@ -288,12 +274,21 @@ class AcoustIDScannerJob(RepairJob):
                 conn.close()
         return tracks
 
-    def _save_checkpoint(self, context: JobContext, fpath):
-        """Save or clear the scan checkpoint."""
+    def _resolve_path(self, file_path, context):
+        """Resolve a DB file path to an actual file on disk."""
+        if not file_path:
+            return None
+        if os.path.exists(file_path):
+            return file_path
+        # Try the repair_worker's resolver
+        from core.repair_worker import _resolve_file_path
+        return _resolve_file_path(file_path, context.transfer_folder)
+
+    def _save_checkpoint_id(self, context: JobContext, track_id):
+        """Save or clear the scan checkpoint by track ID."""
         if context.config_manager:
             context.config_manager.set(
-                f'repair.jobs.{self.job_id}.checkpoint',
-                fpath
+                f'repair.jobs.{self.job_id}.checkpoint_id', track_id
             )
 
     def _get_settings(self, context: JobContext) -> dict:
@@ -305,15 +300,21 @@ class AcoustIDScannerJob(RepairJob):
         return merged
 
     def estimate_scope(self, context: JobContext) -> int:
-        transfer = context.transfer_folder
-        if not os.path.isdir(transfer):
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM tracks
+                WHERE file_path IS NOT NULL AND file_path != ''
+                  AND title IS NOT NULL AND title != ''
+            """)
+            return cursor.fetchone()[0]
+        except Exception:
             return 0
-        count = 0
-        for _root, _dirs, files in os.walk(transfer):
-            for fname in files:
-                if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
-                    count += 1
-        return count
+        finally:
+            if conn:
+                conn.close()
 
 
 def _normalize(text: str) -> str:
