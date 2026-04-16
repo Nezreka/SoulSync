@@ -57250,7 +57250,50 @@ body.reduce-effects *::after {
 .wl-orb-ring { position: absolute; inset: -2px; border-radius: 50%; border: 2px solid hsla(var(--orb-hue),60%,50%,0.3); z-index: 2; pointer-events: none; }
 .wl-orb-group.expanded .wl-orb-ring { border-color: hsla(var(--orb-hue),70%,60%,0.6); box-shadow: 0 0 16px hsla(var(--orb-hue),70%,50%,0.3); }
 
-.wl-orb-label { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.7); text-align: center; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Enhancement 2: hover tooltip */
+.wl-orb-tooltip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%) translateY(4px);
+    background: rgba(10,10,10,0.95);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #fff;
+    text-align: center;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 20;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.wl-orb-tooltip span { font-size: 10px; font-weight: 400; color: rgba(255,255,255,0.45); }
+.wl-orb-group:not(.expanded):hover .wl-orb-tooltip { opacity: 1; transform: translateX(-50%) translateY(0); }
+.wl-orb-group.expanded .wl-orb-tooltip { display: none; }
+
+/* Enhancement 3: pulse for next-in-queue */
+.wl-orb.orb-pulse .wl-orb-glow { animation: orbGlowSpin 8s linear infinite, orbPulse 2.5s ease-in-out infinite; }
+@keyframes orbPulse { 0%,100% { filter: blur(3px) brightness(1); } 50% { filter: blur(5px) brightness(1.4); } }
+
+/* Enhancement 5: album art ring */
+.wl-orb-art-ring { position: absolute; inset: -16px; border-radius: 50%; z-index: 0; pointer-events: none; animation: artRingSpin 30s linear infinite; }
+.wl-art-ring-item { position: absolute; width: 20px; height: 20px; border-radius: 50%; object-fit: cover; top: 50%; left: 50%; transform: rotate(var(--ring-angle)) translateY(-50%) translateX(calc(var(--ring-radius, 48px))); opacity: 0.5; border: 1px solid rgba(255,255,255,0.1); transition: opacity 0.3s; }
+.wl-orb.orb-sm .wl-orb-art-ring { --ring-radius: 44px; }
+.wl-orb.orb-md .wl-orb-art-ring { --ring-radius: 54px; }
+.wl-orb.orb-lg .wl-orb-art-ring { --ring-radius: 66px; }
+.wl-orb:hover .wl-art-ring-item { opacity: 0.85; }
+@keyframes artRingSpin { to { transform: rotate(360deg); } }
+
+/* Enhancement 7: staggered entry animation */
+.wl-orb-group { animation: orbEntrance 0.5s ease backwards; }
+@keyframes orbEntrance { from { opacity: 0; transform: translateY(20px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+.wl-orb-label { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.7); text-align: center; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: color 0.15s; }
+.wl-orb-label:hover { color: rgb(var(--accent-light-rgb)); text-decoration: underline; }
 .wl-orb-meta { font-size: 9px; color: rgba(255,255,255,0.3); text-align: center; }
 
 /* ── Expanded ── */
