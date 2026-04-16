@@ -18375,6 +18375,38 @@ from mutagen.oggvorbis import OggVorbis
 from mutagen.apev2 import APEv2, APENoHeaderError
 import urllib.request
 
+def _wipe_source_tags(file_path: str) -> bool:
+    """Emergency tag wipe — clears ALL tags from a file without writing new ones.
+    Used when full metadata enhancement is skipped or fails, to prevent original
+    Soulseek source tags (especially MusicBrainz IDs from the uploader) from
+    persisting and causing album splits in media servers like Navidrome."""
+    try:
+        _strip_all_non_audio_tags(file_path)
+        audio = MutagenFile(file_path)
+        if audio is None:
+            return False
+        if hasattr(audio, 'clear_pictures'):
+            audio.clear_pictures()
+        if audio.tags is not None:
+            tag_count = len(audio.tags)
+            audio.tags.clear()
+        else:
+            audio.add_tags()
+            tag_count = 0
+        if isinstance(audio.tags, ID3):
+            audio.save(v1=0, v2_version=4)
+        elif isinstance(audio, FLAC):
+            audio.save(deleteid3=True)
+        else:
+            audio.save()
+        if tag_count > 0:
+            print(f"[Tag Wipe] Stripped {tag_count} source tags from: {os.path.basename(file_path)}")
+        return True
+    except Exception as e:
+        print(f"[Tag Wipe] Failed (non-fatal): {e}")
+        return False
+
+
 def _strip_all_non_audio_tags(file_path: str) -> dict:
     """
     Strip ALL non-audio tag containers from a file before metadata rewriting.
@@ -20911,6 +20943,7 @@ def _post_process_matched_download(context_key, context, file_path):
             except Exception as meta_err:
                 import traceback
                 pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
+                _wipe_source_tags(file_path)
 
             # Move file to playlist folder
             print(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
@@ -21152,7 +21185,9 @@ def _post_process_matched_download(context_key, context, file_path):
         except Exception as meta_err:
             import traceback
             pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
-            # Continue anyway - file can still be moved
+            # Wipe source tags even though enhancement failed — prevents Soulseek
+            # uploader's MusicBrainz IDs from causing album splits in Navidrome
+            _wipe_source_tags(file_path)
 
         # Detect enhance mode from track context
         _enhance_source_info = context.get('track_info', {}).get('source_info') or {}
@@ -28490,11 +28525,19 @@ def _run_post_processing_worker(task_id, batch_id):
                         else:
                             print(f"[Post-Processing] Missing spotify_artist or spotify_album in context")
                             print(f"[Post-Processing] spotify_artist: {spotify_artist is not None}, spotify_album: {spotify_album is not None}")
+                            # Wipe source tags even without full enhancement — prevents
+                            # Soulseek uploader's MusicBrainz IDs from causing album splits
+                            if found_file and os.path.exists(found_file):
+                                _wipe_source_tags(found_file)
                     except Exception as enhancement_error:
                         import traceback
                         print(f"[Post-Processing] Error during metadata enhancement: {enhancement_error}\n{traceback.format_exc()}")
+                        if found_file and os.path.exists(found_file):
+                            _wipe_source_tags(found_file)
                 else:
                     print(f"[Post-Processing] Cannot complete metadata enhancement - missing context or expected filename")
+                    if found_file and os.path.exists(found_file):
+                        _wipe_source_tags(found_file)
             else:
                 print(f"[Post-Processing] File already has metadata enhancement completed")
             
