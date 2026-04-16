@@ -3607,6 +3607,7 @@ const WHATS_NEW = {
         { title: 'Fix Wishlist Button on Non-Dashboard Pages', desc: 'Wishlist button click handler moved to global init so it works from any page, not just the dashboard' },
         { title: 'Fix Allow Duplicates Setting Not Saving', desc: 'The "Allow duplicate tracks across albums" toggle was never persisted — it silently reset to ON on every page reload. Now saves correctly' },
         { title: 'Fix Wishlist Dropping Cross-Album Tracks', desc: 'Wishlist cleanup was removing same-titled tracks from different albums even when Allow Duplicates was enabled. Cleanup now respects the setting — same song from different albums can coexist in the wishlist' },
+        { title: 'Fix "Replace Lower Quality" Setting Not Persisting', desc: 'The import section appeared twice in the settings save payload — the second instance (with only staging_path) overwrote the first (with replace_lower_quality). Merged into a single block' },
 
         // --- April 14, 2026 ---
         { date: 'April 14, 2026' },
