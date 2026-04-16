@@ -7286,7 +7286,8 @@ async function saveSettings(quiet = false) {
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos'
         },
         import: {
-            replace_lower_quality: document.getElementById('import-replace-lower-quality').checked
+            replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
+            staging_path: document.getElementById('staging-path').value || './Staging'
         },
         lossy_copy: {
             enabled: document.getElementById('lossy-copy-enabled').checked,
@@ -7298,9 +7299,6 @@ async function saveSettings(quiet = false) {
         listening_stats: {
             enabled: document.getElementById('listening-stats-enabled').checked,
             poll_interval: parseInt(document.getElementById('listening-stats-interval').value) || 30,
-        },
-        import: {
-            staging_path: document.getElementById('staging-path').value || './Staging'
         },
         m3u_export: {
             enabled: document.getElementById('m3u-export-enabled').checked,
