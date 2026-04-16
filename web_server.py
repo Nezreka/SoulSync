@@ -41463,7 +41463,7 @@ def refresh_spotify_library():
         def _run_sync():
             try:
                 from core.watchlist_scanner import get_watchlist_scanner
-                scanner = get_watchlist_scanner()
+                scanner = get_watchlist_scanner(spotify_client)
                 if scanner:
                     # Force full sync by clearing last_sync timestamp
                     database = get_database()
