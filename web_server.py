@@ -18596,7 +18596,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
             # ── Embed source IDs (Spotify, MusicBrainz, etc.) on the same object ──
             # Runs before album art so MusicBrainz release ID is available for
             # Cover Art Archive high-resolution lookup.
-            _embed_source_ids(audio_file, metadata)
+            _embed_source_ids(audio_file, metadata, context)
 
             # Propagate MusicBrainz release ID to album_info so _download_cover_art
             # can use it for Cover Art Archive high-res cover.jpg
@@ -18944,7 +18944,7 @@ def _embed_album_art_metadata(audio_file, metadata: dict):
     except Exception as e:
         print(f"Error embedding album art: {e}")
 
-def _embed_source_ids(audio_file, metadata: dict):
+def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
     """
     Lookup MusicBrainz, Deezer, AudioDB, Tidal, Qobuz, Last.fm, and Genius
     metadata, then embed them along with Spotify/iTunes source IDs as custom
@@ -19038,7 +19038,7 @@ def _embed_source_ids(audio_file, metadata: dict):
         # Extract batch-level artist name for stable MB release cache keys.
         # When downloading an album batch, all tracks should use the same artist key
         # to guarantee they hit the same preflight-cached release MBID.
-        _track_info_for_pp = context.get('track_info', {}) or {}
+        _track_info_for_pp = (context or {}).get('track_info', {}) or {}
         _explicit_artist_for_pp = _track_info_for_pp.get('_explicit_artist_context') if isinstance(_track_info_for_pp, dict) else None
         _batch_artist_name = None
         if isinstance(_explicit_artist_for_pp, dict) and _explicit_artist_for_pp.get('name'):
