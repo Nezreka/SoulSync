@@ -3602,6 +3602,7 @@ const WHATS_NEW = {
     '2.2': [
         // --- April 15, 2026 ---
         { date: 'April 15, 2026' },
+        { title: 'Tools Page', desc: 'All tool cards (Database Updater, Quality Scanner, Duplicate Cleaner, Retag, Backups, Cache, etc.) and Library Maintenance moved from the Dashboard to a dedicated Tools page in the sidebar. Dashboard shows a quick-link card', page: 'tools' },
         { title: 'Watchlist & Wishlist Sidebar Pages', desc: 'Watchlist and Wishlist promoted from modals to full sidebar pages. All features preserved — artist grid, scan controls, batch operations, live activity, countdown timers, category cards with mosaic backgrounds. Header buttons now navigate to the pages', page: 'watchlist' },
         { title: 'Picard-Style MusicBrainz Album Consistency', desc: 'Recording MBIDs now pulled from the matched release tracklist instead of independent searches. Batch-level artist name used for stable cache keys. Post-batch consistency pass rewrites album-level tags on all files to guarantee identical MusicBrainz IDs — prevents Navidrome album splits' },
         { title: 'Fix Spotify API Leaking When Deezer/iTunes is Primary', desc: 'Spotify was being called for watchlist album scanning, similar artist discovery, repair jobs, and the Artists page search even when another source was set as primary. All data-fetching now respects the configured primary source. Spotify playlist sync is unaffected' },
