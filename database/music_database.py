@@ -10794,6 +10794,44 @@ class MusicDatabase:
             logger.error(f"Error deleting automation {automation_id}: {e}")
             return False
 
+    def batch_update_group(self, automation_ids: list, group_name: str = None) -> int:
+        """Batch update group_name for multiple automations. Excludes system automations."""
+        if not automation_ids:
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' for _ in automation_ids)
+                cursor.execute(
+                    f"UPDATE automations SET group_name = ?, updated_at = CURRENT_TIMESTAMP "
+                    f"WHERE id IN ({placeholders}) AND (is_system IS NULL OR is_system = 0)",
+                    [group_name] + list(automation_ids)
+                )
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error batch updating group: {e}")
+            return 0
+
+    def bulk_set_enabled(self, automation_ids: list, enabled: bool) -> int:
+        """Bulk enable/disable multiple automations. Excludes system automations."""
+        if not automation_ids:
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' for _ in automation_ids)
+                cursor.execute(
+                    f"UPDATE automations SET enabled = ?, updated_at = CURRENT_TIMESTAMP "
+                    f"WHERE id IN ({placeholders}) AND (is_system IS NULL OR is_system = 0)",
+                    [1 if enabled else 0] + list(automation_ids)
+                )
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error bulk toggling automations: {e}")
+            return 0
+
     def toggle_automation(self, automation_id: int) -> bool:
         """Toggle the enabled state of an automation. Returns True on success."""
         try:

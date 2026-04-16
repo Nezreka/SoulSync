@@ -68895,26 +68895,113 @@ const AUTO_HUB_REFERENCE = {
 
 // --- Load & Render List ---
 
-function _buildAutomationSection(id, label, automations, useGrid) {
+// Drag-and-drop state
+let _autoDragState = null;
+let _autoDragEnterCount = 0;
+let _autoDragExpandTimer = null;
+
+function _buildAutomationSection(id, label, automations, useGrid, options = {}) {
+    const groupName = options.groupName || null;
+    const isProtected = options.isProtected || false; // System, Hub sections
+
     const section = document.createElement('div');
     section.className = 'automations-section';
+    if (isProtected) section.classList.add('section-protected');
     section.id = id;
+    if (groupName) section.dataset.groupName = groupName;
     const collapsed = localStorage.getItem('auto_section_' + id) === '1';
     if (collapsed) section.classList.add('collapsed');
+
     const header = document.createElement('div');
     header.className = 'automations-section-header';
+
+    // Group header actions (rename, bulk toggle, delete) — only for user groups
+    let actionsHtml = '';
+    if (groupName && !isProtected) {
+        const enabledCount = automations.filter(a => a.enabled).length;
+        const allEnabled = enabledCount === automations.length;
+        actionsHtml = `
+            <div class="section-actions" onclick="event.stopPropagation();">
+                <button class="section-action-btn" title="${allEnabled ? 'Disable all' : 'Enable all'}" onclick="_bulkToggleGroup('${_escAttr(groupName)}', ${allEnabled})">
+                    ${allEnabled ? '⏸' : '▶'}
+                </button>
+                <button class="section-action-btn" title="Rename group" onclick="_startRenameGroup('${_escAttr(groupName)}', this)">
+                    ✏️
+                </button>
+                <button class="section-action-btn section-action-danger" title="Delete group" onclick="_deleteGroup('${_escAttr(groupName)}')">
+                    🗑️
+                </button>
+            </div>
+        `;
+    }
+
     header.innerHTML = `
         <span class="section-chevron">&#9660;</span>
         <span class="section-label">${label}</span>
         <span class="section-count">${automations.length}</span>
+        ${actionsHtml}
         <span class="section-line"></span>
     `;
-    header.onclick = () => {
+    header.onclick = (e) => {
+        if (e.target.closest('.section-actions')) return;
         section.classList.toggle('collapsed');
         localStorage.setItem('auto_section_' + id, section.classList.contains('collapsed') ? '1' : '0');
     };
+
     const body = document.createElement('div');
     body.className = 'automations-section-body';
+
+    // Drop zone setup (not for protected sections)
+    if (!isProtected) {
+        const dropGroupName = groupName; // null for "My Automations"
+        body.addEventListener('dragover', (e) => {
+            if (!_autoDragState) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            body.classList.add('drop-target');
+        });
+        body.addEventListener('dragenter', (e) => {
+            if (!_autoDragState) return;
+            _autoDragEnterCount++;
+            body.classList.add('drop-target');
+            // Expand collapsed sections on drag-hover
+            if (section.classList.contains('collapsed')) {
+                _autoDragExpandTimer = setTimeout(() => {
+                    section.classList.remove('collapsed');
+                }, 500);
+            }
+        });
+        body.addEventListener('dragleave', (e) => {
+            if (!_autoDragState) return;
+            _autoDragEnterCount--;
+            if (_autoDragEnterCount <= 0) {
+                _autoDragEnterCount = 0;
+                body.classList.remove('drop-target');
+                if (_autoDragExpandTimer) { clearTimeout(_autoDragExpandTimer); _autoDragExpandTimer = null; }
+            }
+        });
+        body.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            body.classList.remove('drop-target');
+            _autoDragEnterCount = 0;
+            if (!_autoDragState) return;
+            const draggedId = _autoDragState.id;
+            const fromGroup = _autoDragState.groupName;
+            if (fromGroup === dropGroupName) return; // Same group, no-op
+            try {
+                const res = await fetch('/api/automations/' + draggedId, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ group_name: dropGroupName })
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                showToast(dropGroupName ? `Moved to "${dropGroupName}"` : 'Moved to My Automations', 'success');
+                await loadAutomations();
+            } catch (err) { showToast('Error: ' + err.message, 'error'); }
+        });
+    }
+
     const container = document.createElement('div');
     container.className = useGrid ? 'automations-grid' : 'automations-user-list';
     automations.forEach(a => container.appendChild(renderAutomationCard(a)));
@@ -68922,6 +69009,167 @@ function _buildAutomationSection(id, label, automations, useGrid) {
     section.appendChild(header);
     section.appendChild(body);
     return section;
+}
+
+/**
+ * Delete a group — ungroups all automations (moves to My Automations).
+ */
+async function _deleteGroup(groupName) {
+    // Collect automation IDs in this group
+    const ids = [];
+    document.querySelectorAll(`.automations-section[data-group-name="${groupName}"] .automation-card`).forEach(card => {
+        if (card.dataset.id) ids.push(parseInt(card.dataset.id));
+    });
+
+    if (ids.length === 0) { await loadAutomations(); return; }
+
+    // Show choice dialog — ungroup or delete all
+    const choice = await _showDeleteGroupDialog(groupName, ids.length);
+    if (!choice) return;
+
+    try {
+        if (choice === 'ungroup') {
+            const res = await fetch('/api/automations/group', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ automation_ids: ids, group_name: null })
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            showToast(`Dissolved group "${groupName}" — ${data.updated} automations moved to My Automations`, 'success');
+        } else if (choice === 'delete_all') {
+            // Delete each automation
+            let deleted = 0;
+            for (const id of ids) {
+                try {
+                    const res = await fetch('/api/automations/' + id, { method: 'DELETE' });
+                    const data = await res.json();
+                    if (data.success) deleted++;
+                } catch (e) {}
+            }
+            showToast(`Deleted group "${groupName}" and ${deleted} automation${deleted !== 1 ? 's' : ''}`, 'success');
+        }
+        await loadAutomations();
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+function _showDeleteGroupDialog(groupName, count) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.display = 'flex';
+        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+
+        overlay.innerHTML = `
+            <div class="delete-group-dialog">
+                <div class="delete-group-icon">🗑️</div>
+                <h3 class="delete-group-title">Delete Group "${groupName}"</h3>
+                <p class="delete-group-message">This group contains ${count} automation${count !== 1 ? 's' : ''}. What would you like to do?</p>
+                <div class="delete-group-actions">
+                    <button class="delete-group-btn delete-group-keep" id="dg-ungroup">
+                        Keep Automations — move to My Automations
+                    </button>
+                    <button class="delete-group-btn delete-group-remove" id="dg-delete">
+                        Delete Everything — remove group and all ${count} automation${count !== 1 ? 's' : ''}
+                    </button>
+                    <button class="delete-group-btn delete-group-cancel" id="dg-cancel">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        `;
+
+        overlay.querySelector('#dg-ungroup').onclick = () => { overlay.remove(); resolve('ungroup'); };
+        overlay.querySelector('#dg-delete').onclick = () => { overlay.remove(); resolve('delete_all'); };
+        overlay.querySelector('#dg-cancel').onclick = () => { overlay.remove(); resolve(null); };
+
+        document.addEventListener('keydown', function esc(e) {
+            if (e.key === 'Escape') { overlay.remove(); resolve(null); document.removeEventListener('keydown', esc); }
+        });
+
+        document.body.appendChild(overlay);
+    });
+}
+
+/**
+ * Rename a group — inline edit on the section header label.
+ */
+function _startRenameGroup(groupName, btnEl) {
+    const section = btnEl.closest('.automations-section');
+    const labelEl = section?.querySelector('.section-label');
+    if (!labelEl) return;
+
+    const input = document.createElement('input');
+    input.className = 'section-rename-input';
+    input.value = groupName;
+    input.onclick = (e) => e.stopPropagation();
+
+    const originalText = labelEl.textContent;
+    labelEl.textContent = '';
+    labelEl.appendChild(input);
+    input.focus();
+    input.select();
+
+    const finish = async (save) => {
+        const newName = input.value.trim();
+        input.removeEventListener('blur', blurHandler);
+        if (!save || !newName || newName === groupName) {
+            labelEl.textContent = originalText;
+            return;
+        }
+
+        const ids = [];
+        section.querySelectorAll('.automation-card').forEach(card => {
+            if (card.dataset.id) ids.push(parseInt(card.dataset.id));
+        });
+
+        try {
+            const res = await fetch('/api/automations/group', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ automation_ids: ids, group_name: newName })
+            });
+            const data = await res.json();
+            if (data.error) throw new Error(data.error);
+            showToast(`Renamed to "${newName}"`, 'success');
+            await loadAutomations();
+        } catch (err) {
+            showToast('Error: ' + err.message, 'error');
+            labelEl.textContent = originalText;
+        }
+    };
+
+    input.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        if (e.key === 'Escape') { finish(false); }
+    });
+    const blurHandler = () => finish(true);
+    input.addEventListener('blur', blurHandler);
+}
+
+/**
+ * Bulk toggle all automations in a group.
+ */
+async function _bulkToggleGroup(groupName, currentlyAllEnabled) {
+    const ids = [];
+    document.querySelectorAll(`.automations-section[data-group-name="${groupName}"] .automation-card`).forEach(card => {
+        if (card.dataset.id) ids.push(parseInt(card.dataset.id));
+    });
+    if (ids.length === 0) return;
+
+    const targetEnabled = !currentlyAllEnabled;
+    try {
+        const res = await fetch('/api/automations/bulk-toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ automation_ids: ids, enabled: targetEnabled })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        showToast(`${targetEnabled ? 'Enabled' : 'Disabled'} ${data.updated} automations`, 'success');
+        await loadAutomations();
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
 }
 
 async function loadAutomations() {
@@ -68945,7 +69193,7 @@ async function loadAutomations() {
         const userAutos = automations.filter(a => !a.is_system);
 
         if (systemAutos.length) {
-            list.appendChild(_buildAutomationSection('auto-section-system', 'System', systemAutos, true));
+            list.appendChild(_buildAutomationSection('auto-section-system', 'System', systemAutos, true, { isProtected: true }));
         }
 
         // Automation Hub section
@@ -68957,7 +69205,7 @@ async function loadAutomations() {
         groups.forEach(g => {
             const groupAutos = userAutos.filter(a => a.group_name === g);
             if (groupAutos.length) {
-                list.appendChild(_buildAutomationSection('auto-section-group-' + g.replace(/\W+/g, '_'), '\uD83D\uDCC1 ' + g, groupAutos, true));
+                list.appendChild(_buildAutomationSection('auto-section-group-' + g.replace(/\W+/g, '_'), '\uD83D\uDCC1 ' + g, groupAutos, true, { groupName: g }));
             }
         });
         if (ungrouped.length) {
@@ -69705,6 +69953,27 @@ function renderAutomationCard(a) {
     card.dataset.id = a.id;
     card.dataset.triggerType = a.trigger_type || '';
     card.dataset.actionType = a.action_type || '';
+
+    // Drag-and-drop (non-system only)
+    if (!a.is_system) {
+        card.draggable = true;
+        card.addEventListener('dragstart', (e) => {
+            _autoDragState = { id: a.id, groupName: a.group_name || null };
+            e.dataTransfer.setData('text/plain', String(a.id));
+            e.dataTransfer.effectAllowed = 'move';
+            card.classList.add('dragging');
+            // Dim protected sections during drag
+            document.querySelectorAll('.section-protected').forEach(s => s.classList.add('no-drop'));
+        });
+        card.addEventListener('dragend', () => {
+            card.classList.remove('dragging');
+            _autoDragState = null;
+            _autoDragEnterCount = 0;
+            document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+            document.querySelectorAll('.no-drop').forEach(el => el.classList.remove('no-drop'));
+            if (_autoDragExpandTimer) { clearTimeout(_autoDragExpandTimer); _autoDragExpandTimer = null; }
+        });
+    }
     const tIcon = _autoIcons[a.trigger_type] || '\u2699\uFE0F';
     const aIcon = _autoIcons[a.action_type] || '\u2699\uFE0F';
     const tl = tIcon + ' ' + _autoFormatTrigger(a.trigger_type, a.trigger_config);

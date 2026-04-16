@@ -41129,6 +41129,172 @@ body.downloads-disabled [onclick*="DownloadMissing"]:not([onclick*="close"]) {
     opacity: 0;
 }
 
+/* --- Group header actions --- */
+.section-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+    margin-left: 4px;
+}
+
+.automations-section-header:hover .section-actions {
+    opacity: 1;
+}
+
+.section-action-btn {
+    width: 26px;
+    height: 26px;
+    border: none;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.section-action-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.section-action-danger:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+}
+
+.section-rename-input {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    border-radius: 4px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 2px 8px;
+    width: 180px;
+    outline: none;
+}
+
+.section-rename-input:focus {
+    border-color: rgba(var(--accent-rgb), 0.6);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.15);
+}
+
+/* --- Drag and drop --- */
+.automation-card[draggable="true"] {
+    cursor: grab;
+}
+
+.automation-card[draggable="true"]:active {
+    cursor: grabbing;
+}
+
+.automation-card.dragging {
+    opacity: 0.35;
+    transform: scale(0.97);
+    box-shadow: none;
+}
+
+.automations-section-body.drop-target {
+    background: rgba(var(--accent-rgb), 0.04);
+    border: 2px dashed rgba(var(--accent-rgb), 0.25);
+    border-radius: 10px;
+    min-height: 50px;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.section-protected.no-drop {
+    opacity: 0.4;
+    pointer-events: none;
+}
+
+/* --- Delete group dialog --- */
+.delete-group-dialog {
+    background: linear-gradient(135deg, rgba(26, 26, 26, 0.98) 0%, rgba(16, 16, 16, 0.99) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 28px 24px;
+    max-width: 420px;
+    width: 90vw;
+    text-align: center;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.delete-group-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+}
+
+.delete-group-title {
+    font-size: 17px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 8px 0;
+}
+
+.delete-group-message {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+    margin: 0 0 18px 0;
+    line-height: 1.5;
+}
+
+.delete-group-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.delete-group-btn {
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.delete-group-keep {
+    background: rgba(var(--accent-rgb), 0.12);
+    color: rgb(var(--accent-light-rgb));
+    border-color: rgba(var(--accent-rgb), 0.25);
+}
+
+.delete-group-keep:hover {
+    background: rgba(var(--accent-rgb), 0.2);
+    border-color: rgba(var(--accent-rgb), 0.4);
+}
+
+.delete-group-remove {
+    background: rgba(239, 68, 68, 0.12);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.25);
+}
+
+.delete-group-remove:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+.delete-group-cancel {
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.5);
+    border-color: rgba(255, 255, 255, 0.06);
+}
+
+.delete-group-cancel:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.7);
+}
+
 /* --- System Automations 2-Column Grid --- */
 .automations-grid {
     display: grid;
