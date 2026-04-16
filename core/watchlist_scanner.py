@@ -1212,7 +1212,12 @@ class WatchlistScanner:
         )
         return scan_results
     
-    def get_artist_discography(self, spotify_artist_id: str, last_scan_timestamp: Optional[datetime] = None) -> Optional[List]:
+    def get_artist_discography(
+        self,
+        spotify_artist_id: str,
+        last_scan_timestamp: Optional[datetime] = None,
+        lookback_days: Optional[int] = None,
+    ) -> Optional[List]:
         """
         Get artist's discography from Spotify, optionally filtered by release date.
 
@@ -1220,63 +1225,15 @@ class WatchlistScanner:
             spotify_artist_id: Spotify artist ID
             last_scan_timestamp: Only return releases after this date (for incremental scans)
                                 If None, uses lookback period setting from database
+            lookback_days: Optional per-artist override for lookback period
         """
         try:
-            # Determine if we need the full discography or just recent releases.
-            # Spotify returns albums sorted newest-first, so for time-bounded scans
-            # we only need the first page (50 albums) — this cuts API calls by ~90%
-            # for prolific artists (262 albums = 27 calls → 1 call).
-            needs_full_discog = False
-            cutoff_timestamp = last_scan_timestamp
-
-            if cutoff_timestamp is None:
-                if lookback_days is not None:
-                    cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=lookback_days)
-                    logger.info(f"Using per-artist lookback: {lookback_days} days (cutoff: {cutoff_timestamp})")
-                else:
-                    lookback_period = self._get_lookback_period_setting()
-                    if lookback_period == 'all':
-                        needs_full_discog = True
-                    else:
-                        days = int(lookback_period)
-                        cutoff_timestamp = datetime.now(timezone.utc) - timedelta(days=days)
-                        logger.info(f"Using global lookback period: {lookback_period} days (cutoff: {cutoff_timestamp})")
-
-            # Fetch albums — limit pagination unless full discography is needed
-            logger.debug(f"Fetching discography for artist {spotify_artist_id}" +
-                         (" (full)" if needs_full_discog else " (recent only, max 1 page)"))
-            albums = self.spotify_client.get_artist_albums(
+            return self._get_artist_discography_with_client(
+                self.spotify_client,
                 spotify_artist_id,
-                album_type='album,single',
-                limit=50,
-                skip_cache=True,
-                max_pages=0 if needs_full_discog else 1,
+                last_scan_timestamp,
+                lookback_days=lookback_days,
             )
-
-            if not albums:
-                logger.warning(f"No albums found for artist {spotify_artist_id}")
-                return []
-
-            # Add small delay after fetching artist discography to be extra safe
-            time.sleep(0.3)  # 300ms breathing room
-
-            # Filter by release date if we have a cutoff timestamp
-            if cutoff_timestamp:
-                filtered_albums = []
-                for album in albums:
-                    if self.is_album_after_timestamp(album, cutoff_timestamp):
-                        filtered_albums.append(album)
-
-                logger.info(f"Filtered {len(albums)} albums to {len(filtered_albums)} released after {cutoff_timestamp}")
-                albums = filtered_albums
-
-            # Skip future/unreleased albums — no real audio available yet
-            now = datetime.now(timezone.utc)
-            released = [a for a in albums if not self._is_future_release(a, now)]
-            skipped = len(albums) - len(released)
-            if skipped:
-                logger.info(f"Skipped {skipped} future/unreleased albums (will be picked up after release)")
-            return released
 
         except Exception as e:
             logger.error(f"Error getting discography for artist {spotify_artist_id}: {e}")
