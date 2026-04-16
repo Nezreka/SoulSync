@@ -1105,49 +1105,46 @@ class SpotifyClient:
         if Spotify is unavailable or returns an error.
         """
         cache = get_metadata_cache()
+        effective_limit = min(limit, 50)  # Spotify API max is 50
+
+        # Check Spotify cache first so cached data remains usable even when
+        # Spotify is temporarily unavailable or rate limited.
+        cached_results = cache.get_search_results('spotify', 'track', query, effective_limit)
+        if cached_results is not None:
+            tracks = []
+            for raw in cached_results:
+                try:
+                    tracks.append(Track.from_spotify_track(raw))
+                except Exception:
+                    pass
+            if tracks:
+                return tracks
+
         use_spotify = self.is_spotify_authenticated()
 
         if use_spotify:
-            # Check Spotify cache
-            effective_limit = min(limit, 50)  # Spotify API max is 50
-            cached_results = cache.get_search_results('spotify', 'track', query, effective_limit)
-            if cached_results is not None:
+            try:
+                results = self.sp.search(q=query, type='track', limit=effective_limit)
                 tracks = []
-                for raw in cached_results:
-                    try:
-                        tracks.append(Track.from_spotify_track(raw))
-                    except Exception:
-                        pass
-                if tracks:
-                    return tracks
+                raw_items = results['tracks']['items']
 
-            # Skip Spotify if globally rate limited — fall through to fallback
-            if self.is_rate_limited():
-                logger.debug(f"Spotify rate limited, skipping track search for: {query}")
-                use_spotify = False
-            else:
-                try:
-                    results = self.sp.search(q=query, type='track', limit=effective_limit)
-                    tracks = []
-                    raw_items = results['tracks']['items']
+                for track_data in raw_items:
+                    track = Track.from_spotify_track(track_data)
+                    tracks.append(track)
 
-                    for track_data in raw_items:
-                        track = Track.from_spotify_track(track_data)
-                        tracks.append(track)
+                # Cache individual tracks + search mapping
+                entries = [(td.get('id'), td) for td in raw_items if td.get('id')]
+                if entries:
+                    cache.store_entities_bulk('spotify', 'track', entries)
+                    cache.store_search_results('spotify', 'track', query, effective_limit,
+                                               [td.get('id') for td in raw_items if td.get('id')])
 
-                    # Cache individual tracks + search mapping
-                    entries = [(td.get('id'), td) for td in raw_items if td.get('id')]
-                    if entries:
-                        cache.store_entities_bulk('spotify', 'track', entries)
-                        cache.store_search_results('spotify', 'track', query, effective_limit,
-                                                   [td.get('id') for td in raw_items if td.get('id')])
+                return tracks
 
-                    return tracks
-
-                except Exception as e:
-                    _detect_and_set_rate_limit(e, 'search_tracks')
-                    logger.error(f"Error searching tracks via Spotify: {e}")
-                    # Fall through to fallback
+            except Exception as e:
+                _detect_and_set_rate_limit(e, 'search_tracks')
+                logger.error(f"Error searching tracks via Spotify: {e}")
+                # Fall through to fallback
 
         # Fallback (iTunes or Deezer — configured in settings)
         if allow_fallback:
@@ -1163,26 +1160,22 @@ class SpotifyClient:
         if Spotify is unavailable or returns an error.
         """
         cache = get_metadata_cache()
+        # Check Spotify cache first so cached data remains usable even when
+        # Spotify is temporarily unavailable or rate limited.
+        cached_results = cache.get_search_results('spotify', 'artist', query, min(limit, 10))
+        if cached_results is not None:
+            artists = []
+            for raw in cached_results:
+                try:
+                    artists.append(Artist.from_spotify_artist(raw))
+                except Exception:
+                    pass
+            if artists:
+                query_lower = query.lower().strip()
+                artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
+                return artists
+
         use_spotify = self.is_spotify_authenticated()
-
-        if use_spotify:
-            # Check Spotify cache
-            cached_results = cache.get_search_results('spotify', 'artist', query, min(limit, 10))
-            if cached_results is not None:
-                artists = []
-                for raw in cached_results:
-                    try:
-                        artists.append(Artist.from_spotify_artist(raw))
-                    except Exception:
-                        pass
-                if artists:
-                    query_lower = query.lower().strip()
-                    artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
-                    return artists
-
-            if self.is_rate_limited():
-                logger.debug(f"Spotify rate limited, skipping artist search for: {query}")
-                use_spotify = False
 
         if use_spotify:
             try:
@@ -1230,49 +1223,44 @@ class SpotifyClient:
         if Spotify is unavailable or returns an error.
         """
         cache = get_metadata_cache()
+        # Check Spotify cache first so cached data remains usable even when
+        # Spotify is temporarily unavailable or rate limited.
+        cached_results = cache.get_search_results('spotify', 'album', query, min(limit, 10))
+        if cached_results is not None:
+            albums = []
+            for raw in cached_results:
+                try:
+                    albums.append(Album.from_spotify_album(raw))
+                except Exception:
+                    pass
+            if albums:
+                return albums
+
         use_spotify = self.is_spotify_authenticated()
 
         if use_spotify:
-            # Check Spotify cache
-            cached_results = cache.get_search_results('spotify', 'album', query, min(limit, 10))
-            if cached_results is not None:
+            try:
+                results = self.sp.search(q=query, type='album', limit=min(limit, 10))
                 albums = []
-                for raw in cached_results:
-                    try:
-                        albums.append(Album.from_spotify_album(raw))
-                    except Exception:
-                        pass
-                if albums:
-                    return albums
+                raw_items = results['albums']['items']
 
-        if use_spotify:
-            # Skip Spotify if globally rate limited — fall through to fallback
-            if self.is_rate_limited():
-                logger.debug(f"Spotify rate limited, skipping album search for: {query}")
-                use_spotify = False
-            else:
-                try:
-                    results = self.sp.search(q=query, type='album', limit=min(limit, 10))
-                    albums = []
-                    raw_items = results['albums']['items']
+                for album_data in raw_items:
+                    album = Album.from_spotify_album(album_data)
+                    albums.append(album)
 
-                    for album_data in raw_items:
-                        album = Album.from_spotify_album(album_data)
-                        albums.append(album)
+                # Cache individual albums + search mapping (skip if full data already cached)
+                entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
+                if entries:
+                    cache.store_entities_bulk('spotify', 'album', entries, skip_if_exists=True)
+                    cache.store_search_results('spotify', 'album', query, min(limit, 10),
+                                               [ad.get('id') for ad in raw_items if ad.get('id')])
 
-                    # Cache individual albums + search mapping (skip if full data already cached)
-                    entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
-                    if entries:
-                        cache.store_entities_bulk('spotify', 'album', entries, skip_if_exists=True)
-                        cache.store_search_results('spotify', 'album', query, min(limit, 10),
-                                                   [ad.get('id') for ad in raw_items if ad.get('id')])
+                return albums
 
-                    return albums
-
-                except Exception as e:
-                    _detect_and_set_rate_limit(e, 'search_albums')
-                    logger.error(f"Error searching albums via Spotify: {e}")
-                    # Fall through to iTunes fallback
+            except Exception as e:
+                _detect_and_set_rate_limit(e, 'search_albums')
+                logger.error(f"Error searching albums via Spotify: {e}")
+                # Fall through to iTunes fallback
 
         # Fallback (iTunes or Deezer)
         if allow_fallback:
