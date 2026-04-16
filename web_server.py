@@ -39802,9 +39802,6 @@ def start_watchlist_scan():
                 database = get_database()
                 watchlist_artists = database.get_watchlist_artists(profile_id=scan_profile_id)
 
-                # Apply global overrides if enabled
-                _apply_watchlist_global_overrides(watchlist_artists)
-
                 if not watchlist_artists:
                     watchlist_scan_state['status'] = 'completed'
                     watchlist_scan_state['summary'] = {
@@ -39939,246 +39936,25 @@ def start_watchlist_scan():
 
                 # Pause enrichment workers during scan to reduce API contention
                 _ew_state = _pause_enrichment_workers('watchlist scan')
-
-                # Dynamic delay calculation based on scan scope
-                lookback_period = scanner._get_lookback_period_setting()
-                is_full_discography = (lookback_period == 'all')
-                artist_count = len(watchlist_artists)
-
-                base_artist_delay = 2.0
-                base_album_delay = 0.5
-
-                # Scale up for full discography (way more albums per artist)
-                if is_full_discography:
-                    base_artist_delay *= 2.0
-                    base_album_delay *= 2.0
-
-                # Scale up further for large artist counts (sustained API pressure)
-                if artist_count > 200:
-                    base_artist_delay *= 1.5
-                    base_album_delay *= 1.25
-                elif artist_count > 100:
-                    base_artist_delay *= 1.25
-
-                artist_delay = base_artist_delay
-                album_delay = base_album_delay
-                print(f"Scan parameters: {artist_count} artists, lookback={lookback_period}, "
-                      f"delays: {artist_delay:.1f}s/artist, {album_delay:.1f}s/album")
-
-                # Circuit breaker: pause scan on consecutive rate-limit failures
-                consecutive_failures = 0
-                CIRCUIT_BREAKER_THRESHOLD = 3
-                circuit_breaker_pause = 60  # seconds, doubles each trigger, max 600s
-
-                for i, artist in enumerate(watchlist_artists):
-                    # Check for cancel request
-                    if watchlist_scan_state.get('cancel_requested'):
-                        print(f"[Manual Watchlist Scan] Cancel requested after {i}/{len(watchlist_artists)} artists")
-                        watchlist_scan_state['status'] = 'cancelled'
-                        watchlist_scan_state['current_phase'] = 'cancelled'
-                        watchlist_scan_state['summary'] = {
-                            'total_artists': i,
-                            'successful_scans': len([r for r in scan_results if r.success]),
-                            'new_tracks_found': sum(r.new_tracks_found for r in scan_results if r.success),
-                            'tracks_added_to_wishlist': sum(r.tracks_added_to_wishlist for r in scan_results if r.success),
-                            'cancelled': True
-                        }
-                        break
-
-                    try:
-                        # Fetch artist image using provider-aware method
-                        artist_image_url = scanner.get_artist_image_url(artist) or ''
-
-                        # Update progress
-                        watchlist_scan_state.update({
-                            'current_artist_index': i + 1,
-                            'current_artist_name': artist.artist_name,
-                            'current_artist_image_url': artist_image_url,
-                            'current_phase': 'fetching_discography',
-                            'albums_to_check': 0,
-                            'albums_checked': 0,
-                            'current_album': '',
-                            'current_album_image_url': '',
-                            'current_track_name': ''
-                        })
-
-                        # Get artist discography using provider-aware method
-                        albums = scanner.get_artist_discography_for_watchlist(artist, artist.last_scan_timestamp)
-
-                        if albums is None:
-                            scan_results.append(type('ScanResult', (), {
-                                'artist_name': artist.artist_name,
-                                'spotify_artist_id': artist.spotify_artist_id,
-                                'albums_checked': 0,
-                                'new_tracks_found': 0,
-                                'tracks_added_to_wishlist': 0,
-                                'success': False,
-                                'error_message': "Failed to get artist discography"
-                            })())
-                            continue
-                        
-                        # Update with album count
-                        watchlist_scan_state.update({
-                            'current_phase': 'checking_albums',
-                            'albums_to_check': len(albums),
-                            'albums_checked': 0
-                        })
-                        
-                        # Track progress for this artist
-                        artist_new_tracks = 0
-                        artist_added_tracks = 0
-                        
-                        # Scan each album
-                        for album_index, album in enumerate(albums):
-                            try:
-                                # Get album tracks using provider-aware method
-                                album_data = scanner.metadata_service.get_album(album.id)
-                                if not album_data or 'tracks' not in album_data:
-                                    logger.debug(f"Skipping album {album.name} (id={album.id}): no track data returned")
-                                    continue
-
-                                tracks = album_data['tracks']['items']
-
-                                # Check release type filter (album/EP/single)
-                                if not scanner._should_include_release(len(tracks), artist):
-                                    continue
-
-                                # Get album image
-                                album_image_url = ''
-                                if 'images' in album_data and album_data['images']:
-                                    album_image_url = album_data['images'][0]['url']
-
-                                watchlist_scan_state.update({
-                                    'albums_checked': album_index + 1,
-                                    'current_album': album.name,
-                                    'current_album_image_url': album_image_url,
-                                    'current_phase': f'checking_album_{album_index + 1}_of_{len(albums)}'
-                                })
-
-                                # Check each track
-                                for track in tracks:
-                                    # Check content type filter (live/remix/acoustic/compilation)
-                                    if not scanner._should_include_track(track, album_data, artist):
-                                        continue
-
-                                    # Update current track being processed
-                                    track_name = track.get('name', 'Unknown Track')
-                                    watchlist_scan_state['current_track_name'] = track_name
-
-                                    if scanner.is_track_missing_from_library(track):
-                                        artist_new_tracks += 1
-                                        watchlist_scan_state['tracks_found_this_scan'] += 1
-
-                                        # Add to wishlist
-                                        if scanner.add_track_to_wishlist(track, album_data, artist):
-                                            artist_added_tracks += 1
-                                            watchlist_scan_state['tracks_added_this_scan'] += 1
-
-                                            # Add to recent wishlist additions feed
-                                            track_artists = track.get('artists', [])
-                                            track_artist_name = track_artists[0].get('name', 'Unknown Artist') if track_artists else 'Unknown Artist'
-
-                                            watchlist_scan_state['recent_wishlist_additions'].insert(0, {
-                                                'track_name': track_name,
-                                                'artist_name': track_artist_name,
-                                                'album_image_url': album_image_url
-                                            })
-
-                                            # Keep only last 10
-                                            if len(watchlist_scan_state['recent_wishlist_additions']) > 10:
-                                                watchlist_scan_state['recent_wishlist_additions'].pop()
-
-                                # Rate-limited delay between albums
-                                import time
-                                time.sleep(album_delay)
-
-                            except Exception as e:
-                                print(f"Error checking album {album.name}: {e}")
-                                continue
-
-                        # Update scan timestamp
-                        scanner.update_artist_scan_timestamp(artist)
-
-                        # Store result
-                        scan_results.append(type('ScanResult', (), {
-                            'artist_name': artist.artist_name,
-                            'spotify_artist_id': artist.spotify_artist_id,
-                            'albums_checked': len(albums),
-                            'new_tracks_found': artist_new_tracks,
-                            'tracks_added_to_wishlist': artist_added_tracks,
-                            'success': True,
-                            'error_message': None
-                        })())
-
-                        print(f"Scanned {artist.artist_name}: {artist_new_tracks} new tracks found, {artist_added_tracks} added to wishlist")
-
-                        # Fetch similar artists for discovery feature
-                        # This is critical for the discover page to work
-                        try:
-                            watchlist_scan_state['current_phase'] = 'fetching_similar_artists'
-                            source_artist_id = artist.spotify_artist_id or artist.itunes_artist_id or str(artist.id)
-
-                            # If Spotify is authenticated, also require Spotify IDs to be present
-                            spotify_authenticated = spotify_client and spotify_client.is_spotify_authenticated()
-                            if database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated, profile_id=scan_profile_id):
-                                print(f"  Similar artists for {artist.artist_name} are cached and fresh")
-                                # Still backfill missing iTunes IDs
-                                scanner._backfill_similar_artists_itunes_ids(source_artist_id, profile_id=scan_profile_id)
-                            else:
-                                print(f"  Fetching similar artists for {artist.artist_name}...")
-                                scanner.update_similar_artists(artist, profile_id=scan_profile_id)
-                                print(f"  Similar artists updated for {artist.artist_name}")
-                        except Exception as similar_error:
-                            print(f"  Failed to update similar artists for {artist.artist_name}: {similar_error}")
-
-                        # Delay between artists
-                        if i < len(watchlist_artists) - 1:
-                            watchlist_scan_state['current_phase'] = 'rate_limiting'
-                            time.sleep(artist_delay)
-
-                        # Reset circuit breaker on successful artist scan
-                        consecutive_failures = 0
-                        circuit_breaker_pause = 60
-
-                    except Exception as e:
-                        print(f"Error scanning artist {artist.artist_name}: {e}")
-
-                        # Circuit breaker: detect consecutive rate-limit failures
-                        error_str = str(e).lower()
-                        if "429" in error_str or "rate limit" in error_str:
-                            consecutive_failures += 1
-                            if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
-                                print(f"Circuit breaker: {consecutive_failures} consecutive rate-limit failures, pausing {circuit_breaker_pause}s")
-                                watchlist_scan_state['current_phase'] = 'circuit_breaker_pause'
-                                time.sleep(circuit_breaker_pause)
-                                circuit_breaker_pause = min(circuit_breaker_pause * 2, 600)
-                                consecutive_failures = 0
-                        else:
-                            consecutive_failures = 0
-
-                        scan_results.append(type('ScanResult', (), {
-                            'artist_name': artist.artist_name,
-                            'spotify_artist_id': artist.spotify_artist_id,
-                            'albums_checked': 0,
-                            'new_tracks_found': 0,
-                            'tracks_added_to_wishlist': 0,
-                            'success': False,
-                            'error_message': str(e)
-                        })())
+                scan_results = scanner.scan_watchlist_profile(
+                    scan_profile_id,
+                    watchlist_artists=watchlist_artists,
+                    scan_state=watchlist_scan_state,
+                    cancel_check=lambda: watchlist_scan_state.get('cancel_requested', False),
+                )
 
                 # Store final results (skip if cancelled — already set by cancel handler)
                 was_cancelled = watchlist_scan_state.get('cancel_requested', False)
                 if not was_cancelled:
-                    watchlist_scan_state['status'] = 'completed'
-                    watchlist_scan_state['results'] = scan_results
-                    watchlist_scan_state['completed_at'] = datetime.now()
                     _artmap_cache_invalidate(scan_profile_id)
-                    watchlist_scan_state['current_phase'] = 'completed'
-
-                    # Calculate summary
                     successful_scans = [r for r in scan_results if r.success]
                     total_new_tracks = sum(r.new_tracks_found for r in successful_scans)
                     total_added_to_wishlist = sum(r.tracks_added_to_wishlist for r in successful_scans)
+
+                    watchlist_scan_state['status'] = 'completed'
+                    watchlist_scan_state['results'] = scan_results
+                    watchlist_scan_state['completed_at'] = datetime.now()
+                    watchlist_scan_state['current_phase'] = 'completed'
 
                     watchlist_scan_state['summary'] = {
                         'total_artists': len(scan_results),
@@ -40773,33 +40549,6 @@ def watchlist_global_config():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
-def _apply_watchlist_global_overrides(watchlist_artists):
-    """If global override is enabled, overwrite per-artist settings on WatchlistArtist objects."""
-    if not config_manager.get('watchlist.global_override_enabled', False):
-        return
-    # Read global settings once
-    g_albums = config_manager.get('watchlist.global_include_albums', True)
-    g_eps = config_manager.get('watchlist.global_include_eps', True)
-    g_singles = config_manager.get('watchlist.global_include_singles', True)
-    g_live = config_manager.get('watchlist.global_include_live', False)
-    g_remixes = config_manager.get('watchlist.global_include_remixes', False)
-    g_acoustic = config_manager.get('watchlist.global_include_acoustic', False)
-    g_compilations = config_manager.get('watchlist.global_include_compilations', False)
-    g_instrumentals = config_manager.get('watchlist.global_include_instrumentals', False)
-    print(f"[Watchlist] Global override is ACTIVE — applying to {len(watchlist_artists)} artists "
-          f"(albums={g_albums}, eps={g_eps}, singles={g_singles}, live={g_live}, "
-          f"remixes={g_remixes}, acoustic={g_acoustic}, compilations={g_compilations}, "
-          f"instrumentals={g_instrumentals})")
-    for artist in watchlist_artists:
-        artist.include_albums = g_albums
-        artist.include_eps = g_eps
-        artist.include_singles = g_singles
-        artist.include_live = g_live
-        artist.include_remixes = g_remixes
-        artist.include_acoustic = g_acoustic
-        artist.include_compilations = g_compilations
-        artist.include_instrumentals = g_instrumentals
-
 def _update_similar_artists_worker():
     """Background worker to update similar artists for all watchlist artists"""
     global similar_artists_update_state
@@ -40954,9 +40703,6 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
             scanner = get_watchlist_scanner(spotify_client)
             all_profiles = scan_profiles  # Used later for discovery pool population
 
-            # Apply global overrides if enabled
-            _apply_watchlist_global_overrides(watchlist_artists)
-
             # Initialize detailed progress tracking (same as manual scan)
             watchlist_scan_state = {
                 'status': 'scanning',
@@ -40985,259 +40731,79 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
             # Pause enrichment workers during scan to reduce API contention
             _ew_state = _pause_enrichment_workers('auto-watchlist scan')
 
-            # Dynamic delay calculation based on scan scope
-            lookback_period = scanner._get_lookback_period_setting()
-            is_full_discography = (lookback_period == 'all')
-            artist_count = len(watchlist_artists)
-
-            base_artist_delay = 2.0
-            base_album_delay = 0.5
-
-            # Scale up for full discography (way more albums per artist)
-            if is_full_discography:
-                base_artist_delay *= 2.0
-                base_album_delay *= 2.0
-
-            # Scale up further for large artist counts (sustained API pressure)
-            if artist_count > 200:
-                base_artist_delay *= 1.5
-                base_album_delay *= 1.25
-            elif artist_count > 100:
-                base_artist_delay *= 1.25
-
-            artist_delay = base_artist_delay
-            album_delay = base_album_delay
-            print(f"[Auto-Watchlist] Scan parameters: {artist_count} artists, lookback={lookback_period}, "
-                  f"delays: {artist_delay:.1f}s/artist, {album_delay:.1f}s/album")
-
-            # Circuit breaker: pause scan on consecutive rate-limit failures
-            consecutive_failures = 0
-            CIRCUIT_BREAKER_THRESHOLD = 3
-            circuit_breaker_pause = 60  # seconds, doubles each trigger, max 600s
-
-            # Scan each artist with detailed tracking
-            for i, artist in enumerate(watchlist_artists):
-                # Check for cancel request
-                if watchlist_scan_state.get('cancel_requested'):
-                    print(f"[Auto-Watchlist] Cancel requested after {i}/{len(watchlist_artists)} artists")
-                    watchlist_scan_state['status'] = 'cancelled'
-                    watchlist_scan_state['current_phase'] = 'cancelled'
-                    watchlist_scan_state['summary'] = {
-                        'total_artists': i,
-                        'successful_scans': len([r for r in scan_results if r.success]),
-                        'new_tracks_found': sum(r.new_tracks_found for r in scan_results if r.success),
-                        'tracks_added_to_wishlist': sum(r.tracks_added_to_wishlist for r in scan_results if r.success),
-                        'cancelled': True
-                    }
-                    _update_automation_progress(automation_id, progress=100, phase='Cancelled by user',
-                                                 log_line='Scan cancelled by user', log_type='warning')
-                    break
-
-                try:
-                    # Fetch artist image using provider-aware method
-                    artist_image_url = scanner.get_artist_image_url(artist) or ''
-
-                    pct = 5 + (i / max(1, len(watchlist_artists))) * 90
-                    _update_automation_progress(automation_id, progress=pct,
-                        phase=f'Scanning: {artist.artist_name} ({i+1}/{len(watchlist_artists)})',
-                        current_item=artist.artist_name,
-                        processed=i, total=len(watchlist_artists))
-
-                    # Update progress
-                    watchlist_scan_state.update({
-                        'current_artist_index': i + 1,
-                        'current_artist_name': artist.artist_name,
-                        'current_artist_image_url': artist_image_url,
-                        'current_phase': 'fetching_discography',
-                        'albums_to_check': 0,
-                        'albums_checked': 0,
-                        'current_album': '',
-                        'current_album_image_url': '',
-                        'current_track_name': ''
-                    })
-
-                    # Get artist discography using provider-aware method
-                    albums = scanner.get_artist_discography_for_watchlist(artist, artist.last_scan_timestamp)
-
-                    if albums is None:
-                        scan_results.append(type('ScanResult', (), {
-                            'artist_name': artist.artist_name,
-                            'spotify_artist_id': artist.spotify_artist_id,
-                            'albums_checked': 0,
-                            'new_tracks_found': 0,
-                            'tracks_added_to_wishlist': 0,
-                            'success': False,
-                            'error_message': "Failed to get artist discography"
-                        })())
-                        continue
-
-                    # Update with album count
-                    watchlist_scan_state.update({
-                        'current_phase': 'checking_albums',
-                        'albums_to_check': len(albums),
-                        'albums_checked': 0
-                    })
-
-                    # Track progress for this artist
-                    artist_new_tracks = 0
-                    artist_added_tracks = 0
-
-                    # Scan each album
-                    for album_index, album in enumerate(albums):
-                        try:
-                            # Get album tracks using provider-aware method
-                            album_data = scanner.metadata_service.get_album(album.id)
-                            if not album_data or 'tracks' not in album_data:
-                                logger.debug(f"Skipping album {album.name} (id={album.id}): no track data returned")
-                                continue
-
-                            tracks = album_data['tracks']['items']
-
-                            # Check release type filter (album/EP/single)
-                            if not scanner._should_include_release(len(tracks), artist):
-                                continue
-
-                            # Get album image
-                            album_image_url = ''
-                            if 'images' in album_data and album_data['images']:
-                                album_image_url = album_data['images'][0]['url']
-
-                            watchlist_scan_state.update({
-                                'albums_checked': album_index + 1,
-                                'current_album': album.name,
-                                'current_album_image_url': album_image_url,
-                                'current_phase': f'checking_album_{album_index + 1}_of_{len(albums)}'
-                            })
-
-                            # Check each track
-                            for track in tracks:
-                                # Check content type filter (live/remix/acoustic/compilation)
-                                if not scanner._should_include_track(track, album_data, artist):
-                                    continue
-
-                                # Update current track being processed
-                                track_name = track.get('name', 'Unknown Track')
-                                watchlist_scan_state['current_track_name'] = track_name
-
-                                if scanner.is_track_missing_from_library(track):
-                                    artist_new_tracks += 1
-                                    watchlist_scan_state['tracks_found_this_scan'] += 1
-
-                                    # Add to wishlist
-                                    if scanner.add_track_to_wishlist(track, album_data, artist):
-                                        artist_added_tracks += 1
-                                        watchlist_scan_state['tracks_added_this_scan'] += 1
-
-                                        # Add to recent wishlist additions feed
-                                        track_artists = track.get('artists', [])
-                                        track_artist_name = track_artists[0].get('name', 'Unknown Artist') if track_artists else 'Unknown Artist'
-
-                                        watchlist_scan_state['recent_wishlist_additions'].insert(0, {
-                                            'track_name': track_name,
-                                            'artist_name': track_artist_name,
-                                            'album_image_url': album_image_url
-                                        })
-
-                                        # Keep only last 10
-                                        if len(watchlist_scan_state['recent_wishlist_additions']) > 10:
-                                            watchlist_scan_state['recent_wishlist_additions'].pop()
-
-                            # Rate-limited delay between albums
-                            import time
-                            time.sleep(album_delay)
-
-                        except Exception as e:
-                            print(f"Error checking album {album.name}: {e}")
-                            continue
-
-                    # Update scan timestamp
-                    scanner.update_artist_scan_timestamp(artist)
-
-                    # Store result
-                    scan_results.append(type('ScanResult', (), {
-                        'artist_name': artist.artist_name,
-                        'spotify_artist_id': artist.spotify_artist_id,
-                        'albums_checked': len(albums),
-                        'new_tracks_found': artist_new_tracks,
-                        'tracks_added_to_wishlist': artist_added_tracks,
-                        'success': True,
-                        'error_message': None
-                    })())
-
-                    print(f"Scanned {artist.artist_name}: {artist_new_tracks} new tracks found, {artist_added_tracks} added to wishlist")
-                    if artist_new_tracks > 0:
-                        _update_automation_progress(automation_id,
-                            log_line=f'{artist.artist_name} — {artist_new_tracks} new, {artist_added_tracks} added', log_type='success')
+            def _scan_progress(event_type, payload):
+                if event_type == 'scan_started':
+                    _update_automation_progress(
+                        automation_id,
+                        progress=5,
+                        phase='Loading watchlist',
+                        log_line=f"{len(watchlist_artists)} artists ({profile_label})",
+                        log_type='info',
+                    )
+                elif event_type == 'artist_started':
+                    total = max(1, payload.get('total_artists', len(watchlist_artists)))
+                    idx = payload.get('artist_index', 1)
+                    artist_name = payload.get('artist_name', '')
+                    pct = 5 + ((idx - 1) / total) * 90
+                    _update_automation_progress(
+                        automation_id,
+                        progress=pct,
+                        phase=f'Scanning: {artist_name} ({idx}/{total})',
+                        current_item=artist_name,
+                        processed=idx - 1,
+                        total=total,
+                    )
+                elif event_type == 'artist_completed':
+                    artist_name = payload.get('artist_name', '')
+                    new_tracks = payload.get('new_tracks_found', 0)
+                    added = payload.get('tracks_added_to_wishlist', 0)
+                    if new_tracks > 0:
+                        _update_automation_progress(
+                            automation_id,
+                            log_line=f'{artist_name} — {new_tracks} new, {added} added',
+                            log_type='success',
+                        )
                     else:
-                        _update_automation_progress(automation_id,
-                            log_line=f'{artist.artist_name} — no new tracks', log_type='skip')
+                        _update_automation_progress(
+                            automation_id,
+                            log_line=f'{artist_name} — no new tracks',
+                            log_type='skip',
+                        )
+                elif event_type == 'artist_error':
+                    artist_name = payload.get('artist_name', '')
+                    error_message = payload.get('error_message', 'error')
+                    _update_automation_progress(
+                        automation_id,
+                        log_line=f'{artist_name} — error: {error_message[:60]}',
+                        log_type='error',
+                    )
+                elif event_type == 'cancelled':
+                    _update_automation_progress(
+                        automation_id,
+                        progress=100,
+                        phase='Cancelled by user',
+                        log_line='Scan cancelled by user',
+                        log_type='warning',
+                    )
+                elif event_type == 'scan_completed':
+                    _update_automation_progress(
+                        automation_id,
+                        progress=95,
+                        phase='Scan complete',
+                        log_line=(
+                            f"Scanned {payload.get('successful_scans', 0)} artists — "
+                            f"{payload.get('new_tracks_found', 0)} new tracks, "
+                            f"{payload.get('tracks_added_to_wishlist', 0)} added to wishlist"
+                        ),
+                        log_type='success' if payload.get('new_tracks_found', 0) > 0 else 'info',
+                    )
 
-                    # Emit watchlist_new_release event if new tracks were found
-                    if artist_new_tracks > 0:
-                        try:
-                            if automation_engine:
-                                automation_engine.emit('watchlist_new_release', {
-                                    'artist': artist.artist_name,
-                                    'new_tracks': str(artist_new_tracks),
-                                    'added_to_wishlist': str(artist_added_tracks),
-                                })
-                        except Exception:
-                            pass
-
-                    # Fetch similar artists for discovery feature (per-profile)
-                    try:
-                        watchlist_scan_state['current_phase'] = 'fetching_similar_artists'
-                        source_artist_id = artist.spotify_artist_id or artist.itunes_artist_id or str(artist.id)
-                        artist_profile_id = getattr(artist, 'profile_id', 1)
-
-                        spotify_authenticated = spotify_client and spotify_client.is_spotify_authenticated()
-                        if database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated, profile_id=artist_profile_id):
-                            print(f"  Similar artists for {artist.artist_name} are cached and fresh (profile {artist_profile_id})")
-                            scanner._backfill_similar_artists_itunes_ids(source_artist_id, profile_id=artist_profile_id)
-                        else:
-                            print(f"  Fetching similar artists for {artist.artist_name} (profile {artist_profile_id})...")
-                            scanner.update_similar_artists(artist, profile_id=artist_profile_id)
-                            print(f"  Similar artists updated for {artist.artist_name}")
-                    except Exception as similar_error:
-                        print(f"  Failed to update similar artists for {artist.artist_name}: {similar_error}")
-
-                    # Delay between artists
-                    if i < len(watchlist_artists) - 1:
-                        watchlist_scan_state['current_phase'] = 'rate_limiting'
-                        time.sleep(artist_delay)
-
-                    # Reset circuit breaker on successful artist scan
-                    consecutive_failures = 0
-                    circuit_breaker_pause = 60
-
-                except Exception as e:
-                    print(f"Error scanning artist {artist.artist_name}: {e}")
-                    _update_automation_progress(automation_id,
-                        log_line=f'{artist.artist_name} — error: {str(e)[:60]}', log_type='error')
-
-                    # Circuit breaker: detect consecutive rate-limit failures
-                    error_str = str(e).lower()
-                    if "429" in error_str or "rate limit" in error_str:
-                        consecutive_failures += 1
-                        if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
-                            print(f"[Auto-Watchlist] Circuit breaker: {consecutive_failures} consecutive rate-limit failures, pausing {circuit_breaker_pause}s")
-                            watchlist_scan_state['current_phase'] = 'circuit_breaker_pause'
-                            time.sleep(circuit_breaker_pause)
-                            circuit_breaker_pause = min(circuit_breaker_pause * 2, 600)
-                            consecutive_failures = 0
-                    else:
-                        consecutive_failures = 0
-
-                    scan_results.append(type('ScanResult', (), {
-                        'artist_name': artist.artist_name,
-                        'spotify_artist_id': artist.spotify_artist_id,
-                        'albums_checked': 0,
-                        'new_tracks_found': 0,
-                        'tracks_added_to_wishlist': 0,
-                        'success': False,
-                        'error_message': str(e)
-                    })())
-                    continue
+            scan_results = scanner.scan_watchlist_artists(
+                watchlist_artists,
+                scan_state=watchlist_scan_state,
+                progress_callback=_scan_progress,
+                cancel_check=lambda: watchlist_scan_state.get('cancel_requested'),
+            )
 
             # Update state with results (skip if cancelled — already set by cancel handler)
             was_cancelled = watchlist_scan_state.get('cancel_requested', False)
