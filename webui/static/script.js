@@ -2820,34 +2820,39 @@ function initializeWatchlist() {
         watchlistButton.addEventListener('click', () => navigateToPage('watchlist'));
     }
 
-    // Wishlist button: check for active download process first, otherwise navigate to page
+    // Wishlist button: quick check for active download, otherwise navigate to page
     const wishlistButton = document.getElementById('wishlist-button');
     if (wishlistButton) {
         wishlistButton.addEventListener('click', async () => {
+            // Fast path: check if we already know about an active wishlist process
+            const clientProcess = activeDownloadProcesses['wishlist'];
+            if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
+                clientProcess.modalElement.style.display = 'flex';
+                WishlistModalState.setVisible();
+                return;
+            }
+            // Slow path: ask the server (with timeout to prevent button feeling dead)
             try {
-                const resp = await fetch('/api/active-processes');
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 2000);
+                const resp = await fetch('/api/active-processes', { signal: controller.signal });
+                clearTimeout(timeout);
                 if (resp.ok) {
                     const data = await resp.json();
                     const serverProcess = (data.active_processes || []).find(p => p.playlist_id === 'wishlist');
                     if (serverProcess) {
-                        // Active wishlist download — show the download progress modal
-                        WishlistModalState.clearUserClosed();
-                        const clientProcess = activeDownloadProcesses['wishlist'];
-                        const needsRehydration = !clientProcess ||
-                            clientProcess.batchId !== serverProcess.batch_id ||
-                            !clientProcess.modalElement ||
-                            !document.body.contains(clientProcess.modalElement);
-                        if (needsRehydration) {
+                        try {
+                            WishlistModalState.clearUserClosed();
                             await rehydrateModal(serverProcess, true);
-                        } else {
-                            clientProcess.modalElement.style.display = 'flex';
-                            WishlistModalState.setVisible();
+                        } catch (e) {
+                            console.debug('Rehydration failed, navigating to page:', e);
+                            navigateToPage('wishlist');
                         }
                         return;
                     }
                 }
             } catch (e) {
-                console.debug('Could not check active processes:', e);
+                // Timeout or network error — just navigate
             }
             navigateToPage('wishlist');
         });
