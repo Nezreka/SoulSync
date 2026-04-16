@@ -3605,6 +3605,8 @@ const WHATS_NEW = {
         { title: 'Fix Spotify API Leaking When Deezer/iTunes is Primary', desc: 'Spotify was being called for watchlist album scanning, similar artist discovery, repair jobs, and the Artists page search even when another source was set as primary. All data-fetching now respects the configured primary source. Spotify playlist sync is unaffected' },
         { title: 'Fix OAuth Callback Port Hardcoding', desc: 'Custom callback ports (SOULSYNC_SPOTIFY_CALLBACK_PORT / SOULSYNC_TIDAL_CALLBACK_PORT) are now respected in auth instruction pages and log messages instead of always showing 8888. Added startup diagnostics logging for callback port binding' },
         { title: 'Fix Wishlist Button on Non-Dashboard Pages', desc: 'Wishlist button click handler moved to global init so it works from any page, not just the dashboard' },
+        { title: 'Fix Allow Duplicates Setting Not Saving', desc: 'The "Allow duplicate tracks across albums" toggle was never persisted — it silently reset to ON on every page reload. Now saves correctly' },
+        { title: 'Fix Wishlist Dropping Cross-Album Tracks', desc: 'Wishlist cleanup was removing same-titled tracks from different albums even when Allow Duplicates was enabled. Cleanup now respects the setting — same song from different albums can coexist in the wishlist' },
 
         // --- April 14, 2026 ---
         { date: 'April 14, 2026' },
