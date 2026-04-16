@@ -7467,8 +7467,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 /* Header Styling */
 .dashboard-header {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    flex-direction: column;
+    align-items: flex-start;
     padding: 20px 24px;
     margin: -28px -24px 20px -24px;
     position: relative;
@@ -7582,15 +7582,25 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     line-height: 1.5;
 }
 
-.header-spacer {
-    flex-grow: 1;
-    /* Pushes buttons to the right */
-}
-
 .header-actions {
     display: flex;
     gap: 10px;
+    align-items: center;
+    justify-content: center;
     flex-wrap: wrap;
+    margin-top: 12px;
+    width: 100%;
+}
+
+/* Watchlist / Wishlist quick-nav — top-right of header */
+.header-quick-nav {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    position: absolute;
+    top: 14px;
+    right: 24px;
+    z-index: 2;
 }
 
 /* ── Worker Orbs ── */
@@ -9152,6 +9162,38 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 /* Responsive Design Enhancements */
+@media (max-width: 900px) {
+    .header-quick-nav {
+        position: static;
+        width: 100%;
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+    }
+
+    .header-quick-nav .header-button {
+        flex: 1;
+        justify-content: center;
+    }
+
+    /* Hide worker orb hover tooltips on mobile — status info available on Tools page */
+    .musicbrainz-tooltip,
+    .spotify-enrich-tooltip,
+    .audiodb-tooltip,
+    .deezer-tooltip,
+    .itunes-enrich-tooltip,
+    .lastfm-enrich-tooltip,
+    .genius-enrich-tooltip,
+    .tidal-enrich-tooltip,
+    .qobuz-enrich-tooltip,
+    .discogs-tooltip,
+    .hydrabase-tooltip,
+    .repair-tooltip,
+    .soulid-tooltip {
+        display: none !important;
+    }
+}
+
 @media (max-width: 1200px) {
     .tools-grid {
         grid-template-columns: 1fr;
@@ -9170,17 +9212,26 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     .dashboard-header {
         flex-direction: column;
         align-items: flex-start;
-        gap: 15px;
+        gap: 12px;
+        padding: 16px;
     }
 
     .header-actions {
         width: 100%;
-        justify-content: flex-start;
+        justify-content: center;
+        gap: 6px;
     }
 
-    .header-button {
+    .header-quick-nav {
+        position: static;
+        width: 100%;
+        display: flex;
+        gap: 8px;
+    }
+
+    .header-quick-nav .header-button {
         flex: 1;
-        min-width: 100%;
+        justify-content: center;
     }
 
     .service-status-grid,
