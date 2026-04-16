@@ -1098,81 +1098,84 @@ class SpotifyClient:
             return []
 
     @rate_limited
-    def search_tracks(self, query: str, limit: int = 10) -> List[Track]:
-        """Search for tracks - falls back to configured metadata source if Spotify not authenticated"""
+    def search_tracks(self, query: str, limit: int = 10, allow_fallback: bool = True) -> List[Track]:
+        """Search for tracks.
+
+        When allow_fallback is True, falls back to the configured metadata source
+        if Spotify is unavailable or returns an error.
+        """
         cache = get_metadata_cache()
+        effective_limit = min(limit, 50)  # Spotify API max is 50
+
+        # Check Spotify cache first so cached data remains usable even when
+        # Spotify is temporarily unavailable or rate limited.
+        cached_results = cache.get_search_results('spotify', 'track', query, effective_limit)
+        if cached_results is not None:
+            tracks = []
+            for raw in cached_results:
+                try:
+                    tracks.append(Track.from_spotify_track(raw))
+                except Exception:
+                    pass
+            if tracks:
+                return tracks
+
         use_spotify = self.is_spotify_authenticated()
 
         if use_spotify:
-            # Check Spotify cache
-            effective_limit = min(limit, 50)  # Spotify API max is 50
-            cached_results = cache.get_search_results('spotify', 'track', query, effective_limit)
-            if cached_results is not None:
+            try:
+                results = self.sp.search(q=query, type='track', limit=effective_limit)
                 tracks = []
-                for raw in cached_results:
-                    try:
-                        tracks.append(Track.from_spotify_track(raw))
-                    except Exception:
-                        pass
-                if tracks:
-                    return tracks
+                raw_items = results['tracks']['items']
 
-            # Skip Spotify if globally rate limited — fall through to fallback
-            if self.is_rate_limited():
-                logger.debug(f"Spotify rate limited, skipping track search for: {query}")
-                use_spotify = False
-            else:
-                try:
-                    results = self.sp.search(q=query, type='track', limit=effective_limit)
-                    tracks = []
-                    raw_items = results['tracks']['items']
+                for track_data in raw_items:
+                    track = Track.from_spotify_track(track_data)
+                    tracks.append(track)
 
-                    for track_data in raw_items:
-                        track = Track.from_spotify_track(track_data)
-                        tracks.append(track)
+                # Cache individual tracks + search mapping
+                entries = [(td.get('id'), td) for td in raw_items if td.get('id')]
+                if entries:
+                    cache.store_entities_bulk('spotify', 'track', entries)
+                    cache.store_search_results('spotify', 'track', query, effective_limit,
+                                               [td.get('id') for td in raw_items if td.get('id')])
 
-                    # Cache individual tracks + search mapping
-                    entries = [(td.get('id'), td) for td in raw_items if td.get('id')]
-                    if entries:
-                        cache.store_entities_bulk('spotify', 'track', entries)
-                        cache.store_search_results('spotify', 'track', query, effective_limit,
-                                                   [td.get('id') for td in raw_items if td.get('id')])
+                return tracks
 
-                    return tracks
-
-                except Exception as e:
-                    _detect_and_set_rate_limit(e, 'search_tracks')
-                    logger.error(f"Error searching tracks via Spotify: {e}")
-                    # Fall through to fallback
+            except Exception as e:
+                _detect_and_set_rate_limit(e, 'search_tracks')
+                logger.error(f"Error searching tracks via Spotify: {e}")
+                # Fall through to fallback
 
         # Fallback (iTunes or Deezer — configured in settings)
-        logger.debug(f"Using {self._fallback_source} fallback for track search: {query}")
-        return self._fallback.search_tracks(query, limit)
+        if allow_fallback:
+            logger.debug(f"Using {self._fallback_source} fallback for track search: {query}")
+            return self._fallback.search_tracks(query, limit)
+        return []
 
     @rate_limited
-    def search_artists(self, query: str, limit: int = 10) -> List[Artist]:
-        """Search for artists - falls back to configured metadata source if Spotify not authenticated"""
+    def search_artists(self, query: str, limit: int = 10, allow_fallback: bool = True) -> List[Artist]:
+        """Search for artists.
+
+        When allow_fallback is True, falls back to the configured metadata source
+        if Spotify is unavailable or returns an error.
+        """
         cache = get_metadata_cache()
+        # Check Spotify cache first so cached data remains usable even when
+        # Spotify is temporarily unavailable or rate limited.
+        cached_results = cache.get_search_results('spotify', 'artist', query, min(limit, 10))
+        if cached_results is not None:
+            artists = []
+            for raw in cached_results:
+                try:
+                    artists.append(Artist.from_spotify_artist(raw))
+                except Exception:
+                    pass
+            if artists:
+                query_lower = query.lower().strip()
+                artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
+                return artists
+
         use_spotify = self.is_spotify_authenticated()
-
-        if use_spotify:
-            # Check Spotify cache
-            cached_results = cache.get_search_results('spotify', 'artist', query, min(limit, 10))
-            if cached_results is not None:
-                artists = []
-                for raw in cached_results:
-                    try:
-                        artists.append(Artist.from_spotify_artist(raw))
-                    except Exception:
-                        pass
-                if artists:
-                    query_lower = query.lower().strip()
-                    artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
-                    return artists
-
-            if self.is_rate_limited():
-                logger.debug(f"Spotify rate limited, skipping artist search for: {query}")
-                use_spotify = False
 
         if use_spotify:
             try:
@@ -1204,67 +1207,74 @@ class SpotifyClient:
                 # Fall through to iTunes fallback
 
         # Fallback (iTunes or Deezer)
-        logger.debug(f"Using {self._fallback_source} fallback for artist search: {query}")
-        artists = self._fallback.search_artists(query, limit)
-        query_lower = query.lower().strip()
-        artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
-        return artists
+        if allow_fallback:
+            logger.debug(f"Using {self._fallback_source} fallback for artist search: {query}")
+            artists = self._fallback.search_artists(query, limit)
+            query_lower = query.lower().strip()
+            artists.sort(key=lambda a: (0 if a.name.lower().strip() == query_lower else 1))
+            return artists
+        return []
 
     @rate_limited
-    def search_albums(self, query: str, limit: int = 10) -> List[Album]:
-        """Search for albums - falls back to configured metadata source if Spotify not authenticated"""
+    def search_albums(self, query: str, limit: int = 10, allow_fallback: bool = True) -> List[Album]:
+        """Search for albums.
+
+        When allow_fallback is True, falls back to the configured metadata source
+        if Spotify is unavailable or returns an error.
+        """
         cache = get_metadata_cache()
+        # Check Spotify cache first so cached data remains usable even when
+        # Spotify is temporarily unavailable or rate limited.
+        cached_results = cache.get_search_results('spotify', 'album', query, min(limit, 10))
+        if cached_results is not None:
+            albums = []
+            for raw in cached_results:
+                try:
+                    albums.append(Album.from_spotify_album(raw))
+                except Exception:
+                    pass
+            if albums:
+                return albums
+
         use_spotify = self.is_spotify_authenticated()
 
         if use_spotify:
-            # Check Spotify cache
-            cached_results = cache.get_search_results('spotify', 'album', query, min(limit, 10))
-            if cached_results is not None:
+            try:
+                results = self.sp.search(q=query, type='album', limit=min(limit, 10))
                 albums = []
-                for raw in cached_results:
-                    try:
-                        albums.append(Album.from_spotify_album(raw))
-                    except Exception:
-                        pass
-                if albums:
-                    return albums
+                raw_items = results['albums']['items']
 
-        if use_spotify:
-            # Skip Spotify if globally rate limited — fall through to fallback
-            if self.is_rate_limited():
-                logger.debug(f"Spotify rate limited, skipping album search for: {query}")
-                use_spotify = False
-            else:
-                try:
-                    results = self.sp.search(q=query, type='album', limit=min(limit, 10))
-                    albums = []
-                    raw_items = results['albums']['items']
+                for album_data in raw_items:
+                    album = Album.from_spotify_album(album_data)
+                    albums.append(album)
 
-                    for album_data in raw_items:
-                        album = Album.from_spotify_album(album_data)
-                        albums.append(album)
+                # Cache individual albums + search mapping (skip if full data already cached)
+                entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
+                if entries:
+                    cache.store_entities_bulk('spotify', 'album', entries, skip_if_exists=True)
+                    cache.store_search_results('spotify', 'album', query, min(limit, 10),
+                                               [ad.get('id') for ad in raw_items if ad.get('id')])
 
-                    # Cache individual albums + search mapping (skip if full data already cached)
-                    entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
-                    if entries:
-                        cache.store_entities_bulk('spotify', 'album', entries, skip_if_exists=True)
-                        cache.store_search_results('spotify', 'album', query, min(limit, 10),
-                                                   [ad.get('id') for ad in raw_items if ad.get('id')])
+                return albums
 
-                    return albums
-
-                except Exception as e:
-                    _detect_and_set_rate_limit(e, 'search_albums')
-                    logger.error(f"Error searching albums via Spotify: {e}")
-                    # Fall through to iTunes fallback
+            except Exception as e:
+                _detect_and_set_rate_limit(e, 'search_albums')
+                logger.error(f"Error searching albums via Spotify: {e}")
+                # Fall through to iTunes fallback
 
         # Fallback (iTunes or Deezer)
-        logger.debug(f"Using {self._fallback_source} fallback for album search: {query}")
-        return self._fallback.search_albums(query, limit)
+        if allow_fallback:
+            logger.debug(f"Using {self._fallback_source} fallback for album search: {query}")
+            return self._fallback.search_albums(query, limit)
+        return []
     
     @rate_limited
-    def get_track_details(self, track_id: str) -> Optional[Dict[str, Any]]:
-        """Get detailed track information - falls back to configured metadata source"""
+    def get_track_details(self, track_id: str, allow_fallback: bool = True) -> Optional[Dict[str, Any]]:
+        """Get detailed track information.
+
+        When allow_fallback is True, falls back to the configured metadata source
+        for non-Spotify IDs or Spotify failure.
+        """
         # Check cache — we store raw track_data, reconstruct enhanced on hit
         cache = get_metadata_cache()
         fallback_src = self._fallback_source
@@ -1277,7 +1287,7 @@ class SpotifyClient:
                     return self._build_enhanced_track(cached)
                 # Simplified track cached by get_album_tracks — treat as cache miss
                 logger.debug(f"Cache hit for track {track_id} lacks album data, fetching full data")
-            else:
+            elif allow_fallback:
                 # Fallback cache hit — delegate to fallback client which reconstructs enhanced format
                 return self._fallback.get_track_details(track_id)
 
@@ -1298,7 +1308,7 @@ class SpotifyClient:
                 # Fall through to iTunes fallback
 
         # Fallback - only if ID is numeric (non-Spotify format)
-        if self._is_itunes_id(track_id):
+        if allow_fallback and self._is_itunes_id(track_id):
             logger.debug(f"Using {fallback_src} fallback for track details: {track_id}")
             result = self._fallback.get_track_details(track_id)
             return result
@@ -1354,8 +1364,12 @@ class SpotifyClient:
             return None
     
     @rate_limited
-    def get_album(self, album_id: str) -> Optional[Dict[str, Any]]:
-        """Get album information - falls back to configured metadata source"""
+    def get_album(self, album_id: str, allow_fallback: bool = True) -> Optional[Dict[str, Any]]:
+        """Get album information.
+
+        When allow_fallback is True, falls back to the configured metadata source
+        for non-Spotify IDs or Spotify failure.
+        """
         # Check cache first
         cache = get_metadata_cache()
         fallback_src = self._fallback_source
@@ -1368,7 +1382,7 @@ class SpotifyClient:
                     return cached
                 # Simplified album cached by get_artist_albums — treat as cache miss
                 logger.debug(f"Cache hit for album {album_id} lacks tracks, fetching full data")
-            else:
+            elif allow_fallback:
                 # Fallback cache hit — delegate to fallback client
                 return self._fallback.get_album(album_id)
 
@@ -1385,7 +1399,7 @@ class SpotifyClient:
                 # Fall through to fallback
 
         # Fallback - only if ID is numeric (non-Spotify format)
-        if self._is_itunes_id(album_id):
+        if allow_fallback and self._is_itunes_id(album_id):
             logger.debug(f"Using {fallback_src} fallback for album: {album_id}")
             return self._fallback.get_album(album_id)
         else:
@@ -1393,8 +1407,12 @@ class SpotifyClient:
             return None
     
     @rate_limited
-    def get_album_tracks(self, album_id: str) -> Optional[Dict[str, Any]]:
-        """Get album tracks - falls back to configured metadata source"""
+    def get_album_tracks(self, album_id: str, allow_fallback: bool = True) -> Optional[Dict[str, Any]]:
+        """Get album tracks.
+
+        When allow_fallback is True, falls back to the configured metadata source
+        for non-Spotify IDs or Spotify failure.
+        """
         # Cache key uses album_id with '_tracks' suffix to differentiate from album metadata
         cache = get_metadata_cache()
         fallback_src = self._fallback_source
@@ -1458,7 +1476,7 @@ class SpotifyClient:
                 # Fall through to iTunes fallback
 
         # Fallback - only if ID is numeric (non-Spotify format)
-        if self._is_itunes_id(album_id):
+        if allow_fallback and self._is_itunes_id(album_id):
             logger.debug(f"Using {fallback_src} fallback for album tracks: {album_id}")
             result = self._fallback.get_album_tracks(album_id)
             return result
@@ -1467,8 +1485,12 @@ class SpotifyClient:
             return None
     
     @rate_limited
-    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 10, skip_cache: bool = False, max_pages: int = 0) -> List[Album]:
-        """Get albums by artist ID - falls back to iTunes if Spotify not authenticated.
+    def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 10,
+                          skip_cache: bool = False, max_pages: int = 0, allow_fallback: bool = True) -> List[Album]:
+        """Get albums by artist ID.
+
+        When allow_fallback is True, falls back to iTunes/Deezer if Spotify
+        is not authenticated or errors.
         Set skip_cache=True for watchlist scans that need fresh data to detect new releases.
         Set max_pages to limit pagination (0 = fetch all). Spotify returns newest first,
         so max_pages=1 is sufficient for new release detection."""
@@ -1540,7 +1562,7 @@ class SpotifyClient:
                 # Fall through to iTunes fallback
 
         # Fallback - only if ID is numeric (non-Spotify format)
-        if self._is_itunes_id(artist_id):
+        if allow_fallback and self._is_itunes_id(artist_id):
             logger.debug(f"Using {fallback_src} fallback for artist albums: {artist_id}")
             return self._fallback.get_artist_albums(artist_id, album_type, limit)
         else:
@@ -1559,9 +1581,9 @@ class SpotifyClient:
             return None
 
     @rate_limited
-    def get_artist(self, artist_id: str) -> Optional[Dict[str, Any]]:
+    def get_artist(self, artist_id: str, allow_fallback: bool = True) -> Optional[Dict[str, Any]]:
         """
-        Get full artist details - falls back to configured metadata source.
+        Get full artist details.
 
         Args:
             artist_id: Artist ID (Spotify or fallback source depending on authentication)
@@ -1577,8 +1599,10 @@ class SpotifyClient:
         if cached:
             if source == 'spotify':
                 return cached  # Spotify raw format is the expected format
-            # Fallback cache hit — delegate to fallback client which reconstructs Spotify-compatible format
-            return self._fallback.get_artist(artist_id)
+            if allow_fallback:
+                # Fallback cache hit — delegate to fallback client which reconstructs Spotify-compatible format
+                return self._fallback.get_artist(artist_id)
+            return None
 
         if self.is_spotify_authenticated():
             try:
@@ -1592,7 +1616,7 @@ class SpotifyClient:
                 # Fall through to iTunes fallback
 
         # Fallback - only if ID is numeric (non-Spotify format)
-        if self._is_itunes_id(artist_id):
+        if allow_fallback and self._is_itunes_id(artist_id):
             logger.debug(f"Using {fallback_src} fallback for artist: {artist_id}")
             return self._fallback.get_artist(artist_id)
         else:
