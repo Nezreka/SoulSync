@@ -53,13 +53,21 @@ from core.watchlist_scanner import WatchlistScanner
 
 
 class _FakeSpotifyClient:
+    def __init__(self, search_results=None):
+        self.search_results = list(search_results or [])
+        self.search_calls = []
+
     def is_spotify_authenticated(self):
         return False
 
+    def search_artists(self, query, limit=1, allow_fallback=True):
+        self.search_calls.append((query, limit, allow_fallback))
+        return list(self.search_results) if allow_fallback else []
+
 
 class _FakeMetadataService:
-    def __init__(self, album_data):
-        self.spotify = _FakeSpotifyClient()
+    def __init__(self, album_data, spotify_client=None):
+        self.spotify = spotify_client or _FakeSpotifyClient()
         self.itunes = types.SimpleNamespace()
         self._album_data = album_data
 
@@ -76,8 +84,8 @@ class _FakeSourceClient:
         self.album_calls = []
         self.artist_calls = []
 
-    def search_artists(self, query, limit=1):
-        self.search_calls.append((query, limit))
+    def search_artists(self, query, limit=1, **kwargs):
+        self.search_calls.append((query, limit, kwargs))
         return [types.SimpleNamespace(id=self.artist_id, name=query)]
 
     def get_artist_albums(self, artist_id, album_type='album,single', limit=50, **kwargs):
@@ -374,3 +382,20 @@ def test_get_artist_discography_for_watchlist_falls_back_when_primary_empty(monk
     assert result.albums and result.albums[0].id == "sp-album"
     assert deezer_client.album_calls
     assert spotify_client.album_calls
+
+
+def test_match_to_spotify_uses_strict_lookup():
+    spotify_client = _FakeSpotifyClient(
+        search_results=[types.SimpleNamespace(id="fallback-id", name="Artist One")]
+    )
+    scanner = WatchlistScanner(metadata_service=_FakeMetadataService(None, spotify_client=spotify_client))
+    original_get_client_for_source = watchlist_scanner_module.get_client_for_source
+    watchlist_scanner_module.get_client_for_source = lambda source: spotify_client if source == "spotify" else None
+
+    try:
+        result = scanner._match_to_spotify("Artist One")
+    finally:
+        watchlist_scanner_module.get_client_for_source = original_get_client_for_source
+
+    assert result is None
+    assert spotify_client.search_calls == [("Artist One", 5, False)]

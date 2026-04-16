@@ -355,7 +355,6 @@ class ScanResult:
 class WatchlistDiscographyResult:
     """Resolved watchlist artist discography for a specific metadata source."""
     source: str
-    client: Any
     artist_id: str
     albums: List[Any]
     image_url: Optional[str] = None
@@ -560,8 +559,9 @@ class WatchlistScanner:
 
         return self._get_artist_image_from_data(artist_data)
 
-    def _get_album_data_for_source(self, source: str, client: Any, album_id: str, album_name: str = '') -> Optional[Dict[str, Any]]:
+    def _get_album_data_for_source(self, source: str, album_id: str, album_name: str = '') -> Optional[Dict[str, Any]]:
         """Fetch album data for a specific source and normalize track payloads when needed."""
+        client = get_client_for_source(source)
         if not client or not album_id or not hasattr(client, 'get_album'):
             return None
 
@@ -642,7 +642,6 @@ class WatchlistScanner:
         image_url = self._get_artist_image_for_source(watchlist_artist, source, client, artist_id)
         return WatchlistDiscographyResult(
             source=source,
-            client=client,
             artist_id=artist_id,
             albums=albums,
             image_url=image_url,
@@ -913,14 +912,11 @@ class WatchlistScanner:
 
         _emit('scan_started', profile_id=profile_id, total_artists=len(watchlist_artists))
 
-        # Rate-limit-aware backfill of artist IDs for the providers we can safely resolve.
-        providers_to_backfill = []
-        for source in self._watchlist_source_priority():
-            if source == 'spotify':
-                if self._spotify_available_for_run():
-                    providers_to_backfill.append(source)
-            elif source in {'itunes', 'deezer', 'discogs'} and get_client_for_source(source):
-                providers_to_backfill.append(source)
+        # Keep this as a plain source list; resolve the client right before each use.
+        providers_to_backfill = [
+            source for source in self._watchlist_source_priority()
+            if source in {'spotify', 'itunes', 'deezer', 'discogs'}
+        ]
 
         for provider in providers_to_backfill:
             try:
@@ -1005,11 +1001,10 @@ class WatchlistScanner:
                     album_fetcher = lambda album_id, album_name='': self.metadata_service.get_album(album_id)
                 else:
                     source = discography_result.source
-                    client = discography_result.client
                     albums = discography_result.albums
                     source_artist_id = discography_result.artist_id
                     artist_image_url = discography_result.image_url or self.get_artist_image_url(artist) or ''
-                    album_fetcher = lambda album_id, album_name='': self._get_album_data_for_source(source, client, album_id, album_name)
+                    album_fetcher = lambda album_id, album_name='': self._get_album_data_for_source(source, album_id, album_name)
 
                 absolute_index = artist_index_offset + i + 1
                 if scan_state is not None:
@@ -1251,8 +1246,11 @@ class WatchlistScanner:
             logger.debug(f"Fetching discography for artist {spotify_artist_id}" +
                          (" (full)" if needs_full_discog else " (recent only, max 1 page)"))
             albums = self.spotify_client.get_artist_albums(
-                spotify_artist_id, album_type='album,single', limit=50,
-                skip_cache=True, max_pages=0 if needs_full_discog else 1
+                spotify_artist_id,
+                album_type='album,single',
+                limit=50,
+                skip_cache=True,
+                max_pages=0 if needs_full_discog else 1,
             )
 
             if not albums:
@@ -1413,8 +1411,8 @@ class WatchlistScanner:
         update_fn = {
             'spotify': self.database.update_watchlist_spotify_id,
             'itunes': self.database.update_watchlist_itunes_id,
-            'deezer': getattr(self.database, 'update_watchlist_deezer_id', None),
-            'discogs': getattr(self.database, 'update_watchlist_discogs_id', None),
+            'deezer': self.database.update_watchlist_deezer_id,
+            'discogs': self.database.update_watchlist_discogs_id,
         }.get(provider)
 
         if not match_fn or not update_fn:
@@ -1518,10 +1516,11 @@ class WatchlistScanner:
     def _match_to_spotify(self, artist_name: str) -> Optional[str]:
         """Match artist name to Spotify ID using fuzzy name comparison."""
         try:
-            if hasattr(self, '_metadata_service') and self._metadata_service:
-                results = self._metadata_service.spotify.search_artists(artist_name, limit=5)
-            else:
-                results = self.spotify_client.search_artists(artist_name, limit=5)
+            client = get_client_for_source('spotify')
+            if not client:
+                return None
+
+            results = client.search_artists(artist_name, limit=5, allow_fallback=False)
 
             return self._best_artist_match(results, artist_name)
         except Exception as e:
@@ -2101,7 +2100,7 @@ class WatchlistScanner:
             try:
                 # Try Spotify search (only when Spotify is the configured primary source)
                 if self._spotify_is_primary_source():
-                    searched_results = self.spotify_client.search_artists(artist_name, limit=1)
+                    searched_results = self.spotify_client.search_artists(artist_name, limit=1, allow_fallback=False)
                     if searched_results and len(searched_results) > 0:
                         searched_spotify_id = searched_results[0].id
             except Exception as e:
@@ -2139,7 +2138,11 @@ class WatchlistScanner:
                     # Try to match on Spotify (only when Spotify is the configured primary source)
                     if self._spotify_is_primary_source():
                         try:
-                            spotify_results = self.spotify_client.search_artists(artist_name_to_match, limit=1)
+                            spotify_results = self.spotify_client.search_artists(
+                                artist_name_to_match,
+                                limit=1,
+                                allow_fallback=False,
+                            )
                             if spotify_results and len(spotify_results) > 0:
                                 spotify_artist = spotify_results[0]
                                 # Skip if this is the searched artist
@@ -2443,7 +2446,7 @@ class WatchlistScanner:
                                     artist_id,
                                     album_type='album,single,ep',
                                     limit=50,
-                                    skip_cache=True
+                                    skip_cache=True,
                                 )
                             else:  # itunes or deezer fallback
                                 all_albums = itunes_client.get_artist_albums(
@@ -2668,7 +2671,11 @@ class WatchlistScanner:
                             # Try Spotify first if available
                             if spotify_available:
                                 try:
-                                    search_results = self.spotify_client.search_albums(f"album:{album_row['title']} artist:{album_row['artist_name']}", limit=1)
+                                    search_results = self.spotify_client.search_albums(
+                                        f"album:{album_row['title']} artist:{album_row['artist_name']}",
+                                        limit=1,
+                                        allow_fallback=False,
+                                    )
                                     if search_results and len(search_results) > 0:
                                         spotify_album = search_results[0]
                                         album_data = self.spotify_client.get_album(spotify_album.id)
@@ -2854,7 +2861,7 @@ class WatchlistScanner:
                         artist.spotify_artist_id,
                         album_type='album,single,ep',
                         limit=5,
-                        skip_cache=True
+                        skip_cache=True,
                     )
 
                     if not recent_releases:
@@ -3095,7 +3102,7 @@ class WatchlistScanner:
                             artist.spotify_artist_id,
                             album_type='album,single,ep',
                             limit=20,
-                            skip_cache=True
+                            skip_cache=True,
                         )
                         for album in albums or []:
                             process_album(album, artist.artist_name, artist.spotify_artist_id, fallback_id if fallback_source == 'itunes' else None, 'spotify')
@@ -3152,7 +3159,7 @@ class WatchlistScanner:
                             artist.similar_artist_spotify_id,
                             album_type='album,single,ep',
                             limit=20,
-                            skip_cache=True
+                            skip_cache=True,
                         )
                         for album in albums or []:
                             process_album(album, artist.similar_artist_name, artist.similar_artist_spotify_id, fallback_id if fallback_source == 'itunes' else None, 'spotify')
