@@ -3048,6 +3048,9 @@ async function loadPageData(pageId) {
                 // Load comparisons
                 loadHydrabaseComparisons();
                 break;
+            case 'tools':
+                await initializeToolsPage();
+                break;
             case 'watchlist':
                 await initializeWatchlistPage();
                 break;
@@ -25088,80 +25091,81 @@ function resetWishlistModalToIdleState() {
     }
 }
 
-async function loadDashboardData() {
-    // Attach event listeners for the DB updater tool
+let toolsPageState = { isInitialized: false };
+
+async function initializeToolsPage() {
+    // Attach event listeners for tool buttons (idempotent — getElementById returns null if already wired)
     const updateButton = document.getElementById('db-update-button');
-    if (updateButton) {
+    if (updateButton && !updateButton._toolsWired) {
         updateButton.addEventListener('click', handleDbUpdateButtonClick);
+        updateButton._toolsWired = true;
     }
 
-    // Attach event listeners for the metadata updater tool
     const metadataButton = document.getElementById('metadata-update-button');
-    if (metadataButton) {
+    if (metadataButton && !metadataButton._toolsWired) {
         metadataButton.addEventListener('click', handleMetadataUpdateButtonClick);
+        metadataButton._toolsWired = true;
     }
 
-    // Check active media server and hide metadata updater if not Plex
-    await checkAndHideMetadataUpdaterForNonPlex();
-
-    // Check for ongoing metadata update and restore state
-    await checkAndRestoreMetadataUpdateState();
-
-    // Attach event listener for the quality scanner tool
     const qualityScanButton = document.getElementById('quality-scan-button');
-    if (qualityScanButton) {
+    if (qualityScanButton && !qualityScanButton._toolsWired) {
         qualityScanButton.addEventListener('click', handleQualityScanButtonClick);
+        qualityScanButton._toolsWired = true;
     }
 
-    // Attach event listener for the duplicate cleaner tool
     const duplicateCleanButton = document.getElementById('duplicate-clean-button');
-    if (duplicateCleanButton) {
+    if (duplicateCleanButton && !duplicateCleanButton._toolsWired) {
         duplicateCleanButton.addEventListener('click', handleDuplicateCleanButtonClick);
+        duplicateCleanButton._toolsWired = true;
     }
 
-    // Attach event listener for the retag tool
     const retagOpenButton = document.getElementById('retag-open-button');
-    if (retagOpenButton) {
+    if (retagOpenButton && !retagOpenButton._toolsWired) {
         retagOpenButton.addEventListener('click', openRetagModal);
+        retagOpenButton._toolsWired = true;
     }
 
-    // Attach event listener for the media scan tool
     const mediaScanButton = document.getElementById('media-scan-button');
-    if (mediaScanButton) {
+    if (mediaScanButton && !mediaScanButton._toolsWired) {
         mediaScanButton.addEventListener('click', handleMediaScanButtonClick);
+        mediaScanButton._toolsWired = true;
     }
 
-    // Check active media server and show media scan tool only for Plex
-    await checkAndShowMediaScanForPlex();
-
-    // Attach event listener for the backup manager
     const backupNowButton = document.getElementById('backup-now-button');
-    if (backupNowButton) backupNowButton.addEventListener('click', handleBackupNowClick);
+    if (backupNowButton && !backupNowButton._toolsWired) {
+        backupNowButton.addEventListener('click', handleBackupNowClick);
+        backupNowButton._toolsWired = true;
+    }
+
+    // Tool-specific init
+    await checkAndHideMetadataUpdaterForNonPlex();
+    await checkAndRestoreMetadataUpdateState();
+    await checkAndShowMediaScanForPlex();
     loadBackupList();
-
-    // Attach event listeners for tool help buttons
     initializeToolHelpButtons();
-
-    // Initial load of retag stats
     loadRetagStats();
-
-    // Check for ongoing retag operation
     checkRetagStatus();
-
-    // Initial load of stats
     await fetchAndUpdateDbStats();
+    loadDiscoveryPoolStats();
+    loadMetadataCacheStats();
 
-    // Start periodic refresh of stats (every 10 seconds)
-    stopDbStatsPolling(); // Ensure no duplicates
+    // Start polling (cleared when navigating away via loadPageData preamble)
+    stopDbStatsPolling();
     dbStatsInterval = setInterval(fetchAndUpdateDbStats, 10000);
 
-    // Initial load of discovery pool stats for the tool card
-    loadDiscoveryPoolStats();
+    // Check for ongoing operations
+    await checkAndUpdateDbProgress();
+    await checkAndUpdateQualityScanProgress();
+    await checkAndUpdateDuplicateCleanProgress();
 
-    // Initial load of metadata cache stats + periodic refresh
-    loadMetadataCacheStats();
-    setInterval(loadMetadataCacheStats, 15000);
+    // Initialize library maintenance section
+    updateRepairStatus();
+    switchRepairTab('jobs');
 
+    toolsPageState.isInitialized = true;
+}
+
+async function loadDashboardData() {
     // Initial load of wishlist count
     await updateWishlistCount();
 
@@ -25185,15 +25189,6 @@ async function loadDashboardData() {
 
     // Start periodic toast checking (every 3 seconds)
     setInterval(checkForActivityToasts, 3000);
-
-    // Also check the status of any ongoing update when the page loads
-    await checkAndUpdateDbProgress();
-
-    // Check for any ongoing quality scanner when the page loads
-    await checkAndUpdateQualityScanProgress();
-
-    // Check for any ongoing duplicate cleaner when the page loads
-    await checkAndUpdateDuplicateCleanProgress();
 
     // Check for any active download processes that need rehydration
     await checkForActiveProcesses();
@@ -63191,10 +63186,12 @@ let _repairJobsCache = {}; // Cache job data for help modal
  * Open the Library Maintenance modal
  */
 async function openRepairModal() {
-    const modal = document.getElementById('repair-modal');
-    if (!modal) return;
-    modal.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
+    navigateToPage('tools');
+    // Scroll to maintenance section
+    setTimeout(() => {
+        const section = document.querySelector('.tools-maintenance-section');
+        if (section) section.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
     _repairCurrentTab = 'jobs';
     switchRepairTab('jobs');
     // Load master toggle state
@@ -63213,10 +63210,7 @@ async function openRepairModal() {
 }
 
 function closeRepairModal() {
-    const modal = document.getElementById('repair-modal');
-    if (!modal) return;
-    modal.style.display = 'none';
-    document.body.style.overflow = '';
+    // No-op — repair content now lives on the tools page, no modal to close
 }
 
 async function toggleRepairMaster() {

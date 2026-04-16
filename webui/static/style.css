@@ -55798,13 +55798,231 @@ body.reduce-effects *::after {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+   DASHBOARD TOOLS LINK CARD
+   ═══════════════════════════════════════════════════════════════════ */
+
+.dashboard-tools-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dashboard-tools-link:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(var(--accent-rgb), 0.15);
+    transform: translateY(-1px);
+}
+
+.dashboard-tools-link-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.dashboard-tools-link-title {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
+    font-weight: 500;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   TOOLS PAGE
+   ═══════════════════════════════════════════════════════════════════ */
+
+.tools-page-container {
+    padding: 28px 24px 30px;
+    margin: 20px;
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.55) 0%,
+        rgba(12, 12, 12, 0.62) 100%);
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.3),
+        0 4px 16px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.tools-page-header {
+    padding: 20px 24px 18px;
+    margin: -28px -24px 24px -24px;
+    background: linear-gradient(180deg,
+        rgba(var(--accent-rgb), 0.08) 0%,
+        rgba(var(--accent-rgb), 0.03) 40%,
+        transparent 100%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-top-left-radius: 24px;
+    border-top-right-radius: 24px;
+    position: relative;
+}
+
+.tools-page-header::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(var(--accent-rgb), 0.2) 20%,
+        rgba(var(--accent-rgb), 0.35) 50%,
+        rgba(var(--accent-rgb), 0.2) 80%,
+        transparent 100%);
+}
+
+.tools-page-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 26px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+    letter-spacing: -0.5px;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.tools-page-subtitle {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.4);
+    margin: 6px 0 0 0;
+    font-weight: 500;
+}
+
+/* ── Library Maintenance hero section ── */
+.tools-maintenance-hero {
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.95) 0%,
+        rgba(12, 12, 12, 0.98) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    padding: 20px 24px;
+    margin-bottom: 28px;
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    position: relative;
+    overflow: hidden;
+}
+
+.tools-maintenance-hero::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg,
+        transparent,
+        rgba(var(--accent-rgb), 0.5),
+        rgba(var(--accent-rgb), 0.8),
+        rgba(var(--accent-rgb), 0.5),
+        transparent);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3);
+}
+
+.tools-maintenance-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.tools-maintenance-header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.tools-maintenance-logo {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    object-fit: cover;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.tools-maintenance-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 2px 0;
+    letter-spacing: -0.3px;
+}
+
+.tools-maintenance-subtitle {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+    margin: 0;
+    font-weight: 500;
+}
+
+/* Repair tabs on the tools page */
+.tools-maintenance-hero .repair-tabs {
+    margin-bottom: 16px;
+}
+
+.tools-maintenance-hero .repair-tab-content {
+    min-height: 200px;
+}
+
+/* ── Tool card sections ── */
+.tools-section {
+    margin-bottom: 24px;
+}
+
+.tools-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.35);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin: 0 0 12px 4px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+@media (max-width: 768px) {
+    .tools-page-container {
+        padding: 16px;
+        margin: 10px;
+        border-radius: 16px;
+    }
+
+    .tools-page-header {
+        padding: 16px;
+        margin: -16px -16px 16px -16px;
+        border-top-left-radius: 16px;
+        border-top-right-radius: 16px;
+    }
+
+    .tools-page-title {
+        font-size: 22px;
+    }
+
+    .tools-maintenance-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
    WATCHLIST PAGE
    ═══════════════════════════════════════════════════════════════════ */
 
 .watchlist-page-container {
     padding: 28px 24px 30px;
-    max-width: 1400px;
-    margin: 0 auto;
+    margin: 20px;
     background: linear-gradient(135deg,
         rgba(20, 20, 20, 0.55) 0%,
         rgba(12, 12, 12, 0.62) 100%);
@@ -56216,8 +56434,7 @@ body.reduce-effects *::after {
 
 .wishlist-page-container {
     padding: 28px 24px 30px;
-    max-width: 1400px;
-    margin: 0 auto;
+    margin: 20px;
     background: linear-gradient(135deg,
         rgba(20, 20, 20, 0.55) 0%,
         rgba(12, 12, 12, 0.62) 100%);
@@ -56534,6 +56751,7 @@ body.reduce-effects *::after {
     .watchlist-page-container,
     .wishlist-page-container {
         padding: 16px;
+        margin: 10px;
         border-radius: 16px;
     }
 
