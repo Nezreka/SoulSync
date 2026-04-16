@@ -40490,12 +40490,21 @@ async function initializeWishlistPage() {
         const tracksSection = document.getElementById('wishlist-category-tracks');
         const statsStrip = document.getElementById('wishlist-stats-strip');
 
-        const [statsRes, cycleRes, albumRes, singleRes] = await Promise.all([
+        const [statsRes, cycleRes, albumRes, singleRes, watchlistRes] = await Promise.all([
             fetch('/api/wishlist/stats').then(r => r.json()),
             fetch('/api/wishlist/cycle').then(r => r.json()),
             fetch('/api/wishlist/tracks?category=albums').then(r => r.json()),
             fetch('/api/wishlist/tracks?category=singles').then(r => r.json()),
+            fetch('/api/watchlist/artists').then(r => r.json()).catch(() => ({ success: false })),
         ]);
+
+        // Build artist name → image URL map from watchlist
+        const _artistImageMap = new Map();
+        if (watchlistRes.success && watchlistRes.artists) {
+            for (const wa of watchlistRes.artists) {
+                if (wa.artist_name && wa.image_url) _artistImageMap.set(wa.artist_name.toLowerCase(), wa.image_url);
+            }
+        }
 
         const { singles = 0, albums = 0, total = 0 } = statsRes;
         const currentCycle = cycleRes.cycle || 'albums';
@@ -40524,7 +40533,7 @@ async function initializeWishlistPage() {
         if (tracksSection) tracksSection.style.display = 'none';
         if (statsStrip) statsStrip.style.display = '';
 
-        _renderWishlistNebula(albumRes.tracks || [], singleRes.tracks || []);
+        _renderWishlistNebula(albumRes.tracks || [], singleRes.tracks || [], _artistImageMap, currentCycle);
         startWishlistCountdownTimer(currentCycle, statsRes.next_run_in_seconds || 0);
         wishlistPageState.isInitialized = true;
 
@@ -40538,9 +40547,10 @@ async function initializeWishlistPage() {
    WISHLIST NEBULA — Artist orbs with album/single satellites
    ═══════════════════════════════════════════════════════════════════ */
 
-function _renderWishlistNebula(albumTracks, singleTracks) {
+function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, currentCycle) {
     const field = document.getElementById('wl-nebula-field');
     if (!field) return;
+    artistImageMap = artistImageMap || new Map();
 
     const artistMap = new Map();
     function _parse(track, type) {
@@ -40570,23 +40580,53 @@ function _renderWishlistNebula(albumTracks, singleTracks) {
     function _hue(n) { let h = 0; for (let i = 0; i < n.length; i++) h = n.charCodeAt(i) + ((h << 5) - h); return Math.abs(h) % 360; }
 
     let html = '';
-    for (const [name, data] of sorted) {
+    sorted.forEach(([name, data], idx) => {
         const total = [...data.albums.values()].reduce((s, a) => s + a.tracks.length, 0) + data.singles.length;
+        const hasAlbums = data.albums.size > 0;
         const hue = _hue(name);
         const sz = total >= 10 ? 'orb-lg' : total >= 4 ? 'orb-md' : 'orb-sm';
-        let img = '';
-        for (const [, ad] of data.albums) { if (ad.image) { img = ad.image; break; } }
+
+        // Enhancement 1: prefer watchlist artist photo over album cover
+        let img = artistImageMap.get(name.toLowerCase()) || '';
+        if (!img) { for (const [, ad] of data.albums) { if (ad.image) { img = ad.image; break; } } }
         if (!img && data.singles.length) img = data.singles[0].image || '';
 
-        html += `<div class="wl-orb-group" data-artist="${escapeHtml(name)}">`;
-        html += `<div class="wl-orb ${sz}" style="--orb-hue:${hue}" onclick="_toggleOrbExpand(this)">`;
+        // Enhancement 3: pulse if this artist has albums and current cycle is albums
+        const pulseClass = (hasAlbums && currentCycle === 'albums') ? ' orb-pulse' : '';
+
+        // Enhancement 7: staggered entry animation
+        const delay = Math.min(idx * 60, 800);
+
+        html += `<div class="wl-orb-group" data-artist="${escapeHtml(name)}" style="animation-delay:${delay}ms">`;
+
+        // Enhancement 2: hover tooltip
+        html += `<div class="wl-orb-tooltip">${escapeHtml(name)}<br><span>${total} track${total !== 1 ? 's' : ''}</span></div>`;
+
+        html += `<div class="wl-orb ${sz}${pulseClass}" style="--orb-hue:${hue}" onclick="_toggleOrbExpand(this)">`;
         html += `<div class="wl-orb-glow"></div>`;
-        html += img ? `<img class="wl-orb-img" src="${img}" alt="" loading="lazy">` : `<div class="wl-orb-initials">${escapeHtml(name.substring(0, 2).toUpperCase())}</div>`;
+        html += img ? `<img class="wl-orb-img" src="${img}" alt="">` : `<div class="wl-orb-initials">${escapeHtml(name.substring(0, 2).toUpperCase())}</div>`;
         html += `<div class="wl-orb-ring"></div>`;
-        html += `</div>`;
-        html += `<div class="wl-orb-label">${escapeHtml(name)}</div>`;
+
+        // Enhancement 5: album art ring (show up to 6 album covers around the orb)
+        const ringCovers = [];
+        for (const [, ad] of data.albums) { if (ad.image && ringCovers.length < 6) ringCovers.push(ad.image); }
+        for (const s of data.singles) { if (s.image && ringCovers.length < 6) ringCovers.push(s.image); }
+        if (ringCovers.length >= 3) {
+            html += `<div class="wl-orb-art-ring">`;
+            ringCovers.forEach((url, i) => {
+                const angle = (360 / ringCovers.length) * i;
+                html += `<img class="wl-art-ring-item" src="${url}" style="--ring-angle:${angle}deg" alt="">`;
+            });
+            html += `</div>`;
+        }
+
+        html += `</div>`; // /orb
+
+        // Enhancement 8: clickable artist name → navigate to artist detail
+        html += `<div class="wl-orb-label" onclick="event.stopPropagation(); _navigateToArtistFromWishlist('${escapeHtml(name)}')" title="View artist">${escapeHtml(name)}</div>`;
         html += `<div class="wl-orb-meta">${total} track${total !== 1 ? 's' : ''}</div>`;
 
+        // Expanded content
         html += `<div class="wl-orb-expanded">`;
         if (data.albums.size > 0) {
             html += `<div class="wl-orb-albums">`;
@@ -40610,9 +40650,20 @@ function _renderWishlistNebula(albumTracks, singleTracks) {
             }
             html += `</div>`;
         }
-        html += `</div></div>`;
-    }
+        html += `</div></div>`; // /expanded, /group
+    });
+
     field.innerHTML = html;
+}
+
+// Enhancement 8: navigate to artist detail from wishlist
+function _navigateToArtistFromWishlist(artistName) {
+    // Try to find the artist in the library DB by searching
+    navigateToPage('artists');
+    setTimeout(() => {
+        const searchInput = document.querySelector('.artist-search-input, #artist-search');
+        if (searchInput) { searchInput.value = artistName; searchInput.dispatchEvent(new Event('input')); }
+    }, 300);
 }
 
 function _toggleOrbExpand(el) {
