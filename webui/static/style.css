@@ -15564,13 +15564,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 /* Watchlist Artist Detail Overlay */
 .watchlist-artist-detail-overlay {
-    position: absolute;
+    position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
     background: rgba(18, 18, 18, 0.98);
-    z-index: 10;
+    z-index: 1000;
     transform: translateX(100%);
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     overflow-y: auto;
@@ -55794,5 +55794,792 @@ body.reduce-effects *::after {
 
     .adl-row-status {
         min-width: 70px;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   WATCHLIST PAGE
+   ═══════════════════════════════════════════════════════════════════ */
+
+.watchlist-page-container {
+    padding: 28px 24px 30px;
+    max-width: 1400px;
+    margin: 0 auto;
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.55) 0%,
+        rgba(12, 12, 12, 0.62) 100%);
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.3),
+        0 4px 16px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    position: relative;
+}
+
+/* ── Header ── */
+.watchlist-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 20px 24px 18px;
+    margin: -28px -24px 20px -24px;
+    background: linear-gradient(180deg,
+        rgba(255, 193, 7, 0.08) 0%,
+        rgba(255, 193, 7, 0.03) 40%,
+        transparent 100%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-top-left-radius: 24px;
+    border-top-right-radius: 24px;
+    position: relative;
+}
+
+.watchlist-page-header::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(255, 193, 7, 0.2) 20%,
+        rgba(255, 193, 7, 0.35) 50%,
+        rgba(255, 193, 7, 0.2) 80%,
+        transparent 100%);
+}
+
+.watchlist-page-header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.watchlist-page-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 26px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+    letter-spacing: -0.5px;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.watchlist-page-meta {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.45);
+    font-weight: 500;
+}
+
+.watchlist-page-meta span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.watchlist-page-count {
+    color: rgba(255, 193, 7, 0.8);
+    font-weight: 600;
+}
+
+.watchlist-page-timer {
+    padding-left: 16px;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ── Action buttons ── */
+.watchlist-page-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    padding: 0 4px;
+}
+
+.watchlist-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 18px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    white-space: nowrap;
+    letter-spacing: 0.1px;
+}
+
+.watchlist-action-primary {
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.85));
+    color: #fff;
+    border-color: rgba(var(--accent-rgb), 0.3);
+    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.2);
+}
+
+.watchlist-action-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.3);
+    filter: brightness(1.1);
+}
+
+.watchlist-action-primary:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.watchlist-action-secondary {
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.7);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.watchlist-action-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-1px);
+}
+
+.watchlist-action-danger {
+    background: rgba(239, 68, 68, 0.1);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.15);
+}
+
+.watchlist-action-danger:hover {
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.25);
+    transform: translateY(-1px);
+}
+
+/* ── Scan status card ── */
+.watchlist-page-scan-status {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 18px 24px;
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.95) 0%,
+        rgba(12, 12, 12, 0.98) 100%);
+    border-radius: 14px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    position: relative;
+    overflow: hidden;
+}
+
+.watchlist-page-scan-status::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.5), transparent);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.watchlist-page-scan-status:has(.watchlist-live-activity[style*="flex"])::before {
+    opacity: 1;
+    animation: scanPulse 2s ease-in-out infinite;
+}
+
+@keyframes scanPulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+}
+
+/* ── Last scan summary strip ── */
+.watchlist-last-scan-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: linear-gradient(135deg,
+        rgba(255, 193, 7, 0.06) 0%,
+        rgba(255, 152, 0, 0.03) 100%);
+    border: 1px solid rgba(255, 193, 7, 0.1);
+    border-radius: 10px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.55);
+    font-weight: 500;
+}
+
+.watchlist-last-scan-strip svg {
+    color: rgba(255, 193, 7, 0.6);
+    flex-shrink: 0;
+}
+
+/* ── Toolbar (search + sort) ── */
+.watchlist-toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 16px;
+    padding: 0 4px;
+}
+
+.watchlist-toolbar .watchlist-search-container {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.watchlist-sort-select {
+    padding: 10px 32px 10px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.4)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    white-space: nowrap;
+}
+
+.watchlist-sort-select:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.watchlist-sort-select:focus {
+    border-color: rgba(255, 193, 7, 0.4);
+    outline: none;
+    box-shadow: 0 0 12px rgba(255, 193, 7, 0.1);
+}
+
+.watchlist-sort-select option {
+    background: #1a1a1a;
+    color: #fff;
+}
+
+/* ── Search bar (page-level) ── */
+.watchlist-page-container .watchlist-search-container {
+    margin-bottom: 16px;
+    padding: 0;
+    position: relative;
+}
+
+.watchlist-page-container .watchlist-search-input {
+    width: 100%;
+    padding: 12px 20px 12px 44px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    box-sizing: border-box;
+}
+
+.watchlist-page-container .watchlist-search-input:focus {
+    border-color: rgba(255, 193, 7, 0.5);
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 0 16px rgba(255, 193, 7, 0.12);
+    outline: none;
+}
+
+.watchlist-page-container .watchlist-search-icon {
+    left: 20px;
+}
+
+/* ── Artist grid (page-level) ── */
+.watchlist-page-container .watchlist-artists-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+    padding: 4px;
+}
+
+/* ── Artist cards upgrade ── */
+.watchlist-page-container .watchlist-artist-card {
+    background: linear-gradient(135deg,
+        rgba(26, 26, 26, 0.95) 0%,
+        rgba(18, 18, 18, 0.98) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+    contain: none;
+}
+
+.watchlist-page-container .watchlist-artist-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255, 193, 7, 0.4), transparent);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.watchlist-page-container .watchlist-artist-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(255, 193, 7, 0.15);
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 0 20px rgba(255, 193, 7, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.watchlist-page-container .watchlist-artist-card:hover::before {
+    opacity: 1;
+}
+
+/* ── Batch bar ── */
+.watchlist-page-container .watchlist-batch-bar {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 8px 16px;
+    margin-bottom: 16px;
+}
+
+/* ── Override banner ── */
+.watchlist-page-container .watchlist-global-override-banner {
+    background: linear-gradient(135deg,
+        rgba(255, 193, 7, 0.08) 0%,
+        rgba(255, 152, 0, 0.05) 100%);
+    border: 1px solid rgba(255, 193, 7, 0.15);
+    border-radius: 10px;
+    padding: 10px 16px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: rgba(255, 193, 7, 0.85);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ── Empty state ── */
+.watchlist-page-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 80px 20px;
+    text-align: center;
+}
+
+.watchlist-page-empty-icon {
+    opacity: 0.15;
+    margin-bottom: 8px;
+}
+
+.watchlist-page-empty h3 {
+    margin: 12px 0 8px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+}
+
+.watchlist-page-empty p {
+    margin: 0 0 24px;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.35);
+    max-width: 360px;
+    line-height: 1.5;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   WISHLIST PAGE
+   ═══════════════════════════════════════════════════════════════════ */
+
+.wishlist-page-container {
+    padding: 28px 24px 30px;
+    max-width: 1400px;
+    margin: 0 auto;
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.55) 0%,
+        rgba(12, 12, 12, 0.62) 100%);
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.3),
+        0 4px 16px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    position: relative;
+}
+
+/* ── Header ── */
+.wishlist-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 20px 24px 18px;
+    margin: -28px -24px 24px -24px;
+    background: linear-gradient(180deg,
+        rgba(var(--accent-rgb), 0.08) 0%,
+        rgba(var(--accent-rgb), 0.03) 40%,
+        transparent 100%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-top-left-radius: 24px;
+    border-top-right-radius: 24px;
+    position: relative;
+}
+
+.wishlist-page-header::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        rgba(var(--accent-rgb), 0.2) 20%,
+        rgba(var(--accent-rgb), 0.35) 50%,
+        rgba(var(--accent-rgb), 0.2) 80%,
+        transparent 100%);
+}
+
+.wishlist-page-header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.wishlist-page-header-right {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.wishlist-page-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 26px;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+    letter-spacing: -0.5px;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.wishlist-page-title-icon {
+    font-size: 26px;
+}
+
+.wishlist-page-meta {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.45);
+    font-weight: 500;
+}
+
+.wishlist-page-count {
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 600;
+}
+
+.wishlist-page-timer {
+    padding-left: 16px;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ── Stats strip ── */
+.wishlist-stats-strip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    padding: 14px 24px;
+    background: linear-gradient(135deg,
+        rgba(20, 20, 20, 0.95) 0%,
+        rgba(12, 12, 12, 0.98) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.wishlist-stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 0 32px;
+}
+
+.wishlist-stat-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.5px;
+    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.wishlist-stat-value.wishlist-stat-cycle {
+    font-size: 14px;
+    font-weight: 600;
+    color: rgb(var(--accent-light-rgb));
+}
+
+.wishlist-stat-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.35);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+.wishlist-stat-divider {
+    width: 1px;
+    height: 32px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* ── Track search ── */
+.wishlist-track-search-container {
+    position: relative;
+    margin-bottom: 12px;
+}
+
+.wishlist-track-search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+}
+
+.wishlist-track-search-input {
+    width: 100%;
+    padding: 9px 16px 9px 36px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s;
+    box-sizing: border-box;
+}
+
+.wishlist-track-search-input:focus {
+    border-color: rgba(var(--accent-rgb), 0.4);
+    background: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.1);
+    outline: none;
+}
+
+.wishlist-track-search-input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+}
+
+/* ── Category cards upgrade ── */
+#wishlist-page-categories {
+    margin-bottom: 24px;
+}
+
+.wishlist-page-container .wishlist-category-card {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.wishlist-page-container .wishlist-category-card:hover {
+    transform: translateY(-4px) scale(1.01);
+    border-color: rgba(var(--accent-rgb), 0.2);
+    box-shadow:
+        0 12px 30px rgba(0, 0, 0, 0.4),
+        0 0 24px rgba(var(--accent-rgb), 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.wishlist-page-container .wishlist-category-card.next-in-queue {
+    border-color: rgba(var(--accent-rgb), 0.25);
+    box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.35),
+        0 0 16px rgba(var(--accent-rgb), 0.06),
+        inset 0 1px 0 rgba(var(--accent-rgb), 0.1);
+}
+
+/* ── Mosaic background ── */
+.wishlist-mosaic-bg {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: inherit;
+    z-index: 0;
+}
+
+.wishlist-mosaic-bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0.55));
+    z-index: 1;
+}
+
+/* ── Track list section ── */
+.wishlist-page-container .wishlist-category-tracks {
+    max-height: none;
+    background: rgba(255, 255, 255, 0.015);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 14px;
+    padding: 16px;
+}
+
+.wishlist-page-container .wishlist-category-header {
+    margin-bottom: 12px;
+}
+
+.wishlist-page-container .wishlist-tracks-scroll {
+    max-height: calc(100vh - 320px);
+    overflow-y: auto;
+}
+
+/* Category header right side with download button */
+.wishlist-category-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ── Batch bar ── */
+.wishlist-page-container .wishlist-batch-bar {
+    background: rgba(var(--accent-rgb), 0.06);
+    border: 1px solid rgba(var(--accent-rgb), 0.12);
+    border-radius: 10px;
+    padding: 8px 16px;
+    margin-bottom: 12px;
+}
+
+/* ── Album cards in track list ── */
+.wishlist-page-container .wishlist-album-card {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    transition: border-color 0.2s;
+}
+
+.wishlist-page-container .wishlist-album-card:hover {
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Empty state ── */
+.wishlist-page-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 80px 20px;
+    text-align: center;
+}
+
+.wishlist-page-empty-icon {
+    opacity: 0.15;
+    margin-bottom: 8px;
+}
+
+.wishlist-page-empty h3 {
+    margin: 12px 0 8px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+}
+
+.wishlist-page-empty p {
+    margin: 0 0 24px;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.35);
+    max-width: 360px;
+    line-height: 1.5;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   WATCHLIST & WISHLIST RESPONSIVE
+   ═══════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+    .watchlist-page-container,
+    .wishlist-page-container {
+        padding: 16px;
+        border-radius: 16px;
+    }
+
+    .watchlist-page-header,
+    .wishlist-page-header {
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+        margin: -16px -16px 16px -16px;
+        border-top-left-radius: 16px;
+        border-top-right-radius: 16px;
+    }
+
+    .watchlist-page-title,
+    .wishlist-page-title {
+        font-size: 22px;
+    }
+
+    .watchlist-page-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .watchlist-page-container .watchlist-artists-grid {
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 12px;
+    }
+
+    .watchlist-toolbar {
+        flex-direction: column;
+    }
+
+    .watchlist-sort-select {
+        width: 100%;
+    }
+
+    .wishlist-page-header-right {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    .wishlist-stat-item {
+        padding: 0 16px;
+    }
+
+    .wishlist-stat-value {
+        font-size: 18px;
     }
 }
