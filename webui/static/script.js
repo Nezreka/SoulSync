@@ -33,6 +33,10 @@ let wishlistCountInterval = null;
 let wishlistCountdownInterval = null;  // Countdown timer for wishlist overview modal
 let watchlistCountdownInterval = null;  // Countdown timer for watchlist overview modal
 
+// Page state for Watchlist & Wishlist sidebar pages
+let watchlistPageState = { isInitialized: false, artists: [] };
+let wishlistPageState = { isInitialized: false };
+
 // --- Add these globals for the Sync Page ---
 let spotifyPlaylists = [];
 let selectedPlaylists = new Set();
@@ -2795,16 +2799,43 @@ function initializeMobileNavigation() {
 }
 
 function initializeWatchlist() {
-    // Add watchlist button click handler
+    // Watchlist button navigates to watchlist page
     const watchlistButton = document.getElementById('watchlist-button');
     if (watchlistButton) {
-        watchlistButton.addEventListener('click', showWatchlistModal);
+        watchlistButton.addEventListener('click', () => navigateToPage('watchlist'));
     }
 
-    // Add wishlist button click handler (global init so it works on all pages)
+    // Wishlist button: check for active download process first, otherwise navigate to page
     const wishlistButton = document.getElementById('wishlist-button');
     if (wishlistButton) {
-        wishlistButton.addEventListener('click', handleWishlistButtonClick);
+        wishlistButton.addEventListener('click', async () => {
+            try {
+                const resp = await fetch('/api/active-processes');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    const serverProcess = (data.active_processes || []).find(p => p.playlist_id === 'wishlist');
+                    if (serverProcess) {
+                        // Active wishlist download — show the download progress modal
+                        WishlistModalState.clearUserClosed();
+                        const clientProcess = activeDownloadProcesses['wishlist'];
+                        const needsRehydration = !clientProcess ||
+                            clientProcess.batchId !== serverProcess.batch_id ||
+                            !clientProcess.modalElement ||
+                            !document.body.contains(clientProcess.modalElement);
+                        if (needsRehydration) {
+                            await rehydrateModal(serverProcess, true);
+                        } else {
+                            clientProcess.modalElement.style.display = 'flex';
+                            WishlistModalState.setVisible();
+                        }
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.debug('Could not check active processes:', e);
+            }
+            navigateToPage('wishlist');
+        });
     }
 
     // Update watchlist count initially
@@ -2920,6 +2951,9 @@ async function loadPageData(pageId) {
         stopDbUpdatePolling();
         stopWishlistCountPolling();
         stopLogPolling();
+        // Stop watchlist/wishlist page timers when navigating away
+        if (watchlistCountdownInterval) { clearInterval(watchlistCountdownInterval); watchlistCountdownInterval = null; }
+        if (wishlistCountdownInterval) { clearInterval(wishlistCountdownInterval); wishlistCountdownInterval = null; }
         switch (pageId) {
             case 'dashboard':
                 await loadDashboardData();
@@ -3013,6 +3047,12 @@ async function loadPageData(pageId) {
                 } catch (e) { }
                 // Load comparisons
                 loadHydrabaseComparisons();
+                break;
+            case 'watchlist':
+                await initializeWatchlistPage();
+                break;
+            case 'wishlist':
+                await initializeWishlistPage();
                 break;
             case 'automations':
                 await loadAutomations();
@@ -3528,8 +3568,8 @@ let _wishlistAutoProcessingNotified = false;
 function updateWishlistStatsFromData(data) {
     // Auto-processing detection: close modal and notify (once only)
     if (data.is_auto_processing) {
-        if (!_wishlistAutoProcessingNotified && typeof closeWishlistOverviewModal === 'function') {
-            closeWishlistOverviewModal();
+        if (!_wishlistAutoProcessingNotified) {
+            if (currentPage === 'wishlist') navigateToPage('active-downloads');
             showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
             _wishlistAutoProcessingNotified = true;
         }
@@ -13600,7 +13640,7 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
                 const data = _lastWishlistStats;
                 if (data.is_auto_processing) {
                     if (!_wishlistAutoProcessingNotified) {
-                        closeWishlistOverviewModal();
+                        navigateToPage('active-downloads');
                         showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
                         _wishlistAutoProcessingNotified = true;
                     }
@@ -13713,13 +13753,14 @@ async function cleanupWishlistOverview() {
             const statsData = await statsResponse.json();
 
             if (statsData.total === 0) {
-                // Wishlist is empty, just close the modal
-                closeWishlistOverviewModal();
+                // Wishlist is empty, refresh the page to show empty state
+                wishlistPageState.isInitialized = false;
+                await initializeWishlistPage();
                 await updateWishlistCount();
             } else {
-                // Wishlist still has items, refresh the modal to show updated counts
-                closeWishlistOverviewModal();
-                await openWishlistOverviewModal();
+                // Wishlist still has items, refresh the page to show updated counts
+                wishlistPageState.isInitialized = false;
+                await initializeWishlistPage();
             }
         } else {
             showToast(`Failed to cleanup wishlist: ${result.error || 'Unknown error'}`, 'error');
@@ -13766,9 +13807,9 @@ async function clearEntireWishlist() {
             console.log('Updating wishlist button count...');
             await updateWishlistCount();
 
-            console.log('Closing modal...');
-            closeWishlistOverviewModal();
-            console.log('Modal should be closed now');
+            console.log('Refreshing wishlist page...');
+            wishlistPageState.isInitialized = false;
+            await initializeWishlistPage();
         } else {
             console.error('Clear failed:', result.error);
             showToast(`Failed to clear wishlist: ${result.error || 'Unknown error'}`, 'error');
@@ -14071,11 +14112,13 @@ function backToCategories() {
     const categoryGrid = document.querySelector('.wishlist-category-grid');
     const downloadBtn = document.getElementById('wishlist-download-btn');
     const batchBar = document.getElementById('wishlist-batch-bar');
+    const trackSearch = document.getElementById('wishlist-track-search-input');
 
     categoryTracksSection.style.display = 'none';
     categoryGrid.style.display = 'grid';
     downloadBtn.style.display = 'none';
     if (batchBar) batchBar.style.display = 'none';
+    if (trackSearch) trackSearch.value = '';
     window.selectedWishlistCategory = null;
 }
 
@@ -14383,11 +14426,10 @@ async function downloadSelectedCategory() {
         return;
     }
 
-    // Collect checked track IDs BEFORE closing the modal (checkboxes are destroyed on close)
+    // Collect checked track IDs
     const checkedBoxes = document.querySelectorAll('.wishlist-select-cb:checked');
     const selectedTrackIds = new Set(Array.from(checkedBoxes).map(cb => cb.dataset.trackId).filter(Boolean));
 
-    closeWishlistOverviewModal();
     await openDownloadMissingWishlistModal(category, selectedTrackIds.size > 0 ? selectedTrackIds : null);
 }
 
@@ -39937,7 +39979,377 @@ async function updateArtistCardWatchlistStatus() {
 }
 
 /**
- * Show watchlist modal
+ * Initialize/refresh the watchlist sidebar page
+ */
+async function initializeWatchlistPage() {
+    try {
+        const emptyEl = document.getElementById('watchlist-page-empty');
+        const gridEl = document.getElementById('watchlist-artists-list');
+        const countEl = document.getElementById('watchlist-page-count');
+        const overrideBanner = document.getElementById('watchlist-page-override-banner');
+
+        // Fetch count, artists, scan status, global config in parallel
+        const [countRes, artistsRes, statusRes, globalRes] = await Promise.all([
+            fetch('/api/watchlist/count').then(r => r.json()),
+            fetch('/api/watchlist/artists').then(r => r.json()),
+            fetch('/api/watchlist/scan/status').then(r => r.json()),
+            fetch('/api/watchlist/global-config').then(r => r.json()).catch(() => ({ success: false })),
+        ]);
+
+        const count = countRes.success ? countRes.count : 0;
+        const artists = artistsRes.success ? artistsRes.artists : [];
+        const scanStatus = statusRes.success ? statusRes.status : 'idle';
+        const globalOverrideActive = globalRes.success && globalRes.config && globalRes.config.global_override_enabled;
+
+        // Update count
+        if (countEl) countEl.textContent = `${count} artist${count !== 1 ? 's' : ''}`;
+
+        // Update nav badge
+        const navBadge = document.getElementById('watchlist-nav-badge');
+        if (navBadge) {
+            navBadge.textContent = count;
+            navBadge.classList.toggle('hidden', count === 0);
+        }
+
+        // Empty state
+        if (count === 0) {
+            if (emptyEl) emptyEl.style.display = '';
+            if (gridEl) gridEl.style.display = 'none';
+            watchlistPageState.isInitialized = true;
+            return;
+        }
+        if (emptyEl) emptyEl.style.display = 'none';
+        if (gridEl) gridEl.style.display = '';
+
+        // Store artists for sorting
+        watchlistPageState.artists = artists;
+
+        // Last scan summary strip
+        const scanStrip = document.getElementById('watchlist-last-scan-strip');
+        const scanText = document.getElementById('watchlist-last-scan-text');
+        if (scanStrip && scanText && statusRes.completed_at && statusRes.summary) {
+            const completedDate = new Date(statusRes.completed_at);
+            const ago = _formatTimeAgo(completedDate);
+            const found = statusRes.summary.new_tracks_found || 0;
+            const added = statusRes.summary.tracks_added_to_wishlist || 0;
+            scanText.textContent = `Last scan: ${ago} — ${found} new track${found !== 1 ? 's' : ''} found, ${added} added to wishlist`;
+            scanStrip.style.display = '';
+        } else if (scanStrip) {
+            scanStrip.style.display = 'none';
+        }
+
+        // Global override banner
+        if (overrideBanner) overrideBanner.style.display = globalOverrideActive ? '' : 'none';
+        const settingsBtn = document.getElementById('watchlist-page-settings-btn');
+        if (settingsBtn) {
+            settingsBtn.classList.toggle('watchlist-global-settings-active', globalOverrideActive);
+            settingsBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> ${globalOverrideActive ? 'Global Override ON' : 'Global Settings'}`;
+        }
+
+        // Render artist cards
+        if (gridEl) {
+            gridEl.innerHTML = artists.map(artist => {
+                const pills = [];
+                if (artist.include_albums) pills.push('<span class="watchlist-pill watchlist-pill-active">Albums</span>');
+                if (artist.include_eps) pills.push('<span class="watchlist-pill watchlist-pill-active">EPs</span>');
+                if (artist.include_singles) pills.push('<span class="watchlist-pill watchlist-pill-active">Singles</span>');
+                if (artist.include_live) pills.push('<span class="watchlist-pill watchlist-pill-filter">Live</span>');
+                if (artist.include_remixes) pills.push('<span class="watchlist-pill watchlist-pill-filter">Remixes</span>');
+                if (artist.include_acoustic) pills.push('<span class="watchlist-pill watchlist-pill-filter">Acoustic</span>');
+                if (artist.include_compilations) pills.push('<span class="watchlist-pill watchlist-pill-filter">Compilations</span>');
+                const sourceBadges = [];
+                if (artist.spotify_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-spotify">Spotify</span>');
+                if (artist.itunes_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-itunes">iTunes</span>');
+                if (artist.deezer_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-deezer">Deezer</span>');
+                if (artist.discogs_artist_id) sourceBadges.push('<span class="watchlist-source-badge watchlist-source-discogs">Discogs</span>');
+                const artistPrimaryId = artist.spotify_artist_id || artist.itunes_artist_id || artist.deezer_artist_id || artist.discogs_artist_id;
+                return `
+                    <div class="watchlist-artist-card"
+                         data-artist-name="${artist.artist_name.toLowerCase().replace(/"/g, '&quot;')}"
+                         data-artist-id="${artistPrimaryId}"
+                         data-last-scan="${artist.last_scan_timestamp || ''}"
+                         data-added="${artist.date_added || ''}">
+                        <label class="watchlist-card-checkbox" onclick="event.stopPropagation();">
+                            <input type="checkbox" class="watchlist-select-cb"
+                                   data-artist-id="${artistPrimaryId}"
+                                   data-artist-name="${escapeHtml(artist.artist_name)}"
+                                   onchange="updateWatchlistBatchBar()">
+                            <span class="watchlist-checkbox-custom"></span>
+                        </label>
+                        <button class="watchlist-card-gear"
+                                data-artist-id="${artistPrimaryId}"
+                                data-artist-name="${escapeHtml(artist.artist_name)}"
+                                onclick="event.stopPropagation();"
+                                title="Artist settings">
+                            <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 00-.48-.41h-3.84a.48.48 0 00-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87a.48.48 0 00.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.26.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1115.6 12 3.6 3.6 0 0112 15.6z"/></svg>
+                        </button>
+                        <div class="watchlist-card-image">
+                            ${artist.image_url ? `<img src="${artist.image_url}" alt="${escapeHtml(artist.artist_name)}" onerror="if(!this.dataset.retried){this.dataset.retried='1';this.src=this.src;}else{this.parentElement.innerHTML='<div class=\\'watchlist-card-image-fallback\\'>🎤</div>';}">` : '<div class="watchlist-card-image-fallback">🎤</div>'}
+                        </div>
+                        <div class="watchlist-card-info">
+                            <span class="watchlist-card-name">${escapeHtml(artist.artist_name)}</span>
+                            <span class="watchlist-card-meta">${formatRelativeScanTime(artist.last_scan_timestamp)}</span>
+                        </div>
+                        ${sourceBadges.length > 0 ? `<div class="watchlist-card-sources">${sourceBadges.join('')}</div>` : ''}
+                        ${pills.length > 0 ? `<div class="watchlist-card-pills">${pills.join('')}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+
+            // Wire up gear buttons
+            gridEl.querySelectorAll('.watchlist-card-gear').forEach(button => {
+                button.addEventListener('click', () => {
+                    openWatchlistArtistConfigModal(button.getAttribute('data-artist-id'), button.getAttribute('data-artist-name'));
+                });
+            });
+
+            // Wire up artist card clicks
+            gridEl.querySelectorAll('.watchlist-artist-card').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    if (e.target.closest('.watchlist-card-gear') || e.target.closest('.watchlist-card-checkbox')) return;
+                    const artistId = item.getAttribute('data-artist-id');
+                    const artistName = item.querySelector('.watchlist-card-name').textContent;
+                    openWatchlistArtistDetailView(artistId, artistName);
+                });
+            });
+        }
+
+        // Scan status
+        const scanStatusEl = document.getElementById('watchlist-scan-status');
+        const liveActivityEl = document.getElementById('watchlist-live-activity');
+        const scanBtn = document.getElementById('scan-watchlist-btn');
+        const cancelBtn = document.getElementById('cancel-watchlist-scan-btn');
+
+        if (scanStatus === 'scanning') {
+            if (scanStatusEl) scanStatusEl.style.display = '';
+            if (liveActivityEl) liveActivityEl.style.display = 'flex';
+            if (scanBtn) { scanBtn.disabled = true; scanBtn.classList.add('btn-processing'); scanBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Scanning...'; }
+            if (cancelBtn) cancelBtn.style.display = '';
+            pollWatchlistScanStatus();
+        } else {
+            if (scanStatusEl && statusRes.summary) {
+                scanStatusEl.style.display = '';
+                const summaryEl = document.getElementById('watchlist-page-scan-summary');
+                if (summaryEl) {
+                    summaryEl.style.display = '';
+                    summaryEl.innerHTML = `<span class="sync-stat">Artists: ${statusRes.summary.total_artists || 0}</span><span class="sync-separator"> • </span><span class="sync-stat">New tracks: ${statusRes.summary.new_tracks_found || 0}</span><span class="sync-separator"> • </span><span class="sync-stat">Added to wishlist: ${statusRes.summary.tracks_added_to_wishlist || 0}</span>`;
+                }
+            }
+        }
+
+        // Start countdown timer
+        const nextRunSeconds = countRes.next_run_in_seconds || 0;
+        startWatchlistCountdownTimer(nextRunSeconds);
+
+        watchlistPageState.isInitialized = true;
+
+    } catch (error) {
+        console.error('Error initializing watchlist page:', error);
+        showToast('Failed to load watchlist', 'error');
+    }
+}
+
+/**
+ * Initialize/refresh the wishlist sidebar page
+ */
+async function initializeWishlistPage() {
+    try {
+        const emptyEl = document.getElementById('wishlist-page-empty');
+        const categoriesEl = document.getElementById('wishlist-page-categories');
+        const countEl = document.getElementById('wishlist-page-count');
+        const tracksSection = document.getElementById('wishlist-category-tracks');
+
+        // Fetch stats and cycle
+        const [statsRes, cycleRes] = await Promise.all([
+            fetch('/api/wishlist/stats').then(r => r.json()),
+            fetch('/api/wishlist/cycle').then(r => r.json()),
+        ]);
+
+        const { singles = 0, albums = 0, total = 0 } = statsRes;
+        const currentCycle = cycleRes.cycle || 'albums';
+
+        // Update count
+        if (countEl) countEl.textContent = `${total} track${total !== 1 ? 's' : ''}`;
+
+        // Update nav badge
+        const navBadge = document.getElementById('wishlist-nav-badge');
+        if (navBadge) {
+            navBadge.textContent = total;
+            navBadge.classList.toggle('hidden', total === 0);
+        }
+
+        // Stats strip
+        const statAlbums = document.getElementById('wishlist-stat-albums');
+        const statSingles = document.getElementById('wishlist-stat-singles');
+        const statCycle = document.getElementById('wishlist-stat-cycle');
+        const statsStrip = document.getElementById('wishlist-stats-strip');
+        if (statAlbums) statAlbums.textContent = albums;
+        if (statSingles) statSingles.textContent = singles;
+        if (statCycle) statCycle.textContent = currentCycle === 'albums' ? 'Albums/EPs' : 'Singles';
+
+        // Empty state
+        if (total === 0) {
+            if (emptyEl) emptyEl.style.display = '';
+            if (categoriesEl) categoriesEl.style.display = 'none';
+            if (tracksSection) tracksSection.style.display = 'none';
+            if (statsStrip) statsStrip.style.display = 'none';
+            wishlistPageState.isInitialized = true;
+            return;
+        }
+        if (emptyEl) emptyEl.style.display = 'none';
+        if (categoriesEl) categoriesEl.style.display = '';
+        if (statsStrip) statsStrip.style.display = '';
+
+        // Reset to category view
+        if (tracksSection) tracksSection.style.display = 'none';
+        if (categoriesEl) categoriesEl.style.display = '';
+
+        // Update category cards
+        const albumsCountEl = document.getElementById('wishlist-page-albums-count');
+        const singlesCountEl = document.getElementById('wishlist-page-singles-count');
+        const albumsBadge = document.getElementById('wishlist-page-albums-badge');
+        const singlesBadge = document.getElementById('wishlist-page-singles-badge');
+
+        if (albumsCountEl) albumsCountEl.textContent = `${albums} tracks`;
+        if (singlesCountEl) singlesCountEl.textContent = `${singles} tracks`;
+        if (albumsBadge) albumsBadge.style.display = currentCycle === 'albums' ? '' : 'none';
+        if (singlesBadge) singlesBadge.style.display = currentCycle === 'singles' ? '' : 'none';
+
+        // Add/remove next-in-queue class
+        const albumCard = categoriesEl.querySelector('[data-category="albums"]');
+        const singleCard = categoriesEl.querySelector('[data-category="singles"]');
+        if (albumCard) albumCard.classList.toggle('next-in-queue', currentCycle === 'albums');
+        if (singleCard) singleCard.classList.toggle('next-in-queue', currentCycle === 'singles');
+
+        // Load mosaic covers
+        try {
+            const [albumTracksData, singleTracksData] = await Promise.all([
+                fetch('/api/wishlist/tracks?category=albums&limit=50').then(r => r.json()),
+                fetch('/api/wishlist/tracks?category=singles&limit=50').then(r => r.json()),
+            ]);
+            const albumCovers = extractUniqueCoverImages(albumTracksData.tracks || [], 20);
+            const singleCovers = extractUniqueCoverImages(singleTracksData.tracks || [], 20);
+
+            const albumsMosaic = document.getElementById('wishlist-page-albums-mosaic');
+            const singlesMosaic = document.getElementById('wishlist-page-singles-mosaic');
+            if (albumsMosaic) albumsMosaic.innerHTML = generateMosaicBackground(albumCovers);
+            if (singlesMosaic) singlesMosaic.innerHTML = generateMosaicBackground(singleCovers);
+        } catch (e) {
+            console.debug('Could not load mosaic covers:', e);
+        }
+
+        // Start countdown timer
+        const nextRunSeconds = statsRes.next_run_in_seconds || 0;
+        const nextCycleText = currentCycle === 'albums' ? 'Albums/EPs' : 'Singles';
+        startWishlistCountdownTimer(currentCycle, nextRunSeconds);
+
+        wishlistPageState.isInitialized = true;
+
+    } catch (error) {
+        console.error('Error initializing wishlist page:', error);
+        showToast('Failed to load wishlist', 'error');
+    }
+}
+
+/**
+ * Sort the watchlist artist grid by the selected criteria.
+ */
+function sortWatchlistArtists(sortBy) {
+    const grid = document.getElementById('watchlist-artists-list');
+    if (!grid) return;
+    const cards = Array.from(grid.querySelectorAll('.watchlist-artist-card'));
+    if (cards.length === 0) return;
+
+    cards.sort((a, b) => {
+        switch (sortBy) {
+            case 'name-asc':
+                return (a.dataset.artistName || '').localeCompare(b.dataset.artistName || '');
+            case 'name-desc':
+                return (b.dataset.artistName || '').localeCompare(a.dataset.artistName || '');
+            case 'scan-oldest': {
+                const aTime = a.dataset.lastScan ? new Date(a.dataset.lastScan).getTime() : 0;
+                const bTime = b.dataset.lastScan ? new Date(b.dataset.lastScan).getTime() : 0;
+                return aTime - bTime; // oldest first (never scanned = 0 = top)
+            }
+            case 'scan-newest': {
+                const aTime = a.dataset.lastScan ? new Date(a.dataset.lastScan).getTime() : 0;
+                const bTime = b.dataset.lastScan ? new Date(b.dataset.lastScan).getTime() : 0;
+                return bTime - aTime;
+            }
+            case 'added-newest': {
+                const aTime = a.dataset.added ? new Date(a.dataset.added).getTime() : 0;
+                const bTime = b.dataset.added ? new Date(b.dataset.added).getTime() : 0;
+                return bTime - aTime;
+            }
+            default:
+                return 0;
+        }
+    });
+
+    // Re-append in sorted order (preserves event listeners)
+    cards.forEach(card => grid.appendChild(card));
+}
+
+/**
+ * Filter wishlist tracks by search query within the active track list.
+ */
+function filterWishlistTracks() {
+    const input = document.getElementById('wishlist-track-search-input');
+    if (!input) return;
+    const query = input.value.toLowerCase().trim();
+    const tracksList = document.getElementById('wishlist-tracks-list');
+    if (!tracksList) return;
+
+    // For albums view: filter album cards by album name or track names within
+    const albumCards = tracksList.querySelectorAll('.wishlist-album-card');
+    if (albumCards.length > 0) {
+        albumCards.forEach(card => {
+            const albumHeader = card.querySelector('.wishlist-album-header');
+            const albumName = (albumHeader?.querySelector('.wishlist-album-name')?.textContent || '').toLowerCase();
+            const artistName = (albumHeader?.querySelector('.wishlist-album-artist')?.textContent || '').toLowerCase();
+            const tracks = card.querySelectorAll('.wishlist-album-track');
+            let albumHasMatch = !query || albumName.includes(query) || artistName.includes(query);
+
+            // Also check individual track names
+            if (!albumHasMatch && tracks.length > 0) {
+                tracks.forEach(track => {
+                    const trackName = (track.textContent || '').toLowerCase();
+                    if (trackName.includes(query)) albumHasMatch = true;
+                });
+            }
+
+            card.style.display = albumHasMatch ? '' : 'none';
+        });
+        return;
+    }
+
+    // For singles view: filter individual track rows
+    const trackRows = tracksList.querySelectorAll('.playlist-track-item-with-image, .playlist-track-item');
+    trackRows.forEach(row => {
+        const text = (row.textContent || '').toLowerCase();
+        row.style.display = (!query || text.includes(query)) ? '' : 'none';
+    });
+}
+
+/**
+ * Format a Date object as a relative time string (e.g. "2 hours ago")
+ */
+function _formatTimeAgo(date) {
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays === 1) return 'yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+}
+
+/**
+ * Show watchlist modal (legacy — kept for backward compatibility)
  */
 async function showWatchlistModal() {
     try {
@@ -40725,9 +41137,8 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
                 source = spotify_artist_id ? 'spotify' : discogs_artist_id ? 'discogs' : deezer_artist_id ? 'deezer' : 'itunes';
             }
             if (discogId) {
-                // Close watchlist modal + detail overlay
+                // Close detail overlay and navigate to Artists page
                 closeWatchlistArtistDetailView();
-                closeWatchlistModal();
                 // Navigate to Artists page and load discography
                 navigateToPage('artists');
                 setTimeout(() => {
@@ -40750,13 +41161,10 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
             removeFromWatchlistModal(artistId, artistName);
         });
 
-        // Append to the modal container
-        const container = document.querySelector('.watchlist-fullscreen');
-        if (container) {
-            container.appendChild(overlay);
-            // Trigger slide-in animation
-            requestAnimationFrame(() => overlay.classList.add('visible'));
-        }
+        // Append to body as a fixed overlay
+        document.body.appendChild(overlay);
+        // Trigger slide-in animation
+        requestAnimationFrame(() => overlay.classList.add('visible'));
 
     } catch (error) {
         console.error('Error opening artist detail view:', error);
@@ -40932,10 +41340,10 @@ async function saveWatchlistGlobalConfig() {
             showToast('Global watchlist settings saved', 'success');
             closeWatchlistGlobalSettingsModal();
 
-            // Refresh the watchlist modal to update button and banner
-            const watchlistModal = document.getElementById('watchlist-modal');
-            if (watchlistModal && watchlistModal.style.display === 'flex') {
-                await showWatchlistModal();
+            // Refresh the watchlist page to update the grid
+            if (currentPage === 'watchlist') {
+                watchlistPageState.isInitialized = false;
+                await initializeWatchlistPage();
             }
         } else {
             showToast(`Error: ${data.error}`, 'error');
@@ -41006,10 +41414,10 @@ async function saveWatchlistArtistConfig(artistId) {
             showToast('Artist preferences saved successfully', 'success');
             closeWatchlistArtistConfigModal();
 
-            // Refresh watchlist modal if it's open
-            const watchlistModal = document.getElementById('watchlist-modal');
-            if (watchlistModal && watchlistModal.style.display === 'flex') {
-                await showWatchlistModal();
+            // Refresh watchlist page if we're on it
+            if (currentPage === 'watchlist') {
+                watchlistPageState.isInitialized = false;
+                await initializeWatchlistPage();
             }
         } else {
             showToast(`Error saving preferences: ${data.error}`, 'error');
@@ -41494,8 +41902,9 @@ async function removeFromWatchlistModal(artistId, artistName) {
         // Close detail view if open
         closeWatchlistArtistDetailView();
 
-        // Refresh the modal
-        showWatchlistModal();
+        // Refresh the watchlist page
+        watchlistPageState.isInitialized = false;
+        await initializeWatchlistPage();
 
         // Update button count
         updateWatchlistButtonCount();
@@ -41585,8 +41994,9 @@ async function batchRemoveFromWatchlist() {
 
         console.log(`❌ Batch removed ${data.removed} artists from watchlist`);
 
-        // Refresh the modal
-        showWatchlistModal();
+        // Refresh the watchlist page
+        watchlistPageState.isInitialized = false;
+        await initializeWatchlistPage();
 
         // Update button count
         updateWatchlistButtonCount();
