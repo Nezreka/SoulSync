@@ -1587,11 +1587,7 @@ class WatchlistScanner:
     def _match_to_spotify(self, artist_name: str) -> Optional[str]:
         """Match artist name to Spotify ID using fuzzy name comparison."""
         try:
-            # Use the authenticated spotify_client passed to the scanner,
-            # not get_client_for_source which creates a fresh unauthenticated instance
-            client = self.spotify_client
-            if not client or not client.is_spotify_authenticated():
-                client = get_client_for_source('spotify')
+            client = get_client_for_source('spotify')
             if not client:
                 return None
 
