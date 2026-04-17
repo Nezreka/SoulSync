@@ -19891,11 +19891,13 @@ async function addModalTracksToWishlist(playlistId) {
         }
     }
 
-    // Get artist/album context if available (for artist album downloads)
-    const artist = process.artist || { name: 'Unknown Artist', id: null };
+    // Get album context if available (for artist album downloads)
+    // Artist is resolved per-track below — process.artist is only set for album downloads,
+    // not for playlists, so we must NOT use it as a blanket default.
+    const processArtist = process.artist || null;
     const album = process.album || process.playlist || { name: 'Playlist', id: playlistId };
 
-    console.log(`🔄 Adding ${tracks.length} tracks from "${album.name}" to wishlist`);
+    console.log(`🔄 Adding ${tracks.length} tracks from "${album.name}" to wishlist (process artist: ${processArtist?.name || 'per-track'})`);
 
     // Disable the button to prevent double-clicks
     const wishlistBtn = document.getElementById(`add-to-wishlist-btn-${playlistId}`);
@@ -19966,6 +19968,16 @@ async function addModalTracksToWishlist(playlistId) {
                     trackAlbumType = 'album';
                 }
 
+                // Resolve artist per-track: prefer track's own artists over process-level
+                let trackArtist;
+                if (formattedArtists.length > 0 && formattedArtists[0].name && formattedArtists[0].name !== 'Unknown Artist') {
+                    trackArtist = formattedArtists[0];
+                } else if (processArtist && processArtist.name) {
+                    trackArtist = processArtist;
+                } else {
+                    trackArtist = { name: 'Unknown Artist', id: null };
+                }
+
                 const response = await fetch('/api/add-album-to-wishlist', {
                     method: 'POST',
                     headers: {
@@ -19973,12 +19985,12 @@ async function addModalTracksToWishlist(playlistId) {
                     },
                     body: JSON.stringify({
                         track: formattedTrack,
-                        artist: artist,
+                        artist: trackArtist,
                         album: trackAlbum,
                         source_type: 'album',
                         source_context: {
                             album_name: trackAlbum.name,
-                            artist_name: artist.name,
+                            artist_name: trackArtist.name,
                             album_type: trackAlbumType
                         }
                     })
