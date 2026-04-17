@@ -74151,20 +74151,29 @@ async function loadServerPlaylists() {
             return;
         }
 
-        // Only show server playlists that have a matching mirrored playlist or sync history entry
+        // Separate synced vs non-synced playlists
         const mirroredNames = new Set(mirroredAll.map(p => p.name.trim().toLowerCase()));
         const syncedNames = new Set(historyNames.map(n => n.trim().toLowerCase()));
-        const filtered = data.playlists.filter(pl => {
+        const synced = [];
+        const unsynced = [];
+        for (const pl of data.playlists) {
             const key = pl.name.trim().toLowerCase();
-            return mirroredNames.has(key) || syncedNames.has(key);
-        });
+            if (mirroredNames.has(key) || syncedNames.has(key)) {
+                pl._synced = true;
+                synced.push(pl);
+            } else {
+                pl._synced = false;
+                unsynced.push(pl);
+            }
+        }
 
-        _serverPlaylists = filtered;
+        _serverPlaylists = [...synced, ...unsynced];
         const title = document.getElementById('server-tab-title');
-        if (title) title.textContent = `Server Playlists (${data.server_type ? data.server_type.charAt(0).toUpperCase() + data.server_type.slice(1) : ''})`;
+        const serverName = data.server_type ? data.server_type.charAt(0).toUpperCase() + data.server_type.slice(1) : '';
+        if (title) title.textContent = `Server Playlists (${serverName})`;
 
-        if (filtered.length === 0) {
-            if (container) container.innerHTML = '<div class="playlist-placeholder">No synced playlists found. Only server playlists that have been synced via SoulSync are shown here.</div>';
+        if (synced.length === 0 && unsynced.length === 0) {
+            if (container) container.innerHTML = '<div class="playlist-placeholder">No playlists found on your media server.</div>';
             return;
         }
 
@@ -74176,11 +74185,13 @@ async function loadServerPlaylists() {
         };
         const sIcon = serverIcons[data.server_type] || serverIcons.plex;
 
-        container.innerHTML = `<div class="server-pl-grid">${filtered.map((pl, i) => {
+        function _renderPlCard(pl, i, isSynced) {
             const hue = (i * 37 + 200) % 360;
             const safeName = _esc(pl.name).replace(/'/g, "\\'");
+            const cardClass = isSynced ? 'server-pl-card' : 'server-pl-card server-pl-unsynced';
+            const action = isSynced ? 'Open Editor' : 'View Tracks';
             return `
-            <div class="server-pl-card" onclick="openServerPlaylistEditor('${pl.id}', '${safeName}')" style="animation-delay: ${i * 0.04}s; --card-hue: ${hue}">
+            <div class="${cardClass}" onclick="openServerPlaylistEditor('${pl.id}', '${safeName}')" style="animation-delay: ${i * 0.04}s; --card-hue: ${hue}">
                 <div class="server-pl-card-glow"></div>
                 <div class="server-pl-card-top">
                     <div class="server-pl-card-icon-wrap">
@@ -74194,16 +74205,43 @@ async function loadServerPlaylists() {
                     <div class="server-pl-card-name">${_esc(pl.name)}</div>
                     <div class="server-pl-card-meta">
                         <span class="server-pl-track-count">${pl.track_count}</span> tracks
+                        ${isSynced ? '<span class="server-pl-synced-badge">Synced</span>' : ''}
                     </div>
                 </div>
                 <div class="server-pl-card-footer">
-                    <span class="server-pl-card-action">Open Editor</span>
+                    <span class="server-pl-card-action">${action}</span>
                     <span class="server-pl-card-arrow">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                     </span>
                 </div>
             </div>`;
-        }).join('')}</div>`;
+        }
+
+        let html = '';
+
+        if (synced.length > 0) {
+            html += `<div class="server-pl-section">
+                <div class="server-pl-section-header">
+                    <span class="server-pl-section-icon">&#128279;</span>
+                    <span class="server-pl-section-title">Synced Playlists</span>
+                    <span class="server-pl-section-count">${synced.length}</span>
+                </div>
+                <div class="server-pl-grid">${synced.map((pl, i) => _renderPlCard(pl, i, true)).join('')}</div>
+            </div>`;
+        }
+
+        if (unsynced.length > 0) {
+            html += `<div class="server-pl-section server-pl-section-unsynced">
+                <div class="server-pl-section-header">
+                    <span class="server-pl-section-icon">&#127925;</span>
+                    <span class="server-pl-section-title">Other Server Playlists</span>
+                    <span class="server-pl-section-count">${unsynced.length}</span>
+                </div>
+                <div class="server-pl-grid">${unsynced.map((pl, i) => _renderPlCard(pl, i + synced.length, false)).join('')}</div>
+            </div>`;
+        }
+
+        container.innerHTML = html;
 
     } catch (e) {
         if (container) container.innerHTML = `<div class="playlist-placeholder">Error: ${e.message}</div>`;
