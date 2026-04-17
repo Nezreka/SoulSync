@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import sys
+import uuid
 
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
@@ -529,8 +530,16 @@ class UnknownArtistFixerJob(RepairJob):
                 if artist_row:
                     new_artist_id = artist_row[0]
                 else:
-                    cursor.execute("INSERT INTO artists (name) VALUES (?)", (corrected_artist,))
-                    new_artist_id = cursor.lastrowid
+                    safe_artist_name = re.sub(
+                        r'[^A-Za-z0-9_.-]+',
+                        '_',
+                        corrected_artist.strip() or 'unknown'
+                    )
+                    new_artist_id = f"artist_local_{safe_artist_name}_{uuid.uuid4().hex[:8]}"
+                    cursor.execute(
+                        "INSERT INTO artists (id, name) VALUES (?, ?)",
+                        (new_artist_id, corrected_artist),
+                    )
 
                 # Update track's artist_id and file_path
                 cursor.execute("""

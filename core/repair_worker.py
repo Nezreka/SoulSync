@@ -14,6 +14,7 @@ import shutil
 import sys
 import threading
 import time
+import uuid
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -1486,8 +1487,16 @@ class RepairWorker:
                 row = cursor.fetchone()
                 new_artist_id = row[0] if row else None
                 if not new_artist_id:
-                    cursor.execute("INSERT INTO artists (name) VALUES (?)", (corrected_artist,))
-                    new_artist_id = cursor.lastrowid
+                    safe_artist_name = re.sub(
+                        r'[^A-Za-z0-9_.-]+',
+                        '_',
+                        corrected_artist.strip() or 'unknown'
+                    )
+                    new_artist_id = f"artist_local_{safe_artist_name}_{uuid.uuid4().hex[:8]}"
+                    cursor.execute(
+                        "INSERT INTO artists (id, name) VALUES (?, ?)",
+                        (new_artist_id, corrected_artist),
+                    )
 
                 cursor.execute("UPDATE tracks SET artist_id = ?, file_path = ? WHERE id = ?",
                                (new_artist_id, final_path, track_id))
@@ -1601,9 +1610,18 @@ class RepairWorker:
                 if row:
                     cursor.execute("UPDATE tracks SET artist_id = ? WHERE id = ?", (row[0], track_id))
                 else:
-                    cursor.execute("INSERT INTO artists (name) VALUES (?)", (aid_artist,))
+                    safe_artist_name = re.sub(
+                        r'[^A-Za-z0-9_.-]+',
+                        '_',
+                        aid_artist.strip() or 'unknown'
+                    )
+                    new_artist_id = f"artist_local_{safe_artist_name}_{uuid.uuid4().hex[:8]}"
+                    cursor.execute(
+                        "INSERT INTO artists (id, name) VALUES (?, ?)",
+                        (new_artist_id, aid_artist),
+                    )
                     cursor.execute("UPDATE tracks SET artist_id = ? WHERE id = ?",
-                                   (cursor.lastrowid, track_id))
+                                   (new_artist_id, track_id))
             conn.commit()
             conn.close()
         except Exception as e:
@@ -2140,6 +2158,12 @@ class RepairWorker:
                     # COPY: duplicate file, create new DB record
                     shutil.copy2(src_path, target_path)
                     action = 'copied'
+                    source_track_id = re.sub(
+                        r'[^A-Za-z0-9_.-]+',
+                        '_',
+                        str(getattr(candidate, 'id', 'unknown'))
+                    )
+                    new_track_id = f"album_fill_{source_track_id}_{uuid.uuid4().hex[:8]}"
 
                     conn = self.db._get_connection()
                     cursor = conn.cursor()
@@ -2149,10 +2173,10 @@ class RepairWorker:
                     target_artist_id = artist_row[0] if artist_row else candidate.artist_id
 
                     cursor.execute("""
-                        INSERT INTO tracks (album_id, artist_id, title, track_number, duration,
+                        INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration,
                                             file_path, bitrate, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, (album_id, target_artist_id, track_name, track_number,
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, (new_track_id, album_id, target_artist_id, track_name, track_number,
                           candidate.duration, target_path, candidate.bitrate))
                     conn.commit()
 

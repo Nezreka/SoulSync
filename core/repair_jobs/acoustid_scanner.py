@@ -84,14 +84,16 @@ class AcoustIDScannerJob(RepairJob):
             checkpoint_id = context.config_manager.get(
                 f'repair.jobs.{self.job_id}.checkpoint_id', None
             )
+        if checkpoint_id is not None:
+            checkpoint_id = str(checkpoint_id)
 
         # Build ordered list of (track_id, info) sorted by ID for deterministic order
-        track_list = sorted(db_tracks.items(), key=lambda x: x[0])
+        track_list = sorted(db_tracks.items(), key=lambda x: str(x[0]))
 
         # Skip past checkpoint if resuming
         if checkpoint_id is not None:
             original_len = len(track_list)
-            track_list = [(tid, info) for tid, info in track_list if tid > checkpoint_id]
+            track_list = [(tid, info) for tid, info in track_list if str(tid) > checkpoint_id]
             if len(track_list) < original_len:
                 logger.info("Resuming AcoustID scan from checkpoint ID %s (%d tracks remaining)",
                             checkpoint_id, len(track_list))
@@ -258,6 +260,13 @@ class AcoustIDScannerJob(RepairJob):
             """)
             for row in cursor.fetchall():
                 track_id = row[0]
+                if track_id is None:
+                    logger.warning(
+                        "Skipping track row with null ID while loading AcoustID scan candidates: %s",
+                        row[3] or "<unknown file>",
+                    )
+                    continue
+                track_id = str(track_id)
                 tracks[track_id] = {
                     'title': row[1] or '',
                     'artist': row[2] or '',
