@@ -3617,6 +3617,8 @@ const WHATS_NEW = {
         { title: 'Reject Junk Artist Soulseek Results', desc: 'Soulseek search results from "Various Artists", "VA", "Unknown Artist", and "Unknown Album" folders are now automatically rejected. These compilation/junk folders almost never contain properly tagged files for the target artist' },
         { title: 'Clear Wishlist Cancels Downloads', desc: 'Clearing the wishlist now also cancels any active wishlist download batch. Previously the download queue would keep running after the wishlist was cleared' },
         { title: 'Downloads Batch Panel', desc: 'Downloads page now shows a batch context panel on the right side. Each active batch (wishlist, sync, album download) gets a color-coded card with progress, cancel button, and expandable track list. Color indicators on download rows link them to their batch. Completed batch history shows the last 7 days', page: 'active-downloads' },
+        { title: 'Fix Unknown Artist on Wishlist Downloads', desc: 'Adding tracks to wishlist from a playlist download modal was storing "Unknown Artist" as the artist context. Now resolves the artist per-track from the track\'s own metadata instead of the playlist-level artist which is only set for album downloads' },
+        { title: 'Fix Download Modal Freezing Mid-Download', desc: 'Download modals (wishlist, sync, album) would freeze and stop updating after the first track completed. Caused by M3U auto-save firing every 2 seconds during downloads, exhausting Flask server threads. Now saves M3U once on completion only' },
 
         // --- April 15, 2026 ---
         { date: 'April 15, 2026' },

@@ -22333,6 +22333,8 @@ def get_version_info():
                     "• Fix slskd timeout spam — dashboard and download status skip slskd polling when Soulseek is not active or disconnected",
                     "• Fix Soulseek search queries missing album name — reduces wrong-artist downloads",
                     "• Downloads batch panel — color-coded batch cards with progress, cancel, expand, and 7-day history",
+                    "• Fix Unknown Artist when adding playlist tracks to wishlist",
+                    "• Fix download modal freezing mid-download — M3U auto-save was exhausting server threads",
                     "• Reject Soulseek results from Various Artists/VA/Unknown Artist folders",
                     "• Clearing wishlist now cancels the active wishlist download batch",
                 ],
