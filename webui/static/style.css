@@ -56173,7 +56173,15 @@ body.reduce-effects *::after {
 .adl-batch-panel.collapsed {
     width: 44px;
     min-width: 44px;
-    padding-left: 10px;
+    padding: 0 4px;
+}
+
+.adl-batch-panel.collapsed .adl-batch-panel-title {
+    display: none;
+}
+
+.adl-batch-panel.collapsed .adl-batch-panel-header {
+    justify-content: center;
 }
 
 .adl-batch-empty {
