@@ -1255,8 +1255,7 @@ class WatchlistScanner:
                     if scan_state is not None:
                         scan_state['current_phase'] = 'fetching_similar_artists'
                     artist_profile_id = getattr(artist, 'profile_id', profile_id)
-                    spotify_authenticated = self.spotify_client and self.spotify_client.is_spotify_authenticated()
-                    if self.database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated, profile_id=artist_profile_id):
+                    if self.database.has_fresh_similar_artists(source_artist_id, days_threshold=30, profile_id=artist_profile_id):
                         logger.info("Similar artists for %s are cached and fresh (profile %s)", artist.artist_name, artist_profile_id)
                         self._backfill_similar_artists_fallback_ids(source_artist_id, profile_id=artist_profile_id)
                     else:
@@ -2324,10 +2323,6 @@ class WatchlistScanner:
         except Exception as e:
             logger.error("Error backfilling similar artists IDs: %s", e)
             return 0
-
-    def _backfill_similar_artists_itunes_ids(self, source_artist_id: str, profile_id: int = 1) -> int:
-        """Backward-compatible alias for the provider-priority backfill path."""
-        return self._backfill_similar_artists_fallback_ids(source_artist_id, profile_id=profile_id)
 
     def update_similar_artists(
         self,
@@ -3631,8 +3626,8 @@ class WatchlistScanner:
                     except Exception as e:
                         logger.debug(f"Error building BYLT for {played_artist.get('name', '?')}: {e}")
 
-            # Also save without suffix for backward compatibility (use active source)
-            active_source = 'spotify' if spotify_available else fallback_source
+            # Also save without suffix for backward compatibility (use first active source).
+            active_source = sources_to_process[0]
             release_radar_key = f'release_radar_{active_source}'
             discovery_weekly_key = f'discovery_weekly_{active_source}'
 

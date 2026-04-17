@@ -1105,6 +1105,29 @@ def test_curate_discovery_playlists_uses_source_priority_for_recent_albums(monke
     assert any(key == "discovery_weekly_deezer" for key, _ in saved_playlists)
 
 
+def test_has_fresh_similar_artists_uses_age_only(tmp_path):
+    from datetime import datetime
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    db.add_or_update_similar_artist(
+        source_artist_id="source-1",
+        similar_artist_name="Similar Artist",
+        similar_artist_itunes_id="it-artist",
+        similar_artist_deezer_id="dz-artist",
+        profile_id=1,
+    )
+
+    with db._get_connection() as conn:
+        conn.execute(
+            "UPDATE similar_artists SET last_updated = ? WHERE source_artist_id = ? AND profile_id = ?",
+            (datetime.now().isoformat(), "source-1", 1),
+        )
+        conn.commit()
+
+    assert db.has_fresh_similar_artists("source-1", days_threshold=30, profile_id=1) is True
+
+
 def test_match_to_spotify_uses_strict_lookup():
     spotify_client = _FakeSpotifyClient(
         search_results=[types.SimpleNamespace(id="fallback-id", name="Artist One")]
