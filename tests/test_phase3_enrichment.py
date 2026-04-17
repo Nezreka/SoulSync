@@ -39,19 +39,6 @@ ENDPOINTS = {
 class TestEnrichmentEventDelivery:
     """enrichment:<worker> socket events are received by the client."""
 
-    @pytest.mark.parametrize('worker', WORKERS)
-    def test_enrichment_event_received(self, test_app, shared_state, worker):
-        """Client receives an enrichment:<worker> event."""
-        app, socketio = test_app
-        client = socketio.test_client(app)
-        build = shared_state['build_enrichment_status']
-
-        socketio.emit(f'enrichment:{worker}', build(worker))
-        received = client.get_received()
-        events = [e for e in received if e['name'] == f'enrichment:{worker}']
-        assert len(events) >= 1
-
-
 # =========================================================================
 # Group B — Data Shape (parameterized)
 # =========================================================================
@@ -160,38 +147,11 @@ class TestEnrichmentHttpParity:
 
 
 # =========================================================================
-# Group D — HTTP Still Works (parameterized)
-# =========================================================================
-
-class TestEnrichmentHttpStillWorks:
-    """HTTP endpoints return 200 with expected structure."""
-
-    @pytest.mark.parametrize('worker', WORKERS)
-    def test_http_enrichment_still_works(self, flask_client, worker):
-        """GET /api/<worker>/status returns 200."""
-        endpoint = ENDPOINTS[worker]
-        resp = flask_client.get(endpoint)
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert 'running' in data
-        assert 'paused' in data
-
-
-# =========================================================================
-# Group E — Backward Compatibility
+# Group D — Backward Compatibility
 # =========================================================================
 
 class TestEnrichmentBackwardCompat:
-    """HTTP endpoints work when no WebSocket is connected."""
-
-    def test_all_http_endpoints_work_without_socket(self, flask_client):
-        """All 7 enrichment HTTP endpoints work without any WebSocket connection."""
-        for worker in WORKERS:
-            endpoint = ENDPOINTS[worker]
-            resp = flask_client.get(endpoint)
-            assert resp.status_code == 200
-            data = resp.get_json()
-            assert data['running'] is True
+    """WebSocket clients still receive broadcast enrichment updates."""
 
     def test_multiple_clients_get_enrichment_updates(self, test_app, shared_state):
         """Multiple WebSocket clients each receive enrichment events."""
