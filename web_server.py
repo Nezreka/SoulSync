@@ -53016,6 +53016,94 @@ def refresh_import_suggestions_cache():
     ).start()
 
 
+# ── Auto-Import Worker ──
+auto_import_worker = None
+try:
+    from core.auto_import_worker import AutoImportWorker
+    _ai_db = get_database()
+    _ai_staging = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
+    _ai_transfer = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+    auto_import_worker = AutoImportWorker(
+        database=_ai_db,
+        staging_path=_ai_staging,
+        transfer_path=_ai_transfer,
+        process_callback=_post_process_matched_download,
+        config_manager=config_manager,
+        automation_engine=automation_engine,
+    )
+    if config_manager.get('auto_import.enabled', False):
+        auto_import_worker.start()
+        print("Auto-import worker started")
+    else:
+        print("Auto-import worker initialized (disabled)")
+except Exception as _ai_err:
+    print(f"Auto-import worker init failed: {_ai_err}")
+
+
+@app.route('/api/auto-import/status', methods=['GET'])
+def auto_import_status():
+    if not auto_import_worker:
+        return jsonify({"success": False, "error": "Auto-import not available"}), 500
+    return jsonify({"success": True, **auto_import_worker.get_status()})
+
+
+@app.route('/api/auto-import/toggle', methods=['POST'])
+def auto_import_toggle():
+    if not auto_import_worker:
+        return jsonify({"success": False, "error": "Auto-import not available"}), 500
+    data = request.get_json() or {}
+    enabled = data.get('enabled', not auto_import_worker.running)
+    if enabled:
+        config_manager.set('auto_import.enabled', True)
+        if not auto_import_worker.running:
+            auto_import_worker.start()
+    else:
+        config_manager.set('auto_import.enabled', False)
+        auto_import_worker.stop()
+    return jsonify({"success": True, "enabled": enabled})
+
+
+@app.route('/api/auto-import/settings', methods=['GET', 'POST'])
+def auto_import_settings():
+    if request.method == 'GET':
+        return jsonify({
+            "success": True,
+            "enabled": config_manager.get('auto_import.enabled', False),
+            "scan_interval": config_manager.get('auto_import.scan_interval', 60),
+            "confidence_threshold": config_manager.get('auto_import.confidence_threshold', 0.9),
+            "auto_process": config_manager.get('auto_import.auto_process', True),
+        })
+    data = request.get_json() or {}
+    for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process']:
+        if key in data:
+            config_manager.set(f'auto_import.{key}', data[key])
+    return jsonify({"success": True})
+
+
+@app.route('/api/auto-import/results', methods=['GET'])
+def auto_import_results():
+    if not auto_import_worker:
+        return jsonify({"success": False, "error": "Auto-import not available"}), 500
+    status_filter = request.args.get('status')
+    limit = request.args.get('limit', 50, type=int)
+    results = auto_import_worker.get_results(status_filter=status_filter, limit=limit)
+    return jsonify({"success": True, "results": results})
+
+
+@app.route('/api/auto-import/approve/<int:item_id>', methods=['POST'])
+def auto_import_approve(item_id):
+    if not auto_import_worker:
+        return jsonify({"success": False, "error": "Auto-import not available"}), 500
+    return jsonify(auto_import_worker.approve_item(item_id))
+
+
+@app.route('/api/auto-import/reject/<int:item_id>', methods=['POST'])
+def auto_import_reject(item_id):
+    if not auto_import_worker:
+        return jsonify({"success": False, "error": "Auto-import not available"}), 500
+    return jsonify(auto_import_worker.reject_item(item_id))
+
+
 @app.route('/api/import/staging/suggestions', methods=['GET'])
 def import_staging_suggestions():
     """Return cached import suggestions. If cache isn't built yet, returns partial/empty with a flag."""

@@ -582,6 +582,32 @@ class MusicDatabase:
                     cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
                     logger.info(f"Added {_col} column to library_history")
 
+            # Auto-import history — tracks auto-import scan results and processing status
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS auto_import_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    folder_name TEXT NOT NULL,
+                    folder_path TEXT NOT NULL,
+                    folder_hash TEXT,
+                    status TEXT NOT NULL DEFAULT 'scanning',
+                    confidence REAL DEFAULT 0.0,
+                    album_id TEXT,
+                    album_name TEXT,
+                    artist_name TEXT,
+                    image_url TEXT,
+                    total_files INTEGER DEFAULT 0,
+                    matched_files INTEGER DEFAULT 0,
+                    match_data TEXT,
+                    identification_method TEXT,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    processed_at TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_aih_status ON auto_import_history (status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_aih_folder_hash ON auto_import_history (folder_hash)")
+
             # Sync history table — tracks the last 100 sync operations with cached context for re-trigger
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sync_history (

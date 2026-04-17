@@ -66339,12 +66339,174 @@ function importPageSwitchTab(tab) {
     importPageState.activeTab = tab;
     document.getElementById('import-page-tab-album').classList.toggle('active', tab === 'album');
     document.getElementById('import-page-tab-singles').classList.toggle('active', tab === 'singles');
+    document.getElementById('import-page-tab-auto')?.classList.toggle('active', tab === 'auto');
     document.getElementById('import-page-album-content').classList.toggle('active', tab === 'album');
-    document.getElementById('import-page-singles-content').classList.toggle('active', tab === 'singles');
+    document.getElementById('import-page-singles-content')?.classList.toggle('active', tab === 'singles');
+    document.getElementById('import-page-auto-content')?.classList.toggle('active', tab === 'auto');
 
     if (tab === 'singles' && importPageState.stagingFiles.length > 0) {
         importPageRenderSinglesList();
     }
+    if (tab === 'auto') {
+        _autoImportLoadStatus();
+        _autoImportLoadResults();
+        _autoImportStartPolling();
+    } else {
+        _autoImportStopPolling();
+    }
+}
+
+// ── Auto-Import Tab ──
+let _autoImportPollInterval = null;
+
+function _autoImportStartPolling() {
+    _autoImportStopPolling();
+    _autoImportPollInterval = setInterval(() => {
+        if (importPageState.activeTab === 'auto') {
+            _autoImportLoadStatus();
+            _autoImportLoadResults();
+        }
+    }, 5000);
+}
+
+function _autoImportStopPolling() {
+    if (_autoImportPollInterval) { clearInterval(_autoImportPollInterval); _autoImportPollInterval = null; }
+}
+
+async function _autoImportToggle(enabled) {
+    try {
+        const res = await fetch('/api/auto-import/toggle', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(enabled ? 'Auto-import enabled' : 'Auto-import disabled', 'success');
+            _autoImportLoadStatus();
+        }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function _autoImportLoadStatus() {
+    try {
+        const res = await fetch('/api/auto-import/status');
+        const data = await res.json();
+        if (!data.success) return;
+
+        const toggle = document.getElementById('auto-import-enabled');
+        const statusText = document.getElementById('auto-import-status-text');
+        const settingsRow = document.getElementById('auto-import-settings-row');
+
+        if (toggle) toggle.checked = data.running;
+        if (settingsRow) settingsRow.style.display = data.running ? '' : 'none';
+        if (statusText) {
+            if (data.paused) statusText.textContent = 'Paused';
+            else if (data.current_status === 'scanning') statusText.textContent = `Scanning: ${data.current_folder || '...'}`;
+            else if (data.running) statusText.textContent = 'Watching';
+            else statusText.textContent = 'Disabled';
+            statusText.className = 'auto-import-status ' + (data.running ? (data.current_status === 'scanning' ? 'scanning' : 'active') : 'disabled');
+        }
+    } catch (e) {}
+}
+
+async function _autoImportLoadResults() {
+    const container = document.getElementById('auto-import-results');
+    if (!container) return;
+    try {
+        const res = await fetch('/api/auto-import/results?limit=30');
+        const data = await res.json();
+        if (!data.success || !data.results || data.results.length === 0) {
+            // Keep empty state if no results
+            if (!container.querySelector('.auto-import-card')) {
+                container.innerHTML = `<div class="auto-import-empty">
+                    <p>No imports yet. Drop album folders into your staging directory.</p>
+                </div>`;
+            }
+            return;
+        }
+
+        container.innerHTML = data.results.map(r => {
+            const confPct = Math.round((r.confidence || 0) * 100);
+            const confClass = confPct >= 90 ? 'high' : confPct >= 70 ? 'medium' : 'low';
+            const statusLabels = {
+                'completed': '&#10003; Imported', 'pending_review': '&#9888; Review',
+                'needs_identification': '&#10007; Unidentified', 'failed': '&#10007; Failed',
+                'scanning': '&#8987; Scanning', 'matched': '&#10003; Matched',
+                'rejected': '&#128683; Rejected', 'approved': '&#9989; Approved',
+            };
+            const statusLabel = statusLabels[r.status] || r.status;
+            const statusClass = r.status === 'completed' ? 'completed' : r.status === 'pending_review' ? 'review' :
+                r.status === 'failed' || r.status === 'needs_identification' ? 'failed' : 'neutral';
+
+            let matchInfo = '';
+            if (r.match_data) {
+                try {
+                    const md = typeof r.match_data === 'string' ? JSON.parse(r.match_data) : r.match_data;
+                    matchInfo = `<div class="auto-import-match-info">${md.matched_count || 0}/${md.total_tracks || '?'} tracks matched</div>`;
+                } catch (e) {}
+            }
+
+            let actions = '';
+            if (r.status === 'pending_review') {
+                actions = `<div class="auto-import-actions">
+                    <button class="watchlist-action-btn watchlist-action-primary" onclick="_autoImportApprove(${r.id})">Approve</button>
+                    <button class="watchlist-action-btn watchlist-action-secondary" onclick="_autoImportReject(${r.id})">Dismiss</button>
+                </div>`;
+            }
+
+            return `<div class="auto-import-card auto-import-${statusClass}">
+                <div class="auto-import-card-left">
+                    ${r.image_url ? `<img class="auto-import-card-art" src="${r.image_url}" alt="">` : `<div class="auto-import-card-art-fallback">&#128191;</div>`}
+                </div>
+                <div class="auto-import-card-center">
+                    <div class="auto-import-card-album">${escapeHtml(r.album_name || r.folder_name)}</div>
+                    <div class="auto-import-card-artist">${escapeHtml(r.artist_name || 'Unknown Artist')}</div>
+                    <div class="auto-import-card-folder">${escapeHtml(r.folder_name)} &middot; ${r.total_files} files</div>
+                    ${matchInfo}
+                    ${r.error_message ? `<div class="auto-import-card-error">${escapeHtml(r.error_message)}</div>` : ''}
+                </div>
+                <div class="auto-import-card-right">
+                    <div class="auto-import-confidence-bar">
+                        <div class="auto-import-confidence-fill auto-import-conf-${confClass}" style="width:${confPct}%"></div>
+                    </div>
+                    <div class="auto-import-confidence-text">${confPct}%</div>
+                    <div class="auto-import-status-badge auto-import-badge-${statusClass}">${statusLabel}</div>
+                    ${actions}
+                </div>
+            </div>`;
+        }).join('');
+
+    } catch (e) {}
+}
+
+async function _autoImportSaveSettings() {
+    const confidence = (document.getElementById('auto-import-confidence')?.value || 90) / 100;
+    const interval = parseInt(document.getElementById('auto-import-interval')?.value || 60);
+    try {
+        await fetch('/api/auto-import/settings', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ confidence_threshold: confidence, scan_interval: interval })
+        });
+        showToast('Settings saved', 'success');
+    } catch (e) { showToast('Error', 'error'); }
+}
+
+async function _autoImportApprove(id) {
+    try {
+        const res = await fetch(`/api/auto-import/approve/${id}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) { showToast('Approved', 'success'); _autoImportLoadResults(); }
+        else showToast(data.error || 'Failed', 'error');
+    } catch (e) { showToast('Error', 'error'); }
+}
+
+async function _autoImportReject(id) {
+    try {
+        const res = await fetch(`/api/auto-import/reject/${id}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) { showToast('Dismissed', 'success'); _autoImportLoadResults(); }
+        else showToast(data.error || 'Failed', 'error');
+    } catch (e) { showToast('Error', 'error'); }
 }
 
 // --- Album Tab: Auto-Detected Groups (from file tags) ---
