@@ -15468,12 +15468,50 @@ def sync_artist_library(artist_id):
 
 @app.route('/api/library/album/<album_id>', methods=['DELETE'])
 def library_delete_album(album_id):
-    """Delete an album and all its tracks from the database (does NOT delete files on disk)."""
+    """Delete an album and all its tracks from the database, optionally deleting files on disk."""
     try:
+        delete_files = request.args.get('delete_files', 'false').lower() == 'true'
         database = get_database()
+        files_deleted = 0
+        files_failed = 0
+
         with database._get_connection() as conn:
             cursor = conn.cursor()
-            # Delete all tracks belonging to this album first
+
+            # If deleting files, resolve and remove each track's file first
+            if delete_files:
+                cursor.execute("SELECT id, file_path FROM tracks WHERE album_id = ?", (album_id,))
+                track_rows = cursor.fetchall()
+                for row in track_rows:
+                    fp = row['file_path']
+                    if not fp:
+                        continue
+                    resolved = _resolve_library_file_path(fp)
+                    if resolved and os.path.exists(resolved):
+                        try:
+                            os.remove(resolved)
+                            files_deleted += 1
+                        except Exception as e:
+                            logger.warning(f"Failed to delete track file: {e}")
+                            files_failed += 1
+                    else:
+                        files_failed += 1
+
+                # Try to remove the album folder if it's now empty
+                if track_rows:
+                    first_fp = track_rows[0]['file_path']
+                    if first_fp:
+                        resolved_first = _resolve_library_file_path(first_fp)
+                        if resolved_first:
+                            album_dir = os.path.dirname(resolved_first)
+                            try:
+                                if os.path.isdir(album_dir) and not os.listdir(album_dir):
+                                    os.rmdir(album_dir)
+                                    logger.info(f"Removed empty album directory: {album_dir}")
+                            except Exception:
+                                pass
+
+            # Delete all tracks belonging to this album
             cursor.execute("DELETE FROM tracks WHERE album_id = ?", (album_id,))
             tracks_deleted = cursor.rowcount
             # Delete the album itself
@@ -15482,7 +15520,13 @@ def library_delete_album(album_id):
                 conn.rollback()
                 return jsonify({"success": False, "error": "Album not found"}), 404
             conn.commit()
-            return jsonify({"success": True, "deleted_count": 1, "tracks_deleted": tracks_deleted})
+            return jsonify({
+                "success": True,
+                "deleted_count": 1,
+                "tracks_deleted": tracks_deleted,
+                "files_deleted": files_deleted,
+                "files_failed": files_failed
+            })
     except Exception as e:
         print(f"Error deleting album {album_id}: {e}")
         import traceback

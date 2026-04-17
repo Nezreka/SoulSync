@@ -47755,12 +47755,30 @@ function _pollRedownloadProgress(taskId, overlay) {
 }
 
 async function deleteLibraryAlbum(albumId) {
-    if (!await showConfirmDialog({ title: 'Delete Album', message: 'Delete this album and all its tracks from the library? (Files on disk are not affected)', confirmText: 'Delete', destructive: true })) return;
+    const choice = await _showAlbumDeleteDialog();
+    if (!choice) return;
+
+    const deleteFiles = choice === 'delete_files';
+    const params = deleteFiles ? '?delete_files=true' : '';
+
     try {
-        const response = await fetch(`/api/library/album/${albumId}`, { method: 'DELETE' });
+        const response = await fetch(`/api/library/album/${albumId}${params}`, { method: 'DELETE' });
         const result = await response.json();
         if (!result.success) throw new Error(result.error);
-        showToast(`Album deleted (${result.tracks_deleted || 0} tracks removed)`, 'success');
+
+        let msg = `Album removed from library (${result.tracks_deleted || 0} tracks)`;
+        let toastType = 'success';
+        if (deleteFiles) {
+            if (result.files_deleted > 0) {
+                msg = `Album deleted — ${result.files_deleted} files removed from disk`;
+            }
+            if (result.files_failed > 0) {
+                msg += ` (${result.files_failed} files could not be deleted)`;
+                toastType = 'warning';
+            }
+        }
+        showToast(msg, toastType);
+
         if (artistDetailPageState.enhancedData) {
             const album = (artistDetailPageState.enhancedData.albums || []).find(a => a.id === albumId);
             if (album && album.tracks) {
@@ -47775,6 +47793,53 @@ async function deleteLibraryAlbum(albumId) {
     } catch (error) {
         showToast(`Delete failed: ${error.message}`, 'error');
     }
+}
+
+function _showAlbumDeleteDialog() {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+
+        const close = (val) => { overlay.remove(); resolve(val); };
+        overlay.onclick = e => { if (e.target === overlay) close(null); };
+
+        overlay.innerHTML = `
+            <div class="smart-delete-modal">
+                <div class="smart-delete-header">
+                    <h3>Delete Album</h3>
+                    <button class="smart-delete-close">&times;</button>
+                </div>
+                <p class="smart-delete-desc">How should this album be deleted?</p>
+                <div class="smart-delete-options">
+                    <button class="smart-delete-option" data-choice="db_only">
+                        <div class="smart-delete-option-icon">📋</div>
+                        <div class="smart-delete-option-info">
+                            <div class="smart-delete-option-title">Remove from Library</div>
+                            <div class="smart-delete-option-desc">Remove the album and all tracks from the database. Files on disk are not affected.</div>
+                        </div>
+                    </button>
+                    <button class="smart-delete-option destructive" data-choice="delete_files">
+                        <div class="smart-delete-option-icon">🗑️</div>
+                        <div class="smart-delete-option-info">
+                            <div class="smart-delete-option-title">Delete Files Too</div>
+                            <div class="smart-delete-option-desc">Remove from library and delete all audio files from disk. Empty album folder will be cleaned up.</div>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        `;
+
+        overlay.querySelectorAll('.smart-delete-option').forEach(btn => {
+            btn.addEventListener('click', () => close(btn.dataset.choice));
+        });
+        overlay.querySelector('.smart-delete-close').addEventListener('click', () => close(null));
+
+        const escHandler = e => { if (e.key === 'Escape') { document.removeEventListener('keydown', escHandler); close(null); } };
+        document.addEventListener('keydown', escHandler);
+
+        document.body.appendChild(overlay);
+    });
 }
 
 function extractFormat(filePath) {
