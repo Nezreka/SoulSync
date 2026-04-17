@@ -30,63 +30,6 @@ DELAY_BETWEEN_ARTISTS = 4.0      # 4 seconds between different artists (was 2s, 
 DELAY_BETWEEN_ALBUMS = 0.5       # 500ms between albums for same artist
 DELAY_BETWEEN_API_BATCHES = 1.0  # 1 second between API batch operations
 
-# iTunes API retry configuration
-ITUNES_MAX_RETRIES = 3
-ITUNES_BASE_DELAY = 1.0  # Base delay in seconds for exponential backoff
-
-
-def _get_fallback_metadata_client():
-    """Get the configured metadata client — delegates to centralized metadata_service."""
-    from core.metadata_service import get_primary_source, get_primary_client
-    return get_primary_client(), get_primary_source()
-
-
-def itunes_api_call_with_retry(func, *args, max_retries=ITUNES_MAX_RETRIES, **kwargs):
-    """
-    Execute an iTunes API call with exponential backoff retry logic.
-
-    Args:
-        func: The function to call
-        *args: Arguments to pass to the function
-        max_retries: Maximum number of retry attempts
-        **kwargs: Keyword arguments to pass to the function
-
-    Returns:
-        The result of the function call, or None if all retries failed
-    """
-    last_error = None
-    for attempt in range(max_retries):
-        try:
-            result = func(*args, **kwargs)
-            return result
-        except requests.exceptions.HTTPError as e:
-            # Handle rate limiting (429) and server errors (5xx)
-            if e.response is not None and e.response.status_code == 429:
-                delay = ITUNES_BASE_DELAY * (2 ** attempt)
-                logger.warning(f"[iTunes] Rate limited, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(delay)
-                last_error = e
-            elif e.response is not None and e.response.status_code >= 500:
-                delay = ITUNES_BASE_DELAY * (2 ** attempt)
-                logger.warning(f"[iTunes] Server error {e.response.status_code}, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(delay)
-                last_error = e
-            else:
-                raise  # Don't retry on client errors (4xx except 429)
-        except requests.exceptions.RequestException as e:
-            # Retry on connection errors
-            delay = ITUNES_BASE_DELAY * (2 ** attempt)
-            logger.warning(f"[iTunes] Connection error, retrying in {delay}s (attempt {attempt + 1}/{max_retries}): {e}")
-            time.sleep(delay)
-            last_error = e
-        except Exception as e:
-            # Don't retry on other exceptions
-            raise
-
-    if last_error:
-        logger.error(f"[iTunes] All {max_retries} retry attempts failed: {last_error}")
-    return None
-
 
 def clean_track_name_for_search(track_name):
     """
@@ -1315,7 +1258,7 @@ class WatchlistScanner:
                     spotify_authenticated = self.spotify_client and self.spotify_client.is_spotify_authenticated()
                     if self.database.has_fresh_similar_artists(source_artist_id, days_threshold=30, require_spotify=spotify_authenticated, profile_id=artist_profile_id):
                         logger.info("Similar artists for %s are cached and fresh (profile %s)", artist.artist_name, artist_profile_id)
-                        self._backfill_similar_artists_itunes_ids(source_artist_id, profile_id=artist_profile_id)
+                        self._backfill_similar_artists_fallback_ids(source_artist_id, profile_id=artist_profile_id)
                     else:
                         logger.info("Fetching similar artists for %s (profile %s)...", artist.artist_name, artist_profile_id)
                         self.update_similar_artists(artist, profile_id=artist_profile_id, source_artist_id=source_artist_id)
@@ -2313,56 +2256,78 @@ class WatchlistScanner:
             logger.error(f"Error fetching similar artists from MusicMap: {e}")
             return []
 
-    def _backfill_similar_artists_itunes_ids(self, source_artist_id: str, profile_id: int = 1) -> int:
-        """
-        Backfill missing iTunes IDs for cached similar artists.
-        This ensures seamless dual-source support without clearing cached data.
+    def _update_similar_artist_source_id(self, similar_artist_id: int, source: str, source_id: str) -> bool:
+        """Persist a resolved similar-artist ID for a supported source."""
+        if source == 'deezer':
+            return self.database.update_similar_artist_deezer_id(similar_artist_id, source_id)
+        if source == 'itunes':
+            return self.database.update_similar_artist_itunes_id(similar_artist_id, source_id)
+        return False
 
-        Args:
-            source_artist_id: The source artist ID to backfill similar artists for
-            profile_id: Profile to scope the backfill to
-
-        Returns:
-            Number of similar artists updated with iTunes IDs
+    def _backfill_similar_artists_fallback_ids(self, source_artist_id: str, profile_id: int = 1) -> int:
         """
+        Backfill missing fallback-provider IDs for cached similar artists.
+
+        Uses the configured source priority, filtered to providers that have
+        writable similar-artist ID columns. This keeps old cached rows usable
+        when the active metadata provider changes.
+        """
+        backfill_sources = [source for source in self._discovery_source_priority() if source in {'itunes', 'deezer'}]
+        if not backfill_sources:
+            logger.debug("No fallback metadata providers available for similar-artist backfill")
+            return 0
+
+        updated_total = 0
+
         try:
-            # Get fallback metadata client (iTunes or Deezer)
-            fallback_client, fallback_source = _get_fallback_metadata_client()
-
-            # Get similar artists that are missing IDs for the active fallback source
-            similar_artists = self.database.get_similar_artists_missing_fallback_ids(source_artist_id, fallback_source, profile_id=profile_id)
-
-            if not similar_artists:
-                return 0
-
-            logger.info(f"Backfilling {fallback_source} IDs for {len(similar_artists)} similar artists")
-
-            updated_count = 0
-            for similar_artist in similar_artists:
-                try:
-                    results = fallback_client.search_artists(similar_artist.similar_artist_name, limit=1)
-                    if results and len(results) > 0:
-                        found_id = results[0].id
-                        # Update the similar artist with the correct source ID
-                        if fallback_source == 'deezer':
-                            success = self.database.update_similar_artist_deezer_id(similar_artist.id, found_id)
-                        else:
-                            success = self.database.update_similar_artist_itunes_id(similar_artist.id, found_id)
-                        if success:
-                            updated_count += 1
-                            logger.debug(f"  Backfilled {fallback_source} ID {found_id} for {similar_artist.similar_artist_name}")
-                except Exception as e:
-                    logger.debug(f"  Could not backfill {fallback_source} ID for {similar_artist.similar_artist_name}: {e}")
+            for source in backfill_sources:
+                client = get_client_for_source(source)
+                if not client:
+                    logger.debug("Skipping %s similar-artist backfill - client unavailable", source)
                     continue
 
-            if updated_count > 0:
-                logger.info(f"Backfilled {updated_count} similar artists with {fallback_source} IDs")
+                similar_artists = self.database.get_similar_artists_missing_fallback_ids(
+                    source_artist_id,
+                    source,
+                    profile_id=profile_id,
+                )
+                if not similar_artists:
+                    continue
 
-            return updated_count
+                logger.info("Backfilling %s IDs for %s similar artists", source, len(similar_artists))
+
+                updated_count = 0
+                for similar_artist in similar_artists:
+                    try:
+                        results = self._search_artists_for_source(source, similar_artist.similar_artist_name, limit=1, client=client)
+                        if not results:
+                            continue
+
+                        found_id = self._extract_entity_id(results[0])
+                        if not found_id:
+                            continue
+
+                        success = self._update_similar_artist_source_id(similar_artist.id, source, found_id)
+                        if success:
+                            updated_count += 1
+                            updated_total += 1
+                            logger.debug("  Backfilled %s ID %s for %s", source, found_id, similar_artist.similar_artist_name)
+                    except Exception as e:
+                        logger.debug("  Could not backfill %s ID for %s: %s", source, similar_artist.similar_artist_name, e)
+                        continue
+
+                if updated_count > 0:
+                    logger.info("Backfilled %s similar artists with %s IDs", updated_count, source)
+
+            return updated_total
 
         except Exception as e:
-            logger.error(f"Error backfilling similar artists {fallback_source if 'fallback_source' in dir() else 'fallback'} IDs: {e}")
+            logger.error("Error backfilling similar artists IDs: %s", e)
             return 0
+
+    def _backfill_similar_artists_itunes_ids(self, source_artist_id: str, profile_id: int = 1) -> int:
+        """Backward-compatible alias for the provider-priority backfill path."""
+        return self._backfill_similar_artists_fallback_ids(source_artist_id, profile_id=profile_id)
 
     def update_similar_artists(
         self,

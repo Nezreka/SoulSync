@@ -296,6 +296,54 @@ def test_fetch_similar_artists_from_musicmap_uses_provider_priority(monkeypatch)
     assert spotify_client.search_calls[-1][2]["allow_fallback"] is False
 
 
+def test_backfill_similar_artists_fallback_ids_uses_provider_priority(monkeypatch):
+    def make_client(source):
+        client = types.SimpleNamespace(search_calls=[])
+
+        def search_artists(query, limit=1, **kwargs):
+            client.search_calls.append((query, limit, kwargs))
+            safe_name = query.lower().replace(" ", "-")
+            return [types.SimpleNamespace(id=f"{source}-{safe_name}", name=query)]
+
+        client.search_artists = search_artists
+        return client
+
+    deezer_client = make_client("deezer")
+    itunes_client = make_client("itunes")
+
+    deezer_artist = types.SimpleNamespace(id=11, similar_artist_name="Deezer Artist")
+    itunes_artist = types.SimpleNamespace(id=22, similar_artist_name="iTunes Artist")
+
+    monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(
+        watchlist_scanner_module,
+        "get_client_for_source",
+        lambda source: {
+            "deezer": deezer_client,
+            "itunes": itunes_client,
+        }.get(source),
+    )
+
+    scanner = _build_scanner({"tracks": {"items": []}}, [])
+    scanner.database.get_similar_artists_missing_fallback_ids = (
+        lambda source_artist_id, fallback_source, profile_id=1: [deezer_artist] if fallback_source == "deezer" else [itunes_artist]
+    )
+
+    update_calls = []
+    scanner.database.update_similar_artist_deezer_id = lambda similar_artist_id, deezer_id: update_calls.append(("deezer", similar_artist_id, deezer_id)) or True
+    scanner.database.update_similar_artist_itunes_id = lambda similar_artist_id, itunes_id: update_calls.append(("itunes", similar_artist_id, itunes_id)) or True
+
+    count = scanner._backfill_similar_artists_fallback_ids("source-artist", profile_id=7)
+
+    assert count == 2
+    assert update_calls == [
+        ("deezer", 11, "deezer-deezer-artist"),
+        ("itunes", 22, "itunes-itunes-artist"),
+    ]
+    assert [call[0] for call in deezer_client.search_calls] == ["Deezer Artist"]
+    assert [call[0] for call in itunes_client.search_calls] == ["iTunes Artist"]
+
+
 def test_scan_watchlist_profile_loads_artists_and_applies_overrides(monkeypatch):
     artist = _build_artist()
     scanner = _build_scanner({"tracks": {"items": []}}, [artist])
@@ -352,7 +400,7 @@ def test_scan_watchlist_artists_scans_tracks_and_updates_state(monkeypatch):
     monkeypatch.setattr(scanner, "add_track_to_wishlist", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(scanner, "update_artist_scan_timestamp", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(scanner, "update_similar_artists", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(scanner, "_backfill_similar_artists_itunes_ids", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(scanner, "_backfill_similar_artists_fallback_ids", lambda *_args, **_kwargs: 0)
 
     scan_state = {}
     results = scanner.scan_watchlist_artists([artist], scan_state=scan_state)
@@ -412,7 +460,7 @@ def test_scan_watchlist_artists_skips_placeholder_tracklists(monkeypatch):
     monkeypatch.setattr(scanner, "add_track_to_wishlist", lambda *args, **kwargs: add_calls.append((args, kwargs)) or True)
     monkeypatch.setattr(scanner, "update_artist_scan_timestamp", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(scanner, "update_similar_artists", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(scanner, "_backfill_similar_artists_itunes_ids", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(scanner, "_backfill_similar_artists_fallback_ids", lambda *_args, **_kwargs: 0)
 
     scan_state = {}
     results = scanner.scan_watchlist_artists([artist], scan_state=scan_state)
@@ -451,7 +499,7 @@ def test_scan_watchlist_artists_honors_cancel_check(monkeypatch):
     monkeypatch.setattr(scanner, "add_track_to_wishlist", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(scanner, "update_artist_scan_timestamp", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(scanner, "update_similar_artists", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(scanner, "_backfill_similar_artists_itunes_ids", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(scanner, "_backfill_similar_artists_fallback_ids", lambda *_args, **_kwargs: 0)
 
     cancels = iter([False, True])
     scan_state = {}
