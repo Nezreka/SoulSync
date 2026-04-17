@@ -3227,7 +3227,8 @@ class WatchlistScanner:
         """
         Curate consistent playlist selections that stay the same until next discovery pool update.
 
-        Supports both Spotify and iTunes sources - creates separate curated playlists for each.
+        Supports the discovery metadata sources in priority order and creates
+        separate curated playlists for each source.
         - Release Radar: Prioritizes freshness + popularity from recent releases
         - Discovery Weekly: Balanced mix of popular picks, deep cuts, and mid-tier tracks
 
@@ -3239,9 +3240,6 @@ class WatchlistScanner:
 
             logger.info("Curating discovery playlists...")
 
-            if self.spotify_client and self.spotify_client.is_rate_limited():
-                self._disable_spotify_for_run("global Spotify rate limit active")
-
             # Build listening profile for personalization
             profile = self._get_listening_profile(profile_id)
             if profile['has_data']:
@@ -3250,13 +3248,10 @@ class WatchlistScanner:
                            f"{profile['avg_daily_plays']:.1f} avg daily plays")
 
             # Determine available sources
-            spotify_available = self._spotify_is_primary_source()
-            itunes_client, fallback_source = _get_fallback_metadata_client()
-
-            # Process each available source
-            sources_to_process = [fallback_source]  # Fallback source (iTunes/Deezer) always available
-            if spotify_available:
-                sources_to_process.append('spotify')
+            sources_to_process = self._discovery_source_priority()
+            if not sources_to_process:
+                logger.warning("No discovery sources available to curate playlists")
+                return
 
             # Pre-build artist genre cache from local DB for genre affinity scoring
             _artist_genre_cache = {}
@@ -3309,7 +3304,7 @@ class WatchlistScanner:
 
                         for album in albums:
                             try:
-                                # Get album data from appropriate source
+                                # Get album data from the same source that won discovery
                                 if source == 'spotify':
                                     album_id = album.get('album_spotify_id')
                                 elif source == 'deezer':
@@ -3319,12 +3314,7 @@ class WatchlistScanner:
                                 if not album_id:
                                     continue
 
-                                if source == 'spotify':
-                                    album_data = self.spotify_client.get_album(album_id)
-                                else:
-                                    album_data = itunes_api_call_with_retry(
-                                        itunes_client.get_album, album_id
-                                    )
+                                album_data = self._get_album_data_for_source(source, album_id, album_name=album.get('album_name', ''))
 
                                 if not album_data or 'tracks' not in album_data:
                                     continue
@@ -3524,11 +3514,19 @@ class WatchlistScanner:
             if profile['has_data']:
                 logger.info("Building 'Because You Listen To' playlists...")
                 top_played = self.database.get_top_artists('30d', 3)
-                active_source_for_bylt = 'spotify' if spotify_available else fallback_source
-                all_pool_tracks = self.database.get_discovery_pool_tracks(
-                    limit=2000, new_releases_only=False,
-                    source=active_source_for_bylt, profile_id=profile_id
-                )
+                active_source_for_bylt = None
+                all_pool_tracks = []
+                for candidate_source in sources_to_process:
+                    all_pool_tracks = self.database.get_discovery_pool_tracks(
+                        limit=2000, new_releases_only=False,
+                        source=candidate_source, profile_id=profile_id
+                    )
+                    if all_pool_tracks:
+                        active_source_for_bylt = candidate_source
+                        break
+                if not active_source_for_bylt:
+                    logger.warning("No discovery pool tracks found for Because You Listen To")
+                    all_pool_tracks = []
 
                 # Build source_artist_id → artist_name mapping from watchlist
                 _wa_id_to_name = {}
