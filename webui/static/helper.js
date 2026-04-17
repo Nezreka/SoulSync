@@ -3612,6 +3612,7 @@ const WHATS_NEW = {
         { title: 'Fix Source ID Embedding', desc: 'Critical fix — all source ID tags (Spotify, MusicBrainz, Deezer, AudioDB) were silently skipped on every download due to a missing function parameter. Tags now embed correctly again' },
         { title: 'Fix Watchlist Scan False Failures', desc: 'Artists with no new releases in the lookback window were incorrectly reported as scan failures. Empty discography now correctly treated as success' },
         { title: 'Fix Wishlist Album Remove', desc: 'Removing albums from the Wishlist Nebula now works — API accepts album_name as fallback when album_id is unavailable' },
+        { title: 'Fix Soulseek Timeout Spam', desc: 'Dashboard stats and download status endpoints no longer poll slskd when Soulseek is not the active download source or is known to be disconnected. Eliminates connection timeout errors every 10 seconds for users who have a slskd URL configured but use YouTube/Tidal/etc.' },
 
         // --- April 15, 2026 ---
         { date: 'April 15, 2026' },
