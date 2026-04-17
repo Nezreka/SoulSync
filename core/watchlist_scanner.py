@@ -2841,6 +2841,11 @@ class WatchlistScanner:
                 logger.info("No watchlist artists to check for incremental update")
                 return
 
+            discovery_sources = self._discovery_source_priority()
+            if not discovery_sources:
+                logger.warning("No discovery sources available for incremental update")
+                return
+
             cutoff_date = datetime.now() - timedelta(days=7)  # Only last week's releases
             total_tracks_added = 0
 
@@ -2848,26 +2853,56 @@ class WatchlistScanner:
                 try:
                     logger.info(f"[{artist_idx}/{len(watchlist_artists)}] Checking {artist.artist_name} for new releases...")
 
-                    # Only fetch latest 5 releases (much faster than full scan)
-                    recent_releases = self.spotify_client.get_artist_albums(
-                        artist.spotify_artist_id,
-                        album_type='album,single,ep',
-                        limit=5,
-                        skip_cache=True,
-                        max_pages=1,
-                    )
+                    selected_source = None
+                    selected_artist_id = None
+                    recent_releases = []
+                    artist_genres: List[str] = []
 
-                    if not recent_releases:
+                    for source in discovery_sources:
+                        source_attr = self._artist_id_attribute_for_source(source)
+                        stored_id = getattr(artist, source_attr, None) if source_attr else None
+
+                        cache_callback = None
+                        if source == 'spotify':
+                            cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'spotify', found_id)
+                        elif source == 'itunes':
+                            cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'itunes', found_id)
+                        elif source == 'deezer':
+                            cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'deezer', found_id)
+
+                        artist_id = self._resolve_artist_id_for_source(
+                            source,
+                            artist.artist_name,
+                            stored_id=stored_id,
+                            cache_callback=cache_callback,
+                        )
+                        if not artist_id:
+                            continue
+
+                        recent_releases = self._get_artist_albums_for_source(
+                            source,
+                            artist_id,
+                            album_type='album,single,ep',
+                            limit=5,
+                            skip_cache=True,
+                            max_pages=1,
+                        )
+                        if not recent_releases:
+                            continue
+
+                        try:
+                            artist_data = self._get_artist_data_for_source(source, artist_id)
+                            if artist_data and 'genres' in artist_data:
+                                artist_genres = artist_data['genres']
+                        except Exception as e:
+                            logger.debug(f"Could not fetch genres for {artist.artist_name} on {source}: {e}")
+
+                        selected_source = source
+                        selected_artist_id = artist_id
+                        break
+
+                    if not recent_releases or not selected_source or not selected_artist_id:
                         continue
-
-                    # Fetch artist genres once for all tracks of this artist
-                    artist_genres = []
-                    try:
-                        artist_data = self.spotify_client.get_artist(artist.spotify_artist_id)
-                        if artist_data and 'genres' in artist_data:
-                            artist_genres = artist_data['genres']
-                    except Exception as e:
-                        logger.debug(f"Could not fetch genres for {artist.artist_name}: {e}")
 
                     for release in recent_releases:
                         try:
@@ -2876,7 +2911,7 @@ class WatchlistScanner:
                                 continue  # Skip older releases
 
                             # Get full album data with tracks
-                            album_data = self.spotify_client.get_album(release.id)
+                            album_data = self._get_album_data_for_source(selected_source, release.id, album_name=release.name)
                             if not album_data or 'tracks' not in album_data:
                                 continue
 
@@ -2926,7 +2961,20 @@ class WatchlistScanner:
                                         'artist_genres': artist_genres
                                     }
 
-                                    if self.database.add_to_discovery_pool(track_data, profile_id=profile_id):
+                                    if selected_source == 'spotify':
+                                        track_data['spotify_track_id'] = track['id']
+                                        track_data['spotify_album_id'] = album_data['id']
+                                        track_data['spotify_artist_id'] = selected_artist_id
+                                    elif selected_source == 'deezer':
+                                        track_data['deezer_track_id'] = track['id']
+                                        track_data['deezer_album_id'] = album_data['id']
+                                        track_data['deezer_artist_id'] = selected_artist_id
+                                    else:
+                                        track_data['itunes_track_id'] = track['id']
+                                        track_data['itunes_album_id'] = album_data['id']
+                                        track_data['itunes_artist_id'] = selected_artist_id
+
+                                    if self.database.add_to_discovery_pool(track_data, source=selected_source, profile_id=profile_id):
                                         total_tracks_added += 1
 
                                 except Exception as track_error:

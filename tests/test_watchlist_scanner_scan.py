@@ -827,6 +827,74 @@ def test_cache_discovery_recent_albums_falls_back_to_spotify_when_primary_has_no
     assert spotify_client.album_calls
 
 
+def test_update_discovery_pool_incremental_uses_source_priority(monkeypatch):
+    monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ARTISTS", 0)
+    monkeypatch.setattr(watchlist_scanner_module, "time", types.SimpleNamespace(sleep=lambda *_args, **_kwargs: None))
+    monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(watchlist_scanner_module, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+
+    artist = _build_artist("Incremental Artist")
+    artist.spotify_artist_id = None
+    artist.deezer_artist_id = None
+
+    release = types.SimpleNamespace(
+        id="dz-release-1",
+        name="Incremental Release",
+        release_date="2026-04-16",
+        album_type="album",
+        image_url="https://example.com/deezer-release.jpg",
+    )
+
+    deezer_client = _FakeSourceClient(
+        artist_id="dz-artist",
+        albums=[release],
+        image_url="https://example.com/deezer-artist.jpg",
+        album_payload={
+            "id": "dz-release-1",
+            "name": "Incremental Release",
+            "images": [{"url": "https://example.com/deezer-release.jpg"}],
+            "release_date": "2026-04-16",
+            "popularity": 10,
+            "tracks": {"items": [{"id": "dz-track-1", "name": "Incremental Track", "artists": [{"name": "Incremental Artist"}], "duration_ms": 180000}]},
+            "artists": [{"id": "dz-artist"}],
+        },
+    )
+    spotify_client = _FakeSourceClient(
+        artist_id="sp-artist",
+        albums=[],
+        image_url="https://example.com/spotify-artist.jpg",
+        album_payload={
+            "id": "sp-release-1",
+            "name": "Spotify Incremental Release",
+            "images": [{"url": "https://example.com/spotify-release.jpg"}],
+            "release_date": "2026-04-16",
+            "popularity": 50,
+            "tracks": {"items": [{"id": "sp-track-1", "name": "Spotify Incremental Track", "artists": [{"name": "Incremental Artist"}], "duration_ms": 180000}]},
+            "artists": [{"id": "sp-artist"}],
+        },
+    )
+
+    def fake_get_client_for_source(source):
+        return {
+            "deezer": deezer_client,
+            "spotify": spotify_client,
+        }.get(source)
+
+    monkeypatch.setattr(watchlist_scanner_module, "get_client_for_source", fake_get_client_for_source)
+
+    scanner = _build_scanner({"tracks": {"items": []}}, [artist])
+    scanner.database.should_populate_discovery_pool = lambda hours_threshold=6, profile_id=1: True
+
+    scanner.update_discovery_pool_incremental(profile_id=1)
+
+    assert scanner.database.discovery_pool_calls
+    assert scanner.database.discovery_pool_calls[0][1] == "deezer"
+    assert deezer_client.search_calls == [("Incremental Artist", 1, {})]
+    assert deezer_client.album_calls
+    assert spotify_client.search_calls == []
+    assert spotify_client.album_calls == []
+
+
 def test_curate_discovery_playlists_uses_source_priority_for_recent_albums(monkeypatch):
     monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ARTISTS", 0)
     monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
