@@ -22314,6 +22314,8 @@ def get_version_info():
                     "• Fix slskd timeout spam — dashboard and download status skip slskd polling when Soulseek is not active or disconnected",
                     "• Fix Soulseek search queries missing album name — reduces wrong-artist downloads",
                     "• Downloads batch panel — color-coded batch cards with progress, cancel, expand, and 7-day history",
+                    "• Reject Soulseek results from Various Artists/VA/Unknown Artist folders",
+                    "• Clearing wishlist now cancels the active wishlist download batch",
                 ],
             },
             {
@@ -24931,17 +24933,39 @@ def start_wishlist_missing_downloads():
 
 @app.route('/api/wishlist/clear', methods=['POST'])
 def clear_wishlist():
-    """Endpoint to clear all tracks from the wishlist."""
+    """Endpoint to clear all tracks from the wishlist.
+    Also cancels any active wishlist download batch so cleared tracks don't keep downloading."""
     try:
         from core.wishlist_service import get_wishlist_service
         wishlist_service = get_wishlist_service()
         success = wishlist_service.clear_wishlist(profile_id=get_current_profile_id())
 
         if success:
-            return jsonify({"success": True, "message": "Wishlist cleared successfully"})
+            # Cancel any active wishlist download batch
+            cancelled_count = 0
+            with tasks_lock:
+                for batch_id, batch_data in download_batches.items():
+                    if batch_data.get('playlist_id') == 'wishlist' and batch_data.get('phase') not in ('complete', 'error', 'cancelled'):
+                        batch_data['phase'] = 'cancelled'
+                        for task_id in batch_data.get('queue', []):
+                            if task_id in download_tasks and download_tasks[task_id]['status'] not in ('completed', 'failed', 'not_found', 'cancelled'):
+                                download_tasks[task_id]['status'] = 'cancelled'
+                                cancelled_count += 1
+
+                # Reset wishlist auto-processing flag
+                global wishlist_auto_processing, wishlist_auto_processing_timestamp
+                with wishlist_timer_lock:
+                    wishlist_auto_processing = False
+                    wishlist_auto_processing_timestamp = 0
+
+            if cancelled_count > 0:
+                print(f"[Wishlist Clear] Cancelled {cancelled_count} active wishlist downloads")
+                add_activity_item("", "Wishlist Cleared", f"Wishlist cleared and {cancelled_count} downloads cancelled", "Now")
+
+            return jsonify({"success": True, "message": "Wishlist cleared successfully", "cancelled_downloads": cancelled_count})
         else:
             return jsonify({"success": False, "error": "Failed to clear wishlist"}), 500
-            
+
     except Exception as e:
         print(f"Error clearing wishlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
