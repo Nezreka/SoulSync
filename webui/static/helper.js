@@ -3613,6 +3613,7 @@ const WHATS_NEW = {
         { title: 'Fix Watchlist Scan False Failures', desc: 'Artists with no new releases in the lookback window were incorrectly reported as scan failures. Empty discography now correctly treated as success' },
         { title: 'Fix Wishlist Album Remove', desc: 'Removing albums from the Wishlist Nebula now works — API accepts album_name as fallback when album_id is unavailable' },
         { title: 'Fix Soulseek Timeout Spam', desc: 'Dashboard stats and download status endpoints no longer poll slskd when Soulseek is not the active download source or is known to be disconnected. Eliminates connection timeout errors every 10 seconds for users who have a slskd URL configured but use YouTube/Tidal/etc.' },
+        { title: 'Fix Soulseek Search Missing Album Name', desc: 'Soulseek search queries now include the album name (Artist + Album + Track) as the first search attempt for all download sources. Previously this was excluded for Soulseek-only mode, causing wrong-artist downloads when an artist name matched an album folder in another user\'s library' },
 
         // --- April 15, 2026 ---
         { date: 'April 15, 2026' },
