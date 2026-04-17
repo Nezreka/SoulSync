@@ -54036,6 +54036,64 @@ tr.tag-diff-same {
    SERVER PLAYLIST MANAGER — Sync Page Server Tab
    ================================================================================== */
 
+/* Playlist sections */
+.server-pl-section {
+    margin-bottom: 24px;
+}
+
+.server-pl-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.server-pl-section-icon { font-size: 16px; }
+
+.server-pl-section-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+.server-pl-section-count {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.25);
+    padding: 1px 7px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+}
+
+/* Unsynced cards — dimmer, different accent */
+.server-pl-unsynced {
+    opacity: 0.7;
+}
+
+.server-pl-unsynced:hover {
+    opacity: 1;
+}
+
+.server-pl-unsynced .server-pl-card-glow {
+    background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.03), transparent 60%) !important;
+}
+
+/* Synced badge */
+.server-pl-synced-badge {
+    font-size: 9px;
+    font-weight: 600;
+    color: rgb(var(--accent-light-rgb));
+    padding: 1px 6px;
+    background: rgba(var(--accent-rgb), 0.12);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+    border-radius: 6px;
+    margin-left: 6px;
+}
+
 /* Playlist grid layout */
 .server-pl-grid {
     display: grid;
