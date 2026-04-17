@@ -22312,6 +22312,7 @@ def get_version_info():
                     "• Fix Spotify enrichment worker infinite loop on pre-matched artists",
                     "• Reject Qobuz 30-second sample/preview downloads",
                     "• Fix slskd timeout spam — dashboard and download status skip slskd polling when Soulseek is not active or disconnected",
+                    "• Fix Soulseek search queries missing album name — reduces wrong-artist downloads",
                 ],
             },
             {
