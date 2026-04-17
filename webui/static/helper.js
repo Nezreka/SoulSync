@@ -3600,16 +3600,28 @@ function closeHelperSearch() {
 
 const WHATS_NEW = {
     '2.2': [
+        // --- April 17, 2026 ---
+        { date: 'April 17, 2026' },
+        { title: 'Auto-Import', desc: 'Background staging folder watcher that automatically identifies and imports music. Three strategies: audio tags, folder name parsing, and AcoustID fingerprinting. Confidence-gated: 90%+ auto-imports, 70-90% queued for review, below 70% left for manual. Enable on the Import page Auto tab', page: 'import' },
+        { title: 'Wishlist Nebula', desc: 'Wishlist redesigned as an interactive artist orb visualization. Each artist is a glowing orb with their photo — album fans and single moons orbit around them. Click orbs to expand, download albums/singles directly. Processing state shows live progress', page: 'wishlist' },
+        { title: 'Automation Group Management', desc: 'Rename, delete, and bulk-toggle automation groups. Drag-and-drop automations between groups. Right-click group headers for context menu', page: 'automations' },
+        { title: 'Bidirectional Artist Sync', desc: 'Artist Sync button now pulls new content from your media server AND removes stale library entries no longer on the server. Deep scan mode fetches full metadata for new tracks', page: 'library' },
+        { title: 'Server Playlists — Synced vs Unsynced', desc: 'Server playlist view now shows all playlists from your media server with clear visual separation between synced and unsynced playlists', page: 'sync' },
+        { title: 'Provider-Agnostic Discovery', desc: 'Similar artist matching, discovery pool, and incremental updates now work with any configured metadata source (Spotify, iTunes, Deezer) instead of requiring Spotify. Falls back through sources in priority order', page: 'watchlist' },
+        { title: 'Live Sidebar Badges', desc: 'Watchlist and Wishlist sidebar nav items show live count badges that update from WebSocket pushes' },
+        { title: 'Fix Source ID Embedding', desc: 'Critical fix — all source ID tags (Spotify, MusicBrainz, Deezer, AudioDB) were silently skipped on every download due to a missing function parameter. Tags now embed correctly again' },
+        { title: 'Fix Watchlist Scan False Failures', desc: 'Artists with no new releases in the lookback window were incorrectly reported as scan failures. Empty discography now correctly treated as success' },
+        { title: 'Fix Wishlist Album Remove', desc: 'Removing albums from the Wishlist Nebula now works — API accepts album_name as fallback when album_id is unavailable' },
+
         // --- April 15, 2026 ---
         { date: 'April 15, 2026' },
         { title: 'Dashboard Library Status Card', desc: 'Smart card on the Dashboard showing your library state — server connection, track counts, last refresh time. Guides new users through setup, shows empty-library prompts, and lets you trigger a scan directly from the dashboard', page: 'dashboard' },
         { title: 'AcoustID Scanner Upgrade', desc: 'Now scans your full library (not just Transfer) to detect wrong downloads. Actionable fixes: retag with correct metadata, re-download the right track, or delete the wrong file. Enabled by default, runs daily' },
         { title: 'Tools Page', desc: 'All tool cards (Database Updater, Quality Scanner, Duplicate Cleaner, Retag, Backups, Cache, etc.) and Library Maintenance moved from the Dashboard to a dedicated Tools page in the sidebar. Dashboard shows a quick-link card', page: 'tools' },
-        { title: 'Watchlist & Wishlist Sidebar Pages', desc: 'Watchlist and Wishlist promoted from modals to full sidebar pages. All features preserved — artist grid, scan controls, batch operations, live activity, countdown timers, category cards with mosaic backgrounds. Header buttons now navigate to the pages', page: 'watchlist' },
+        { title: 'Watchlist & Wishlist Sidebar Pages', desc: 'Watchlist and Wishlist promoted from modals to full sidebar pages. All features preserved — artist grid, scan controls, batch operations, live activity, countdown timers. Header buttons now navigate to the pages', page: 'watchlist' },
         { title: 'Picard-Style MusicBrainz Album Consistency', desc: 'Recording MBIDs now pulled from the matched release tracklist instead of independent searches. Batch-level artist name used for stable cache keys. Post-batch consistency pass rewrites album-level tags on all files to guarantee identical MusicBrainz IDs — prevents Navidrome album splits' },
         { title: 'Fix Spotify API Leaking When Deezer/iTunes is Primary', desc: 'Spotify was being called for watchlist album scanning, similar artist discovery, repair jobs, and the Artists page search even when another source was set as primary. All data-fetching now respects the configured primary source. Spotify playlist sync is unaffected' },
         { title: 'Fix OAuth Callback Port Hardcoding', desc: 'Custom callback ports (SOULSYNC_SPOTIFY_CALLBACK_PORT / SOULSYNC_TIDAL_CALLBACK_PORT) are now respected in auth instruction pages and log messages instead of always showing 8888. Added startup diagnostics logging for callback port binding' },
-        { title: 'Fix Wishlist Button on Non-Dashboard Pages', desc: 'Wishlist button click handler moved to global init so it works from any page, not just the dashboard' },
         { title: 'Fix Allow Duplicates Setting Not Saving', desc: 'The "Allow duplicate tracks across albums" toggle was never persisted — it silently reset to ON on every page reload. Now saves correctly' },
         { title: 'Fix Wishlist Dropping Cross-Album Tracks', desc: 'Wishlist cleanup was removing same-titled tracks from different albums even when Allow Duplicates was enabled. Cleanup now respects the setting — same song from different albums can coexist in the wishlist' },
         { title: 'Fix "Replace Lower Quality" Setting Not Persisting', desc: 'The import section appeared twice in the settings save payload — the second instance (with only staging_path) overwrote the first (with replace_lower_quality). Merged into a single block' },
