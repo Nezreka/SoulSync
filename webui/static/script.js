@@ -15056,10 +15056,10 @@ let globalPollingFailureCount = 0; // Track consecutive failures for exponential
 let globalPollingBaseInterval = 2000; // Base polling interval in ms - MATCHES sync.py exactly
 
 function startGlobalDownloadPolling() {
-    if (socketConnected) {
-        console.debug('🔄 [Global Polling] WebSocket active, skipping HTTP polling');
-        return; // WebSocket handles download updates via room subscriptions
-    }
+    // Always run HTTP polling as a fallback — WebSocket connections can silently
+    // stop delivering messages (room subscription lost, server emit error, proxy
+    // timeout) without triggering a disconnect event. The 2-second poll is cheap
+    // (single batched request) and ensures modals never go stale.
     if (globalDownloadStatusPoller) {
         console.debug('🔄 [Global Polling] Already running, skipping start');
         return; // Prevent duplicate pollers
