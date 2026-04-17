@@ -125,6 +125,7 @@ class _FakeDB:
         self.similar_calls = []
         self.discovery_pool_calls = []
         self.discovery_pool_timestamp_calls = []
+        self.discovery_recent_calls = []
         self.db_albums = []
 
     def get_watchlist_artists(self, profile_id=None):
@@ -142,6 +143,13 @@ class _FakeDB:
 
     def add_to_discovery_pool(self, track_data, source, profile_id=1):
         self.discovery_pool_calls.append((track_data, source, profile_id))
+        return True
+
+    def clear_discovery_recent_albums(self, profile_id=1):
+        return True
+
+    def cache_discovery_recent_album(self, album_data, source='spotify', profile_id=1):
+        self.discovery_recent_calls.append((album_data, source, profile_id))
         return True
 
     def cleanup_old_discovery_tracks(self, days_threshold=365):
@@ -716,6 +724,193 @@ def test_populate_discovery_pool_uses_strict_spotify_for_database_album_search(m
         for call in spotify_client.album_calls
         if len(call) == 2
     )
+
+
+def test_cache_discovery_recent_albums_uses_primary_source_first(monkeypatch):
+    monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ARTISTS", 0)
+    monkeypatch.setattr(watchlist_scanner_module, "time", types.SimpleNamespace(sleep=lambda *_args, **_kwargs: None))
+    monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(watchlist_scanner_module, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+
+    artist = _build_artist("Artist One")
+    album = types.SimpleNamespace(
+        id="dz-album-1",
+        name="Recent Deezer Album",
+        album_type="album",
+        release_date="2026-04-01",
+        image_url="https://example.com/deezer-album.jpg",
+    )
+
+    deezer_client = _FakeSourceClient(
+        artist_id="dz-artist",
+        albums=[album],
+        image_url="https://example.com/deezer-artist.jpg",
+    )
+    spotify_client = _FakeSourceClient(
+        artist_id="sp-artist",
+        albums=[types.SimpleNamespace(id="sp-album-1", name="Spotify Album", album_type="album")],
+        image_url="https://example.com/spotify-artist.jpg",
+    )
+
+    def fake_get_client_for_source(source):
+        return {
+            "deezer": deezer_client,
+            "spotify": spotify_client,
+        }.get(source)
+
+    monkeypatch.setattr(watchlist_scanner_module, "get_client_for_source", fake_get_client_for_source)
+
+    scanner = _build_scanner({"tracks": {"items": []}}, [artist])
+    scanner.database.get_top_similar_artists = lambda limit=50, profile_id=1: []
+
+    scanner.cache_discovery_recent_albums(profile_id=1)
+
+    assert scanner.database.discovery_recent_calls
+    assert scanner.database.discovery_recent_calls[0][1] == "deezer"
+    assert deezer_client.album_calls
+    assert spotify_client.search_calls == []
+    assert spotify_client.album_calls == []
+
+
+def test_cache_discovery_recent_albums_falls_back_to_spotify_when_primary_has_no_albums(monkeypatch):
+    monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ARTISTS", 0)
+    monkeypatch.setattr(watchlist_scanner_module, "time", types.SimpleNamespace(sleep=lambda *_args, **_kwargs: None))
+    monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(watchlist_scanner_module, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+
+    artist = _build_artist("Fallback Artist")
+    artist.spotify_artist_id = None
+    deezer_client = _FakeSourceClient(
+        artist_id="dz-artist",
+        albums=[],
+        image_url="https://example.com/deezer-artist.jpg",
+    )
+    spotify_album = types.SimpleNamespace(
+        id="sp-album-1",
+        name="Spotify Recent Album",
+        album_type="album",
+        release_date="2026-04-01",
+        image_url="https://example.com/spotify-album.jpg",
+    )
+    spotify_client = _FakeSourceClient(
+        artist_id="sp-artist",
+        albums=[spotify_album],
+        image_url="https://example.com/spotify-artist.jpg",
+        album_payload={
+            "id": "sp-album-1",
+            "name": "Spotify Recent Album",
+            "images": [{"url": "https://example.com/spotify-album.jpg"}],
+            "release_date": "2026-04-01",
+            "popularity": 50,
+            "tracks": {"items": [{"id": "sp-track-1", "name": "Spotify Track", "artists": [{"name": "Fallback Artist"}]}]},
+            "artists": [{"id": "sp-artist"}],
+        },
+    )
+
+    def fake_get_client_for_source(source):
+        return {
+            "deezer": deezer_client,
+            "spotify": spotify_client,
+        }.get(source)
+
+    monkeypatch.setattr(watchlist_scanner_module, "get_client_for_source", fake_get_client_for_source)
+
+    scanner = _build_scanner({"tracks": {"items": []}}, [artist])
+    scanner.database.get_top_similar_artists = lambda limit=50, profile_id=1: []
+
+    scanner.cache_discovery_recent_albums(profile_id=1)
+
+    assert scanner.database.discovery_recent_calls
+    assert scanner.database.discovery_recent_calls[0][1] == "spotify"
+    assert deezer_client.album_calls
+    assert spotify_client.search_calls == [("Fallback Artist", 1, {"allow_fallback": False})]
+    assert spotify_client.album_calls
+
+
+def test_curate_discovery_playlists_uses_source_priority_for_recent_albums(monkeypatch):
+    monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ARTISTS", 0)
+    monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(watchlist_scanner_module, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+
+    artist = _build_artist("Playlist Artist")
+    scanner = _build_scanner({"tracks": {"items": []}}, [artist])
+
+    saved_playlists = []
+    recent_album = {
+        "album_deezer_id": "dz-album-1",
+        "album_itunes_id": None,
+        "album_spotify_id": None,
+        "album_name": "Recent Deezer Album",
+        "artist_name": "Playlist Artist",
+        "release_date": "2026-04-01",
+        "album_type": "album",
+        "album_cover_url": "https://example.com/deezer-album.jpg",
+        "artist_deezer_id": "dz-artist",
+        "artist_spotify_id": None,
+        "artist_itunes_id": None,
+    }
+    discovery_track = types.SimpleNamespace(
+        artist_name="Playlist Artist",
+        popularity=72,
+        deezer_track_id="dz-track-1",
+        spotify_track_id=None,
+        itunes_track_id=None,
+    )
+    deezer_client = _FakeSourceClient(
+        artist_id="dz-artist",
+        albums=[],
+        image_url="https://example.com/deezer-artist.jpg",
+        album_payload={
+            "id": "dz-album-1",
+            "name": "Recent Deezer Album",
+            "images": [{"url": "https://example.com/deezer-album.jpg"}],
+            "release_date": "2026-04-01",
+            "popularity": 40,
+            "tracks": {"items": [{"id": "dz-track-1", "name": "Track One", "artists": [{"name": "Playlist Artist"}], "duration_ms": 180000}]},
+            "artists": [{"id": "dz-artist"}],
+        },
+    )
+    spotify_client = _FakeSourceClient(
+        artist_id="sp-artist",
+        albums=[],
+        image_url="https://example.com/spotify-artist.jpg",
+        album_payload={
+            "id": "sp-album-1",
+            "name": "Spotify Album",
+            "images": [{"url": "https://example.com/spotify-album.jpg"}],
+            "release_date": "2026-04-01",
+            "popularity": 60,
+            "tracks": {"items": [{"id": "sp-track-1", "name": "Spotify Track", "artists": [{"name": "Playlist Artist"}], "duration_ms": 180000}]},
+            "artists": [{"id": "sp-artist"}],
+        },
+    )
+
+    def fake_get_client_for_source(source):
+        return {
+            "deezer": deezer_client,
+            "spotify": spotify_client,
+        }.get(source)
+
+    monkeypatch.setattr(watchlist_scanner_module, "get_client_for_source", fake_get_client_for_source)
+    monkeypatch.setattr(scanner, "_get_listening_profile", lambda profile_id: {
+        "has_data": False,
+        "top_artist_names": set(),
+        "top_genres": set(),
+        "avg_daily_plays": 0.0,
+        "artist_play_counts": {},
+    })
+    monkeypatch.setattr(scanner.database, "get_discovery_recent_albums", lambda limit, source, profile_id: [recent_album] if source == "deezer" else [], raising=False)
+    monkeypatch.setattr(scanner.database, "get_discovery_pool_tracks", lambda *args, **kwargs: [discovery_track] if kwargs.get("source") == "deezer" else [], raising=False)
+    monkeypatch.setattr(scanner.database, "save_curated_playlist", lambda key, tracks, profile_id=1: saved_playlists.append((key, list(tracks))) or True, raising=False)
+    monkeypatch.setattr(scanner.database, "get_top_artists", lambda *args, **kwargs: [], raising=False)
+    monkeypatch.setattr(scanner.database, "get_watchlist_artists", lambda *args, **kwargs: [], raising=False)
+
+    scanner.curate_discovery_playlists(profile_id=1)
+
+    assert any(call[0] == "dz-album-1" for call in deezer_client.album_calls)
+    assert spotify_client.album_calls == []
+    assert any(key == "release_radar_deezer" for key, _ in saved_playlists)
+    assert any(key == "discovery_weekly_deezer" for key, _ in saved_playlists)
 
 
 def test_match_to_spotify_uses_strict_lookup():
