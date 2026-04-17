@@ -465,7 +465,7 @@ function resubscribeDownloadBatches() {
     if (!socket || !socketConnected) return;
     const activeBatchIds = [];
     Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
-        if (process.batchId && process.status === 'running') {
+        if (process.batchId && (process.status === 'running' || process.status === 'complete')) {
             activeBatchIds.push(process.batchId);
         }
     });
@@ -15075,7 +15075,9 @@ function startGlobalDownloadPolling() {
         let hasOpenWishlistModal = false;
 
         Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
-            if (process.batchId && process.status === 'running') {
+            // Include running AND recently-completed batches — ensures late task
+            // status updates still reach the modal so rows don't freeze mid-download
+            if (process.batchId && (process.status === 'running' || process.status === 'complete')) {
                 activeBatchIds.push(process.batchId);
                 batchToPlaylistMap[process.batchId] = playlistId;
             }
@@ -15187,7 +15189,7 @@ function startGlobalDownloadPollingWithInterval(interval) {
         let hasOpenWishlistModal = false;
 
         Object.entries(activeDownloadProcesses).forEach(([playlistId, process]) => {
-            if (process.batchId && process.status === 'running') {
+            if (process.batchId && (process.status === 'running' || process.status === 'complete')) {
                 activeBatchIds.push(process.batchId);
                 batchToPlaylistMap[process.batchId] = playlistId;
             }
@@ -15661,9 +15663,14 @@ function processModalStatusUpdate(playlistId, data) {
             autoSavePlaylistM3U(playlistId);
         }
 
-        // CLIENT-SIDE COMPLETION: If all tracks are finished (completed or failed), complete the modal
-        const allTracksFinished = totalFinished >= missingCount && missingCount > 0;
-        if (allTracksFinished && process.status !== 'complete') {
+        // CLIENT-SIDE COMPLETION: Only complete when ALL task rows in the UI reflect a terminal state.
+        // Using totalFinished (derived from DOM updates in THIS render pass) prevents premature
+        // completion when the server sends phase='complete' before all rows have been updated.
+        const allTracksFinished = totalFinished >= missingCount && missingCount > 0 && totalFinished > 0;
+        // Extra guard: require the server to also report no active tasks
+        const serverHasActiveWork = (data.tasks || []).some(t =>
+            ['downloading', 'searching', 'queued', 'pending', 'post_processing'].includes(t.status));
+        if (allTracksFinished && !serverHasActiveWork && process.status !== 'complete') {
             console.log(`🎯 [Client Completion] All ${totalFinished}/${missingCount} tracks finished - completing modal locally`);
 
             // Hide cancel button and mark as complete
