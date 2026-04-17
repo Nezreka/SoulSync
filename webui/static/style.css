@@ -55776,9 +55776,32 @@ body.reduce-effects *::after {
    ACTIVE DOWNLOADS PAGE — Premium Glassmorphic
    ============================================ */
 
-.adl-container {
+/* Batch color palette */
+:root {
+    --batch-color-0: 139, 92, 246;    /* violet */
+    --batch-color-1: 59, 130, 246;    /* blue */
+    --batch-color-2: 236, 72, 153;    /* pink */
+    --batch-color-3: 245, 158, 11;    /* amber */
+    --batch-color-4: 16, 185, 129;    /* emerald */
+    --batch-color-5: 239, 68, 68;     /* red */
+    --batch-color-6: 6, 182, 212;     /* cyan */
+    --batch-color-7: 168, 85, 247;    /* purple */
+}
+
+.adl-layout {
+    display: flex;
+    gap: 0;
     padding: 28px 32px;
-    max-width: 960px;
+    max-width: 1440px;
+}
+
+.adl-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.adl-container {
+    padding: 0;
 }
 
 .adl-header {
@@ -56081,10 +56104,435 @@ body.reduce-effects *::after {
     box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.3);
 }
 
+/* ---- Batch row color indicator ---- */
+.adl-row-batch-color {
+    width: 3px;
+    border-radius: 2px;
+    align-self: stretch;
+    flex-shrink: 0;
+    min-height: 32px;
+}
+
+/* ---- Batch Context Panel ---- */
+.adl-batch-panel {
+    width: 340px;
+    flex-shrink: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 0 12px 0 24px;
+    margin-left: 8px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    max-height: calc(100vh - 120px);
+    position: sticky;
+    top: 80px;
+}
+
+.adl-batch-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.adl-batch-panel-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    margin: 0;
+}
+
+/* Collapse toggle */
+.adl-batch-panel-collapse {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.adl-batch-panel-collapse:hover {
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.adl-batch-panel-collapse svg {
+    transition: transform 0.2s;
+}
+
+.adl-batch-panel.collapsed .adl-batch-panel-collapse svg {
+    transform: rotate(180deg);
+}
+
+.adl-batch-panel.collapsed .adl-batch-active,
+.adl-batch-panel.collapsed .adl-batch-history-section {
+    display: none;
+}
+
+.adl-batch-panel.collapsed {
+    width: 44px;
+    min-width: 44px;
+    padding-left: 10px;
+}
+
+.adl-batch-empty {
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 0.8rem;
+    text-align: center;
+    padding: 32px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* Batch card */
+.adl-batch-card {
+    background: rgba(255, 255, 255, 0.018);
+    border: 1px solid rgba(255, 255, 255, 0.035);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-left: 3px solid transparent;
+}
+
+.adl-batch-card:hover {
+    background: rgba(255, 255, 255, 0.035);
+    border-color: rgba(255, 255, 255, 0.06);
+}
+
+.adl-batch-card-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.adl-batch-card-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.adl-batch-card-name {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.adl-batch-card-meta {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 2px;
+}
+
+.adl-batch-card-source {
+    font-size: 0.65rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+
+/* Batch card thumbnail */
+.adl-batch-card-thumb {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.adl-batch-card-actions {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.adl-batch-card-cancel,
+.adl-batch-card-filter {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    padding: 3px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.adl-batch-card-cancel:hover {
+    color: #ef4444;
+}
+
+.adl-batch-card-filter:hover {
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.adl-batch-card-filter.active {
+    color: rgba(var(--accent-rgb), 1);
+    background: rgba(var(--accent-rgb), 0.1);
+}
+
+/* Active batch glow */
+.adl-batch-card.active-glow {
+    border-color: rgba(var(--accent-rgb), 0.15);
+    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.06);
+}
+
+/* Filtered batch highlight */
+.adl-batch-card.filtered {
+    background: rgba(var(--accent-rgb), 0.04);
+    border-color: rgba(var(--accent-rgb), 0.15);
+}
+
+/* Progress bar inside batch card */
+.adl-batch-progress {
+    height: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    margin-top: 8px;
+    overflow: hidden;
+}
+
+.adl-batch-progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: rgba(var(--accent-rgb), 0.7);
+    transition: width 0.4s ease;
+}
+
+.adl-batch-progress-fill.has-failed {
+    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.7), #ef4444);
+}
+
+/* Expanded tracks list */
+.adl-batch-tracks {
+    display: none;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    max-height: 400px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.adl-batch-card.expanded .adl-batch-tracks {
+    display: block;
+}
+
+/* Clickable batch name */
+.adl-batch-card-link {
+    cursor: pointer;
+    transition: color 0.15s;
+}
+
+.adl-batch-card-link:hover {
+    color: rgba(var(--accent-rgb), 1);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.adl-batch-track-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.adl-batch-track-title {
+    flex: 1;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.adl-batch-track-status {
+    flex-shrink: 0;
+    font-size: 0.7rem;
+    min-width: 24px;
+    text-align: right;
+}
+
+.adl-batch-track-status.completed { color: #22c55e; }
+.adl-batch-track-status.active { color: rgba(var(--accent-rgb), 1); }
+.adl-batch-track-status.failed { color: #ef4444; }
+.adl-batch-track-status.queued { color: rgba(255, 255, 255, 0.3); }
+
+/* Mini progress bar per track */
+.adl-batch-track-progress {
+    width: 100%;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 1px;
+    overflow: hidden;
+    margin-top: -2px;
+}
+
+.adl-batch-track-progress-fill {
+    height: 100%;
+    background: rgba(var(--accent-rgb), 0.5);
+    border-radius: 1px;
+    transition: width 0.4s ease;
+}
+
+/* Thumbnail fallback (initial letter) */
+.adl-batch-card-thumb-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    font-weight: 700;
+    border-radius: 6px;
+}
+
+/* Batch filter banner above download list */
+.adl-batch-filter-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    margin-bottom: 8px;
+    background: rgba(var(--accent-rgb), 0.06);
+    border: 1px solid rgba(var(--accent-rgb), 0.12);
+    border-radius: 8px;
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.adl-filter-banner-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.adl-filter-banner-clear {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.72rem;
+    padding: 2px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-left: auto;
+    transition: all 0.15s;
+}
+
+.adl-filter-banner-clear:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* History source color dot */
+.adl-batch-history-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+/* Completed batch cards fade via inline opacity from JS */
+.adl-batch-card {
+    transition: all 0.2s ease, opacity 0.5s ease;
+}
+
+/* Batch history section */
+.adl-batch-history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    padding: 8px 0;
+    margin-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+}
+
+.adl-batch-history-header:hover {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.adl-batch-history-chevron {
+    transition: transform 0.2s;
+}
+
+.adl-batch-history-section.expanded .adl-batch-history-chevron {
+    transform: rotate(180deg);
+}
+
+.adl-batch-history-list {
+    display: none;
+}
+
+.adl-batch-history-section.expanded .adl-batch-history-list {
+    display: block;
+}
+
+.adl-batch-history-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.adl-batch-history-name {
+    flex: 1;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.adl-batch-history-stats {
+    font-size: 0.68rem;
+    color: rgba(255, 255, 255, 0.3);
+    flex-shrink: 0;
+}
+
+.adl-batch-history-date {
+    font-size: 0.65rem;
+    color: rgba(255, 255, 255, 0.2);
+    flex-shrink: 0;
+}
+
 /* ---- Responsive ---- */
 
+@media (max-width: 900px) {
+    .adl-layout {
+        flex-direction: column;
+        padding: 20px 16px;
+    }
+
+    .adl-batch-panel {
+        width: 100%;
+        border-left: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        padding: 16px 12px 0 0;
+        margin-left: 0;
+        margin-top: 16px;
+        max-height: 300px;
+        position: static;
+    }
+}
+
 @media (max-width: 600px) {
-    .adl-container {
+    .adl-layout {
         padding: 16px 12px;
     }
 

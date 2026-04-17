@@ -22313,6 +22313,7 @@ def get_version_info():
                     "• Reject Qobuz 30-second sample/preview downloads",
                     "• Fix slskd timeout spam — dashboard and download status skip slskd polling when Soulseek is not active or disconnected",
                     "• Fix Soulseek search queries missing album name — reduces wrong-artist downloads",
+                    "• Downloads batch panel — color-coded batch cards with progress, cancel, expand, and 7-day history",
                 ],
             },
             {
@@ -30282,6 +30283,22 @@ def get_all_downloads_unified():
                                 artwork = images[0].get('url', '') if isinstance(images[0], dict) else str(images[0])
 
                 status = task.get('status', 'queued')
+                # Determine download progress percentage
+                progress = 0
+                if status == 'completed':
+                    progress = 100
+                elif status == 'post_processing':
+                    progress = 95
+                elif status in ('downloading', 'searching'):
+                    # Check live transfer data for real progress
+                    task_filename = task.get('filename') or track_info.get('filename')
+                    task_username = task.get('username') or track_info.get('username')
+                    if task_filename and task_username:
+                        lookup_key = _make_context_key(task_username, task_filename)
+                        live_info = get_cached_transfer_data().get(lookup_key)
+                        if live_info:
+                            progress = live_info.get('percentComplete', 0)
+
                 items.append({
                     'task_id': task_id,
                     'title': title,
@@ -30289,6 +30306,7 @@ def get_all_downloads_unified():
                     'album': album,
                     'artwork': artwork,
                     'status': status,
+                    'progress': progress,
                     'error': task.get('error_message'),
                     'batch_id': batch_id,
                     'batch_name': batch.get('playlist_name') or batch.get('album_name') or '',
@@ -30302,14 +30320,48 @@ def get_all_downloads_unified():
         # Sort: active first (by priority), then by timestamp desc within each group
         items.sort(key=lambda x: (x['priority'], -x['timestamp']))
 
+        # Build batch summaries for the batch context panel
+        batch_summaries = []
+        with tasks_lock:
+            for bid, batch in download_batches.items():
+                queue = batch.get('queue', [])
+                statuses = [download_tasks[tid]['status'] for tid in queue if tid in download_tasks]
+                batch_summaries.append({
+                    'batch_id': bid,
+                    'playlist_id': batch.get('playlist_id', ''),
+                    'batch_name': batch.get('playlist_name') or batch.get('album_name') or '',
+                    'source_page': batch.get('source_page') or batch.get('initiated_from') or '',
+                    'phase': batch.get('phase', 'unknown'),
+                    'total': len(queue),
+                    'completed': sum(1 for s in statuses if s in ('completed', 'skipped', 'already_owned')),
+                    'failed': sum(1 for s in statuses if s in ('failed', 'not_found', 'cancelled')),
+                    'active': sum(1 for s in statuses if s in ('downloading', 'searching', 'post_processing')),
+                    'queued': sum(1 for s in statuses if s in ('queued', 'pending')),
+                })
+
         return jsonify({
             'success': True,
             'downloads': items[:limit],
             'total': len(items),
+            'batches': batch_summaries,
             'timestamp': time.time(),
         })
     except Exception as e:
         logger.error(f"Error getting unified downloads: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/downloads/batch-history', methods=['GET'])
+def get_batch_history():
+    """Return completed batch summaries from the last N days for the batch panel history section."""
+    try:
+        days = int(request.args.get('days', 7))
+        limit = int(request.args.get('limit', 50))
+        database = get_database()
+        history = database.get_recent_batch_history(days=days, limit=limit)
+        return jsonify({'success': True, 'history': history})
+    except Exception as e:
+        logger.error(f"Error getting batch history: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -31248,7 +31300,7 @@ def _detect_sync_source(playlist_id):
 
 def _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
                                 is_album_download, album_context, artist_context,
-                                playlist_folder_mode):
+                                playlist_folder_mode, source_page=None):
     """Record a sync start to the database.
     If a previous sync history entry exists for the same playlist_id, update it
     instead of creating a duplicate."""
@@ -31289,7 +31341,7 @@ def _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
                     SET batch_id = ?, playlist_name = ?, source = ?, sync_type = ?,
                         tracks_json = ?, artist_context = ?, album_context = ?,
                         thumb_url = ?, total_tracks = ?, is_album_download = ?,
-                        playlist_folder_mode = ?, started_at = CURRENT_TIMESTAMP,
+                        playlist_folder_mode = ?, source_page = ?, started_at = CURRENT_TIMESTAMP,
                         completed_at = NULL, tracks_found = 0, tracks_downloaded = 0, tracks_failed = 0
                     WHERE id = ?
                 """, (batch_id, playlist_name, source, sync_type,
@@ -31297,7 +31349,7 @@ def _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
                       json.dumps(artist_context, ensure_ascii=False) if artist_context else None,
                       json.dumps(album_context, ensure_ascii=False) if album_context else None,
                       thumb_url, len(tracks), int(is_album_download), int(playlist_folder_mode),
-                      existing['id']))
+                      source_page, existing['id']))
                 conn.commit()
                 logger.info(f"Updated existing sync history entry {existing['id']} for '{playlist_name}'")
                 return
@@ -31316,7 +31368,8 @@ def _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
             thumb_url=thumb_url,
             total_tracks=len(tracks),
             is_album_download=is_album_download,
-            playlist_folder_mode=playlist_folder_mode
+            playlist_folder_mode=playlist_folder_mode,
+            source_page=source_page
         )
     except Exception as e:
         logger.warning(f"Failed to record sync history start: {e}")
@@ -32031,10 +32084,18 @@ def start_missing_tracks_process(playlist_id):
             'wing_it': wing_it,
         }
 
-    # Record sync history
+    # Record sync history — derive source_page from context
+    if playlist_id == 'wishlist':
+        _source_page = 'wishlist'
+    elif is_album_download:
+        _source_page = 'album'
+    elif playlist_id.startswith('youtube_'):
+        _source_page = 'sync'
+    else:
+        _source_page = 'sync'
     _record_sync_history_start(batch_id, playlist_id, playlist_name, tracks,
                                is_album_download, album_context, artist_context,
-                               playlist_folder_mode)
+                               playlist_folder_mode, source_page=_source_page)
 
     # Link YouTube playlist to download process if this is a YouTube playlist
     if playlist_id.startswith('youtube_'):
@@ -37854,7 +37915,8 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
             is_album_download=False,
             album_context=None,
             artist_context=None,
-            playlist_folder_mode=False
+            playlist_folder_mode=False,
+            source_page='sync'
         )
 
     try:

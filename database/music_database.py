@@ -645,6 +645,16 @@ class MusicDatabase:
                 except Exception:
                     pass
 
+            # Migration: add source_page column to sync_history (UI origin context for batch panel)
+            try:
+                cursor.execute("SELECT source_page FROM sync_history LIMIT 1")
+            except Exception:
+                try:
+                    cursor.execute("ALTER TABLE sync_history ADD COLUMN source_page TEXT")
+                    logger.info("Added source_page column to sync_history table")
+                except Exception:
+                    pass
+
             # Migration: add track_artist column for per-track artist on compilations/DJ mixes
             try:
                 cursor.execute("SELECT track_artist FROM tracks LIMIT 1")
@@ -10202,7 +10212,7 @@ class MusicDatabase:
     def add_sync_history_entry(self, batch_id, playlist_id, playlist_name, source, sync_type,
                                tracks_json, artist_context=None, album_context=None,
                                thumb_url=None, total_tracks=0, is_album_download=False,
-                               playlist_folder_mode=False):
+                               playlist_folder_mode=False, source_page=None):
         """Record a new sync operation to sync_history."""
         try:
             conn = self._get_connection()
@@ -10210,11 +10220,11 @@ class MusicDatabase:
             cursor.execute("""
                 INSERT INTO sync_history (batch_id, playlist_id, playlist_name, source, sync_type,
                     tracks_json, artist_context, album_context, thumb_url, total_tracks,
-                    is_album_download, playlist_folder_mode)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    is_album_download, playlist_folder_mode, source_page)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (batch_id, playlist_id, playlist_name, source, sync_type,
                   tracks_json, artist_context, album_context, thumb_url, total_tracks,
-                  int(is_album_download), int(playlist_folder_mode)))
+                  int(is_album_download), int(playlist_folder_mode), source_page))
             conn.commit()
             # Cap at 100 entries
             cursor.execute("""
@@ -10363,6 +10373,26 @@ class MusicDatabase:
         except Exception as e:
             logger.debug(f"Error getting sync history stats: {e}")
             return {}
+
+    def get_recent_batch_history(self, days: int = 7, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get completed batch history from the last N days for the downloads batch panel."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, batch_id, playlist_name, source, sync_type, source_page,
+                       total_tracks, tracks_found, tracks_downloaded, tracks_failed,
+                       thumb_url, is_album_download, started_at, completed_at
+                FROM sync_history
+                WHERE completed_at IS NOT NULL
+                  AND started_at >= datetime('now', ? || ' days')
+                ORDER BY started_at DESC
+                LIMIT ?
+            """, (f'-{days}', limit))
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting recent batch history: {e}")
+            return []
 
     def api_get_recently_added(self, entity_type: str = "albums", limit: int = 50) -> List[Dict[str, Any]]:
         """Get recently added entities, ordered by created_at DESC."""
