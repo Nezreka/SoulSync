@@ -5130,23 +5130,33 @@ def _build_system_stats():
         finished_downloads = session_completed_downloads
 
     # Calculate total download speed from active soulseek transfers
+    # Skip the slskd API call entirely when Soulseek is not the active download
+    # source — avoids connection timeout spam every 10 seconds for users who have
+    # a slskd URL configured but are using YouTube/Tidal/etc.
     total_download_speed = 0.0
-    try:
-        transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
-        if transfers_data:
-            for user_data in transfers_data:
-                if 'directories' in user_data:
-                    for directory in user_data['directories']:
-                        if 'files' in directory:
-                            for file_info in directory['files']:
-                                state = file_info.get('state', '').lower()
-                                # Only count actively downloading files
-                                if 'inprogress' in state or 'downloading' in state or 'transferring' in state:
-                                    speed = file_info.get('averageSpeed', 0)
-                                    if isinstance(speed, (int, float)) and speed > 0:
-                                        total_download_speed += float(speed)
-    except Exception as e:
-        print(f"Warning: Could not fetch download speeds: {e}")
+    soulseek_known_down = not _status_cache.get('soulseek', {}).get('connected', True)
+    download_mode = config_manager.get('download_source.mode', 'hybrid')
+    hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
+    soulseek_active = (download_mode == 'soulseek' or
+                       (download_mode == 'hybrid' and 'soulseek' in hybrid_order))
+
+    if soulseek_active and not soulseek_known_down:
+        try:
+            transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+            if transfers_data:
+                for user_data in transfers_data:
+                    if 'directories' in user_data:
+                        for directory in user_data['directories']:
+                            if 'files' in directory:
+                                for file_info in directory['files']:
+                                    state = file_info.get('state', '').lower()
+                                    # Only count actively downloading files
+                                    if 'inprogress' in state or 'downloading' in state or 'transferring' in state:
+                                        speed = file_info.get('averageSpeed', 0)
+                                        if isinstance(speed, (int, float)) and speed > 0:
+                                            total_download_speed += float(speed)
+        except Exception as e:
+            print(f"Warning: Could not fetch download speeds: {e}")
 
     # Convert bytes/sec to KB/s and format
     if total_download_speed > 0:
@@ -9249,7 +9259,11 @@ def get_download_status():
 
     try:
         global _processed_download_ids
-        transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+        # Skip slskd API call if Soulseek is already known to be disconnected
+        soulseek_known_down = not _status_cache.get('soulseek', {}).get('connected', True)
+        transfers_data = None
+        if not soulseek_known_down:
+            transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
 
         # Don't return early if no Soulseek transfers - YouTube/Tidal downloads need to be checked too!
         all_transfers = []
@@ -22297,6 +22311,7 @@ def get_version_info():
                     "• Fix replace lower quality setting not persisting",
                     "• Fix Spotify enrichment worker infinite loop on pre-matched artists",
                     "• Reject Qobuz 30-second sample/preview downloads",
+                    "• Fix slskd timeout spam — dashboard and download status skip slskd polling when Soulseek is not active or disconnected",
                 ],
             },
             {
