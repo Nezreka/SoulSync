@@ -514,17 +514,7 @@ class WatchlistScanner:
         if stored_id:
             return stored_id
 
-        if not client or not hasattr(client, 'search_artists'):
-            return None
-
-        try:
-            search_kwargs = {'limit': 1}
-            if source == 'spotify':
-                search_kwargs['allow_fallback'] = False
-            search_results = client.search_artists(watchlist_artist.artist_name, **search_kwargs)
-        except Exception as e:
-            logger.debug("Could not search %s for %s: %s", source, watchlist_artist.artist_name, e)
-            return None
+        search_results = self._search_artists_for_source(source, watchlist_artist.artist_name, limit=1, client=client)
 
         if not search_results:
             return None
@@ -533,6 +523,22 @@ class WatchlistScanner:
         if found_id and attr:
             self._cache_watchlist_artist_source_id(watchlist_artist, source, found_id)
         return found_id
+
+    def _search_artists_for_source(self, source: str, artist_name: str, limit: int = 1, client: Any = None) -> List[Any]:
+        """Search artists for a specific source, keeping Spotify strict."""
+        if client is None:
+            client = get_client_for_source(source)
+        if not client or not hasattr(client, 'search_artists'):
+            return []
+
+        try:
+            search_kwargs = {'limit': limit}
+            if source == 'spotify':
+                search_kwargs['allow_fallback'] = False
+            return client.search_artists(artist_name, **search_kwargs) or []
+        except Exception as e:
+            logger.debug("Could not search %s for %s: %s", source, artist_name, e)
+            return []
 
     @staticmethod
     def _get_artist_image_from_data(artist_data: Any) -> Optional[str]:
@@ -565,6 +571,41 @@ class WatchlistScanner:
             or getattr(artist_data, 'thumb_url', None)
             or getattr(artist_data, 'cover_image', None)
         )
+
+    def _get_artist_metadata_from_data(self, artist_data: Any) -> Dict[str, Any]:
+        """Extract normalized artist metadata from a provider result."""
+        if not artist_data:
+            return {'name': None, 'image_url': None, 'genres': [], 'popularity': 0}
+
+        if isinstance(artist_data, dict):
+            name = artist_data.get('name') or artist_data.get('artist_name') or artist_data.get('title')
+            genres = artist_data.get('genres') or []
+            popularity = artist_data.get('popularity') or artist_data.get('rank') or 0
+        else:
+            name = (
+                getattr(artist_data, 'name', None)
+                or getattr(artist_data, 'artist_name', None)
+                or getattr(artist_data, 'title', None)
+            )
+            genres = getattr(artist_data, 'genres', None) or []
+            popularity = getattr(artist_data, 'popularity', None) or getattr(artist_data, 'rank', None) or 0
+
+        if isinstance(genres, str):
+            genres = [genres]
+        elif not isinstance(genres, list):
+            genres = list(genres) if genres else []
+
+        try:
+            popularity = int(popularity or 0)
+        except Exception:
+            popularity = 0
+
+        return {
+            'name': name,
+            'image_url': self._get_artist_image_from_data(artist_data),
+            'genres': genres,
+            'popularity': popularity,
+        }
 
     def _get_artist_image_for_source(self, watchlist_artist: WatchlistArtist, source: str, client: Any, artist_id: str) -> Optional[str]:
         """Fetch an artist image for a specific source."""
@@ -2122,20 +2163,22 @@ class WatchlistScanner:
 
     def _fetch_similar_artists_from_musicmap(self, artist_name: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
-        Fetch similar artists from MusicMap and match them to both Spotify and iTunes.
+        Fetch similar artists from MusicMap and match them against configured metadata providers.
 
         Args:
             artist_name: The artist name to find similar artists for
             limit: Maximum number of similar artists to return (default: 20)
 
         Returns:
-            List of matched artist dictionaries with both Spotify and iTunes IDs when available
+            List of matched artist dictionaries with provider-specific IDs when available
         """
         try:
             logger.info(f"Fetching similar artists from MusicMap for: {artist_name}")
 
             # Construct MusicMap URL
-            url_artist = artist_name.lower().replace(' ', '+')
+            from urllib.parse import quote_plus
+
+            url_artist = quote_plus(artist_name.strip())
             musicmap_url = f'https://www.music-map.com/{url_artist}'
 
             # Set headers to mimic a browser
@@ -2173,36 +2216,33 @@ class WatchlistScanner:
 
             logger.info(f"Found {len(similar_artist_names)} similar artists from MusicMap")
 
-            # Get fallback metadata client for matching (iTunes or Deezer)
-            itunes_client, fallback_source = _get_fallback_metadata_client()
+            source_priority = self._discovery_source_priority()
+            source_id_keys = {
+                'spotify': 'spotify_id',
+                'itunes': 'itunes_id',
+                'deezer': 'deezer_id',
+            }
+            searched_source_ids = {}
+            available_sources = []
 
-            # Get the searched artist's IDs to exclude them
-            searched_spotify_id = None
-            searched_fallback_id = None
-            try:
-                # Try Spotify search (only when Spotify is the configured primary source)
-                if self._spotify_is_primary_source():
-                    searched_results = self.spotify_client.search_artists(artist_name, limit=1, allow_fallback=False)
-                    if searched_results and len(searched_results) > 0:
-                        searched_spotify_id = searched_results[0].id
-            except Exception as e:
-                logger.debug(f"Could not get searched artist Spotify ID: {e}")
+            for source in source_priority:
+                search_results = self._search_artists_for_source(source, artist_name, limit=1)
+                if search_results:
+                    searched_source_ids[source] = self._extract_entity_id(search_results[0])
+                    available_sources.append(source)
+                else:
+                    searched_source_ids[source] = None
 
-            try:
-                # Try fallback source (iTunes/Deezer) search
-                fallback_results = itunes_client.search_artists(artist_name, limit=1)
-                if fallback_results and len(fallback_results) > 0:
-                    searched_fallback_id = fallback_results[0].id
-            except Exception as e:
-                logger.debug(f"Could not get searched artist {fallback_source} ID: {e}")
+            if not available_sources:
+                logger.warning(f"No metadata providers available for MusicMap matching: {artist_name}")
+                return []
 
-            # Match each artist to both Spotify and fallback source (iTunes/Deezer)
             matched_artists = []
-            seen_names = set()  # Track seen artist names to prevent duplicates
+            seen_names = set()
+            provider_match_counts = {source: 0 for source in available_sources}
 
             for artist_name_to_match in similar_artist_names[:limit]:
                 try:
-                    # Skip if we've already matched this artist name
                     name_lower = artist_name_to_match.lower().strip()
                     if name_lower in seen_names:
                         continue
@@ -2214,71 +2254,56 @@ class WatchlistScanner:
                         'deezer_id': None,
                         'image_url': None,
                         'genres': [],
-                        'popularity': 0
+                        'popularity': 0,
                     }
 
-                    # Try to match on Spotify (only when Spotify is the configured primary source)
-                    if self._spotify_is_primary_source():
-                        try:
-                            spotify_results = self.spotify_client.search_artists(
-                                artist_name_to_match,
-                                limit=1,
-                                allow_fallback=False,
-                            )
-                            if spotify_results and len(spotify_results) > 0:
-                                spotify_artist = spotify_results[0]
-                                # Skip if this is the searched artist
-                                if spotify_artist.id != searched_spotify_id:
-                                    artist_data['spotify_id'] = spotify_artist.id
-                                    artist_data['name'] = spotify_artist.name  # Use canonical name
-                                    artist_data['image_url'] = spotify_artist.image_url if hasattr(spotify_artist, 'image_url') else None
-                                    artist_data['genres'] = spotify_artist.genres if hasattr(spotify_artist, 'genres') else []
-                                    artist_data['popularity'] = spotify_artist.popularity if hasattr(spotify_artist, 'popularity') else 0
-                        except Exception as e:
-                            logger.debug(f"Spotify match failed for {artist_name_to_match}: {e}")
+                    for source in available_sources:
+                        search_results = self._search_artists_for_source(source, artist_name_to_match, limit=1)
+                        if not search_results:
+                            continue
 
-                    # Try to match on fallback source (iTunes/Deezer) with retry for rate limiting
-                    try:
-                        fallback_results = itunes_api_call_with_retry(
-                            itunes_client.search_artists, artist_name_to_match, limit=1
-                        )
-                        if fallback_results and len(fallback_results) > 0:
-                            fallback_artist = fallback_results[0]
-                            # Skip if this is the searched artist
-                            if fallback_artist.id != searched_fallback_id:
-                                # Store under the appropriate key based on fallback source
-                                if fallback_source == 'deezer':
-                                    artist_data['deezer_id'] = fallback_artist.id
-                                else:
-                                    artist_data['itunes_id'] = fallback_artist.id
-                                # Use fallback name if we don't have Spotify
-                                if not artist_data['spotify_id']:
-                                    artist_data['name'] = fallback_artist.name
-                                # Use fallback genres if we don't have Spotify genres
-                                if not artist_data['genres'] and hasattr(fallback_artist, 'genres'):
-                                    artist_data['genres'] = fallback_artist.genres
-                        else:
-                            logger.info(f"  [{fallback_source}] No match found for: {artist_name_to_match}")
-                    except Exception as e:
-                        logger.info(f"  [{fallback_source}] Match failed for {artist_name_to_match}: {e}")
+                        matched_artist = search_results[0]
+                        matched_id = self._extract_entity_id(matched_artist)
+                        if not matched_id or matched_id == searched_source_ids.get(source):
+                            continue
 
-                    # Only add if we got at least one ID
-                    fallback_id_key = 'deezer_id' if fallback_source == 'deezer' else 'itunes_id'
-                    if artist_data['spotify_id'] or artist_data.get(fallback_id_key):
+                        id_key = source_id_keys.get(source)
+                        if not id_key:
+                            continue
+
+                        artist_data[id_key] = matched_id
+                        provider_match_counts[source] += 1
+
+                        metadata = self._get_artist_metadata_from_data(matched_artist)
+                        if metadata['name'] and artist_data['name'] == artist_name_to_match:
+                            artist_data['name'] = metadata['name']
+                        if metadata['image_url'] and not artist_data['image_url']:
+                            artist_data['image_url'] = metadata['image_url']
+                        if metadata['genres'] and not artist_data['genres']:
+                            artist_data['genres'] = metadata['genres']
+                        if metadata['popularity'] and not artist_data['popularity']:
+                            artist_data['popularity'] = metadata['popularity']
+
+                    if any(artist_data.get(key) for key in source_id_keys.values()):
                         seen_names.add(name_lower)
                         matched_artists.append(artist_data)
-                        logger.debug(f"  Matched: {artist_data['name']} (Spotify: {artist_data['spotify_id']}, {fallback_source}: {artist_data.get(fallback_id_key)})")
+                        provider_summary = ", ".join(
+                            f"{source}: {artist_data.get(source_id_keys[source])}"
+                            for source in available_sources
+                            if artist_data.get(source_id_keys[source])
+                        )
+                        logger.debug(f"  Matched: {artist_data['name']} ({provider_summary})")
 
                 except Exception as match_error:
                     logger.debug(f"Error matching {artist_name_to_match}: {match_error}")
                     continue
 
             # Log detailed matching statistics
-            fallback_id_key = 'deezer_id' if fallback_source == 'deezer' else 'itunes_id'
-            fallback_matched = sum(1 for a in matched_artists if a.get(fallback_id_key))
-            spotify_matched = sum(1 for a in matched_artists if a.get('spotify_id'))
-            both_matched = sum(1 for a in matched_artists if a.get(fallback_id_key) and a.get('spotify_id'))
-            logger.info(f"Matched {len(matched_artists)} similar artists - {fallback_source}: {fallback_matched}, Spotify: {spotify_matched}, Both: {both_matched}")
+            provider_stats = ", ".join(
+                f"{source}: {provider_match_counts[source]}"
+                for source in available_sources
+            )
+            logger.info(f"Matched {len(matched_artists)} similar artists - {provider_stats}")
             return matched_artists
 
         except requests.exceptions.RequestException as e:
@@ -2349,12 +2374,12 @@ class WatchlistScanner:
         """
         Fetch and store similar artists for a watchlist artist.
         Called after each artist scan to build discovery pool.
-        Uses MusicMap to find similar artists and matches them to both Spotify and iTunes.
+        Uses MusicMap to find similar artists and matches them against available metadata providers.
         """
         try:
             logger.info(f"Fetching similar artists for {watchlist_artist.artist_name}")
 
-            # Get similar artists from MusicMap (returns list of artist dicts with both IDs)
+            # Get similar artists from MusicMap (returns list of artist dicts with provider IDs)
             similar_artists = self._fetch_similar_artists_from_musicmap(watchlist_artist.artist_name, limit=limit)
 
             if not similar_artists:
@@ -2377,7 +2402,7 @@ class WatchlistScanner:
             stored_count = 0
             for rank, similar_artist in enumerate(similar_artists, 1):
                 try:
-                    # similar_artist has 'name', 'spotify_id', 'itunes_id', 'deezer_id', 'image_url', 'genres', 'popularity'
+                    # similar_artist has 'name', provider IDs, 'image_url', 'genres', 'popularity'
                     success = self.database.add_or_update_similar_artist(
                         source_artist_id=source_artist_id,
                         similar_artist_name=similar_artist['name'],
