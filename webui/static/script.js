@@ -66465,6 +66465,12 @@ function _autoImportStopPolling() {
 }
 
 async function _autoImportToggle(enabled) {
+    // Optimistically update toggle state so it doesn't flicker
+    const toggle = document.getElementById('auto-import-enabled');
+    if (toggle) toggle.checked = enabled;
+    const statusText = document.getElementById('auto-import-status-text');
+    if (statusText) statusText.textContent = enabled ? 'Starting...' : 'Stopping...';
+
     try {
         const res = await fetch('/api/auto-import/toggle', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -66474,8 +66480,14 @@ async function _autoImportToggle(enabled) {
         if (data.success) {
             showToast(enabled ? 'Auto-import enabled' : 'Auto-import disabled', 'success');
             _autoImportLoadStatus();
+        } else {
+            // Revert on failure
+            if (toggle) toggle.checked = !enabled;
         }
-    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+        if (toggle) toggle.checked = !enabled;
+    }
 }
 
 async function _autoImportLoadStatus() {
