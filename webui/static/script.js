@@ -40739,7 +40739,9 @@ async function _nebulaDownload() {
         if (statsResp.ok) {
             const stats = await statsResp.json();
             if (stats.is_auto_processing) {
-                showToast('Wishlist is currently being auto-processed. Check the Downloads page for progress.', 'info');
+                // Navigate to downloads page so the user can see progress
+                navigateToPage('active-downloads');
+                showToast('Wishlist is currently being auto-processed', 'info');
                 return;
             }
         }
