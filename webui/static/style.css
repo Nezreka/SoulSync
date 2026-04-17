@@ -57701,6 +57701,174 @@ body.reduce-effects *::after {
     .wl-orb-group.expanded { max-width: 100%; }
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   AUTO-IMPORT TAB
+   ═══════════════════════════════════════════════════════════════════ */
+
+.auto-import-controls {
+    padding: 12px 0 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    margin-bottom: 16px;
+}
+
+.auto-import-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.auto-import-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.7);
+}
+
+.auto-import-toggle-label input { display: none; }
+
+.auto-import-status {
+    font-size: 12px;
+    font-weight: 500;
+    padding: 2px 10px;
+    border-radius: 6px;
+}
+.auto-import-status.active { color: #4ade80; background: rgba(74,222,128,0.1); }
+.auto-import-status.scanning { color: rgb(var(--accent-light-rgb)); background: rgba(var(--accent-rgb),0.1); }
+.auto-import-status.disabled { color: rgba(255,255,255,0.3); }
+
+.auto-import-settings-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: rgba(255,255,255,0.5);
+}
+
+.auto-import-settings-row label { display: flex; align-items: center; gap: 6px; }
+.auto-import-settings-row input[type="range"] { width: 100px; }
+.auto-import-settings-row select {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: #fff;
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 12px;
+}
+
+.auto-import-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: rgba(255,255,255,0.3);
+    font-size: 13px;
+}
+
+/* Result cards */
+.auto-import-card {
+    display: flex;
+    gap: 14px;
+    padding: 14px 16px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    margin-bottom: 8px;
+    transition: all 0.2s;
+    align-items: center;
+}
+
+.auto-import-card:hover {
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.1);
+}
+
+.auto-import-completed { border-left: 3px solid #4ade80; }
+.auto-import-review { border-left: 3px solid #fbbf24; }
+.auto-import-failed { border-left: 3px solid #f87171; }
+
+.auto-import-card-art {
+    width: 56px; height: 56px;
+    border-radius: 8px;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.auto-import-card-art-fallback {
+    width: 56px; height: 56px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.05);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; opacity: 0.3; flex-shrink: 0;
+}
+
+.auto-import-card-center { flex: 1; min-width: 0; }
+
+.auto-import-card-album {
+    font-size: 14px; font-weight: 600; color: #fff;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.auto-import-card-artist {
+    font-size: 12px; color: rgba(255,255,255,0.45);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.auto-import-card-folder {
+    font-size: 10px; color: rgba(255,255,255,0.25); margin-top: 2px;
+}
+
+.auto-import-match-info {
+    font-size: 10px; color: rgba(255,255,255,0.35); margin-top: 2px;
+}
+
+.auto-import-card-error {
+    font-size: 10px; color: #f87171; margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.auto-import-card-right {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+    flex-shrink: 0; min-width: 80px;
+}
+
+.auto-import-confidence-bar {
+    width: 60px; height: 4px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 2px; overflow: hidden;
+}
+
+.auto-import-confidence-fill { height: 100%; border-radius: 2px; }
+.auto-import-conf-high { background: #4ade80; }
+.auto-import-conf-medium { background: #fbbf24; }
+.auto-import-conf-low { background: #f87171; }
+
+.auto-import-confidence-text {
+    font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.5);
+}
+
+.auto-import-status-badge {
+    font-size: 9px; font-weight: 600; padding: 2px 8px;
+    border-radius: 6px; white-space: nowrap;
+}
+.auto-import-badge-completed { background: rgba(74,222,128,0.1); color: #4ade80; }
+.auto-import-badge-review { background: rgba(251,191,36,0.1); color: #fbbf24; }
+.auto-import-badge-failed { background: rgba(248,113,113,0.1); color: #f87171; }
+.auto-import-badge-neutral { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4); }
+
+.auto-import-actions {
+    display: flex; gap: 4px; margin-top: 4px;
+}
+
+.auto-import-actions button { font-size: 10px; padding: 3px 10px; }
+
+@media (max-width: 768px) {
+    .auto-import-card { flex-direction: column; align-items: flex-start; }
+    .auto-import-card-right { flex-direction: row; width: 100%; justify-content: space-between; }
+}
+
 /* ── Legacy (hidden) ── */
 #wishlist-page-categories { display: none;
     margin-bottom: 24px;

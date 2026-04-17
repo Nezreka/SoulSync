@@ -6007,8 +6007,39 @@
 
             <!-- Tab Bar -->
             <div class="import-page-tab-bar">
+                <button class="import-page-tab" id="import-page-tab-auto" onclick="importPageSwitchTab('auto')">Auto</button>
                 <button class="import-page-tab active" id="import-page-tab-album" onclick="importPageSwitchTab('album')">Albums</button>
                 <button class="import-page-tab" id="import-page-tab-singles" onclick="importPageSwitchTab('singles')">Singles</button>
+            </div>
+
+            <!-- Auto Import Tab -->
+            <div class="import-page-tab-content" id="import-page-auto-content">
+                <div class="auto-import-controls">
+                    <div class="auto-import-toggle-row">
+                        <label class="auto-import-toggle-label">
+                            <input type="checkbox" id="auto-import-enabled" onchange="_autoImportToggle(this.checked)">
+                            <span class="repair-toggle-slider"></span>
+                            <span>Auto-Import</span>
+                        </label>
+                        <span class="auto-import-status" id="auto-import-status-text">Disabled</span>
+                    </div>
+                    <div class="auto-import-settings-row" id="auto-import-settings-row" style="display:none;">
+                        <label>Confidence: <input type="range" id="auto-import-confidence" min="50" max="100" value="90" oninput="document.getElementById('auto-import-conf-val').textContent=this.value+'%'"> <span id="auto-import-conf-val">90%</span></label>
+                        <label>Interval: <select id="auto-import-interval" onchange="_autoImportSaveSettings()">
+                            <option value="30">30s</option>
+                            <option value="60" selected>60s</option>
+                            <option value="120">2m</option>
+                            <option value="300">5m</option>
+                        </select></label>
+                        <button class="watchlist-action-btn watchlist-action-secondary" onclick="_autoImportSaveSettings()">Save</button>
+                    </div>
+                </div>
+                <div class="auto-import-results" id="auto-import-results">
+                    <div class="auto-import-empty">
+                        <p>Enable auto-import to watch your staging folder for new music.</p>
+                        <p style="opacity:0.5;font-size:12px;">Drop album folders into your staging directory and SoulSync will identify, match, and import them automatically.</p>
+                    </div>
+                </div>
             </div>
 
             <!-- Album Tab -->
