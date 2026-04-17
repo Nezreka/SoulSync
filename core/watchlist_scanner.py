@@ -653,7 +653,10 @@ class WatchlistScanner:
             last_scan_timestamp,
             lookback_days=watchlist_artist.lookback_days,
         )
-        if not albums:
+        # albums can be None (API failure) or empty list (no new releases).
+        # None means this source failed — try next source.
+        # Empty list means success — artist has no new releases in the lookback window.
+        if albums is None:
             return None
 
         image_url = self._get_artist_image_for_source(watchlist_artist, source, client, artist_id)
@@ -1410,8 +1413,11 @@ class WatchlistScanner:
                 _skip['max_pages'] = _max_pages
             albums = client.get_artist_albums(artist_id, album_type='album,single', limit=50, **_skip)
 
+            if albums is None:
+                logger.warning(f"API failure fetching albums for artist {artist_id}")
+                return None
             if not albums:
-                logger.warning(f"No albums found for artist {artist_id}")
+                logger.debug(f"No albums found for artist {artist_id}")
                 return []
 
             # Add small delay after fetching artist discography to be extra safe
@@ -1581,7 +1587,11 @@ class WatchlistScanner:
     def _match_to_spotify(self, artist_name: str) -> Optional[str]:
         """Match artist name to Spotify ID using fuzzy name comparison."""
         try:
-            client = get_client_for_source('spotify')
+            # Use the authenticated spotify_client passed to the scanner,
+            # not get_client_for_source which creates a fresh unauthenticated instance
+            client = self.spotify_client
+            if not client or not client.is_spotify_authenticated():
+                client = get_client_for_source('spotify')
             if not client:
                 return None
 

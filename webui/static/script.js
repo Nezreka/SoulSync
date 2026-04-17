@@ -40711,7 +40711,13 @@ async function _removeWishlistTrack(trackId) {
     try {
         const res = await fetch('/api/wishlist/remove-track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ spotify_track_id: trackId }) });
         const data = await res.json();
-        if (data.success) { const p = document.querySelector(`.wl-single-pill[data-track-id="${trackId}"]`); if (p) p.remove(); showToast('Removed', 'success'); await updateWishlistCount(); }
+        if (data.success) {
+            showToast('Removed', 'success');
+            await updateWishlistCount();
+            // Re-render nebula to reflect removal
+            wishlistPageState.isInitialized = false;
+            await initializeWishlistPage();
+        }
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
 }
 
