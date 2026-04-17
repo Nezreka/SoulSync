@@ -15315,7 +15315,7 @@ def sync_artist_library(artist_id):
                 pass
             # If not found as DB ID, look up by source artist ID
             if not db_artist_id:
-                for col in ('spotify_artist_id', 'itunes_artist_id', 'deezer_artist_id'):
+                for col in ('spotify_artist_id', 'itunes_artist_id', 'deezer_id'):
                     cursor.execute(f"SELECT id FROM artists WHERE {col} = ?", (artist_id,))
                     row = cursor.fetchone()
                     if row:
