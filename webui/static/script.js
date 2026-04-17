@@ -2974,6 +2974,7 @@ async function loadPageData(pageId) {
         // Stop watchlist/wishlist page timers when navigating away
         if (watchlistCountdownInterval) { clearInterval(watchlistCountdownInterval); watchlistCountdownInterval = null; }
         if (wishlistCountdownInterval) { clearInterval(wishlistCountdownInterval); wishlistCountdownInterval = null; }
+        if (typeof _stopNebulaLivePolling === 'function') _stopNebulaLivePolling();
         switch (pageId) {
             case 'dashboard':
                 await loadDashboardData();
@@ -40535,6 +40536,10 @@ async function initializeWishlistPage() {
 
         _renderWishlistNebula(albumRes.tracks || [], singleRes.tracks || [], _artistImageMap, currentCycle);
         startWishlistCountdownTimer(currentCycle, statsRes.next_run_in_seconds || 0);
+
+        // Live processing: check if wishlist download is active and start polling
+        _startNebulaLivePolling(currentCycle, _artistImageMap);
+
         wishlistPageState.isInitialized = true;
 
     } catch (error) {
@@ -40629,23 +40634,34 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
         // Expanded content
         html += `<div class="wl-orb-expanded">`;
         if (data.albums.size > 0) {
-            html += `<div class="wl-orb-albums">`;
+            html += `<div class="wl-album-fan">`;
             for (const [an, ad] of data.albums) {
-                html += `<div class="wl-satellite" data-album="${escapeHtml(an)}">`;
-                html += `<div class="wl-satellite-art">${ad.image ? `<img src="${ad.image}" alt="">` : ''}</div>`;
-                html += `<div class="wl-satellite-info"><div class="wl-satellite-name">${escapeHtml(an)}</div><div class="wl-satellite-count">${ad.tracks.length} tracks</div></div>`;
-                html += `<button class="wl-satellite-remove" onclick="event.stopPropagation();_removeWishlistAlbum('${escapeHtml(an)}')" title="Remove">&#10005;</button>`;
+                const tileId = 'wl-tile-' + an.replace(/\W/g, '_') + '_' + idx;
+                html += `<div class="wl-album-tile" data-album="${escapeHtml(an)}" onclick="_toggleAlbumTile(this)">`;
+                html += `<div class="wl-album-tile-art">${ad.image ? `<img src="${ad.image}" alt="">` : `<div class="wl-album-tile-fallback">&#128191;</div>`}</div>`;
+                html += `<div class="wl-album-tile-info"><div class="wl-album-tile-name">${escapeHtml(an)}</div><div class="wl-album-tile-count">${ad.tracks.length} track${ad.tracks.length !== 1 ? 's' : ''}</div></div>`;
+                html += `<span class="wl-album-tile-badge">${ad.tracks.length}</span>`;
+                html += `<button class="wl-album-tile-remove" onclick="event.stopPropagation();_removeWishlistAlbum('${escapeHtml(an)}')" title="Remove album">&#10005;</button>`;
+                // Track list (hidden until tile clicked)
+                html += `<div class="wl-tile-tracks">`;
+                for (const tr of ad.tracks) {
+                    html += `<div class="wl-tile-track">`;
+                    html += `<span class="wl-tile-track-name">${escapeHtml(tr.track)}</span>`;
+                    html += `<button class="wl-tile-track-remove" onclick="event.stopPropagation();_removeWishlistTrack('${escapeHtml(tr.id)}')" title="Remove track">&#10005;</button>`;
+                    html += `</div>`;
+                }
+                html += `</div>`;
                 html += `</div>`;
             }
             html += `</div>`;
         }
         if (data.singles.length > 0) {
-            html += `<div class="wl-orb-singles">`;
+            html += `<div class="wl-singles-orbit">`;
             for (const s of data.singles) {
-                html += `<div class="wl-single-pill" data-track-id="${escapeHtml(s.id)}">`;
-                if (s.image) html += `<img class="wl-pill-art" src="${s.image}" alt="">`;
-                html += `<span class="wl-pill-name">${escapeHtml(s.track)}</span>`;
-                html += `<button class="wl-pill-remove" onclick="event.stopPropagation();_removeWishlistTrack('${escapeHtml(s.id)}')" title="Remove">&#10005;</button>`;
+                html += `<div class="wl-single-moon" data-track-id="${escapeHtml(s.id)}">`;
+                html += s.image ? `<img src="${s.image}" alt="">` : `<span class="wl-moon-fallback">&#11088;</span>`;
+                html += `<div class="wl-moon-label">${escapeHtml(s.track)}</div>`;
+                html += `<button class="wl-moon-remove-btn" onclick="event.stopPropagation();_removeWishlistTrack('${escapeHtml(s.id)}')" title="Remove">&#10005;</button>`;
                 html += `</div>`;
             }
             html += `</div>`;
@@ -40664,6 +40680,13 @@ function _navigateToArtistFromWishlist(artistName) {
         const searchInput = document.querySelector('.artist-search-input, #artist-search');
         if (searchInput) { searchInput.value = artistName; searchInput.dispatchEvent(new Event('input')); }
     }, 300);
+}
+
+function _toggleAlbumTile(tileEl) {
+    const wasExpanded = tileEl.classList.contains('tile-expanded');
+    // Collapse all tiles in this group
+    tileEl.closest('.wl-album-fan')?.querySelectorAll('.wl-album-tile.tile-expanded').forEach(t => t.classList.remove('tile-expanded'));
+    if (!wasExpanded) tileEl.classList.add('tile-expanded');
 }
 
 function _toggleOrbExpand(el) {
@@ -40703,6 +40726,82 @@ function _filterNebula() {
     });
 }
 
+async function _nebulaDownload() {
+    // Check if wishlist is already processing
+    try {
+        const statsResp = await fetch('/api/wishlist/stats');
+        if (statsResp.ok) {
+            const stats = await statsResp.json();
+            if (stats.is_auto_processing) {
+                showToast('Wishlist is currently being auto-processed. Check the Downloads page for progress.', 'info');
+                return;
+            }
+        }
+        const procResp = await fetch('/api/active-processes');
+        if (procResp.ok) {
+            const procData = await procResp.json();
+            const wishlistBatch = (procData.active_processes || []).find(p => p.playlist_id === 'wishlist');
+            if (wishlistBatch) {
+                // Show the existing download modal
+                WishlistModalState.clearUserClosed();
+                const clientProcess = activeDownloadProcesses['wishlist'];
+                if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
+                    clientProcess.modalElement.style.display = 'flex';
+                    WishlistModalState.setVisible();
+                } else {
+                    await rehydrateModal(wishlistBatch, true);
+                }
+                return;
+            }
+        }
+    } catch (e) {}
+
+    // No active process — show category choice
+    const choice = await _showNebulaDownloadChoice();
+    if (choice) await openDownloadMissingWishlistModal(choice);
+}
+
+function _showNebulaDownloadChoice() {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.display = 'flex';
+        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+
+        const albumCount = document.getElementById('wishlist-stat-albums')?.textContent || '0';
+        const singleCount = document.getElementById('wishlist-stat-singles')?.textContent || '0';
+
+        overlay.innerHTML = `
+            <div class="delete-group-dialog">
+                <div class="delete-group-icon">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgb(var(--accent-rgb))" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </div>
+                <h3 class="delete-group-title">Download Wishlist</h3>
+                <p class="delete-group-message">Choose which category to process</p>
+                <div class="delete-group-actions">
+                    <button class="delete-group-btn delete-group-keep" id="ndc-albums">
+                        &#128191; Albums &amp; EPs <span style="opacity:0.5;margin-left:6px">${albumCount} tracks</span>
+                    </button>
+                    <button class="delete-group-btn delete-group-keep" id="ndc-singles" style="border-color: rgba(var(--accent-rgb), 0.15); background: rgba(var(--accent-rgb), 0.06);">
+                        &#11088; Singles <span style="opacity:0.5;margin-left:6px">${singleCount} tracks</span>
+                    </button>
+                    <button class="delete-group-btn delete-group-cancel" id="ndc-cancel">Cancel</button>
+                </div>
+            </div>
+        `;
+
+        overlay.querySelector('#ndc-albums').onclick = () => { overlay.remove(); resolve('albums'); };
+        overlay.querySelector('#ndc-singles').onclick = () => { overlay.remove(); resolve('singles'); };
+        overlay.querySelector('#ndc-cancel').onclick = () => { overlay.remove(); resolve(null); };
+
+        document.addEventListener('keydown', function esc(e) {
+            if (e.key === 'Escape') { overlay.remove(); resolve(null); document.removeEventListener('keydown', esc); }
+        });
+
+        document.body.appendChild(overlay);
+    });
+}
+
 function _nebulaBack() {
     const t = document.getElementById('wishlist-category-tracks');
     const n = document.getElementById('wishlist-nebula');
@@ -40711,6 +40810,86 @@ function _nebulaBack() {
     window.selectedWishlistCategory = null;
     wishlistPageState.isInitialized = false;
     initializeWishlistPage();
+}
+
+// ── Live processing state for nebula ──
+let _nebulaLivePollInterval = null;
+let _nebulaLastTotal = null;
+
+function _startNebulaLivePolling(currentCycle, artistImageMap) {
+    _stopNebulaLivePolling();
+    _nebulaLastTotal = null;
+
+    _nebulaLivePollInterval = setInterval(async () => {
+        if (currentPage !== 'wishlist') { _stopNebulaLivePolling(); return; }
+
+        try {
+            // Use wishlist stats which has is_auto_processing flag
+            const statsResp = await fetch('/api/wishlist/stats');
+            if (!statsResp.ok) return;
+            const stats = await statsResp.json();
+            const isProcessing = stats.is_auto_processing || false;
+            const newTotal = stats.total || 0;
+
+            // Also check for manual wishlist download batches
+            let hasBatch = false;
+            try {
+                const procResp = await fetch('/api/active-processes');
+                if (procResp.ok) {
+                    const procData = await procResp.json();
+                    hasBatch = (procData.active_processes || []).some(p => p.playlist_id === 'wishlist');
+                }
+            } catch (e) {}
+
+            const active = isProcessing || hasBatch;
+            const nebulaField = document.getElementById('wl-nebula-field');
+            if (!nebulaField) return;
+
+            if (active) {
+                nebulaField.classList.add('nebula-processing');
+                document.querySelectorAll('.wl-orb-group').forEach(g => g.classList.add('orb-processing'));
+
+                // Tracks completed — re-render
+                if (_nebulaLastTotal !== null && newTotal < _nebulaLastTotal) {
+                    const [albumRes, singleRes] = await Promise.all([
+                        fetch('/api/wishlist/tracks?category=albums').then(r => r.json()),
+                        fetch('/api/wishlist/tracks?category=singles').then(r => r.json()),
+                    ]);
+                    _renderWishlistNebula(albumRes.tracks || [], singleRes.tracks || [], artistImageMap, currentCycle);
+
+                    const countEl = document.getElementById('wishlist-page-count');
+                    if (countEl) countEl.textContent = `${newTotal} track${newTotal !== 1 ? 's' : ''}`;
+                    const sa = document.getElementById('wishlist-stat-albums');
+                    const ss = document.getElementById('wishlist-stat-singles');
+                    if (sa) sa.textContent = stats.albums || 0;
+                    if (ss) ss.textContent = stats.singles || 0;
+
+                    // Re-add processing classes after re-render
+                    document.getElementById('wl-nebula-field')?.classList.add('nebula-processing');
+                    document.querySelectorAll('.wl-orb-group').forEach(g => g.classList.add('orb-processing'));
+                }
+                _nebulaLastTotal = newTotal;
+            } else {
+                nebulaField.classList.remove('nebula-processing');
+                document.querySelectorAll('.wl-orb-group.orb-processing').forEach(g => g.classList.remove('orb-processing'));
+
+                if (_nebulaLastTotal !== null) {
+                    _nebulaLastTotal = null;
+                    wishlistPageState.isInitialized = false;
+                    await initializeWishlistPage();
+                    await updateWishlistCount();
+                }
+            }
+        } catch (e) {}
+    }, 5000);
+}
+
+function _stopNebulaLivePolling() {
+    if (_nebulaLivePollInterval) {
+        clearInterval(_nebulaLivePollInterval);
+        _nebulaLivePollInterval = null;
+    }
+    _nebulaLastTotal = null;
 }
 
 /**
