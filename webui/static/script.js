@@ -15658,10 +15658,10 @@ function processModalStatusUpdate(playlistId, data) {
         document.getElementById(`download-progress-text-${playlistId}`).textContent = `${completedCount}/${missingCount} completed (${progressPercent.toFixed(0)}%)`;
         document.getElementById(`stat-downloaded-${playlistId}`).textContent = completedCount;
 
-        // Auto-save M3U file for playlists as downloads progress
-        if (completedCount > 0) {
-            autoSavePlaylistM3U(playlistId);
-        }
+        // Auto-save M3U file once when all downloads finish (not on every poll cycle).
+        // Previously this fired on EVERY 2-second poll when completedCount > 0, flooding
+        // the server with heavyweight M3U generation requests that exhausted Flask threads
+        // and caused the batch status endpoint to hang — killing the poller.
 
         // CLIENT-SIDE COMPLETION: Only complete when ALL task rows in the UI reflect a terminal state.
         // Using totalFinished (derived from DOM updates in THIS render pass) prevents premature
@@ -15677,6 +15677,11 @@ function processModalStatusUpdate(playlistId, data) {
             document.getElementById(`cancel-all-btn-${playlistId}`).style.display = 'none';
             process.status = 'complete';
             updatePlaylistCardUI(playlistId);
+
+            // Save M3U once on completion (not during progress polling)
+            if (completedCount > 0) {
+                autoSavePlaylistM3U(playlistId);
+            }
 
             // Show the force download toggle again
             const forceToggleContainer = document.querySelector(`#force-download-all-${playlistId}`)?.closest('.force-download-toggle-container');
