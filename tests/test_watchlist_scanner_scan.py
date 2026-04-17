@@ -220,6 +220,130 @@ def _build_scanner(album_data, artists):
     return scanner
 
 
+def test_fetch_similar_artists_from_musicmap_uses_provider_priority(monkeypatch):
+    html = """
+    <html>
+      <body>
+        <div id="gnodMap">
+          <a href="/artist/seed">Artist One</a>
+          <a href="/artist/similar">Similar Artist</a>
+        </div>
+      </body>
+    </html>
+    """
+
+    class _Response:
+        def __init__(self, text):
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+    def make_client(source, seed_id, match_id, canonical_name, popularity):
+        client = _FakeSourceClient(artist_id=match_id, albums=[], image_url=None)
+
+        def search_artists(query, limit=1, **kwargs):
+            client.search_calls.append((query, limit, kwargs))
+            if query == "Artist One":
+                return [types.SimpleNamespace(id=seed_id, name=f"{source} Seed")]
+            if query == "Similar Artist":
+                return [
+                    types.SimpleNamespace(
+                        id=match_id,
+                        name=canonical_name,
+                        image_url=f"https://{source}.example.com/{match_id}.jpg",
+                        genres=[source, "genre"],
+                        popularity=popularity,
+                    )
+                ]
+            return []
+
+        client.search_artists = search_artists
+        return client
+
+    deezer_client = make_client("deezer", "dz-seed", "dz-match", "Deezer Canonical", 30)
+    itunes_client = make_client("itunes", "it-seed", "it-match", "iTunes Canonical", 20)
+    spotify_client = make_client("spotify", "sp-seed", "sp-match", "Spotify Canonical", 10)
+
+    monkeypatch.setattr(watchlist_scanner_module.requests, "get", lambda *args, **kwargs: _Response(html))
+    monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(
+        watchlist_scanner_module,
+        "get_client_for_source",
+        lambda source: {
+            "deezer": deezer_client,
+            "itunes": itunes_client,
+            "spotify": spotify_client,
+        }.get(source),
+    )
+
+    scanner = _build_scanner({"tracks": {"items": []}}, [])
+    results = scanner._fetch_similar_artists_from_musicmap("Artist One", limit=5)
+
+    assert len(results) == 1
+    artist = results[0]
+    assert artist["name"] == "Deezer Canonical"
+    assert artist["deezer_id"] == "dz-match"
+    assert artist["itunes_id"] == "it-match"
+    assert artist["spotify_id"] == "sp-match"
+    assert artist["image_url"] == "https://deezer.example.com/dz-match.jpg"
+    assert artist["genres"] == ["deezer", "genre"]
+    assert artist["popularity"] == 30
+
+    assert [call[0] for call in deezer_client.search_calls] == ["Artist One", "Similar Artist"]
+    assert [call[0] for call in itunes_client.search_calls] == ["Artist One", "Similar Artist"]
+    assert [call[0] for call in spotify_client.search_calls] == ["Artist One", "Similar Artist"]
+    assert spotify_client.search_calls[-1][2]["allow_fallback"] is False
+
+
+def test_backfill_similar_artists_fallback_ids_uses_provider_priority(monkeypatch):
+    def make_client(source):
+        client = types.SimpleNamespace(search_calls=[])
+
+        def search_artists(query, limit=1, **kwargs):
+            client.search_calls.append((query, limit, kwargs))
+            safe_name = query.lower().replace(" ", "-")
+            return [types.SimpleNamespace(id=f"{source}-{safe_name}", name=query)]
+
+        client.search_artists = search_artists
+        return client
+
+    deezer_client = make_client("deezer")
+    itunes_client = make_client("itunes")
+
+    deezer_artist = types.SimpleNamespace(id=11, similar_artist_name="Deezer Artist")
+    itunes_artist = types.SimpleNamespace(id=22, similar_artist_name="iTunes Artist")
+
+    monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(
+        watchlist_scanner_module,
+        "get_client_for_source",
+        lambda source: {
+            "deezer": deezer_client,
+            "itunes": itunes_client,
+        }.get(source),
+    )
+
+    scanner = _build_scanner({"tracks": {"items": []}}, [])
+    scanner.database.get_similar_artists_missing_fallback_ids = (
+        lambda source_artist_id, fallback_source, profile_id=1: [deezer_artist] if fallback_source == "deezer" else [itunes_artist]
+    )
+
+    update_calls = []
+    scanner.database.update_similar_artist_deezer_id = lambda similar_artist_id, deezer_id: update_calls.append(("deezer", similar_artist_id, deezer_id)) or True
+    scanner.database.update_similar_artist_itunes_id = lambda similar_artist_id, itunes_id: update_calls.append(("itunes", similar_artist_id, itunes_id)) or True
+
+    count = scanner._backfill_similar_artists_fallback_ids("source-artist", profile_id=7)
+
+    assert count == 2
+    assert update_calls == [
+        ("deezer", 11, "deezer-deezer-artist"),
+        ("itunes", 22, "itunes-itunes-artist"),
+    ]
+    assert [call[0] for call in deezer_client.search_calls] == ["Deezer Artist"]
+    assert [call[0] for call in itunes_client.search_calls] == ["iTunes Artist"]
+
+
 def test_scan_watchlist_profile_loads_artists_and_applies_overrides(monkeypatch):
     artist = _build_artist()
     scanner = _build_scanner({"tracks": {"items": []}}, [artist])
@@ -276,7 +400,7 @@ def test_scan_watchlist_artists_scans_tracks_and_updates_state(monkeypatch):
     monkeypatch.setattr(scanner, "add_track_to_wishlist", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(scanner, "update_artist_scan_timestamp", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(scanner, "update_similar_artists", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(scanner, "_backfill_similar_artists_itunes_ids", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(scanner, "_backfill_similar_artists_fallback_ids", lambda *_args, **_kwargs: 0)
 
     scan_state = {}
     results = scanner.scan_watchlist_artists([artist], scan_state=scan_state)
@@ -336,7 +460,7 @@ def test_scan_watchlist_artists_skips_placeholder_tracklists(monkeypatch):
     monkeypatch.setattr(scanner, "add_track_to_wishlist", lambda *args, **kwargs: add_calls.append((args, kwargs)) or True)
     monkeypatch.setattr(scanner, "update_artist_scan_timestamp", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(scanner, "update_similar_artists", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(scanner, "_backfill_similar_artists_itunes_ids", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(scanner, "_backfill_similar_artists_fallback_ids", lambda *_args, **_kwargs: 0)
 
     scan_state = {}
     results = scanner.scan_watchlist_artists([artist], scan_state=scan_state)
@@ -375,7 +499,7 @@ def test_scan_watchlist_artists_honors_cancel_check(monkeypatch):
     monkeypatch.setattr(scanner, "add_track_to_wishlist", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(scanner, "update_artist_scan_timestamp", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(scanner, "update_similar_artists", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(scanner, "_backfill_similar_artists_itunes_ids", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(scanner, "_backfill_similar_artists_fallback_ids", lambda *_args, **_kwargs: 0)
 
     cancels = iter([False, True])
     scan_state = {}
@@ -827,6 +951,74 @@ def test_cache_discovery_recent_albums_falls_back_to_spotify_when_primary_has_no
     assert spotify_client.album_calls
 
 
+def test_update_discovery_pool_incremental_uses_source_priority(monkeypatch):
+    monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ARTISTS", 0)
+    monkeypatch.setattr(watchlist_scanner_module, "time", types.SimpleNamespace(sleep=lambda *_args, **_kwargs: None))
+    monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(watchlist_scanner_module, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+
+    artist = _build_artist("Incremental Artist")
+    artist.spotify_artist_id = None
+    artist.deezer_artist_id = None
+
+    release = types.SimpleNamespace(
+        id="dz-release-1",
+        name="Incremental Release",
+        release_date="2026-04-16",
+        album_type="album",
+        image_url="https://example.com/deezer-release.jpg",
+    )
+
+    deezer_client = _FakeSourceClient(
+        artist_id="dz-artist",
+        albums=[release],
+        image_url="https://example.com/deezer-artist.jpg",
+        album_payload={
+            "id": "dz-release-1",
+            "name": "Incremental Release",
+            "images": [{"url": "https://example.com/deezer-release.jpg"}],
+            "release_date": "2026-04-16",
+            "popularity": 10,
+            "tracks": {"items": [{"id": "dz-track-1", "name": "Incremental Track", "artists": [{"name": "Incremental Artist"}], "duration_ms": 180000}]},
+            "artists": [{"id": "dz-artist"}],
+        },
+    )
+    spotify_client = _FakeSourceClient(
+        artist_id="sp-artist",
+        albums=[],
+        image_url="https://example.com/spotify-artist.jpg",
+        album_payload={
+            "id": "sp-release-1",
+            "name": "Spotify Incremental Release",
+            "images": [{"url": "https://example.com/spotify-release.jpg"}],
+            "release_date": "2026-04-16",
+            "popularity": 50,
+            "tracks": {"items": [{"id": "sp-track-1", "name": "Spotify Incremental Track", "artists": [{"name": "Incremental Artist"}], "duration_ms": 180000}]},
+            "artists": [{"id": "sp-artist"}],
+        },
+    )
+
+    def fake_get_client_for_source(source):
+        return {
+            "deezer": deezer_client,
+            "spotify": spotify_client,
+        }.get(source)
+
+    monkeypatch.setattr(watchlist_scanner_module, "get_client_for_source", fake_get_client_for_source)
+
+    scanner = _build_scanner({"tracks": {"items": []}}, [artist])
+    scanner.database.should_populate_discovery_pool = lambda hours_threshold=6, profile_id=1: True
+
+    scanner.update_discovery_pool_incremental(profile_id=1)
+
+    assert scanner.database.discovery_pool_calls
+    assert scanner.database.discovery_pool_calls[0][1] == "deezer"
+    assert deezer_client.search_calls == [("Incremental Artist", 1, {})]
+    assert deezer_client.album_calls
+    assert spotify_client.search_calls == []
+    assert spotify_client.album_calls == []
+
+
 def test_curate_discovery_playlists_uses_source_priority_for_recent_albums(monkeypatch):
     monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ARTISTS", 0)
     monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
@@ -911,6 +1103,29 @@ def test_curate_discovery_playlists_uses_source_priority_for_recent_albums(monke
     assert spotify_client.album_calls == []
     assert any(key == "release_radar_deezer" for key, _ in saved_playlists)
     assert any(key == "discovery_weekly_deezer" for key, _ in saved_playlists)
+
+
+def test_has_fresh_similar_artists_uses_age_only(tmp_path):
+    from datetime import datetime
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    db.add_or_update_similar_artist(
+        source_artist_id="source-1",
+        similar_artist_name="Similar Artist",
+        similar_artist_itunes_id="it-artist",
+        similar_artist_deezer_id="dz-artist",
+        profile_id=1,
+    )
+
+    with db._get_connection() as conn:
+        conn.execute(
+            "UPDATE similar_artists SET last_updated = ? WHERE source_artist_id = ? AND profile_id = ?",
+            (datetime.now().isoformat(), "source-1", 1),
+        )
+        conn.commit()
+
+    assert db.has_fresh_similar_artists("source-1", days_threshold=30, profile_id=1) is True
 
 
 def test_match_to_spotify_uses_strict_lookup():
