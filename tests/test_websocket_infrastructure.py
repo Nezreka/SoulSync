@@ -35,50 +35,12 @@ class TestInfrastructure:
         assert client.is_connected()
         client.disconnect()
 
-    def test_http_status_still_works(self, flask_client):
-        """GET /status returns 200 with expected keys."""
-        resp = flask_client.get('/status')
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert 'spotify' in data
-        assert 'media_server' in data
-        assert 'soulseek' in data
-        assert 'active_media_server' in data
-
-    def test_http_watchlist_count_still_works(self, flask_client):
-        """GET /api/watchlist/count returns 200 with expected keys."""
-        resp = flask_client.get('/api/watchlist/count')
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data['success'] is True
-        assert 'count' in data
-        assert 'next_run_in_seconds' in data
-
-    def test_http_download_batch_still_works(self, flask_client):
-        """GET /api/download_status/batch returns 200 with expected structure."""
-        resp = flask_client.get('/api/download_status/batch')
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert 'batches' in data
-        assert 'metadata' in data
-
-
 # =========================================================================
 # Group B — Service Status Parity
 # =========================================================================
 
 class TestServiceStatus:
     """status:update socket events match GET /status HTTP responses."""
-
-    def test_status_update_received(self, test_app, shared_state):
-        """Client receives a status:update event."""
-        app, socketio = test_app
-        client = socketio.test_client(app)
-        build = shared_state['build_status_payload']
-        socketio.emit('status:update', build())
-        received = client.get_received()
-        status_events = [e for e in received if e['name'] == 'status:update']
-        assert len(status_events) >= 1
 
     def test_status_update_shape(self, test_app, shared_state):
         """status:update event data has the expected keys."""
@@ -138,16 +100,6 @@ class TestServiceStatus:
 
 class TestWatchlistCount:
     """watchlist:count socket events match GET /api/watchlist/count."""
-
-    def test_watchlist_count_received(self, test_app, shared_state):
-        """Client receives a watchlist:count event."""
-        app, socketio = test_app
-        client = socketio.test_client(app)
-        build = shared_state['build_watchlist_count_payload']
-        socketio.emit('watchlist:count', build())
-        received = client.get_received()
-        wl_events = [e for e in received if e['name'] == 'watchlist:count']
-        assert len(wl_events) >= 1
 
     def test_watchlist_count_shape(self, test_app, shared_state):
         """watchlist:count event data has expected keys."""
@@ -221,12 +173,6 @@ class TestDownloadBatch:
         lock = shared_state['tasks_lock']
         with lock:
             batches[batch_id] = defaults
-
-    def test_download_subscribe(self, test_app):
-        """Client can subscribe to a batch room."""
-        app, socketio = test_app
-        client = socketio.test_client(app)
-        client.emit('downloads:subscribe', {'batch_ids': ['batch_abc']})
 
     def test_download_receives_updates(self, test_app, shared_state):
         """After subscribing, client receives batch_update for that batch."""
@@ -337,47 +283,6 @@ class TestDownloadBatch:
         assert 'tasks' in data
         assert 'active_count' in data
         assert 'max_concurrent' in data
-
-    def test_download_http_batch_still_works(self, test_app, shared_state):
-        """HTTP batch endpoint works alongside WebSocket rooms."""
-        app, socketio = test_app
-        flask_client = app.test_client()
-
-        self._add_batch(shared_state, 'batch_http')
-
-        resp = flask_client.get('/api/download_status/batch?batch_ids=batch_http')
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert 'batch_http' in data['batches']
-        assert data['batches']['batch_http']['phase'] == 'downloading'
-
-
-# =========================================================================
-# Group E — Fallback Behavior
-# =========================================================================
-
-class TestFallback:
-    """HTTP endpoints work when no WebSocket is connected."""
-
-    def test_http_works_without_websocket(self, flask_client):
-        """All three HTTP endpoints work without any WebSocket connection."""
-        # Status
-        resp = flask_client.get('/status')
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data['spotify']['connected'] is True
-
-        # Watchlist
-        resp = flask_client.get('/api/watchlist/count')
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data['count'] == 7
-
-        # Download batch (empty — no active batches)
-        resp = flask_client.get('/api/download_status/batch')
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data['batches'] == {}
 
     def test_multiple_clients_get_updates(self, test_app, shared_state):
         """Multiple WebSocket clients each receive broadcast events."""

@@ -219,7 +219,7 @@ PUID/PGID are exposed in the template — set them to match your Unraid permissi
 ```bash
 git clone https://github.com/Nezreka/SoulSync
 cd SoulSync
-pip install -r requirements-webui.txt
+pip install -r requirements.txt
 python web_server.py
 # Open http://localhost:8008
 ```

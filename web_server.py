@@ -68,7 +68,7 @@ from core.soulseek_client import SoulseekClient
 from core.download_orchestrator import DownloadOrchestrator
 from core.tidal_client import TidalClient # Added import for Tidal
 from core.matching_engine import MusicMatchingEngine
-from core.database_update_worker import DatabaseUpdateWorker, DatabaseStatsWorker
+from core.database_update_worker import DatabaseUpdateWorker
 from core.web_scan_manager import WebScanManager
 from core.lyrics_client import lyrics_client
 from core.metadata_cache import get_metadata_cache
@@ -4066,7 +4066,7 @@ def _find_downloaded_file(download_path, track_data):
         return None
 
 # --- Refactored Logic from GUI Threads ---
-# This logic is extracted from your QThread classes to be used directly by Flask.
+# This logic is extracted from the database update worker to be used directly by Flask.
 
 def run_service_test(service, test_config):
     """
@@ -24238,7 +24238,7 @@ def _run_db_update_task(full_refresh, server_type):
             db_update_worker.connect_callback('finished', _db_update_finished_callback)
             db_update_worker.connect_callback('error', _db_update_error_callback)
 
-    # This is a blocking call that runs the QThread's logic
+    # This is a blocking call that runs the worker logic
     db_update_worker.run()
 
 
@@ -24289,7 +24289,7 @@ def _run_deep_scan_task(server_type):
 def get_database_stats():
     """Endpoint to get current database statistics."""
     try:
-        # This logic is adapted from DatabaseStatsWorker
+        # This endpoint returns the same stats shape the UI expects.
         db = get_database()
         stats = db.get_database_info_for_server()
         return jsonify(stats)
