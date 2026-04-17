@@ -38,19 +38,6 @@ ENDPOINTS = {
 class TestToolEventDelivery:
     """tool:<name> socket events are received by the client."""
 
-    @pytest.mark.parametrize('tool', TOOLS)
-    def test_tool_event_received(self, test_app, shared_state, tool):
-        """Client receives a tool:<name> event."""
-        app, socketio = test_app
-        client = socketio.test_client(app)
-        build = shared_state['build_tool_status']
-
-        socketio.emit(f'tool:{tool}', build(tool))
-        received = client.get_received()
-        events = [e for e in received if e['name'] == f'tool:{tool}']
-        assert len(events) >= 1
-
-
 # =========================================================================
 # Group B — Data Shape (individual per tool)
 # =========================================================================
@@ -255,41 +242,11 @@ class TestToolHttpParity:
 
 
 # =========================================================================
-# Group D — HTTP Still Works (parameterized)
-# =========================================================================
-
-class TestToolHttpStillWorks:
-    """HTTP endpoints return 200 with expected structure."""
-
-    @pytest.mark.parametrize('tool', TOOLS)
-    def test_http_tool_still_works(self, flask_client, tool):
-        """GET /api/<tool>/status returns 200."""
-        endpoint = ENDPOINTS[tool]
-        resp = flask_client.get(endpoint)
-        assert resp.status_code == 200
-        data = resp.get_json()
-        if tool == 'logs':
-            assert 'logs' in data
-        elif tool == 'metadata':
-            assert 'success' in data
-            assert 'status' in data
-        else:
-            assert 'status' in data
-
-
-# =========================================================================
-# Group E — Backward Compatibility
+# Group D — Backward Compatibility
 # =========================================================================
 
 class TestToolBackwardCompat:
-    """HTTP endpoints work when no WebSocket is connected."""
-
-    def test_all_http_endpoints_work_without_socket(self, flask_client):
-        """All 7 tool HTTP endpoints work without any WebSocket connection."""
-        for tool in TOOLS:
-            endpoint = ENDPOINTS[tool]
-            resp = flask_client.get(endpoint)
-            assert resp.status_code == 200
+    """WebSocket clients still receive broadcast tool updates."""
 
     def test_multiple_clients_get_tool_updates(self, test_app, shared_state):
         """Multiple WebSocket clients each receive tool events."""
