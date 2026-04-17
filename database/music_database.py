@@ -938,7 +938,7 @@ class MusicDatabase:
         """Add tables for discovery feature: similar artists, discovery pool, and recent releases"""
         try:
             # Similar Artists table - stores similar artists for each watchlist artist
-            # Supports both Spotify and iTunes IDs for dual-source discovery
+            # Supports Spotify plus fallback provider IDs for discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS similar_artists (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -954,7 +954,7 @@ class MusicDatabase:
             """)
 
             # Discovery Pool table - rotating pool of 1000-2000 tracks for recommendations
-            # Supports both Spotify and iTunes sources for dual-source discovery
+            # Supports Spotify, iTunes, and Deezer sources for discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS discovery_pool (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -980,7 +980,7 @@ class MusicDatabase:
             """)
 
             # Recent Releases table - tracks new releases from watchlist artists
-            # Supports both Spotify and iTunes sources for dual-source discovery
+            # Supports Spotify, iTunes, and Deezer sources for discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS recent_releases (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -999,7 +999,7 @@ class MusicDatabase:
             """)
 
             # Discovery Recent Albums cache - for discover page recent releases section
-            # Supports both Spotify and iTunes sources for dual-source discovery
+            # Supports Spotify, iTunes, and Deezer sources for discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS discovery_recent_albums (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -7162,7 +7162,7 @@ class MusicDatabase:
             return 0
 
     def update_watchlist_artist_image(self, artist_id: str, image_url: str) -> bool:
-        """Update the image URL for a watchlist artist (checks both Spotify and iTunes IDs)"""
+        """Update the image URL for a watchlist artist (checks linked provider IDs)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7382,13 +7382,13 @@ class MusicDatabase:
             logger.error(f"Error getting similar artists: {e}")
             return []
 
-    def get_similar_artists_missing_itunes_ids(self, source_artist_id: str, profile_id: int = 1) -> List[SimilarArtist]:
-        """Get similar artists for a source that are missing iTunes IDs (for backfill)"""
-        return self.get_similar_artists_missing_fallback_ids(source_artist_id, 'itunes', profile_id)
-
     def get_similar_artists_missing_fallback_ids(self, source_artist_id: str, fallback_source: str = 'itunes', profile_id: int = 1) -> List[SimilarArtist]:
-        """Get similar artists missing IDs for the given fallback source (for backfill)"""
+        """Get similar artists missing fallback-provider IDs for backfill."""
         try:
+            if fallback_source not in {'itunes', 'deezer'}:
+                logger.error("Unsupported similar-artist fallback source: %s", fallback_source)
+                return []
+
             col = 'similar_artist_deezer_id' if fallback_source == 'deezer' else 'similar_artist_itunes_id'
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7499,19 +7499,16 @@ class MusicDatabase:
             logger.error(f"Error updating similar artist metadata by external ID: {e}")
             return False
 
-    def has_fresh_similar_artists(self, source_artist_id: str, days_threshold: int = 30, require_itunes: bool = True, require_spotify: bool = False, profile_id: int = 1) -> bool:
+    def has_fresh_similar_artists(self, source_artist_id: str, days_threshold: int = 30, profile_id: int = 1) -> bool:
         """
         Check if we have cached similar artists that are still fresh (<days_threshold old).
-        Also checks that similar artists have the required provider IDs.
 
         Args:
             source_artist_id: The source artist ID to check
             days_threshold: Maximum age in days to consider fresh
-            require_itunes: If True, also requires iTunes IDs to be present (for seamless provider switching)
-            require_spotify: If True, also requires Spotify IDs to be present (for Spotify discovery)
             profile_id: Profile to check freshness for
 
-        Returns True if we have recent data with required IDs, False if data is stale, missing, or incomplete.
+        Returns True if we have recent data, False if data is stale or missing.
         """
         try:
             with self._get_connection() as conn:
@@ -7535,40 +7532,6 @@ class MusicDatabase:
 
                 if days_since_update >= days_threshold:
                     return False
-
-                # Check if we have iTunes IDs (for seamless provider switching)
-                if require_itunes:
-                    cursor.execute("""
-                        SELECT COUNT(*) as total,
-                               SUM(CASE WHEN similar_artist_itunes_id IS NOT NULL AND similar_artist_itunes_id != '' THEN 1 ELSE 0 END) as has_itunes
-                        FROM similar_artists
-                        WHERE source_artist_id = ? AND profile_id = ?
-                    """, (source_artist_id, profile_id))
-                    id_row = cursor.fetchone()
-
-                    if id_row and id_row['total'] > 0:
-                        # If less than 50% have iTunes IDs, consider stale and refetch
-                        itunes_ratio = id_row['has_itunes'] / id_row['total']
-                        if itunes_ratio < 0.5:
-                            logger.debug(f"Similar artists for {source_artist_id} missing iTunes IDs ({id_row['has_itunes']}/{id_row['total']}), will refetch")
-                            return False
-
-                # Check if we have Spotify IDs (for Spotify discovery)
-                if require_spotify:
-                    cursor.execute("""
-                        SELECT COUNT(*) as total,
-                               SUM(CASE WHEN similar_artist_spotify_id IS NOT NULL AND similar_artist_spotify_id != '' THEN 1 ELSE 0 END) as has_spotify
-                        FROM similar_artists
-                        WHERE source_artist_id = ? AND profile_id = ?
-                    """, (source_artist_id, profile_id))
-                    id_row = cursor.fetchone()
-
-                    if id_row and id_row['total'] > 0:
-                        # If less than 50% have Spotify IDs, consider stale and refetch
-                        spotify_ratio = id_row['has_spotify'] / id_row['total']
-                        if spotify_ratio < 0.5:
-                            logger.debug(f"Similar artists for {source_artist_id} missing Spotify IDs ({id_row['has_spotify']}/{id_row['total']}), will refetch")
-                            return False
 
                 return True
 
@@ -7669,7 +7632,7 @@ class MusicDatabase:
             logger.error(f"Error marking artists as featured: {e}")
 
     def add_to_discovery_pool(self, track_data: Dict[str, Any], source: str = 'spotify', profile_id: int = 1) -> bool:
-        """Add a track to the discovery pool (supports both Spotify and iTunes sources)"""
+        """Add a track to the discovery pool (supports Spotify, iTunes, and Deezer sources)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7764,7 +7727,7 @@ class MusicDatabase:
             logger.error(f"Error rotating discovery pool: {e}")
 
     def get_discovery_pool_tracks(self, limit: int = 100, new_releases_only: bool = False, source: Optional[str] = None, profile_id: int = 1) -> List[DiscoveryTrack]:
-        """Get tracks from discovery pool, optionally filtered by source ('spotify' or 'itunes')"""
+        """Get tracks from discovery pool, optionally filtered by source ('spotify', 'itunes', or 'deezer')"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7822,7 +7785,7 @@ class MusicDatabase:
             return []
 
     def cache_discovery_recent_album(self, album_data: Dict[str, Any], source: str = 'spotify', profile_id: int = 1) -> bool:
-        """Cache a recent album for the discover page (supports both Spotify and iTunes sources)"""
+        """Cache a recent album for the discover page (supports Spotify, iTunes, and Deezer sources)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
