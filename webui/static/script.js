@@ -75294,15 +75294,40 @@ function _syncDetailFilter(btn, filter) {
 let _adlPoller = null;
 let _adlFilter = 'all';
 let _adlData = [];
+let _adlBatches = [];
+let _adlBatchHistory = [];
+let _adlExpandedBatches = new Set();
+let _adlBatchHistoryPoller = null;
+let _adlFilterBatchId = null; // When set, main list shows only this batch
+const _batchColorMap = {};
+const _batchCompletedAt = {}; // batch_id -> timestamp when first seen as complete
+let _batchColorNext = 0;
+
+function _getBatchColor(batchId) {
+    if (!batchId) return -1;
+    if (_batchColorMap[batchId] === undefined) {
+        // Deterministic color from batch_id hash for consistency across reloads
+        let hash = 0;
+        for (let i = 0; i < batchId.length; i++) hash = ((hash << 5) - hash + batchId.charCodeAt(i)) | 0;
+        _batchColorMap[batchId] = Math.abs(hash) % 8;
+    }
+    return _batchColorMap[batchId];
+}
 
 function loadActiveDownloadsPage() {
     _adlFetch();
-    // Poll every 2 seconds while on this page
+    _adlFetchBatchHistory();
+    // Poll downloads every 2 seconds, history every 60 seconds
     if (_adlPoller) clearInterval(_adlPoller);
     _adlPoller = setInterval(() => {
         if (currentPage === 'active-downloads') _adlFetch();
         else { clearInterval(_adlPoller); _adlPoller = null; }
     }, 2000);
+    if (_adlBatchHistoryPoller) clearInterval(_adlBatchHistoryPoller);
+    _adlBatchHistoryPoller = setInterval(() => {
+        if (currentPage === 'active-downloads') _adlFetchBatchHistory();
+        else { clearInterval(_adlBatchHistoryPoller); _adlBatchHistoryPoller = null; }
+    }, 60000);
 }
 
 function adlSetFilter(filter) {
@@ -75317,7 +75342,9 @@ async function _adlFetch() {
         const data = await resp.json();
         if (data.success) {
             _adlData = data.downloads || [];
+            _adlBatches = data.batches || [];
             _adlRender();
+            _adlRenderBatchPanel();
             _adlUpdateBadge();
         }
     } catch (e) {
@@ -75355,10 +75382,16 @@ function _adlRender() {
     const failedStatuses = ['failed', 'not_found', 'cancelled'];
 
     let filtered = _adlData;
-    if (_adlFilter === 'active') filtered = _adlData.filter(d => activeStatuses.includes(d.status));
-    else if (_adlFilter === 'queued') filtered = _adlData.filter(d => queuedStatuses.includes(d.status));
-    else if (_adlFilter === 'completed') filtered = _adlData.filter(d => completedStatuses.includes(d.status));
-    else if (_adlFilter === 'failed') filtered = _adlData.filter(d => failedStatuses.includes(d.status));
+
+    // Batch filter: if a batch card is selected, narrow to that batch first
+    if (_adlFilterBatchId) {
+        filtered = filtered.filter(d => d.batch_id === _adlFilterBatchId);
+    }
+
+    if (_adlFilter === 'active') filtered = filtered.filter(d => activeStatuses.includes(d.status));
+    else if (_adlFilter === 'queued') filtered = filtered.filter(d => queuedStatuses.includes(d.status));
+    else if (_adlFilter === 'completed') filtered = filtered.filter(d => completedStatuses.includes(d.status));
+    else if (_adlFilter === 'failed') filtered = filtered.filter(d => failedStatuses.includes(d.status));
 
     const completedN = _adlData.filter(d => [...completedStatuses, ...failedStatuses].includes(d.status)).length;
 
@@ -75376,6 +75409,25 @@ function _adlRender() {
     // Show/hide clear button
     const clearBtn = document.getElementById('adl-clear-btn');
     if (clearBtn) clearBtn.style.display = completedN > 0 ? '' : 'none';
+
+    // Batch filter indicator banner
+    let existingBanner = document.getElementById('adl-batch-filter-banner');
+    if (_adlFilterBatchId) {
+        const batchInfo = _adlBatches.find(b => b.batch_id === _adlFilterBatchId);
+        const batchName = batchInfo ? batchInfo.batch_name : 'Unknown batch';
+        const colorIdx = _getBatchColor(_adlFilterBatchId);
+        const colorDot = colorIdx >= 0 ? `<span class="adl-filter-banner-dot" style="background:rgba(var(--batch-color-${colorIdx}),0.7)"></span>` : '';
+        if (!existingBanner) {
+            existingBanner = document.createElement('div');
+            existingBanner.id = 'adl-batch-filter-banner';
+            existingBanner.className = 'adl-batch-filter-banner';
+            list.parentNode.insertBefore(existingBanner, list);
+        }
+        existingBanner.innerHTML = `${colorDot}Showing: <strong>${_adlEsc(batchName)}</strong> <button class="adl-filter-banner-clear" onclick="_adlFilterByBatch('${_adlFilterBatchId}')">Clear filter</button>`;
+        existingBanner.style.display = '';
+    } else if (existingBanner) {
+        existingBanner.style.display = 'none';
+    }
 
     if (filtered.length === 0) {
         if (empty) empty.style.display = '';
@@ -75427,7 +75479,13 @@ function _adlRender() {
             // Track position: "3 of 19"
             const posText = dl.batch_total > 1 ? `${(dl.track_index || 0) + 1} of ${dl.batch_total}` : '';
 
-            html += `<div class="adl-row adl-row-${statusClass}" data-task-id="${dl.task_id}">
+            const colorIdx = _getBatchColor(dl.batch_id);
+            const colorBar = colorIdx >= 0
+                ? `<div class="adl-row-batch-color" style="background:rgba(var(--batch-color-${colorIdx}),0.6)"></div>`
+                : '';
+
+            html += `<div class="adl-row adl-row-${statusClass}" data-task-id="${dl.task_id}" data-batch-id="${dl.batch_id || ''}">
+                ${colorBar}
                 ${artHtml}
                 <div class="adl-row-info">
                     <div class="adl-row-title">${title}</div>
@@ -75496,5 +75554,321 @@ async function adlClearCompleted() {
     }
 }
 
+// ---- Batch Context Panel ----
+
+const _BATCH_FADE_SECONDS = 15; // Remove completed batches after this many seconds
+
+function _adlRenderBatchPanel() {
+    const container = document.getElementById('adl-batch-active');
+    const headerTitle = document.querySelector('.adl-batch-panel-title');
+    if (!container) return;
+
+    const now = Date.now();
+
+    // Filter out batches that completed more than FADE seconds ago
+    const visibleBatches = _adlBatches.filter(batch => {
+        const isTerminal = batch.phase === 'complete' || batch.phase === 'cancelled' || batch.phase === 'error';
+        if (!isTerminal) {
+            delete _batchCompletedAt[batch.batch_id]; // Reset if it came back to life
+            return true;
+        }
+        if (!_batchCompletedAt[batch.batch_id]) {
+            _batchCompletedAt[batch.batch_id] = now;
+        }
+        const elapsed = (now - _batchCompletedAt[batch.batch_id]) / 1000;
+        return elapsed < _BATCH_FADE_SECONDS;
+    });
+
+    // Update header with count
+    if (headerTitle) {
+        const activeCount = visibleBatches.filter(b => b.phase !== 'complete' && b.phase !== 'cancelled' && b.phase !== 'error').length;
+        headerTitle.textContent = activeCount > 0 ? `Batches (${activeCount})` : 'Batches';
+    }
+
+    if (visibleBatches.length === 0) {
+        container.innerHTML = `<div class="adl-batch-empty">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" style="opacity:0.25;margin-bottom:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <div>No active batches</div>
+            <div style="font-size:0.7rem;margin-top:2px;opacity:0.5">Start a download from Search, Sync, or Wishlist</div>
+        </div>`;
+        return;
+    }
+
+    let html = '';
+    for (const batch of visibleBatches) {
+        const colorIdx = _getBatchColor(batch.batch_id);
+        const colorStyle = colorIdx >= 0 ? `border-left-color: rgba(var(--batch-color-${colorIdx}), 0.6)` : '';
+        const isExpanded = _adlExpandedBatches.has(batch.batch_id);
+        const isFiltered = _adlFilterBatchId === batch.batch_id;
+        const total = batch.total || 1;
+        const done = batch.completed + batch.failed;
+        const pct = Math.round((done / total) * 100);
+        const hasFailed = batch.failed > 0;
+        const isTerminal = batch.phase === 'complete' || batch.phase === 'cancelled' || batch.phase === 'error';
+        const isActive = batch.phase === 'downloading' && batch.active > 0;
+
+        // Fade progress for completing batches
+        let fadeStyle = '';
+        if (isTerminal && _batchCompletedAt[batch.batch_id]) {
+            const elapsed = (now - _batchCompletedAt[batch.batch_id]) / 1000;
+            const fadeStart = _BATCH_FADE_SECONDS * 0.6;
+            if (elapsed > fadeStart) {
+                const fadeProgress = Math.min(1, (elapsed - fadeStart) / (_BATCH_FADE_SECONDS - fadeStart));
+                fadeStyle = `opacity: ${1 - fadeProgress};`;
+            }
+        }
+
+        const sourceBadge = batch.source_page
+            ? `<span class="adl-batch-card-source">${_adlEsc(batch.source_page)}</span>`
+            : '';
+
+        // Phase label with icon
+        let phaseText = '';
+        let phaseIcon = '';
+        if (batch.phase === 'analysis') {
+            phaseText = 'Analyzing...';
+            phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
+        } else if (batch.phase === 'downloading') {
+            phaseText = `${batch.completed}/${total} tracks`;
+            if (batch.active > 0) phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
+        } else if (batch.phase === 'complete') {
+            phaseText = `Done \u2014 ${batch.completed} tracks`;
+            phaseIcon = '<span style="color:#22c55e;margin-right:4px">\u2713</span>';
+        } else if (batch.phase === 'cancelled') {
+            phaseText = 'Cancelled';
+        } else if (batch.phase === 'error') {
+            phaseText = 'Error';
+        } else {
+            phaseText = batch.phase;
+        }
+
+        // Get first track artwork for batch thumbnail, fallback to initial
+        const batchTracks = _adlData.filter(d => d.batch_id === batch.batch_id);
+        const artworkTrack = batchTracks.find(t => t.artwork);
+        let thumbHtml;
+        if (artworkTrack) {
+            thumbHtml = `<img class="adl-batch-card-thumb" src="${_adlEsc(artworkTrack.artwork)}" alt="" onerror="this.outerHTML='<div class=\\'adl-batch-card-thumb adl-batch-card-thumb-fallback\\'>${_adlEsc((batch.batch_name || 'D')[0])}</div>'">`;
+        } else {
+            const initial = (batch.batch_name || 'D')[0].toUpperCase();
+            const bgColor = colorIdx >= 0 ? `rgba(var(--batch-color-${colorIdx}), 0.15)` : 'rgba(255,255,255,0.05)';
+            const fgColor = colorIdx >= 0 ? `rgba(var(--batch-color-${colorIdx}), 0.7)` : 'rgba(255,255,255,0.4)';
+            thumbHtml = `<div class="adl-batch-card-thumb adl-batch-card-thumb-fallback" style="background:${bgColor};color:${fgColor}">${initial}</div>`;
+        }
+
+        // Build expanded tracks list with per-track progress
+        let tracksHtml = '';
+        if (isExpanded) {
+            if (batchTracks.length > 0) {
+                tracksHtml = batchTracks.map(t => {
+                    const cls = _adlStatusClass(t.status);
+                    const progress = t.progress || 0;
+
+                    // Status indicator with detail
+                    let statusHtml = '';
+                    if (t.status === 'downloading' && progress > 0) {
+                        statusHtml = `<span class="adl-batch-track-status active">${Math.round(progress)}%</span>`;
+                    } else if (t.status === 'searching') {
+                        statusHtml = `<span class="adl-batch-track-status active"><span class="adl-spinner" style="width:8px;height:8px"></span></span>`;
+                    } else if (t.status === 'post_processing') {
+                        statusHtml = `<span class="adl-batch-track-status active" title="Processing">proc</span>`;
+                    } else if (cls === 'completed') {
+                        statusHtml = `<span class="adl-batch-track-status completed">\u2713</span>`;
+                    } else if (cls === 'failed') {
+                        statusHtml = `<span class="adl-batch-track-status failed">\u2717</span>`;
+                    } else {
+                        statusHtml = `<span class="adl-batch-track-status queued">\u00B7</span>`;
+                    }
+
+                    // Mini progress bar for downloading tracks
+                    const miniBar = t.status === 'downloading' && progress > 0
+                        ? `<div class="adl-batch-track-progress"><div class="adl-batch-track-progress-fill" style="width:${progress}%"></div></div>`
+                        : '';
+
+                    return `<div class="adl-batch-track-row">
+                        <span class="adl-batch-track-title">${_adlEsc(t.title || 'Unknown')}</span>
+                        ${statusHtml}
+                        ${miniBar}
+                    </div>`;
+                }).join('');
+            } else {
+                tracksHtml = '<div style="font-size:0.7rem;color:rgba(255,255,255,0.3);padding:4px 0">No tracks loaded</div>';
+            }
+        }
+
+        const cardClasses = ['adl-batch-card'];
+        if (isExpanded) cardClasses.push('expanded');
+        if (isActive) cardClasses.push('active-glow');
+        if (isFiltered) cardClasses.push('filtered');
+
+        const playlistId = _adlEsc(batch.playlist_id || '');
+
+        html += `<div class="${cardClasses.join(' ')}" style="${colorStyle}${fadeStyle}" data-batch-id="${batch.batch_id}" onclick="_adlToggleBatch('${batch.batch_id}')">
+            <div class="adl-batch-card-top">
+                ${thumbHtml}
+                <div class="adl-batch-card-info">
+                    <div class="adl-batch-card-name adl-batch-card-link" onclick="event.stopPropagation(); _adlOpenBatchModal('${batch.batch_id}', '${playlistId}', '${_adlEsc(batch.batch_name || 'Download')}')" title="Open download modal">${_adlEsc(batch.batch_name || 'Download')}</div>
+                    <div class="adl-batch-card-meta">${phaseIcon}${phaseText}</div>
+                </div>
+                ${sourceBadge}
+                <div class="adl-batch-card-actions">
+                    <button class="adl-batch-card-filter ${isFiltered ? 'active' : ''}" onclick="event.stopPropagation(); _adlFilterByBatch('${batch.batch_id}')" title="${isFiltered ? 'Show all downloads' : 'Filter to this batch'}">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                    </button>
+                    ${!isTerminal ? `<button class="adl-batch-card-cancel" onclick="event.stopPropagation(); _adlCancelBatch('${batch.batch_id}')" title="Cancel batch">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>` : ''}
+                </div>
+            </div>
+            <div class="adl-batch-progress">
+                <div class="adl-batch-progress-fill${hasFailed ? ' has-failed' : ''}" style="width:${pct}%"></div>
+            </div>
+            <div class="adl-batch-tracks">${tracksHtml}</div>
+        </div>`;
+    }
+
+    container.innerHTML = html;
+}
+
+function _adlToggleBatch(batchId) {
+    if (_adlExpandedBatches.has(batchId)) {
+        _adlExpandedBatches.delete(batchId);
+    } else {
+        _adlExpandedBatches.add(batchId);
+    }
+    _adlRenderBatchPanel();
+}
+
+function _adlOpenBatchModal(batchId, playlistId, batchName) {
+    // For wishlist batches, navigate to wishlist and show modal
+    if (playlistId === 'wishlist') {
+        const clientProcess = activeDownloadProcesses['wishlist'];
+        if (clientProcess && clientProcess.modalElement && document.body.contains(clientProcess.modalElement)) {
+            clientProcess.modalElement.style.display = 'flex';
+            if (typeof WishlistModalState !== 'undefined') WishlistModalState.setVisible();
+        } else {
+            rehydrateModal({ playlist_id: playlistId, playlist_name: batchName, batch_id: batchId }, true);
+        }
+        return;
+    }
+
+    // For other batches, try to show existing modal or rehydrate
+    for (const [pid, process] of Object.entries(activeDownloadProcesses)) {
+        if (process.batchId === batchId && process.modalElement && document.body.contains(process.modalElement)) {
+            process.modalElement.style.display = 'flex';
+            return;
+        }
+    }
+    // Rehydrate from server
+    rehydrateModal({ playlist_id: playlistId, playlist_name: batchName, batch_id: batchId }, true);
+}
+
+function _adlFilterByBatch(batchId) {
+    if (_adlFilterBatchId === batchId) {
+        _adlFilterBatchId = null; // Toggle off
+    } else {
+        _adlFilterBatchId = batchId;
+    }
+    _adlRender();
+    _adlRenderBatchPanel();
+}
+
+async function _adlCancelBatch(batchId) {
+    if (!confirm('Cancel this batch? Active downloads will be stopped.')) return;
+    try {
+        const resp = await fetch(`/api/playlists/${batchId}/cancel_batch`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(`Cancelled ${data.cancelled_tasks} downloads`, 'info');
+            _adlFetch();
+        } else {
+            showToast(data.error || 'Failed to cancel batch', 'error');
+        }
+    } catch (e) {
+        showToast('Failed to cancel batch', 'error');
+    }
+}
+
+// ---- Batch History ----
+
+async function _adlFetchBatchHistory() {
+    try {
+        const resp = await fetch('/api/downloads/batch-history?days=7&limit=50');
+        const data = await resp.json();
+        if (data.success) {
+            _adlBatchHistory = data.history || [];
+            _adlRenderBatchHistory();
+        }
+    } catch (e) {
+        console.debug('Batch history fetch error:', e);
+    }
+}
+
+function _adlRenderBatchHistory() {
+    const section = document.getElementById('adl-batch-history-section');
+    const list = document.getElementById('adl-batch-history-list');
+    if (!section || !list) return;
+
+    if (_adlBatchHistory.length === 0) {
+        section.style.display = 'none';
+        return;
+    }
+
+    section.style.display = '';
+
+    list.innerHTML = _adlBatchHistory.map(h => {
+        const name = _adlEsc(h.playlist_name || 'Unknown');
+        const downloaded = h.tracks_downloaded || 0;
+        const failed = h.tracks_failed || 0;
+        const total = h.total_tracks || 0;
+        const statsParts = [`${downloaded}/${total}`];
+        if (failed > 0) statsParts.push(`<span style="color:#ef4444">${failed} failed</span>`);
+
+        let dateText = '';
+        if (h.completed_at) {
+            try {
+                const d = new Date(h.completed_at);
+                const now = new Date();
+                const diffMs = now - d;
+                const diffH = Math.floor(diffMs / 3600000);
+                if (diffH < 1) dateText = 'just now';
+                else if (diffH < 24) dateText = `${diffH}h ago`;
+                else dateText = `${Math.floor(diffH / 24)}d ago`;
+            } catch (e) {
+                dateText = '';
+            }
+        }
+
+        const sourceLabel = h.source_page ? `<span class="adl-batch-card-source" style="font-size:0.6rem;padding:0 4px">${_adlEsc(h.source_page)}</span>` : '';
+
+        // Source type color dot
+        const sourceColors = { wishlist: '168, 85, 247', sync: '59, 130, 246', album: '16, 185, 129' };
+        const dotColor = sourceColors[h.source_page] || '255, 255, 255';
+        const histDot = `<span class="adl-batch-history-dot" style="background:rgba(${dotColor}, 0.6)"></span>`;
+
+        return `<div class="adl-batch-history-item">
+            ${histDot}
+            <div class="adl-batch-history-name">${name} ${sourceLabel}</div>
+            <div class="adl-batch-history-stats">${statsParts.join(' ')}</div>
+            <div class="adl-batch-history-date">${dateText}</div>
+        </div>`;
+    }).join('');
+}
+
+function adlToggleBatchHistory() {
+    const section = document.getElementById('adl-batch-history-section');
+    if (section) section.classList.toggle('expanded');
+}
+
+function adlToggleBatchPanel() {
+    const panel = document.getElementById('adl-batch-panel');
+    if (panel) panel.classList.toggle('collapsed');
+}
+
 window.adlSetFilter = adlSetFilter;
 window.adlClearCompleted = adlClearCompleted;
+window._adlToggleBatch = _adlToggleBatch;
+window._adlOpenBatchModal = _adlOpenBatchModal;
+window._adlFilterByBatch = _adlFilterByBatch;
+window._adlCancelBatch = _adlCancelBatch;
+window.adlToggleBatchHistory = adlToggleBatchHistory;
+window.adlToggleBatchPanel = adlToggleBatchPanel;
