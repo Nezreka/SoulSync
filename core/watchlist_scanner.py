@@ -859,7 +859,7 @@ class WatchlistScanner:
         Returns the first provider that can actually return albums.
 
         Args:
-            watchlist_artist: WatchlistArtist object (has both spotify and itunes IDs)
+            watchlist_artist: WatchlistArtist object (has provider IDs when available)
             last_scan_timestamp: Only return releases after this date (for incremental scans)
 
         Returns:
@@ -2398,7 +2398,7 @@ class WatchlistScanner:
         Populate discovery pool with tracks from top similar artists.
         Called after watchlist scan completes.
 
-        Supports both Spotify and iTunes sources - populates for whichever is available.
+        Supports Spotify, iTunes, and Deezer sources - populates for whichever is available.
         - Checks if pool was updated in last 24 hours (prevents over-polling)
         - Includes albums, singles, and EPs for comprehensive coverage
         - Appends to existing pool instead of replacing it

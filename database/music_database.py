@@ -912,7 +912,7 @@ class MusicDatabase:
         """Add tables for discovery feature: similar artists, discovery pool, and recent releases"""
         try:
             # Similar Artists table - stores similar artists for each watchlist artist
-            # Supports both Spotify and iTunes IDs for dual-source discovery
+            # Supports Spotify plus fallback provider IDs for discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS similar_artists (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -928,7 +928,7 @@ class MusicDatabase:
             """)
 
             # Discovery Pool table - rotating pool of 1000-2000 tracks for recommendations
-            # Supports both Spotify and iTunes sources for dual-source discovery
+            # Supports Spotify, iTunes, and Deezer sources for discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS discovery_pool (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -954,7 +954,7 @@ class MusicDatabase:
             """)
 
             # Recent Releases table - tracks new releases from watchlist artists
-            # Supports both Spotify and iTunes sources for dual-source discovery
+            # Supports Spotify, iTunes, and Deezer sources for discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS recent_releases (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -973,7 +973,7 @@ class MusicDatabase:
             """)
 
             # Discovery Recent Albums cache - for discover page recent releases section
-            # Supports both Spotify and iTunes sources for dual-source discovery
+            # Supports Spotify, iTunes, and Deezer sources for discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS discovery_recent_albums (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -7136,7 +7136,7 @@ class MusicDatabase:
             return 0
 
     def update_watchlist_artist_image(self, artist_id: str, image_url: str) -> bool:
-        """Update the image URL for a watchlist artist (checks both Spotify and iTunes IDs)"""
+        """Update the image URL for a watchlist artist (checks linked provider IDs)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7356,13 +7356,13 @@ class MusicDatabase:
             logger.error(f"Error getting similar artists: {e}")
             return []
 
-    def get_similar_artists_missing_itunes_ids(self, source_artist_id: str, profile_id: int = 1) -> List[SimilarArtist]:
-        """Get similar artists for a source that are missing iTunes IDs (for backfill)"""
-        return self.get_similar_artists_missing_fallback_ids(source_artist_id, 'itunes', profile_id)
-
     def get_similar_artists_missing_fallback_ids(self, source_artist_id: str, fallback_source: str = 'itunes', profile_id: int = 1) -> List[SimilarArtist]:
-        """Get similar artists missing IDs for the given fallback source (for backfill)"""
+        """Get similar artists missing fallback-provider IDs for backfill."""
         try:
+            if fallback_source not in {'itunes', 'deezer'}:
+                logger.error("Unsupported similar-artist fallback source: %s", fallback_source)
+                return []
+
             col = 'similar_artist_deezer_id' if fallback_source == 'deezer' else 'similar_artist_itunes_id'
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7606,7 +7606,7 @@ class MusicDatabase:
             logger.error(f"Error marking artists as featured: {e}")
 
     def add_to_discovery_pool(self, track_data: Dict[str, Any], source: str = 'spotify', profile_id: int = 1) -> bool:
-        """Add a track to the discovery pool (supports both Spotify and iTunes sources)"""
+        """Add a track to the discovery pool (supports Spotify, iTunes, and Deezer sources)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7701,7 +7701,7 @@ class MusicDatabase:
             logger.error(f"Error rotating discovery pool: {e}")
 
     def get_discovery_pool_tracks(self, limit: int = 100, new_releases_only: bool = False, source: Optional[str] = None, profile_id: int = 1) -> List[DiscoveryTrack]:
-        """Get tracks from discovery pool, optionally filtered by source ('spotify' or 'itunes')"""
+        """Get tracks from discovery pool, optionally filtered by source ('spotify', 'itunes', or 'deezer')"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -7759,7 +7759,7 @@ class MusicDatabase:
             return []
 
     def cache_discovery_recent_album(self, album_data: Dict[str, Any], source: str = 'spotify', profile_id: int = 1) -> bool:
-        """Cache a recent album for the discover page (supports both Spotify and iTunes sources)"""
+        """Cache a recent album for the discover page (supports Spotify, iTunes, and Deezer sources)"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
