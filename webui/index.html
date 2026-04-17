@@ -6777,16 +6777,10 @@
                         <!-- Action bar -->
                         <div class="wl-nebula-bar">
                             <input type="text" class="wl-nebula-search" id="wl-nebula-search" placeholder="Search artists, albums..." oninput="_filterNebula()">
-                            <div class="wl-nebula-bar-actions">
-                                <button class="watchlist-action-btn watchlist-action-primary" onclick="selectWishlistCategory('albums')">
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                    Albums
-                                </button>
-                                <button class="watchlist-action-btn watchlist-action-secondary" onclick="selectWishlistCategory('singles')">
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                    Singles
-                                </button>
-                            </div>
+                            <button class="watchlist-action-btn watchlist-action-primary" onclick="_nebulaDownload()">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                Download Wishlist
+                            </button>
                         </div>
                         <!-- Artist orbs container -->
                         <div class="wl-nebula-field" id="wl-nebula-field">
