@@ -1,35 +1,5 @@
 #!/usr/bin/env python3
 
-# Conditional PyQt6 import for backward compatibility with GUI version
-try:
-    from PyQt6.QtCore import QThread, pyqtSignal
-    QT_AVAILABLE = True
-except ImportError:
-    QT_AVAILABLE = False
-    # Define dummy classes for headless operation
-    class QThread:
-        def __init__(self):
-            self.callbacks = {}
-        def start(self):
-            import threading
-            self.thread = threading.Thread(target=self.run)
-            self.thread.daemon = True
-            self.thread.start()
-        def wait(self):
-            if hasattr(self, 'thread'):
-                self.thread.join()
-        def emit_signal(self, signal_name, *args):
-            if signal_name in self.callbacks:
-                for callback in self.callbacks[signal_name]:
-                    try:
-                        callback(*args)
-                    except Exception as e:
-                        logger.error(f"Error in callback for {signal_name}: {e}")
-        def connect_signal(self, signal_name, callback):
-            if signal_name not in self.callbacks:
-                self.callbacks[signal_name] = []
-            self.callbacks[signal_name].append(callback)
-
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Callable
@@ -42,32 +12,19 @@ from config.settings import config_manager
 
 logger = get_logger("database_update_worker")
 
-class DatabaseUpdateWorker(QThread):
-    """Worker thread for updating SoulSync database with media server library data (Plex or Jellyfin)"""
-    
-    # Qt signals (only available when PyQt6 is installed)
-    if QT_AVAILABLE:
-        progress_updated = pyqtSignal(str, int, int, float)  # current_item, processed, total, percentage
-        artist_processed = pyqtSignal(str, bool, str, int, int)  # artist_name, success, details, albums_count, tracks_count
-        finished = pyqtSignal(int, int, int, int, int)  # total_artists, total_albums, total_tracks, successful, failed
-        error = pyqtSignal(str)  # error_message
-        phase_changed = pyqtSignal(str)  # current_phase (artists, albums, tracks)
+class DatabaseUpdateWorker:
+    """Worker for updating SoulSync database with media server library data."""
     
     def __init__(self, media_client, database_path: str = "database/music_library.db", full_refresh: bool = False, server_type: str = "plex", force_sequential: bool = False):
-        super().__init__()
-
         # Force sequential processing for web server mode to avoid threading issues
         self.force_sequential = force_sequential
-
-        # Initialize signal callbacks for headless mode
-        if not QT_AVAILABLE:
-            self.callbacks = {
-                'progress_updated': [],
-                'artist_processed': [],
-                'finished': [],
-                'error': [],
-                'phase_changed': []
-            }
+        self.callbacks = {
+            'progress_updated': [],
+            'artist_processed': [],
+            'finished': [],
+            'error': [],
+            'phase_changed': [],
+        }
         
         # Support both old plex_client parameter and new media_client parameter for backward compatibility
         if hasattr(media_client, '__class__') and 'plex' in media_client.__class__.__name__.lower():
@@ -116,19 +73,16 @@ class DatabaseUpdateWorker(QThread):
         self.database: Optional[MusicDatabase] = None
     
     def _emit_signal(self, signal_name: str, *args):
-        """Emit a signal in both Qt and headless modes"""
-        if QT_AVAILABLE and hasattr(self, signal_name):
-            # Qt mode - use actual signal
-            getattr(self, signal_name).emit(*args)
-        elif not QT_AVAILABLE:
-            # Headless mode - use callback system
-            self.emit_signal(signal_name, *args)
+        """Emit a signal through the callback registry."""
+        for callback in self.callbacks.get(signal_name, []):
+            try:
+                callback(*args)
+            except Exception as e:
+                logger.error(f"Error in callback for {signal_name}: {e}")
     
     def connect_callback(self, signal_name: str, callback: Callable):
-        """Connect a callback for headless mode"""
-        if not QT_AVAILABLE:
-            self.connect_signal(signal_name, callback)
-        # In Qt mode, use the normal signal.connect() method
+        """Connect a callback for progress notifications."""
+        self.callbacks.setdefault(signal_name, []).append(callback)
     
     def stop(self):
         """Stop the database update process"""
@@ -1261,8 +1215,8 @@ class DatabaseUpdateWorker(QThread):
                 logger.error(f"Error processing artist {getattr(artist, 'title', 'Unknown')}: {e}")
                 return (getattr(artist, 'title', 'Unknown'), False, f"Error: {str(e)}", 0, 0)
         
-        # Process artists - use sequential processing in web server mode to avoid threading issues
-        if not QT_AVAILABLE or self.force_sequential:
+        # Process artists sequentially when requested (the web server uses this path).
+        if self.force_sequential:
             # Sequential processing for web server mode
             for i, artist in enumerate(artists):
                 if self.should_stop:
@@ -1277,7 +1231,7 @@ class DatabaseUpdateWorker(QThread):
                 # Emit progress signal
                 self._emit_signal('artist_processed', artist_name, success, details, album_count, track_count)
         else:
-            # Process artists in parallel using ThreadPoolExecutor (Qt mode only)
+            # Parallel processing for local/manual runs
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 # Submit all tasks
                 future_to_artist = {executor.submit(process_single_artist, artist): artist
@@ -1409,71 +1363,3 @@ class DatabaseUpdateWorker(QThread):
 
         except Exception as e:
             logger.error(f"Error in run_with_callback: {e}")
-
-class DatabaseStatsWorker(QThread):
-    """Simple worker for getting database statistics without blocking UI"""
-    
-    # Qt signals (only available when PyQt6 is installed)
-    if QT_AVAILABLE:
-        stats_updated = pyqtSignal(dict)  # Database statistics
-    
-    def __init__(self, database_path: str = "database/music_library.db"):
-        super().__init__()
-        self.database_path = database_path
-        self.should_stop = False
-        
-        # Initialize signal callbacks for headless mode
-        if not QT_AVAILABLE:
-            self.callbacks = {
-                'stats_updated': []
-            }
-    
-    def stop(self):
-        """Stop the worker"""
-        self.should_stop = True
-    
-    def _emit_signal(self, signal_name: str, *args):
-        """Emit a signal in both Qt and headless modes"""
-        if QT_AVAILABLE and hasattr(self, signal_name):
-            # Qt mode - use actual signal
-            getattr(self, signal_name).emit(*args)
-        elif not QT_AVAILABLE:
-            # Headless mode - use callback system
-            self.emit_signal(signal_name, *args)
-    
-    def connect_callback(self, signal_name: str, callback: Callable):
-        """Connect a callback for headless mode"""
-        if not QT_AVAILABLE:
-            self.connect_signal(signal_name, callback)
-        # In Qt mode, use the normal signal.connect() method
-    
-    def run(self):
-        """Get database statistics and full info including last refresh"""
-        try:
-            if self.should_stop:
-                return
-                
-            database = get_database(self.database_path)
-            if self.should_stop:
-                return
-                
-            # Get database info for active server (server-aware statistics)
-            info = database.get_database_info_for_server()
-            if not self.should_stop:
-                self._emit_signal('stats_updated', info)
-        except Exception as e:
-            logger.error(f"Error getting database stats: {e}")
-            if not self.should_stop:
-                # Import here to avoid circular imports
-                from config.settings import config_manager
-                active_server = config_manager.get_active_media_server()
-                
-                self._emit_signal('stats_updated', {
-                    'artists': 0,
-                    'albums': 0, 
-                    'tracks': 0,
-                    'database_size_mb': 0.0,
-                    'last_update': None,
-                    'last_full_refresh': None,
-                    'server_source': active_server
-                })
