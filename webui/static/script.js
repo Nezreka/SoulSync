@@ -75773,7 +75773,15 @@ function _adlFilterByBatch(batchId) {
 }
 
 async function _adlCancelBatch(batchId) {
-    if (!confirm('Cancel this batch? Active downloads will be stopped.')) return;
+    const batch = _adlBatches.find(b => b.batch_id === batchId);
+    const batchName = batch ? batch.batch_name : 'this batch';
+    const confirmed = await showConfirmDialog({
+        title: 'Cancel Batch',
+        message: `Cancel "${batchName}"? All active and queued downloads in this batch will be stopped.`,
+        confirmText: 'Cancel Batch',
+        destructive: true
+    });
+    if (!confirmed) return;
     try {
         const resp = await fetch(`/api/playlists/${batchId}/cancel_batch`, { method: 'POST' });
         const data = await resp.json();
