@@ -220,6 +220,82 @@ def _build_scanner(album_data, artists):
     return scanner
 
 
+def test_fetch_similar_artists_from_musicmap_uses_provider_priority(monkeypatch):
+    html = """
+    <html>
+      <body>
+        <div id="gnodMap">
+          <a href="/artist/seed">Artist One</a>
+          <a href="/artist/similar">Similar Artist</a>
+        </div>
+      </body>
+    </html>
+    """
+
+    class _Response:
+        def __init__(self, text):
+            self.text = text
+
+        def raise_for_status(self):
+            return None
+
+    def make_client(source, seed_id, match_id, canonical_name, popularity):
+        client = _FakeSourceClient(artist_id=match_id, albums=[], image_url=None)
+
+        def search_artists(query, limit=1, **kwargs):
+            client.search_calls.append((query, limit, kwargs))
+            if query == "Artist One":
+                return [types.SimpleNamespace(id=seed_id, name=f"{source} Seed")]
+            if query == "Similar Artist":
+                return [
+                    types.SimpleNamespace(
+                        id=match_id,
+                        name=canonical_name,
+                        image_url=f"https://{source}.example.com/{match_id}.jpg",
+                        genres=[source, "genre"],
+                        popularity=popularity,
+                    )
+                ]
+            return []
+
+        client.search_artists = search_artists
+        return client
+
+    deezer_client = make_client("deezer", "dz-seed", "dz-match", "Deezer Canonical", 30)
+    itunes_client = make_client("itunes", "it-seed", "it-match", "iTunes Canonical", 20)
+    spotify_client = make_client("spotify", "sp-seed", "sp-match", "Spotify Canonical", 10)
+
+    monkeypatch.setattr(watchlist_scanner_module.requests, "get", lambda *args, **kwargs: _Response(html))
+    monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(
+        watchlist_scanner_module,
+        "get_client_for_source",
+        lambda source: {
+            "deezer": deezer_client,
+            "itunes": itunes_client,
+            "spotify": spotify_client,
+        }.get(source),
+    )
+
+    scanner = _build_scanner({"tracks": {"items": []}}, [])
+    results = scanner._fetch_similar_artists_from_musicmap("Artist One", limit=5)
+
+    assert len(results) == 1
+    artist = results[0]
+    assert artist["name"] == "Deezer Canonical"
+    assert artist["deezer_id"] == "dz-match"
+    assert artist["itunes_id"] == "it-match"
+    assert artist["spotify_id"] == "sp-match"
+    assert artist["image_url"] == "https://deezer.example.com/dz-match.jpg"
+    assert artist["genres"] == ["deezer", "genre"]
+    assert artist["popularity"] == 30
+
+    assert [call[0] for call in deezer_client.search_calls] == ["Artist One", "Similar Artist"]
+    assert [call[0] for call in itunes_client.search_calls] == ["Artist One", "Similar Artist"]
+    assert [call[0] for call in spotify_client.search_calls] == ["Artist One", "Similar Artist"]
+    assert spotify_client.search_calls[-1][2]["allow_fallback"] is False
+
+
 def test_scan_watchlist_profile_loads_artists_and_applies_overrides(monkeypatch):
     artist = _build_artist()
     scanner = _build_scanner({"tracks": {"items": []}}, [artist])
