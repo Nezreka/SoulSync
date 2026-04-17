@@ -1,5 +1,5 @@
-# SoulSync WebUI Requirements
-# Docker-compatible requirements without PyQt6 dependencies
+# SoulSync requirements
+# Web application dependencies only
 
 # Core web framework
 Flask>=3.0.0

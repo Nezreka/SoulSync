@@ -1,7 +1,7 @@
 # SoulSync development requirements
 # Runtime web dependencies + test runner
 
--r requirements-webui.txt
+-r requirements.txt
 
 # Test runner
 pytest>=9.0.0

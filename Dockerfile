@@ -15,9 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-COPY requirements-webui.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements-webui.txt
+    pip install --no-cache-dir -r requirements.txt
 
 # Stage 2: Runtime — only runtime dependencies, no build tools
 FROM python:3.11-slim
