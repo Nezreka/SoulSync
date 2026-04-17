@@ -687,6 +687,20 @@ class MusicMatchingEngine:
         title_words = spotify_cleaned_title.split()
         is_short_title = len(spotify_cleaned_title) <= 5 or len(title_words) == 1
 
+        # --- Junk Artist Gate ---
+        # Reject results from generic/compilation folders where metadata is unreliable.
+        # These folders almost never contain properly tagged files for the target artist.
+        _JUNK_ARTISTS = {'various artists', 'va', 'unknown artist', 'unknown album',
+                         'various artist'}
+        if not is_youtube:
+            for seg_norm in _artist_segments_norm:
+                if seg_norm in _JUNK_ARTISTS:
+                    logger.debug(
+                        f"Junk artist reject: '{spotify_track.name}' — path segment "
+                        f"'{seg_norm}' in '{slskd_track.filename[:80]}'"
+                    )
+                    return 0.0
+
         # --- Minimum Title Gate ---
         # Reject matches where the title has almost no resemblance to the target.
         # Without this, artist + album bonus alone can push completely wrong tracks
