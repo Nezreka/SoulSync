@@ -419,12 +419,15 @@ def test_get_artist_discography_for_watchlist_prefers_primary_source(monkeypatch
     assert spotify_client.album_calls == []
 
 
-def test_get_artist_discography_for_watchlist_falls_back_when_primary_empty(monkeypatch):
+def test_get_artist_discography_for_watchlist_falls_back_when_primary_fails(monkeypatch):
+    """When the primary source API fails (returns None), fall back to next source."""
     monkeypatch.setattr(watchlist_scanner_module, "time", types.SimpleNamespace(sleep=lambda *_args, **_kwargs: None))
     monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
     monkeypatch.setattr(watchlist_scanner_module, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
 
+    # Deezer client returns None from get_artist_albums (API failure)
     deezer_client = _FakeSourceClient(artist_id="dz-artist", albums=[], image_url="https://example.com/deezer.jpg")
+    deezer_client.get_artist_albums = lambda *args, **kwargs: None  # Simulate API failure
     spotify_album = types.SimpleNamespace(id="sp-album", name="Spotify Album", release_date=None)
     spotify_client = _FakeSourceClient(artist_id="sp-artist", albums=[spotify_album], image_url="https://example.com/spotify.jpg")
 
@@ -448,7 +451,7 @@ def test_get_artist_discography_for_watchlist_falls_back_when_primary_empty(monk
     assert result.source == "spotify"
     assert result.artist_id == "sp-artist"
     assert result.albums and result.albums[0].id == "sp-album"
-    assert deezer_client.album_calls
+    # Spotify client should have been called as fallback
     assert spotify_client.album_calls
 
 

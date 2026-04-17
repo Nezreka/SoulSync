@@ -25024,9 +25024,10 @@ def remove_album_from_wishlist():
 
         data = request.get_json()
         album_id = data.get('album_id')
+        album_name_filter = data.get('album_name')
 
-        if not album_id:
-            return jsonify({"success": False, "error": "No album_id provided"}), 400
+        if not album_id and not album_name_filter:
+            return jsonify({"success": False, "error": "No album_id or album_name provided"}), 400
 
         wishlist_service = get_wishlist_service()
         all_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=get_current_profile_id())
@@ -25065,8 +25066,18 @@ def remove_album_from_wishlist():
                 track_album_id = re.sub(r'[^a-zA-Z0-9\s_-]', '', custom_id)  # Remove special chars
                 track_album_id = re.sub(r'\s+', '_', track_album_id).lower()  # Replace spaces & lowercase
 
-            # Match by album ID
-            if track_album_id == album_id:
+            # Match by album ID or album name
+            matched = False
+            if album_id and track_album_id == album_id:
+                matched = True
+            elif album_name_filter:
+                track_album_name = album_data.get('name', '')
+                if isinstance(spotify_data.get('album'), str):
+                    track_album_name = spotify_data['album']
+                if track_album_name and track_album_name.lower().strip() == album_name_filter.lower().strip():
+                    matched = True
+
+            if matched:
                 spotify_track_id = track.get('spotify_track_id') or track.get('id')
                 if spotify_track_id:
                     tracks_to_remove.append(spotify_track_id)
