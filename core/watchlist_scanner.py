@@ -470,6 +470,15 @@ class WatchlistScanner:
         }.get(source)
 
     @staticmethod
+    def _similar_artist_id_attribute_for_source(source: str) -> Optional[str]:
+        """Return the similar-artist attribute that stores the given source ID."""
+        return {
+            'spotify': 'similar_artist_spotify_id',
+            'itunes': 'similar_artist_itunes_id',
+            'deezer': 'similar_artist_deezer_id',
+        }.get(source)
+
+    @staticmethod
     def _extract_entity_id(value: Any) -> Optional[str]:
         """Extract an ID from a dataclass, dict, or plain object."""
         if value is None:
@@ -692,7 +701,9 @@ class WatchlistScanner:
         artist_id: str,
         album_type: str = 'album,single,ep',
         limit: int = 50,
+        # Only applies to Spotify currently
         skip_cache: bool = True,
+        # Only applies to Spotify currently
         max_pages: int = 0,
     ) -> List[Any]:
         """Fetch artist albums for a specific source, keeping Spotify strict."""
@@ -2956,16 +2967,13 @@ class WatchlistScanner:
         """
         Cache recent albums from watchlist and similar artists for discover page.
 
-        Supports both Spotify and iTunes sources - iTunes is always processed (baseline),
-        Spotify is added when authenticated. Same pattern as discovery pool.
+        Uses the configured source priority and caches the first source that
+        can return albums for each artist.
         """
         try:
             from datetime import datetime, timedelta
 
             logger.info("Caching recent albums for discover page...")
-
-            if self.spotify_client and self.spotify_client.is_rate_limited():
-                self._disable_spotify_for_run("global Spotify rate limit active")
 
             # Clear existing cache for this profile
             self.database.clear_discovery_recent_albums(profile_id=profile_id)
@@ -2983,21 +2991,20 @@ class WatchlistScanner:
             except Exception:
                 pass
             cutoff_date = datetime.now() - timedelta(days=days_lookback)
-            cached_count = {'spotify': 0, 'itunes': 0, 'deezer': 0}
+            discovery_sources = self._discovery_source_priority()
+            if not discovery_sources:
+                logger.warning("No music sources available to cache recent albums")
+                return
+
+            cached_count = {source: 0 for source in discovery_sources}
             albums_checked = 0
-
-            # Determine available sources
-            spotify_available = self._spotify_is_primary_source()
-
-            # Get fallback metadata client (iTunes or Deezer)
-            itunes_client, fallback_source = _get_fallback_metadata_client()
 
             # Get artists to check (scoped to profile)
             watchlist_artists = self.database.get_watchlist_artists(profile_id=profile_id)
-            similar_artists = self.database.get_top_similar_artists(limit=50, profile_id=profile_id)
+            # We only need a modest sample here; this path fans out into per-source album lookups.
+            similar_artists = self.database.get_top_similar_artists(limit=25, profile_id=profile_id)
 
             logger.info(f"Checking albums from {len(watchlist_artists)} watchlist + {len(similar_artists)} similar artists")
-            logger.info(f"Sources: Spotify={spotify_available}, {fallback_source}=True")
 
             def process_album(album, artist_name, artist_spotify_id, artist_itunes_id, source, artist_deezer_id=None):
                 """Helper to process and cache a single album"""
@@ -3043,118 +3050,137 @@ class WatchlistScanner:
 
             # Process watchlist artists
             for artist in watchlist_artists:
-                # Always process fallback source (iTunes or Deezer) as baseline
-                fallback_id = artist.itunes_artist_id if fallback_source == 'itunes' else artist.deezer_artist_id
-                if not fallback_id:
-                    # Try to resolve fallback ID on-the-fly (with retry for rate limiting)
-                    try:
-                        results = itunes_api_call_with_retry(
-                            itunes_client.search_artists, artist.artist_name, limit=1
-                        )
-                        if results and len(results) > 0:
-                            fallback_id = results[0].id
-                            fallback_resolved += 1
-                            logger.debug(f"[{fallback_source}] Resolved ID for {artist.artist_name}: {fallback_id}")
-                        else:
-                            fallback_failed_resolve += 1
-                            logger.info(f"[{fallback_source}] No artist found for: {artist.artist_name}")
-                    except Exception as e:
-                        fallback_failed_resolve += 1
-                        logger.info(f"[{fallback_source}] Failed to resolve {artist.artist_name}: {e}")
+                selected_source = None
+                selected_artist_id = None
+                selected_albums = []
+                selected_watchlist_id = None
 
-                if fallback_id:
-                    try:
-                        albums = itunes_api_call_with_retry(
-                            itunes_client.get_artist_albums, fallback_id, album_type='album,single,ep', limit=20
-                        )
-                        for album in albums or []:
-                            process_album(
-                                album, artist.artist_name, artist.spotify_artist_id,
-                                fallback_id if fallback_source == 'itunes' else None,
-                                fallback_source,
-                                artist_deezer_id=fallback_id if fallback_source == 'deezer' else None
-                            )
-                    except Exception as e:
-                        logger.info(f"[{fallback_source}] Error fetching albums for {artist.artist_name}: {e}")
+                for source in discovery_sources:
+                    source_attr = self._artist_id_attribute_for_source(source)
+                    stored_id = getattr(artist, source_attr, None) if source_attr else None
+                    cache_callback = None
+                    if source == 'spotify':
+                        cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'spotify', found_id)
+                    elif source == 'itunes':
+                        cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'itunes', found_id)
+                    elif source == 'deezer':
+                        cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'deezer', found_id)
 
-                # Process Spotify if authenticated
-                if spotify_available and artist.spotify_artist_id:
-                    try:
-                        albums = self.spotify_client.get_artist_albums(
-                            artist.spotify_artist_id,
-                            album_type='album,single,ep',
-                            limit=20,
-                            skip_cache=True,
-                            max_pages=2,
-                        )
-                        for album in albums or []:
-                            process_album(album, artist.artist_name, artist.spotify_artist_id, fallback_id if fallback_source == 'itunes' else None, 'spotify')
-                    except Exception as e:
-                        logger.debug(f"Error fetching Spotify albums for {artist.artist_name}: {e}")
+                    artist_id = self._resolve_artist_id_for_source(
+                        source,
+                        artist.artist_name,
+                        stored_id=stored_id,
+                        cache_callback=cache_callback,
+                    )
+                    if not artist_id:
+                        continue
+
+                    albums = self._get_artist_albums_for_source(
+                        source,
+                        artist_id,
+                        album_type='album,single,ep',
+                        limit=20,
+                        skip_cache=True,
+                        max_pages=2,
+                    )
+                    if not albums:
+                        logger.debug(f"No recent albums found for {artist.artist_name} on {source}")
+                        continue
+
+                    selected_source = source
+                    selected_artist_id = artist_id
+                    selected_albums = albums
+                    if source == 'spotify':
+                        selected_watchlist_id = artist_id
+                    elif source == 'itunes':
+                        selected_watchlist_id = artist.itunes_artist_id or artist_id
+                    elif source == 'deezer':
+                        selected_watchlist_id = getattr(artist, 'deezer_artist_id', None) or artist_id
+                    break
+
+                if not selected_source or not selected_artist_id or not selected_albums:
+                    time.sleep(DELAY_BETWEEN_ARTISTS)
+                    continue
+
+                for album in selected_albums:
+                    process_album(
+                        album,
+                        artist.artist_name,
+                        selected_watchlist_id if selected_source == 'spotify' else artist.spotify_artist_id,
+                        selected_watchlist_id if selected_source == 'itunes' else None,
+                        selected_source,
+                        artist_deezer_id=selected_watchlist_id if selected_source == 'deezer' else None,
+                    )
 
                 time.sleep(DELAY_BETWEEN_ARTISTS)
 
             # Process similar artists
             for artist in similar_artists:
-                # Always process fallback source (iTunes or Deezer) as baseline
-                fallback_id = artist.similar_artist_itunes_id if fallback_source == 'itunes' else getattr(artist, 'similar_artist_deezer_id', None)
-                if not fallback_id:
-                    # Try to resolve fallback ID on-the-fly (with retry for rate limiting)
-                    try:
-                        results = itunes_api_call_with_retry(
-                            itunes_client.search_artists, artist.similar_artist_name, limit=1
-                        )
-                        if results and len(results) > 0:
-                            fallback_id = results[0].id
-                            # Cache for future
-                            if fallback_source == 'deezer':
-                                self.database.update_similar_artist_deezer_id(artist.id, fallback_id)
-                            else:
-                                self.database.update_similar_artist_itunes_id(artist.id, fallback_id)
-                            fallback_resolved += 1
-                            logger.debug(f"[{fallback_source}] Resolved ID for similar artist {artist.similar_artist_name}: {fallback_id}")
-                        else:
-                            fallback_failed_resolve += 1
-                            logger.info(f"[{fallback_source}] No artist found for similar: {artist.similar_artist_name}")
-                    except Exception as e:
-                        fallback_failed_resolve += 1
-                        logger.info(f"[{fallback_source}] Failed to resolve similar {artist.similar_artist_name}: {e}")
+                selected_source = None
+                selected_artist_id = None
+                selected_albums = []
+                selected_similar_id = None
 
-                if fallback_id:
-                    try:
-                        albums = itunes_api_call_with_retry(
-                            itunes_client.get_artist_albums, fallback_id, album_type='album,single,ep', limit=20
-                        )
-                        for album in albums or []:
-                            process_album(
-                                album, artist.similar_artist_name, artist.similar_artist_spotify_id,
-                                fallback_id if fallback_source == 'itunes' else None,
-                                fallback_source,
-                                artist_deezer_id=fallback_id if fallback_source == 'deezer' else None
-                            )
-                    except Exception as e:
-                        logger.info(f"[{fallback_source}] Error fetching albums for similar {artist.similar_artist_name}: {e}")
+                for source in discovery_sources:
+                    source_attr = self._similar_artist_id_attribute_for_source(source)
+                    stored_id = getattr(artist, source_attr, None) if source_attr else None
+                    cache_callback = None
+                    if source == 'itunes':
+                        cache_callback = lambda found_id, similar_id=artist.id: self.database.update_similar_artist_itunes_id(similar_id, found_id)
+                    elif source == 'deezer':
+                        cache_callback = lambda found_id, similar_id=artist.id: self.database.update_similar_artist_deezer_id(similar_id, found_id)
 
-                # Process Spotify if authenticated
-                if spotify_available and artist.similar_artist_spotify_id:
-                    try:
-                        albums = self.spotify_client.get_artist_albums(
-                            artist.similar_artist_spotify_id,
-                            album_type='album,single,ep',
-                            limit=20,
-                            skip_cache=True,
-                            max_pages=2,
-                        )
-                        for album in albums or []:
-                            process_album(album, artist.similar_artist_name, artist.similar_artist_spotify_id, fallback_id if fallback_source == 'itunes' else None, 'spotify')
-                    except Exception as e:
-                        logger.debug(f"Error fetching Spotify albums for {artist.similar_artist_name}: {e}")
+                    artist_id = self._resolve_artist_id_for_source(
+                        source,
+                        artist.similar_artist_name,
+                        stored_id=stored_id,
+                        cache_callback=cache_callback,
+                    )
+                    if not artist_id:
+                        continue
+
+                    albums = self._get_artist_albums_for_source(
+                        source,
+                        artist_id,
+                        album_type='album,single,ep',
+                        limit=20,
+                        skip_cache=True,
+                        max_pages=2,
+                    )
+                    if not albums:
+                        logger.debug(f"No recent albums found for similar {artist.similar_artist_name} on {source}")
+                        continue
+
+                    selected_source = source
+                    selected_artist_id = artist_id
+                    selected_albums = albums
+                    if source == 'spotify':
+                        selected_similar_id = artist_id
+                    elif source == 'itunes':
+                        selected_similar_id = artist.similar_artist_itunes_id or artist_id
+                    elif source == 'deezer':
+                        selected_similar_id = getattr(artist, 'similar_artist_deezer_id', None) or artist_id
+                    break
+
+                if not selected_source or not selected_artist_id or not selected_albums:
+                    time.sleep(DELAY_BETWEEN_ARTISTS)
+                    continue
+
+                for album in selected_albums:
+                    process_album(
+                        album,
+                        artist.similar_artist_name,
+                        selected_similar_id if selected_source == 'spotify' else artist.similar_artist_spotify_id,
+                        selected_similar_id if selected_source == 'itunes' else None,
+                        selected_source,
+                        artist_deezer_id=selected_similar_id if selected_source == 'deezer' else None,
+                    )
 
                 time.sleep(DELAY_BETWEEN_ARTISTS)
 
-            total_cached = cached_count['spotify'] + cached_count.get(fallback_source, 0)
-            logger.info(f"Cached {total_cached} recent albums (Spotify: {cached_count['spotify']}, {fallback_source}: {cached_count.get(fallback_source, 0)}) from {albums_checked} albums checked")
-            logger.info(f"[{fallback_source}] ID resolution stats: {fallback_resolved} resolved, {fallback_failed_resolve} failed")
+            total_cached = sum(cached_count.values())
+            logger.info(f"Cached {total_cached} recent albums from {albums_checked} albums checked")
+            logger.info(f"Recent albums ID resolution stats: {fallback_resolved} resolved, {fallback_failed_resolve} failed")
 
         except Exception as e:
             logger.error(f"Error caching discovery recent albums: {e}")
