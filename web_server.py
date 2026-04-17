@@ -15297,7 +15297,7 @@ def redownload_start(track_id):
 
 @app.route('/api/library/artist/<artist_id>/sync', methods=['POST'])
 def sync_artist_library(artist_id):
-    """Validate an artist's library entries — remove stale tracks/albums, recount."""
+    """Bidirectional sync: pull new content from media server AND remove stale entries."""
     try:
         database = get_database()
         with database._get_connection() as conn:
@@ -15307,13 +15307,11 @@ def sync_artist_library(artist_id):
             db_artist_id = None
             try:
                 candidate = int(artist_id)
-                # Verify this DB ID actually exists
                 cursor.execute("SELECT id FROM artists WHERE id = ?", (candidate,))
                 if cursor.fetchone():
                     db_artist_id = candidate
             except (ValueError, TypeError):
                 pass
-            # If not found as DB ID, look up by source artist ID
             if not db_artist_id:
                 for col in ('spotify_artist_id', 'itunes_artist_id', 'deezer_id'):
                     cursor.execute(f"SELECT id FROM artists WHERE {col} = ?", (artist_id,))
@@ -15325,74 +15323,108 @@ def sync_artist_library(artist_id):
             if not db_artist_id:
                 return jsonify({"success": False, "error": "Artist not found"}), 404
 
-            # Get all tracks for this artist
-            cursor.execute("""
-                SELECT t.id, t.file_path, t.title, t.album_id
-                FROM tracks t WHERE t.artist_id = ?
-            """, (db_artist_id,))
-            tracks = cursor.fetchall()
-
-            # Get current artist info
             cursor.execute("SELECT name, server_source FROM artists WHERE id = ?", (db_artist_id,))
             artist_row = cursor.fetchone()
             artist_name = artist_row['name'] if artist_row else f'ID {db_artist_id}'
             server_source = artist_row['server_source'] if artist_row else None
 
-            # Re-fetch artist name from media server (catches renames in Plex/Jellyfin/Navidrome)
-            name_updated = False
-            if server_source:
-                try:
-                    server_artist = None
-                    if server_source == 'plex' and plex_client and plex_client.server:
-                        try:
-                            server_artist = plex_client.server.fetchItem(int(db_artist_id))
-                        except Exception:
-                            pass
-                    elif server_source in ('jellyfin', 'navidrome'):
-                        media_client = {'jellyfin': jellyfin_client, 'navidrome': navidrome_client}.get(server_source)
-                        if media_client and hasattr(media_client, 'get_artist_by_id'):
-                            server_artist = media_client.get_artist_by_id(str(db_artist_id))
+        # ── Phase 1: Pull new content from media server ──
+        new_albums = 0
+        new_tracks = 0
+        name_updated = False
 
-                    if server_artist and hasattr(server_artist, 'title') and server_artist.title:
-                        new_name = server_artist.title
-                        if new_name != artist_name:
-                            cursor.execute("UPDATE artists SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                                           (new_name, db_artist_id))
+        if server_source:
+            media_client = None
+            if server_source == 'plex' and plex_client and plex_client.server:
+                media_client = plex_client
+            elif server_source == 'jellyfin' and jellyfin_client:
+                media_client = jellyfin_client
+            elif server_source == 'navidrome' and navidrome_client:
+                media_client = navidrome_client
+
+            if media_client:
+                try:
+                    from core.database_update_worker import DatabaseUpdateWorker
+                    worker = DatabaseUpdateWorker(
+                        media_client=media_client,
+                        full_refresh=False,
+                        server_type=server_source,
+                        force_sequential=True,
+                    )
+                    worker.database = database  # Use existing DB instance instead of creating new one
+
+                    # Fetch the artist object from the server
+                    server_artist = None
+                    print(f"[Artist Sync] Fetching artist {db_artist_id} from {server_source}...")
+                    if server_source == 'plex' and hasattr(media_client, 'server'):
+                        try:
+                            server_artist = media_client.server.fetchItem(int(db_artist_id))
+                            print(f"[Artist Sync] Plex returned: {getattr(server_artist, 'title', 'None')}")
+                        except Exception as e:
+                            print(f"[Artist Sync] Plex fetchItem failed: {e}")
+                    elif hasattr(media_client, 'get_artist_by_id'):
+                        try:
+                            server_artist = media_client.get_artist_by_id(str(db_artist_id))
+                            print(f"[Artist Sync] Server returned: {getattr(server_artist, 'title', None) or server_artist}")
+                        except Exception as e:
+                            print(f"[Artist Sync] get_artist_by_id failed: {e}")
+                    else:
+                        print(f"[Artist Sync] No get_artist_by_id method on {type(media_client).__name__}")
+
+                    if not server_artist:
+                        print(f"[Artist Sync] Could not fetch artist from server — skipping pull phase")
+
+                    if server_artist:
+                        # Check for name change
+                        new_name = getattr(server_artist, 'title', None)
+                        if new_name and new_name != artist_name:
+                            database.execute_query(
+                                "UPDATE artists SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (new_name, db_artist_id)
+                            )
                             print(f"[Artist Sync] Name updated: '{artist_name}' → '{new_name}'")
                             artist_name = new_name
                             name_updated = True
+
+                        # Process artist content (deep scan mode — skip existing, preserve enrichment)
+                        success, details, new_albums, new_tracks = worker._process_artist_with_content(
+                            server_artist, skip_existing_tracks=True
+                        )
+                        print(f"[Artist Sync] Server pull for {artist_name}: {details}")
+
                 except Exception as e:
-                    print(f"[Artist Sync] Could not refresh name from {server_source}: {e}")
+                    print(f"[Artist Sync] Server pull failed for {artist_name}: {e}")
 
-            stale_tracks = []
-            valid_tracks = 0
+        # ── Phase 2: Remove stale entries (files no longer on disk) ──
+        stale_removed = 0
+        empty_albums_removed = 0
 
+        with database._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, file_path FROM tracks WHERE artist_id = ?", (db_artist_id,))
+            tracks = cursor.fetchall()
+
+            stale_ids = []
             for track in tracks:
-                file_path = track['file_path']
-                if not file_path:
-                    stale_tracks.append(track['id'])
+                fp = track['file_path']
+                if not fp:
+                    stale_ids.append(track['id'])
                     continue
+                resolved = _resolve_library_file_path(fp)
+                if not resolved or not os.path.exists(resolved):
+                    stale_ids.append(track['id'])
 
-                # Check if file exists on disk
-                resolved = _resolve_library_file_path(file_path)
-                if resolved and os.path.exists(resolved):
-                    valid_tracks += 1
-                else:
-                    stale_tracks.append(track['id'])
+            if stale_ids:
+                placeholders = ','.join('?' for _ in stale_ids)
+                cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", stale_ids)
+                stale_removed = len(stale_ids)
 
-            # Remove stale tracks
-            if stale_tracks:
-                placeholders = ','.join('?' for _ in stale_tracks)
-                cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", stale_tracks)
-
-            # Remove empty albums (no tracks left from ANY artist)
             cursor.execute("""
                 DELETE FROM albums WHERE artist_id = ?
                 AND id NOT IN (SELECT DISTINCT album_id FROM tracks)
             """, (db_artist_id,))
             empty_albums_removed = cursor.rowcount
 
-            # Update track_count on remaining albums
             cursor.execute("""
                 UPDATE albums SET track_count = (
                     SELECT COUNT(*) FROM tracks WHERE tracks.album_id = albums.id
@@ -15401,19 +15433,23 @@ def sync_artist_library(artist_id):
 
             conn.commit()
 
-            print(f"[Artist Sync] {artist_name}: {valid_tracks} valid, {len(stale_tracks)} stale removed, {empty_albums_removed} empty albums cleaned")
+        print(f"[Artist Sync] {artist_name}: +{new_albums} albums, +{new_tracks} tracks, "
+              f"-{stale_removed} stale, -{empty_albums_removed} empty albums")
 
-            return jsonify({
-                "success": True,
-                "artist_name": artist_name,
-                "name_updated": name_updated,
-                "valid_tracks": valid_tracks,
-                "stale_removed": len(stale_tracks),
-                "empty_albums_removed": empty_albums_removed
-            })
+        return jsonify({
+            "success": True,
+            "artist_name": artist_name,
+            "name_updated": name_updated,
+            "new_albums": new_albums,
+            "new_tracks": new_tracks,
+            "stale_removed": stale_removed,
+            "empty_albums_removed": empty_albums_removed,
+        })
 
     except Exception as e:
         print(f"Error syncing artist {artist_id}: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/library/album/<album_id>', methods=['DELETE'])

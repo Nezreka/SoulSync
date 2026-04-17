@@ -45808,9 +45808,12 @@ function renderArtistMetaPanel(artist) {
             const data = await res.json();
             if (data.success) {
                 const parts = [];
-                if (data.stale_removed > 0) parts.push(`${data.stale_removed} stale tracks removed`);
+                if (data.new_albums > 0) parts.push(`+${data.new_albums} albums`);
+                if (data.new_tracks > 0) parts.push(`+${data.new_tracks} tracks`);
+                if (data.stale_removed > 0) parts.push(`${data.stale_removed} stale removed`);
                 if (data.empty_albums_removed > 0) parts.push(`${data.empty_albums_removed} empty albums cleaned`);
-                if (parts.length === 0) parts.push('All files verified');
+                if (data.name_updated) parts.push('name updated');
+                if (parts.length === 0) parts.push('Already in sync');
                 showToast(`${data.artist_name}: ${parts.join(', ')}`, 'success');
                 // Refresh enhanced view if anything changed
                 if (data.stale_removed > 0 || data.empty_albums_removed > 0) {
@@ -64014,6 +64017,7 @@ async function loadRepairJobs() {
                     <div class="repair-job-status ${dotClass}"></div>
                     <div class="repair-job-info">
                         <div class="repair-job-name">${job.display_name}</div>
+                        <div class="repair-job-desc">${job.description || ''}</div>
                         <div class="repair-job-flow">${flowParts.join('')}</div>
                         <div class="repair-job-meta">${metaParts.join(' &middot; ')}</div>
                     </div>

@@ -49359,66 +49359,92 @@ tr.tag-diff-same {
 
 /* ── Jobs Tab ── */
 .repair-jobs-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
 }
 
+@media (max-width: 900px) { .repair-jobs-list { grid-template-columns: 1fr; } }
+
 .repair-job-card {
-    background: rgba(22, 22, 22, 0.95);
+    background: linear-gradient(135deg, rgba(22, 22, 22, 0.95), rgba(16, 16, 16, 0.98));
     border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
     overflow: hidden;
-    transition: all 0.2s ease;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+.repair-job-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.3), transparent);
+    opacity: 0;
+    transition: opacity 0.3s;
 }
 
 .repair-job-card:hover {
-    background: rgba(28, 28, 28, 0.98);
-    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.2);
+    background: linear-gradient(135deg, rgba(28, 28, 28, 0.98), rgba(20, 20, 20, 0.99));
+    border-color: rgba(var(--accent-rgb), 0.15);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+.repair-job-card:hover::before { opacity: 1; }
+
 .repair-job-card.running {
-    border-color: rgba(var(--accent-rgb, 99, 102, 241), 0.35);
-    box-shadow: 0 0 12px rgba(var(--accent-rgb, 99, 102, 241), 0.08),
-                inset 0 0 20px rgba(var(--accent-rgb, 99, 102, 241), 0.03);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.1);
+}
+
+.repair-job-card.running::before {
+    opacity: 1;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.6), transparent);
+    animation: scanPulse 2s ease-in-out infinite;
 }
 
 .repair-job-card.disabled {
-    opacity: 0.55;
+    opacity: 0.5;
 }
 .repair-job-card.disabled:hover {
-    opacity: 0.75;
+    opacity: 0.7;
+    transform: none;
 }
 
 .repair-job-main {
     display: flex;
-    align-items: center;
-    padding: 10px 14px;
-    gap: 10px;
+    align-items: flex-start;
+    padding: 14px 16px;
+    gap: 12px;
 }
 
-/* Status dot — matches automation-status */
+/* Status dot */
 .repair-job-status {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     flex-shrink: 0;
+    margin-top: 4px;
 }
 .repair-job-status.enabled {
     background: #4ade80;
-    box-shadow: 0 0 6px rgba(74, 222, 128, 0.4);
+    box-shadow: 0 0 8px rgba(74, 222, 128, 0.4);
 }
 .repair-job-status.disabled {
-    background: #555;
+    background: #444;
 }
 .repair-job-status.running {
-    background: rgb(var(--accent-rgb, 99, 102, 241));
-    box-shadow: 0 0 6px rgba(var(--accent-rgb, 99, 102, 241), 0.4);
+    background: rgb(var(--accent-rgb));
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5);
     animation: repair-status-pulse 1.5s ease-in-out infinite;
 }
 @keyframes repair-status-pulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(var(--accent-rgb, 99, 102, 241), 0.4); }
-    50% { opacity: 0.4; box-shadow: 0 0 2px rgba(var(--accent-rgb, 99, 102, 241), 0.2); }
+    0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5); }
+    50% { opacity: 0.4; box-shadow: 0 0 3px rgba(var(--accent-rgb), 0.2); }
 }
 
 .repair-job-info {
@@ -49426,16 +49452,24 @@ tr.tag-diff-same {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
 }
 
 .repair-job-name {
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 700;
     color: #fff;
-    white-space: nowrap;
+    letter-spacing: -0.2px;
+}
+
+.repair-job-desc {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 /* Flow visualization — job type badges */
@@ -49484,8 +49518,9 @@ tr.tag-diff-same {
 .repair-job-actions {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
     flex-shrink: 0;
+    margin-left: auto;
 }
 
 /* Toggle — matches automation-toggle (32x18) */
