@@ -18309,9 +18309,28 @@ def _create_lossy_copy(final_path):
                 except Exception as del_err:
                     print(f"[Blasphemy Mode] Error during original deletion, keeping original: {del_err}")
         else:
-            print(f"[Lossy Copy] ffmpeg failed: {result.stderr[:200]}")
+            # ffmpeg always prints its version banner to stderr (~300 chars).
+            # Strip it so the actual error is visible, and show more than 200 chars.
+            stderr = result.stderr or ''
+            # Remove the version/config preamble (ends after the first empty line)
+            stderr_lines = stderr.split('\n')
+            error_lines = []
+            past_banner = False
+            for line in stderr_lines:
+                if past_banner:
+                    error_lines.append(line)
+                elif line.strip() == '':
+                    past_banner = True
+            error_msg = '\n'.join(error_lines).strip() if error_lines else stderr[-500:]
+            print(f"[Lossy Copy] ffmpeg failed (exit code {result.returncode}): {error_msg[:500]}")
+            # Clean up empty/broken output file
+            if os.path.isfile(out_path) and os.path.getsize(out_path) == 0:
+                os.remove(out_path)
+                print(f"[Lossy Copy] Removed empty output file: {os.path.basename(out_path)}")
     except subprocess.TimeoutExpired:
         print(f"[Lossy Copy] Conversion timed out for: {os.path.basename(final_path)}")
+        if os.path.isfile(out_path) and os.path.getsize(out_path) == 0:
+            os.remove(out_path)
     except Exception as e:
         print(f"[Lossy Copy] Conversion error: {e}")
     return None
