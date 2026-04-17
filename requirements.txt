@@ -13,9 +13,6 @@ PlexAPI>=4.17.0
 requests>=2.31.0
 aiohttp>=3.9.0
 
-# Configuration management
-python-dotenv>=1.0.0
-
 # Security and encryption
 cryptography>=41.0.0
 
@@ -35,9 +32,6 @@ yt-dlp>=2024.12.13
 
 # Lyrics support
 lrclibapi>=0.3.1
-
-# Optional: MQTT support (for future features)
-asyncio-mqtt>=0.16.0
 
 # Audio fingerprinting for download verification
 pyacoustid>=1.3.0
