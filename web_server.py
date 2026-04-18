@@ -34,7 +34,7 @@ _log_path = config_manager.get('logging.path', 'logs/app.log')
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-SOULSYNC_VERSION = "2.31"
+SOULSYNC_VERSION = "2.32"
 
 # Dedicated source reuse logger — writes to logs/source_reuse.log
 import logging as _logging
@@ -8567,6 +8567,8 @@ def enhanced_search():
             alternate_sources.append('hydrabase')
         # YouTube music videos always available (uses yt-dlp, no auth needed)
         alternate_sources.append('youtube_videos')
+        # MusicBrainz always available (public API, no auth)
+        alternate_sources.append('musicbrainz')
 
         logger.info(f"Enhanced search results ({primary_source}): {len(db_artists)} DB artists, "
                      f"{len(primary_results['artists'])} artists, {len(primary_results['albums'])} albums, "
@@ -8653,7 +8655,7 @@ def enhanced_search_source(source_name):
     This prevents slow sources (iTunes with 3s rate limit) from blocking the UI.
     Falls back to single JSON response if streaming not supported.
     """
-    if source_name not in ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'youtube_videos'):
+    if source_name not in ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'youtube_videos', 'musicbrainz'):
         return jsonify({"error": f"Unknown source: {source_name}"}), 400
 
     data = request.get_json()
@@ -8713,6 +8715,13 @@ def enhanced_search_source(source_name):
             if hydrabase_client and hydrabase_client.is_connected():
                 client = hydrabase_client
             else:
+                return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
+        elif source_name == 'musicbrainz':
+            try:
+                from core.musicbrainz_search import MusicBrainzSearchClient
+                client = MusicBrainzSearchClient()
+            except Exception as e:
+                logger.warning(f"MusicBrainz search client init failed: {e}")
                 return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
 
         def generate():
@@ -22487,6 +22496,19 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "MusicBrainz Search Tab",
+                "description": "Find tracks and albums on MusicBrainz's community database — covers obscure music that Spotify/Deezer/iTunes miss",
+                "features": [
+                    "• New tab in Enhanced Search and Global Search alongside existing sources",
+                    "• Searches recordings, releases, and artists on MusicBrainz",
+                    "• Cover art from Cover Art Archive (free, linked by release ID)",
+                    "• Click results to open download modal with full tracklist — same flow as other sources",
+                    "• Smart query parsing splits 'Artist Title' into structured artist + title search",
+                    "• Deduplicates album results (keeps best version with date and art)",
+                    "• Always available — public API, no authentication needed",
+                ],
+            },
+            {
                 "title": "SoulSync Standalone Library",
                 "description": "Use SoulSync without Plex, Jellyfin, or Navidrome — manage your library directly",
                 "features": [
@@ -32998,6 +33020,17 @@ def get_album_tracks(album_id):
             client = _get_deezer_client()
         elif source_override == 'discogs':
             client = _get_discogs_client()
+        elif source_override == 'musicbrainz':
+            try:
+                from core.musicbrainz_search import MusicBrainzSearchClient
+                mb_search = MusicBrainzSearchClient()
+                album_data = mb_search.get_album(album_id)
+                if not album_data:
+                    return jsonify({"error": "Album not found on MusicBrainz"}), 404
+                return jsonify(album_data)
+            except Exception as e:
+                logger.error(f"MusicBrainz album detail failed: {e}")
+                return jsonify({"error": str(e)}), 500
 
         album_data = client.get_album(album_id)
         if not album_data:

@@ -3599,7 +3599,11 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
-    '2.31': [
+    '2.32': [
+        // --- April 18, 2026 ---
+        { date: 'April 18, 2026' },
+        { title: 'MusicBrainz Search Tab', desc: 'New search tab in Enhanced and Global search — find tracks and albums on MusicBrainz\'s community database. Cover art from Cover Art Archive. Click results to open download modal with full tracklist. Finds obscure tracks that Spotify/Deezer/iTunes miss', page: 'downloads' },
+
         // --- April 17, 2026 ---
         { date: 'April 17, 2026' },
         { title: 'SoulSync Standalone Library', desc: 'New "Standalone" server option — manage your library without Plex, Jellyfin, or Navidrome. Downloads and imports write directly to the library database with pre-populated enrichment IDs. Deep scan finds untracked files and cleans stale records. Select in Settings → Connections', page: 'settings' },
@@ -3695,12 +3699,12 @@ const WHATS_NEW = {
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '2.31';
+    return btn ? btn.textContent.trim().replace('v', '') : '2.32';
 }
 
 function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
-    return versions[0] || '2.31';
+    return versions[0] || '2.32';
 }
 
 function openWhatsNew() {

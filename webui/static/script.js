@@ -8573,6 +8573,7 @@ function initializeSearchModeToggle() {
         discogs: { text: 'Discogs', tabClass: 'enh-tab-discogs', badgeClass: 'enh-badge-discogs' },
         hydrabase: { text: 'Hydrabase', tabClass: 'enh-tab-hydrabase', badgeClass: 'enh-badge-hydrabase' },
         youtube_videos: { text: 'Music Videos', tabClass: 'enh-tab-youtube', badgeClass: 'enh-badge-youtube' },
+        musicbrainz: { text: 'MusicBrainz', tabClass: 'enh-tab-musicbrainz', badgeClass: 'enh-badge-musicbrainz' },
     };
 
     // Live search with debouncing
@@ -18069,7 +18070,7 @@ function _gsRender(data) {
         return;
     }
 
-    const sourceLabels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', hydrabase: 'Hydrabase', youtube_videos: 'Music Videos' };
+    const sourceLabels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', hydrabase: 'Hydrabase', youtube_videos: 'Music Videos', musicbrainz: 'MusicBrainz' };
     const srcLabel = sourceLabels[_gsState.activeSource] || _gsState.activeSource || '';
 
     let h = '';
