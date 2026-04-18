@@ -54308,5 +54308,6 @@ def start_runtime_services():
 if __name__ == '__main__':
     print("Starting SoulSync Web UI Server...")
     print("Open your browser and navigate to http://127.0.0.1:8008")
+    print("Note: direct `python web_server.py` startup is a legacy fallback; use Gunicorn for production.")
     start_runtime_services()
     socketio.run(app, host='0.0.0.0', port=8008, debug=False, allow_unsafe_werkzeug=True)
