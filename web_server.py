@@ -10949,23 +10949,6 @@ def get_artist_discography(artist_id):
         if hydrabase_worker and dev_mode_enabled and artist_name:
             hydrabase_worker.enqueue(artist_name, 'artist.albums')
 
-        from core.metadata_service import (
-            get_artist_albums_for_source,
-            get_client_for_source,
-            get_primary_source,
-            get_source_priority,
-        )
-
-        def _search_artists_for_source(client, source: str, name: str, limit: int = 5):
-            if not client or not hasattr(client, 'search_artists'):
-                return []
-            kwargs = {'limit': limit}
-            if source == 'spotify':
-                kwargs['allow_fallback'] = False
-            return client.search_artists(name, **kwargs) or []
-
-        primary_source = get_primary_source()
-        source_priority = list(get_source_priority(primary_source))
         effective_override_source = source_override
         if source_override == 'hydrabase':
             plugin = request.args.get('plugin', '').strip().lower()
@@ -10976,135 +10959,25 @@ def get_artist_discography(artist_id):
             else:
                 effective_override_source = 'spotify'
 
-        if effective_override_source and effective_override_source in source_priority:
-            source_priority = [effective_override_source] + [
-                source for source in source_priority if source != effective_override_source
-            ]
+        from core.metadata_service import MetadataLookupOptions, get_artist_discography as _get_artist_discography
 
-        logger.debug(
-            "Fetching discography for artist %s (name=%s, source_override=%s, priority=%s)",
+        discography = _get_artist_discography(
             artist_id,
-            artist_name,
-            source_override or 'auto',
-            source_priority,
+            artist_name=artist_name,
+            options=MetadataLookupOptions(
+                source_override=effective_override_source,
+                allow_fallback=True,
+                skip_cache=False,
+                max_pages=0,
+                limit=50,
+            ),
         )
 
-        albums = []
-        active_source = None
+        album_list = discography['albums']
+        singles_list = discography['singles']
+        active_source = discography['source']
+        source_priority = discography['source_priority']
 
-        # Hydrabase can return a ready-made discography when active.
-        if not source_override and _is_hydrabase_active() and artist_name:
-            try:
-                albums = hydrabase_client.search_discography(artist_name, limit=50)
-                if albums:
-                    active_source = 'hydrabase'
-                    logger.info("Got %s albums from Hydrabase for artist %s", len(albums), artist_id)
-            except Exception as e:
-                logger.debug("Hydrabase discography failed for artist %s: %s", artist_id, e)
-
-        # Walk sources in configured priority order, keeping strict per-source lookups.
-        if not albums:
-            for source in source_priority:
-                if source == 'hydrabase':
-                    continue
-
-                client = get_client_for_source(source)
-                try:
-                    albums = get_artist_albums_for_source(source, artist_id)
-                except Exception as e:
-                    logger.debug("%s direct lookup failed for artist %s: %s", source, artist_id, e)
-                    albums = []
-
-                if not albums and artist_name:
-                    try:
-                        search_artists = _search_artists_for_source(client, source, artist_name, limit=5)
-                        if search_artists:
-                            best = next(
-                                (a for a in search_artists if a.name.lower() == artist_name.lower()),
-                                search_artists[0]
-                            )
-                            logger.debug("Found %s artist '%s' (id=%s)", source, best.name, best.id)
-                            albums = get_artist_albums_for_source(source, best.id)
-                    except Exception as e:
-                        logger.debug("%s name search failed for artist %s: %s", source, artist_name, e)
-
-                if albums:
-                    active_source = source
-                    logger.info("Got %s albums from %s for artist %s", len(albums), source, artist_id)
-                    break
-
-        logger.debug("Total albums returned for artist %s: %s (source=%s)", artist_id, len(albums), active_source)
-        
-        if not albums:
-            return jsonify({
-                "albums": [],
-                "singles": [],
-                "source": active_source or (source_priority[0] if source_priority else "unknown")
-            })
-        
-        # Separate albums from singles/EPs
-        album_list = []
-        singles_list = []
-        
-        # Track seen albums to avoid duplicates (especially for "appears_on")
-        seen_albums = set()
-        
-        for album in albums:
-            # Skip duplicates
-            if album.id in seen_albums:
-                continue
-            seen_albums.add(album.id)
-
-            # Skip albums where this artist isn't the primary (first-listed) artist
-            if hasattr(album, 'artist_ids') and album.artist_ids:
-                if album.artist_ids[0] != artist_id:
-                    continue
-            
-            album_data = {
-                "id": album.id,
-                "name": album.name,
-                "release_date": album.release_date if hasattr(album, 'release_date') else None,
-                "album_type": album.album_type if hasattr(album, 'album_type') else 'album',
-                "image_url": album.image_url if hasattr(album, 'image_url') else None,
-                "total_tracks": album.total_tracks if hasattr(album, 'total_tracks') else 0,
-                "external_urls": album.external_urls if hasattr(album, 'external_urls') else {}
-            }
-            
-            # Skip obvious compilation issues but be more lenient for now
-            if hasattr(album, 'album_type') and album.album_type == 'compilation':
-                logger.debug("Found compilation '%s' for artist %s - including for now", album.name, artist_id)
-            
-            # Categorize by album type
-            if hasattr(album, 'album_type'):
-                if album.album_type in ['single', 'ep']:
-                    singles_list.append(album_data)
-                else:  # 'album' or approved 'compilation'
-                    album_list.append(album_data)
-            else:
-                # Default to album if no type specified
-                album_list.append(album_data)
-        
-        # Sort by release date (newest first)
-        def get_release_year(item):
-            if item['release_date']:
-                try:
-                    # Handle different date formats (YYYY, YYYY-MM, YYYY-MM-DD)
-                    return int(item['release_date'][:4])
-                except (ValueError, IndexError):
-                    return 0
-            return 0
-        
-        album_list.sort(key=get_release_year, reverse=True)
-        singles_list.sort(key=get_release_year, reverse=True)
-        
-        logger.info("Found %s albums and %s singles for artist %s", len(album_list), len(singles_list), artist_id)
-
-        # Debug: Log the final album list
-        for album in album_list:
-            logger.debug("Album: %s (%s) - %s", album['name'], album['album_type'], album['release_date'])
-        for single in singles_list:
-            logger.debug("Single/EP: %s (%s) - %s", single['name'], single['album_type'], single['release_date'])
-        
         # Gather artist enrichment info from cache + library
         artist_info = {}
         try:
