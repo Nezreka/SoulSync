@@ -622,8 +622,8 @@ class ConfigManager:
         return self.get('active_media_server', 'plex')
 
     def set_active_media_server(self, server: str):
-        """Set the active media server (plex, jellyfin, or navidrome)"""
-        if server not in ['plex', 'jellyfin', 'navidrome']:
+        """Set the active media server (plex, jellyfin, navidrome, or soulsync)"""
+        if server not in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
             raise ValueError(f"Invalid media server: {server}")
         self.set('active_media_server', server)
 
@@ -636,6 +636,8 @@ class ConfigManager:
             return self.get_jellyfin_config()
         elif active_server == 'navidrome':
             return self.get_navidrome_config()
+        elif active_server == 'soulsync':
+            return {'transfer_path': self.get('soulseek.transfer_path', './Transfer')}
         else:
             return {}
 
@@ -655,6 +657,8 @@ class ConfigManager:
         elif active_server == 'navidrome':
             navidrome = self.get_navidrome_config()
             media_server_configured = bool(navidrome.get('base_url')) and bool(navidrome.get('username')) and bool(navidrome.get('password'))
+        elif active_server == 'soulsync':
+            media_server_configured = True  # SoulSync standalone is always configured
 
         return (
             bool(spotify.get('client_id')) and
@@ -675,6 +679,7 @@ class ConfigManager:
         validation['plex'] = bool(self.get('plex.base_url')) and bool(self.get('plex.token'))
         validation['jellyfin'] = bool(self.get('jellyfin.base_url')) and bool(self.get('jellyfin.api_key'))
         validation['navidrome'] = bool(self.get('navidrome.base_url')) and bool(self.get('navidrome.username')) and bool(self.get('navidrome.password'))
+        validation['soulsync'] = True  # Standalone mode is always valid
         validation['active_media_server'] = active_server
 
         return validation

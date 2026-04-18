@@ -332,7 +332,7 @@ def _make_context_key(username, filename):
 # Each client is initialized independently so one failure doesn't take down everything.
 # Previously, a single exception set ALL clients to None, breaking the entire app.
 print("Initializing SoulSync services for Web UI...")
-spotify_client = plex_client = jellyfin_client = navidrome_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
+spotify_client = plex_client = jellyfin_client = navidrome_client = soulsync_library_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
 
 try:
     spotify_client = SpotifyClient()
@@ -357,6 +357,13 @@ try:
     print("  Navidrome client initialized")
 except Exception as e:
     print(f"  Navidrome client failed to initialize: {e}")
+
+try:
+    from core.soulsync_client import SoulSyncClient
+    soulsync_library_client = SoulSyncClient()
+    print("  SoulSync library client initialized")
+except Exception as e:
+    print(f"  SoulSync library client failed to initialize: {e}")
 
 try:
     soulseek_client = DownloadOrchestrator()
@@ -402,7 +409,8 @@ try:
     media_clients = {
         'plex_client': plex_client,
         'jellyfin_client': jellyfin_client,
-        'navidrome_client': navidrome_client
+        'navidrome_client': navidrome_client,
+        'soulsync_library_client': soulsync_library_client,
     }
     web_scan_manager = WebScanManager(media_clients, delay_seconds=60)
     print("  Web scan manager initialized")
@@ -2130,6 +2138,166 @@ def _record_download_provenance(context):
         )
     except Exception:
         pass  # Non-critical, never block download flow
+
+
+def _record_soulsync_library_entry(context, spotify_artist, album_info):
+    """Write artist/album/track to library DB after successful download/import.
+
+    Only runs when active server is 'soulsync' (standalone mode). Creates
+    DB records with server_source='soulsync' and pre-populates enrichment
+    IDs so enrichment workers don't need to re-discover them.
+    """
+    try:
+        active_server = config_manager.get_active_media_server()
+        if active_server != 'soulsync':
+            return
+
+        final_path = context.get('_final_processed_path')
+        if not final_path:
+            return
+
+        spotify_album = context.get('spotify_album', {}) or {}
+        track_info = context.get('track_info', {}) or {}
+        original_search = context.get('original_search_result', {}) or {}
+
+        artist_name = (spotify_artist or {}).get('name', '')
+        if not artist_name:
+            artist_name = original_search.get('spotify_clean_artist', '') or original_search.get('artist', '')
+        if not artist_name or artist_name in ('Unknown', 'Unknown Artist'):
+            return
+
+        album_name = ''
+        if album_info and isinstance(album_info, dict):
+            album_name = album_info.get('album_name', '')
+        if not album_name:
+            album_name = spotify_album.get('name', '') or original_search.get('album', '')
+        if not album_name:
+            album_name = track_info.get('name', 'Unknown')
+
+        track_name = original_search.get('spotify_clean_title', '') or track_info.get('name', '') or original_search.get('title', '')
+        track_number = (track_info.get('track_number') or (album_info.get('track_number') if isinstance(album_info, dict) else None)) or 1
+        duration_ms = track_info.get('duration_ms', 0) or 0
+
+        year = None
+        release_date = spotify_album.get('release_date', '')
+        if release_date and len(release_date) >= 4:
+            try:
+                year = int(release_date[:4])
+            except ValueError:
+                pass
+
+        image_url = spotify_album.get('image_url', '')
+        if not image_url:
+            images = spotify_album.get('images', [])
+            if images and isinstance(images, list) and len(images) > 0:
+                img = images[0]
+                image_url = img.get('url', '') if isinstance(img, dict) else str(img)
+
+        # Enrichment IDs from context — saves enrichment workers from re-discovering
+        spotify_artist_id = (spotify_artist or {}).get('id', '')
+        if spotify_artist_id in ('auto_import', 'from_sync_modal', 'explicit_artist', ''):
+            spotify_artist_id = ''
+        spotify_album_id = spotify_album.get('id', '')
+        if spotify_album_id in ('from_sync_modal', 'explicit_album', ''):
+            spotify_album_id = ''
+        spotify_track_id = track_info.get('id', '') or original_search.get('id', '')
+
+        genres = (spotify_artist or {}).get('genres', [])
+        genres_json = json.dumps(genres) if genres else ''
+
+        bitrate = 0
+        try:
+            from mutagen import File as MutagenFile
+            audio = MutagenFile(final_path)
+            if audio and hasattr(audio, 'info') and audio.info and hasattr(audio.info, 'bitrate'):
+                bitrate = int(audio.info.bitrate / 1000) if audio.info.bitrate else 0
+        except Exception:
+            pass
+
+        import hashlib
+        def _sid(text):
+            return str(abs(int(hashlib.md5(text.encode('utf-8', errors='replace')).hexdigest(), 16)) % (10 ** 9))
+
+        artist_id = _sid(artist_name.lower().strip())
+        album_id = _sid(f"{artist_name}::{album_name}".lower().strip())
+        track_id = _sid(final_path)
+        total_tracks = spotify_album.get('total_tracks', 0) or 0
+
+        db = get_database()
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # ── Artist: find existing or create ──
+            # Check any source (not just soulsync) to avoid ID collisions
+            cursor.execute("SELECT id, server_source FROM artists WHERE id = ?", (artist_id,))
+            existing_by_id = cursor.fetchone()
+            if existing_by_id:
+                # ID exists — reuse it (may be from another server source)
+                artist_id = existing_by_id[0]
+            else:
+                # Check by name across all sources
+                cursor.execute("SELECT id FROM artists WHERE name COLLATE NOCASE = ? LIMIT 1", (artist_name,))
+                existing_by_name = cursor.fetchone()
+                if existing_by_name:
+                    artist_id = existing_by_name[0]
+                else:
+                    cursor.execute("""
+                        INSERT INTO artists (id, name, genres, thumb_url, server_source, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, (artist_id, artist_name, genres_json, image_url))
+                    if spotify_artist_id:
+                        try:
+                            cursor.execute("UPDATE artists SET spotify_artist_id = ? WHERE id = ? AND (spotify_artist_id IS NULL OR spotify_artist_id = '')",
+                                           (spotify_artist_id, artist_id))
+                        except Exception:
+                            pass
+
+            # ── Album: find existing or create ──
+            cursor.execute("SELECT id FROM albums WHERE id = ?", (album_id,))
+            existing_album_by_id = cursor.fetchone()
+            if existing_album_by_id:
+                album_id = existing_album_by_id[0]
+            else:
+                # Check by title + artist across all sources
+                cursor.execute("SELECT id FROM albums WHERE title COLLATE NOCASE = ? AND artist_id = ? LIMIT 1",
+                               (album_name, artist_id))
+                existing_album_by_name = cursor.fetchone()
+                if existing_album_by_name:
+                    album_id = existing_album_by_name[0]
+                else:
+                    cursor.execute("""
+                        INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count,
+                                            server_source, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, (album_id, artist_id, album_name, year, image_url, genres_json, total_tracks))
+                    if spotify_album_id:
+                        try:
+                            cursor.execute("UPDATE albums SET spotify_album_id = ? WHERE id = ? AND (spotify_album_id IS NULL OR spotify_album_id = '')",
+                                           (spotify_album_id, album_id))
+                        except Exception:
+                            pass
+
+            # ── Track ──
+            cursor.execute("SELECT id FROM tracks WHERE file_path = ?", (final_path,))
+            if not cursor.fetchone():
+                cursor.execute("""
+                    INSERT INTO tracks (id, album_id, artist_id, title, track_number,
+                                        duration, file_path, bitrate, server_source,
+                                        created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (track_id, album_id, artist_id, track_name, track_number,
+                      duration_ms, final_path, bitrate))
+                if spotify_track_id:
+                    try:
+                        cursor.execute("UPDATE tracks SET spotify_track_id = ? WHERE id = ?", (spotify_track_id, track_id))
+                    except Exception:
+                        pass
+
+            conn.commit()
+            print(f"[SoulSync Library] Added: {artist_name} / {album_name} / {track_name}")
+
+    except Exception as e:
+        logger.debug(f"[SoulSync Library] Non-critical error: {e}")
 
 
 # --- Register Public REST API Blueprint (v1) ---
@@ -4786,6 +4954,9 @@ def get_status():
             elif active_server == "navidrome" and navidrome_client:
                 # Use existing instance
                 media_server_status = navidrome_client.is_connected()
+            elif active_server == "soulsync":
+                # Standalone mode — always connected if Transfer folder exists
+                media_server_status = soulsync_library_client.is_connected() if soulsync_library_client else False
             media_server_response_time = (time.time() - media_server_start) * 1000
             _status_cache['media_server'] = {
                 'connected': media_server_status,
@@ -6621,7 +6792,7 @@ def test_connection_endpoint():
             _status_cache['spotify']['source'] = _get_metadata_fallback_source()
             _status_cache_timestamps['spotify'] = current_time
             print("Updated Spotify status cache after successful test")
-        elif service in ['plex', 'jellyfin', 'navidrome']:
+        elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
             _status_cache['media_server']['connected'] = True
             _status_cache['media_server']['type'] = service
             _status_cache_timestamps['media_server'] = current_time
@@ -6671,7 +6842,7 @@ def test_dashboard_connection_endpoint():
             _status_cache['spotify']['source'] = _get_metadata_fallback_source()
             _status_cache_timestamps['spotify'] = current_time
             print("Updated Spotify status cache after successful dashboard test")
-        elif service in ['plex', 'jellyfin', 'navidrome']:
+        elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
             _status_cache['media_server']['connected'] = True
             _status_cache['media_server']['type'] = service
             _status_cache_timestamps['media_server'] = current_time
@@ -21522,6 +21693,7 @@ def _post_process_matched_download(context_key, context, file_path):
         _emit_track_downloaded(context)
         _record_library_history_download(context)
         _record_download_provenance(context)
+        _record_soulsync_library_entry(context, spotify_artist, album_info)
 
         # RETAG DATA CAPTURE: Record completed album/single downloads for retag tool
         try:
@@ -24272,6 +24444,8 @@ def _run_db_update_task(full_refresh, server_type):
         media_client = jellyfin_client
     elif server_type == "navidrome":
         media_client = navidrome_client
+    elif server_type == "soulsync":
+        media_client = soulsync_library_client
 
     if not media_client:
         _db_update_error_callback(f"Media client for '{server_type}' not available.")
@@ -24318,6 +24492,10 @@ def _run_deep_scan_task(server_type):
         media_client = jellyfin_client
     elif server_type == "navidrome":
         media_client = navidrome_client
+    elif server_type == "soulsync":
+        media_client = soulsync_library_client
+        if media_client:
+            media_client.clear_cache()  # Force fresh scan for deep scan
 
     if not media_client:
         _db_update_error_callback(f"Media client for '{server_type}' not available.")
