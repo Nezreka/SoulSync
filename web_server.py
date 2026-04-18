@@ -50837,9 +50837,23 @@ def get_spotify_artist_discography(artist_name):
                     groups[key] = r
                 else:
                     existing = groups[key]
-                    # Prefer: more tracks > explicit > longer title (deluxe)
-                    if (r.get('track_count', 0) > existing.get('track_count', 0) or
-                        '(explicit' in r['title'].lower()):
+                    # Only dedup if titles are genuinely similar (not just same year)
+                    from difflib import SequenceMatcher
+                    title_sim = SequenceMatcher(None, norm, _VARIANT_RE.sub('', existing['title']).strip().lower()).ratio()
+                    if title_sim < 0.85:
+                        # Titles are too different — not variants, keep both
+                        # Use full title as key to avoid collision
+                        groups[(r['title'].lower(), r.get('year'))] = r
+                        continue
+                    # Prefer: studio over compilation, explicit over clean, more tracks as tiebreaker
+                    r_is_compilation = r.get('album_type', '').lower() == 'compilation' or 'best of' in r['title'].lower() or 'greatest hits' in r['title'].lower()
+                    e_is_compilation = existing.get('album_type', '').lower() == 'compilation' or 'best of' in existing['title'].lower() or 'greatest hits' in existing['title'].lower()
+                    if e_is_compilation and not r_is_compilation:
+                        groups[key] = r  # Studio album wins over compilation
+                    elif r_is_compilation and not e_is_compilation:
+                        pass  # Keep existing studio album
+                    elif (r.get('track_count', 0) > existing.get('track_count', 0) or
+                          '(explicit' in r['title'].lower()):
                         groups[key] = r
             return list(groups.values())
 
