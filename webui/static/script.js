@@ -12093,6 +12093,7 @@ async function openDownloadMissingModal(playlistId) {
     const playlist = spotifyPlaylists.find(p => p.id === playlistId);
     if (!playlist) {
         showToast('Could not find playlist data.', 'error');
+        hideLoadingOverlay();
         return;
     }
 
@@ -12109,6 +12110,7 @@ async function openDownloadMissingModal(playlistId) {
             playlistTrackCache[playlistId] = tracks;
         } catch (error) {
             showToast(`Failed to fetch tracks: ${error.message}`, 'error');
+            hideLoadingOverlay();
             return;
         }
     }
