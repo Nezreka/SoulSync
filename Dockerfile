@@ -81,8 +81,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
-ENV FLASK_APP=web_server.py
-ENV FLASK_ENV=production
 ENV DATABASE_PATH=/app/data/music_library.db
 ENV PUID=1000
 ENV PGID=1000
@@ -90,4 +88,4 @@ ENV UMASK=022
 
 # Set entrypoint and default command
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["python", "web_server.py"]
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "wsgi:application"]
