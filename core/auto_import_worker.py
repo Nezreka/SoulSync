@@ -433,7 +433,7 @@ class AutoImportWorker:
                            (folder_hash,))
             row = cursor.fetchone()
             conn.close()
-            return row and row['status'] in ('completed', 'pending_review')
+            return row and row['status'] in ('completed', 'pending_review', 'needs_identification', 'failed', 'rejected')
         except Exception:
             return False
 
