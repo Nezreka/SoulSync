@@ -50,8 +50,8 @@ def _compute_folder_hash(audio_files: List[str]) -> str:
 
 
 def _read_file_tags(file_path: str) -> Dict[str, Any]:
-    """Read embedded tags from an audio file. Returns dict with title, artist, album, track_number, disc_number."""
-    result = {'title': '', 'artist': '', 'album': '', 'track_number': 0, 'disc_number': 1}
+    """Read embedded tags from an audio file. Returns dict with title, artist, album, track_number, disc_number, year."""
+    result = {'title': '', 'artist': '', 'album': '', 'track_number': 0, 'disc_number': 1, 'year': ''}
     try:
         from mutagen import File as MutagenFile
         audio = MutagenFile(file_path, easy=True)
@@ -60,6 +60,10 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
             result['title'] = (tags.get('title', [''])[0] or '').strip()
             result['artist'] = (tags.get('artist', [''])[0] or tags.get('albumartist', [''])[0] or '').strip()
             result['album'] = (tags.get('album', [''])[0] or '').strip()
+            # Date/year — try 'date' first, fall back to 'year'
+            date_str = (tags.get('date', [''])[0] or tags.get('year', [''])[0] or '').strip()
+            if date_str and len(date_str) >= 4:
+                result['year'] = date_str[:4]
             tn = tags.get('tracknumber', ['0'])[0]
             try:
                 result['track_number'] = int(str(tn).split('/')[0])
@@ -490,6 +494,8 @@ class AutoImportWorker:
                 'artist_name': artist,
                 'track_name': title,
                 'image_url': '',
+                'release_date': tags.get('year', '') or '',
+                'track_number': tags.get('track_number', 1),
                 'total_tracks': 1,
                 'source': 'tags',
                 'method': 'tags' if tags.get('artist') else 'filename',
@@ -544,16 +550,24 @@ class AutoImportWorker:
             if hasattr(best_result, 'artists') and best_result.artists:
                 a = best_result.artists[0]
                 r_artist = a.get('name', str(a)) if isinstance(a, dict) else str(a)
+
+            # Extract image — try direct image_url first (Deezer), then album.images (Spotify)
+            r_image = getattr(best_result, 'image_url', '') or ''
             if hasattr(best_result, 'album'):
                 alb = best_result.album
                 if isinstance(alb, dict):
                     r_album = alb.get('name', '')
                     r_album_id = alb.get('id', '')
-                    images = alb.get('images', [])
-                    if images:
-                        r_image = images[0].get('url', '') if isinstance(images[0], dict) else str(images[0])
+                    if not r_image:
+                        images = alb.get('images', [])
+                        if images:
+                            r_image = images[0].get('url', '') if isinstance(images[0], dict) else str(images[0])
                 elif isinstance(alb, str):
                     r_album = alb
+
+            # Extract track number and release date from the matched result
+            r_track_number = getattr(best_result, 'track_number', None) or 1
+            r_release_date = getattr(best_result, 'release_date', '') or ''
 
             return {
                 'album_id': r_album_id or None,
@@ -562,7 +576,9 @@ class AutoImportWorker:
                 'track_name': getattr(best_result, 'name', '') or title,
                 'track_id': getattr(best_result, 'id', ''),
                 'image_url': r_image,
-                'total_tracks': 1,
+                'release_date': r_release_date,
+                'track_number': r_track_number,
+                'total_tracks': getattr(best_result, 'total_tracks', 1) or 1,
                 'source': source,
                 'method': 'tags',
                 'identification_confidence': best_score,
@@ -696,11 +712,15 @@ class AutoImportWorker:
                 a = best_result.artists[0]
                 r_artist = a.get('name', str(a)) if isinstance(a, dict) else str(a)
 
+            # Get release date
+            release_date = getattr(best_result, 'release_date', '') or ''
+
             return {
                 'album_id': best_result.id,
                 'album_name': best_result.name,
                 'artist_name': r_artist or artist or '',
                 'image_url': image_url,
+                'release_date': release_date,
                 'total_tracks': getattr(best_result, 'total_tracks', 0),
                 'source': source,
                 'method': method,
@@ -722,7 +742,7 @@ class AutoImportWorker:
                 'name': identification.get('track_name', identification.get('album_name', '')),
                 'artists': [{'name': identification.get('artist_name', '')}],
                 'id': identification.get('track_id', ''),
-                'track_number': 1,
+                'track_number': identification.get('track_number', 1),
                 'disc_number': 1,
             }
             return {
@@ -750,14 +770,31 @@ class AutoImportWorker:
             album_data = None
             if hasattr(client, 'get_album'):
                 album_data = client.get_album(album_id)
+
+            # Fallback: try get_album_metadata (Deezer) or get_album_tracks
+            if not album_data and hasattr(client, 'get_album_metadata'):
+                album_data = client.get_album_metadata(str(album_id), include_tracks=True)
+            if not album_data and hasattr(client, 'get_album_tracks'):
+                tracks_data = client.get_album_tracks(str(album_id))
+                if tracks_data:
+                    album_data = {'id': album_id, 'name': identification.get('album_name', ''), 'tracks': tracks_data}
+
             if not album_data:
                 return None
 
-            # Extract tracks
+            # Extract tracks — handle various response formats
             tracks = []
-            if isinstance(album_data, dict) and 'tracks' in album_data:
-                items = album_data['tracks'].get('items', []) if isinstance(album_data['tracks'], dict) else album_data['tracks']
-                tracks = items if isinstance(items, list) else []
+            if isinstance(album_data, dict):
+                if 'tracks' in album_data:
+                    raw = album_data['tracks']
+                    if isinstance(raw, dict) and 'items' in raw:
+                        tracks = raw['items']
+                    elif isinstance(raw, dict) and 'data' in raw:
+                        tracks = raw['data']  # Deezer format
+                    elif isinstance(raw, list):
+                        tracks = raw
+                elif 'items' in album_data:
+                    tracks = album_data['items']
 
             if not tracks:
                 return None
@@ -880,6 +917,7 @@ class AutoImportWorker:
         artist_name = identification.get('artist_name', 'Unknown')
         album_name = identification.get('album_name', 'Unknown')
         image_url = identification.get('image_url', '')
+        release_date = identification.get('release_date', '') or album_data.get('release_date', '')
 
         # Compute total discs
         total_discs = 1
@@ -912,9 +950,9 @@ class AutoImportWorker:
                         'genres': [],
                     },
                     'spotify_album': {
-                        'id': album_data.get('id', identification.get('album_id', '')),
+                        'id': album_data.get('id') or identification.get('album_id') or '',
                         'name': album_name,
-                        'release_date': album_data.get('release_date', ''),
+                        'release_date': release_date,
                         'total_tracks': album_data.get('total_tracks', match_result.get('total_tracks', 0)),
                         'total_discs': total_discs,
                         'image_url': image_url,
