@@ -49264,15 +49264,18 @@ tr.tag-diff-same {
     transition: transform 0.2s ease;
 }
 
-.repair-master-toggle input {
+.repair-master-toggle input,
+.auto-import-toggle-label input {
     display: none;
 }
 
-.repair-master-toggle input:checked + .repair-toggle-slider {
+.repair-master-toggle input:checked + .repair-toggle-slider,
+.auto-import-toggle-label input:checked + .repair-toggle-slider {
     background: var(--accent-color, #6366f1);
 }
 
-.repair-master-toggle input:checked + .repair-toggle-slider::after {
+.repair-master-toggle input:checked + .repair-toggle-slider::after,
+.auto-import-toggle-label input:checked + .repair-toggle-slider::after {
     transform: translateX(20px);
 }
 
