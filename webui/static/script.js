@@ -5737,9 +5737,13 @@ function validateFileOrganizationTemplates() {
 function switchSettingsTab(tab) {
     // Update tab bar
     document.querySelectorAll('.stg-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-    // Show/hide settings groups by data-stg attribute
-    document.querySelectorAll('#settings-page .settings-group[data-stg]').forEach(g => {
+    // Show/hide settings groups and section headers by data-stg attribute
+    document.querySelectorAll('#settings-page [data-stg]').forEach(g => {
         g.style.display = g.dataset.stg === tab ? '' : 'none';
+    });
+    // Re-apply collapsed state on section bodies (tab switch resets inline display)
+    document.querySelectorAll('#settings-page .settings-section-body.collapsed').forEach(b => {
+        b.style.display = 'none';
     });
     // Also hide/show the column wrappers if they're empty in this tab
     document.querySelectorAll('#settings-page .settings-left-column, #settings-page .settings-right-column, #settings-page .settings-third-column').forEach(col => {

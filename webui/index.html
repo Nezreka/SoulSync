@@ -5061,6 +5061,14 @@
                                 </div>
                             </div>
 
+                            <!-- ═══ PATHS & ORGANIZATION ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Paths &amp; Organization</h3>
+                                <span class="settings-section-hint">File templates, music library paths</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="library">
+
                             <!-- File Organization Settings -->
                             <div class="settings-group" data-stg="library">
                                 <h3>📁 File Organization</h3>
@@ -5134,6 +5142,34 @@
                                     </small>
                                 </div>
                             </div>
+
+                            <!-- Music Library Paths (moved into Paths & Organization) -->
+                            <div class="settings-group" data-stg="library">
+                                <h3>📂 Music Library Paths</h3>
+
+                                <div class="help-text" style="margin-bottom: 12px;">
+                                    Tell SoulSync where your music files live. Required for tag writing, streaming, and file detection
+                                    when your media server stores files at a different path than SoulSync can see.
+                                    <strong>Docker users:</strong> mount your music folder(s) into the SoulSync container with read-write access,
+                                    then add the <em>container-side</em> path here (e.g. <code>/music</code>).
+                                </div>
+
+                                <div id="music-paths-list"></div>
+
+                                <div class="form-actions" style="margin-top: 8px;">
+                                    <button class="test-button" onclick="addMusicPathRow()">+ Add Path</button>
+                                </div>
+                            </div>
+
+                            </div><!-- end Paths & Organization body -->
+
+                            <!-- ═══ POST-PROCESSING ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Post-Processing</h3>
+                                <span class="settings-section-hint">Metadata, tags, conversion, lyrics</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="library">
 
                             <!-- Metadata Enhancement Settings -->
                             <div class="settings-group" data-stg="library">
@@ -5430,6 +5466,16 @@
                                 </div>
                             </div>
 
+                            </div><!-- end Post-Processing body -->
+
+                            <!-- ═══ LIBRARY PREFERENCES ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Library Preferences</h3>
+                                <span class="settings-section-hint">Import, content filter, playlists, stats</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="library">
+
                             <!-- Listening Stats Settings -->
                             <div class="settings-group" data-stg="library">
                                 <h3>📊 Listening Stats</h3>
@@ -5627,25 +5673,6 @@
                             </div>
 
 
-                            <!-- Music Library Paths -->
-                            <div class="settings-group" data-stg="library">
-                                <h3>📂 Music Library Paths</h3>
-
-                                <div class="help-text" style="margin-bottom: 12px;">
-                                    Tell SoulSync where your music files live. Required for tag writing, streaming, and file detection
-                                    when your media server stores files at a different path than SoulSync can see.
-                                    <strong>Docker users:</strong> mount your music folder(s) into the SoulSync container with read-write access,
-                                    then add the <em>container-side</em> path here (e.g. <code>/music</code>).
-                                </div>
-
-                                <div id="music-paths-list"></div>
-
-                                <div class="form-actions" style="margin-top: 8px;">
-                                    <button class="test-button" onclick="addMusicPathRow()">+ Add Path</button>
-                                </div>
-                            </div>
-
-
                             <!-- Content Filter Settings -->
                             <div class="settings-group" data-stg="library">
                                 <h3>🔞 Content Filter</h3>
@@ -5707,6 +5734,8 @@
                                     </label>
                                 </div>
                             </div>
+
+                            </div><!-- end Library Preferences body -->
 
                             <!-- Logging Information (Read-only) -->
                             <div class="settings-group" data-stg="advanced">
