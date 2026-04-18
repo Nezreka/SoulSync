@@ -135,6 +135,40 @@ def get_album_tracks_for_source(source: str, album_id: str):
         return None
 
 
+def get_artist_albums_for_source(
+    source: str,
+    artist_id: str,
+    album_type: str = 'album,single',
+    limit: int = 50,
+    skip_cache: bool = False,
+    max_pages: int = 0,
+):
+    """Get artist albums for an exact source.
+
+    Returns a provider-native album list or None if the source is unavailable.
+    No fallback swaps.
+
+    Set skip_cache=True only for freshness-sensitive flows that need newly
+    released albums to show up immediately.
+    """
+    client = get_client_for_source(source)
+    if not client or not artist_id or not hasattr(client, 'get_artist_albums'):
+        return None
+
+    try:
+        kwargs = {
+            'album_type': album_type,
+            'limit': limit,
+        }
+        if source == 'spotify':
+            kwargs['allow_fallback'] = False
+            kwargs['skip_cache'] = skip_cache
+            kwargs['max_pages'] = max_pages
+        return client.get_artist_albums(artist_id, **kwargs)
+    except Exception:
+        return None
+
+
 def get_deezer_client():
     """Get cached Deezer client.
 
