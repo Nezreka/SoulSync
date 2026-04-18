@@ -8536,7 +8536,7 @@ def enhanced_search():
             # Search using the user's configured primary metadata source
             fb_source = _get_metadata_fallback_source()
             try:
-                primary_results = _enhanced_search_source(query, _get_metadata_fallback_client())
+                primary_results = _enhanced_search_source(query, _get_metadata_fallback_client(), fb_source)
                 primary_source = fb_source
             except Exception as e:
                 logger.debug(f"Primary source ({fb_source}) search failed: {e}")
@@ -8545,7 +8545,7 @@ def enhanced_search():
             if primary_results is empty_source and fb_source != 'spotify':
                 if spotify_client and spotify_client.is_spotify_authenticated():
                     try:
-                        primary_results = _enhanced_search_source(query, spotify_client)
+                        primary_results = _enhanced_search_source(query, spotify_client, "spotify")
                         primary_source = "spotify"
                     except Exception as e:
                         logger.debug(f"Spotify fallback search failed: {e}")
@@ -8592,59 +8592,86 @@ def enhanced_search():
         return jsonify({"error": str(e)}), 500
 
 
-def _enhanced_search_source(query, client):
+def _search_metadata_source_kind(client, query, kind, source_name=None):
+    """Search one result type from a metadata source and normalize it."""
+    source_label = source_name or type(client).__name__
+
+    if kind == "artists":
+        artists = []
+        try:
+            artist_objs = client.search_artists(query, limit=10)
+            for artist in artist_objs:
+                artists.append({
+                    "id": artist.id,
+                    "name": artist.name,
+                    "image_url": artist.image_url,
+                    "external_urls": artist.external_urls or {},
+                })
+        except Exception as e:
+            logger.debug(f"Artist search failed for {source_label}: {e}")
+        return artists
+
+    if kind == "albums":
+        albums = []
+        try:
+            album_objs = client.search_albums(query, limit=10)
+            for album in album_objs:
+                artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
+                albums.append({
+                    "id": album.id,
+                    "name": album.name,
+                    "artist": artist_name,
+                    "image_url": album.image_url,
+                    "release_date": album.release_date,
+                    "total_tracks": album.total_tracks,
+                    "album_type": album.album_type,
+                    "external_urls": album.external_urls or {},
+                })
+        except Exception as e:
+            logger.warning(f"Album search failed for {source_label}: {e}", exc_info=True)
+        return albums
+
+    if kind == "tracks":
+        tracks = []
+        try:
+            track_objs = client.search_tracks(query, limit=10)
+            for track in track_objs:
+                artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
+                tracks.append({
+                    "id": track.id,
+                    "name": track.name,
+                    "artist": artist_name,
+                    "album": track.album,
+                    "duration_ms": track.duration_ms,
+                    "image_url": track.image_url,
+                    "release_date": track.release_date,
+                    "external_urls": track.external_urls or {},
+                })
+        except Exception as e:
+            logger.warning(f"Track search failed for {source_label}: {e}", exc_info=True)
+        return tracks
+
+    raise ValueError(f"Unknown metadata search kind: {kind}")
+
+
+def _enhanced_search_source(query, client, source_name=None):
     """Search a single metadata source and return normalized results dict."""
-    artists = []
-    albums = []
-    tracks = []
+    results = {"artists": [], "albums": [], "tracks": []}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {
+            executor.submit(_search_metadata_source_kind, client, query, "artists", source_name): "artists",
+            executor.submit(_search_metadata_source_kind, client, query, "albums", source_name): "albums",
+            executor.submit(_search_metadata_source_kind, client, query, "tracks", source_name): "tracks",
+        }
+        for future in as_completed(futures):
+            kind = futures[future]
+            try:
+                results[kind] = future.result()
+            except Exception as e:
+                logger.warning(f"{kind.title()} search failed for {source_name or type(client).__name__}: {e}", exc_info=True)
+                results[kind] = []
 
-    try:
-        artist_objs = client.search_artists(query, limit=10)
-        for artist in artist_objs:
-            artists.append({
-                "id": artist.id,
-                "name": artist.name,
-                "image_url": artist.image_url,
-                "external_urls": artist.external_urls or {},
-            })
-    except Exception as e:
-        logger.debug(f"Artist search failed for {type(client).__name__}: {e}")
-
-    try:
-        album_objs = client.search_albums(query, limit=10)
-        for album in album_objs:
-            artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
-            albums.append({
-                "id": album.id,
-                "name": album.name,
-                "artist": artist_name,
-                "image_url": album.image_url,
-                "release_date": album.release_date,
-                "total_tracks": album.total_tracks,
-                "album_type": album.album_type,
-                "external_urls": album.external_urls or {},
-            })
-    except Exception as e:
-        logger.warning(f"Album search failed for {type(client).__name__}: {e}", exc_info=True)
-
-    try:
-        track_objs = client.search_tracks(query, limit=10)
-        for track in track_objs:
-            artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
-            tracks.append({
-                "id": track.id,
-                "name": track.name,
-                "artist": artist_name,
-                "album": track.album,
-                "duration_ms": track.duration_ms,
-                "image_url": track.image_url,
-                "release_date": track.release_date,
-                "external_urls": track.external_urls or {},
-            })
-    except Exception as e:
-        logger.warning(f"Track search failed for {type(client).__name__}: {e}", exc_info=True)
-
-    return {"artists": artists, "albums": albums, "tracks": tracks, "available": True}
+    return {"artists": results["artists"], "albums": results["albums"], "tracks": results["tracks"], "available": True}
 
 
 @app.route('/api/enhanced-search/source/<source_name>', methods=['POST'])
@@ -8726,51 +8753,20 @@ def enhanced_search_source(source_name):
 
         def generate():
             # Stream each search type as it completes
-            try:
-                artist_objs = client.search_artists(query, limit=10)
-                artists = []
-                for artist in artist_objs:
-                    artists.append({
-                        "id": artist.id, "name": artist.name,
-                        "image_url": artist.image_url,
-                        "external_urls": artist.external_urls or {},
-                    })
-                yield json.dumps({"type": "artists", "data": artists}) + "\n"
-            except Exception as e:
-                logger.debug(f"Artist search failed for {source_name}: {e}")
-                yield json.dumps({"type": "artists", "data": []}) + "\n"
-
-            try:
-                album_objs = client.search_albums(query, limit=10)
-                albums = []
-                for album in album_objs:
-                    artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
-                    albums.append({
-                        "id": album.id, "name": album.name, "artist": artist_name,
-                        "image_url": album.image_url, "release_date": album.release_date,
-                        "total_tracks": album.total_tracks, "album_type": album.album_type,
-                        "external_urls": album.external_urls or {},
-                    })
-                yield json.dumps({"type": "albums", "data": albums}) + "\n"
-            except Exception as e:
-                logger.warning(f"Album search failed for {source_name}: {e}")
-                yield json.dumps({"type": "albums", "data": []}) + "\n"
-
-            try:
-                track_objs = client.search_tracks(query, limit=10)
-                tracks = []
-                for track in track_objs:
-                    artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
-                    tracks.append({
-                        "id": track.id, "name": track.name, "artist": artist_name,
-                        "album": track.album, "duration_ms": track.duration_ms,
-                        "image_url": track.image_url, "release_date": track.release_date,
-                        "external_urls": track.external_urls or {},
-                    })
-                yield json.dumps({"type": "tracks", "data": tracks}) + "\n"
-            except Exception as e:
-                logger.warning(f"Track search failed for {source_name}: {e}")
-                yield json.dumps({"type": "tracks", "data": []}) + "\n"
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                futures = {
+                    executor.submit(_search_metadata_source_kind, client, query, "artists", source_name): "artists",
+                    executor.submit(_search_metadata_source_kind, client, query, "albums", source_name): "albums",
+                    executor.submit(_search_metadata_source_kind, client, query, "tracks", source_name): "tracks",
+                }
+                for future in as_completed(futures):
+                    kind = futures[future]
+                    try:
+                        payload = future.result()
+                    except Exception as e:
+                        logger.warning(f"{kind.title()} search failed for {source_name}: {e}", exc_info=True)
+                        payload = []
+                    yield json.dumps({"type": kind, "data": payload}) + "\n"
 
             yield json.dumps({"type": "done"}) + "\n"
 
