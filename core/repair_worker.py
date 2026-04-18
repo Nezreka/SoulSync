@@ -1556,7 +1556,6 @@ class RepairWorker:
             album_title = details.get('album_title', '')
             if expected_title and expected_artist:
                 try:
-                    import json, uuid
                     track_data = {
                         'id': f'acoustid_fix_{uuid.uuid4().hex[:8]}',
                         'name': expected_title,
