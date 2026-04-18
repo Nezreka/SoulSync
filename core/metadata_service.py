@@ -3,11 +3,12 @@ Metadata Service - Centralized metadata source selection
 
 ALL metadata source decisions flow through this module. Other files import
 get_primary_source() and get_primary_client() instead of reimplementing
-the logic. This prevents bugs where different files have different defaults
-or auth checks.
+the logic. This prevents bugs where different files have different defaults,
+auth checks, or source-fallback behavior.
 """
 
 import threading
+from dataclasses import dataclass
 from typing import List, Optional, Dict, Any, Literal
 from core.spotify_client import SpotifyClient
 from core.itunes_client import iTunesClient
@@ -22,6 +23,17 @@ METADATA_SOURCE_PRIORITY = ('deezer', 'itunes', 'spotify', 'discogs', 'hydrabase
 
 _client_cache_lock = threading.RLock()
 _client_cache: Dict[str, Any] = {}
+
+
+@dataclass(frozen=True)
+class MetadataLookupOptions:
+    """Generic metadata lookup policy shared by metadata services."""
+
+    source_override: Optional[str] = None
+    allow_fallback: bool = True
+    skip_cache: bool = False
+    max_pages: int = 0
+    limit: int = 50
 
 
 # =============================================================================
@@ -135,6 +147,253 @@ def get_album_tracks_for_source(source: str, album_id: str):
         return None
 
 
+def get_artist_albums_for_source(
+    source: str,
+    artist_id: str,
+    artist_name: str = '',
+    album_type: str = 'album,single',
+    limit: int = 50,
+    skip_cache: bool = False,
+    max_pages: int = 0,
+):
+    """Get artist albums for an exact source.
+
+    Returns a provider-native album list or None if the source is unavailable.
+    Tries the requested artist ID first, then falls back to artist-name
+    search using the same flow for every provider when artist_name is provided.
+
+    Set skip_cache=True only for freshness-sensitive flows that need newly
+    released albums to show up immediately.
+    """
+    client = get_client_for_source(source)
+    if not client or not artist_id or not hasattr(client, 'get_artist_albums'):
+        return None
+
+    def _fetch_for_artist(target_artist_id: str):
+        kwargs = {
+            'album_type': album_type,
+            'limit': limit,
+        }
+        if source == 'spotify':
+            kwargs['allow_fallback'] = False
+            kwargs['skip_cache'] = skip_cache
+            kwargs['max_pages'] = max_pages
+        return client.get_artist_albums(target_artist_id, **kwargs)
+
+    try:
+        albums = _fetch_for_artist(artist_id) or []
+        if albums:
+            return albums
+
+        if not artist_name:
+            return albums
+
+        search_results = _search_artists_for_source(source, client, artist_name, limit=5)
+        if not search_results:
+            return albums
+
+        best = _pick_best_artist_match(search_results, artist_name)
+        if not best:
+            return albums
+
+        found_artist_id = _extract_lookup_value(best, 'id', 'artist_id')
+        if not found_artist_id:
+            return albums
+
+        resolved = _fetch_for_artist(found_artist_id) or []
+        if resolved:
+            logger.debug("Found %s artist '%s' (id=%s)", source, _extract_lookup_value(best, 'name', 'artist_name', 'title'), found_artist_id)
+        return resolved
+    except Exception:
+        return None
+
+
+def _get_source_chain_for_lookup(options: MetadataLookupOptions) -> List[str]:
+    primary_source = get_primary_source()
+    source_chain = list(get_source_priority(primary_source))
+    override = (options.source_override or '').strip().lower()
+
+    if override:
+        source_chain = [override] + [source for source in source_chain if source != override]
+
+    if not options.allow_fallback:
+        source_chain = source_chain[:1]
+
+    return source_chain
+
+
+def _extract_lookup_value(value: Any, *names: str, default: Any = None) -> Any:
+    if value is None:
+        return default
+
+    for name in names:
+        if isinstance(value, dict):
+            if name in value and value[name] is not None:
+                return value[name]
+        else:
+            candidate = getattr(value, name, None)
+            if candidate is not None:
+                return candidate
+    return default
+
+
+def _normalize_artist_name(value: Any) -> str:
+    return (value or '').strip().casefold()
+
+
+def _search_artists_for_source(source: str, client: Any, artist_name: str, limit: int = 5) -> List[Any]:
+    if not client or not hasattr(client, 'search_artists'):
+        return []
+
+    try:
+        kwargs = {'limit': limit}
+        if source == 'spotify':
+            kwargs['allow_fallback'] = False
+        return client.search_artists(artist_name, **kwargs) or []
+    except Exception as exc:
+        logger.debug("Could not search %s for %s: %s", source, artist_name, exc)
+        return []
+
+
+def _pick_best_artist_match(search_results: List[Any], artist_name: str) -> Optional[Any]:
+    """Prefer an exact artist-name match, otherwise use the first result."""
+    if not search_results:
+        return None
+
+    target_name = _normalize_artist_name(artist_name)
+    for artist in search_results:
+        candidate_name = _normalize_artist_name(
+            _extract_lookup_value(artist, 'name', 'artist_name', 'title')
+        )
+        if candidate_name == target_name:
+            return artist
+
+    return search_results[0]
+
+
+def _build_discography_release_dict(release: Any, artist_id: str) -> Optional[Dict[str, Any]]:
+    release_id = _extract_lookup_value(release, 'id', 'album_id', 'release_id')
+    if not release_id:
+        return None
+
+    artist_ids = _extract_lookup_value(release, 'artist_ids') or []
+    if isinstance(artist_ids, (str, bytes)):
+        artist_ids = [artist_ids]
+    else:
+        try:
+            artist_ids = list(artist_ids)
+        except TypeError:
+            artist_ids = [artist_ids]
+
+    if artist_ids and str(artist_ids[0]) != str(artist_id):
+        return None
+
+    album_type = _extract_lookup_value(release, 'album_type', default='album') or 'album'
+    release_date = _extract_lookup_value(release, 'release_date')
+
+    return {
+        'id': release_id,
+        'name': _extract_lookup_value(release, 'name', 'title', default=release_id),
+        'release_date': release_date,
+        'album_type': album_type,
+        'image_url': _extract_lookup_value(release, 'image_url', 'thumb_url', 'cover_image'),
+        'total_tracks': _extract_lookup_value(release, 'total_tracks', default=0) or 0,
+        'external_urls': _extract_lookup_value(release, 'external_urls', default={}) or {},
+    }
+
+
+def _sort_discography_releases(releases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def get_release_year(item):
+        if item.get('release_date'):
+            try:
+                return int(str(item['release_date'])[:4])
+            except (ValueError, IndexError, TypeError):
+                return 0
+        return 0
+
+    return sorted(releases, key=get_release_year, reverse=True)
+
+
+def get_artist_discography(
+    artist_id: str,
+    artist_name: str = '',
+    options: Optional[MetadataLookupOptions] = None,
+) -> Dict[str, Any]:
+    """Get a normalized artist discography with source resolution and fallback.
+
+    Each provider uses the same lookup flow:
+    1. try the requested artist ID
+    2. if that misses, search by artist name
+    3. retry with the provider-specific artist ID from the search result
+    """
+    options = options or MetadataLookupOptions()
+    source_priority = _get_source_chain_for_lookup(options)
+
+    albums: List[Any] = []
+    active_source: Optional[str] = None
+
+    if not albums:
+        for source in source_priority:
+            client = get_client_for_source(source)
+            if not client:
+                continue
+
+            try:
+                albums = get_artist_albums_for_source(
+                    source,
+                    artist_id,
+                    artist_name=artist_name,
+                    limit=options.limit,
+                    skip_cache=options.skip_cache,
+                    max_pages=options.max_pages,
+                ) or []
+            except Exception as exc:
+                logger.debug("%s direct lookup failed for artist %s: %s", source, artist_id, exc)
+                albums = []
+
+            if albums:
+                active_source = source
+                logger.info("Got %s albums from %s for artist %s", len(albums), source, artist_id)
+                break
+
+    album_list: List[Dict[str, Any]] = []
+    singles_list: List[Dict[str, Any]] = []
+    seen_albums = set()
+
+    for release in albums or []:
+        release_data = _build_discography_release_dict(release, artist_id)
+        if not release_data:
+            continue
+
+        release_id = release_data['id']
+        if release_id in seen_albums:
+            continue
+        seen_albums.add(release_id)
+
+        album_type = release_data.get('album_type') or 'album'
+        if album_type in ['single', 'ep']:
+            singles_list.append(release_data)
+        else:
+            album_list.append(release_data)
+
+    album_list = _sort_discography_releases(album_list)
+    singles_list = _sort_discography_releases(singles_list)
+
+    logger.debug(
+        "Total albums returned for artist %s: %s (source=%s)",
+        artist_id,
+        len(album_list) + len(singles_list),
+        active_source,
+    )
+
+    return {
+        'albums': album_list,
+        'singles': singles_list,
+        'source': active_source or (source_priority[0] if source_priority else 'unknown'),
+        'source_priority': source_priority,
+    }
+
+
 def get_deezer_client():
     """Get cached Deezer client.
 
@@ -192,18 +451,32 @@ def get_discogs_client(token: Optional[str] = None):
         return client
 
 
-def get_hydrabase_client(allow_fallback: bool = True):
-    """Return current Hydrabase client if connected.
+def is_hydrabase_enabled() -> bool:
+    """Return True when Hydrabase is connected and allowed for metadata use."""
+    try:
+        import importlib
+        ws = importlib.import_module('web_server')
+        client = getattr(ws, 'hydrabase_client', None)
+        if not client or not client.is_connected():
+            return False
+        return bool(getattr(ws, 'dev_mode_enabled', False))
+    except Exception:
+        return False
+
+
+def get_hydrabase_client(allow_fallback: bool = True, require_enabled: bool = True):
+    """Return current Hydrabase client if connected and enabled.
 
     If allow_fallback is True, return iTunes fallback when Hydrabase is not
-    connected. If False, return None instead.
+    connected or not enabled. If False, return None instead.
     """
     try:
         import importlib
         ws = importlib.import_module('web_server')
         client = getattr(ws, 'hydrabase_client', None)
         if client and client.is_connected():
-            return client
+            if not require_enabled or bool(getattr(ws, 'dev_mode_enabled', False)):
+                return client
     except Exception:
         pass
     if allow_fallback:
