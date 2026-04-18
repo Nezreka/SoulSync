@@ -396,9 +396,15 @@ function handleServiceStatusUpdate(data) {
     // Update downloads nav badge from status push
     if (data.active_downloads !== undefined) _updateDlNavBadge(data.active_downloads);
 
-    // Hide sync nav button for standalone mode (no server to sync playlists to)
+    // Hide sync-related UI for standalone mode (no server to sync playlists to)
+    const isSoulsyncStandalone = data.media_server?.type === 'soulsync';
+    _isSoulsyncStandalone = isSoulsyncStandalone;
     const syncNav = document.querySelector('[data-page="sync"]');
-    if (syncNav) syncNav.style.display = (data.media_server?.type === 'soulsync') ? 'none' : '';
+    if (syncNav) syncNav.style.display = isSoulsyncStandalone ? 'none' : '';
+    // Hide all sync buttons across the app
+    document.querySelectorAll('.sync-to-server-btn, [id$="-sync-btn"], [onclick*="startPlaylistSync"], [onclick*="syncPlaylistToServer"], [onclick*="startDecadeSync"]').forEach(btn => {
+        btn.style.display = isSoulsyncStandalone ? 'none' : '';
+    });
 
     // Update enrichment service cards
     if (data.enrichment) renderEnrichmentCards(data.enrichment);
@@ -11839,7 +11845,7 @@ function showPlaylistDetailsModal(playlist) {
             ? '📊 View Download Results'
             : '📥 Download Missing Tracks'}
                 </button>
-                <button id="sync-btn-${playlist.id}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlist.id}')" ${isSyncing ? 'disabled' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>
+                <button id="sync-btn-${playlist.id}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlist.id}')" ${isSyncing ? 'disabled' : ''} ${_isSoulsyncStandalone ? 'style="display:none"' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>
             </div>
         </div>
     `;
@@ -25417,6 +25423,7 @@ function updateLibraryStatusCard(dbStats) {
 
 // Track last service status for library card
 let _lastServiceStatus = null;
+let _isSoulsyncStandalone = false;  // Global flag: true when no media server (sync buttons hidden)
 const _origFetchServiceStatus = typeof fetchAndUpdateServiceStatus === 'function' ? fetchAndUpdateServiceStatus : null;
 
 function _capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
@@ -27581,7 +27588,7 @@ function showDeezerArlPlaylistDetailsModal(playlist, originalDeezerPlaylistId) {
                 <button class="playlist-modal-btn playlist-modal-btn-tertiary" onclick="closeDeezerArlPlaylistDetailsModal(); openDownloadMissingModal('${playlistId}')">
                     ${hasCompletedProcess ? '📊 View Download Results' : '📥 Download Missing Tracks'}
                 </button>
-                <button id="sync-btn-${playlistId}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlistId}')" ${isSyncing ? 'disabled' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>
+                <button id="sync-btn-${playlistId}" class="playlist-modal-btn playlist-modal-btn-primary" onclick="startPlaylistSync('${playlistId}')" ${isSyncing ? 'disabled' : ''} ${_isSoulsyncStandalone ? 'style="display:none"' : ''}>${isSyncing ? '⏳ Syncing...' : 'Sync Playlist'}</button>
             </div>
         </div>
     `;
@@ -37227,7 +37234,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                         Begin Analysis
                     </button>
                     ${_isBeatportPlaylistId(virtualPlaylistId) ? `
-                    <button class="download-control-btn sync-to-server-btn" id="sync-server-btn-${virtualPlaylistId}" onclick="syncPlaylistToServer('${virtualPlaylistId}')">
+                    <button class="download-control-btn sync-to-server-btn" id="sync-server-btn-${virtualPlaylistId}" onclick="syncPlaylistToServer('${virtualPlaylistId}')" ${_isSoulsyncStandalone ? 'style="display:none"' : ''}>
                         Sync to Server
                     </button>` : ''}
                     <button class="download-control-btn" id="add-to-wishlist-btn-${virtualPlaylistId}" onclick="addModalTracksToWishlist('${virtualPlaylistId}')" style="background-color: #9333ea; color: white;">
@@ -39257,9 +39264,14 @@ async function fetchAndUpdateServiceStatus() {
         // Update downloads nav badge
         if (data.active_downloads !== undefined) _updateDlNavBadge(data.active_downloads);
 
-        // Hide sync nav for standalone mode
+        // Hide sync-related UI for standalone mode
+        const isSoulsyncStandalone2 = data.media_server?.type === 'soulsync';
+        _isSoulsyncStandalone = isSoulsyncStandalone2;
         const syncNav = document.querySelector('[data-page="sync"]');
-        if (syncNav) syncNav.style.display = (data.media_server?.type === 'soulsync') ? 'none' : '';
+        if (syncNav) syncNav.style.display = isSoulsyncStandalone2 ? 'none' : '';
+        document.querySelectorAll('.sync-to-server-btn, [id$="-sync-btn"], [onclick*="startPlaylistSync"], [onclick*="syncPlaylistToServer"], [onclick*="startDecadeSync"]').forEach(btn => {
+            btn.style.display = isSoulsyncStandalone2 ? 'none' : '';
+        });
 
         // Update enrichment service cards
         if (data.enrichment) renderEnrichmentCards(data.enrichment);

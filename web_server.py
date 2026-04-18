@@ -34,7 +34,7 @@ _log_path = config_manager.get('logging.path', 'logs/app.log')
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-SOULSYNC_VERSION = "2.3"
+SOULSYNC_VERSION = "2.31"
 
 # Dedicated source reuse logger — writes to logs/source_reuse.log
 import logging as _logging
@@ -22585,7 +22585,7 @@ def get_version_info():
                 ],
             },
             {
-                "title": "Earlier in v2.2",
+                "title": "Earlier in v2.3",
                 "description": "Major features from earlier in this release cycle",
                 "features": [
                     "• Centralized Downloads page with live-updating list and filter pills",
