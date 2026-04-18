@@ -53267,6 +53267,53 @@ def auto_import_reject(item_id):
     return jsonify(auto_import_worker.reject_item(item_id))
 
 
+@app.route('/api/auto-import/scan-now', methods=['POST'])
+def auto_import_scan_now():
+    """Trigger an immediate scan cycle."""
+    if not auto_import_worker:
+        return jsonify({"success": False, "error": "Auto-import not available"}), 500
+    if not auto_import_worker.running:
+        return jsonify({"success": False, "error": "Auto-import is not running"}), 400
+    # Run scan in background thread
+    import threading
+    threading.Thread(target=auto_import_worker._scan_cycle, daemon=True).start()
+    return jsonify({"success": True})
+
+
+@app.route('/api/auto-import/approve-all', methods=['POST'])
+def auto_import_approve_all():
+    """Approve all pending review items."""
+    if not auto_import_worker:
+        return jsonify({"success": False, "error": "Auto-import not available"}), 500
+    try:
+        results = auto_import_worker.get_results(status_filter='pending_review', limit=200)
+        count = 0
+        for r in results:
+            result = auto_import_worker.approve_item(r['id'])
+            if result.get('success'):
+                count += 1
+        return jsonify({"success": True, "count": count})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/auto-import/clear-completed', methods=['POST'])
+def auto_import_clear_completed():
+    """Remove completed/imported items from history."""
+    if not auto_import_worker:
+        return jsonify({"success": False, "error": "Auto-import not available"}), 500
+    try:
+        db = get_database()
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM auto_import_history WHERE status IN ('completed', 'approved', 'failed', 'needs_identification', 'rejected')")
+            count = cursor.rowcount
+            conn.commit()
+        return jsonify({"success": True, "count": count})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/import/staging/suggestions', methods=['GET'])
 def import_staging_suggestions():
     """Return cached import suggestions. If cache isn't built yet, returns partial/empty with a flag."""
