@@ -396,6 +396,10 @@ function handleServiceStatusUpdate(data) {
     // Update downloads nav badge from status push
     if (data.active_downloads !== undefined) _updateDlNavBadge(data.active_downloads);
 
+    // Hide sync nav button for standalone mode (no server to sync playlists to)
+    const syncNav = document.querySelector('[data-page="sync"]');
+    if (syncNav) syncNav.style.display = (data.media_server?.type === 'soulsync') ? 'none' : '';
+
     // Update enrichment service cards
     if (data.enrichment) renderEnrichmentCards(data.enrichment);
 
@@ -39252,6 +39256,10 @@ async function fetchAndUpdateServiceStatus() {
 
         // Update downloads nav badge
         if (data.active_downloads !== undefined) _updateDlNavBadge(data.active_downloads);
+
+        // Hide sync nav for standalone mode
+        const syncNav = document.querySelector('[data-page="sync"]');
+        if (syncNav) syncNav.style.display = (data.media_server?.type === 'soulsync') ? 'none' : '';
 
         // Update enrichment service cards
         if (data.enrichment) renderEnrichmentCards(data.enrichment);
