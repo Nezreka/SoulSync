@@ -9049,16 +9049,25 @@ function initializeSearchModeToggle() {
         const sources = data.sources || {};
         const primary = data.primary_source || 'spotify';
 
-        // Build tab list: primary first, then alternates sorted alphabetically
+        // Build tab list: primary first, then alternates sorted alphabetically.
+        // Hide completed zero-result sources so the bar stays focused.
         const sourceNames = Object.keys(sources).filter(s => sources[s].available);
-        if (sourceNames.length <= 1) {
+        const visibleSources = sourceNames.filter(name => {
+            const src = sources[name] || {};
+            const count = name === 'youtube_videos'
+                ? (src.videos?.length || 0)
+                : (src.artists?.length || 0) + (src.albums?.length || 0) + (src.tracks?.length || 0);
+            const isLoading = !!(src._loading && src._loading.size > 0);
+            return isLoading || count > 0 || name === _activeSearchSource;
+        });
+        if (visibleSources.length <= 1) {
             tabBar.classList.add('hidden');
             tabBar.innerHTML = '';
             return;
         }
 
         // Primary tab first, then others
-        const ordered = [primary, ...sourceNames.filter(s => s !== primary).sort()];
+        const ordered = [primary, ...visibleSources.filter(s => s !== primary).sort()];
 
         tabBar.innerHTML = ordered.map(name => {
             const info = SOURCE_LABELS[name] || { text: name, tabClass: '' };
@@ -18183,10 +18192,26 @@ function _gsRenderTabs() {
     const el = document.getElementById('gsearch-tabs');
     if (!el) return;
     const sources = Object.keys(_gsState.sources);
-    if (sources.length < 2) { el.style.display = 'none'; return; }
-    const labels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', hydrabase: 'Hydrabase', youtube_videos: 'Music Videos' };
+    const labels = {
+        spotify: 'Spotify',
+        itunes: 'Apple Music',
+        deezer: 'Deezer',
+        discogs: 'Discogs',
+        hydrabase: 'Hydrabase',
+        youtube_videos: 'Music Videos',
+        musicbrainz: 'MusicBrainz',
+    };
+    const visibleSources = sources.filter(s => {
+        const d = _gsState.sources[s] || {};
+        const count = s === 'youtube_videos'
+            ? (d.videos?.length || 0)
+            : (d.artists?.length || 0) + (d.albums?.length || 0) + (d.tracks?.length || 0);
+        const isLoading = !!(d._loading && d._loading.size > 0);
+        return isLoading || count > 0 || s === _gsState.activeSource;
+    });
+    if (visibleSources.length < 2) { el.style.display = 'none'; return; }
     el.style.display = 'flex';
-    el.innerHTML = sources.map(s => {
+    el.innerHTML = visibleSources.map(s => {
         const d = _gsState.sources[s];
         const c = s === 'youtube_videos'
             ? (d.videos?.length || 0)
