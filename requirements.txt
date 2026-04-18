@@ -44,3 +44,5 @@ tidalapi>=0.7.6
 
 # WebSocket server for real-time UI updates
 flask-socketio>=5.3.0
+gunicorn>=25.3.0
+simple-websocket>=1.1.0
