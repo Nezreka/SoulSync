@@ -865,7 +865,14 @@ class WatchlistScanner:
         Returns:
             WatchlistDiscographyResult or None on error
         """
-        for source in self._watchlist_source_priority():
+        # Per-artist metadata source override — if set, use that source first with fallback
+        preferred = getattr(watchlist_artist, 'preferred_metadata_source', None)
+        if preferred and preferred in ('spotify', 'deezer', 'itunes', 'discogs'):
+            source_priority = list(get_source_priority(preferred))
+        else:
+            source_priority = self._watchlist_source_priority()
+
+        for source in source_priority:
             result = self._resolve_watchlist_discography_for_source(watchlist_artist, source, last_scan_timestamp)
             if result:
                 return result
