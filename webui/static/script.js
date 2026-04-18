@@ -8671,6 +8671,7 @@ function initializeSearchModeToggle() {
 
     async function performEnhancedSearch(query) {
         console.log('Enhanced search:', query);
+        const searchId = Date.now() + Math.random();
 
         // Show loading state with correct source name
         showDropdown();
@@ -8693,14 +8694,7 @@ function initializeSearchModeToggle() {
         _altSourceController = new AbortController();
 
         // Initialize multi-source state early so alternate fetches can write to it
-        _enhancedSearchData = { db_artists: [], primary_source: null, sources: {} };
-
-        // Fire ALL source fetches immediately in parallel with the primary endpoint.
-        // Don't guess which is primary — the main endpoint response will tell us.
-        // If an alternate duplicates the primary, it just overwrites with same data.
-        for (const srcName of ['spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'youtube_videos', 'musicbrainz']) {
-            _fetchAlternateSource(srcName, query);
-        }
+        _enhancedSearchData = { db_artists: [], primary_source: null, sources: {}, searchId, query };
 
         try {
             const response = await fetch('/api/enhanced-search', {
@@ -8716,7 +8710,7 @@ function initializeSearchModeToggle() {
             console.log('Enhanced results:', data);
 
             // Store multi-source state
-            const primarySource = data.primary_source || data.metadata_source || 'spotify';
+            const primarySource = data.primary_source || data.metadata_source || 'deezer';
             _activeSearchSource = primarySource;
             _enhancedSearchData = _enhancedSearchData || {};
             _enhancedSearchData.db_artists = data.db_artists;
@@ -8745,6 +8739,10 @@ function initializeSearchModeToggle() {
                 renderDropdownResults(data);
                 resultsContainer.classList.remove('hidden');
             }
+
+            // Alternate sources now start after the primary response has landed.
+            // This avoids speculative fan-out for short or aborted searches.
+            _queueAlternateSourceFetches(data.alternate_sources || [], query, searchId);
 
         } catch (error) {
             if (error.name !== 'AbortError') {
@@ -8960,8 +8958,26 @@ function initializeSearchModeToggle() {
         }
     }
 
-    async function _fetchAlternateSource(sourceName, query) {
+    function _queueAlternateSourceFetches(alternateSources, query, searchId) {
+        if (!Array.isArray(alternateSources) || alternateSources.length === 0) return;
+
+        // Fetch metadata sources first, then YouTube last so it does not compete
+        // with the primary artist/album/track results for early attention.
+        const orderedSources = ['spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'youtube_videos']
+            .filter(src => alternateSources.includes(src) && src !== _activeSearchSource);
+
+        orderedSources.forEach((src, index) => {
+            setTimeout(() => {
+                if (!_enhancedSearchData || _enhancedSearchData.searchId !== searchId) return;
+                _fetchAlternateSource(src, query, searchId);
+            }, index * 150);
+        });
+    }
+
+    async function _fetchAlternateSource(sourceName, query, searchId) {
         try {
+            if (!_enhancedSearchData || _enhancedSearchData.searchId !== searchId) return;
+
             const response = await fetch(`/api/enhanced-search/source/${sourceName}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -8969,9 +8985,9 @@ function initializeSearchModeToggle() {
                 signal: _altSourceController?.signal,
             });
             if (!response.ok) return;
+            if (!_enhancedSearchData || _enhancedSearchData.searchId !== searchId) return;
 
             // Stream NDJSON — render each search type (artists, albums, tracks) as it arrives
-            if (!_enhancedSearchData) return;
             if (!_enhancedSearchData.sources[sourceName]) {
                 const loadingSet = sourceName === 'youtube_videos' ? new Set(['videos']) : new Set(['artists', 'albums', 'tracks']);
                 _enhancedSearchData.sources[sourceName] = { artists: [], albums: [], tracks: [], videos: [], available: true, _loading: loadingSet };
@@ -8992,6 +9008,7 @@ function initializeSearchModeToggle() {
                     const line = buffer.slice(0, newlineIdx).trim();
                     buffer = buffer.slice(newlineIdx + 1);
                     if (!line) continue;
+                    if (!_enhancedSearchData || _enhancedSearchData.searchId !== searchId) return;
 
                     try {
                         const chunk = JSON.parse(line);
@@ -9015,7 +9032,7 @@ function initializeSearchModeToggle() {
             }
 
             // Final render
-            if (_enhancedSearchData.primary_source) {
+            if (_enhancedSearchData && _enhancedSearchData.searchId === searchId && _enhancedSearchData.primary_source) {
                 renderSourceTabs(_enhancedSearchData);
             }
         } catch (e) {
