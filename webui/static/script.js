@@ -33380,8 +33380,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
 
             let buttons = '';
 
-            // Only show sync button if there are Spotify matches
-            if (hasSpotifyMatches) {
+            // Only show sync button if there are Spotify matches (and not standalone mode)
+            if (hasSpotifyMatches && !_isSoulsyncStandalone) {
                 if (isListenBrainz) {
                     buttons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isTidal) {
@@ -33517,8 +33517,8 @@ function getModalActionButtons(urlHash, phase, state = null) {
         case 'sync_complete':
             let syncCompleteButtons = '';
 
-            // Only show sync button if there are Spotify matches
-            if (hasSpotifyMatches) {
+            // Only show sync button if there are Spotify matches (and not standalone mode)
+            if (hasSpotifyMatches && !_isSoulsyncStandalone) {
                 if (isListenBrainz) {
                     syncCompleteButtons += `<button class="modal-btn modal-btn-primary" onclick="startListenBrainzPlaylistSync('${urlHash}')">🔄 Sync This Playlist</button>`;
                 } else if (isTidal) {
