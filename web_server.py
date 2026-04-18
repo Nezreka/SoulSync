@@ -2227,66 +2227,76 @@ def _record_soulsync_library_entry(context, spotify_artist, album_info):
         with db._get_connection() as conn:
             cursor = conn.cursor()
 
-            # ── Artist: find existing or create ──
-            # Check any source (not just soulsync) to avoid ID collisions
-            cursor.execute("SELECT id, server_source FROM artists WHERE id = ?", (artist_id,))
-            existing_by_id = cursor.fetchone()
-            if existing_by_id:
-                # ID exists — reuse it (may be from another server source)
-                artist_id = existing_by_id[0]
-            else:
-                # Check by name across all sources
-                cursor.execute("SELECT id FROM artists WHERE name COLLATE NOCASE = ? LIMIT 1", (artist_name,))
+            # ── Artist: find existing soulsync record or create ──
+            cursor.execute("SELECT id FROM artists WHERE id = ? AND server_source = 'soulsync'", (artist_id,))
+            if not cursor.fetchone():
+                # Check if soulsync artist exists by name
+                cursor.execute("SELECT id FROM artists WHERE name COLLATE NOCASE = ? AND server_source = 'soulsync' LIMIT 1", (artist_name,))
                 existing_by_name = cursor.fetchone()
                 if existing_by_name:
                     artist_id = existing_by_name[0]
                 else:
+                    # Avoid PK collision with other server sources
+                    cursor.execute("SELECT id FROM artists WHERE id = ?", (artist_id,))
+                    if cursor.fetchone():
+                        # ID taken by another source — append suffix
+                        artist_id = _sid(artist_name.lower().strip() + '::soulsync')
                     cursor.execute("""
                         INSERT INTO artists (id, name, genres, thumb_url, server_source, created_at, updated_at)
                         VALUES (?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """, (artist_id, artist_name, genres_json, image_url))
                     if spotify_artist_id:
                         try:
-                            cursor.execute("UPDATE artists SET spotify_artist_id = ? WHERE id = ? AND (spotify_artist_id IS NULL OR spotify_artist_id = '')",
-                                           (spotify_artist_id, artist_id))
+                            cursor.execute("UPDATE artists SET spotify_artist_id = ? WHERE id = ?", (spotify_artist_id, artist_id))
                         except Exception:
                             pass
 
-            # ── Album: find existing or create ──
-            cursor.execute("SELECT id FROM albums WHERE id = ?", (album_id,))
-            existing_album_by_id = cursor.fetchone()
-            if existing_album_by_id:
-                album_id = existing_album_by_id[0]
-            else:
-                # Check by title + artist across all sources
-                cursor.execute("SELECT id FROM albums WHERE title COLLATE NOCASE = ? AND artist_id = ? LIMIT 1",
+            # ── Album: find existing soulsync record or create ──
+            cursor.execute("SELECT id FROM albums WHERE id = ? AND server_source = 'soulsync'", (album_id,))
+            if not cursor.fetchone():
+                cursor.execute("SELECT id FROM albums WHERE title COLLATE NOCASE = ? AND artist_id = ? AND server_source = 'soulsync' LIMIT 1",
                                (album_name, artist_id))
                 existing_album_by_name = cursor.fetchone()
                 if existing_album_by_name:
                     album_id = existing_album_by_name[0]
                 else:
+                    # Avoid PK collision
+                    cursor.execute("SELECT id FROM albums WHERE id = ?", (album_id,))
+                    if cursor.fetchone():
+                        album_id = _sid(f"{artist_name}::{album_name}::soulsync".lower().strip())
                     cursor.execute("""
                         INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count,
-                                            server_source, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, (album_id, artist_id, album_name, year, image_url, genres_json, total_tracks))
+                                            duration, server_source, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """, (album_id, artist_id, album_name, year, image_url, genres_json, total_tracks, duration_ms))
                     if spotify_album_id:
                         try:
-                            cursor.execute("UPDATE albums SET spotify_album_id = ? WHERE id = ? AND (spotify_album_id IS NULL OR spotify_album_id = '')",
-                                           (spotify_album_id, album_id))
+                            cursor.execute("UPDATE albums SET spotify_album_id = ? WHERE id = ?", (spotify_album_id, album_id))
                         except Exception:
                             pass
 
             # ── Track ──
+            # Determine per-track artist (for compilations/features where track artist != album artist)
+            track_artist = None
+            track_artists_list = track_info.get('artists', []) or original_search.get('artists', [])
+            if track_artists_list:
+                first_track_artist = track_artists_list[0]
+                if isinstance(first_track_artist, dict):
+                    ta_name = first_track_artist.get('name', '')
+                else:
+                    ta_name = str(first_track_artist)
+                if ta_name and ta_name.lower() != artist_name.lower():
+                    track_artist = ta_name  # Only store when different from album artist
+
             cursor.execute("SELECT id FROM tracks WHERE file_path = ?", (final_path,))
             if not cursor.fetchone():
                 cursor.execute("""
                     INSERT INTO tracks (id, album_id, artist_id, title, track_number,
-                                        duration, file_path, bitrate, server_source,
+                                        duration, file_path, bitrate, track_artist, server_source,
                                         created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """, (track_id, album_id, artist_id, track_name, track_number,
-                      duration_ms, final_path, bitrate))
+                      duration_ms, final_path, bitrate, track_artist))
                 if spotify_track_id:
                     try:
                         cursor.execute("UPDATE tracks SET spotify_track_id = ? WHERE id = ?", (spotify_track_id, track_id))
