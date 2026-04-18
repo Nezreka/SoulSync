@@ -90,4 +90,4 @@ ENV UMASK=022
 
 # Set entrypoint and default command
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["python", "web_server.py"]
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "wsgi:application"]
