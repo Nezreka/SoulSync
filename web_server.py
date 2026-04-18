@@ -4342,6 +4342,20 @@ def run_service_test(service, test_config):
 
             except Exception as e:
                 return False, f"Navidrome connection error: {str(e)}"
+        elif service == "soulsync":
+            transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+            if os.path.isdir(transfer_path):
+                # Count audio files
+                count = 0
+                for root, dirs, files in os.walk(transfer_path):
+                    for f in files:
+                        if os.path.splitext(f)[1].lower() in ('.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav'):
+                            count += 1
+                    if count > 100:
+                        break  # Don't count everything, just confirm files exist
+                return True, f"SoulSync standalone ready! Transfer folder: {transfer_path} ({count}+ audio files)"
+            else:
+                return False, f"Transfer folder not found: {transfer_path}"
         elif service == "soulseek":
             if soulseek_client is None:
                 return False, "Download orchestrator failed to initialize. Check server logs for startup errors."

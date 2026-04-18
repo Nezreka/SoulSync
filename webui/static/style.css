@@ -3164,6 +3164,39 @@ body.helper-mode-active #dashboard-activity-feed:hover {
             rgba(var(--accent-light-rgb), 0.18) 100%);
 }
 
+/* SoulSync standalone info section */
+.soulsync-standalone-info {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 14px;
+    background: rgba(var(--accent-rgb), 0.04);
+    border: 1px solid rgba(var(--accent-rgb), 0.1);
+    border-radius: 10px;
+    margin-bottom: 14px;
+}
+
+.soulsync-standalone-logo {
+    width: 48px;
+    height: 48px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.soulsync-standalone-text h4 {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.soulsync-standalone-text p {
+    margin: 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+    line-height: 1.4;
+}
+
 .server-toggle-btn.active .server-logo {
     opacity: 1.0;
 }
