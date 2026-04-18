@@ -56,10 +56,9 @@ multi-server-database-plan.md
 server-source.md
 plans.md
 
-# GUI-specific files
+# GUI-specific files (removed by PR #311)
 main.py
 ui/
-requirements.txt
 
 # Dev-specific files
 requirements-dev.txt
