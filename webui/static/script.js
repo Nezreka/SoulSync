@@ -66557,7 +66557,7 @@ async function _autoImportLoadResults() {
                     totalTracks = md.total_tracks || 0;
                     if (md.matches) {
                         trackDetails = md.matches.map(m => ({
-                            name: m.track?.name || 'Unknown',
+                            name: m.track_name || m.track?.name || 'Unknown',
                             file: m.file ? m.file.split(/[/\\]/).pop() : '?',
                             confidence: Math.round((m.confidence || 0) * 100),
                         }));
