@@ -41672,6 +41672,43 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
         document.getElementById('config-include-instrumentals').checked = config.include_instrumentals || false;
         document.getElementById('config-lookback-days').value = config.lookback_days != null ? String(config.lookback_days) : '';
 
+        // Populate metadata source selector
+        const sourceSelector = document.getElementById('config-metadata-source-selector');
+        if (sourceSelector) {
+            const sources = [
+                { key: 'spotify', label: 'Spotify', id: spotify_artist_id, color: '#1DB954' },
+                { key: 'deezer', label: 'Deezer', id: deezer_artist_id, color: '#A238FF' },
+                { key: 'itunes', label: 'Apple Music', id: itunes_artist_id, color: '#FC3C44' },
+                { key: 'discogs', label: 'Discogs', id: discogs_artist_id, color: '#333' },
+            ];
+            const globalSource = data.global_metadata_source || 'deezer';
+            const currentOverride = config.preferred_metadata_source;
+            const globalLabel = { spotify: 'Spotify', deezer: 'Deezer', itunes: 'Apple Music', discogs: 'Discogs' }[globalSource] || globalSource;
+
+            let html = `<button class="config-msrc-btn ${!currentOverride ? 'active' : ''}" data-source="" title="Use global default (${globalLabel})">
+                <span class="config-msrc-icon">🌐</span><span class="config-msrc-label">Default (${globalLabel})</span>
+            </button>`;
+            for (const src of sources) {
+                if (!src.id) continue;
+                const isActive = currentOverride === src.key;
+                html += `<button class="config-msrc-btn ${isActive ? 'active' : ''}" data-source="${src.key}" style="${isActive ? 'border-color:' + src.color : ''}" title="${src.label}">
+                    <span class="config-msrc-label">${src.label}</span>
+                </button>`;
+            }
+            sourceSelector.innerHTML = html;
+            sourceSelector.querySelectorAll('.config-msrc-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    sourceSelector.querySelectorAll('.config-msrc-btn').forEach(b => {
+                        b.classList.remove('active');
+                        b.style.borderColor = '';
+                    });
+                    btn.classList.add('active');
+                    const color = sources.find(s => s.key === btn.dataset.source)?.color;
+                    if (color) btn.style.borderColor = color;
+                });
+            });
+        }
+
         // Show global override notice if active
         const existingNotice = document.querySelector('.global-override-notice');
         if (existingNotice) existingNotice.remove();
@@ -42128,6 +42165,8 @@ async function saveWatchlistArtistConfig(artistId) {
         const includeInstrumentals = document.getElementById('config-include-instrumentals').checked;
         const lookbackDaysVal = document.getElementById('config-lookback-days').value;
         const lookbackDays = lookbackDaysVal !== '' ? parseInt(lookbackDaysVal) : null;
+        const activeSourceBtn = document.querySelector('#config-metadata-source-selector .config-msrc-btn.active');
+        const preferredMetadataSource = activeSourceBtn ? (activeSourceBtn.dataset.source || null) : null;
 
         // Validate at least one release type is selected
         if (!includeAlbums && !includeEps && !includeSingles) {
@@ -42156,6 +42195,7 @@ async function saveWatchlistArtistConfig(artistId) {
                 include_compilations: includeCompilations,
                 include_instrumentals: includeInstrumentals,
                 lookback_days: lookbackDays,
+                preferred_metadata_source: preferredMetadataSource,
             })
         });
 

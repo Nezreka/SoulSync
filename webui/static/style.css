@@ -17138,6 +17138,46 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin-bottom: 24px;
 }
 
+.config-metadata-source-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.config-msrc-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 2px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.config-msrc-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.config-msrc-btn.active {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--accent-color, #1DB954);
+    color: #fff;
+}
+
+.config-msrc-icon {
+    font-size: 16px;
+}
+
+.config-msrc-label {
+    white-space: nowrap;
+}
+
 .config-options {
     display: flex;
     flex-direction: column;

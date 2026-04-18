@@ -40957,7 +40957,7 @@ def watchlist_artist_config(artist_id):
                        include_live, include_remixes, include_acoustic, include_compilations,
                        artist_name, image_url, spotify_artist_id, itunes_artist_id,
                        last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id,
-                       lookback_days, discogs_artist_id
+                       lookback_days, discogs_artist_id, preferred_metadata_source
                 FROM watchlist_artists
                 WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
             """, (artist_id, artist_id, artist_id, artist_id))
@@ -41063,8 +41063,10 @@ def watchlist_artist_config(artist_id):
                 'last_scan_timestamp': result[11],
                 'date_added': result[12],
                 'lookback_days': result[15] if len(result) > 15 else None,
+                'preferred_metadata_source': result[17] if len(result) > 17 else None,
             }
 
+            from core.metadata_service import get_primary_source
             return jsonify({
                 "success": True,
                 "config": config,
@@ -41075,6 +41077,7 @@ def watchlist_artist_config(artist_id):
                 "deezer_artist_id": deezer_id,
                 "discogs_artist_id": discogs_id,
                 "watchlist_name": result[7],  # Original stored watchlist artist name
+                "global_metadata_source": get_primary_source(),
             })
 
         else:  # POST
@@ -41094,6 +41097,10 @@ def watchlist_artist_config(artist_id):
             # Validate lookback_days if provided
             if lookback_days is not None:
                 lookback_days = int(lookback_days) if lookback_days != '' else None
+            preferred_metadata_source = data.get('preferred_metadata_source', None)
+            # Validate — only accept known sources, empty string means clear override
+            if preferred_metadata_source == '' or preferred_metadata_source not in ('spotify', 'deezer', 'itunes', 'discogs'):
+                preferred_metadata_source = None
 
             # Validate at least one release type is selected
             if not (include_albums or include_eps or include_singles):
@@ -41116,13 +41123,13 @@ def watchlist_artist_config(artist_id):
                 UPDATE watchlist_artists
                 SET include_albums = ?, include_eps = ?, include_singles = ?,
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
-                    include_instrumentals = ?, lookback_days = ?,
+                    include_instrumentals = ?, lookback_days = ?, preferred_metadata_source = ?,
                     last_scan_timestamp = CASE WHEN ? THEN NULL ELSE last_scan_timestamp END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
-                  int(include_instrumentals), lookback_days, lookback_changed,
+                  int(include_instrumentals), lookback_days, preferred_metadata_source, lookback_changed,
                   artist_id, artist_id, artist_id, artist_id))
             conn.commit()
 
