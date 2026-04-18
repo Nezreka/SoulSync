@@ -11804,10 +11804,12 @@ def _check_single_completion(db, single_data: dict, artist_name: str, test_mode:
         else:
             # Single track - just check if the track exists
             try:
+                active_server = config_manager.get_active_media_server()
                 db_track, confidence = db.check_track_exists(
                     title=single_name,
                     artist=artist_name,
-                    confidence_threshold=0.7
+                    confidence_threshold=0.7,
+                    server_source=active_server
                 )
             except Exception as db_error:
                 print(f"Database error for single '{single_name}': {db_error}")
