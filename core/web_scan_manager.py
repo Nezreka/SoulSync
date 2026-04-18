@@ -52,7 +52,8 @@ class WebScanManager:
             server_client_map = {
                 'jellyfin': 'jellyfin_client',
                 'navidrome': 'navidrome_client',
-                'plex': 'plex_client'
+                'plex': 'plex_client',
+                'soulsync': 'soulsync_library_client',
             }
 
             # Try to get the configured active server
