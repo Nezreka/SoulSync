@@ -228,7 +228,7 @@ PUID/PGID are exposed in the template — set them to match your Unraid permissi
 git clone https://github.com/Nezreka/SoulSync
 cd SoulSync
 pip install -r requirements.txt
-python web_server.py
+gunicorn -c gunicorn.conf.py wsgi:application
 # Open http://localhost:8008
 ```
 
@@ -237,6 +237,7 @@ For local development and tests:
 ```bash
 pip install -r requirements-dev.txt
 pytest
+gunicorn -c gunicorn.dev.conf.py wsgi:application
 ```
 
 ---

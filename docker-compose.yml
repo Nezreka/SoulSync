@@ -14,7 +14,6 @@ services:
       - PGID=1000
       - UMASK=022
       # Web server configuration
-      - FLASK_ENV=production
       - PYTHONPATH=/app
       # Optional: Configure through environment variables
       - SOULSYNC_CONFIG_PATH=/app/config/config.json

@@ -1,3 +1,11 @@
+if __name__ == '__main__':
+    raise SystemExit(
+        "SoulSync must be started with Gunicorn.\n"
+        "Use:\n"
+        "`gunicorn -c gunicorn.conf.py wsgi:application` for production, or\n"
+        "`gunicorn -c gunicorn.dev.conf.py wsgi:application` for local development."
+    )
+
 import os
 import json
 import asyncio
@@ -111,6 +119,7 @@ from core.automation_engine import AutomationEngine
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
 project_root = os.path.dirname(base_dir) # Go up one level to the project root
+DEV_STATIC_NO_CACHE = os.environ.get('SOULSYNC_WEB_DEV_NO_CACHE', '0').lower() in ('1', 'true', 'yes', 'on')
 
 # Check for environment variable first (Docker support), then fallback to calculated path
 env_config_path = os.environ.get('SOULSYNC_CONFIG_PATH')
@@ -150,6 +159,8 @@ app = Flask(
     template_folder=os.path.join(base_dir, 'webui'),
     static_folder=os.path.join(base_dir, 'webui', 'static')
 )
+app.config['TEMPLATES_AUTO_RELOAD'] = DEV_STATIC_NO_CACHE
+app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 
 # --- Flask Session Setup (for multi-profile support) ---
 import secrets as _secrets
@@ -174,6 +185,7 @@ socketio = SocketIO(app, async_mode='threading', cors_allowed_origins='*')
 @app.before_request
 def _set_profile_context():
     """Set g.profile_id from session for every request"""
+    g.request_start_monotonic = time.perf_counter()
     # Skip for profile management, static, and root routes
     path = request.path
     if (path.startswith('/api/profiles') or
@@ -198,6 +210,34 @@ def _set_profile_context():
             pass  # DB error — don't block requests, use the session value
 
     g.profile_id = pid
+
+
+@app.after_request
+def _log_slow_request(response):
+    """Log slow HTTP requests so we can identify UI stall sources."""
+    try:
+        path = request.path
+        if path.startswith('/socket.io/'):
+            return response
+
+        start = getattr(g, 'request_start_monotonic', None)
+        if start is None:
+            return response
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        slow_threshold_ms = 1000.0
+        if elapsed_ms >= slow_threshold_ms:
+            logger.warning(
+                "Slow request: %s %s -> %s in %.1fms",
+                request.method,
+                request.full_path.rstrip('?'),
+                response.status_code,
+                elapsed_ms,
+            )
+    except Exception:
+        pass
+
+    return response
 
 def get_current_profile_id() -> int:
     """Get the current profile ID from Flask g context or default to 1"""
@@ -54383,94 +54423,102 @@ def _emit_repair_progress_loop():
 # END WEBSOCKET HANDLERS
 # ================================================================================================
 
+_runtime_start_lock = threading.Lock()
+_runtime_started = False
 
-if __name__ == '__main__':
-    print("Starting SoulSync Web UI Server...")
-    print("Open your browser and navigate to http://127.0.0.1:8008")
 
-    # Dump SOULSYNC_* env vars for diagnostics (helps debug Docker/Unraid env issues)
-    _soulsync_env = {k: v for k, v in os.environ.items() if k.startswith('SOULSYNC_')}
-    if _soulsync_env:
-        print(f"[Startup] SOULSYNC environment variables: {_soulsync_env}")
-    else:
-        print("[Startup] No SOULSYNC_* environment variables detected")
+def start_runtime_services():
+    """Start one-time server background services for direct and WSGI launches."""
+    global _runtime_started
 
-    # Start OAuth callback servers
-    print("Starting OAuth callback servers...")
-    start_oauth_callback_servers()
-    
-    # Startup diagnostics: Check and recover stuck flags
-    print("Running startup diagnostics...")
-    stuck_flags_recovered = check_and_recover_stuck_flags()
-    if stuck_flags_recovered:
-        print("Recovered stuck flags from previous session")
-    else:
-        print("No stuck flags detected - system healthy")
+    with _runtime_start_lock:
+        if _runtime_started:
+            return
 
-    # Start simple background monitor when server starts
-    print("Starting simple background monitor...")
-    start_simple_background_monitor()
-    print("Simple background monitor started (includes automatic search cleanup)")
+        print("Starting SoulSync runtime services...")
 
-    # Wishlist/watchlist timers are now managed by AutomationEngine system automations
+        # Dump SOULSYNC_* env vars for diagnostics (helps debug Docker/Unraid env issues)
+        _soulsync_env = {k: v for k, v in os.environ.items() if k.startswith('SOULSYNC_')}
+        if _soulsync_env:
+            print(f"[Startup] SOULSYNC environment variables: {_soulsync_env}")
+        else:
+            print("[Startup] No SOULSYNC_* environment variables detected")
 
-    # Pre-build import suggestions cache in background
-    print("Pre-building import suggestions cache...")
-    start_import_suggestions_cache()
+        # Start OAuth callback servers
+        print("Starting OAuth callback servers...")
+        start_oauth_callback_servers()
 
-    # Initialize app start time for uptime tracking
-    import time
-    app.start_time = time.time()
+        # Startup diagnostics: Check and recover stuck flags
+        print("Running startup diagnostics...")
+        stuck_flags_recovered = check_and_recover_stuck_flags()
+        if stuck_flags_recovered:
+            print("Recovered stuck flags from previous session")
+        else:
+            print("No stuck flags detected - system healthy")
 
-    # Register action handlers and start automation engine
-    _register_automation_handlers()
-    if automation_engine:
-        try:
-            print("Starting automation engine...")
-            automation_engine.start()
-            print("Automation engine started")
+        # Start simple background monitor when server starts
+        print("Starting simple background monitor...")
+        start_simple_background_monitor()
+        print("Simple background monitor started (includes automatic search cleanup)")
+
+        # Wishlist/watchlist timers are now managed by AutomationEngine system automations
+
+        # Pre-build import suggestions cache in background
+        print("Pre-building import suggestions cache...")
+        start_import_suggestions_cache()
+
+        # Initialize app start time for uptime tracking
+        app.start_time = time.time()
+
+        # Register action handlers and start automation engine
+        _register_automation_handlers()
+        if automation_engine:
             try:
-                automation_engine.emit('app_started', {})
-            except Exception:
-                pass
-        except AttributeError as e:
-            print(f"Automation engine failed to start: {e}")
-            print("   If using Docker, check that your volume mount is /app/data (not /app/database)")
-            logger.error(f"Automation engine start error (possible stale Docker volume): {e}")
-        except Exception as e:
-            print(f"Automation engine failed to start: {e}")
-            logger.error(f"Automation engine start error: {e}")
+                print("Starting automation engine...")
+                automation_engine.start()
+                print("Automation engine started")
+                try:
+                    automation_engine.emit('app_started', {})
+                except Exception:
+                    pass
+            except AttributeError as e:
+                print(f"Automation engine failed to start: {e}")
+                print("   If using Docker, check that your volume mount is /app/data (not /app/database)")
+                logger.error(f"Automation engine start error (possible stale Docker volume): {e}")
+            except Exception as e:
+                print(f"Automation engine failed to start: {e}")
+                logger.error(f"Automation engine start error: {e}")
 
-    # Add startup activity
-    add_activity_item("", "System Started", "SoulSync Web UI Server initialized", "Now")
+        # Add startup activity
+        add_activity_item("", "System Started", "SoulSync Web UI Server initialized", "Now")
 
-    # Start WebSocket background emitters
-    print("Starting WebSocket background emitters...")
-    # Phase 1: Global pollers
-    socketio.start_background_task(_emit_service_status_loop)
-    socketio.start_background_task(_emit_watchlist_count_loop)
-    socketio.start_background_task(_emit_download_status_loop)
-    # Phase 2: Dashboard pollers
-    socketio.start_background_task(_emit_system_stats_loop)
-    socketio.start_background_task(_emit_activity_feed_loop)
-    socketio.start_background_task(_emit_db_stats_loop)
-    socketio.start_background_task(_emit_wishlist_count_loop)
-    # Phase 3: Enrichment sidebar workers
-    socketio.start_background_task(_emit_enrichment_status_loop)
-    # Phase 4: Tool progress pollers
-    socketio.start_background_task(_emit_tool_progress_loop)
-    # Phase 5: Sync/discovery progress + scans
-    socketio.start_background_task(_emit_sync_progress_loop)
-    socketio.start_background_task(_emit_discovery_progress_loop)
-    socketio.start_background_task(_emit_scan_status_loop)
-    # Phase 6: Automation progress
-    socketio.start_background_task(_emit_automation_progress_loop)
-    # Phase 7: Repair job progress
-    socketio.start_background_task(_emit_repair_progress_loop)
-    # Hydrabase auto-reconnect monitor
-    socketio.start_background_task(_hydrabase_reconnect_loop)
-    # API Rate Monitor — 1s push for speedometer gauges
-    socketio.start_background_task(_emit_rate_monitor_loop)
-    print("WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor)")
+        # Start WebSocket background emitters
+        print("Starting WebSocket background emitters...")
+        # Phase 1: Global pollers
+        socketio.start_background_task(_emit_service_status_loop)
+        socketio.start_background_task(_emit_watchlist_count_loop)
+        socketio.start_background_task(_emit_download_status_loop)
+        # Phase 2: Dashboard pollers
+        socketio.start_background_task(_emit_system_stats_loop)
+        socketio.start_background_task(_emit_activity_feed_loop)
+        socketio.start_background_task(_emit_db_stats_loop)
+        socketio.start_background_task(_emit_wishlist_count_loop)
+        # Phase 3: Enrichment sidebar workers
+        socketio.start_background_task(_emit_enrichment_status_loop)
+        # Phase 4: Tool progress pollers
+        socketio.start_background_task(_emit_tool_progress_loop)
+        # Phase 5: Sync/discovery progress + scans
+        socketio.start_background_task(_emit_sync_progress_loop)
+        socketio.start_background_task(_emit_discovery_progress_loop)
+        socketio.start_background_task(_emit_scan_status_loop)
+        # Phase 6: Automation progress
+        socketio.start_background_task(_emit_automation_progress_loop)
+        # Phase 7: Repair job progress
+        socketio.start_background_task(_emit_repair_progress_loop)
+        # Hydrabase auto-reconnect monitor
+        socketio.start_background_task(_hydrabase_reconnect_loop)
+        # API Rate Monitor — 1s push for speedometer gauges
+        socketio.start_background_task(_emit_rate_monitor_loop)
+        print("WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor)")
 
-    socketio.run(app, host='0.0.0.0', port=8008, debug=False, allow_unsafe_werkzeug=True)
+        _runtime_started = True
