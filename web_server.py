@@ -22487,14 +22487,30 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "SoulSync Standalone Library",
+                "description": "Use SoulSync without Plex, Jellyfin, or Navidrome — manage your library directly",
+                "features": [
+                    "• New 'Standalone' server option in Settings → Connections",
+                    "• Downloads and imports write artist/album/track to the library database immediately",
+                    "• Pre-populated enrichment IDs (Spotify, Deezer, MusicBrainz) — workers skip re-discovery",
+                    "• Deep scan finds untracked files in Transfer → moves to Staging for processing",
+                    "• Deep scan removes stale DB records when files are deleted from disk",
+                    "• Sync page and sync buttons hidden automatically in standalone mode",
+                    "• Full library page, artist detail, discography, and enhanced view all work standalone",
+                ],
+                "usage_note": "Go to Settings → Connections and click the 'Standalone' button. No media server needed."
+            },
+            {
                 "title": "Auto-Import",
                 "description": "Background staging folder watcher that automatically identifies and imports music into your library",
                 "features": [
-                    "• Three identification strategies: audio file tags, folder name parsing, and AcoustID fingerprinting",
-                    "• Confidence-gated processing: 90%+ auto-imports, 70-90% queued for review, below 70% left for manual",
-                    "• Smart matching with weighted algorithm — title, artist, track number, and album signals",
-                    "• Approve or reject pending imports from the Import page Auto tab",
-                    "• Content hash-based deduplication prevents reprocessing the same folder",
+                    "• Recursive scan — any folder depth (Artist/Album/tracks, Album/tracks, loose files)",
+                    "• Single file support — loose audio files identified via tags, filename, or AcoustID",
+                    "• Tag-based identification preferred over weak metadata matches (85% confidence for tagged files)",
+                    "• AcoustID fingerprinting fallback for untagged or ambiguous files",
+                    "• Stats bar, filter pills (All/Review/Imported/Failed), Scan Now, Approve All, Clear History",
+                    "• Expandable track match details with per-track confidence scores",
+                    "• Race condition fix prevents duplicate processing during multi-track albums",
                 ],
                 "usage_note": "Enable on the Import page Auto tab. Set your staging folder in Settings."
             },
@@ -22559,6 +22575,20 @@ def get_version_info():
                 ],
             },
             {
+                "title": "Downloads & Soulseek Improvements",
+                "description": "Better download management, search accuracy, and queue control",
+                "features": [
+                    "• Downloads batch panel — color-coded batch cards with progress, cancel, expand, and 7-day history",
+                    "• Soulseek search queries now include album name — reduces wrong-artist downloads",
+                    "• Reject Soulseek results from Various Artists/VA/Unknown Artist folders",
+                    "• Clearing wishlist now cancels the active wishlist download batch",
+                    "• Album delete with 'Delete Files Too' option on enhanced library page",
+                    "• Fix download modal freezing mid-download — M3U auto-save was exhausting server threads",
+                    "• Fix Unknown Artist when adding playlist tracks to wishlist",
+                    "• Fix slskd timeout spam when Soulseek is not the active download source",
+                ],
+            },
+            {
                 "title": "Recent Fixes",
                 "description": "Bug fixes from recent releases and community reports",
                 "features": [
@@ -22572,16 +22602,6 @@ def get_version_info():
                     "• Fix replace lower quality setting not persisting",
                     "• Fix Spotify enrichment worker infinite loop on pre-matched artists",
                     "• Reject Qobuz 30-second sample/preview downloads",
-                    "• Fix slskd timeout spam — dashboard and download status skip slskd polling when Soulseek is not active or disconnected",
-                    "• Fix Soulseek search queries missing album name — reduces wrong-artist downloads",
-                    "• Downloads batch panel — color-coded batch cards with progress, cancel, expand, and 7-day history",
-                    "• Fix Unknown Artist when adding playlist tracks to wishlist",
-                    "• Fix download modal freezing mid-download — M3U auto-save was exhausting server threads",
-                    "• SoulSync Standalone Library — manage library without a media server, downloads write to DB immediately",
-                    "• Auto-Import: recursive scan, singles, tag preference, AcoustID fallback, race condition fix, stats/filters/batch actions",
-                    "• Album delete with file removal option on enhanced library page",
-                    "• Reject Soulseek results from Various Artists/VA/Unknown Artist folders",
-                    "• Clearing wishlist now cancels the active wishlist download batch",
                 ],
             },
             {
