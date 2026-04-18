@@ -174,6 +174,7 @@ socketio = SocketIO(app, async_mode='threading', cors_allowed_origins='*')
 @app.before_request
 def _set_profile_context():
     """Set g.profile_id from session for every request"""
+    g.request_start_monotonic = time.perf_counter()
     # Skip for profile management, static, and root routes
     path = request.path
     if (path.startswith('/api/profiles') or
@@ -199,6 +200,34 @@ def _set_profile_context():
 
     g.profile_id = pid
 
+
+@app.after_request
+def _log_slow_request(response):
+    """Log slow HTTP requests so we can identify UI stall sources."""
+    try:
+        # Skip websocket upgrades and very common noise.
+        path = request.path
+        if path.startswith('/socket.io/'):
+            return response
+
+        start = getattr(g, 'request_start_monotonic', None)
+        if start is None:
+            return response
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        slow_threshold_ms = 1000.0
+        if elapsed_ms >= slow_threshold_ms:
+            logger.warning(
+                "Slow request: %s %s -> %s in %.1fms",
+                request.method,
+                request.full_path.rstrip('?'),
+                response.status_code,
+                elapsed_ms,
+            )
+    except Exception:
+        pass
+
+    return response
 
 def get_current_profile_id() -> int:
     """Get the current profile ID from Flask g context or default to 1"""
