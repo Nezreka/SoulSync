@@ -396,12 +396,9 @@ function handleServiceStatusUpdate(data) {
     // Update downloads nav badge from status push
     if (data.active_downloads !== undefined) _updateDlNavBadge(data.active_downloads);
 
-    // Hide sync-related UI for standalone mode (no server to sync playlists to)
+    // Hide sync buttons (not the page) for standalone mode — playlists still browsable/downloadable
     const isSoulsyncStandalone = data.media_server?.type === 'soulsync';
     _isSoulsyncStandalone = isSoulsyncStandalone;
-    const syncNav = document.querySelector('[data-page="sync"]');
-    if (syncNav) syncNav.style.display = isSoulsyncStandalone ? 'none' : '';
-    // Hide all sync buttons across the app
     document.querySelectorAll('.sync-to-server-btn, [id$="-sync-btn"], [onclick*="startPlaylistSync"], [onclick*="syncPlaylistToServer"], [onclick*="startDecadeSync"]').forEach(btn => {
         btn.style.display = isSoulsyncStandalone ? 'none' : '';
     });
@@ -39271,11 +39268,9 @@ async function fetchAndUpdateServiceStatus() {
         // Update downloads nav badge
         if (data.active_downloads !== undefined) _updateDlNavBadge(data.active_downloads);
 
-        // Hide sync-related UI for standalone mode
+        // Hide sync buttons (not the page) for standalone mode
         const isSoulsyncStandalone2 = data.media_server?.type === 'soulsync';
         _isSoulsyncStandalone = isSoulsyncStandalone2;
-        const syncNav = document.querySelector('[data-page="sync"]');
-        if (syncNav) syncNav.style.display = isSoulsyncStandalone2 ? 'none' : '';
         document.querySelectorAll('.sync-to-server-btn, [id$="-sync-btn"], [onclick*="startPlaylistSync"], [onclick*="syncPlaylistToServer"], [onclick*="startDecadeSync"]').forEach(btn => {
             btn.style.display = isSoulsyncStandalone2 ? 'none' : '';
         });
