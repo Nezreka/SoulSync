@@ -5516,6 +5516,19 @@ def get_debug_info():
     info['os'] = f"{platform.system()} {platform.release()}"
     info['python'] = sys.version.split()[0]
     info['docker'] = os.path.exists('/.dockerenv')
+    info['runner'] = 'gunicorn' if not _DIRECT_RUN else 'direct (python web_server.py)'
+
+    # ffmpeg version
+    try:
+        import subprocess
+        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, timeout=5)
+        first_line = result.stdout.split('\n')[0] if result.stdout else ''
+        # e.g. "ffmpeg version 6.1.1 Copyright ..."
+        info['ffmpeg'] = first_line.split('Copyright')[0].replace('ffmpeg version', '').strip() if first_line else 'installed (version unknown)'
+    except FileNotFoundError:
+        info['ffmpeg'] = 'NOT INSTALLED'
+    except Exception:
+        info['ffmpeg'] = 'unknown'
 
     # Uptime
     start_time = getattr(app, 'start_time', time.time())
@@ -5525,7 +5538,7 @@ def get_debug_info():
     # Paths
     download_path = config_manager.get('soulseek.download_path', './downloads')
     transfer_folder = config_manager.get('soulseek.transfer_path', './Transfer')
-    staging_folder = config_manager.get('import.staging_folder', '')
+    staging_folder = config_manager.get('import.staging_path', '')
     info['paths'] = {
         'download_path': download_path,
         'download_path_exists': os.path.isdir(download_path) if download_path else False,
@@ -5536,6 +5549,21 @@ def get_debug_info():
         'staging_folder': staging_folder,
         'staging_folder_exists': os.path.isdir(staging_folder) if staging_folder else False,
     }
+    # Music library paths (Settings > Library)
+    music_paths = config_manager.get('library.music_paths', [])
+    if isinstance(music_paths, list) and music_paths:
+        info['paths']['music_library_paths'] = []
+        for p in music_paths:
+            if p and isinstance(p, str):
+                info['paths']['music_library_paths'].append({
+                    'path': p,
+                    'exists': os.path.isdir(p),
+                })
+    # Music videos directory
+    music_videos_path = config_manager.get('library.music_videos_path', '')
+    if music_videos_path:
+        info['paths']['music_videos_path'] = music_videos_path
+        info['paths']['music_videos_path_exists'] = os.path.isdir(music_videos_path)
 
     # Services from status cache
     spotify_cache = _status_cache.get('spotify', {})
@@ -5555,16 +5583,16 @@ def get_debug_info():
 
     # Enrichment workers
     workers = {}
-    worker_names = ['musicbrainz', 'audiodb', 'deezer', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz']
+    worker_names = ['musicbrainz', 'audiodb', 'deezer', 'spotify', 'itunes', 'lastfm', 'genius', 'discogs', 'tidal', 'qobuz']
     for name in worker_names:
         paused_key = f'{name}_enrichment_paused'
         workers[name] = 'paused' if config_manager.get(paused_key, False) else 'active'
     info['enrichment_workers'] = workers
 
-    # Library stats
+    # Library stats — use same method as dashboard (filters by active server)
     try:
-        db = get_db()
-        lib_stats = db.get_statistics()
+        db = get_database()
+        lib_stats = db.get_database_info_for_server()
         info['library'] = {
             'artists': lib_stats.get('artists', 0),
             'albums': lib_stats.get('albums', 0),
@@ -5579,6 +5607,13 @@ def get_debug_info():
         info['watchlist_count'] = db.get_watchlist_count()
     except Exception:
         info['watchlist_count'] = 0
+
+    # Wishlist pending count
+    try:
+        db = get_db()
+        info['wishlist_count'] = db.get_wishlist_count()
+    except Exception:
+        info['wishlist_count'] = 0
 
     # Automation count
     try:
@@ -5613,15 +5648,29 @@ def get_debug_info():
     info['active_syncs'] = active_syncs
 
     # Config settings relevant to troubleshooting
+    source_mode = config_manager.get('download_source.mode', 'hybrid')
     info['config'] = {
-        'source_mode': config_manager.get('download_source.mode', 'hybrid'),
+        'source_mode': source_mode,
         'quality_profile': config_manager.get('download_source.quality_profile', 'default'),
         'organization_template': config_manager.get('organization.folder_template', ''),
         'post_processing_enabled': config_manager.get('post_processing.enabled', True),
         'acoustid_enabled': bool(config_manager.get('acoustid.api_key', '')),
         'auto_scan_enabled': config_manager.get('watchlist.auto_scan', False),
         'm3u_export_enabled': config_manager.get('m3u.enabled', False),
+        'log_level': config_manager.get('logging.level', 'INFO'),
+        'primary_metadata_source': config_manager.get('metadata.fallback_source', 'deezer'),
+        'lossy_copy_enabled': config_manager.get('post_processing.lossy_copy.enabled', False),
+        'lossy_copy_format': config_manager.get('post_processing.lossy_copy.format', 'mp3'),
+        'lossy_copy_bitrate': config_manager.get('post_processing.lossy_copy.bitrate', 320),
+        'allow_duplicate_tracks': config_manager.get('library.allow_duplicate_tracks', False),
+        'replace_lower_quality': config_manager.get('import.replace_lower_quality', False),
+        'auto_import_enabled': config_manager.get('import.auto_import_enabled', False),
     }
+    # Hybrid source priority order
+    if source_mode == 'hybrid':
+        info['config']['hybrid_sources'] = config_manager.get('download_source.hybrid_order', [])
+    # Discogs connection status
+    info['services']['discogs_connected'] = bool(config_manager.get('discogs.token', ''))
 
     # Download client init failures
     info['download_client_failures'] = []

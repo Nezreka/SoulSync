@@ -4865,19 +4865,6 @@
                                     </div>
                                 </div>
 
-                                <div class="form-group">
-                                    <label>Log Level:</label>
-                                    <select id="log-level-select" class="form-select" onchange="changeLogLevel()">
-                                        <option value="DEBUG">DEBUG (Detailed)</option>
-                                        <option value="INFO" selected>INFO (Normal)</option>
-                                        <option value="WARNING">WARNING (Minimal)</option>
-                                        <option value="ERROR">ERROR (Critical Only)</option>
-                                    </select>
-                                    <div class="setting-help-text">
-                                        Controls the level of detail in application logs. DEBUG shows all details, INFO
-                                        shows general operations, WARNING and ERROR show only issues.
-                                    </div>
-                                </div>
                             </div>
 
                             <!-- Quality Profile Settings (Soulseek only) -->
@@ -5737,13 +5724,22 @@
 
                             </div><!-- end Library Preferences body -->
 
-                            <!-- Logging Information (Read-only) -->
+                            <!-- Logging Settings -->
                             <div class="settings-group" data-stg="advanced">
-                                <h3>Logging Information</h3>
+                                <h3>Logging</h3>
 
                                 <div class="form-group">
                                     <label>Log Level:</label>
-                                    <div class="readonly-field" id="log-level-display">DEBUG</div>
+                                    <select id="log-level-select" class="form-select" onchange="changeLogLevel()">
+                                        <option value="DEBUG">DEBUG (Detailed)</option>
+                                        <option value="INFO" selected>INFO (Normal)</option>
+                                        <option value="WARNING">WARNING (Minimal)</option>
+                                        <option value="ERROR">ERROR (Critical Only)</option>
+                                    </select>
+                                    <div class="setting-help-text">
+                                        Controls the level of detail in application logs. DEBUG shows all details, INFO
+                                        shows general operations, WARNING and ERROR show only issues.
+                                    </div>
                                 </div>
 
                                 <div class="form-group">

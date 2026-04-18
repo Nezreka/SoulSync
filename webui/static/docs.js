@@ -1458,7 +1458,7 @@ const DOCS_SECTIONS = [
                     <li><strong>UI Appearance</strong> &mdash; Custom accent colors with persistent preference. Changes apply immediately across the entire interface. Choose from different <strong>sidebar visualizer types</strong> for the media player audio visualization.</li>
                     <li><strong>API Keys</strong> &mdash; Generate and manage API keys for the REST API. Keys use a <code>sk_</code> prefix and are shown once at creation &mdash; only a SHA-256 hash is stored for security.</li>
                     <li><strong>Path Templates</strong> &mdash; Configure how files are organized in your library. The default template is <code>Artist/Album/TrackNum - Title.ext</code></li>
-                    <li><strong>Log Level</strong> &mdash; Set the application log verbosity (DEBUG, INFO, WARNING, ERROR) from the Settings page. Changes take effect immediately without restart. Useful for troubleshooting issues.</li>
+                    <li><strong>Log Level</strong> &mdash; Set log verbosity (DEBUG, INFO, WARNING, ERROR) in <strong>Settings &rarr; Advanced &rarr; Logging</strong>. Changes take effect immediately. See <em>Troubleshooting &rarr; Understanding Logs</em> for details.</li>
                     <li><strong>WebSocket</strong> &mdash; Real-time status updates are delivered via WebSocket. All downloads, enrichment progress, scan status, and system events push to the UI without polling.</li>
                     <li><strong>Music Library Paths</strong> &mdash; In Settings &gt; Library, add folder paths where your music files live. Required for tag writing, streaming, and file detection when your media server stores files at a different path than SoulSync can see. Docker users: mount your music folder(s) with read-write access, then add the container-side path.</li>
                     <li><strong>Replace Lower Quality on Import</strong> &mdash; Opt-in toggle in Settings &gt; Library. When importing from Staging, if a track already exists at lower quality (e.g. MP3), it gets replaced with the higher quality version (e.g. FLAC). Disabled by default.</li>
@@ -1538,6 +1538,100 @@ const DOCS_SECTIONS = [
                     <li>Any user can change their home page from their profile settings (click profile avatar &rarr; My Profile)</li>
                     <li>The home page selector only shows pages the user has access to</li>
                 </ul>
+            </div>
+        `
+    },
+    {
+        id: 'troubleshooting',
+        title: 'Troubleshooting',
+        icon: '/static/settings.jpg',
+        children: [
+            { id: 'ts-logs', title: 'Understanding Logs' },
+            { id: 'ts-debug', title: 'Copy Debug Info' },
+            { id: 'ts-common', title: 'Common Issues' },
+            { id: 'ts-reporting', title: 'Reporting Issues' }
+        ],
+        content: () => `
+            <div class="docs-subsection" id="ts-logs">
+                <h3 class="docs-subsection-title">Understanding Logs</h3>
+                <p class="docs-text">SoulSync writes several log files that are critical for diagnosing issues. All logs are in the <code>logs/</code> directory (Docker: <code>/app/logs/</code>).</p>
+                <table class="docs-table">
+                    <thead><tr><th>File</th><th>What It Contains</th><th>When to Check</th></tr></thead>
+                    <tbody>
+                        <tr><td><code>app.log</code></td><td>Main application log &mdash; API calls, downloads, library scans, enrichment, errors</td><td>First place to look for any issue</td></tr>
+                        <tr><td><code>post_processing.log</code></td><td>File processing pipeline &mdash; tagging, organization, conversion, file moves</td><td>Files not appearing in library, wrong tags, conversion failures</td></tr>
+                        <tr><td><code>acoustid.log</code></td><td>Audio fingerprint verification results</td><td>Wrong tracks being downloaded, verification failures</td></tr>
+                        <tr><td><code>source_reuse.log</code></td><td>Soulseek source reuse decisions for album consistency</td><td>Albums downloading from mixed sources</td></tr>
+                    </tbody>
+                </table>
+                <h4>Setting Log Level</h4>
+                <p class="docs-text">Go to <strong>Settings &rarr; Advanced &rarr; Logging</strong> and change the log level:</p>
+                <ul class="docs-list">
+                    <li><strong>DEBUG</strong> &mdash; Maximum detail. Use this when troubleshooting &mdash; shows every decision the app makes</li>
+                    <li><strong>INFO</strong> &mdash; Normal operations (default). Good for day-to-day use</li>
+                    <li><strong>WARNING</strong> &mdash; Only problems and unusual situations</li>
+                    <li><strong>ERROR</strong> &mdash; Only failures. Minimal output</li>
+                </ul>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Reproducing a bug?</strong> Set log level to <strong>DEBUG</strong>, reproduce the issue, then grab the logs. The extra detail makes it much easier to identify the problem.</div></div>
+            </div>
+            <div class="docs-subsection" id="ts-debug">
+                <h3 class="docs-subsection-title">Copy Debug Info</h3>
+                <p class="docs-text">The <strong>Copy Debug Info</strong> button in the sidebar collects a complete snapshot of your SoulSync instance in one click:</p>
+                <ul class="docs-list">
+                    <li>System info (version, OS, Python, uptime, memory, CPU)</li>
+                    <li>Service connection status (Spotify, Soulseek, Tidal, Qobuz, Discogs, media server)</li>
+                    <li>Library stats and database size</li>
+                    <li>All configured paths with accessibility checks</li>
+                    <li>Config settings (download source, quality profile, post-processing, etc.)</li>
+                    <li>Enrichment worker status</li>
+                    <li>API rate usage and any active rate limits</li>
+                    <li>Recent log lines from the selected log file</li>
+                </ul>
+                <p class="docs-text">Use the dropdowns to choose how many log lines to include (20&ndash;500) and which log file to pull from.</p>
+                <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div>Debug info does <strong>not</strong> include API keys, tokens, or passwords &mdash; it is safe to share publicly.</div></div>
+            </div>
+            <div class="docs-subsection" id="ts-common">
+                <h3 class="docs-subsection-title">Common Issues</h3>
+                <h4>Downloads complete but tracks don't appear in library</h4>
+                <ul class="docs-list">
+                    <li>Check that your <strong>Transfer path</strong> is correct and writable (see Paths in debug info)</li>
+                    <li>If using a media server, trigger a library scan after downloads complete</li>
+                    <li>Check <code>post_processing.log</code> for file move errors</li>
+                </ul>
+                <h4>Soulseek search returns no results</h4>
+                <ul class="docs-list">
+                    <li>Verify slskd is running and the API key is correct in Settings</li>
+                    <li>Check that slskd shows as connected on the Dashboard</li>
+                    <li>Try searching directly in the slskd web UI to rule out network issues</li>
+                </ul>
+                <h4>Spotify shows "Rate Limited"</h4>
+                <ul class="docs-list">
+                    <li>This is temporary &mdash; Spotify throttles API calls when limits are hit</li>
+                    <li>SoulSync automatically falls back to other metadata sources during a ban</li>
+                    <li>The rate limit modal shows a countdown. Enrichment workers auto-pause and resume when the ban lifts</li>
+                </ul>
+                <h4>Docker: paths not found / permission denied</h4>
+                <ul class="docs-list">
+                    <li>Paths in Settings must be <strong>container paths</strong> (e.g. <code>/app/downloads</code>), not host paths</li>
+                    <li>Ensure your Docker volume mounts match the container paths</li>
+                    <li>Set PUID/PGID to match your host user (Unraid default: 99/100)</li>
+                </ul>
+                <h4>Wrong track downloaded</h4>
+                <ul class="docs-list">
+                    <li>Enable <strong>AcoustID verification</strong> in Settings to catch mismatches</li>
+                    <li>Check <code>acoustid.log</code> for fingerprint comparison details</li>
+                    <li>Use the track redownload feature to try a different source</li>
+                </ul>
+            </div>
+            <div class="docs-subsection" id="ts-reporting">
+                <h3 class="docs-subsection-title">Reporting Issues</h3>
+                <p class="docs-text">When reporting a bug on <a href="https://github.com/Nezreka/SoulSync/issues" target="_blank">GitHub Issues</a> or in the <a href="https://discord.gg/wGvKqVQwmy" target="_blank">Discord</a>, include:</p>
+                <ol class="docs-list">
+                    <li><strong>Debug info snapshot</strong> &mdash; Click <strong>Copy Debug Info</strong> in the Help sidebar and paste the output</li>
+                    <li><strong>Steps to reproduce</strong> &mdash; What you did, what you expected, what happened instead</li>
+                    <li><strong>Relevant log lines</strong> &mdash; Set log level to DEBUG, reproduce the issue, and include the relevant log section. The debug info includes recent lines, but for longer issues you may need to pull from the full log file</li>
+                </ol>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>The more context you provide, the faster the fix.</strong> A debug info snapshot + steps to reproduce + DEBUG log excerpt is the ideal bug report. Even if you think you know the cause, the logs often reveal something unexpected.</div></div>
             </div>
         `
     },
@@ -2376,6 +2470,8 @@ function initializeDocsPage() {
                 text += `Version:     ${data.version}\n`;
                 text += `OS:          ${data.os}${data.docker ? ' (Docker)' : ''}\n`;
                 text += `Python:      ${data.python}\n`;
+                text += `ffmpeg:      ${data.ffmpeg || 'unknown'}\n`;
+                text += `Runner:      ${data.runner || 'unknown'}\n`;
                 text += `Uptime:      ${data.uptime || 'unknown'}\n`;
                 text += `Memory:      ${data.memory_usage || '?'} (system: ${data.system_memory || '?'})\n`;
                 text += `CPU:         ${data.cpu_percent || '?'}\n`;
@@ -2388,6 +2484,7 @@ function initializeDocsPage() {
                 text += `Soulseek:      ${data.services?.soulseek_connected ? ck + ' Connected' : ex + ' Disconnected'}\n`;
                 text += `Tidal:         ${data.services?.tidal_connected ? ck + ' Connected' : ex + ' Disconnected'}\n`;
                 text += `Qobuz:         ${data.services?.qobuz_connected ? ck + ' Connected' : ex + ' Disconnected'}\n`;
+                text += `Discogs:       ${data.services?.discogs_connected ? ck + ' Connected' : ex + ' No Token'}\n`;
                 text += `Download Mode: ${data.services?.download_source || 'unknown'}\n\n`;
 
                 text += '── Library ──\n';
@@ -2396,6 +2493,7 @@ function initializeDocsPage() {
                 text += `Tracks:   ${data.library?.tracks?.toLocaleString() || '0'}\n`;
                 text += `Database: ${data.database_size || 'unknown'}\n`;
                 text += `Watchlist: ${data.watchlist_count || 0} artists\n`;
+                text += `Wishlist:  ${data.wishlist_count || 0} pending\n`;
                 text += `Automations: ${data.automations?.enabled || 0} enabled / ${data.automations?.total || 0} total\n\n`;
 
                 text += '── Active ──\n';
@@ -2406,16 +2504,37 @@ function initializeDocsPage() {
                 const pathStatus = (exists, writable) => exists ? (writable ? ck + ' ok' : ck + ' exists ' + ex + ' not writable') : ex + ' missing';
                 text += `Download: ${data.paths?.download_path || '(not set)'} [${pathStatus(data.paths?.download_path_exists, data.paths?.download_path_writable)}]\n`;
                 text += `Transfer: ${data.paths?.transfer_folder || '(not set)'} [${pathStatus(data.paths?.transfer_folder_exists, data.paths?.transfer_folder_writable)}]\n`;
-                text += `Staging:  ${data.paths?.staging_folder || '(not set)'} [${data.paths?.staging_folder_exists ? ck + ' ok' : ex + ' missing'}]\n\n`;
+                text += `Staging:  ${data.paths?.staging_folder ? data.paths.staging_folder + ' [' + (data.paths.staging_folder_exists ? ck + ' ok' : ex + ' missing') + ']' : '(not configured — optional)'}\n`;
+                if (data.paths?.music_videos_path) {
+                    text += `Videos:   ${data.paths.music_videos_path} [${data.paths.music_videos_path_exists ? ck + ' ok' : ex + ' missing'}]\n`;
+                }
+                if (data.paths?.music_library_paths?.length) {
+                    text += `Library Paths:\n`;
+                    data.paths.music_library_paths.forEach(p => {
+                        text += `  ${p.path} [${p.exists ? ck + ' ok' : ex + ' missing'}]\n`;
+                    });
+                }
+                text += '\n';
 
                 text += '── Config ──\n';
                 if (data.config) {
+                    text += `Log Level:        ${data.config.log_level || 'INFO'}\n`;
                     text += `Source Mode:      ${data.config.source_mode || 'unknown'}\n`;
+                    if (data.config.source_mode === 'hybrid' && data.config.hybrid_sources?.length) {
+                        text += `Hybrid Priority:  ${data.config.hybrid_sources.join(' → ')}\n`;
+                    }
+                    text += `Metadata Source:  ${data.config.primary_metadata_source || 'deezer'}\n`;
                     text += `Quality Profile:  ${data.config.quality_profile || 'default'}\n`;
                     text += `Folder Template:  ${data.config.organization_template || '(default)'}\n`;
                     text += `Post-Processing:  ${data.config.post_processing_enabled ? 'enabled' : 'disabled'}\n`;
+                    if (data.config.lossy_copy_enabled) {
+                        text += `Lossy Copy:       ${data.config.lossy_copy_format?.toUpperCase()} @ ${data.config.lossy_copy_bitrate}kbps\n`;
+                    }
                     text += `AcoustID:         ${data.config.acoustid_enabled ? 'enabled' : 'disabled'}\n`;
                     text += `Auto Scan:        ${data.config.auto_scan_enabled ? 'enabled' : 'disabled'}\n`;
+                    text += `Auto Import:      ${data.config.auto_import_enabled ? 'enabled' : 'disabled'}\n`;
+                    text += `Duplicate Tracks: ${data.config.allow_duplicate_tracks ? 'allowed' : 'rejected'}\n`;
+                    text += `Replace Quality:  ${data.config.replace_lower_quality ? 'enabled' : 'disabled'}\n`;
                     text += `M3U Export:       ${data.config.m3u_export_enabled ? 'enabled' : 'disabled'}\n`;
                 }
                 text += '\n';
@@ -2460,12 +2579,21 @@ function initializeDocsPage() {
                 }
                 text += '\n';
 
+                if (data.available_logs?.length) {
+                    text += '── Log Files ──\n';
+                    data.available_logs.forEach(log => {
+                        text += `  ${log.file.padEnd(24)} ${log.size}\n`;
+                    });
+                    text += '\n';
+                }
+
                 text += `── Logs: ${data.log_source || 'app'}.log (last ${data.recent_logs?.length || 0} lines) ──\n`;
                 if (data.recent_logs?.length) {
                     data.recent_logs.forEach(line => { text += line + '\n'; });
                 } else {
                     text += '(no log lines)\n';
                 }
+                text += '\n---\nPaste this output into your GitHub issue at https://github.com/Nezreka/SoulSync/issues\n';
 
                 // Copy to clipboard — navigator.clipboard requires HTTPS/localhost,
                 // so fall back to execCommand for Docker/LAN HTTP access

@@ -6235,8 +6235,9 @@ async function loadSettingsData() {
         if (reduceCheckbox) reduceCheckbox.checked = reduceEffects;
         applyReduceEffects(reduceEffects);
 
-        // Populate Logging information (read-only)
-        document.getElementById('log-level-display').textContent = settings.logging?.level || 'INFO';
+        // Populate Logging information
+        const logLevelSelect = document.getElementById('log-level-select');
+        if (logLevelSelect) logLevelSelect.value = settings.logging?.level || 'INFO';
         document.getElementById('log-path-display').textContent = settings.logging?.path || 'logs/app.log';
 
         // Load Discovery Lookback Period setting
