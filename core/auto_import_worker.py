@@ -486,40 +486,71 @@ class AutoImportWorker:
 
         # Search metadata source for track
         result = self._search_single_track(artist, title, album)
-        if result:
+        if result and result.get('identification_confidence', 0) >= 0.8:
             return result
 
-        # Fallback: AcoustID fingerprint
+        # Fallback: AcoustID fingerprint (also used when metadata match is weak)
         try:
             from core.acoustid_client import AcoustIDClient
             client = AcoustIDClient()
             fp_result = client.fingerprint_and_lookup(file_path)
             if fp_result and fp_result.get('recordings'):
                 best = fp_result['recordings'][0]
-                fp_artist = best.get('artist', artist)
-                fp_title = best.get('title', title)
+                # AcoustID can return None for artist/title on new releases —
+                # fall back to tag data we already have
+                fp_artist = best.get('artist') or artist
+                fp_title = best.get('title') or title
                 if fp_artist and fp_title:
-                    result = self._search_single_track(fp_artist, fp_title, '')
-                    if result:
-                        result['method'] = 'acoustid'
-                        return result
+                    fp_result2 = self._search_single_track(fp_artist, fp_title, '')
+                    if fp_result2 and fp_result2.get('identification_confidence', 0) >= 0.8:
+                        fp_result2['method'] = 'acoustid'
+                        return fp_result2
+                    # Keep weak AcoustID result as fallback
+                    if fp_result2 and (not result or fp_result2.get('identification_confidence', 0) > result.get('identification_confidence', 0)):
+                        result = fp_result2
         except Exception:
             pass
 
-        # If we have artist and title but no metadata match, still return basic identification
-        if artist and title:
-            return {
-                'album_id': None,
-                'album_name': album or title,  # Use title as album name for singles
+        # If we have good tag data (artist + title), prefer tag-based identification
+        # over a weak metadata/AcoustID result — tags from post-processed files are reliable
+        if artist and title and tags.get('artist'):
+            tag_conf = 0.85  # High confidence for files with proper embedded tags
+            # Use the metadata result's image/album data if available, but trust tag identity
+            tag_result = {
+                'album_id': result.get('album_id') if result else None,
+                'album_name': album or (result.get('album_name') if result else None) or title,
                 'artist_name': artist,
                 'track_name': title,
-                'image_url': '',
-                'release_date': tags.get('year', '') or '',
+                'image_url': result.get('image_url', '') if result else '',
+                'release_date': tags.get('year', '') or (result.get('release_date', '') if result else ''),
                 'track_number': tags.get('track_number', 1),
+                'total_tracks': result.get('total_tracks', 1) if result else 1,
+                'source': result.get('source', 'tags') if result else 'tags',
+                'method': 'tags',
+                'identification_confidence': tag_conf,
+                'is_single': True,
+                'track_id': result.get('track_id', '') if result else '',
+            }
+            return tag_result
+
+        # If AcoustID didn't help but we had a weak metadata match, use it
+        if result:
+            return result
+
+        # Last resort: filename-only identification
+        if title:
+            return {
+                'album_id': None,
+                'album_name': title,
+                'artist_name': artist or 'Unknown Artist',
+                'track_name': title,
+                'image_url': '',
+                'release_date': '',
+                'track_number': 1,
                 'total_tracks': 1,
                 'source': 'tags',
-                'method': 'tags' if tags.get('artist') else 'filename',
-                'identification_confidence': 0.7 if tags.get('artist') else 0.5,
+                'method': 'filename',
+                'identification_confidence': 0.5,
                 'is_single': True,
             }
 
