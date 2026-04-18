@@ -2993,6 +2993,59 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 /* Glassmorphic cards */
+/* Collapsible settings section headers */
+.settings-section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    margin-bottom: 4px;
+    cursor: pointer;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    transition: all 0.15s;
+    user-select: none;
+}
+
+.settings-section-header:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.settings-section-header h3 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.95);
+    letter-spacing: 0.3px;
+}
+
+.settings-section-arrow {
+    font-size: 11px;
+    color: rgba(var(--accent-rgb), 0.7);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+}
+
+.settings-section-header.collapsed .settings-section-arrow {
+    transform: rotate(-90deg);
+}
+
+.settings-section-hint {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.35);
+    margin-left: auto;
+}
+
+.settings-section-body {
+    transition: all 0.2s ease;
+}
+
+.settings-section-body.collapsed {
+    display: none;
+}
+
 .settings-group {
     background: linear-gradient(135deg, rgba(35, 35, 35, 0.6), rgba(20, 20, 20, 0.8));
     border: 1px solid rgba(255, 255, 255, 0.08);
