@@ -66528,54 +66528,112 @@ async function _autoImportLoadResults() {
             return;
         }
 
-        container.innerHTML = data.results.map(r => {
+        container.innerHTML = data.results.map((r, idx) => {
             const confPct = Math.round((r.confidence || 0) * 100);
             const confClass = confPct >= 90 ? 'high' : confPct >= 70 ? 'medium' : 'low';
             const statusLabels = {
-                'completed': '&#10003; Imported', 'pending_review': '&#9888; Review',
-                'needs_identification': '&#10007; Unidentified', 'failed': '&#10007; Failed',
-                'scanning': '&#8987; Scanning', 'matched': '&#10003; Matched',
-                'rejected': '&#128683; Rejected', 'approved': '&#9989; Approved',
+                'completed': 'Imported', 'pending_review': 'Needs Review',
+                'needs_identification': 'Unidentified', 'failed': 'Failed',
+                'scanning': 'Scanning...', 'matched': 'Matched',
+                'rejected': 'Dismissed', 'approved': 'Approved',
+            };
+            const statusIcons = {
+                'completed': '\u2713', 'pending_review': '\u26A0',
+                'needs_identification': '\u2717', 'failed': '\u2717',
+                'scanning': '\u231B', 'matched': '\u2713',
+                'rejected': '\u2715', 'approved': '\u2713',
             };
             const statusLabel = statusLabels[r.status] || r.status;
+            const statusIcon = statusIcons[r.status] || '';
             const statusClass = r.status === 'completed' ? 'completed' : r.status === 'pending_review' ? 'review' :
                 r.status === 'failed' || r.status === 'needs_identification' ? 'failed' : 'neutral';
 
-            let matchInfo = '';
+            // Parse match data for track details
+            let matchCount = 0, totalTracks = 0, trackDetails = [];
             if (r.match_data) {
                 try {
                     const md = typeof r.match_data === 'string' ? JSON.parse(r.match_data) : r.match_data;
-                    matchInfo = `<div class="auto-import-match-info">${md.matched_count || 0}/${md.total_tracks || '?'} tracks matched</div>`;
+                    matchCount = md.matched_count || 0;
+                    totalTracks = md.total_tracks || 0;
+                    if (md.matches) {
+                        trackDetails = md.matches.map(m => ({
+                            name: m.track?.name || 'Unknown',
+                            file: m.file ? m.file.split(/[/\\]/).pop() : '?',
+                            confidence: Math.round((m.confidence || 0) * 100),
+                        }));
+                    }
+                } catch (e) {}
+            }
+
+            const matchSummary = totalTracks > 0 ? `${matchCount}/${totalTracks} tracks` : `${r.total_files} files`;
+            const methodLabels = { tags: 'Tags', folder_name: 'Folder Name', acoustid: 'AcoustID', filename: 'Filename' };
+            const methodLabel = methodLabels[r.identification_method] || r.identification_method || '';
+
+            // Time ago
+            let timeAgo = '';
+            if (r.created_at) {
+                try {
+                    const d = new Date(r.created_at);
+                    const diffM = Math.floor((Date.now() - d) / 60000);
+                    if (diffM < 1) timeAgo = 'just now';
+                    else if (diffM < 60) timeAgo = `${diffM}m ago`;
+                    else if (diffM < 1440) timeAgo = `${Math.floor(diffM / 60)}h ago`;
+                    else timeAgo = `${Math.floor(diffM / 1440)}d ago`;
                 } catch (e) {}
             }
 
             let actions = '';
             if (r.status === 'pending_review') {
                 actions = `<div class="auto-import-actions">
-                    <button class="watchlist-action-btn watchlist-action-primary" onclick="_autoImportApprove(${r.id})">Approve</button>
-                    <button class="watchlist-action-btn watchlist-action-secondary" onclick="_autoImportReject(${r.id})">Dismiss</button>
+                    <button class="watchlist-action-btn watchlist-action-primary" onclick="event.stopPropagation(); _autoImportApprove(${r.id})">Approve & Import</button>
+                    <button class="watchlist-action-btn watchlist-action-secondary" onclick="event.stopPropagation(); _autoImportReject(${r.id})">Dismiss</button>
                 </div>`;
             }
 
-            return `<div class="auto-import-card auto-import-${statusClass}">
-                <div class="auto-import-card-left">
-                    ${r.image_url ? `<img class="auto-import-card-art" src="${r.image_url}" alt="">` : `<div class="auto-import-card-art-fallback">&#128191;</div>`}
-                </div>
-                <div class="auto-import-card-center">
-                    <div class="auto-import-card-album">${escapeHtml(r.album_name || r.folder_name)}</div>
-                    <div class="auto-import-card-artist">${escapeHtml(r.artist_name || 'Unknown Artist')}</div>
-                    <div class="auto-import-card-folder">${escapeHtml(r.folder_name)} &middot; ${r.total_files} files</div>
-                    ${matchInfo}
-                    ${r.error_message ? `<div class="auto-import-card-error">${escapeHtml(r.error_message)}</div>` : ''}
-                </div>
-                <div class="auto-import-card-right">
-                    <div class="auto-import-confidence-bar">
-                        <div class="auto-import-confidence-fill auto-import-conf-${confClass}" style="width:${confPct}%"></div>
+            // Expanded track list (hidden by default)
+            let trackListHtml = '';
+            if (trackDetails.length > 0) {
+                trackListHtml = `<div class="auto-import-track-list" id="auto-import-tracks-${idx}">
+                    <div class="auto-import-track-list-header">
+                        <span>Track</span><span>Matched File</span><span>Conf</span>
                     </div>
-                    <div class="auto-import-confidence-text">${confPct}%</div>
-                    <div class="auto-import-status-badge auto-import-badge-${statusClass}">${statusLabel}</div>
-                    ${actions}
+                    ${trackDetails.map(t => {
+                        const tConfClass = t.confidence >= 90 ? 'high' : t.confidence >= 70 ? 'medium' : 'low';
+                        return `<div class="auto-import-track-row">
+                            <span class="auto-import-track-name">${escapeHtml(t.name)}</span>
+                            <span class="auto-import-track-file">${escapeHtml(t.file)}</span>
+                            <span class="auto-import-track-conf auto-import-conf-${tConfClass}">${t.confidence}%</span>
+                        </div>`;
+                    }).join('')}
+                </div>`;
+            }
+
+            return `<div class="auto-import-card auto-import-${statusClass}" onclick="_autoImportToggleDetail(${idx})" style="cursor:pointer">
+                <div class="auto-import-card-top">
+                    <div class="auto-import-card-left">
+                        ${r.image_url ? `<img class="auto-import-card-art" src="${r.image_url}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="auto-import-card-art-fallback" style="display:none">\uD83D\uDCBF</div>` : `<div class="auto-import-card-art-fallback">\uD83D\uDCBF</div>`}
+                    </div>
+                    <div class="auto-import-card-center">
+                        <div class="auto-import-card-album">${escapeHtml(r.album_name || r.folder_name)}</div>
+                        <div class="auto-import-card-artist">${escapeHtml(r.artist_name || 'Unknown Artist')}</div>
+                        <div class="auto-import-card-meta">
+                            <span>${matchSummary}</span>
+                            ${methodLabel ? `<span class="auto-import-method-badge">${methodLabel}</span>` : ''}
+                            ${timeAgo ? `<span>${timeAgo}</span>` : ''}
+                        </div>
+                        ${r.error_message ? `<div class="auto-import-card-error">${escapeHtml(r.error_message)}</div>` : ''}
+                    </div>
+                    <div class="auto-import-card-right">
+                        <div class="auto-import-status-badge auto-import-badge-${statusClass}">${statusIcon} ${statusLabel}</div>
+                        <div class="auto-import-confidence-bar">
+                            <div class="auto-import-confidence-fill auto-import-conf-${confClass}" style="width:${confPct}%"></div>
+                        </div>
+                        <div class="auto-import-confidence-text">${confPct}% confidence</div>
+                        ${actions}
+                    </div>
                 </div>
+                <div class="auto-import-card-folder-path">${escapeHtml(r.folder_name)}</div>
+                ${trackListHtml}
             </div>`;
         }).join('');
 
@@ -66593,6 +66651,14 @@ async function _autoImportSaveSettings() {
         showToast('Settings saved', 'success');
     } catch (e) { showToast('Error', 'error'); }
 }
+
+function _autoImportToggleDetail(idx) {
+    const trackList = document.getElementById(`auto-import-tracks-${idx}`);
+    if (trackList) {
+        trackList.classList.toggle('expanded');
+    }
+}
+window._autoImportToggleDetail = _autoImportToggleDetail;
 
 async function _autoImportApprove(id) {
     try {
