@@ -119,6 +119,7 @@ from core.automation_engine import AutomationEngine
 # --- Flask App Setup ---
 base_dir = os.path.abspath(os.path.dirname(__file__))
 project_root = os.path.dirname(base_dir) # Go up one level to the project root
+DEV_STATIC_NO_CACHE = os.environ.get('SOULSYNC_WEB_DEV_NO_CACHE', '0').lower() in ('1', 'true', 'yes', 'on')
 
 # Check for environment variable first (Docker support), then fallback to calculated path
 env_config_path = os.environ.get('SOULSYNC_CONFIG_PATH')
@@ -158,6 +159,8 @@ app = Flask(
     template_folder=os.path.join(base_dir, 'webui'),
     static_folder=os.path.join(base_dir, 'webui', 'static')
 )
+app.config['TEMPLATES_AUTO_RELOAD'] = DEV_STATIC_NO_CACHE
+app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 
 # --- Flask Session Setup (for multi-profile support) ---
 import secrets as _secrets
@@ -213,7 +216,6 @@ def _set_profile_context():
 def _log_slow_request(response):
     """Log slow HTTP requests so we can identify UI stall sources."""
     try:
-        # Skip websocket upgrades and very common noise.
         path = request.path
         if path.startswith('/socket.io/'):
             return response

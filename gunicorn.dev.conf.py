@@ -5,6 +5,7 @@ worker_class = "gthread"
 workers = 1
 threads = 4
 reload = True
+raw_env = ["SOULSYNC_WEB_DEV_NO_CACHE=1"]
 
 # Keep requests from hanging forever on slow external services.
 timeout = 120
