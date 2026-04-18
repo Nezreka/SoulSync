@@ -451,18 +451,32 @@ def get_discogs_client(token: Optional[str] = None):
         return client
 
 
-def get_hydrabase_client(allow_fallback: bool = True):
-    """Return current Hydrabase client if connected.
+def is_hydrabase_enabled() -> bool:
+    """Return True when Hydrabase is connected and allowed for metadata use."""
+    try:
+        import importlib
+        ws = importlib.import_module('web_server')
+        client = getattr(ws, 'hydrabase_client', None)
+        if not client or not client.is_connected():
+            return False
+        return bool(getattr(ws, 'dev_mode_enabled', False))
+    except Exception:
+        return False
+
+
+def get_hydrabase_client(allow_fallback: bool = True, require_enabled: bool = True):
+    """Return current Hydrabase client if connected and enabled.
 
     If allow_fallback is True, return iTunes fallback when Hydrabase is not
-    connected. If False, return None instead.
+    connected or not enabled. If False, return None instead.
     """
     try:
         import importlib
         ws = importlib.import_module('web_server')
         client = getattr(ws, 'hydrabase_client', None)
         if client and client.is_connected():
-            return client
+            if not require_enabled or bool(getattr(ws, 'dev_mode_enabled', False)):
+                return client
     except Exception:
         pass
     if allow_fallback:

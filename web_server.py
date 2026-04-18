@@ -5867,15 +5867,11 @@ _COMPARISON_MAX_ENTRIES = 50
 _comparison_lock = threading.Lock()
 
 def _is_hydrabase_active():
-    """Check if Hydrabase should be used as the PRIMARY metadata source (replaces Spotify).
-    Only active in dev mode — the legacy 'Hydrabase replaces everything' behavior.
-    When selected as a fallback source, Hydrabase works through the normal fallback
-    path (_get_metadata_fallback_client) just like iTunes/Deezer — not as primary."""
+    """Check if Hydrabase is connected and enabled for metadata use."""
     try:
-        if hydrabase_client is None or not hydrabase_client.is_connected():
-            return False
-        return dev_mode_enabled
-    except (NameError, Exception):
+        from core.metadata_service import is_hydrabase_enabled
+        return is_hydrabase_enabled()
+    except Exception:
         return False
 
 def _run_background_comparison(query, hydrabase_counts=None):

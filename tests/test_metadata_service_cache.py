@@ -105,3 +105,39 @@ def test_deezer_client_cache_tracks_token(monkeypatch):
 
     assert first is not second
     assert calls["deezer"] == 2
+
+
+class _FakeHydrabaseClient:
+    def __init__(self, connected=True):
+        self._connected = connected
+
+    def is_connected(self):
+        return self._connected
+
+
+def test_hydrabase_enabled_requires_connection_and_dev_mode(monkeypatch):
+    fake_ws = types.ModuleType("web_server")
+    fake_ws.hydrabase_client = _FakeHydrabaseClient(connected=True)
+    fake_ws.dev_mode_enabled = True
+    monkeypatch.setitem(sys.modules, "web_server", fake_ws)
+
+    assert metadata_service.is_hydrabase_enabled() is True
+
+    fake_ws.dev_mode_enabled = False
+    assert metadata_service.is_hydrabase_enabled() is False
+
+    fake_ws.dev_mode_enabled = True
+    fake_ws.hydrabase_client = _FakeHydrabaseClient(connected=False)
+    assert metadata_service.is_hydrabase_enabled() is False
+
+
+def test_get_client_for_source_hydrabase_requires_enablement(monkeypatch):
+    fake_ws = types.ModuleType("web_server")
+    fake_ws.hydrabase_client = _FakeHydrabaseClient(connected=True)
+    fake_ws.dev_mode_enabled = False
+    monkeypatch.setitem(sys.modules, "web_server", fake_ws)
+
+    assert metadata_service.get_client_for_source("hydrabase") is None
+
+    fake_ws.dev_mode_enabled = True
+    assert metadata_service.get_client_for_source("hydrabase") is fake_ws.hydrabase_client
