@@ -10941,154 +10941,105 @@ def get_artist_discography(artist_id):
     """Get an artist's complete discography (albums and singles)"""
     try:
         # Get optional artist name for fallback searches
-        artist_name = request.args.get('artist_name', '')
+        artist_name = request.args.get('artist_name', '').strip()
         # Optional source override from multi-source search tabs
-        source_override = request.args.get('source', '')
+        source_override = request.args.get('source', '').strip().lower()
 
         # Mirror to Hydrabase P2P network
         if hydrabase_worker and dev_mode_enabled and artist_name:
             hydrabase_worker.enqueue(artist_name, 'artist.albums')
 
-        # Determine which source to use
-        spotify_available = spotify_client and spotify_client.is_spotify_authenticated()
+        from core.metadata_service import (
+            get_artist_albums_for_source,
+            get_client_for_source,
+            get_primary_source,
+            get_source_priority,
+        )
 
-        # Import fallback client for non-Spotify lookups
-        fallback_client = _get_metadata_fallback_client()
-        fallback_source = _get_metadata_fallback_source()
+        def _search_artists_for_source(client, source: str, name: str, limit: int = 5):
+            if not client or not hasattr(client, 'search_artists'):
+                return []
+            kwargs = {'limit': limit}
+            if source == 'spotify':
+                kwargs['allow_fallback'] = False
+            return client.search_artists(name, **kwargs) or []
 
-        print(f"Fetching discography for artist: {artist_id} (name: {artist_name}, spotify: {spotify_available}, source_override: {source_override or 'auto'})")
+        primary_source = get_primary_source()
+        source_priority = list(get_source_priority(primary_source))
+        effective_override_source = source_override
+        if source_override == 'hydrabase':
+            plugin = request.args.get('plugin', '').strip().lower()
+            if plugin == 'deezer':
+                effective_override_source = 'deezer'
+            elif plugin == 'itunes' or artist_id.isdigit():
+                effective_override_source = 'itunes'
+            else:
+                effective_override_source = 'spotify'
+
+        if effective_override_source and effective_override_source in source_priority:
+            source_priority = [effective_override_source] + [
+                source for source in source_priority if source != effective_override_source
+            ]
+
+        logger.debug(
+            "Fetching discography for artist %s (name=%s, source_override=%s, priority=%s)",
+            artist_id,
+            artist_name,
+            source_override or 'auto',
+            source_priority,
+        )
 
         albums = []
         active_source = None
 
-        # Source override: when user clicked from a specific search tab, use that source directly
-        if source_override and source_override in ('spotify', 'itunes', 'deezer'):
-            try:
-                if source_override == 'spotify' and spotify_available:
-                    albums = spotify_client.get_artist_albums(artist_id, album_type='album,single')
-                    if albums:
-                        active_source = 'spotify'
-                elif source_override == 'itunes':
-                    itunes_cl = _get_itunes_client()
-                    albums = itunes_cl.get_artist_albums(artist_id, album_type='album,single')
-                    if albums:
-                        active_source = 'itunes'
-                elif source_override == 'deezer':
-                    deezer_cl = _get_deezer_client()
-                    albums = deezer_cl.get_artist_albums(artist_id, album_type='album,single')
-                    if albums:
-                        active_source = 'deezer'
-                elif source_override == 'discogs':
-                    discogs_cl = _get_discogs_client()
-                    albums = discogs_cl.get_artist_albums(artist_id, album_type='album,single')
-                    if albums:
-                        active_source = 'discogs'
-                elif source_override == 'hydrabase':
-                    plugin = request.args.get('plugin', '').lower()
-                    if plugin == 'deezer':
-                        hb_cl = _get_deezer_client()
-                    elif plugin == 'itunes' or artist_id.isdigit():
-                        hb_cl = _get_itunes_client()
-                    else:
-                        hb_cl = spotify_client
-                    albums = hb_cl.get_artist_albums(artist_id, album_type='album,single')
-                    if albums:
-                        active_source = plugin or 'hydrabase'
-
-                # If direct ID lookup failed but we have artist name, search by name
-                if not albums and artist_name:
-                    if source_override == 'itunes':
-                        cl = _get_itunes_client()
-                    elif source_override == 'hydrabase':
-                        plugin = request.args.get('plugin', '').lower()
-                        if plugin == 'deezer':
-                            cl = _get_deezer_client()
-                        else:
-                            cl = _get_itunes_client()
-                    elif source_override == 'deezer':
-                        cl = _get_deezer_client()
-                    elif source_override == 'discogs':
-                        cl = _get_discogs_client()
-                    elif source_override == 'spotify' and spotify_available:
-                        cl = spotify_client
-                    else:
-                        cl = None
-
-                    if cl:
-                        search_artists = cl.search_artists(artist_name, limit=5)
-                        if search_artists:
-                            best = next((a for a in search_artists if a.name.lower() == artist_name.lower()), search_artists[0])
-                            albums = cl.get_artist_albums(best.id, album_type='album,single')
-                            if albums:
-                                active_source = source_override
-
-                if albums:
-                    print(f"Got {len(albums)} albums from {active_source} (source override)")
-            except Exception as e:
-                print(f"Source override ({source_override}) lookup failed: {e}")
-
-        # Try Hydrabase first when active (and no source override)
-        if not albums and _is_hydrabase_active() and artist_name:
+        # Hydrabase can return a ready-made discography when active.
+        if not source_override and _is_hydrabase_active() and artist_name:
             try:
                 albums = hydrabase_client.search_discography(artist_name, limit=50)
                 if albums:
                     active_source = 'hydrabase'
-                    print(f"Got {len(albums)} albums from Hydrabase")
+                    logger.info("Got %s albums from Hydrabase for artist %s", len(albums), artist_id)
             except Exception as e:
-                print(f"Hydrabase discography failed: {e}")
+                logger.debug("Hydrabase discography failed for artist %s: %s", artist_id, e)
 
-        # Try to get albums from the appropriate source
-        # Check if the ID looks like Spotify (alphanumeric) or iTunes (numeric only)
-        is_numeric_id = artist_id.isdigit()
-
-        if not albums and spotify_available and not is_numeric_id:
-            # Try Spotify first for alphanumeric IDs
-            try:
-                albums = spotify_client.get_artist_albums(artist_id, album_type='album,single')
-                if albums:
-                    active_source = 'spotify'
-                    print(f"Got {len(albums)} albums from Spotify")
-            except Exception as e:
-                print(f"Spotify lookup failed: {e}")
-
-        # Try fallback source if Spotify didn't work or if it's a numeric ID
+        # Walk sources in configured priority order, keeping strict per-source lookups.
         if not albums:
-            try:
-                if is_numeric_id:
-                    # It's a numeric ID (iTunes/Deezer), use directly
-                    albums = fallback_client.get_artist_albums(artist_id, album_type='album,single')
-                    if albums:
-                        active_source = fallback_source
-                        print(f"Got {len(albums)} albums from {fallback_source} (direct ID)")
-                elif artist_name:
-                    # Search fallback by name
-                    print(f"Trying {fallback_source} search by name: '{artist_name}'")
-                    fallback_artists = fallback_client.search_artists(artist_name, limit=5)
-                    if fallback_artists:
-                        # Find best match
-                        best_match = None
-                        for artist in fallback_artists:
-                            if artist.name.lower() == artist_name.lower():
-                                best_match = artist
-                                break
-                        if not best_match:
-                            best_match = fallback_artists[0]
+            for source in source_priority:
+                if source == 'hydrabase':
+                    continue
 
-                        print(f"Found {fallback_source} artist: {best_match.name} (ID: {best_match.id})")
-                        albums = fallback_client.get_artist_albums(best_match.id, album_type='album,single')
-                        if albums:
-                            active_source = fallback_source
-                            print(f"Got {len(albums)} albums from {fallback_source} (name search)")
-            except Exception as e:
-                print(f"{fallback_source} lookup failed: {e}")
+                client = get_client_for_source(source)
+                try:
+                    albums = get_artist_albums_for_source(source, artist_id)
+                except Exception as e:
+                    logger.debug("%s direct lookup failed for artist %s: %s", source, artist_id, e)
+                    albums = []
 
-        print(f"Total albums returned: {len(albums)} (source: {active_source})")
+                if not albums and artist_name:
+                    try:
+                        search_artists = _search_artists_for_source(client, source, artist_name, limit=5)
+                        if search_artists:
+                            best = next(
+                                (a for a in search_artists if a.name.lower() == artist_name.lower()),
+                                search_artists[0]
+                            )
+                            logger.debug("Found %s artist '%s' (id=%s)", source, best.name, best.id)
+                            albums = get_artist_albums_for_source(source, best.id)
+                    except Exception as e:
+                        logger.debug("%s name search failed for artist %s: %s", source, artist_name, e)
+
+                if albums:
+                    active_source = source
+                    logger.info("Got %s albums from %s for artist %s", len(albums), source, artist_id)
+                    break
+
+        logger.debug("Total albums returned for artist %s: %s (source=%s)", artist_id, len(albums), active_source)
         
         if not albums:
             return jsonify({
                 "albums": [],
                 "singles": [],
-                "source": active_source or "unknown"
+                "source": active_source or (source_priority[0] if source_priority else "unknown")
             })
         
         # Separate albums from singles/EPs
@@ -11121,7 +11072,7 @@ def get_artist_discography(artist_id):
             
             # Skip obvious compilation issues but be more lenient for now
             if hasattr(album, 'album_type') and album.album_type == 'compilation':
-                print(f"Found compilation: '{album.name}' - including for now")
+                logger.debug("Found compilation '%s' for artist %s - including for now", album.name, artist_id)
             
             # Categorize by album type
             if hasattr(album, 'album_type'):
@@ -11146,42 +11097,50 @@ def get_artist_discography(artist_id):
         album_list.sort(key=get_release_year, reverse=True)
         singles_list.sort(key=get_release_year, reverse=True)
         
-        print(f"Found {len(album_list)} albums and {len(singles_list)} singles for artist {artist_id}")
-        
+        logger.info("Found %s albums and %s singles for artist %s", len(album_list), len(singles_list), artist_id)
+
         # Debug: Log the final album list
         for album in album_list:
-            print(f"Album: {album['name']} ({album['album_type']}) - {album['release_date']}")
+            logger.debug("Album: %s (%s) - %s", album['name'], album['album_type'], album['release_date'])
         for single in singles_list:
-            print(f"Single/EP: {single['name']} ({single['album_type']}) - {single['release_date']}")
+            logger.debug("Single/EP: %s (%s) - %s", single['name'], single['album_type'], single['release_date'])
         
         # Gather artist enrichment info from cache + library
         artist_info = {}
         try:
             cache = get_metadata_cache()
+            cache_sources = []
+            if active_source:
+                cache_sources.append(active_source)
+            for source in source_priority:
+                if source not in cache_sources:
+                    cache_sources.append(source)
+
             # Try metadata cache for genres, image, followers
-            cached = cache.get_entity(active_source or 'spotify', 'artist', artist_id)
-            if not cached and active_source != 'spotify':
-                cached = cache.get_entity('spotify', 'artist', artist_id)
-            if not cached:
+            cached = None
+            for src in cache_sources:
+                cached = cache.get_entity(src, 'artist', artist_id)
+                if cached:
+                    break
+            if not cached and artist_name:
                 # Try by name across all sources
-                for src in ['spotify', 'itunes', 'deezer']:
-                    if artist_name:
-                        db_tmp = get_database()
-                        conn_tmp = db_tmp._get_connection()
-                        try:
-                            cur = conn_tmp.cursor()
-                            cur.execute("""
-                                SELECT genres, image_url, followers, popularity, external_urls
-                                FROM metadata_cache_entities
-                                WHERE entity_type = 'artist' AND name COLLATE NOCASE = ? AND source = ?
-                                LIMIT 1
-                            """, (artist_name, src))
-                            row = cur.fetchone()
-                            if row:
-                                cached = dict(row)
-                                break
-                        finally:
-                            conn_tmp.close()
+                for src in cache_sources:
+                    db_tmp = get_database()
+                    conn_tmp = db_tmp._get_connection()
+                    try:
+                        cur = conn_tmp.cursor()
+                        cur.execute("""
+                            SELECT genres, image_url, followers, popularity, external_urls
+                            FROM metadata_cache_entities
+                            WHERE entity_type = 'artist' AND name COLLATE NOCASE = ? AND source = ?
+                            LIMIT 1
+                        """, (artist_name, src))
+                        row = cur.fetchone()
+                        if row:
+                            cached = dict(row)
+                            break
+                    finally:
+                        conn_tmp.close()
             if cached:
                 try:
                     artist_info['genres'] = json.loads(cached.get('genres', '[]')) if isinstance(cached.get('genres'), str) else (cached.get('genres') or [])
@@ -11254,14 +11213,12 @@ def get_artist_discography(artist_id):
         return jsonify({
             "albums": album_list,
             "singles": singles_list,
-            "source": active_source or "spotify",
+            "source": active_source or (source_priority[0] if source_priority else "unknown"),
             "artist_info": artist_info,
         })
 
     except Exception as e:
-        print(f"Error fetching artist discography: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Error fetching artist discography for %s", artist_id)
         return jsonify({"error": str(e)}), 500
 
 def _resolve_db_album_id(album_id, artist_id=None):
@@ -11301,20 +11258,20 @@ def _resolve_db_album_id(album_id, artist_id=None):
             album_title = row['title']
             artist_name = row['artist_name']
             query = f"{artist_name} {album_title}"
-            print(f"Searching for album by name: '{query}'")
+            logger.debug("Searching for album by name: %s", query)
             results = spotify_client.search_albums(query, limit=5)
             if results:
                 # Pick the best match (search already ranks by relevance)
                 for album in results:
                     if album.name.lower().strip() == album_title.lower().strip():
-                        print(f"Found exact album match: {album.name} (ID: {album.id})")
+                        logger.debug("Found exact album match: %s (id=%s)", album.name, album.id)
                         return album.id
                 # Fall back to first result if no exact title match
-                print(f"No exact match, using best result: {results[0].name} (ID: {results[0].id})")
+                logger.debug("No exact match, using best result: %s (id=%s)", results[0].name, results[0].id)
                 return results[0].id
 
     except Exception as e:
-        print(f"Error resolving DB album ID {album_id}: {e}")
+        logger.debug("Error resolving DB album ID %s: %s", album_id, e)
     return None
 
 
@@ -11354,7 +11311,7 @@ def get_artist_album_tracks(artist_id, album_id):
                             'uri': '',
                             'album': album_info
                         })
-                    print(f"Hydrabase returned {len(formatted_tracks)} tracks for album: {album_info['name']}")
+                    logger.info("Hydrabase returned %s tracks for album %s", len(formatted_tracks), album_info['name'])
                     return jsonify({
                         'success': True,
                         'album': album_info,
@@ -11382,7 +11339,12 @@ def get_artist_album_tracks(artist_id, album_id):
         elif source_override == 'discogs':
             client = _get_discogs_client()
 
-        print(f"Fetching tracks for album: {album_id} by artist: {artist_id} (source: {source_override or 'auto'})")
+        logger.debug(
+            "Fetching tracks for album %s by artist %s (source=%s)",
+            album_id,
+            artist_id,
+            source_override or 'auto',
+        )
 
         # Get album information first
         album_data = client.get_album(album_id)
@@ -11392,7 +11354,7 @@ def get_artist_album_tracks(artist_id, album_id):
         if not album_data:
             resolved_album_id = _resolve_db_album_id(album_id, artist_id)
             if resolved_album_id and resolved_album_id != album_id:
-                print(f"Resolved DB album ID {album_id} -> external ID {resolved_album_id}")
+                logger.debug("Resolved DB album ID %s -> external ID %s", album_id, resolved_album_id)
                 album_data = client.get_album(resolved_album_id)
 
         if not album_data:
@@ -11446,7 +11408,7 @@ def get_artist_album_tracks(artist_id, album_id):
             }
             formatted_tracks.append(formatted_track)
         
-        print(f"Successfully formatted {len(formatted_tracks)} tracks for album: {album_info['name']}")
+        logger.info("Successfully formatted %s tracks for album %s", len(formatted_tracks), album_info['name'])
         
         return jsonify({
             'success': True,
@@ -11455,9 +11417,7 @@ def get_artist_album_tracks(artist_id, album_id):
         })
         
     except Exception as e:
-        print(f"Error fetching album tracks: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Error fetching album tracks for artist %s album %s", artist_id, album_id)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/artist/<artist_id>/download-discography', methods=['POST'])
