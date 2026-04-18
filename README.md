@@ -14,7 +14,7 @@
 
 ## What It Does
 
-SoulSync bridges streaming services to your media server with automated discovery:
+SoulSync bridges streaming services to your music library with automated discovery:
 
 1. **Monitors artists** → Automatically detects new releases from your watchlist
 2. **Generates playlists** → Release Radar, Discovery Weekly, Seasonal, Decade/Genre mixes, Cache-powered discovery
@@ -23,7 +23,7 @@ SoulSync bridges streaming services to your media server with automated discover
 5. **Enriches metadata** → 10 enrichment workers (Spotify, MusicBrainz, iTunes, Deezer, Discogs, AudioDB, Last.fm, Genius, Tidal, Qobuz)
 6. **Tags consistently** → Picard-style MusicBrainz release preflight ensures all album tracks get the same release ID
 7. **Organizes files** → Custom templates for clean folder structures
-8. **Syncs media server** → Plex, Jellyfin, or Navidrome stay updated automatically
+8. **Manages library** → Plex, Jellyfin, Navidrome, or SoulSync Standalone (no media server required)
 9. **Scrobbles plays** → Automatic scrobbling to Last.fm and ListenBrainz from your media server
 
 ---
@@ -177,6 +177,14 @@ SoulSync bridges streaming services to your media server with automated discover
 **Database Storage Visualization** — Donut chart showing per-table storage breakdown
 
 **Import System** — Tag-first matching, auto-grouped album cards, staging folder workflow
+- Auto-Import worker: recursive scan, single file support, AcoustID fingerprinting fallback
+- Confidence-gated: 90%+ auto-imports, 70-90% queued for review
+
+**SoulSync Standalone Mode** — Use SoulSync without Plex, Jellyfin, or Navidrome
+- Downloads and imports write directly to the library database
+- Filesystem scanner for incremental and deep scan of Transfer folder
+- Pre-populated enrichment IDs from download context (Spotify, Deezer, MusicBrainz)
+- Select in Settings → Connections → Standalone
 
 **Template Organization** — `$albumartist/$album/$track - $title` and 10+ variables
 
