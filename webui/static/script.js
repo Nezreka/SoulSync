@@ -6349,12 +6349,14 @@ function toggleServer(serverType) {
     document.getElementById('plex-toggle').classList.remove('active');
     document.getElementById('jellyfin-toggle').classList.remove('active');
     document.getElementById('navidrome-toggle').classList.remove('active');
-    document.getElementById(`${serverType}-toggle`).classList.add('active');
+    document.getElementById('soulsync-toggle')?.classList.remove('active');
+    document.getElementById(`${serverType}-toggle`)?.classList.add('active');
 
     // Show/hide server containers
     document.getElementById('plex-container').classList.toggle('hidden', serverType !== 'plex');
     document.getElementById('jellyfin-container').classList.toggle('hidden', serverType !== 'jellyfin');
     document.getElementById('navidrome-container').classList.toggle('hidden', serverType !== 'navidrome');
+    document.getElementById('soulsync-container')?.classList.toggle('hidden', serverType !== 'soulsync');
 
     // Load Plex music libraries when switching to Plex
     if (serverType === 'plex') {
@@ -6369,6 +6371,15 @@ function toggleServer(serverType) {
     // Load Navidrome music folders when switching to Navidrome
     if (serverType === 'navidrome') {
         loadNavidromeMusicFolders();
+    }
+
+    // Show Transfer path for SoulSync standalone
+    if (serverType === 'soulsync') {
+        const transferInput = document.getElementById('soulsync-transfer-path');
+        const transferPathEl = document.getElementById('transfer-path');
+        if (transferInput && transferPathEl) {
+            transferInput.value = transferPathEl.value || './Transfer';
+        }
     }
 
     // Auto-save after server toggle change
@@ -7185,6 +7196,8 @@ async function saveSettings(quiet = false) {
         activeServer = 'jellyfin';
     } else if (document.getElementById('navidrome-toggle').classList.contains('active')) {
         activeServer = 'navidrome';
+    } else if (document.getElementById('soulsync-toggle')?.classList.contains('active')) {
+        activeServer = 'soulsync';
     }
 
     const settings = {

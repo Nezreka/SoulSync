@@ -4307,6 +4307,12 @@
                                             class="server-logo">
                                         Navidrome
                                     </button>
+                                    <button class="server-toggle-btn" id="soulsync-toggle"
+                                        onclick="toggleServer('soulsync')">
+                                        <img src="/static/trans2.png" alt="SoulSync"
+                                            class="server-logo">
+                                        Standalone
+                                    </button>
                                 </div>
 
                                 <!-- Plex Settings -->
@@ -4404,6 +4410,24 @@
                                         <button class="detect-button"
                                             onclick="autoDetectNavidrome()">Auto-detect</button>
                                         <button class="test-button" onclick="testConnection('navidrome')">Test</button>
+                                    </div>
+                                </div>
+
+                                <div class="server-config-container hidden" id="soulsync-container">
+                                    <div class="soulsync-standalone-info">
+                                        <img src="/static/trans2.png" alt="SoulSync" class="soulsync-standalone-logo">
+                                        <div class="soulsync-standalone-text">
+                                            <h4>Standalone Mode</h4>
+                                            <p>SoulSync manages your library directly without an external media server. Downloads and imports are added to the library automatically.</p>
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Library Folder (Transfer Path):</label>
+                                        <input type="text" id="soulsync-transfer-path" disabled placeholder="Set in Paths section below">
+                                        <small>Files in this folder are your library. Configure the path in the Paths section.</small>
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="test-button" onclick="testConnection('soulsync')">Verify Folder</button>
                                     </div>
                                 </div>
 
