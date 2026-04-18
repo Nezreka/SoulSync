@@ -135,6 +135,7 @@ class AutoImportWorker:
 
         # State
         self._folder_snapshots: Dict[str, float] = {}  # path -> mtime_sum
+        self._processing_paths: set = set()  # Paths currently being processed (skip on rescan)
         self._current_folder = ''
         self._current_status = 'idle'
         self._stats = {'scanned': 0, 'auto_processed': 0, 'pending_review': 0, 'failed': 0}
@@ -237,6 +238,11 @@ class AutoImportWorker:
 
             self._current_folder = candidate.name
 
+            # Skip folders currently being processed by a previous scan cycle
+            if candidate.path in self._processing_paths:
+                logger.debug(f"[Auto-Import] Skipping {candidate.name} — still processing from previous cycle")
+                continue
+
             # Check if already processed
             if self._is_already_processed(candidate.folder_hash):
                 continue
@@ -248,6 +254,8 @@ class AutoImportWorker:
             self._stats['scanned'] += 1
             logger.info(f"[Auto-Import] Processing folder: {candidate.name} ({len(candidate.audio_files)} files)")
 
+            # Mark as in-progress so next scan cycle skips this folder
+            self._processing_paths.add(candidate.path)
             try:
                 # Phase 3: Identify
                 identification = self._identify_folder(candidate)
@@ -272,11 +280,21 @@ class AutoImportWorker:
                 confidence = match_result['confidence']
                 status = 'matched'
 
-                if confidence >= threshold and auto_process:
-                    # Phase 5: Auto-process
-                    logger.info(f"[Auto-Import] High confidence ({confidence:.0%}) — auto-processing {candidate.name}")
+                # Check if individual track matches are strong even if overall confidence
+                # is low (e.g. only 2 of 18 album tracks present → low coverage kills
+                # overall score, but the 2 tracks match perfectly and should still import)
+                high_conf_matches = [m for m in match_result.get('matches', []) if m['confidence'] >= 0.8]
+                has_strong_individual_matches = len(high_conf_matches) > 0
+
+                if (confidence >= threshold or has_strong_individual_matches) and auto_process:
+                    # Phase 5: Auto-process — process all tracks that matched
+                    effective_conf = max(confidence, min(m['confidence'] for m in high_conf_matches) if high_conf_matches else 0)
+                    logger.info(f"[Auto-Import] Processing {candidate.name} — "
+                                f"overall: {confidence:.0%}, {len(high_conf_matches)} strong matches, "
+                                f"{match_result.get('matched_count', 0)}/{match_result.get('total_tracks', '?')} tracks")
                     success = self._process_matches(candidate, identification, match_result)
                     status = 'completed' if success else 'failed'
+                    confidence = max(confidence, effective_conf)
                     if success:
                         self._stats['auto_processed'] += 1
                     else:
@@ -302,6 +320,8 @@ class AutoImportWorker:
                 logger.error(f"[Auto-Import] Error processing {candidate.name}: {e}")
                 self._record_result(candidate, 'failed', 0.0, error_message=str(e))
                 self._stats['failed'] += 1
+            finally:
+                self._processing_paths.discard(candidate.path)
 
             # Rate limit between folders
             if self._interruptible_sleep(2):

@@ -66449,6 +66449,7 @@ function importPageSwitchTab(tab) {
 
 // ── Auto-Import Tab ──
 let _autoImportPollInterval = null;
+let _autoImportFilter = 'all';
 
 function _autoImportStartPolling() {
     _autoImportStopPolling();
@@ -66499,14 +66500,43 @@ async function _autoImportLoadStatus() {
         const toggle = document.getElementById('auto-import-enabled');
         const statusText = document.getElementById('auto-import-status-text');
         const settingsRow = document.getElementById('auto-import-settings-row');
+        const scanNowBtn = document.getElementById('auto-import-scan-now');
+        const progressEl = document.getElementById('auto-import-progress');
+        const progressText = document.getElementById('auto-import-progress-text');
 
         if (toggle) toggle.checked = data.running;
         if (settingsRow) settingsRow.style.display = data.running ? '' : 'none';
+        if (scanNowBtn) scanNowBtn.style.display = data.running ? '' : 'none';
+
+        // Live scan progress
+        if (progressEl) {
+            if (data.current_status === 'scanning') {
+                progressEl.style.display = '';
+                if (progressText) {
+                    const stats = data.stats || {};
+                    progressText.textContent = `Scanning: ${data.current_folder || '...'} (${stats.scanned || 0} processed)`;
+                }
+            } else {
+                progressEl.style.display = 'none';
+            }
+        }
+
         if (statusText) {
             if (data.paused) statusText.textContent = 'Paused';
-            else if (data.current_status === 'scanning') statusText.textContent = `Scanning: ${data.current_folder || '...'}`;
-            else if (data.running) statusText.textContent = 'Watching';
-            else statusText.textContent = 'Disabled';
+            else if (data.current_status === 'scanning') statusText.textContent = 'Scanning...';
+            else if (data.running) {
+                // Show last scan time
+                let watchText = 'Watching';
+                if (data.last_scan_time) {
+                    try {
+                        const lastScan = new Date(data.last_scan_time);
+                        const diffS = Math.floor((Date.now() - lastScan) / 1000);
+                        if (diffS < 60) watchText = `Watching (scanned ${diffS}s ago)`;
+                        else if (diffS < 3600) watchText = `Watching (scanned ${Math.floor(diffS / 60)}m ago)`;
+                    } catch (e) {}
+                }
+                statusText.textContent = watchText;
+            } else statusText.textContent = 'Disabled';
             statusText.className = 'auto-import-status ' + (data.running ? (data.current_status === 'scanning' ? 'scanning' : 'active') : 'disabled');
         }
     } catch (e) {}
@@ -66516,19 +66546,61 @@ async function _autoImportLoadResults() {
     const container = document.getElementById('auto-import-results');
     if (!container) return;
     try {
-        const res = await fetch('/api/auto-import/results?limit=30');
+        const res = await fetch('/api/auto-import/results?limit=100');
         const data = await res.json();
         if (!data.success || !data.results || data.results.length === 0) {
-            // Keep empty state if no results
             if (!container.querySelector('.auto-import-card')) {
                 container.innerHTML = `<div class="auto-import-empty">
-                    <p>No imports yet. Drop album folders into your staging directory.</p>
+                    <p>No imports yet. Drop album folders or single tracks into your staging directory.</p>
                 </div>`;
             }
+            // Hide stats and filters
+            const statsEl = document.getElementById('auto-import-stats');
+            const filtersEl = document.getElementById('auto-import-filters');
+            if (statsEl) statsEl.style.display = 'none';
+            if (filtersEl) filtersEl.style.display = 'none';
             return;
         }
 
-        container.innerHTML = data.results.map((r, idx) => {
+        // Compute stats
+        const allResults = data.results;
+        const importedCount = allResults.filter(r => r.status === 'completed' || r.status === 'approved').length;
+        const reviewCount = allResults.filter(r => r.status === 'pending_review').length;
+        const failedCount = allResults.filter(r => r.status === 'failed' || r.status === 'needs_identification').length;
+
+        // Update stats
+        const statsEl = document.getElementById('auto-import-stats');
+        if (statsEl) {
+            statsEl.style.display = '';
+            document.getElementById('auto-import-stat-imported').textContent = `${importedCount} imported`;
+            document.getElementById('auto-import-stat-review').textContent = `${reviewCount} review`;
+            document.getElementById('auto-import-stat-failed').textContent = `${failedCount} failed`;
+        }
+
+        // Show filters
+        const filtersEl = document.getElementById('auto-import-filters');
+        if (filtersEl) {
+            filtersEl.style.display = '';
+            // Show batch action buttons when applicable
+            const approveAllBtn = document.getElementById('auto-import-approve-all');
+            const clearBtn = document.getElementById('auto-import-clear-completed');
+            if (approveAllBtn) approveAllBtn.style.display = reviewCount > 0 ? '' : 'none';
+            if (clearBtn) clearBtn.style.display = (importedCount + failedCount) > 0 ? '' : 'none';
+        }
+
+        // Apply filter
+        let filtered = allResults;
+        if (_autoImportFilter === 'pending') filtered = allResults.filter(r => r.status === 'pending_review');
+        else if (_autoImportFilter === 'imported') filtered = allResults.filter(r => r.status === 'completed' || r.status === 'approved');
+        else if (_autoImportFilter === 'failed') filtered = allResults.filter(r => r.status === 'failed' || r.status === 'needs_identification');
+
+        if (filtered.length === 0) {
+            const filterName = _autoImportFilter === 'pending' ? 'pending review' : _autoImportFilter;
+            container.innerHTML = `<div class="auto-import-empty"><p>No ${filterName} items.</p></div>`;
+            return;
+        }
+
+        container.innerHTML = filtered.map((r, idx) => {
             const confPct = Math.round((r.confidence || 0) * 100);
             const confClass = confPct >= 90 ? 'high' : confPct >= 70 ? 'medium' : 'low';
             const statusLabels = {
@@ -66652,6 +66724,58 @@ async function _autoImportSaveSettings() {
     } catch (e) { showToast('Error', 'error'); }
 }
 
+function _autoImportSetFilter(filter) {
+    _autoImportFilter = filter;
+    document.querySelectorAll('#auto-import-filters .adl-pill').forEach(p =>
+        p.classList.toggle('active', p.dataset.filter === filter));
+    _autoImportLoadResults();
+}
+
+async function _autoImportScanNow() {
+    try {
+        const res = await fetch('/api/auto-import/scan-now', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Scan triggered', 'success');
+            _autoImportLoadStatus();
+        } else {
+            showToast(data.error || 'Failed to trigger scan', 'error');
+        }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function _autoImportApproveAll() {
+    const confirmed = await showConfirmDialog({
+        title: 'Approve All',
+        message: 'Approve and import all pending review items?',
+        confirmText: 'Approve All',
+    });
+    if (!confirmed) return;
+    try {
+        const res = await fetch('/api/auto-import/approve-all', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Approved ${data.count || 0} items`, 'success');
+            _autoImportLoadResults();
+        } else {
+            showToast(data.error || 'Failed', 'error');
+        }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function _autoImportClearCompleted() {
+    try {
+        const res = await fetch('/api/auto-import/clear-completed', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Cleared ${data.count || 0} imported items`, 'success');
+            _autoImportLoadResults();
+        } else {
+            showToast(data.error || 'Failed', 'error');
+        }
+    } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
 function _autoImportToggleDetail(idx) {
     const trackList = document.getElementById(`auto-import-tracks-${idx}`);
     if (trackList) {
@@ -66659,6 +66783,10 @@ function _autoImportToggleDetail(idx) {
     }
 }
 window._autoImportToggleDetail = _autoImportToggleDetail;
+window._autoImportSetFilter = _autoImportSetFilter;
+window._autoImportScanNow = _autoImportScanNow;
+window._autoImportApproveAll = _autoImportApproveAll;
+window._autoImportClearCompleted = _autoImportClearCompleted;
 
 async function _autoImportApprove(id) {
     try {

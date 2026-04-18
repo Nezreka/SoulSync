@@ -6048,6 +6048,10 @@
                             <span>Auto-Import</span>
                         </label>
                         <span class="auto-import-status" id="auto-import-status-text">Disabled</span>
+                        <button class="auto-import-scan-now-btn" id="auto-import-scan-now" onclick="_autoImportScanNow()" title="Scan staging folder now" style="display:none">
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M13.65 2.35A8 8 0 1 0 16 8h-2a6 6 0 1 1-1.76-4.24L10 6h6V0l-2.35 2.35z"/></svg>
+                            Scan Now
+                        </button>
                     </div>
                     <div class="auto-import-settings-row" id="auto-import-settings-row" style="display:none;">
                         <label>Confidence: <input type="range" id="auto-import-confidence" min="50" max="100" value="90" oninput="document.getElementById('auto-import-conf-val').textContent=this.value+'%'"> <span id="auto-import-conf-val">90%</span></label>
@@ -6059,11 +6063,32 @@
                         </select></label>
                         <button class="watchlist-action-btn watchlist-action-secondary" onclick="_autoImportSaveSettings()">Save</button>
                     </div>
+                    <!-- Live scan progress -->
+                    <div class="auto-import-progress" id="auto-import-progress" style="display:none">
+                        <div class="auto-import-progress-text" id="auto-import-progress-text">Scanning...</div>
+                        <div class="auto-import-progress-bar"><div class="auto-import-progress-fill" id="auto-import-progress-fill"></div></div>
+                    </div>
+                </div>
+                <!-- Stats summary -->
+                <div class="auto-import-stats" id="auto-import-stats" style="display:none">
+                    <span class="auto-import-stat" id="auto-import-stat-imported">0 imported</span>
+                    <span class="auto-import-stat auto-import-stat-review" id="auto-import-stat-review">0 review</span>
+                    <span class="auto-import-stat auto-import-stat-failed" id="auto-import-stat-failed">0 failed</span>
+                </div>
+                <!-- Filter pills -->
+                <div class="auto-import-filters" id="auto-import-filters" style="display:none">
+                    <button class="adl-pill active" data-filter="all" onclick="_autoImportSetFilter('all')">All</button>
+                    <button class="adl-pill" data-filter="pending" onclick="_autoImportSetFilter('pending')">Needs Review</button>
+                    <button class="adl-pill" data-filter="imported" onclick="_autoImportSetFilter('imported')">Imported</button>
+                    <button class="adl-pill" data-filter="failed" onclick="_autoImportSetFilter('failed')">Failed</button>
+                    <div style="flex:1"></div>
+                    <button class="auto-import-batch-btn" id="auto-import-approve-all" onclick="_autoImportApproveAll()" style="display:none">Approve All</button>
+                    <button class="auto-import-batch-btn auto-import-clear-btn" id="auto-import-clear-completed" onclick="_autoImportClearCompleted()" style="display:none">Clear History</button>
                 </div>
                 <div class="auto-import-results" id="auto-import-results">
                     <div class="auto-import-empty">
                         <p>Enable auto-import to watch your staging folder for new music.</p>
-                        <p style="opacity:0.5;font-size:12px;">Drop album folders into your staging directory and SoulSync will identify, match, and import them automatically.</p>
+                        <p style="opacity:0.5;font-size:12px;">Drop album folders or single tracks into your staging directory and SoulSync will identify, match, and import them automatically.</p>
                     </div>
                 </div>
             </div>
