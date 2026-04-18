@@ -8698,7 +8698,7 @@ function initializeSearchModeToggle() {
         // Fire ALL source fetches immediately in parallel with the primary endpoint.
         // Don't guess which is primary — the main endpoint response will tell us.
         // If an alternate duplicates the primary, it just overwrites with same data.
-        for (const srcName of ['spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'youtube_videos']) {
+        for (const srcName of ['spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'youtube_videos', 'musicbrainz']) {
             _fetchAlternateSource(srcName, query);
         }
 
