@@ -1,10 +1,4 @@
-if __name__ == '__main__':
-    raise SystemExit(
-        "SoulSync must be started with Gunicorn.\n"
-        "Use:\n"
-        "`gunicorn -c gunicorn.conf.py wsgi:application` for production, or\n"
-        "`gunicorn -c gunicorn.dev.conf.py wsgi:application` for local development."
-    )
+_DIRECT_RUN = (__name__ == '__main__')
 
 import os
 import json
@@ -54522,3 +54516,13 @@ def start_runtime_services():
         print("WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor)")
 
         _runtime_started = True
+
+
+# Direct execution: python web_server.py (dev/Windows fallback)
+# Production should use: gunicorn -c gunicorn.conf.py wsgi:application
+if _DIRECT_RUN:
+    print("Starting SoulSync Web UI Server...")
+    print("Open your browser and navigate to http://127.0.0.1:8008")
+    print("Tip: For production, use gunicorn -c gunicorn.conf.py wsgi:application")
+    start_runtime_services()
+    socketio.run(app, host='0.0.0.0', port=8008, debug=False, allow_unsafe_werkzeug=True)
