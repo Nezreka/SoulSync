@@ -24462,19 +24462,158 @@ def _resume_workers_after_scan():
         print(f"Resumed {resumed} workers after database scan")
     _workers_paused_by_scan = set()
 
+def _run_soulsync_deep_scan():
+    """Deep scan for SoulSync standalone mode.
+
+    1. Scans the Transfer folder for all audio files
+    2. Compares against soulsync DB records (by file_path)
+    3. Untracked files → moved to Staging for auto-import processing
+    4. Stale DB records (file gone) → removed from DB
+    """
+    try:
+        import shutil
+        transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        staging_path = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
+
+        if not os.path.isdir(transfer_path):
+            _db_update_error_callback(f"Transfer folder not found: {transfer_path}")
+            return
+
+        print(f"[SoulSync Deep Scan] Starting — Transfer: {transfer_path}")
+        _db_update_phase_callback('scanning')
+
+        # Phase 1: Collect all audio files in Transfer
+        audio_extensions = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
+        transfer_files = set()
+        for root, dirs, files in os.walk(transfer_path):
+            for filename in files:
+                if os.path.splitext(filename)[1].lower() in audio_extensions:
+                    transfer_files.add(os.path.join(root, filename))
+
+        print(f"[SoulSync Deep Scan] Found {len(transfer_files)} audio files in Transfer")
+
+        # Phase 2: Get all soulsync file paths from DB
+        db = get_database()
+        db_paths = set()
+        try:
+            with db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT file_path FROM tracks WHERE server_source = 'soulsync' AND file_path IS NOT NULL")
+                for row in cursor.fetchall():
+                    if row['file_path']:
+                        db_paths.add(row['file_path'])
+        except Exception as e:
+            print(f"[SoulSync Deep Scan] Error reading DB paths: {e}")
+
+        print(f"[SoulSync Deep Scan] {len(db_paths)} tracks in soulsync DB")
+
+        # Phase 3: Find untracked files (in Transfer but not in DB)
+        untracked = transfer_files - db_paths
+        # Also check with normalized paths (Windows vs Unix separators)
+        if untracked:
+            db_paths_normalized = {p.replace('\\', '/') for p in db_paths}
+            untracked = {f for f in untracked if f.replace('\\', '/') not in db_paths_normalized}
+
+        # Phase 4: Move untracked files to Staging for auto-import
+        moved_count = 0
+        if untracked and os.path.isdir(staging_path):
+            _db_update_phase_callback('moving_untracked')
+            for file_path in untracked:
+                try:
+                    # Preserve relative folder structure from Transfer
+                    rel_path = os.path.relpath(file_path, transfer_path)
+                    dest_path = os.path.join(staging_path, rel_path)
+                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                    shutil.move(file_path, dest_path)
+                    moved_count += 1
+                except Exception as e:
+                    print(f"[SoulSync Deep Scan] Could not move {os.path.basename(file_path)}: {e}")
+
+            # Clean up empty directories in Transfer after moving files
+            for root, dirs, files in os.walk(transfer_path, topdown=False):
+                for d in dirs:
+                    dir_path = os.path.join(root, d)
+                    try:
+                        if not os.listdir(dir_path):
+                            os.rmdir(dir_path)
+                    except OSError:
+                        pass
+
+        # Phase 5: Find stale DB records (in DB but file gone from disk)
+        _db_update_phase_callback('cleanup')
+        stale_count = 0
+        stale_track_ids = []
+        for db_path in db_paths:
+            if not os.path.exists(db_path):
+                stale_track_ids.append(db_path)
+                stale_count += 1
+
+        # Remove stale records
+        if stale_track_ids:
+            try:
+                with db._get_connection() as conn:
+                    cursor = conn.cursor()
+                    for fp in stale_track_ids:
+                        cursor.execute("DELETE FROM tracks WHERE file_path = ? AND server_source = 'soulsync'", (fp,))
+                    conn.commit()
+
+                    # Clean up orphaned albums (no tracks left)
+                    cursor.execute("""
+                        DELETE FROM albums WHERE server_source = 'soulsync'
+                        AND id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE server_source = 'soulsync')
+                    """)
+                    orphan_albums = cursor.rowcount
+
+                    # Clean up orphaned artists (no albums left)
+                    cursor.execute("""
+                        DELETE FROM artists WHERE server_source = 'soulsync'
+                        AND id NOT IN (SELECT DISTINCT artist_id FROM albums WHERE server_source = 'soulsync')
+                    """)
+                    orphan_artists = cursor.rowcount
+                    conn.commit()
+
+                    if orphan_albums > 0 or orphan_artists > 0:
+                        print(f"[SoulSync Deep Scan] Cleaned up {orphan_albums} orphaned albums, {orphan_artists} orphaned artists")
+            except Exception as e:
+                print(f"[SoulSync Deep Scan] Error cleaning stale records: {e}")
+
+        summary = f"Deep scan complete: {len(transfer_files)} files scanned"
+        if moved_count > 0:
+            summary += f", {moved_count} untracked files moved to Staging"
+        if stale_count > 0:
+            summary += f", {stale_count} stale records removed"
+        if moved_count == 0 and stale_count == 0:
+            summary += " — library is clean"
+
+        print(f"[SoulSync Deep Scan] {summary}")
+        add_activity_item("", "SoulSync Deep Scan", summary, "Now")
+        _db_update_finished_callback(0, 0, len(transfer_files), moved_count, stale_count)
+
+    except Exception as e:
+        print(f"[SoulSync Deep Scan] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        _db_update_error_callback(f"Deep scan failed: {e}")
+
+
 def _run_db_update_task(full_refresh, server_type):
     """The actual function that runs in the background thread."""
     global db_update_worker
+
+    # SoulSync standalone: library is populated at download/import time, no incremental scan needed
+    if server_type == "soulsync":
+        print("[SoulSync Standalone] Incremental scan skipped — library updates at download time. Use Deep Scan to find untracked files.")
+        _db_update_finished_callback(0, 0, 0, 0, 0)
+        return
+
     media_client = None
-    
+
     if server_type == "plex":
         media_client = plex_client
     elif server_type == "jellyfin":
         media_client = jellyfin_client
     elif server_type == "navidrome":
         media_client = navidrome_client
-    elif server_type == "soulsync":
-        media_client = soulsync_library_client
 
     if not media_client:
         _db_update_error_callback(f"Media client for '{server_type}' not available.")
@@ -24522,9 +24661,10 @@ def _run_deep_scan_task(server_type):
     elif server_type == "navidrome":
         media_client = navidrome_client
     elif server_type == "soulsync":
-        media_client = soulsync_library_client
-        if media_client:
-            media_client.clear_cache()  # Force fresh scan for deep scan
+        # SoulSync standalone deep scan: find untracked files → move to Staging,
+        # remove stale DB records where files no longer exist on disk
+        _run_soulsync_deep_scan()
+        return
 
     if not media_client:
         _db_update_error_callback(f"Media client for '{server_type}' not available.")
