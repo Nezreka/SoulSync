@@ -210,10 +210,12 @@ class AutoImportWorker:
         """One full scan of the staging folder."""
         staging = self._resolve_staging_path()
         if not staging or not os.path.isdir(staging):
+            logger.warning(f"[Auto-Import] Staging path not found or invalid: {self.staging_path}")
             return
 
         # Find folder candidates
         candidates = self._enumerate_folders(staging)
+        logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging}")
         if not candidates:
             return
 
@@ -316,68 +318,73 @@ class AutoImportWorker:
         return None
 
     def _enumerate_folders(self, staging: str) -> List[FolderCandidate]:
-        """Find album folder and single file candidates in staging directory."""
+        """Find album folder and single file candidates in staging directory (recursive)."""
         candidates = []
+        self._scan_directory(staging, candidates)
+        return candidates
+
+    def _scan_directory(self, directory: str, candidates: List[FolderCandidate]):
+        """Recursively scan a directory for album folders and loose audio files."""
         try:
-            entries = sorted(os.listdir(staging))
+            entries = sorted(os.listdir(directory))
         except OSError:
-            return candidates
+            return
+
+        # Collect loose audio files at this level
+        loose_files = []
+        subdirs = []
 
         for entry in entries:
-            full_path = os.path.join(staging, entry)
-
-            # Loose audio file in staging root → single track candidate
+            full_path = os.path.join(directory, entry)
             if os.path.isfile(full_path) and os.path.splitext(entry)[1].lower() in AUDIO_EXTENSIONS:
-                folder_hash = _compute_folder_hash([full_path])
-                candidates.append(FolderCandidate(
-                    path=full_path, name=entry, audio_files=[full_path],
-                    folder_hash=folder_hash, is_single=True
-                ))
-                continue
+                loose_files.append(full_path)
+            elif os.path.isdir(full_path):
+                subdirs.append((entry, full_path))
 
-            if not os.path.isdir(full_path):
-                continue
-
-            audio_files = []
+        if loose_files:
+            # This directory has audio files — treat it as an album folder candidate
+            audio_files = loose_files
             disc_structure = {}
 
-            # Check for disc subfolders
+            # Check if any subdirs are disc folders
             has_disc_folders = False
-            for sub in os.listdir(full_path):
-                sub_path = os.path.join(full_path, sub)
-                disc_match = DISC_FOLDER_RE.match(sub)
-                if disc_match and os.path.isdir(sub_path):
+            for sub_name, sub_path in subdirs:
+                disc_match = DISC_FOLDER_RE.match(sub_name)
+                if disc_match:
                     has_disc_folders = True
                     disc_num = int(disc_match.group(1))
                     disc_files = [os.path.join(sub_path, f) for f in sorted(os.listdir(sub_path))
-                                  if os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
+                                  if os.path.isfile(os.path.join(sub_path, f))
+                                  and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
                     if disc_files:
                         disc_structure[disc_num] = disc_files
                         audio_files.extend(disc_files)
 
-            # Also collect top-level audio files
-            top_files = [os.path.join(full_path, f) for f in sorted(os.listdir(full_path))
-                         if os.path.isfile(os.path.join(full_path, f))
-                         and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
+            if has_disc_folders:
+                disc_structure[0] = loose_files  # Top-level files are disc 0
 
-            if not has_disc_folders:
-                audio_files = top_files
-            else:
-                # Add any stray top-level files to disc 0
-                if top_files:
-                    disc_structure[0] = top_files
-                    audio_files.extend(top_files)
-
-            if not audio_files:
-                continue
-
+            # Determine if this is a single or album
+            is_single = len(audio_files) == 1 and not has_disc_folders
+            folder_name = os.path.basename(directory)
             folder_hash = _compute_folder_hash(audio_files)
-            candidates.append(FolderCandidate(
-                path=full_path, name=entry, audio_files=audio_files,
-                disc_structure=disc_structure, folder_hash=folder_hash
-            ))
 
-        return candidates
+            if is_single:
+                candidates.append(FolderCandidate(
+                    path=audio_files[0], name=os.path.basename(audio_files[0]),
+                    audio_files=audio_files, folder_hash=folder_hash, is_single=True
+                ))
+            else:
+                candidates.append(FolderCandidate(
+                    path=directory, name=folder_name, audio_files=audio_files,
+                    disc_structure=disc_structure, folder_hash=folder_hash
+                ))
+        else:
+            # No audio files here — recurse into subdirectories
+            for sub_name, sub_path in subdirs:
+                # Skip disc folders at this level (they'll be handled by the parent album)
+                if DISC_FOLDER_RE.match(sub_name):
+                    continue
+                self._scan_directory(sub_path, candidates)
 
     def _is_folder_stable(self, candidate: FolderCandidate) -> bool:
         """Check if folder contents have stopped changing."""

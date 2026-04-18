@@ -58229,13 +58229,18 @@ body.reduce-effects *::after {
 /* Result cards */
 .auto-import-card {
     display: flex;
-    gap: 14px;
+    flex-direction: column;
     padding: 14px 16px;
     background: rgba(255,255,255,0.02);
     border: 1px solid rgba(255,255,255,0.06);
     border-radius: 12px;
     margin-bottom: 8px;
     transition: all 0.2s;
+}
+
+.auto-import-card-top {
+    display: flex;
+    gap: 14px;
     align-items: center;
 }
 
@@ -58307,6 +58312,90 @@ body.reduce-effects *::after {
 .auto-import-confidence-text {
     font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.5);
 }
+
+.auto-import-card-meta {
+    display: flex; gap: 8px; align-items: center;
+    font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 3px;
+}
+
+.auto-import-method-badge {
+    background: rgba(255,255,255,0.06);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+    color: rgba(255,255,255,0.45);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.auto-import-card-folder-path {
+    font-size: 9px;
+    color: rgba(255,255,255,0.15);
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.03);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Expandable track list */
+.auto-import-track-list {
+    display: none;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+.auto-import-track-list.expanded {
+    display: block;
+}
+
+.auto-import-track-list-header {
+    display: grid;
+    grid-template-columns: 1fr 1fr 50px;
+    gap: 8px;
+    font-size: 9px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.auto-import-track-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 50px;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 11px;
+}
+
+.auto-import-track-name {
+    color: rgba(255,255,255,0.7);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.auto-import-track-file {
+    color: rgba(255,255,255,0.3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.auto-import-track-conf {
+    text-align: right;
+    font-weight: 600;
+    font-size: 10px;
+}
+
+.auto-import-track-conf.auto-import-conf-high { color: #4ade80; }
+.auto-import-track-conf.auto-import-conf-medium { color: #fbbf24; }
+.auto-import-track-conf.auto-import-conf-low { color: #f87171; }
 
 .auto-import-status-badge {
     font-size: 9px; font-weight: 600; padding: 2px 8px;
