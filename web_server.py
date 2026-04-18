@@ -18402,10 +18402,12 @@ def _create_lossy_copy(final_path):
         bitrate = '256'
 
     # Codec configuration: (ffmpeg_codec, extension, quality_label, extra_args)
+    # -vn strips video/image streams (embedded cover art) which can cause
+    # conversion failures when the output muxer can't handle image streams
     codec_map = {
-        'mp3':  ('libmp3lame', '.mp3',  f'MP3-{bitrate}',  ['-id3v2_version', '3']),
-        'opus': ('libopus',    '.opus', f'OPUS-{bitrate}',  ['-map', '0:a', '-vbr', 'on']),
-        'aac':  ('aac',        '.m4a',  f'AAC-{bitrate}',   ['-movflags', '+faststart']),
+        'mp3':  ('libmp3lame', '.mp3',  f'MP3-{bitrate}',  ['-vn', '-id3v2_version', '3']),
+        'opus': ('libopus',    '.opus', f'OPUS-{bitrate}',  ['-vn', '-map', '0:a', '-vbr', 'on']),
+        'aac':  ('aac',        '.m4a',  f'AAC-{bitrate}',   ['-vn', '-movflags', '+faststart']),
     }
 
     if codec not in codec_map:
