@@ -66395,10 +66395,6 @@ async function importPageRefreshStaging() {
     // Clear finished jobs from the queue
     importPageClearFinishedJobs();
 
-    // Re-fetch groups and suggestions (server rebuilds cache after imports)
-    importPageLoadAutoGroups();
-    importPageLoadSuggestions();
-
     try {
         const resp = await fetch('/api/import/staging/files');
         const data = await resp.json();
@@ -66417,10 +66413,14 @@ async function importPageRefreshStaging() {
         document.getElementById('import-page-staging-stats').textContent =
             `${importPageState.stagingFiles.length} file${importPageState.stagingFiles.length !== 1 ? 's' : ''}${totalSize ? ' · ' + sizeStr : ''}`;
 
-        // Refresh the current tab view
+        // Refresh the current tab view after data is loaded
         if (importPageState.activeTab === 'singles') {
             importPageRenderSinglesList();
+        } else if (importPageState.activeTab === 'album') {
+            importPageLoadAutoGroups();
         }
+        // Always refresh suggestions and groups in background
+        importPageLoadSuggestions();
     } catch (err) {
         console.error('Failed to refresh staging:', err);
     }
