@@ -3602,6 +3602,11 @@ const WHATS_NEW = {
     '2.32': [
         // --- April 18, 2026 ---
         { date: 'April 18, 2026' },
+        { title: 'Per-Artist Watchlist Scan Source', desc: 'Override which metadata provider (Spotify, Deezer, Apple Music, Discogs) is used when scanning a specific watchlist artist for new releases. Source selector in the artist config modal only shows providers the artist has enrichment matches for. Global default unchanged unless explicitly overridden', page: 'watchlist' },
+        { title: 'Enhanced Copy Debug Info', desc: 'Copy Debug Info button now includes ffmpeg version, runner type, Discogs status, wishlist count, music library paths, music videos dir, hybrid source priority, lossy copy config, auto import status, and a log file listing with sizes. Staging path bug fixed. Library counts now match dashboard. Footer links to GitHub Issues', page: 'help' },
+        { title: 'Troubleshooting Docs Section', desc: 'New Help page section with log file reference table, log level guide, Copy Debug Info walkthrough, common issues FAQ, and issue reporting checklist', page: 'help' },
+        { title: 'Log Level Moved to Advanced Tab', desc: 'Log Level dropdown moved from Downloads tab to Settings → Advanced → Logging for better organization' },
+        { title: 'Fix AcoustID Scanner Fix Action', desc: 'AcoustID mismatch "Fix" button was failing with a uuid error. Caused by a redundant local import shadowing the module-level import in Python\'s scoping rules' },
         { title: 'MusicBrainz Search Tab', desc: 'New search tab in Enhanced and Global search — find tracks and albums on MusicBrainz\'s community database. Cover art from Cover Art Archive. Click results to open download modal with full tracklist. Finds obscure tracks that Spotify/Deezer/iTunes miss', page: 'downloads' },
 
         // --- April 17, 2026 ---
