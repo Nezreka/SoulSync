@@ -2724,6 +2724,63 @@ def add_cache_headers(response, cache_duration=300):
     response.headers['Pragma'] = 'cache'
     return response
 
+
+_enhanced_search_cache = collections.OrderedDict()
+_enhanced_search_cache_lock = threading.Lock()
+_ENHANCED_SEARCH_CACHE_TTL = 600
+_ENHANCED_SEARCH_CACHE_MAX_ENTRIES = 100
+
+
+def _get_enhanced_search_cache_key(query):
+    """Build a cache key that follows the current metadata/search configuration."""
+    normalized_query = (query or '').strip().lower()
+
+    try:
+        active_server = config_manager.get_active_media_server()
+    except Exception:
+        active_server = 'unknown'
+
+    try:
+        fallback_source = _get_metadata_fallback_source()
+    except Exception:
+        fallback_source = 'unknown'
+
+    try:
+        hydrabase_active = _is_hydrabase_active()
+    except Exception:
+        hydrabase_active = False
+
+    return (normalized_query, active_server, fallback_source, hydrabase_active)
+
+
+def _get_cached_enhanced_search_response(cache_key):
+    """Return a cached enhanced-search response if it is still fresh."""
+    now = time.time()
+    with _enhanced_search_cache_lock:
+        entry = _enhanced_search_cache.get(cache_key)
+        if not entry:
+            return None
+
+        if now - entry['timestamp'] < _ENHANCED_SEARCH_CACHE_TTL:
+            _enhanced_search_cache.move_to_end(cache_key)
+            return entry['data']
+
+        _enhanced_search_cache.pop(cache_key, None)
+        return None
+
+
+def _set_cached_enhanced_search_response(cache_key, response_data):
+    """Store an enhanced-search response in the short-lived in-memory cache."""
+    with _enhanced_search_cache_lock:
+        _enhanced_search_cache[cache_key] = {
+            'timestamp': time.time(),
+            'data': response_data,
+        }
+        _enhanced_search_cache.move_to_end(cache_key)
+
+        while len(_enhanced_search_cache) > _ENHANCED_SEARCH_CACHE_MAX_ENTRIES:
+            _enhanced_search_cache.popitem(last=False)
+
 # --- Background Download Monitoring (GUI Parity) ---
 class WebUIDownloadMonitor:
     """
@@ -8474,6 +8531,7 @@ def enhanced_search():
     """
     data = request.get_json()
     query = data.get('query', '').strip()
+    cache_key = _get_enhanced_search_cache_key(query)
 
     empty_source = {"artists": [], "albums": [], "tracks": [], "available": False}
 
@@ -8487,6 +8545,11 @@ def enhanced_search():
             "primary_source": "spotify",
             "metadata_source": "spotify"
         })
+
+    cached_response = _get_cached_enhanced_search_response(cache_key)
+    if cached_response is not None:
+        logger.info(f"Enhanced search cache hit for: '{query}'")
+        return jsonify(cached_response)
 
     logger.info(f"Enhanced search initiated for: '{query}'")
 
@@ -8506,6 +8569,23 @@ def enhanced_search():
                 "name": artist.name,
                 "image_url": image_url
             })
+
+        # Very short queries are usually broad enough that remote metadata searches
+        # just add latency without improving the result quality much. Keep them local.
+        if len(query) < 3:
+            fb_source = _get_metadata_fallback_source()
+            response_data = {
+                "db_artists": db_artists,
+                "spotify_artists": [],
+                "spotify_albums": [],
+                "spotify_tracks": [],
+                "metadata_source": fb_source,
+                "primary_source": fb_source,
+                "alternate_sources": [],
+                "sources": {},
+            }
+            _set_cached_enhanced_search_response(cache_key, response_data)
+            return jsonify(response_data)
 
         # ── Determine primary source and search it synchronously ──
         primary_source = "spotify"
@@ -8575,7 +8655,7 @@ def enhanced_search():
                      f"{len(primary_results['tracks'])} tracks | "
                      f"Alt sources available: {alternate_sources}")
 
-        return jsonify({
+        response_data = {
             # Backward compat — same shape as before
             "db_artists": db_artists,
             "spotify_artists": primary_results["artists"],
@@ -8585,7 +8665,9 @@ def enhanced_search():
             # New multi-source data
             "primary_source": primary_source,
             "alternate_sources": alternate_sources,
-        })
+        }
+        _set_cached_enhanced_search_response(cache_key, response_data)
+        return jsonify(response_data)
 
     except Exception as e:
         logger.error(f"Enhanced search error: {e}")
