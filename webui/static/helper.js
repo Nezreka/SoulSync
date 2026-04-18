@@ -3599,7 +3599,7 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
-    '2.2': [
+    '2.31': [
         // --- April 17, 2026 ---
         { date: 'April 17, 2026' },
         { title: 'Auto-Import', desc: 'Background staging folder watcher that automatically identifies and imports music. Three strategies: audio tags, folder name parsing, and AcoustID fingerprinting. Confidence-gated: 90%+ auto-imports, 70-90% queued for review, below 70% left for manual. Enable on the Import page Auto tab', page: 'import' },
@@ -3695,12 +3695,12 @@ const WHATS_NEW = {
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '2.2';
+    return btn ? btn.textContent.trim().replace('v', '') : '2.31';
 }
 
 function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
-    return versions[0] || '2.2';
+    return versions[0] || '2.31';
 }
 
 function openWhatsNew() {
