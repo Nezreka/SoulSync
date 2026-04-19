@@ -15012,6 +15012,16 @@ def library_delete_track(track_id):
                         os.remove(resolved)
                         file_deleted = True
                         logger.info(f"Deleted file from disk: {resolved}")
+                        # Clean up sidecar files (.lrc, .txt lyrics, cover.jpg)
+                        base_no_ext = os.path.splitext(resolved)[0]
+                        for sidecar_ext in ('.lrc', '.txt'):
+                            sidecar = base_no_ext + sidecar_ext
+                            if os.path.exists(sidecar):
+                                try:
+                                    os.remove(sidecar)
+                                    logger.info(f"Deleted sidecar file: {sidecar}")
+                                except Exception:
+                                    pass
                     except Exception as e:
                         logger.warning(f"Failed to delete file: {e}")
                         file_error = str(e)
@@ -15799,6 +15809,15 @@ def library_delete_album(album_id):
                         try:
                             os.remove(resolved)
                             files_deleted += 1
+                            # Clean up sidecar files (.lrc, .txt lyrics)
+                            base_no_ext = os.path.splitext(resolved)[0]
+                            for sidecar_ext in ('.lrc', '.txt'):
+                                sidecar = base_no_ext + sidecar_ext
+                                if os.path.exists(sidecar):
+                                    try:
+                                        os.remove(sidecar)
+                                    except Exception:
+                                        pass
                         except Exception as e:
                             logger.warning(f"Failed to delete track file: {e}")
                             files_failed += 1
