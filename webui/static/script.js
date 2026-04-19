@@ -24638,9 +24638,16 @@ function openToolHelpModal(toolId) {
 
 function closeToolHelpModal() {
     const modal = document.getElementById('tool-help-modal');
-    modal.classList.remove('active');
+    if (modal) modal.classList.remove('active');
     document.body.style.overflow = ''; // Restore scrolling
 }
+// Global Escape key handler for tool help modal (works even if Tools page wasn't visited)
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('tool-help-modal');
+        if (modal && modal.classList.contains('active')) closeToolHelpModal();
+    }
+});
 
 // ===============================
 // == RETAG TOOL FUNCTIONS      ==
