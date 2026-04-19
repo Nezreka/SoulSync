@@ -326,20 +326,28 @@ class MetadataCache:
                 """, (row['id'],))
                 conn.commit()
 
-                # Resolve entity IDs to full data
+                # Resolve entity IDs to full data via a single batched query
+                # (chunked to stay below SQLite's default variable limit).
                 result_ids = json.loads(row['result_ids'])
                 if not result_ids:
                     return []
 
-                results = []
-                for eid in result_ids:
-                    cursor.execute("""
-                        SELECT raw_json FROM metadata_cache_entities
-                        WHERE source = ? AND entity_type = ? AND entity_id = ?
-                    """, (source, search_type, eid))
-                    erow = cursor.fetchone()
-                    if erow:
-                        results.append(json.loads(erow['raw_json']))
+                raw_by_id: Dict[str, dict] = {}
+                for i in range(0, len(result_ids), 500):
+                    chunk = result_ids[i:i + 500]
+                    placeholders = ','.join('?' * len(chunk))
+                    cursor.execute(f"""
+                        SELECT entity_id, raw_json FROM metadata_cache_entities
+                        WHERE source = ? AND entity_type = ? AND entity_id IN ({placeholders})
+                    """, [source, search_type, *chunk])
+                    for erow in cursor.fetchall():
+                        try:
+                            raw_by_id[erow['entity_id']] = json.loads(erow['raw_json'])
+                        except (ValueError, TypeError):
+                            continue
+
+                # Preserve the original result_ids ordering.
+                results = [raw_by_id[eid] for eid in result_ids if eid in raw_by_id]
 
                 # Only return if we found all (or most) entries — partial results are unreliable
                 if len(results) >= len(result_ids) * 0.8:
