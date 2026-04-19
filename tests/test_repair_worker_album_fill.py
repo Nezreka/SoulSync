@@ -33,6 +33,9 @@ if "config.settings" not in sys.modules:
         def get(self, key, default=None):
             return default
 
+        def get_active_media_server(self):
+            return "plex"
+
     settings_mod.config_manager = _DummyConfigManager()
     config_pkg.settings = settings_mod
     sys.modules["config"] = config_pkg
