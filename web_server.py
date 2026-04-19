@@ -19078,6 +19078,8 @@ def _generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: 
 def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> dict:
     """Extracts a comprehensive metadata dictionary from the provided context."""
     metadata = {}
+    if album_info is None:
+        album_info = {}
     original_search = context.get("original_search_result", {})
     spotify_album = context.get("spotify_album")
 
