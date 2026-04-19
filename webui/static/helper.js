@@ -3625,6 +3625,7 @@ const WHATS_NEW = {
         { title: 'Improved Deep Scan Logging', desc: 'Per-artist log lines now show "0 new tracks (150 existing updated)" instead of misleading "0 tracks". Completion message shows "library up to date" when nothing is new' },
         { title: 'Faster Standalone Verify', desc: 'Standalone verify button now stops counting after 10 audio files instead of 100, reducing verification time from 60+ seconds to near-instant on large libraries' },
         { title: 'MusicBrainz Search Tab', desc: 'New search tab in Enhanced and Global search — find tracks and albums on MusicBrainz\'s community database. Cover art from Cover Art Archive. Click results to open download modal with full tracklist. Finds obscure tracks that Spotify/Deezer/iTunes miss', page: 'downloads' },
+        { title: 'Fix Library Page Crash on All Filter', desc: 'Library page could crash with "No artists found" when viewing all artists if any artist had a non-string soul_id. Individual letter filters worked because the problematic artist wasn\'t in those results. Card rendering is now fault-tolerant — one bad artist card can\'t take down the whole page', page: 'library' },
 
         // --- April 17, 2026 ---
         { date: 'April 17, 2026' },
