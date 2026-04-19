@@ -40,16 +40,68 @@ def register_routes(bp):
     @bp.route("/downloads", methods=["GET"])
     @require_api_key
     def list_downloads():
-        """List active and recent download tasks."""
+        """List download tasks with optional filtering and pagination.
+
+        Query params:
+            status: comma-separated statuses to include (e.g. "downloading,queued").
+                    Default includes all.
+            limit:  max tasks to return (default 100, max 500).
+            offset: skip the first N tasks (default 0).
+
+        Response includes `total` (post-filter count) so clients can paginate
+        without fetching everything. Tasks are sorted by `status_change_time`
+        descending so newest/in-flight tasks appear first.
+        """
         try:
             from web_server import download_tasks, tasks_lock
 
-            tasks = []
-            with tasks_lock:
-                for task_id, task in download_tasks.items():
-                    tasks.append(_serialize_download(task_id, task))
+            # Parse pagination params
+            try:
+                limit = int(request.args.get("limit", 100))
+            except (TypeError, ValueError):
+                limit = 100
+            try:
+                offset = int(request.args.get("offset", 0))
+            except (TypeError, ValueError):
+                offset = 0
+            # Clamp to sensible bounds
+            limit = max(1, min(limit, 500))
+            offset = max(0, offset)
 
-            return api_success({"downloads": tasks})
+            status_param = request.args.get("status", "").strip()
+            status_filter = (
+                {s.strip() for s in status_param.split(",") if s.strip()}
+                if status_param
+                else None
+            )
+
+            # Snapshot under the lock, then sort/slice outside.
+            with tasks_lock:
+                snapshot = list(download_tasks.items())
+
+            if status_filter:
+                snapshot = [
+                    (tid, t) for tid, t in snapshot
+                    if (t.get("status") or "") in status_filter
+                ]
+
+            # Sort newest-first by status_change_time; fall back to string id
+            # so ordering is stable when timestamps are missing or tied.
+            snapshot.sort(
+                key=lambda item: (item[1].get("status_change_time") or "", item[0]),
+                reverse=True,
+            )
+
+            total = len(snapshot)
+            page = snapshot[offset:offset + limit]
+            tasks = [_serialize_download(tid, t) for tid, t in page]
+
+            return api_success({
+                "downloads": tasks,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            })
         except ImportError:
             return api_error("NOT_AVAILABLE", "Download tracking not available.", 501)
         except Exception as e:
