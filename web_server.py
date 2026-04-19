@@ -11353,19 +11353,20 @@ def get_artist_discography(artist_id):
         return jsonify({"error": str(e)}), 500
 
 def _resolve_db_album_id(album_id, artist_id=None):
-    """Resolve a database album ID to a real Spotify/iTunes album ID.
+    """Resolve a database album ID to a real external album ID.
 
-    When the artist detail page falls back to owned_releases (Spotify artist
-    search failed), the album cards carry a database auto-increment ID.
-    This helper looks up stored external IDs first, then falls back to an
-    iTunes/Spotify search by album title + artist name.
+    When the artist detail page falls back to owned_releases, the album cards
+    carry a database ID. This helper looks up stored external IDs first, then
+    falls back to a search by album title + artist name using the primary
+    metadata source (with fallback to other sources).
     """
     try:
         database = get_database()
         with database._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT a.title, a.spotify_album_id, a.itunes_album_id, a.discogs_id, ar.name as artist_name
+                SELECT a.title, a.spotify_album_id, a.itunes_album_id, a.discogs_id,
+                       a.deezer_album_id, ar.name as artist_name
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
                 WHERE a.id = ?
@@ -11374,32 +11375,42 @@ def _resolve_db_album_id(album_id, artist_id=None):
             if not row:
                 return None
 
-            # Prefer stored external IDs — match the active fallback source
+            # Prefer stored external IDs — match the active primary source first
             fallback = _get_metadata_fallback_source()
-            if fallback == 'discogs' and row.get('discogs_id'):
-                return row['discogs_id']
-            if row['spotify_album_id']:
-                return row['spotify_album_id']
-            if row['itunes_album_id']:
-                return row['itunes_album_id']
-            if row.get('discogs_id'):
-                return row['discogs_id']
+            id_priority = {
+                'spotify': [('spotify_album_id', None), ('deezer_album_id', None), ('itunes_album_id', None), ('discogs_id', None)],
+                'deezer': [('deezer_album_id', None), ('spotify_album_id', None), ('itunes_album_id', None), ('discogs_id', None)],
+                'itunes': [('itunes_album_id', None), ('spotify_album_id', None), ('deezer_album_id', None), ('discogs_id', None)],
+                'discogs': [('discogs_id', None), ('spotify_album_id', None), ('deezer_album_id', None), ('itunes_album_id', None)],
+            }
+            for col, _ in id_priority.get(fallback, id_priority['spotify']):
+                val = row[col] if col in row.keys() else None
+                if val:
+                    return val
 
-            # No stored external ID — search by name
+            # No stored external ID — search by name using primary source with fallback
             album_title = row['title']
             artist_name = row['artist_name']
             query = f"{artist_name} {album_title}"
             logger.debug("Searching for album by name: %s", query)
-            results = spotify_client.search_albums(query, limit=5)
-            if results:
-                # Pick the best match (search already ranks by relevance)
-                for album in results:
-                    if album.name.lower().strip() == album_title.lower().strip():
-                        logger.debug("Found exact album match: %s (id=%s)", album.name, album.id)
-                        return album.id
-                # Fall back to first result if no exact title match
-                logger.debug("No exact match, using best result: %s (id=%s)", results[0].name, results[0].id)
-                return results[0].id
+
+            from core.metadata_service import get_source_priority, get_client_for_source
+            for source in get_source_priority(fallback):
+                try:
+                    client = get_client_for_source(source)
+                    if not client:
+                        continue
+                    results = client.search_albums(query, limit=5)
+                    if results:
+                        for album in results:
+                            if album.name.lower().strip() == album_title.lower().strip():
+                                logger.debug("Found exact album match via %s: %s (id=%s)", source, album.name, album.id)
+                                return album.id
+                        logger.debug("No exact match via %s, using best result: %s (id=%s)", source, results[0].name, results[0].id)
+                        return results[0].id
+                except Exception as e:
+                    logger.debug("Album search via %s failed: %s", source, e)
+                    continue
 
     except Exception as e:
         logger.debug("Error resolving DB album ID %s: %s", album_id, e)
