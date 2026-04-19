@@ -24374,8 +24374,10 @@ def _db_update_phase_callback(phase):
 
 def _db_update_artist_callback(artist_name, success, details, album_count, track_count):
     if success:
+        # Use the details string from the worker — it includes context like "0 new tracks (150 existing updated)"
+        log_msg = f'{artist_name} — {details}' if details else f'{artist_name} — {album_count} albums, {track_count} tracks'
         _update_automation_progress(_db_update_automation_id,
-            log_line=f'{artist_name} — {album_count} albums, {track_count} tracks',
+            log_line=log_msg,
             log_type='success')
     else:
         _update_automation_progress(_db_update_automation_id,
@@ -24396,10 +24398,32 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
     removal_msg = ""
     if removed_artists > 0 or removed_albums > 0:
         removal_msg = f" | Removed: {removed_artists} artists, {removed_albums} albums"
+    if removed_tracks > 0:
+        removal_msg += f", {removed_tracks} tracks"
+
+    # Build a clear summary message
+    # For deep scans: total_tracks = new tracks only, successful = artists processed
+    # Include skipped/existing count when available for clarity
+    skipped_tracks = 0
+    if db_update_worker:
+        skipped_tracks = getattr(db_update_worker, '_total_skipped', 0)
+        # Calculate from processed counts if not tracked directly
+        if not skipped_tracks:
+            total_processed = getattr(db_update_worker, 'processed_tracks', 0)
+            if total_processed == 0 and total_tracks == 0 and successful > 0:
+                # Deep scan with nothing new — show artists scanned
+                skipped_tracks = getattr(db_update_worker, 'processed_albums', 0)
+
+    if total_tracks > 0:
+        phase_msg = f"Completed: {total_artists} artists, {total_albums} albums, {total_tracks} new tracks{removal_msg}."
+    elif successful > 0:
+        phase_msg = f"Completed: {successful} artists scanned, library up to date{removal_msg}."
+    else:
+        phase_msg = f"Completed: {successful} successful, {failed} failed{removal_msg}."
 
     with db_update_lock:
         db_update_state["status"] = "finished"
-        db_update_state["phase"] = f"Completed: {successful} successful, {failed} failed{removal_msg}."
+        db_update_state["phase"] = phase_msg
         db_update_state["total_albums"] = total_albums
         db_update_state["total_tracks"] = total_tracks
         db_update_state["removed_artists"] = removed_artists
