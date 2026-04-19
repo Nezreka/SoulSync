@@ -45204,7 +45204,8 @@ async function checkLibraryCompletion(artistName, discography) {
         artist_name: artistName,
         albums: discography.albums || [],
         eps: discography.eps || [],
-        singles: discography.singles || []
+        singles: discography.singles || [],
+        source: discography?.source || null
     };
 
     try {
