@@ -22771,7 +22771,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     justify-content: center;
     align-items: center;
     gap: 20px;
-    padding: 20px 0;
+    padding: 20px 0 10vh;
     margin-top: auto;
 }
 
