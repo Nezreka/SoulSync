@@ -24503,6 +24503,136 @@ def _resume_workers_after_scan():
         print(f"Resumed {resumed} workers after database scan")
     _workers_paused_by_scan = set()
 
+def _run_soulsync_full_refresh():
+    """Full refresh for SoulSync standalone — wipe all soulsync records, re-scan output folder, rebuild library from file tags."""
+    try:
+        from core.soulsync_client import _read_tags, _stable_id
+
+        transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        if not os.path.isdir(transfer_path):
+            _db_update_error_callback(f"Output folder not found: {transfer_path}")
+            return
+
+        print(f"[SoulSync Full Refresh] Starting — clearing soulsync data, re-scanning: {transfer_path}")
+        _db_update_phase_callback('Clearing library...')
+
+        db = get_database()
+        db.clear_server_data('soulsync')
+
+        # Collect all audio files
+        _db_update_phase_callback('Scanning output folder...')
+        audio_exts = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
+        audio_files = []
+        for root, dirs, files in os.walk(transfer_path):
+            for fname in files:
+                if os.path.splitext(fname)[1].lower() in audio_exts:
+                    audio_files.append(os.path.join(root, fname))
+
+        total = len(audio_files)
+        print(f"[SoulSync Full Refresh] Found {total} audio files, rebuilding library...")
+        if total == 0:
+            _db_update_finished_callback(0, 0, 0, 0, 0)
+            return
+
+        # Group files by artist → album using tags
+        _db_update_phase_callback(f'Reading tags from {total} files...')
+        artists_map = {}  # artist_name → { albums_map: { album_name → [tracks] } }
+        processed = 0
+
+        for file_path in audio_files:
+            tags = _read_tags(file_path)
+            artist_name = tags.get('album_artist') or tags.get('artist') or 'Unknown Artist'
+            album_name = tags.get('album') or 'Unknown Album'
+
+            if artist_name not in artists_map:
+                artists_map[artist_name] = {}
+            if album_name not in artists_map[artist_name]:
+                artists_map[artist_name][album_name] = []
+            artists_map[artist_name][album_name].append((file_path, tags))
+
+            processed += 1
+            if processed % 50 == 0:
+                _db_update_phase_callback(f'Reading tags... {processed}/{total}')
+
+        # Write to DB
+        _db_update_phase_callback('Writing to database...')
+        successful = 0
+        failed = 0
+
+        try:
+            with db._get_connection() as conn:
+                cursor = conn.cursor()
+
+                for artist_name, albums in artists_map.items():
+                    artist_id = _stable_id(artist_name.lower()) + '::soulsync'
+
+                    # Insert artist
+                    try:
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO artists (id, name, server_source, created_at, updated_at)
+                            VALUES (?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """, (artist_id, artist_name))
+                    except Exception:
+                        pass
+
+                    for album_name, tracks in albums.items():
+                        album_key = f"{artist_name.lower()}::{album_name.lower()}"
+                        album_id = _stable_id(album_key) + '::soulsync'
+
+                        # Get year from first track with a year
+                        year = ''
+                        for _, t in tracks:
+                            if t.get('year'):
+                                year = t['year']
+                                break
+
+                        # Insert album
+                        try:
+                            cursor.execute("""
+                                INSERT OR IGNORE INTO albums (id, artist_id, title, year, track_count, server_source, created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            """, (album_id, artist_id, album_name, year, len(tracks)))
+                        except Exception:
+                            pass
+
+                        # Insert tracks
+                        for file_path, tags in tracks:
+                            track_id = _stable_id(file_path) + '::soulsync'
+                            try:
+                                cursor.execute("""
+                                    INSERT OR IGNORE INTO tracks (id, album_id, artist_id, title, track_number, disc_number,
+                                        duration, file_path, bitrate, year, server_source, created_at, updated_at)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                """, (track_id, album_id, artist_id, tags['title'], tags['track_number'],
+                                      tags['disc_number'], tags['duration_ms'], file_path,
+                                      tags['bitrate'], tags.get('year', '')))
+                                successful += 1
+                            except Exception as e:
+                                failed += 1
+                                print(f"[SoulSync Full Refresh] Track insert error: {e}")
+
+                conn.commit()
+        except Exception as e:
+            print(f"[SoulSync Full Refresh] DB error: {e}")
+            _db_update_error_callback(f"Database error: {e}")
+            return
+
+        artist_count = len(artists_map)
+        album_count = sum(len(albums) for albums in artists_map.values())
+        summary = f"Full refresh complete: {successful} tracks from {album_count} albums by {artist_count} artists"
+        if failed > 0:
+            summary += f" ({failed} failed)"
+        print(f"[SoulSync Full Refresh] {summary}")
+        add_activity_item("", "SoulSync Full Refresh", summary, "Now")
+        _db_update_finished_callback(artist_count, album_count, total, successful, failed)
+
+    except Exception as e:
+        print(f"[SoulSync Full Refresh] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        _db_update_error_callback(f"Full refresh failed: {e}")
+
+
 def _run_soulsync_deep_scan():
     """Deep scan for SoulSync standalone mode.
 
@@ -24641,10 +24771,14 @@ def _run_db_update_task(full_refresh, server_type):
     """The actual function that runs in the background thread."""
     global db_update_worker
 
-    # SoulSync standalone: library is populated at download/import time, no incremental scan needed
+    # SoulSync standalone
     if server_type == "soulsync":
-        print("[SoulSync Standalone] Incremental scan skipped — library updates at download time. Use Deep Scan to find untracked files.")
-        _db_update_finished_callback(0, 0, 0, 0, 0)
+        if full_refresh:
+            _run_soulsync_full_refresh()
+        else:
+            # Incremental: library updates at download/import time, nothing to do
+            print("[SoulSync Standalone] Incremental scan skipped — library updates at download time. Use Deep Scan or Full Refresh.")
+            _db_update_finished_callback(0, 0, 0, 0, 0)
         return
 
     media_client = None
