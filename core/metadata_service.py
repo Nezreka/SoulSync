@@ -294,12 +294,41 @@ def _build_discography_release_dict(release: Any, artist_id: str) -> Optional[Di
     return {
         'id': release_id,
         'name': _extract_lookup_value(release, 'name', 'title', default=release_id),
+        'artist_name': _extract_release_artist_name(release),
         'release_date': release_date,
         'album_type': album_type,
         'image_url': _extract_lookup_value(release, 'image_url', 'thumb_url', 'cover_image'),
         'total_tracks': _extract_lookup_value(release, 'total_tracks', default=0) or 0,
         'external_urls': _extract_lookup_value(release, 'external_urls', default={}) or {},
     }
+
+
+def _extract_release_artist_name(release: Any) -> str:
+    artist_name = _extract_lookup_value(release, 'artist_name', 'artist', default='') or ''
+    artist_name = str(artist_name).strip()
+    if artist_name:
+        return artist_name
+
+    artists = _extract_lookup_value(release, 'artists', default=[]) or []
+    if isinstance(artists, (str, bytes)):
+        return str(artists).strip()
+    if isinstance(artists, dict):
+        return str(_extract_lookup_value(artists, 'name', 'artist_name', 'title', default='') or '').strip()
+
+    try:
+        artists = list(artists)
+    except TypeError:
+        artists = [artists]
+
+    if not artists:
+        return ''
+
+    first_artist = artists[0]
+    inferred_name = _extract_lookup_value(first_artist, 'name', 'artist_name', 'title')
+    if not inferred_name and isinstance(first_artist, str):
+        inferred_name = first_artist
+
+    return str(inferred_name).strip() if inferred_name else ''
 
 
 def _sort_discography_releases(releases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -391,6 +420,387 @@ def get_artist_discography(
         'singles': singles_list,
         'source': active_source or (source_priority[0] if source_priority else 'unknown'),
         'source_priority': source_priority,
+    }
+
+
+def _get_completion_source_chain(source_override: Optional[str] = None) -> List[str]:
+    primary_source = get_primary_source()
+    source_chain = list(get_source_priority(primary_source))
+
+    override = (source_override or '').strip().lower()
+    if override:
+        source_chain = [override] + [source for source in source_chain if source != override]
+
+    return source_chain
+
+
+def _extract_track_items(api_tracks: Any) -> List[Dict[str, Any]]:
+    if not api_tracks:
+        return []
+    if isinstance(api_tracks, dict):
+        return api_tracks.get('items') or []
+    if isinstance(api_tracks, list):
+        return api_tracks
+    return []
+
+
+def _resolve_completion_artist_name(
+    discography: Dict[str, Any],
+    artist_name: str,
+) -> str:
+    resolved_name = (artist_name or '').strip()
+    if resolved_name and resolved_name.lower() != 'unknown artist':
+        return resolved_name
+
+    release_items = list((discography or {}).get('albums', []) or []) + list((discography or {}).get('singles', []) or [])
+    if not release_items:
+        return resolved_name or 'Unknown Artist'
+
+    release_artist_name = _extract_release_artist_name(release_items[0])
+    if release_artist_name:
+        logger.debug("Using release artist metadata '%s' for completion", release_artist_name)
+        return release_artist_name
+
+    return resolved_name or 'Unknown Artist'
+
+
+def _resolve_completion_track_total(release: Dict[str, Any], source_chain: List[str]) -> int:
+    total_tracks = _extract_lookup_value(release, 'total_tracks', default=0) or 0
+    if total_tracks:
+        return int(total_tracks)
+
+    release_id = _extract_lookup_value(release, 'id', 'album_id', 'release_id')
+    if not release_id:
+        return 0
+
+    for source in source_chain:
+        try:
+            api_tracks = get_album_tracks_for_source(source, str(release_id))
+            items = _extract_track_items(api_tracks)
+            if items:
+                logger.debug("Resolved track count for release %s from %s", release_id, source)
+                return len(items)
+        except Exception as exc:
+            logger.debug("Could not resolve track count for release %s from %s: %s", release_id, source, exc)
+
+    return 0
+
+
+def check_album_completion(
+    db,
+    album_data: Dict[str, Any],
+    artist_name: str,
+    source_override: Optional[str] = None,
+    source_chain: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Check completion status for a single album."""
+    try:
+        source_chain = source_chain or _get_completion_source_chain(source_override)
+        album_name = album_data.get('name', '')
+        total_tracks = _resolve_completion_track_total(album_data, source_chain)
+        album_id = album_data.get('id', '')
+
+        # If total_tracks is 0 (Discogs masters don't include track counts),
+        # try to fetch the real count from the prioritized metadata sources.
+        if total_tracks == 0 and album_id:
+            logger.debug("No track count found for '%s' (%s)", album_name, album_id)
+
+        print(f"Checking album: '{album_name}' ({total_tracks} tracks)")
+
+        formats = []
+        # Check if album exists in database with completeness info
+        try:
+            from config.settings import config_manager
+            active_server = config_manager.get_active_media_server()
+            db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
+                title=album_name,
+                artist=artist_name,
+                expected_track_count=total_tracks if total_tracks > 0 else None,
+                confidence_threshold=0.7,
+                server_source=active_server
+            )
+        except Exception as db_error:
+            print(f"Database error for album '{album_name}': {db_error}")
+            return {
+                "id": album_id,
+                "name": album_name,
+                "status": "error",
+                "owned_tracks": 0,
+                "expected_tracks": total_tracks,
+                "completion_percentage": 0,
+                "confidence": 0.0,
+                "found_in_db": False,
+                "error_message": str(db_error),
+                "formats": []
+            }
+
+        if expected_tracks > 0:
+            completion_percentage = (owned_tracks / expected_tracks) * 100
+        elif total_tracks > 0:
+            completion_percentage = (owned_tracks / total_tracks) * 100
+        else:
+            completion_percentage = 100 if owned_tracks > 0 else 0
+
+        if owned_tracks > 0 and owned_tracks >= (expected_tracks or total_tracks):
+            status = "completed"
+        elif owned_tracks > 0:
+            status = "partial"
+        else:
+            status = "missing"
+
+        print(f"  Result: {owned_tracks}/{expected_tracks or total_tracks} tracks ({completion_percentage:.1f}%) - {status}")
+
+        return {
+            "id": album_id,
+            "name": album_name,
+            "status": status,
+            "owned_tracks": owned_tracks,
+            "expected_tracks": expected_tracks or total_tracks,
+            "completion_percentage": round(completion_percentage, 1),
+            "confidence": round(confidence, 2) if confidence else 0.0,
+            "found_in_db": db_album is not None,
+            "formats": formats
+        }
+
+    except Exception as e:
+        print(f"Error checking album completion for '{album_data.get('name', 'Unknown')}': {e}")
+        return {
+            "id": album_data.get('id', ''),
+            "name": album_data.get('name', 'Unknown'),
+            "status": "error",
+            "owned_tracks": 0,
+            "expected_tracks": album_data.get('total_tracks', 0),
+            "completion_percentage": 0,
+            "confidence": 0.0,
+            "found_in_db": False,
+            "formats": []
+        }
+
+
+def check_single_completion(
+    db,
+    single_data: Dict[str, Any],
+    artist_name: str,
+    source_override: Optional[str] = None,
+    source_chain: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Check completion status for a single/EP."""
+    try:
+        source_chain = source_chain or _get_completion_source_chain(source_override)
+        single_name = single_data.get('name', '')
+        raw_total_tracks = single_data.get('total_tracks', 1)
+        total_tracks = raw_total_tracks if raw_total_tracks is not None else 1
+        single_id = single_data.get('id', '')
+        album_type = single_data.get('album_type', 'single')
+        formats = []
+
+        if total_tracks == 0:
+            total_tracks = _resolve_completion_track_total(single_data, source_chain) or 1
+
+        print(f"Checking {album_type}: '{single_name}' ({total_tracks} tracks)")
+
+        if album_type == 'ep' or total_tracks > 1:
+            try:
+                from config.settings import config_manager
+                active_server = config_manager.get_active_media_server()
+                db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
+                    title=single_name,
+                    artist=artist_name,
+                    expected_track_count=total_tracks,
+                    confidence_threshold=0.7,
+                    server_source=active_server
+                )
+            except Exception as db_error:
+                print(f"Database error for EP '{single_name}': {db_error}")
+                owned_tracks, expected_tracks, confidence = 0, total_tracks, 0.0
+                db_album = None
+
+            if expected_tracks > 0:
+                completion_percentage = (owned_tracks / expected_tracks) * 100
+            else:
+                completion_percentage = (owned_tracks / total_tracks) * 100
+
+            if owned_tracks > 0 and owned_tracks >= (expected_tracks or total_tracks):
+                status = "completed"
+            elif owned_tracks > 0:
+                status = "partial"
+            else:
+                status = "missing"
+
+            print(f"  EP Result: {owned_tracks}/{expected_tracks or total_tracks} tracks ({completion_percentage:.1f}%) - {status}")
+
+            return {
+                "id": single_id,
+                "name": single_name,
+                "status": status,
+                "owned_tracks": owned_tracks,
+                "expected_tracks": expected_tracks or total_tracks,
+                "completion_percentage": round(completion_percentage, 1),
+                "confidence": round(confidence, 2) if confidence else 0.0,
+                "found_in_db": db_album is not None,
+                "type": album_type,
+                "formats": formats
+            }
+        else:
+            try:
+                from config.settings import config_manager
+                active_server = config_manager.get_active_media_server()
+                db_track, confidence = db.check_track_exists(
+                    title=single_name,
+                    artist=artist_name,
+                    confidence_threshold=0.7,
+                    server_source=active_server
+                )
+            except Exception as db_error:
+                print(f"Database error for single '{single_name}': {db_error}")
+                db_track, confidence = None, 0.0
+
+            owned_tracks = 1 if db_track else 0
+            expected_tracks = 1
+            completion_percentage = 100 if db_track else 0
+            status = "completed" if db_track else "missing"
+
+            if db_track and db_track.file_path:
+                import os
+                ext = os.path.splitext(db_track.file_path)[1].lstrip('.').upper()
+                if ext == 'MP3' and db_track.bitrate:
+                    formats = [f"MP3-{db_track.bitrate}"]
+                elif ext:
+                    formats = [ext]
+
+            print(f"  Single Result: {owned_tracks}/1 tracks ({completion_percentage:.1f}%) - {status}")
+
+            return {
+                "id": single_id,
+                "name": single_name,
+                "status": status,
+                "owned_tracks": owned_tracks,
+                "expected_tracks": expected_tracks,
+                "completion_percentage": round(completion_percentage, 1),
+                "confidence": round(confidence, 2) if confidence else 0.0,
+                "found_in_db": db_track is not None,
+                "type": album_type,
+                "formats": formats
+            }
+
+    except Exception as e:
+        print(f"Error checking single/EP completion for '{single_data.get('name', 'Unknown')}': {e}")
+        return {
+            "id": single_data.get('id', ''),
+            "name": single_data.get('name', 'Unknown'),
+            "status": "error",
+            "owned_tracks": 0,
+            "expected_tracks": single_data.get('total_tracks', 1),
+            "completion_percentage": 0,
+            "confidence": 0.0,
+            "found_in_db": False,
+            "type": single_data.get('album_type', 'single'),
+            "formats": []
+        }
+
+
+def iter_artist_discography_completion_events(
+    discography: Dict[str, Any],
+    artist_name: str = 'Unknown Artist',
+    source_override: Optional[str] = None,
+    db=None,
+):
+    """Yield completion-stream events for artist discography ownership checks."""
+    if db is None:
+        from database.music_database import get_database
+
+        db = get_database()
+    source_chain = _get_completion_source_chain(source_override)
+    resolved_artist_name = _resolve_completion_artist_name(discography or {}, artist_name)
+
+    albums = list((discography or {}).get('albums', []) or [])
+    singles = list((discography or {}).get('singles', []) or [])
+    total_items = len(albums) + len(singles)
+    processed_count = 0
+
+    yield {
+        'type': 'start',
+        'total_items': total_items,
+        'artist_name': resolved_artist_name,
+    }
+
+    for album in albums:
+        try:
+            completion_data = check_album_completion(
+                db,
+                album,
+                resolved_artist_name,
+                source_override=source_override,
+                source_chain=source_chain,
+            )
+            completion_data['type'] = 'album_completion'
+            completion_data['container_type'] = 'albums'
+            processed_count += 1
+            completion_data['progress'] = round((processed_count / total_items) * 100, 1) if total_items else 100
+            yield completion_data
+        except Exception as e:
+            yield {
+                'type': 'error',
+                'container_type': 'albums',
+                'id': album.get('id', ''),
+                'name': album.get('name', 'Unknown'),
+                'error': str(e),
+            }
+
+    for single in singles:
+        try:
+            completion_data = check_single_completion(
+                db,
+                single,
+                resolved_artist_name,
+                source_override=source_override,
+                source_chain=source_chain,
+            )
+            completion_data['type'] = 'single_completion'
+            completion_data['container_type'] = 'singles'
+            processed_count += 1
+            completion_data['progress'] = round((processed_count / total_items) * 100, 1) if total_items else 100
+            yield completion_data
+        except Exception as e:
+            yield {
+                'type': 'error',
+                'container_type': 'singles',
+                'id': single.get('id', ''),
+                'name': single.get('name', 'Unknown'),
+                'error': str(e),
+            }
+
+    yield {
+        'type': 'complete',
+        'processed_count': processed_count,
+        'artist_name': resolved_artist_name,
+    }
+
+
+def check_artist_discography_completion(
+    discography: Dict[str, Any],
+    artist_name: str = 'Unknown Artist',
+    source_override: Optional[str] = None,
+    db=None,
+) -> Dict[str, Any]:
+    """Return completion results for an artist discography without streaming."""
+    albums_completion = []
+    singles_completion = []
+
+    for event in iter_artist_discography_completion_events(
+        discography,
+        artist_name=artist_name,
+        source_override=source_override,
+        db=db,
+    ):
+        if event.get('type') == 'album_completion':
+            albums_completion.append(event)
+        elif event.get('type') == 'single_completion':
+            singles_completion.append(event)
+
+    return {
+        'albums': albums_completion,
+        'singles': singles_completion,
     }
 
 
