@@ -66,10 +66,33 @@ DEFAULT_GENRES = [
     # World / International
     "World", "Afrobeat", "Afropop", "Afrobeats", "Bhangra", "Celtic", "Flamenco",
     "Fado", "Klezmer", "Polka", "Zydeco", "Highlife",
+    # Alternative / Indie (broad umbrella genres Spotify uses heavily)
+    "Alternative", "Indie", "Alternative Metal", "Alternative R&B",
+    # Additional Rock
+    "New Wave", "Darkwave", "Post-Grunge", "Slowcore", "Sadcore", "Post-Punk Revival",
+    # Additional Metal
+    "Grindcore", "Crust Punk", "Crossover Thrash", "Trap Metal",
+    # Additional Hip Hop
+    "Emo Rap", "Cloud Rap", "Phonk", "Horrorcore", "Nerdcore",
+    # Additional Electronic
+    "Dark Ambient", "Drone", "Witch House", "Hyperpop", "Future Funk",
+    "Outrun", "Retrowave", "Chiptune", "Dance",
+    # Additional Pop
+    "German Pop", "French Pop", "Turkish Pop",
+    # Additional Latin
+    "Trap Latino", "Urbano Latino", "Tropicalia", "Mambo", "Bossa Nova",
+    # Additional Reggae
+    "Roots Reggae", "Lovers Rock",
+    # Additional Jazz
+    "Hard Bop", "Modal Jazz", "Gypsy Jazz",
+    # Additional World
+    "Qawwali", "Carnatic", "Hindustani",
+    # Media
+    "Video Game Music", "Anime", "Soundtrack", "Film Score",
     # Other
     "Experimental", "Avant-Garde", "Noise", "Spoken Word", "Comedy", "Instrumental",
     "A Cappella", "Worship", "Christian", "Christmas", "Holiday", "Easy Listening",
-    "Lounge", "Psychedelic",
+    "Lounge", "Psychedelic", "Progressive",
 ]
 
 # Normalized lookup set — built once, used for O(1) matching
