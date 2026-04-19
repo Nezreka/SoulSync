@@ -23288,7 +23288,7 @@ const TOOL_HELP_CONTENT = {
         title: 'Duplicate Cleaner',
         content: `
             <h4>What does this tool do?</h4>
-            <p>The Duplicate Cleaner scans your Transfer folder for duplicate audio files and automatically removes lower-quality versions, keeping only the best copy.</p>
+            <p>The Duplicate Cleaner scans your output folder for duplicate audio files and automatically removes lower-quality versions, keeping only the best copy.</p>
 
             <h4>How it detects duplicates</h4>
             <p>Files are considered duplicates when:</p>
@@ -23937,7 +23937,7 @@ const TOOL_HELP_CONTENT = {
         title: 'Duplicate Scan Done',
         content: `
             <h4>What is this trigger?</h4>
-            <p>Fires when the duplicate cleaner finishes scanning your transfer folder for duplicate audio files.</p>
+            <p>Fires when the duplicate cleaner finishes scanning your output folder for duplicate audio files.</p>
 
             <h4>Available variables for notifications</h4>
             <p><code>{files_scanned}</code>, <code>{duplicates_found}</code>, <code>{space_freed}</code></p>
@@ -24135,7 +24135,7 @@ const TOOL_HELP_CONTENT = {
         title: 'Run Duplicate Cleaner',
         content: `
             <h4>What does this action do?</h4>
-            <p>Scans your transfer folder for duplicate audio files (same filename, different format) and removes the lower-quality version. For example, if you have both <code>Song.flac</code> and <code>Song.mp3</code>, the MP3 is removed.</p>
+            <p>Scans your output folder for duplicate audio files (same filename, different format) and removes the lower-quality version. For example, if you have both <code>Song.flac</code> and <code>Song.mp3</code>, the MP3 is removed.</p>
 
             <h4>Safety</h4>
             <p>Removed files are moved to a <code>deleted/</code> subfolder, not permanently deleted. You can recover them if needed.</p>
@@ -24227,12 +24227,12 @@ const TOOL_HELP_CONTENT = {
         title: 'Clean Completed Downloads',
         content: `
             <h4>What does this action do?</h4>
-            <p>Clears completed downloads from the transfer list and removes any empty directories left behind in the staging folder.</p>
+            <p>Clears completed downloads from the transfer list and removes any empty directories left behind in the import folder.</p>
 
             <h4>Good for</h4>
             <ul>
                 <li>Automatic cleanup after batch downloads</li>
-                <li>Preventing staging folder clutter</li>
+                <li>Preventing import folder clutter</li>
                 <li>Chaining after a batch complete trigger</li>
             </ul>
         `
@@ -24245,8 +24245,8 @@ const TOOL_HELP_CONTENT = {
             <ol>
                 <li><strong>Clear Quarantine</strong> — permanently deletes all quarantined files</li>
                 <li><strong>Clear Download Queue</strong> — removes completed, errored, and cancelled downloads from Soulseek</li>
-                <li><strong>Sweep Empty Directories</strong> — removes empty folders left behind in the downloads directory</li>
-                <li><strong>Sweep Staging Folder</strong> — removes empty directories from the import staging area</li>
+                <li><strong>Sweep Empty Directories</strong> — removes empty folders left behind in the input directory</li>
+                <li><strong>Sweep Import Folder</strong> — removes empty directories from the import folder</li>
                 <li><strong>Clean Search History</strong> — trims old Soulseek search queries</li>
             </ol>
 
@@ -65528,7 +65528,7 @@ async function fixAllMatchingFindings() {
         } else if (fixAction === 'staging') {
             if (!await showConfirmDialog({
                 title: 'Move to Staging',
-                message: `Move ${_repairFindingsTotal} orphan files to the staging folder? Files are NOT deleted — you can review and import them from staging.`,
+                message: `Move ${_repairFindingsTotal} orphan files to the import folder? Files are NOT deleted — you can review and import them.`,
                 confirmText: 'Move All to Staging',
                 destructive: false
             })) return;
@@ -66517,12 +66517,12 @@ async function importPageRefreshStaging() {
         const resp = await fetch('/api/import/staging/files');
         const data = await resp.json();
         if (!data.success) {
-            document.getElementById('import-page-staging-path').textContent = `Staging folder: error`;
+            document.getElementById('import-page-staging-path').textContent = `Import folder: error`;
             return;
         }
 
         importPageState.stagingFiles = data.files || [];
-        document.getElementById('import-page-staging-path').textContent = `Staging: ${data.staging_path || 'Not configured'}`;
+        document.getElementById('import-page-staging-path').textContent = `Import: ${data.staging_path || 'Not configured'}`;
 
         const totalSize = importPageState.stagingFiles.reduce((s, f) => s + (f.size || 0), 0);
         const sizeStr = totalSize > 1073741824 ? `${(totalSize / 1073741824).toFixed(1)} GB`
@@ -66669,7 +66669,7 @@ async function _autoImportLoadResults() {
         if (!data.success || !data.results || data.results.length === 0) {
             if (!container.querySelector('.auto-import-card')) {
                 container.innerHTML = `<div class="auto-import-empty">
-                    <p>No imports yet. Drop album folders or single tracks into your staging directory.</p>
+                    <p>No imports yet. Drop album folders or single tracks into your import folder.</p>
                 </div>`;
             }
             // Hide stats and filters
@@ -67391,7 +67391,7 @@ function importPageRenderSinglesList() {
     const files = importPageState.stagingFiles;
 
     if (files.length === 0) {
-        list.innerHTML = '<div class="import-page-empty-state">No audio files found in staging folder</div>';
+        list.innerHTML = '<div class="import-page-empty-state">No audio files found in import folder</div>';
         return;
     }
 
@@ -71194,7 +71194,7 @@ const _RESULT_DISPLAY_MAP = {
     ],
     'full_cleanup': [
         { key: 'quarantine_removed', label: 'Quarantine Removed' },
-        { key: 'staging_removed', label: 'Staging Dirs Removed' },
+        { key: 'staging_removed', label: 'Import Dirs Removed' },
         { key: 'total_removed', label: 'Total Items Removed' },
     ],
     'playlist_pipeline': [

@@ -504,10 +504,10 @@ function _renderPaths(el) {
             <h2>Paths & Media Server</h2>
             <p class="setup-subtitle">Where should downloaded music go?</p>
             <div class="setup-info-box">
-                <strong>Two-folder system:</strong> Music downloads to the <strong>Download Folder</strong> first as raw files. After post-processing (metadata tagging, file organization), finished tracks are moved to the <strong>Transfer Folder</strong> organized into Artist/Album subfolders. Point your media server at the Transfer folder.
+                <strong>Two-folder system:</strong> Music downloads to the <strong>Input Folder</strong> first as raw files. After post-processing (metadata tagging, file organization), finished tracks are moved to the <strong>Output Folder</strong> organized into Artist/Album subfolders. Point your media server at the output folder.
             </div>
             <div class="setup-input-group">
-                <label>Download Folder (where raw downloads land)</label>
+                <label>Input Folder (where raw downloads land)</label>
                 <div class="setup-path-row">
                     <input class="setup-input setup-path-input" type="text" id="setup-download-path"
                            placeholder="/app/downloads"
@@ -520,7 +520,7 @@ function _renderPaths(el) {
                 </div>
             </div>
             <div class="setup-input-group">
-                <label>Music Library / Transfer Folder (organized music)</label>
+                <label>Music Library / Output Folder (organized music)</label>
                 <div class="setup-path-row">
                     <input class="setup-input setup-path-input" type="text" id="setup-transfer-path"
                            placeholder="/app/Transfer"
@@ -769,7 +769,7 @@ function _renderFirstDownload(el) {
             <h2>Your First Download</h2>
             <p class="setup-subtitle">Try searching for a track to see the full pipeline in action.</p>
             <div class="setup-info-box">
-                <strong>How it works:</strong> Type a song name below. SoulSync searches your metadata source for the track, then finds the best matching audio file from your download source. The track is tagged with full metadata (artist, album, track number, artwork) and organized into your Transfer folder.
+                <strong>How it works:</strong> Type a song name below. SoulSync searches your metadata source for the track, then finds the best matching audio file from your download source. The track is tagged with full metadata (artist, album, track number, artwork) and organized into your output folder.
             </div>
             <div class="setup-search-wrapper">
                 <span class="setup-search-icon">
@@ -936,7 +936,7 @@ function _renderDone(el) {
     summaryRows.push({ label: 'Metadata Source', value: cap(_wizardSettings.metadata_source) });
     const dlName = _wizardSettings.download_source === 'deezer_dl' ? 'Deezer' : cap(_wizardSettings.download_source);
     summaryRows.push({ label: 'Download Source', value: dlName });
-    if (_wizardSettings.download_path) summaryRows.push({ label: 'Download Folder', value: _wizardSettings.download_path });
+    if (_wizardSettings.download_path) summaryRows.push({ label: 'Input Folder', value: _wizardSettings.download_path });
     if (_wizardSettings.transfer_path) summaryRows.push({ label: 'Music Library', value: _wizardSettings.transfer_path });
     if (_wizardSettings.media_server !== 'none') summaryRows.push({ label: 'Media Server', value: cap(_wizardSettings.media_server) });
     if (_wizardAddedArtists.length > 0) summaryRows.push({ label: 'Artists Added', value: _wizardAddedArtists.length.toString() });

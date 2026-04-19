@@ -63,7 +63,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Download Source</strong> &mdash; Connect at least one download source: Soulseek (slskd), YouTube, Tidal, Qobuz, HiFi, or Deezer. Soulseek offers the best quality selection; the others work as alternatives or fallbacks in Hybrid mode.</li>
                     <li><strong>Media Server</strong> &mdash; Connect Plex, Jellyfin, or Navidrome so SoulSync knows where your library lives and can trigger scans.</li>
                     <li><strong>Spotify (Recommended)</strong> &mdash; Connect Spotify for the richest metadata. Create an app at <strong>developer.spotify.com</strong>, enter your Client ID and Secret, then click Authenticate.</li>
-                    <li><strong>Download Path</strong> &mdash; Set your download and transfer paths in the Download Settings section. The transfer path should point to your media server's monitored folder.</li>
+                    <li><strong>Input Path</strong> &mdash; Set your input and output paths in the Download Settings section. The output path should point to your media server's monitored folder.</li>
                 </ol>
                 ${docsImg('gs-first-setup.jpg', 'Settings page first-time setup')}
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>You can start using SoulSync with just one download source. Spotify and other services add metadata enrichment but aren't strictly required &mdash; iTunes/Apple Music and Deezer are always available as free fallbacks.</div></div>
@@ -105,7 +105,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Artists</strong> &mdash; Search artists, manage your watchlist, scan for new releases</li>
                     <li><strong>Automations</strong> &mdash; Create scheduled tasks and event-driven workflows</li>
                     <li><strong>Library</strong> &mdash; Browse and manage your music collection with standard or enhanced views</li>
-                    <li><strong>Import</strong> &mdash; Import music files from a staging folder with album/track matching</li>
+                    <li><strong>Import</strong> &mdash; Import music files from an import folder with album/track matching</li>
                     <li><strong>Settings</strong> &mdash; Configure services, download preferences, quality profiles, and more</li>
                 </ul>
                 ${docsImg('gs-interface.jpg', 'SoulSync interface layout')}
@@ -126,9 +126,9 @@ const DOCS_SECTIONS = [
                 <table class="docs-table">
                     <thead><tr><th>Folder</th><th>Default (Docker)</th><th>Purpose</th></tr></thead>
                     <tbody>
-                        <tr><td><strong>Download Path</strong></td><td><code>/app/downloads</code></td><td>Where slskd/YouTube/Tidal/Qobuz initially saves downloaded files. This is a <strong>temporary staging area</strong> &mdash; files should not stay here permanently.</td></tr>
-                        <tr><td><strong>Transfer Path</strong></td><td><code>/app/Transfer</code></td><td>Where post-processed files are moved after tagging and renaming. This <strong>must</strong> be the folder your media server (Plex/Jellyfin/Navidrome) monitors.</td></tr>
-                        <tr><td><strong>Staging Path</strong></td><td><code>/app/Staging</code></td><td>For the Import feature only. Drop audio files here to import them into your library via the Import page.</td></tr>
+                        <tr><td><strong>Input Path</strong></td><td><code>/app/downloads</code></td><td>Where slskd/YouTube/Tidal/Qobuz initially saves downloaded files. This is a <strong>temporary holding area</strong> &mdash; files should not stay here permanently.</td></tr>
+                        <tr><td><strong>Output Path</strong></td><td><code>/app/Transfer</code></td><td>Where post-processed files are moved after tagging and renaming. This <strong>must</strong> be the folder your media server (Plex/Jellyfin/Navidrome) monitors.</td></tr>
+                        <tr><td><strong>Import Path</strong></td><td><code>/app/Staging</code></td><td>For the Import feature only. Drop audio files here to import them into your library via the Import page.</td></tr>
                     </tbody>
                 </table>
                 ${docsImg('gs-folders.jpg', 'Download settings folder configuration')}
@@ -137,13 +137,13 @@ const DOCS_SECTIONS = [
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>
                     <strong>The complete download-to-library pipeline:</strong><br><br>
                     <strong>1.</strong> You search for music in SoulSync and click download<br>
-                    <strong>2.</strong> SoulSync tells slskd to download the file &rarr; slskd saves it to its download folder<br>
-                    <strong>3.</strong> SoulSync detects the completed download in the <strong>Download Path</strong><br>
+                    <strong>2.</strong> SoulSync tells slskd to download the file &rarr; slskd saves it to its input folder<br>
+                    <strong>3.</strong> SoulSync detects the completed download in the <strong>Input Path</strong><br>
                     <strong>4.</strong> Post-processing runs: AcoustID verification &rarr; metadata tagging &rarr; cover art embedding &rarr; lyrics fetch<br>
                     <strong>5.</strong> File is renamed and organized (e.g., <code>Artist/Album/01 - Title.flac</code>)<br>
-                    <strong>6.</strong> File is moved from Download Path &rarr; <strong>Transfer Path</strong><br>
+                    <strong>6.</strong> File is moved from Input Path &rarr; <strong>Output Path</strong><br>
                     <strong>7.</strong> Media server scan is triggered &rarr; file appears in your library<br><br>
-                    <strong>If any step fails, the pipeline stops.</strong> The most common failure point is Step 3 &mdash; SoulSync can't find the file because the Download Path doesn't match where slskd actually saved it.
+                    <strong>If any step fails, the pipeline stops.</strong> The most common failure point is Step 3 &mdash; SoulSync can't find the file because the Input Path doesn't match where slskd actually saved it.
                 </div></div>
 
                 <h4>Docker Setup: The Full Picture</h4>
@@ -163,31 +163,31 @@ const DOCS_SECTIONS = [
                     <code>/app/downloads/</code> &larr; same files as <code style="color: var(--accent-primary);">/mnt/data/slskd-downloads/</code><br>
                     <code>/app/Transfer/</code> &larr; same files as <code style="color: #50e050;">/mnt/media/music/</code><br><br>
                     <strong>SoulSync Settings (what you enter in the app)</strong><br>
-                    Download Path: <code>/app/downloads</code><br>
-                    Transfer Path: <code>/app/Transfer</code>
+                    Input Path: <code>/app/downloads</code><br>
+                    Output Path: <code>/app/Transfer</code>
                 </div></div>
 
                 <h4>The #1 Mistake: Not Configuring App Settings</h4>
                 <p class="docs-text">Many users set up their docker-compose volumes correctly but <strong>never open SoulSync Settings to configure the paths</strong>. The app defaults may not match your volume mounts. You must go to <strong>Settings &rarr; Download Settings</strong> and verify that:</p>
                 <ul class="docs-list">
-                    <li><strong>Download Path</strong> matches where slskd puts completed files <em>inside the container</em> (usually <code>/app/downloads</code>)</li>
-                    <li><strong>Transfer Path</strong> matches where you mounted your media library <em>inside the container</em> (usually <code>/app/Transfer</code>)</li>
+                    <li><strong>Input Path</strong> matches where slskd puts completed files <em>inside the container</em> (usually <code>/app/downloads</code>)</li>
+                    <li><strong>Output Path</strong> matches where you mounted your media library <em>inside the container</em> (usually <code>/app/Transfer</code>)</li>
                 </ul>
                 <div class="docs-callout warning"><span class="docs-callout-icon">&#x26A0;&#xFE0F;</span><div>
                     <strong>"I set up my docker-compose but nothing transfers"</strong> &mdash; this almost always means the app settings weren't configured. Docker-compose makes the folders accessible. The app settings tell SoulSync where to look. <strong>Both are required.</strong>
                 </div></div>
 
-                <h4>The #2 Mistake: Download Path Doesn't Match slskd</h4>
-                <p class="docs-text">The <strong>Download Path</strong> in SoulSync must point to the <strong>exact same physical folder</strong> where slskd saves its completed downloads. If they don't match, SoulSync can't find the files and post-processing fails silently.</p>
+                <h4>The #2 Mistake: Input Path Doesn't Match slskd</h4>
+                <p class="docs-text">The <strong>Input Path</strong> in SoulSync must point to the <strong>exact same physical folder</strong> where slskd saves its completed downloads. If they don't match, SoulSync can't find the files and post-processing fails silently.</p>
 
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x2139;&#xFE0F;</span><div>
-                    <strong>Both SoulSync and slskd must see the same download folder.</strong><br><br>
+                    <strong>Both SoulSync and slskd must see the same input folder.</strong><br><br>
                     <strong>slskd container:</strong><br>
                     &bull; slskd downloads to <code>/downloads/complete</code> inside its own container<br>
                     &bull; slskd docker-compose: <code>- /mnt/data/slskd-downloads:/downloads/complete</code><br><br>
                     <strong>SoulSync container:</strong><br>
                     &bull; SoulSync docker-compose: <code>- /mnt/data/slskd-downloads:/app/downloads</code> (same host folder!)<br>
-                    &bull; SoulSync Setting: Download Path = <code>/app/downloads</code><br><br>
+                    &bull; SoulSync Setting: Input Path = <code>/app/downloads</code><br><br>
                     <strong>The key:</strong> both containers mount the <strong>same host folder</strong> (<code>/mnt/data/slskd-downloads</code>). The container-internal paths can be different &mdash; that's fine. What matters is they point to the same physical directory on your server.
                 </div></div>
 
@@ -205,18 +205,18 @@ const DOCS_SECTIONS = [
                     </tbody>
                 </table>
 
-                <h4>Transfer Path = Media Server's Music Folder</h4>
-                <p class="docs-text">Your Transfer Path must ultimately point to the same physical directory your media server monitors. This is how new music appears in Plex/Jellyfin/Navidrome.</p>
+                <h4>Output Path = Media Server's Music Folder</h4>
+                <p class="docs-text">Your Output Path must ultimately point to the same physical directory your media server monitors. This is how new music appears in Plex/Jellyfin/Navidrome.</p>
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>
                     <strong>Example with Plex:</strong><br><br>
                     &bull; Plex monitors <code>/mnt/media/music</code> on the host<br>
                     &bull; SoulSync docker-compose: <code>- /mnt/media/music:/app/Transfer:rw</code><br>
-                    &bull; SoulSync Settings: Transfer Path = <code>/app/Transfer</code><br><br>
+                    &bull; SoulSync Settings: Output Path = <code>/app/Transfer</code><br><br>
                     <strong>Result:</strong> SoulSync writes to <code>/app/Transfer</code> inside the container &rarr; appears at <code>/mnt/media/music</code> on the host &rarr; Plex sees it and adds it to your library.
                 </div></div>
 
                 <h4>Complete Docker Compose Example (slskd + SoulSync)</h4>
-                <p class="docs-text">Here's a working example showing both slskd and SoulSync configured to share the same download folder:</p>
+                <p class="docs-text">Here's a working example showing both slskd and SoulSync configured to share the same input folder:</p>
                 <div class="docs-callout info"><span class="docs-callout-icon">&#x1F4CB;</span><div>
                     <code><strong># docker-compose.yml</strong></code><br>
                     <code>services:</code><br>
@@ -239,17 +239,17 @@ const DOCS_SECTIONS = [
                     <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- /docker/soulsync/staging:/app/Staging</code><br>
                     <code>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- soulsync_database:/app/data</code><br><br>
                     <code><strong># Then in SoulSync Settings:</strong></code><br>
-                    <code># Download Path: /app/downloads</code><br>
-                    <code># Transfer Path: /app/Transfer</code>
+                    <code># Input Path: /app/downloads</code><br>
+                    <code># Output Path: /app/Transfer</code>
                 </div></div>
                 ${docsImg('gs-docker.jpg', 'Docker compose configuration')}
 
                 <h4>Setup Checklist</h4>
                 <p class="docs-text">Go through every item. If you miss any single one, the pipeline will break:</p>
                 <ol class="docs-steps">
-                    <li><strong>slskd download folder is mounted in SoulSync's container</strong> &mdash; Both containers must mount the <strong>same host directory</strong>. The host paths (left side of <code>:</code>) must be identical.</li>
-                    <li><strong>Media server's music folder is mounted as Transfer</strong> &mdash; Mount the folder your Plex/Jellyfin/Navidrome monitors as <code>/app/Transfer</code> with <code>:rw</code> permissions.</li>
-                    <li><strong>SoulSync Settings are configured</strong> &mdash; Open <strong>Settings &rarr; Download Settings</strong>. Set Download Path to <code>/app/downloads</code> and Transfer Path to <code>/app/Transfer</code> (or whatever container paths you used on the right side of <code>:</code>).</li>
+                    <li><strong>slskd input folder is mounted in SoulSync's container</strong> &mdash; Both containers must mount the <strong>same host directory</strong>. The host paths (left side of <code>:</code>) must be identical.</li>
+                    <li><strong>Media server's music folder is mounted as Output</strong> &mdash; Mount the folder your Plex/Jellyfin/Navidrome monitors as <code>/app/Transfer</code> with <code>:rw</code> permissions.</li>
+                    <li><strong>SoulSync Settings are configured</strong> &mdash; Open <strong>Settings &rarr; Download Settings</strong>. Set Input Path to <code>/app/downloads</code> and Output Path to <code>/app/Transfer</code> (or whatever container paths you used on the right side of <code>:</code>).</li>
                     <li><strong>slskd URL and API key are set</strong> &mdash; In <strong>Settings &rarr; Soulseek</strong>, enter your slskd URL (e.g., <code>http://slskd:5030</code> or <code>http://host.docker.internal:5030</code>) and API key.</li>
                     <li><strong>PUID/PGID match your host user</strong> &mdash; Run <code>id</code> on your host. Set those values in docker-compose environment variables. Both slskd and SoulSync should use the same PUID/PGID.</li>
                     <li><strong>Test with one track</strong> &mdash; Download a single track. Watch the logs. If it downloads but doesn't transfer, the paths are wrong.</li>
@@ -259,7 +259,7 @@ const DOCS_SECTIONS = [
                 <p class="docs-text">If paths are correct but files still won't transfer, it's usually a permissions issue. SoulSync needs <strong>read + write</strong> access to all three folders.</p>
                 <ul class="docs-list">
                     <li>Set <code>PUID</code> and <code>PGID</code> in your docker-compose to match the user that owns your music folders (run <code>id</code> on your host to find your UID/GID &mdash; usually 1000/1000)</li>
-                    <li>Ensure the Transfer folder is writable: <code>chmod -R 755 /mnt/media/music</code> (use your actual host path)</li>
+                    <li>Ensure the output folder is writable: <code>chmod -R 755 /mnt/media/music</code> (use your actual host path)</li>
                     <li>If using multiple containers (slskd + SoulSync), both must use the <strong>same PUID/PGID</strong> so file permissions are compatible</li>
                     <li>NFS/CIFS/network mounts may need additional permissions &mdash; test with a local folder first to isolate the issue</li>
                 </ul>
@@ -270,7 +270,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Verify downloads are visible:</strong> <code>docker exec soulsync-webui ls -la /app/downloads</code> &mdash; you should see slskd's downloaded files here. If empty or "No such file or directory", your volume mount is wrong.</li>
                     <li><strong>Verify Transfer is writable:</strong> <code>docker exec soulsync-webui touch /app/Transfer/test.txt && echo "OK"</code> &mdash; then check that <code>test.txt</code> appears in your media server's music folder on the host. Clean up after: <code>rm /mnt/media/music/test.txt</code></li>
                     <li><strong>Verify permissions:</strong> <code>docker exec soulsync-webui id</code> &mdash; the uid and gid should match your PUID/PGID values.</li>
-                    <li><strong>Verify app settings:</strong> Open SoulSync Settings &rarr; Download Settings. Confirm the Download Path and Transfer Path show container paths (like <code>/app/downloads</code>), not host paths.</li>
+                    <li><strong>Verify app settings:</strong> Open SoulSync Settings &rarr; Download Settings. Confirm the Input Path and Output Path show container paths (like <code>/app/downloads</code>), not host paths.</li>
                     <li><strong>Test a single download:</strong> Search for a track, download it, and watch the logs. Enable DEBUG logging in Settings for full detail. Check <code>logs/app.log</code> for any path errors.</li>
                 </ol>
 
@@ -278,13 +278,13 @@ const DOCS_SECTIONS = [
                 <table class="docs-table">
                     <thead><tr><th>Symptom</th><th>Likely Cause</th><th>Fix</th></tr></thead>
                     <tbody>
-                        <tr><td>Files download but never transfer</td><td>App settings not configured &mdash; docker-compose volumes are set but SoulSync Settings still have defaults or wrong paths</td><td>Open <strong>Settings &rarr; Download Settings</strong> and set Download Path + Transfer Path to your <strong>container-side</strong> mount paths.</td></tr>
-                        <tr><td>Post-processing log is empty</td><td>SoulSync can't find the downloaded file at the expected path &mdash; the Download Path in Settings doesn't match where slskd actually saves files inside the container</td><td>Run <code>docker exec soulsync-webui ls /app/downloads</code> to see what's actually there. The Download Path in Settings must match this path exactly.</td></tr>
-                        <tr><td>Same tracks downloading multiple times</td><td>Post-processing fails so SoulSync thinks the track was never downloaded successfully. On resume, it tries again.</td><td>Fix the folder paths first. Once post-processing works, files move to Transfer and SoulSync knows they exist.</td></tr>
-                        <tr><td>Files not renamed properly</td><td>Post-processing isn't running (path mismatch) or file organization is disabled in Settings</td><td>Verify File Organization is enabled in <strong>Settings &rarr; Processing & Organization</strong>. Fix Download Path first.</td></tr>
-                        <tr><td>Permission denied in logs</td><td>Container user can't write to the Transfer folder on the host</td><td>Set PUID/PGID to match the host user that owns the music folder. Run <code>chmod -R 755</code> on the Transfer host folder.</td></tr>
-                        <tr><td>Media server doesn't see new files</td><td>Transfer Path doesn't map to the folder your media server monitors</td><td>Ensure the <strong>host path</strong> in your SoulSync volume mount (<code>/mnt/media/music:/app/Transfer</code>) is the same folder Plex/Jellyfin/Navidrome watches.</td></tr>
-                        <tr><td>slskd downloads work fine on their own but not through SoulSync</td><td>slskd's download folder and SoulSync's Download Path point to different physical locations</td><td>Both containers must mount the <strong>same host directory</strong>. Check the left side of <code>:</code> in both docker-compose volume entries &mdash; they must match.</td></tr>
+                        <tr><td>Files download but never transfer</td><td>App settings not configured &mdash; docker-compose volumes are set but SoulSync Settings still have defaults or wrong paths</td><td>Open <strong>Settings &rarr; Download Settings</strong> and set Input Path + Output Path to your <strong>container-side</strong> mount paths.</td></tr>
+                        <tr><td>Post-processing log is empty</td><td>SoulSync can't find the downloaded file at the expected path &mdash; the Input Path in Settings doesn't match where slskd actually saves files inside the container</td><td>Run <code>docker exec soulsync-webui ls /app/downloads</code> to see what's actually there. The Input Path in Settings must match this path exactly.</td></tr>
+                        <tr><td>Same tracks downloading multiple times</td><td>Post-processing fails so SoulSync thinks the track was never downloaded successfully. On resume, it tries again.</td><td>Fix the folder paths first. Once post-processing works, files move to the output folder and SoulSync knows they exist.</td></tr>
+                        <tr><td>Files not renamed properly</td><td>Post-processing isn't running (path mismatch) or file organization is disabled in Settings</td><td>Verify File Organization is enabled in <strong>Settings &rarr; Processing & Organization</strong>. Fix Input Path first.</td></tr>
+                        <tr><td>Permission denied in logs</td><td>Container user can't write to the output folder on the host</td><td>Set PUID/PGID to match the host user that owns the music folder. Run <code>chmod -R 755</code> on the output host folder.</td></tr>
+                        <tr><td>Media server doesn't see new files</td><td>Output Path doesn't map to the folder your media server monitors</td><td>Ensure the <strong>host path</strong> in your SoulSync volume mount (<code>/mnt/media/music:/app/Transfer</code>) is the same folder Plex/Jellyfin/Navidrome watches.</td></tr>
+                        <tr><td>slskd downloads work fine on their own but not through SoulSync</td><td>slskd's download folder and SoulSync's Input Path point to different physical locations</td><td>Both containers must mount the <strong>same host directory</strong>. Check the left side of <code>:</code> in both docker-compose volume entries &mdash; they must match.</td></tr>
                     </tbody>
                 </table>
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Still stuck?</strong> Enable DEBUG logging in Settings, download a single track, and check <code>logs/app.log</code>. The post-processing log will show exactly where the file pipeline breaks &mdash; whether it's a path not found, permission denied, or verification failure. If the post-processing log is empty, the issue is almost certainly a path mismatch (SoulSync never found the file to process).</div></div>
@@ -392,7 +392,7 @@ const DOCS_SECTIONS = [
             <div class="docs-subsection" id="wf-download">
                 <h3 class="docs-subsection-title">How to: Download an Album</h3>
                 <p class="docs-text"><strong>Goal:</strong> Find an album and download it to your library with full metadata, cover art, and proper file organization.</p>
-                <p class="docs-text"><strong>Prerequisites:</strong> At least one download source connected (Soulseek, YouTube, Tidal, or Qobuz). Download and Transfer paths configured.</p>
+                <p class="docs-text"><strong>Prerequisites:</strong> At least one download source connected (Soulseek, YouTube, Tidal, or Qobuz). Input and Output paths configured.</p>
                 <ol class="docs-steps">
                     <li><strong>Open Search</strong> &mdash; Click the Search page in the sidebar (make sure Enhanced Search is active)</li>
                     <li><strong>Type the album name</strong> &mdash; Results appear in a categorized dropdown: Artists, Albums, Singles & EPs, Tracks</li>
@@ -401,7 +401,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Click Download</strong> &mdash; SoulSync searches for each track, downloads, tags, and organizes the files automatically</li>
                 </ol>
                 ${docsImg('wf-download-album.gif', 'Downloading an album')}
-                <p class="docs-text"><strong>Result:</strong> Tracks appear in your Transfer folder as <code>Artist/Album/01 - Title.flac</code> and your media server is notified to scan.</p>
+                <p class="docs-text"><strong>Result:</strong> Tracks appear in your output folder as <code>Artist/Album/01 - Title.flac</code> and your media server is notified to scan.</p>
                 <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>If a track fails to download, click the retry icon or use the candidate selector to pick an alternative source file from a different user.</div></div>
             </div>
             <div class="docs-subsection" id="wf-sync">
@@ -432,7 +432,7 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">How to: Import Existing Music</h3>
                 <p class="docs-text"><strong>Goal:</strong> Bring music files you already have into SoulSync with proper metadata and organization.</p>
                 <ol class="docs-steps">
-                    <li><strong>Place files in your staging folder</strong> &mdash; Put album folders (e.g., <code>Artist - Album/</code>) in the Staging path configured in Settings</li>
+                    <li><strong>Place files in your import folder</strong> &mdash; Put album folders (e.g., <code>Artist - Album/</code>) in the Import Path configured in Settings</li>
                     <li><strong>Go to the Import page</strong> &mdash; SoulSync detects the files and suggests album matches</li>
                     <li><strong>Search for the correct album</strong> &mdash; If the auto-suggestion is wrong, search Spotify/iTunes for the right album</li>
                     <li><strong>Match tracks</strong> &mdash; Drag-and-drop files onto the correct track slots, or click Auto-Match</li>
@@ -450,7 +450,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Click Test Connection</strong> &mdash; Verify the connection is working. A green checkmark confirms success</li>
                 </ol>
                 ${docsImg('wf-media-server.gif', 'Connecting media server')}
-                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>Make sure your Transfer Path points to the same folder your media server monitors. This is how new downloads automatically appear in your library.</div></div>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div>Make sure your Output Path points to the same folder your media server monitors. This is how new downloads automatically appear in your library.</div></div>
             </div>
         `
     },
@@ -576,7 +576,7 @@ const DOCS_SECTIONS = [
                     <thead><tr><th>Job</th><th>What It Does</th></tr></thead>
                     <tbody>
                         <tr><td>Track Number Repair</td><td>Fixes missing or incorrect track numbers by comparing against official tracklists</td></tr>
-                        <tr><td>Orphan File Detector</td><td>Finds audio files in your transfer folder not tracked in the database. Can move to staging or delete.</td></tr>
+                        <tr><td>Orphan File Detector</td><td>Finds audio files in your output folder not tracked in the database. Can move to import folder or delete.</td></tr>
                         <tr><td>Dead File Cleaner</td><td>Removes database entries pointing to files that no longer exist on disk</td></tr>
                         <tr><td>Duplicate Detector</td><td>Identifies duplicate tracks by fingerprint or metadata match</td></tr>
                         <tr><td>AcoustID Scanner</td><td>Batch audio fingerprint verification across your library</td></tr>
@@ -834,7 +834,7 @@ const DOCS_SECTIONS = [
                     <li><strong>AcoustID Fingerprint Verification</strong> &mdash; If AcoustID is configured, the downloaded file is fingerprinted and compared against the expected track. Title and artist are fuzzy-matched (title &ge; 70% similarity, artist &ge; 60%). Files that fail verification are <strong>quarantined</strong> instead of added to your library. <em>Note: AcoustID is skipped for streaming sources (Tidal, Qobuz, Deezer, HiFi) since files are downloaded by exact track ID. However, streaming search results are still verified by artist and title matching before download to prevent wrong-track matches (e.g. same title, different artist).</em></li>
                     <li><strong>Metadata Tagging</strong> &mdash; The file is tagged with official metadata: title, artist, album artist, album, track number, disc number, year, genre, and composer. Tags are written using Mutagen (supports MP3, FLAC, OGG, M4A).</li>
                     <li><strong>Cover Art Embedding</strong> &mdash; Album artwork is downloaded from the metadata source and embedded directly into the audio file.</li>
-                    <li><strong>File Organization</strong> &mdash; The file is renamed and moved to your transfer path following customizable templates. Separate templates for albums, singles, and playlists are configured in Settings. Available variables include <code>$artist</code>, <code>$album</code>, <code>$title</code>, <code>$track</code>, <code>$year</code>, <code>$quality</code>, and <code>$albumtype</code> (resolves to Album, Single, EP, or Compilation). For <strong>multi-disc albums</strong>, a <code>Disc N/</code> subfolder is automatically created when the album has more than one disc (or use <code>$disc</code> for zero-padded "01" or <code>$discnum</code> for unpadded "1" in your template for manual control).</li>
+                    <li><strong>File Organization</strong> &mdash; The file is renamed and moved to your output path following customizable templates. Separate templates for albums, singles, and playlists are configured in Settings. Available variables include <code>$artist</code>, <code>$album</code>, <code>$title</code>, <code>$track</code>, <code>$year</code>, <code>$quality</code>, and <code>$albumtype</code> (resolves to Album, Single, EP, or Compilation). For <strong>multi-disc albums</strong>, a <code>Disc N/</code> subfolder is automatically created when the album has more than one disc (or use <code>$disc</code> for zero-padded "01" or <code>$discnum</code> for unpadded "1" in your template for manual control).</li>
                     <li><strong>Lyrics (LRC)</strong> &mdash; Synced lyrics are fetched from the LRClib API and saved as <code>.lrc</code> sidecar files alongside the audio file. Compatible media players (foobar2000, MusicBee, Plex, etc.) will display time-synced lyrics automatically. Falls back to plain-text lyrics if synced versions aren't available.</li>
                     <li><strong>Lossy Copy</strong> &mdash; If enabled in settings, a lower-bitrate copy is created alongside the original (useful for mobile device syncing).</li>
                     <li><strong>Media Server Scan</strong> &mdash; Your media server (Plex/Jellyfin) is notified to scan for the new file. Navidrome auto-detects changes.</li>
@@ -1111,8 +1111,8 @@ const DOCS_SECTIONS = [
                         <tr><td><strong>Backup Database</strong></td><td>Create a timestamped database backup</td></tr>
                         <tr><td><strong>Refresh Beatport Cache</strong></td><td>Scrape Beatport homepage and warm the data cache</td></tr>
                         <tr><td><strong>Clean Search History</strong></td><td>Remove old searches from Soulseek (keeps 50 most recent)</td></tr>
-                        <tr><td><strong>Clean Completed Downloads</strong></td><td>Clear completed downloads and empty directories from the download folder</td></tr>
-                        <tr><td><strong>Full Cleanup</strong></td><td>Clear quarantine, download queue, staging folder, and search history in one sweep</td></tr>
+                        <tr><td><strong>Clean Completed Downloads</strong></td><td>Clear completed downloads and empty directories from the input folder</td></tr>
+                        <tr><td><strong>Full Cleanup</strong></td><td>Clear quarantine, download queue, import folder, and search history in one sweep</td></tr>
                         <tr><td><strong>Notify Only</strong></td><td>No action &mdash; just trigger notifications</td></tr>
                     </tbody>
                 </table>
@@ -1250,7 +1250,7 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Library Issues</h3>
                 <p class="docs-text">The Issues page tracks problems detected in your library by the repair worker. Issues are categorized by type and severity:</p>
                 <ul class="docs-list">
-                    <li><strong>Orphan files</strong> &mdash; Audio files in your transfer folder not tracked in the database</li>
+                    <li><strong>Orphan files</strong> &mdash; Audio files in your output folder not tracked in the database</li>
                     <li><strong>Dead references</strong> &mdash; Database entries pointing to files that no longer exist on disk</li>
                     <li><strong>Duplicate tracks</strong> &mdash; Multiple copies of the same track detected by fingerprint or metadata</li>
                     <li><strong>Missing cover art</strong> &mdash; Albums or tracks without embedded artwork</li>
@@ -1275,16 +1275,16 @@ const DOCS_SECTIONS = [
         content: () => `
             <div class="docs-subsection" id="imp-setup">
                 <h3 class="docs-subsection-title">Staging Setup</h3>
-                <p class="docs-text">Set your <strong>staging folder path</strong> in Settings &rarr; Download Settings. Place audio files you want to import into this folder. SoulSync scans the folder and detects albums from the file structure.</p>
+                <p class="docs-text">Set your <strong>import folder path</strong> in Settings &rarr; Download Settings. Place audio files you want to import into this folder. SoulSync scans the folder and detects albums from the file structure.</p>
                 <p class="docs-text">Place albums in subfolders (e.g., <code>Artist - Album/</code>) and loose singles at the root level.</p>
                 <p class="docs-text">The import page header shows the total files in staging and their combined size.</p>
                 ${docsImg('imp-staging.jpg', 'Import staging page')}
-                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Files not showing up?</strong> Check that your staging folder path is correct in Settings and that the folder has read permissions. Docker users: make sure the staging volume mount is configured in your docker-compose.yml.</div></div>
+                <div class="docs-callout tip"><span class="docs-callout-icon">&#x1F4A1;</span><div><strong>Files not showing up?</strong> Check that your import folder path is correct in Settings and that the folder has read permissions. Docker users: make sure the import volume mount is configured in your docker-compose.yml.</div></div>
             </div>
             <div class="docs-subsection" id="imp-workflow">
                 <h3 class="docs-subsection-title">Import Workflow</h3>
                 <ol class="docs-steps">
-                    <li>Place audio files in your staging folder</li>
+                    <li>Place audio files in your import folder</li>
                     <li>Navigate to the <strong>Import</strong> page &mdash; SoulSync detects and suggests album matches</li>
                     <li>Search for the correct album on Spotify/iTunes if the suggestion is wrong</li>
                     <li><strong>Match tracks</strong> &mdash; Drag-and-drop staged files onto album track slots, or let auto-match attempt it</li>
@@ -1304,7 +1304,7 @@ const DOCS_SECTIONS = [
                     <li><strong>Drag & Drop</strong> &mdash; Manually drag staged files onto the correct album track slots</li>
                     <li><strong>Conflict Detection</strong> &mdash; Highlights when a file matches multiple tracks or when tracks are unmatched</li>
                 </ul>
-                <p class="docs-text">After matching, the import process tags files with the official metadata (title, artist, album, track number, cover art) and moves them to your transfer path following the standard file organization template.</p>
+                <p class="docs-text">After matching, the import process tags files with the official metadata (title, artist, album, track number, cover art) and moves them to your output path following the standard file organization template.</p>
             </div>
             <div class="docs-subsection" id="imp-textfile">
                 <h3 class="docs-subsection-title">Import from Text File</h3>
@@ -1422,9 +1422,9 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Download Settings</h3>
                 <ul class="docs-list">
                     <li><strong>Download Source Mode</strong> &mdash; Soulseek, YouTube, Tidal, Qobuz, HiFi, Deezer, or Hybrid. Hybrid tries your primary source first, then falls back to alternates with configurable priority via drag-and-drop. Each streaming source has its own quality dropdown and an <strong>Allow quality fallback</strong> toggle. See <em>Download Sources</em> and <em>Quality Profiles</em> in the Music Downloads section for details.</li>
-                    <li><strong>Download Path</strong> &mdash; The folder where files are initially downloaded. This <strong>must match</strong> the folder your download source (slskd) writes to. In Docker, this is the container-side mount point (e.g., <code>/app/downloads</code>), not the host path. SoulSync monitors this folder for completed downloads to begin post-processing.</li>
-                    <li><strong>Transfer Path</strong> &mdash; The final destination for processed music files. After tagging, renaming, and organizing, files are moved here. This <strong>must</strong> point to your media server's monitored music folder (the folder Plex/Jellyfin/Navidrome watches for new content). In Docker, use the container-side path (e.g., <code>/app/Transfer</code>).</li>
-                    <li><strong>Staging Path</strong> &mdash; Folder for the Import feature (files placed here appear on the Import page). Separate from the download/transfer pipeline.</li>
+                    <li><strong>Input Path</strong> &mdash; The folder where files are initially downloaded. This <strong>must match</strong> the folder your download source (slskd) writes to. In Docker, this is the container-side mount point (e.g., <code>/app/downloads</code>), not the host path. SoulSync monitors this folder for completed downloads to begin post-processing.</li>
+                    <li><strong>Output Path</strong> &mdash; The final destination for processed music files. After tagging, renaming, and organizing, files are moved here. This <strong>must</strong> point to your media server's monitored music folder (the folder Plex/Jellyfin/Navidrome watches for new content). In Docker, use the container-side path (e.g., <code>/app/Transfer</code>).</li>
+                    <li><strong>Import Path</strong> &mdash; Folder for the Import feature (files placed here appear on the Import page). Separate from the input/output pipeline.</li>
                     <li><strong>iTunes Country</strong> &mdash; Storefront region for iTunes/Apple Music lookups (US, GB, FR, JP, etc.). Changes apply immediately to all searches without restarting. ID-based lookups automatically try up to 10 regional storefronts as fallback when the primary country returns no results.</li>
                     <li><strong>Lossy Copy</strong> &mdash; When enabled, creates a lower-bitrate MP3 copy of every downloaded file. Configure the output bitrate (default 320kbps) and output folder. Optionally delete the original lossless file after creating the lossy copy. Useful for syncing to mobile devices or streaming servers with bandwidth constraints.</li>
                     <li><strong>Content Filtering</strong> &mdash; Toggle explicit content filtering to control whether explicit tracks appear in search results and downloads.</li>
@@ -1439,7 +1439,7 @@ const DOCS_SECTIONS = [
                     <li><strong>AcoustID Verification</strong> &mdash; Toggle on/off. When enabled, every download is fingerprinted and compared against the expected track. Failed matches are quarantined.</li>
                     <li><strong>Metadata Enhancement</strong> &mdash; Master toggle for all enrichment workers. When disabled, no background metadata fetching occurs.</li>
                     <li><strong>Embed Album Art</strong> &mdash; Automatically embed cover art into audio file tags during post-processing.</li>
-                    <li><strong>File Organization</strong> &mdash; Toggle automatic file renaming and folder placement. When disabled, files stay in the download folder as-is.</li>
+                    <li><strong>File Organization</strong> &mdash; Toggle automatic file renaming and folder placement. When disabled, files stay in the input folder as-is.</li>
                     <li><strong>Path Template</strong> &mdash; Customize the folder structure using variables: <code>{artist}</code>, <code>{album}</code>, <code>{title}</code>, <code>{track_number}</code>, <code>{year}</code>, <code>{genre}</code>. Default: <code>{artist}/{album}/{track_number} - {title}</code></li>
                     <li><strong>Disc Label</strong> &mdash; Customize the multi-disc subfolder prefix (default: "Disc"). Multi-disc albums create <code>Disc 1/</code>, <code>Disc 2/</code>, etc.</li>
                     <li><strong>Soulseek Search Timeout</strong> &mdash; How long to wait for Soulseek search results before giving up (seconds).</li>
@@ -1594,7 +1594,7 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">Common Issues</h3>
                 <h4>Downloads complete but tracks don't appear in library</h4>
                 <ul class="docs-list">
-                    <li>Check that your <strong>Transfer path</strong> is correct and writable (see Paths in debug info)</li>
+                    <li>Check that your <strong>Output Path</strong> is correct and writable (see Paths in debug info)</li>
                     <li>If using a media server, trigger a library scan after downloads complete</li>
                     <li>Check <code>post_processing.log</code> for file move errors</li>
                 </ul>
@@ -2502,9 +2502,9 @@ function initializeDocsPage() {
 
                 text += '── Paths ──\n';
                 const pathStatus = (exists, writable) => exists ? (writable ? ck + ' ok' : ck + ' exists ' + ex + ' not writable') : ex + ' missing';
-                text += `Download: ${data.paths?.download_path || '(not set)'} [${pathStatus(data.paths?.download_path_exists, data.paths?.download_path_writable)}]\n`;
-                text += `Transfer: ${data.paths?.transfer_folder || '(not set)'} [${pathStatus(data.paths?.transfer_folder_exists, data.paths?.transfer_folder_writable)}]\n`;
-                text += `Staging:  ${data.paths?.staging_folder ? data.paths.staging_folder + ' [' + (data.paths.staging_folder_exists ? ck + ' ok' : ex + ' missing') + ']' : '(not configured — optional)'}\n`;
+                text += `Input:    ${data.paths?.download_path || '(not set)'} [${pathStatus(data.paths?.download_path_exists, data.paths?.download_path_writable)}]\n`;
+                text += `Output:   ${data.paths?.transfer_folder || '(not set)'} [${pathStatus(data.paths?.transfer_folder_exists, data.paths?.transfer_folder_writable)}]\n`;
+                text += `Import:   ${data.paths?.staging_folder ? data.paths.staging_folder + ' [' + (data.paths.staging_folder_exists ? ck + ' ok' : ex + ' missing') + ']' : '(not configured — optional)'}\n`;
                 if (data.paths?.music_videos_path) {
                     text += `Videos:   ${data.paths.music_videos_path} [${data.paths.music_videos_path_exists ? ck + ' ok' : ex + ' missing'}]\n`;
                 }

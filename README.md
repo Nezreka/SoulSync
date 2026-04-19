@@ -280,9 +280,9 @@ Open SoulSync at `http://localhost:8008` and go to Settings.
 **Download Source**: Choose your preferred source (Soulseek, Deezer, Tidal, Qobuz, HiFi, YouTube, or Hybrid)
 
 **Paths**:
-- **Download Path**: Container path to slskd's download folder (e.g., `/app/downloads`)
-- **Transfer Path**: Where organized music goes (e.g., `/app/Transfer`)
-- **Staging Path**: Optional import folder (e.g., `/app/Staging`)
+- **Input Folder**: Container path to slskd's download folder (e.g., `/app/downloads`)
+- **Output Folder**: Where organized music goes (e.g., `/app/Transfer`)
+- **Import Folder**: Optional folder for importing existing music (e.g., `/app/Staging`)
 
 **Media Server** (optional): Use your machine's actual IP (not `localhost` — that means inside the container)
 
@@ -293,9 +293,9 @@ Open SoulSync at `http://localhost:8008` and go to Settings.
 | Config | `/app/config` | Your config folder |
 | Logs | `/app/logs` | Your logs folder |
 | Database | `/app/data` | Named volume (recommended) |
-| Downloads | `/app/downloads` | Same folder slskd downloads to |
-| Transfer | `/app/Transfer` | Where organized music goes |
-| Staging | `/app/Staging` | Optional import folder |
+| Input | `/app/downloads` | Same folder slskd downloads to |
+| Output | `/app/Transfer` | Where organized music goes |
+| Import | `/app/Staging` | Optional folder for importing music |
 
 **Important:** Use a named volume for the database (`soulsync_database:/app/data`). Direct host path mounts to `/app/data` can overwrite Python module files.
 

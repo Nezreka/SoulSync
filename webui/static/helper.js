@@ -125,7 +125,7 @@ const HELPER_CONTENT = {
     },
     '.nav-button[data-page="import"]': {
         title: 'Music Import',
-        description: 'Import music files from your staging folder. SoulSync identifies tracks using AcoustID fingerprinting, matches them to metadata, and organizes them into your library with proper tagging.',
+        description: 'Import music files from your import folder. SoulSync identifies tracks using AcoustID fingerprinting, matches them to metadata, and organizes them into your library with proper tagging.',
         docsId: 'import'
     },
     '.nav-button[data-page="settings"]': {
@@ -230,7 +230,7 @@ const HELPER_CONTENT = {
     },
     '#import-button': {
         title: 'Quick Import',
-        description: 'Shortcut to the Import page. Drop music files in your staging folder and import them into your library with metadata matching and tagging.',
+        description: 'Shortcut to the Import page. Drop music files in your import folder and import them into your library with metadata matching and tagging.',
         docsId: 'import'
     },
 
@@ -1856,16 +1856,16 @@ const HELPER_CONTENT = {
 
     '.import-page-container': {
         title: 'Import Music',
-        description: 'Import audio files from your staging folder into your library. Match files to album metadata, tag them, and organize into your collection.',
+        description: 'Import audio files from your import folder into your library. Match files to album metadata, tag them, and organize into your collection.',
         docsId: 'import'
     },
     '.import-page-refresh-btn': {
         title: 'Refresh',
-        description: 'Re-scan your staging folder for new audio files. Use after dropping new files into the staging path.',
+        description: 'Re-scan your import folder for new audio files. Use after dropping new files in.',
     },
     '#import-staging-bar': {
-        title: 'Staging Folder',
-        description: 'Shows your configured staging folder path and the number of audio files found. Set the staging path in Settings → Download Settings.',
+        title: 'Import Folder',
+        description: 'Shows your configured import folder path and the number of audio files found. Set the import path in Settings → Download Settings.',
         docsId: 'imp-setup'
     },
     '#import-page-queue': {
@@ -1874,7 +1874,7 @@ const HELPER_CONTENT = {
     },
     '#import-page-tab-album': {
         title: 'Albums Tab',
-        description: 'Import complete albums. Search for an album, match staging files to tracks, then process. Suggestions appear automatically from your staging folder.',
+        description: 'Import complete albums. Search for an album, match import files to tracks, then process. Suggestions appear automatically from your import folder.',
         docsId: 'imp-workflow'
     },
     '#import-page-tab-singles': {
@@ -1884,15 +1884,15 @@ const HELPER_CONTENT = {
     },
     '#import-page-suggestions-grid': {
         title: 'Suggestions',
-        description: 'Albums automatically detected from your staging folder based on folder names and file metadata. Click a suggestion to start the matching process.',
+        description: 'Albums automatically detected from your import folder based on folder names and file metadata. Click a suggestion to start the matching process.',
     },
     '#import-page-album-search-input': {
         title: 'Album Search',
-        description: 'Search your metadata source for an album to match against staging files. Enter the album name or artist + album.',
+        description: 'Search your metadata source for an album to match against import files. Enter the album name or artist + album.',
     },
     '#import-page-album-match-section': {
         title: 'Track Matching',
-        description: 'Match your staging files to album tracks. Drag files from the unmatched pool onto tracks, or let auto-matching do it. Green = matched, red = unmatched.',
+        description: 'Match your import files to album tracks. Drag files from the unmatched pool onto tracks, or let auto-matching do it. Green = matched, red = unmatched.',
         tips: [
             'Drag and drop files from the unmatched pool to track slots',
             '"Re-match Automatically" re-runs the matching algorithm',
@@ -1902,7 +1902,7 @@ const HELPER_CONTENT = {
     },
     '#import-page-unmatched-pool': {
         title: 'Unmatched Files',
-        description: 'Audio files in your staging folder that haven\'t been matched to an album track yet. Drag them onto the correct track slot above.',
+        description: 'Audio files in your import folder that haven\'t been matched to an album track yet. Drag them onto the correct track slot above.',
         docsId: 'imp-matching'
     },
     '#import-page-album-process-btn': {
@@ -1911,7 +1911,7 @@ const HELPER_CONTENT = {
     },
     '#import-page-singles-list': {
         title: 'Singles List',
-        description: 'Individual audio files in your staging folder. Select files and click "Process Selected" to identify and import them as single tracks.',
+        description: 'Individual audio files in your import folder. Select files and click "Process Selected" to identify and import them as single tracks.',
         docsId: 'imp-singles'
     },
     '#import-page-singles-process-btn': {
@@ -2696,9 +2696,9 @@ const HELPER_TOURS = {
         icon: '📥',
         steps: [
             // Header
-            { page: 'import', selector: '.import-page-header', title: 'Import Music', description: 'Import audio files from your staging folder into your organized library. Files are matched to album metadata, tagged, and moved to the correct location.' },
-            { page: 'import', selector: '.import-page-staging-bar', title: 'Staging Folder', description: 'Shows your configured staging folder path and stats (file count, total size). This is where you drop audio files before importing. Configure the path in Settings → Downloads.' },
-            { page: 'import', selector: '.import-page-refresh-btn', title: 'Refresh', description: 'Re-scans your staging folder for new audio files. Hit this after dropping new files in.' },
+            { page: 'import', selector: '.import-page-header', title: 'Import Music', description: 'Import audio files from your import folder into your organized library. Files are matched to album metadata, tagged, and moved to the correct location.' },
+            { page: 'import', selector: '.import-page-staging-bar', title: 'Import Folder', description: 'Shows your configured import folder path and stats (file count, total size). This is where you drop audio files before importing. Configure the path in Settings → Downloads.' },
+            { page: 'import', selector: '.import-page-refresh-btn', title: 'Refresh', description: 'Re-scans your import folder for new audio files. Hit this after dropping new files in.' },
 
             // Queue
             { page: 'import', selector: '#import-page-queue', title: 'Processing Queue', description: 'When you process albums or singles, jobs appear here with progress indicators. "Clear finished" removes completed jobs from the list.' },
@@ -2707,7 +2707,7 @@ const HELPER_TOURS = {
             { page: 'import', selector: '.import-page-tab-bar', title: 'Albums vs Singles', description: 'Two modes: Albums tab matches full albums to metadata (cover art, track numbers, disc info). Singles tab processes individual files one at a time.' },
 
             // Album workflow
-            { page: 'import', selector: '#import-page-suggestions', title: 'Album Suggestions', description: 'The importer analyzes your staging files and suggests album matches based on embedded tags. Click a suggestion to start the matching process.' },
+            { page: 'import', selector: '#import-page-suggestions', title: 'Album Suggestions', description: 'The importer analyzes your import files and suggests album matches based on embedded tags. Click a suggestion to start the matching process.' },
             { page: 'import', selector: '#import-page-album-search-input', title: 'Album Search', description: 'If suggestions don\'t match, search manually. Type an album name, click Search, and select the correct result.' },
             { page: 'import', selector: '#import-page-album-search-input', title: 'Track Matching', description: 'After selecting an album, you\'ll see a track matching table. Files are auto-matched to tracks by name/number. Drag unmatched files from the pool to the correct track slot, then click "Process Album".' },
 
@@ -3612,7 +3612,7 @@ const WHATS_NEW = {
         // --- April 17, 2026 ---
         { date: 'April 17, 2026' },
         { title: 'SoulSync Standalone Library', desc: 'New "Standalone" server option — manage your library without Plex, Jellyfin, or Navidrome. Downloads and imports write directly to the library database with pre-populated enrichment IDs. Deep scan finds untracked files and cleans stale records. Select in Settings → Connections', page: 'settings' },
-        { title: 'Auto-Import', desc: 'Background staging folder watcher that automatically identifies and imports music. Three strategies: audio tags, folder name parsing, and AcoustID fingerprinting. Confidence-gated: 90%+ auto-imports, 70-90% queued for review, below 70% left for manual. Enable on the Import page Auto tab', page: 'import' },
+        { title: 'Auto-Import', desc: 'Background import folder watcher that automatically identifies and imports music. Three strategies: audio tags, folder name parsing, and AcoustID fingerprinting. Confidence-gated: 90%+ auto-imports, 70-90% queued for review, below 70% left for manual. Enable on the Import page Auto tab', page: 'import' },
         { title: 'Wishlist Nebula', desc: 'Wishlist redesigned as an interactive artist orb visualization. Each artist is a glowing orb with their photo — album fans and single moons orbit around them. Click orbs to expand, download albums/singles directly. Processing state shows live progress', page: 'wishlist' },
         { title: 'Automation Group Management', desc: 'Rename, delete, and bulk-toggle automation groups. Drag-and-drop automations between groups. Right-click group headers for context menu', page: 'automations' },
         { title: 'Bidirectional Artist Sync', desc: 'Artist Sync button now pulls new content from your media server AND removes stale library entries no longer on the server. Deep scan mode fetches full metadata for new tracks', page: 'library' },
@@ -3629,7 +3629,7 @@ const WHATS_NEW = {
         { title: 'Downloads Batch Panel', desc: 'Downloads page now shows a batch context panel on the right side. Each active batch (wishlist, sync, album download) gets a color-coded card with progress, cancel button, and expandable track list. Color indicators on download rows link them to their batch. Completed batch history shows the last 7 days', page: 'active-downloads' },
         { title: 'Fix Unknown Artist on Wishlist Downloads', desc: 'Adding tracks to wishlist from a playlist download modal was storing "Unknown Artist" as the artist context. Now resolves the artist per-track from the track\'s own metadata instead of the playlist-level artist which is only set for album downloads' },
         { title: 'Fix Download Modal Freezing Mid-Download', desc: 'Download modals (wishlist, sync, album) would freeze and stop updating after the first track completed. Caused by M3U auto-save firing every 2 seconds during downloads, exhausting Flask server threads. Now saves M3U once on completion only' },
-        { title: 'Auto-Import Improvements', desc: 'Recursive staging folder scan (any folder depth), single file support, expandable track match details, stats bar with filters, Scan Now button, Approve All / Clear History batch actions. Tag-based identification preferred over weak metadata matches. AcoustID fallback for untagged files. Race condition fix prevents duplicate processing', page: 'import' },
+        { title: 'Auto-Import Improvements', desc: 'Recursive import folder scan (any folder depth), single file support, expandable track match details, stats bar with filters, Scan Now button, Approve All / Clear History batch actions. Tag-based identification preferred over weak metadata matches. AcoustID fallback for untagged files. Race condition fix prevents duplicate processing', page: 'import' },
         { title: 'Album Delete with File Removal', desc: 'Enhanced library album delete now offers "Delete Files Too" option alongside "Remove from Library" — deletes audio files from disk and cleans up empty album folders', page: 'library' },
 
         // --- April 15, 2026 ---
@@ -3650,7 +3650,7 @@ const WHATS_NEW = {
 
         // --- April 14, 2026 ---
         { date: 'April 14, 2026' },
-        { title: 'Fix Staging Files Ignoring Path Template',        desc: 'Files matched from the Staging folder were copied to the transfer root with their original filename instead of applying the configured path template. Post-processing now receives full artist/album context for staging matches' },
+        { title: 'Fix Import Files Ignoring Path Template',        desc: 'Files matched from the import folder were copied to the output root with their original filename instead of applying the configured path template. Post-processing now receives full artist/album context for import matches' },
 
         // --- April 4, 2026 ---
         { date: 'April 4, 2026' },

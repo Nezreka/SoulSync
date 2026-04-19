@@ -1727,7 +1727,7 @@ def _register_automation_handlers():
                 log_line=f'Empty directories: removed {dirs_removed}', log_type='success' if dirs_removed else 'info')
 
         # --- 4. Sweep empty staging directories ---
-        _update_automation_progress(automation_id, phase='Sweeping staging folder...', progress=60)
+        _update_automation_progress(automation_id, phase='Sweeping import folder...', progress=60)
         staging_path = _get_staging_path()
         s_removed = 0
         if os.path.isdir(staging_path):
@@ -4454,9 +4454,9 @@ def run_service_test(service, test_config):
                             count += 1
                     if count > 100:
                         break  # Don't count everything, just confirm files exist
-                return True, f"SoulSync standalone ready! Transfer folder: {transfer_path} ({count}+ audio files)"
+                return True, f"SoulSync standalone ready! Output folder: {transfer_path} ({count}+ audio files)"
             else:
-                return False, f"Transfer folder not found: {transfer_path}"
+                return False, f"Output folder not found: {transfer_path}"
         elif service == "soulseek":
             if soulseek_client is None:
                 return False, "Download orchestrator failed to initialize. Check server logs for startup errors."
@@ -6852,7 +6852,7 @@ def get_automation_blocks():
             {"type": "clean_completed_downloads", "label": "Clean Completed Downloads", "icon": "check-square",
              "description": "Clear completed downloads and empty directories", "available": True},
             {"type": "full_cleanup", "label": "Full Cleanup", "icon": "trash",
-             "description": "Clear quarantine, download queue, staging folder, and search history in one sweep", "available": True},
+             "description": "Clear quarantine, download queue, import folder, and search history in one sweep", "available": True},
             {"type": "deep_scan_library", "label": "Deep Scan Library", "icon": "search",
              "description": "Full library comparison without losing enrichment data", "available": True},
             {"type": "run_script", "label": "Run Script", "icon": "terminal",
@@ -22516,7 +22516,7 @@ def get_version_info():
             },
             {
                 "title": "Auto-Import",
-                "description": "Background staging folder watcher that automatically identifies and imports music into your library",
+                "description": "Background import folder watcher that automatically identifies and imports music into your library",
                 "features": [
                     "• Recursive scan — any folder depth (Artist/Album/tracks, Album/tracks, loose files)",
                     "• Single file support — loose audio files identified via tags, filename, or AcoustID",
@@ -22526,7 +22526,7 @@ def get_version_info():
                     "• Expandable track match details with per-track confidence scores",
                     "• Race condition fix prevents duplicate processing during multi-track albums",
                 ],
-                "usage_note": "Enable on the Import page Auto tab. Set your staging folder in Settings."
+                "usage_note": "Enable on the Import page Auto tab. Set your import folder in Settings."
             },
             {
                 "title": "Wishlist Nebula",
@@ -22982,7 +22982,7 @@ _OLD_V22_NOTES = """
                 "title": "Fix Library Maintenance Path Fixes Failing Silently",
                 "description": "Path mismatch fixes now use fresh config and report errors to the UI",
                 "features": [
-                    "• Transfer folder path is re-read from config before each fix attempt",
+                    "• Output folder path is re-read from config before each fix attempt",
                     "• Fix failure reasons are now shown in the toast notification",
                     "• Bulk fix failures are logged individually with finding ID and error details"
                 ]
@@ -23428,9 +23428,9 @@ _OLD_V2_NOTES = r"""
             },
             {
                 "title": "Staging Folder Pre-Download Check",
-                "description": "Check your staging folder for existing files before downloading",
+                "description": "Check your import folder for existing files before downloading",
                 "features": [
-                    "• Before searching Soulseek/YouTube, checks the staging folder for a matching file",
+                    "• Before searching Soulseek/YouTube, checks the import folder for a matching file",
                     "• Tag-based matching (Mutagen) with filename parsing fallback",
                     "• On match, copies the file to transfer and runs normal post-processing",
                     "• Staging scan cached per batch — only scans once for the entire download"
@@ -24499,9 +24499,9 @@ def _resume_workers_after_scan():
 def _run_soulsync_deep_scan():
     """Deep scan for SoulSync standalone mode.
 
-    1. Scans the Transfer folder for all audio files
+    1. Scans the output folder for all audio files
     2. Compares against soulsync DB records (by file_path)
-    3. Untracked files → moved to Staging for auto-import processing
+    3. Untracked files → moved to import folder for auto-import processing
     4. Stale DB records (file gone) → removed from DB
     """
     try:
@@ -24510,7 +24510,7 @@ def _run_soulsync_deep_scan():
         staging_path = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
 
         if not os.path.isdir(transfer_path):
-            _db_update_error_callback(f"Transfer folder not found: {transfer_path}")
+            _db_update_error_callback(f"Output folder not found: {transfer_path}")
             return
 
         print(f"[SoulSync Deep Scan] Starting — Transfer: {transfer_path}")
@@ -26851,8 +26851,8 @@ def _run_duplicate_cleaner():
         if not transfer_folder or not os.path.exists(transfer_folder):
             with duplicate_cleaner_lock:
                 duplicate_cleaner_state["status"] = "error"
-                duplicate_cleaner_state["phase"] = "Transfer folder not configured or does not exist"
-                duplicate_cleaner_state["error_message"] = "Please configure Transfer folder in settings"
+                duplicate_cleaner_state["phase"] = "Output folder not configured or does not exist"
+                duplicate_cleaner_state["error_message"] = "Please configure output folder in settings"
             print(f"[Duplicate Cleaner] Transfer folder not found: {transfer_folder}")
             return
 
