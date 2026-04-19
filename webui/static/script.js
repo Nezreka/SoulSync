@@ -54913,15 +54913,14 @@ async function openYourAlbumDownload(index) {
                 track_number: track.track_number || 0
             };
         });
-        const virtualId = `your_albums_${album.spotify_album_id || album.deezer_album_id || album.tidal_album_id || index}`;
-        await openDownloadMissingModalForYouTube(virtualId, albumData.name, tracks,
-            { name: album.artist_name, source: albumData.source || 'spotify' },
-            {
-                id: albumData.id, name: albumData.name, album_type: albumData.album_type || 'album',
-                total_tracks: albumData.total_tracks || 0, release_date: albumData.release_date || '',
-                images: albumData.images || []
-            }
-        );
+        const virtualId = `discover_album_${album.spotify_album_id || album.deezer_album_id || album.tidal_album_id || index}`;
+        const albumObj = {
+            id: albumData.id, name: albumData.name, album_type: albumData.album_type || 'album',
+            total_tracks: albumData.total_tracks || 0, release_date: albumData.release_date || '',
+            images: albumData.images || [], artists: [{ name: album.artist_name }]
+        };
+        const artistObj = { id: null, name: album.artist_name };
+        await openDownloadMissingModalForArtistAlbum(virtualId, albumData.name, tracks, albumObj, artistObj, false);
         hideLoadingOverlay();
     } catch (e) {
         console.error('Error opening your album download:', e);
