@@ -26914,15 +26914,18 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
                 progress: data.progress, spotify_matches: data.spotify_matches, spotify_total: data.spotify_total,
                 complete: data.complete,
                 results: (data.results || []).map((r, i) => {
-                    const isFound = r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track;
+                    const isWingIt = r.wing_it_fallback || r.status_class === 'wing-it';
+                    const isFound = !isWingIt && (r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track);
                     return {
                         index: i, yt_track: r.tidal_track ? r.tidal_track.name : 'Unknown',
                         yt_artist: r.tidal_track ? (r.tidal_track.artists ? r.tidal_track.artists.join(', ') : 'Unknown') : 'Unknown',
-                        status: isFound ? '✅ Found' : '❌ Not Found', status_class: isFound ? 'found' : 'not-found',
+                        status: isWingIt ? '🎯 Wing It' : (isFound ? '✅ Found' : '❌ Not Found'),
+                        status_class: isWingIt ? 'wing-it' : (isFound ? 'found' : 'not-found'),
                         spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
                         spotify_artist: r.spotify_data && r.spotify_data.artists ? (Array.isArray(r.spotify_data.artists) ? r.spotify_data.artists.join(', ') : r.spotify_data.artists) : (r.spotify_artist || '-'),
                         spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) : (r.spotify_album || '-'),
-                        spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match
+                        spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match,
+                        wing_it_fallback: isWingIt
                     };
                 })
             };
@@ -28360,15 +28363,18 @@ function startDeezerDiscoveryPolling(fakeUrlHash, playlistId) {
                 progress: data.progress, spotify_matches: data.spotify_matches, spotify_total: data.spotify_total,
                 complete: data.complete,
                 results: (data.results || []).map((r, i) => {
-                    const isFound = r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track;
+                    const isWingIt = r.wing_it_fallback || r.status_class === 'wing-it';
+                    const isFound = !isWingIt && (r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track);
                     return {
                         index: i, yt_track: r.deezer_track ? r.deezer_track.name : 'Unknown',
                         yt_artist: r.deezer_track ? (r.deezer_track.artists ? r.deezer_track.artists.join(', ') : 'Unknown') : 'Unknown',
-                        status: isFound ? '✅ Found' : '❌ Not Found', status_class: isFound ? 'found' : 'not-found',
+                        status: isWingIt ? '🎯 Wing It' : (isFound ? '✅ Found' : '❌ Not Found'),
+                        status_class: isWingIt ? 'wing-it' : (isFound ? 'found' : 'not-found'),
                         spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
                         spotify_artist: r.spotify_data && r.spotify_data.artists ? (Array.isArray(r.spotify_data.artists) ? r.spotify_data.artists.join(', ') : r.spotify_data.artists) : (r.spotify_artist || '-'),
                         spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) : (r.spotify_album || '-'),
-                        spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match
+                        spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match,
+                        wing_it_fallback: isWingIt
                     };
                 })
             };
@@ -32244,15 +32250,18 @@ function startSpotifyPublicDiscoveryPolling(fakeUrlHash, urlHash) {
                 progress: data.progress, spotify_matches: data.spotify_matches, spotify_total: data.spotify_total,
                 complete: data.complete,
                 results: (data.results || []).map((r, i) => {
-                    const isFound = r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track;
+                    const isWingIt = r.wing_it_fallback || r.status_class === 'wing-it';
+                    const isFound = !isWingIt && (r.status === 'found' || r.status === '✅ Found' || r.status_class === 'found' || r.spotify_data || r.spotify_track);
                     return {
                         index: i, yt_track: r.spotify_public_track ? r.spotify_public_track.name : 'Unknown',
                         yt_artist: r.spotify_public_track ? (r.spotify_public_track.artists ? r.spotify_public_track.artists.join(', ') : 'Unknown') : 'Unknown',
-                        status: isFound ? '✅ Found' : '❌ Not Found', status_class: isFound ? 'found' : 'not-found',
+                        status: isWingIt ? '🎯 Wing It' : (isFound ? '✅ Found' : '❌ Not Found'),
+                        status_class: isWingIt ? 'wing-it' : (isFound ? 'found' : 'not-found'),
                         spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
                         spotify_artist: r.spotify_data && r.spotify_data.artists ? (Array.isArray(r.spotify_data.artists) ? r.spotify_data.artists.join(', ') : r.spotify_data.artists) : (r.spotify_artist || '-'),
                         spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) : (r.spotify_album || '-'),
-                        spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match
+                        spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match,
+                        wing_it_fallback: isWingIt
                     };
                 })
             };
@@ -34083,6 +34092,9 @@ function generateDiscoveryActionButton(result, identifier, platform) {
         result.status_class === 'error' ||
         result.status === '❌ Error';
 
+    const isWingIt = result.wing_it_fallback ||
+        result.status_class === 'wing-it';
+
     const isFound = result.status === 'found' ||
         result.status_class === 'found' ||
         result.status === '✅ Found';
@@ -34091,6 +34103,15 @@ function generateDiscoveryActionButton(result, identifier, platform) {
         return `<button class="fix-match-btn"
                         onclick="openDiscoveryFixModal('${platform}', '${identifier}', ${result.index})"
                         title="Manually search for this track">
+                    🔧 Fix
+                </button>`;
+    }
+
+    // For wing-it fallbacks, show fix button so user can find a real match
+    if (isWingIt) {
+        return `<button class="fix-match-btn"
+                        onclick="openDiscoveryFixModal('${platform}', '${identifier}', ${result.index})"
+                        title="Search for a proper metadata match">
                     🔧 Fix
                 </button>`;
     }

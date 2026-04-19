@@ -22502,6 +22502,7 @@ def get_version_info():
                     "• Fix Spotify enrichment worker infinite loop on pre-matched artists",
                     "• Reject Qobuz 30-second sample/preview downloads",
                     "• Fix library page crash on All filter — non-string soul_id broke card rendering",
+                    "• Auto Wing It fallback for failed discovery — unmatched tracks download via Soulseek with raw metadata",
                 ],
             },
             {
@@ -27812,9 +27813,21 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                 
                 # Process each failed track (matching sync.py's loop) with safety limit
                 max_failed_tracks = min(len(permanently_failed_tracks), 50)  # Safety limit
+                wing_it_skipped = 0
                 for i, failed_track_info in enumerate(permanently_failed_tracks[:max_failed_tracks]):
                     try:
                         track_name = failed_track_info.get('track_name', f'Track {i+1}')
+
+                        # Skip wing-it fallback tracks — they had no real metadata match,
+                        # so adding them to wishlist would just retry with the same raw data.
+                        # Check the track ID prefix since _ensure_spotify_track_format overwrites source.
+                        sp_track = failed_track_info.get('spotify_track', {})
+                        sp_id = sp_track.get('id', '') if isinstance(sp_track, dict) else ''
+                        if str(sp_id).startswith('wing_it_'):
+                            wing_it_skipped += 1
+                            print(f"[Wishlist Processing] Skipping wing-it track: {track_name}")
+                            continue
+
                         print(f"[Wishlist Processing] Adding track {i+1}/{max_failed_tracks}: {track_name}")
                         
                         success = wishlist_service.add_failed_track_from_modal(
@@ -27842,6 +27855,8 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                         error_count += 1
                         print(f"[Wishlist Processing] Exception adding track to wishlist: {e}")
                 
+                if wing_it_skipped:
+                    print(f"[Wishlist Processing] Skipped {wing_it_skipped} wing-it fallback tracks")
                 print(f"[Wishlist Processing] Added {wishlist_added_count}/{failed_count} failed tracks to wishlist (errors: {error_count})")
                         
             except Exception as e:
@@ -34363,7 +34378,7 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
 
         updated = 0
         for result in discovery_results:
-            if result.get('status') != 'found':
+            if result.get('status') not in ('found', 'Found', 'Wing It'):
                 continue
 
             match_data = result.get('match_data') or result.get('spotify_data')
@@ -34396,6 +34411,9 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
                 'confidence': confidence,
                 'matched_data': match_data,
             }
+            if result.get('wing_it_fallback'):
+                extra_data['wing_it_fallback'] = True
+                extra_data['provider'] = 'wing_it_fallback'
             db.update_mirrored_track_extra_data(db_track_id, extra_data)
             updated += 1
 
@@ -34469,20 +34487,24 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                     except (json.JSONDecodeError, TypeError):
                         pass
                 if existing_extra.get('discovered'):
-                    # Check if matched_data is complete — old discoveries may be missing
-                    # track_number/release_date due to the Track dataclass stripping them.
-                    # Re-discover these so the enriched pipeline fills in the gaps.
-                    md = existing_extra.get('matched_data', {})
-                    album = md.get('album', {})
-                    has_track_num = md.get('track_number')
-                    has_release = album.get('release_date') if isinstance(album, dict) else None
-                    has_album_id = album.get('id') if isinstance(album, dict) else None
-                    if has_track_num and (has_release or has_album_id):
-                        pl_skipped += 1
-                        total_skipped += 1
-                    else:
-                        # Incomplete discovery — re-discover to get full metadata
+                    if existing_extra.get('wing_it_fallback'):
+                        # Wing It stub — always re-attempt to find a real match
                         undiscovered_tracks.append(track)
+                    else:
+                        # Check if matched_data is complete — old discoveries may be missing
+                        # track_number/release_date due to the Track dataclass stripping them.
+                        # Re-discover these so the enriched pipeline fills in the gaps.
+                        md = existing_extra.get('matched_data', {})
+                        album = md.get('album', {})
+                        has_track_num = md.get('track_number')
+                        has_release = album.get('release_date') if isinstance(album, dict) else None
+                        has_album_id = album.get('id') if isinstance(album, dict) else None
+                        if has_track_num and (has_release or has_album_id):
+                            pl_skipped += 1
+                            total_skipped += 1
+                        else:
+                            # Incomplete discovery — re-discover to get full metadata
+                            undiscovered_tracks.append(track)
                 else:
                     undiscovered_tracks.append(track)
 
@@ -34671,19 +34693,23 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                         current_item=f'{track_name} - {artist_name}',
                         log_line=f'{track_name} → {matched_data["name"]} ({best_confidence:.2f})', log_type='success')
                 else:
+                    # Auto Wing It fallback — mark as discovered with stub metadata
+                    stub = _build_discovery_wing_it_stub(track_name, artist_name, duration_ms)
                     extra_data = {
-                        'discovered': False,
-                        'discovery_attempted': True,
-                        'provider': discovery_source,
+                        'discovered': True,
+                        'provider': 'wing_it_fallback',
+                        'confidence': 0,
+                        'wing_it_fallback': True,
+                        'matched_data': stub,
                     }
                     db.update_mirrored_track_extra_data(track_id, extra_data)
-                    total_failed += 1
-                    print(f"[{i+1}/{len(undiscovered_tracks)}] No match: {track_name} by {artist_name}")
+                    total_discovered += 1
+                    print(f"[{i+1}/{len(undiscovered_tracks)}] Wing It: {track_name} by {artist_name}")
                     _update_automation_progress(automation_id,
                         progress=((total_skipped + total_discovered + total_failed) / max(1, grand_total)) * 100,
                         processed=total_discovered + total_failed,
                         current_item=f'{track_name} - {artist_name}',
-                        log_line=f'{track_name} by {artist_name} → no match', log_type='error')
+                        log_line=f'{track_name} by {artist_name} → wing it (no API match)', log_type='info')
 
                 time.sleep(0.15)
 
@@ -35014,6 +35040,24 @@ def _run_tidal_discovery_worker(playlist_id):
                         print(f"CACHE SAVED: {tidal_track.name} (confidence: {match_confidence:.3f})")
                     except Exception as cache_err:
                         print(f"Cache save error: {cache_err}")
+
+                # Auto Wing It fallback for unmatched tracks
+                if result['status'] != 'found':
+                    tidal_t = result.get('tidal_track', {})
+                    stub = _build_discovery_wing_it_stub(
+                        tidal_t.get('name', ''),
+                        ', '.join(tidal_t.get('artists', [])),
+                        tidal_t.get('duration_ms', 0)
+                    )
+                    result['status'] = 'found'
+                    result['status_class'] = 'wing-it'
+                    result['spotify_data'] = stub
+                    result['match_data'] = stub
+                    result['wing_it_fallback'] = True
+                    result['confidence'] = 0
+                    successful_discoveries += 1
+                    state['spotify_matches'] = successful_discoveries
+                    state['wing_it_count'] = state.get('wing_it_count', 0) + 1
 
                 state['discovery_results'].append(result)
                 state['discovery_progress'] = int(((i + 1) / len(playlist.tracks)) * 100)
@@ -36126,6 +36170,26 @@ def _run_deezer_discovery_worker(playlist_id):
                     except Exception as cache_err:
                         print(f"Cache save error: {cache_err}")
 
+                # Auto Wing It fallback for unmatched tracks
+                if result['status_class'] == 'not-found':
+                    deezer_t = result.get('deezer_track', {})
+                    stub = _build_discovery_wing_it_stub(
+                        deezer_t.get('name', ''),
+                        ', '.join(deezer_t.get('artists', [])),
+                        deezer_t.get('duration_ms', 0)
+                    )
+                    result['status'] = 'Wing It'
+                    result['status_class'] = 'wing-it'
+                    result['spotify_data'] = stub
+                    result['match_data'] = stub
+                    result['spotify_track'] = deezer_t.get('name', '')
+                    result['spotify_artist'] = ', '.join(deezer_t.get('artists', []))
+                    result['wing_it_fallback'] = True
+                    result['confidence'] = 0
+                    successful_discoveries += 1
+                    state['spotify_matches'] = successful_discoveries
+                    state['wing_it_count'] = state.get('wing_it_count', 0) + 1
+
                 result['index'] = i
                 state['discovery_results'].append(result)
                 state['discovery_progress'] = int(((i + 1) / len(tracks)) * 100)
@@ -36966,6 +37030,26 @@ def _run_spotify_public_discovery_worker(url_hash):
                     except Exception as cache_err:
                         print(f"Cache save error: {cache_err}")
 
+                # Auto Wing It fallback for unmatched tracks
+                if result['status_class'] == 'not-found':
+                    sp_t = result.get('spotify_public_track', {})
+                    stub = _build_discovery_wing_it_stub(
+                        sp_t.get('name', ''),
+                        ', '.join(sp_t.get('artists', [])),
+                        sp_t.get('duration_ms', 0)
+                    )
+                    result['status'] = 'Wing It'
+                    result['status_class'] = 'wing-it'
+                    result['spotify_data'] = stub
+                    result['match_data'] = stub
+                    result['spotify_track'] = sp_t.get('name', '')
+                    result['spotify_artist'] = ', '.join(sp_t.get('artists', []))
+                    result['wing_it_fallback'] = True
+                    result['confidence'] = 0
+                    successful_discoveries += 1
+                    state['spotify_matches'] = successful_discoveries
+                    state['wing_it_count'] = state.get('wing_it_count', 0) + 1
+
                 result['index'] = i
                 state['discovery_results'].append(result)
                 state['discovery_progress'] = int(((i + 1) / len(tracks)) * 100)
@@ -37476,6 +37560,20 @@ def update_youtube_discovery_match():
         return jsonify({'error': str(e)}), 500
 
 
+def _build_discovery_wing_it_stub(track_name, artist_name, duration_ms=0, image_url=''):
+    """Build stub matched_data for tracks that failed metadata discovery.
+    Used as automatic Wing It fallback so tracks still flow through the download pipeline."""
+    return {
+        'id': f"wing_it_{hash(f'{artist_name}_{track_name}') % 100000}",
+        'name': track_name,
+        'artists': [{'name': artist_name}] if isinstance(artist_name, str) else artist_name,
+        'album': {'name': '', 'album_type': 'single', 'images': [], 'release_date': ''},
+        'duration_ms': duration_ms,
+        'image_url': image_url,
+        'source': 'wing_it_fallback',
+    }
+
+
 def _run_youtube_discovery_worker(url_hash):
     """Background worker for YouTube music discovery process (Spotify preferred, iTunes fallback)"""
     _ew_state = {}
@@ -37715,6 +37813,19 @@ def _run_youtube_discovery_worker(url_hash):
                         except Exception as cache_err:
                             print(f"Cache save error: {cache_err}")
 
+                else:
+                    # Auto Wing It fallback — build stub from raw source data
+                    stub = _build_discovery_wing_it_stub(cleaned_title, cleaned_artist, track.get('duration_ms', 0))
+                    result['status'] = 'Wing It'
+                    result['status_class'] = 'wing-it'
+                    result['spotify_track'] = cleaned_title
+                    result['spotify_artist'] = cleaned_artist
+                    result['spotify_album'] = ''
+                    result['matched_data'] = stub
+                    result['spotify_data'] = stub
+                    result['wing_it_fallback'] = True
+                    state['wing_it_count'] = state.get('wing_it_count', 0) + 1
+
                 state['discovery_results'].append(result)
 
                 print(f"  {'' if matched_track else ''} Track {i+1}/{len(tracks)}: {result['status']}")
@@ -37755,7 +37866,7 @@ def _run_youtube_discovery_worker(url_hash):
                     db_track_id = tracks[idx].get('db_track_id')
                     if not db_track_id:
                         continue
-                    if result.get('status_class') == 'found' and result.get('matched_data'):
+                    if result.get('status_class') in ('found', 'wing-it') and result.get('matched_data'):
                         extra_data = {
                             'discovered': True,
                             'provider': result.get('discovery_source', discovery_source),
@@ -37764,6 +37875,9 @@ def _run_youtube_discovery_worker(url_hash):
                         }
                         if result.get('manual_match'):
                             extra_data['manual_match'] = True
+                        if result.get('wing_it_fallback'):
+                            extra_data['wing_it_fallback'] = True
+                            extra_data['provider'] = 'wing_it_fallback'
                         db.update_mirrored_track_extra_data(db_track_id, extra_data)
                     else:
                         extra_data = {
@@ -37778,9 +37892,13 @@ def _run_youtube_discovery_worker(url_hash):
 
         playlist_name = playlist['name']
         source_label = discovery_source.upper()
-        add_activity_item("", f"YouTube Discovery Complete ({source_label})", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
+        wing_it_count = state.get('wing_it_count', 0)
+        activity_msg = f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found"
+        if wing_it_count:
+            activity_msg += f", {wing_it_count} wing it"
+        add_activity_item("", f"YouTube Discovery Complete ({source_label})", activity_msg, "Now")
 
-        print(f"YouTube discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched")
+        print(f"YouTube discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched, {wing_it_count} wing it")
 
     except Exception as e:
         print(f"Error in YouTube discovery worker: {e}")
@@ -38025,6 +38143,19 @@ def _run_listenbrainz_discovery_worker(state_key):
                             print(f"CACHE SAVED: {cleaned_artist} - {cleaned_title} (confidence: {best_confidence:.3f})")
                         except Exception as cache_err:
                             print(f"Cache save error: {cache_err}")
+
+                else:
+                    # Auto Wing It fallback — build stub from raw source data
+                    stub = _build_discovery_wing_it_stub(cleaned_title, cleaned_artist, duration_ms)
+                    result['status'] = 'Wing It'
+                    result['status_class'] = 'wing-it'
+                    result['spotify_track'] = cleaned_title
+                    result['spotify_artist'] = cleaned_artist
+                    result['spotify_album'] = ''
+                    result['matched_data'] = stub
+                    result['spotify_data'] = stub
+                    result['wing_it_fallback'] = True
+                    state['wing_it_count'] = state.get('wing_it_count', 0) + 1
 
                 state['discovery_results'].append(result)
 
@@ -48568,6 +48699,23 @@ def _run_beatport_discovery_worker(url_hash):
                             print(f"CACHE SAVED: {track_artist} - {track_title} (confidence: {best_confidence:.3f})")
                         except Exception as cache_err:
                             print(f"Cache save error: {cache_err}")
+
+                # Auto Wing It fallback for unmatched tracks
+                if result_entry.get('status_class') == 'not-found':
+                    bp_t = result_entry.get('beatport_track', {})
+                    stub = _build_discovery_wing_it_stub(
+                        bp_t.get('title', ''),
+                        bp_t.get('artist', ''),
+                    )
+                    result_entry['status'] = 'found'
+                    result_entry['status_class'] = 'wing-it'
+                    result_entry['spotify_data'] = stub
+                    result_entry['match_data'] = stub
+                    result_entry['wing_it_fallback'] = True
+                    result_entry['confidence'] = 0
+                    successful_discoveries += 1
+                    state['spotify_matches'] = successful_discoveries
+                    state['wing_it_count'] = state.get('wing_it_count', 0) + 1
 
                 state['discovery_results'].append(result_entry)
 

@@ -3600,6 +3600,12 @@ function closeHelperSearch() {
 
 const WHATS_NEW = {
     '2.33': [
+        // --- April 19, 2026 ---
+        { date: 'April 19, 2026' },
+        { title: 'Auto Wing It Discovery Fallback', desc: 'When playlist discovery fails to match a track on any metadata API (Spotify, Deezer, iTunes, etc.), the track now automatically falls back to Wing It mode instead of being marked "Not Found". Stub metadata is built from the raw source title and artist, and the track flows through the normal download pipeline via Soulseek. Amber "Wing It" badge distinguishes these from API-matched tracks. Works across all discovery sources: YouTube, Tidal, Deezer, Beatport, ListenBrainz, and mirrored playlists. Wing It stubs persist in the DB for mirrored playlists and are re-attempted on future discovery runs so real matches can replace them' },
+        { title: 'Fix Library Page Crash on All Filter', desc: 'Library page could crash with "No artists found" when viewing all artists if any artist had a non-string soul_id. Individual letter filters worked because the problematic artist wasn\'t in those results. Card rendering is now fault-tolerant — one bad artist card can\'t take down the whole page', page: 'library' },
+        { title: 'Fix CI Test Failures', desc: 'Fixed test suite failures caused by incomplete dummy config managers missing get_active_media_server() and script.js read encoding on non-UTF-8 locales' },
+
         // --- April 18, 2026 ---
         { date: 'April 18, 2026' },
         { title: 'Live Log Viewer', desc: 'New Logs tab on the Settings page — real-time terminal-style log viewer with color-coded log levels. Filter by DEBUG/INFO/WARNING/ERROR, search logs in real-time, switch between log files (app, post-processing, acoustid, source reuse). Auto-scroll, copy, clear. Live WebSocket updates every 0.5s. Smart level detection works on both logger output and print statements', page: 'settings' },
