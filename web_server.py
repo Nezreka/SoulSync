@@ -1608,6 +1608,15 @@ def _register_automation_handlers():
     def _auto_clean_search_history(config):
         """Remove old searches from Soulseek."""
         automation_id = config.get('_automation_id')
+        # Skip if soulseek is not the active download source or in hybrid order
+        dl_mode = config_manager.get('download_source.mode', 'hybrid')
+        hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
+        soulseek_active = (dl_mode == 'soulseek' or
+                          (dl_mode == 'hybrid' and 'soulseek' in hybrid_order))
+        if not soulseek_active or not soulseek_client or not soulseek_client.base_url:
+            _update_automation_progress(automation_id,
+                log_line='Soulseek not active — skipped', log_type='skip')
+            return {'status': 'skipped'}
         if not config_manager.get('soulseek.auto_clear_searches', True):
             _update_automation_progress(automation_id,
                 log_line='Auto-clear disabled in settings', log_type='skip')
@@ -9360,6 +9369,7 @@ def download_music_video():
             _music_video_downloads[video_id]['status'] = 'matching'
             artist_name = raw_channel
             track_title = raw_title
+            year = ''
 
             # Strip common YouTube suffixes for cleaner search
             import re as _re
@@ -9384,6 +9394,8 @@ def download_music_video():
                     if best and best_score >= 0.5:
                         artist_name = best.artists[0] if best.artists else raw_channel
                         track_title = best.name
+                        if hasattr(best, 'release_date') and best.release_date:
+                            year = str(best.release_date)[:4]
                         print(f"[Music Video] Matched to: {artist_name} - {track_title} (confidence: {best_score:.2f})")
                     else:
                         # Parse artist from video title: "Artist - Title" pattern
@@ -9403,13 +9415,27 @@ def download_music_video():
             def _sanitize(s):
                 return _re.sub(r'[<>:"/\\|?*]', '_', s).strip().rstrip('.')
 
-            artist_folder = _sanitize(artist_name)
-            video_filename = f"{_sanitize(track_title)}-video"
-
-            # Build output path: MusicVideos/Artist/Title-video
-            artist_dir = os.path.join(music_videos_path, artist_folder)
-            os.makedirs(artist_dir, exist_ok=True)
-            output_path = os.path.join(artist_dir, video_filename)
+            # Apply video path template
+            video_template = config_manager.get('file_organization.templates', {}).get('video_path', '$artist/$title-video')
+            if not video_template or not video_template.strip():
+                video_template = '$artist/$title-video'
+            safe_artist = _sanitize(artist_name)
+            video_path = video_template
+            video_path = video_path.replace('$artistletter', safe_artist[0].upper() if safe_artist else 'A')
+            video_path = video_path.replace('$artist', safe_artist)
+            video_path = video_path.replace('$title', _sanitize(track_title))
+            video_path = video_path.replace('$year', str(year) if year else '')
+            # Clean up empty segments from missing variables
+            video_path = _re.sub(r'//+', '/', video_path).strip('/')
+            # Split into folder and filename
+            path_parts = video_path.rsplit('/', 1)
+            if len(path_parts) == 2:
+                folder_part, file_part = path_parts
+            else:
+                folder_part, file_part = '', path_parts[0]
+            output_dir = os.path.join(music_videos_path, folder_part) if folder_part else music_videos_path
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(output_dir, file_part)
 
             # Step 2: Download
             _music_video_downloads[video_id]['status'] = 'downloading'
@@ -22503,6 +22529,8 @@ def get_version_info():
                     "• Reject Qobuz 30-second sample/preview downloads",
                     "• Fix library page crash on All filter — non-string soul_id broke card rendering",
                     "• Auto Wing It fallback for failed discovery — unmatched tracks download via Soulseek with raw metadata",
+                    "• Customizable music video naming — path template with $artist, $title, $year variables",
+                    "• Fix soulseek log spam when not configured as download source",
                 ],
             },
             {

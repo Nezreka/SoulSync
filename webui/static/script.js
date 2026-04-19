@@ -5652,12 +5652,14 @@ function resetFileOrganizationTemplates() {
     const defaults = {
         album: '$albumartist/$albumartist - $album/$track - $title',
         single: '$artist/$artist - $title/$title',
-        playlist: '$playlist/$artist - $title'
+        playlist: '$playlist/$artist - $title',
+        video: '$artist/$title-video'
     };
 
     document.getElementById('template-album-path').value = defaults.album;
     document.getElementById('template-single-path').value = defaults.single;
     document.getElementById('template-playlist-path').value = defaults.playlist;
+    document.getElementById('template-video-path').value = defaults.video;
 
     debouncedAutoSaveSettings();
 }
@@ -5669,7 +5671,8 @@ function validateFileOrganizationTemplates() {
     const validVars = {
         album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$disc', '$discnum', '$year', '$quality'],
         single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$year', '$quality'],
-        playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality']
+        playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
+        video: ['$artist', '$artistletter', '$title', '$year']
     };
 
     // Get template values
@@ -6191,6 +6194,7 @@ async function loadSettingsData() {
         document.getElementById('template-album-path').value = settings.file_organization?.templates?.album_path || '$albumartist/$albumartist - $album/$track - $title';
         document.getElementById('template-single-path').value = settings.file_organization?.templates?.single_path || '$artist/$artist - $title/$title';
         document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
+        document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
         document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
@@ -7645,7 +7649,8 @@ async function saveSettings(quiet = false) {
             templates: {
                 album_path: document.getElementById('template-album-path').value,
                 single_path: document.getElementById('template-single-path').value,
-                playlist_path: document.getElementById('template-playlist-path').value
+                playlist_path: document.getElementById('template-playlist-path').value,
+                video_path: document.getElementById('template-video-path').value
             }
         },
         wishlist: {
