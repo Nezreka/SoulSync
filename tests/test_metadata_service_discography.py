@@ -32,6 +32,9 @@ if "config.settings" not in sys.modules:
         def get(self, key, default=None):
             return default
 
+        def get_active_media_server(self):
+            return "primary"
+
     settings_mod.config_manager = _DummyConfigManager()
     config_pkg.settings = settings_mod
     sys.modules["config"] = config_pkg
@@ -56,6 +59,7 @@ class _FakeSourceClient:
         self.album_calls = []
         self.artist_search_calls = []
         self.discography_calls = []
+        self.track_search_calls = []
 
     def get_artist_albums(self, artist_id, **kwargs):
         self.album_calls.append((artist_id, dict(kwargs)))
@@ -68,6 +72,14 @@ class _FakeSourceClient:
     def search_discography(self, query, **kwargs):
         self.discography_calls.append((query, dict(kwargs)))
         return list(self.discography_results)
+
+    def search_tracks(self, query, **kwargs):
+        self.track_search_calls.append((query, dict(kwargs)))
+        return []
+
+    def get_album_tracks(self, album_id, **kwargs):
+        self.album_calls.append((album_id, dict(kwargs)))
+        return {"items": list(self.album_results)}
 
 
 def _album(album_id, name, release_date, album_type="album"):
@@ -248,3 +260,126 @@ def test_get_artist_discography_uses_hydrabase_fast_path_when_active(monkeypatch
         )
     ]
     assert hydrabase.artist_search_calls == [("Artist One", {"limit": 5})]
+
+
+class _CompletionFakeDB:
+    def __init__(self, owned_tracks=1, expected_tracks=3, is_track=False):
+        self.owned_tracks = owned_tracks
+        self.expected_tracks = expected_tracks
+        self.is_track = is_track
+        self.album_calls = []
+        self.track_calls = []
+
+    def check_album_exists_with_completeness(self, **kwargs):
+        self.album_calls.append(dict(kwargs))
+        return (True, 0.9, self.owned_tracks, self.expected_tracks, self.owned_tracks >= self.expected_tracks, [])
+
+    def check_track_exists(self, **kwargs):
+        self.track_calls.append(dict(kwargs))
+        if self.is_track:
+            return (object(), 0.9)
+        return (None, 0.0)
+
+
+def test_iter_artist_discography_completion_uses_primary_source_first(monkeypatch):
+    deezer = _FakeSourceClient()
+    spotify = _FakeSourceClient()
+    itunes = _FakeSourceClient()
+
+    deezer.album_results = [{"id": "release-1-track-1"}, {"id": "release-1-track-2"}]
+    spotify.album_results = [{"id": "release-1-track-1"}, {"id": "release-1-track-2"}, {"id": "release-1-track-3"}]
+    itunes.album_results = [{"id": "release-1-track-1"}]
+
+    clients = {
+        "deezer": deezer,
+        "spotify": spotify,
+        "itunes": itunes,
+    }
+
+    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: clients.get(source))
+
+    db = _CompletionFakeDB(owned_tracks=1, expected_tracks=2)
+    events = list(metadata_service.iter_artist_discography_completion_events(
+        {
+            "albums": [{"id": "release-1", "name": "Album One", "total_tracks": 0}],
+            "singles": [],
+        },
+        artist_name="Artist One",
+        db=db,
+    ))
+
+    assert events[0]["type"] == "start"
+    assert events[-1]["type"] == "complete"
+    assert events[1]["expected_tracks"] == 2
+    assert events[1]["status"] == "partial"
+    assert deezer.album_calls == [("release-1", {})]
+    assert spotify.album_calls == []
+    assert itunes.album_calls == []
+    assert db.album_calls and db.album_calls[0]["expected_track_count"] == 2
+
+
+def test_iter_artist_discography_completion_respects_source_override(monkeypatch):
+    deezer = _FakeSourceClient()
+    spotify = _FakeSourceClient()
+    itunes = _FakeSourceClient()
+
+    deezer.album_results = [{"id": "release-2-track-1"}]
+    spotify.album_results = [{"id": "release-2-track-1"}, {"id": "release-2-track-2"}]
+    itunes.album_results = [{"id": "release-2-track-1"}, {"id": "release-2-track-2"}, {"id": "release-2-track-3"}]
+
+    clients = {
+        "deezer": deezer,
+        "spotify": spotify,
+        "itunes": itunes,
+    }
+
+    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: clients.get(source))
+
+    db = _CompletionFakeDB(owned_tracks=1, expected_tracks=3)
+    events = list(metadata_service.iter_artist_discography_completion_events(
+        {
+            "albums": [{"id": "release-2", "name": "Album Two", "total_tracks": 0}],
+            "singles": [],
+        },
+        artist_name="Artist Two",
+        source_override="itunes",
+        db=db,
+    ))
+
+    assert events[1]["expected_tracks"] == 3
+    assert itunes.album_calls == [("release-2", {})]
+    assert deezer.album_calls == []
+    assert spotify.album_calls == []
+
+
+def test_iter_artist_discography_completion_uses_release_artist_metadata(monkeypatch):
+    source = _FakeSourceClient()
+    clients = {"deezer": source}
+
+    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary])
+    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source_name: clients.get(source_name))
+
+    db = _CompletionFakeDB(owned_tracks=1, expected_tracks=2)
+    events = list(metadata_service.iter_artist_discography_completion_events(
+        {
+            "albums": [{
+                "id": "release-3",
+                "name": "Album Three",
+                "artist_name": "Explicit Artist",
+                "total_tracks": 2,
+            }],
+            "singles": [],
+        },
+        artist_name="Unknown Artist",
+        db=db,
+    ))
+
+    assert events[0]["artist_name"] == "Explicit Artist"
+    assert events[1]["name"] == "Album Three"
+    assert db.album_calls[0]["artist"] == "Explicit Artist"
+    assert source.track_search_calls == []

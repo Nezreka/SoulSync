@@ -35807,7 +35807,8 @@ async function loadArtistDiscography(artistId, artistName = null, sourceOverride
 
         const discography = {
             albums: data.albums || [],
-            singles: data.singles || []
+            singles: data.singles || [],
+            source: data.source || sourceOverride || null,
         };
 
         // Update selected artist with full details from backend (includes MusicBrainz ID)
@@ -36303,7 +36304,7 @@ async function checkDiscographyCompletion(artistId, discography) {
             body: JSON.stringify({
                 discography: discography,
                 artist_name: artistsPageState.selectedArtist?.name || 'Unknown Artist',
-                test_mode: window.location.search.includes('test=true')
+                source: discography?.source || artistsPageState.sourceOverride || null,
             }),
             signal: artistCompletionController.signal
         });
