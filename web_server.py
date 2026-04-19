@@ -4878,7 +4878,7 @@ def index():
 @app.route('/<path:page>')
 def spa_catch_all(page):
     # Serve index.html for client-side routes; let Flask handle real routes first.
-    if page.startswith(('api/', 'static/', 'auth/', 'callback', 'tidal/', 'status')):
+    if page.startswith(('api/', 'static/', 'auth/', 'callback', 'deezer/', 'tidal/', 'status')):
         abort(404)
     return render_template('index.html')
 
