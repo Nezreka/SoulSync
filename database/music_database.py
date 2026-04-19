@@ -5063,12 +5063,41 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
+
+    def api_search_tracks(self, title: str = "", artist: str = "", limit: int = 50,
+                          server_source: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Search tracks and return full dict rows (all track columns plus artist_name,
+        album_title, album_thumb_url). Avoids the double-query pattern of calling
+        search_tracks() followed by api_get_tracks_by_ids().
+        """
+        try:
+            if not title and not artist:
+                return []
+
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            basic_rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source)
+            if basic_rows:
+                return [dict(r) for r in basic_rows]
+
+            fuzzy_rows = self._search_tracks_fuzzy_rows(cursor, title, artist, limit, server_source)
+            return [dict(r) for r in fuzzy_rows]
+        except Exception as e:
+            logger.error(f"API: Error searching tracks with title='{title}', artist='{artist}': {e}")
+            return []
     
     def _search_tracks_basic(self, cursor, title: str, artist: str, limit: int, server_source: str = None) -> List[DatabaseTrack]:
         """Basic SQL LIKE search - fastest method"""
+        rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source)
+        return self._rows_to_tracks(rows)
+
+    def _search_tracks_basic_rows(self, cursor, title: str, artist: str, limit: int,
+                                  server_source: Optional[str] = None):
+        """Basic SQL LIKE search returning raw rows (shared by DatabaseTrack and dict-returning callers)."""
         where_conditions = []
         params = []
-        
+
         if title:
             where_conditions.append("unidecode_lower(tracks.title) LIKE ?")
             params.append(f"%{self._normalize_for_comparison(title)}%")
@@ -5083,13 +5112,13 @@ class MusicDatabase:
         if server_source:
             where_conditions.append("tracks.server_source = ?")
             params.append(server_source)
-        
+
         if not where_conditions:
             return []
-        
+
         where_clause = " AND ".join(where_conditions)
         params.append(limit)
-        
+
         cursor.execute(f"""
             SELECT tracks.*, artists.name as artist_name, albums.title as album_title, albums.thumb_url as album_thumb_url
             FROM tracks
@@ -5100,45 +5129,47 @@ class MusicDatabase:
             LIMIT ?
         """, params)
 
-        return self._rows_to_tracks(cursor.fetchall())
+        return cursor.fetchall()
     
     def _search_tracks_fuzzy_fallback(self, cursor, title: str, artist: str, limit: int, server_source: str = None) -> List[DatabaseTrack]:
         """Broadest fuzzy search - partial word matching"""
+        rows = self._search_tracks_fuzzy_rows(cursor, title, artist, limit, server_source)
+        return self._rows_to_tracks(rows)
+
+    def _search_tracks_fuzzy_rows(self, cursor, title: str, artist: str, limit: int,
+                                  server_source: Optional[str] = None):
+        """Broadest fuzzy search returning raw rows (shared by DatabaseTrack and dict-returning callers)."""
         # Get broader results by searching for individual words
         search_terms = []
         if title:
-            # Split title into words and search for each (normalized for diacritics)
             title_words = [w.strip() for w in self._normalize_for_comparison(title).split() if len(w.strip()) >= 3]
             search_terms.extend(title_words)
 
         if artist:
-            # Split artist into words and search for each (normalized for diacritics)
             artist_words = [w.strip() for w in self._normalize_for_comparison(artist).split() if len(w.strip()) >= 3]
             search_terms.extend(artist_words)
-        
+
         if not search_terms:
             return []
-        
-        # Build a query that searches for any of the words
+
         like_conditions = []
         params = []
-        
-        for term in search_terms[:5]:  # Limit to 5 terms to avoid too broad search
+
+        for term in search_terms[:5]:
             like_conditions.append("(unidecode_lower(tracks.title) LIKE ? OR unidecode_lower(artists.name) LIKE ? OR unidecode_lower(COALESCE(tracks.track_artist, '')) LIKE ?)")
             params.extend([f"%{term}%", f"%{term}%", f"%{term}%"])
-        
+
         if not like_conditions:
             return []
-        
-        # Build WHERE clause with optional server filter
+
         where_parts = [f"({' OR '.join(like_conditions)})"]
         if server_source:
             where_parts.append("tracks.server_source = ?")
-            params.append(server_source)  # Append after LIKE params, before LIMIT
-        
+            params.append(server_source)
+
         where_clause = " AND ".join(where_parts)
-        params.append(limit * 3)  # Get more results for scoring
-        
+        params.append(limit * 3)
+
         cursor.execute(f"""
             SELECT tracks.*, artists.name as artist_name, albums.title as album_title, albums.thumb_url as album_thumb_url
             FROM tracks
@@ -5154,23 +5185,19 @@ class MusicDatabase:
         # Score and filter results
         scored_results = []
         for row in rows:
-            # Simple scoring based on how many search terms match
             score = 0
             db_title_lower = self._normalize_for_comparison(row['title'])
             db_artist_lower = self._normalize_for_comparison(row['artist_name'])
-            
+
             for term in search_terms:
                 if term in db_title_lower or term in db_artist_lower:
                     score += 1
-            
+
             if score > 0:
                 scored_results.append((score, row))
-        
-        # Sort by score and take top results
+
         scored_results.sort(key=lambda x: x[0], reverse=True)
-        top_rows = [row for score, row in scored_results[:limit]]
-        
-        return self._rows_to_tracks(top_rows)
+        return [row for score, row in scored_results[:limit]]
     
     def _rows_to_tracks(self, rows) -> List[DatabaseTrack]:
         """Convert database rows to DatabaseTrack objects"""
