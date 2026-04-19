@@ -5931,7 +5931,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'lidarr_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'lidarr_download', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -21346,6 +21346,18 @@ def _post_process_matched_download(context_key, context, file_path):
             # Store final path for verification wrapper (before conversions may override)
             context['_final_processed_path'] = final_path
 
+            # ReplayGain analysis — write track-level gain tags if enabled
+            if config_manager.get('post_processing.replaygain_enabled', False):
+                try:
+                    from core.replaygain import analyze_track as _rg_analyze, write_replaygain_tags as _rg_write, is_ffmpeg_available as _rg_ffmpeg_ok, RG_REFERENCE_LUFS as _RG_REF
+                    if _rg_ffmpeg_ok():
+                        lufs, peak_dbfs = _rg_analyze(final_path)
+                        gain_db = _RG_REF - lufs
+                        _rg_write(final_path, gain_db, peak_dbfs)
+                        pp_logger.info(f"ReplayGain: {gain_db:+.2f} dB — {os.path.basename(final_path)}")
+                except Exception as rg_err:
+                    pp_logger.debug(f"ReplayGain analysis skipped: {rg_err}")
+
             # Downsample hi-res FLAC to CD quality if enabled (must run before lossy copy)
             downsampled_path = _downsample_hires_flac(final_path, context)
             if downsampled_path:
@@ -21722,6 +21734,18 @@ def _post_process_matched_download(context_key, context, file_path):
 
         # 4. Generate LRC lyrics file at final location (elegant addition)
         _generate_lrc_file(final_path, context, spotify_artist, album_info)
+
+        # 5. ReplayGain analysis — write track-level gain tags if enabled
+        if config_manager.get('post_processing.replaygain_enabled', False):
+            try:
+                from core.replaygain import analyze_track as _rg_analyze, write_replaygain_tags as _rg_write, is_ffmpeg_available as _rg_ffmpeg_ok, RG_REFERENCE_LUFS as _RG_REF
+                if _rg_ffmpeg_ok():
+                    lufs, peak_dbfs = _rg_analyze(final_path)
+                    gain_db = _RG_REF - lufs
+                    _rg_write(final_path, gain_db, peak_dbfs)
+                    pp_logger.info(f"ReplayGain: {gain_db:+.2f} dB, peak {peak_dbfs:.2f} dBFS — {os.path.basename(final_path)}")
+            except Exception as rg_err:
+                pp_logger.debug(f"ReplayGain analysis skipped: {rg_err}")
 
         # Downsample hi-res FLAC to CD quality if enabled (must run before lossy copy)
         downsampled_path = _downsample_hires_flac(final_path, context)
