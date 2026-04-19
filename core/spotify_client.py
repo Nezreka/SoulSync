@@ -620,6 +620,21 @@ class SpotifyClient:
                 return self._auth_cached_result
 
         # Cache miss — make API call outside the lock.
+        # Safety: if there's no cached token, return False immediately.
+        # Without this guard, spotipy's auth_manager will try to start an interactive
+        # OAuth flow (binding 127.0.0.1:<redirect_port>), which inside Docker either
+        # steals Flask's port (crash loop) or binds loopback-only (unreachable from host).
+        # Users authenticate via the SoulSync web UI instead.
+        try:
+            cache_handler = getattr(self.sp.auth_manager, 'cache_handler', None)
+            if cache_handler and cache_handler.get_cached_token() is None:
+                with self._auth_cache_lock:
+                    self._auth_cached_result = False
+                    self._auth_cache_time = time.time()
+                return False
+        except Exception:
+            pass
+
         # Use a dedicated probe client (retries=0) so a 429 here propagates
         # immediately and we can detect long Retry-After bans.
         try:
