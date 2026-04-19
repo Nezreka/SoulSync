@@ -17178,6 +17178,41 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     white-space: nowrap;
 }
 
+.genre-whitelist-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.genre-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.genre-chip-x {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.35);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 2px;
+    line-height: 1;
+}
+
+.genre-chip-x:hover {
+    color: #ef5350;
+}
+
 .config-options {
     display: flex;
     flex-direction: column;

@@ -726,10 +726,14 @@ class SpotifyWorker:
 
             # Backfill genres if empty
             if artist_obj.genres:
-                cursor.execute("""
-                    UPDATE artists SET genres = ?
-                    WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                """, (json.dumps(artist_obj.genres), artist_id))
+                from core.genre_filter import filter_genres
+                from config.settings import config_manager as _cfg
+                _filtered = filter_genres(list(artist_obj.genres), _cfg)
+                if _filtered:
+                    cursor.execute("""
+                        UPDATE artists SET genres = ?
+                        WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
+                    """, (json.dumps(_filtered), artist_id))
 
             conn.commit()
         except Exception as e:

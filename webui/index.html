@@ -5672,6 +5672,32 @@
                             </div>
 
 
+                            <!-- Genre Whitelist -->
+                            <div class="settings-group" data-stg="library">
+                                <h3>🎵 Genre Whitelist</h3>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="genre-whitelist-enabled" onchange="if(typeof debouncedAutoSaveSettings==='function')debouncedAutoSaveSettings()">
+                                        Enable strict genre filtering
+                                    </label>
+                                </div>
+                                <div class="help-text" style="margin-bottom:12px;">
+                                    When enabled, only genres on the whitelist below are kept during enrichment. Junk tags (artist names, radio shows, playlist names) are silently dropped. When disabled, all genres pass through unchanged.
+                                </div>
+
+                                <div id="genre-whitelist-container" style="display:none">
+                                    <div class="form-group" style="margin-bottom:8px;">
+                                        <input type="text" id="genre-whitelist-search" placeholder="Search or add genre..." class="form-input" style="margin-bottom:8px;">
+                                    </div>
+                                    <div id="genre-whitelist-chips" class="genre-whitelist-chips"></div>
+                                    <div class="form-actions" style="margin-top:8px;gap:8px;">
+                                        <button class="test-button" onclick="_genreWhitelistReset()">Reset to Defaults</button>
+                                        <span id="genre-whitelist-count" style="color:rgba(255,255,255,0.4);font-size:12px;"></span>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Import Quality Settings -->
                             <div class="settings-group" data-stg="library">
                                 <h3>📥 Import Settings</h3>
