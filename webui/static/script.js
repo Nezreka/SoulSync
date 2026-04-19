@@ -12950,13 +12950,14 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
         virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
             virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
                 virtualPlaylistId.startsWith('spotify_public_') ? 'Spotify' :
-                    virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
-                        virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
-                            virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
-                                virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
-                                    virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
-                                        virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
-                                            'YouTube';
+                    virtualPlaylistId.startsWith('spotify:') ? 'Spotify' :
+                        virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
+                            virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
+                                virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
+                                    virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                                        virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
+                                            virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                                                'YouTube';
 
     // Store metadata for discover download sidebar (will be added when Begin Analysis is clicked)
     if (source === 'SoulSync' || virtualPlaylistId.startsWith('discover_lb_') || virtualPlaylistId.startsWith('listenbrainz_') || virtualPlaylistId.startsWith('wing_it_')) {
@@ -27308,13 +27309,14 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
         virtualPlaylistId.startsWith('tidal_') ? 'Tidal' :
             virtualPlaylistId.startsWith('listenbrainz_') ? 'ListenBrainz' :
                 virtualPlaylistId.startsWith('spotify_public_') ? 'Spotify' :
-                    virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
-                        virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
-                            virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
-                                virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
-                                    virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
-                                        virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
-                                            'YouTube';
+                    virtualPlaylistId.startsWith('spotify:') ? 'Spotify' :
+                        virtualPlaylistId.startsWith('discover_') ? 'SoulSync' :
+                            virtualPlaylistId.startsWith('seasonal_') ? 'SoulSync' :
+                                virtualPlaylistId.startsWith('spotify_library_') ? 'SoulSync' :
+                                    virtualPlaylistId.startsWith('build_playlist_') ? 'SoulSync' :
+                                        virtualPlaylistId.startsWith('decade_') ? 'SoulSync' :
+                                            virtualPlaylistId === 'build_playlist_custom' ? 'SoulSync' :
+                                                'YouTube';
 
     const heroContext = {
         type: 'playlist',
