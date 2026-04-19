@@ -25526,11 +25526,11 @@ async function dashboardLibraryScan(fullRefresh = false) {
                     detail.textContent = `${status.processed} / ${status.total || '?'}`;
                 }
 
-                if (status.status === 'completed' || status.status === 'error' || status.status === 'idle') {
+                if (status.status === 'completed' || status.status === 'finished' || status.status === 'error' || status.status === 'idle') {
                     clearInterval(pollInterval);
                     window._libraryStatusScanning = false;
 
-                    if (status.status === 'completed') {
+                    if (status.status === 'completed' || status.status === 'finished') {
                         showToast('Library scan complete', 'success');
                     } else if (status.status === 'error') {
                         showToast(`Scan error: ${status.error_message || 'Unknown'}`, 'error');
@@ -25608,11 +25608,11 @@ async function dashboardLibraryDeepScan() {
                     detail.textContent = `${status.processed} / ${status.total || '?'}`;
                 }
 
-                if (status.status === 'completed' || status.status === 'error' || status.status === 'idle') {
+                if (status.status === 'completed' || status.status === 'finished' || status.status === 'error' || status.status === 'idle') {
                     clearInterval(pollInterval);
                     window._libraryStatusScanning = false;
 
-                    if (status.status === 'completed') {
+                    if (status.status === 'completed' || status.status === 'finished') {
                         showToast('Deep scan complete', 'success');
                     } else if (status.status === 'error') {
                         showToast(`Deep scan error: ${status.error_message || 'Unknown'}`, 'error');
