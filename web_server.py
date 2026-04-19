@@ -6257,6 +6257,75 @@ def handle_log_level():
             return jsonify({"success": False, "error": str(e)}), 500
 
 # ===========================
+# LIVE LOG VIEWER API
+# ===========================
+
+# In-memory ring buffer for live log streaming via WebSocket
+_live_log_buffer = []
+_live_log_buffer_lock = threading.Lock()
+_LIVE_LOG_BUFFER_MAX = 500
+
+
+@app.route('/api/logs/tail', methods=['GET'])
+def get_log_tail():
+    """Return the last N lines from a log file, optionally filtered by level."""
+    log_source = request.args.get('source', 'app')
+    lines = request.args.get('lines', 200, type=int)
+    lines = max(10, min(lines, 1000))
+    level_filter = request.args.get('level', '').upper()  # DEBUG, INFO, WARNING, ERROR or empty
+
+    log_map = {
+        'app': os.path.join('logs', 'app.log'),
+        'post_processing': os.path.join('logs', 'post_processing.log'),
+        'acoustid': os.path.join('logs', 'acoustid.log'),
+        'source_reuse': os.path.join('logs', 'source_reuse.log'),
+    }
+    log_path = log_map.get(log_source, log_map['app'])
+
+    result_lines = []
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                all_lines = f.readlines()
+            # Read more lines than requested so filtering has enough to work with
+            tail = all_lines[-(lines * 3):] if level_filter else all_lines[-lines:]
+            for line in tail:
+                stripped = line.rstrip()
+                if not stripped:
+                    continue
+                if level_filter and level_filter in ('DEBUG', 'INFO', 'WARNING', 'ERROR'):
+                    # Match lines like "2026-04-18 12:00:00 - name - INFO - message"
+                    if f' - {level_filter} - ' not in stripped:
+                        continue
+                result_lines.append(stripped)
+            # Trim to requested count after filtering
+            result_lines = result_lines[-lines:]
+        except Exception as e:
+            result_lines = [f'Error reading log file: {e}']
+
+    # Available log files
+    available = []
+    logs_dir = 'logs'
+    if os.path.isdir(logs_dir):
+        for fname in sorted(os.listdir(logs_dir)):
+            if fname.endswith('.log'):
+                fpath = os.path.join(logs_dir, fname)
+                size_kb = os.path.getsize(fpath) / 1024
+                available.append({
+                    'key': fname.replace('.log', ''),
+                    'file': fname,
+                    'size': f"{size_kb:.0f} KB" if size_kb < 1024 else f"{size_kb/1024:.1f} MB",
+                })
+
+    return jsonify({
+        'lines': result_lines,
+        'source': log_source,
+        'total': len(result_lines),
+        'available_logs': available,
+    })
+
+
+# ===========================
 # AUTOMATIONS API
 # ===========================
 
@@ -54390,6 +54459,69 @@ def _emit_tool_progress_loop():
         except Exception as e:
             logger.debug(f"Error emitting logs: {e}")
 
+def _emit_live_log_loop():
+    """Background thread that tails app.log and pushes new lines via WebSocket."""
+    _last_pos = {}  # {source: file_position}
+    _active_source = 'app'
+    log_map = {
+        'app': os.path.join('logs', 'app.log'),
+        'post_processing': os.path.join('logs', 'post_processing.log'),
+        'acoustid': os.path.join('logs', 'acoustid.log'),
+        'source_reuse': os.path.join('logs', 'source_reuse.log'),
+    }
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(2)
+        try:
+            # Read which source clients want (stored by subscribe handler)
+            source = getattr(_emit_live_log_loop, '_source', 'app')
+            log_path = log_map.get(source, log_map['app'])
+            if not os.path.exists(log_path):
+                continue
+
+            file_size = os.path.getsize(log_path)
+            last_pos = _last_pos.get(source, 0)
+
+            # File was truncated or rotated
+            if file_size < last_pos:
+                last_pos = 0
+
+            if file_size == last_pos:
+                continue  # No new data
+
+            new_lines = []
+            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                f.seek(last_pos)
+                for line in f:
+                    stripped = line.rstrip()
+                    if stripped:
+                        new_lines.append(stripped)
+                _last_pos[source] = f.tell()
+
+            if new_lines:
+                # Cap at 50 lines per push to avoid flooding
+                socketio.emit('logs:live', {
+                    'lines': new_lines[-50:],
+                    'source': source,
+                })
+        except Exception as e:
+            logger.debug(f"Error in live log emitter: {e}")
+
+_emit_live_log_loop._source = 'app'
+
+
+@socketio.on('logs:subscribe')
+def handle_logs_subscribe(data):
+    """Client subscribes to live log stream with optional source."""
+    source = data.get('source', 'app')
+    _emit_live_log_loop._source = source
+    join_room('logs:live')
+
+
+@socketio.on('logs:unsubscribe')
+def handle_logs_unsubscribe(data):
+    leave_room('logs:live')
+
+
 @socketio.on('sync:subscribe')
 def handle_sync_subscribe(data):
     for pid in data.get('playlist_ids', []):
@@ -54680,7 +54812,9 @@ def start_runtime_services():
         socketio.start_background_task(_hydrabase_reconnect_loop)
         # API Rate Monitor — 1s push for speedometer gauges
         socketio.start_background_task(_emit_rate_monitor_loop)
-        print("WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor)")
+        # Live log tail — streams new log lines to the log viewer
+        socketio.start_background_task(_emit_live_log_loop)
+        print("WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor + live logs)")
 
         _runtime_started = True
 

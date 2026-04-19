@@ -5755,6 +5755,12 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadDbMaintenanceInfo === 'function') {
         try { loadDbMaintenanceInfo(); } catch (e) { }
     }
+    // Initialize live log viewer when switching to Logs tab
+    if (tab === 'logs') {
+        _logViewerInit();
+    } else {
+        _logViewerStop();
+    }
 }
 
 function toggleStgService(el) {
@@ -6972,6 +6978,139 @@ document.addEventListener('input', (e) => {
 
 function _collectGenreWhitelist() {
     return _genreWhitelistCache;
+}
+
+// ── Live Log Viewer ──
+let _logViewerActive = false;
+let _logViewerFilter = '';
+let _logViewerSource = 'app';
+const _LOG_MAX_LINES = 1000;
+
+async function _logViewerInit() {
+    if (_logViewerActive) return;
+    _logViewerActive = true;
+    _logViewerSource = document.getElementById('log-viewer-source')?.value || 'app';
+
+    // Fetch initial tail
+    try {
+        const params = new URLSearchParams({ source: _logViewerSource, lines: 200 });
+        if (_logViewerFilter) params.set('level', _logViewerFilter);
+        const resp = await fetch(`/api/logs/tail?${params}`);
+        const data = await resp.json();
+        if (data.lines) {
+            const container = document.getElementById('log-viewer-lines');
+            if (container) {
+                container.innerHTML = '';
+                _logViewerAppendLines(data.lines);
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to load initial logs:', e);
+    }
+
+    // Subscribe to live updates
+    if (typeof socket !== 'undefined' && socket && socket.connected) {
+        socket.emit('logs:subscribe', { source: _logViewerSource });
+        socket.on('logs:live', _logViewerOnLive);
+    }
+}
+
+function _logViewerStop() {
+    if (!_logViewerActive) return;
+    _logViewerActive = false;
+    if (typeof socket !== 'undefined' && socket) {
+        socket.off('logs:live', _logViewerOnLive);
+        socket.emit('logs:unsubscribe', {});
+    }
+}
+
+function _logViewerOnLive(data) {
+    if (!_logViewerActive || !data.lines) return;
+    if (data.source !== _logViewerSource) return;
+    const filtered = _logViewerFilter
+        ? data.lines.filter(l => l.includes(` - ${_logViewerFilter} - `))
+        : data.lines;
+    if (filtered.length > 0) _logViewerAppendLines(filtered);
+}
+
+function _logViewerAppendLines(lines) {
+    const container = document.getElementById('log-viewer-lines');
+    if (!container) return;
+    const autoScroll = document.getElementById('log-viewer-autoscroll')?.checked;
+    const terminal = document.getElementById('log-viewer-terminal');
+
+    for (const line of lines) {
+        const div = document.createElement('div');
+        div.className = 'log-line ' + _logViewerGetClass(line);
+        div.textContent = line;
+        container.appendChild(div);
+    }
+
+    // Trim old lines
+    while (container.children.length > _LOG_MAX_LINES) {
+        container.removeChild(container.firstChild);
+    }
+
+    // Update count
+    const countEl = document.getElementById('log-viewer-line-count');
+    if (countEl) countEl.textContent = `${container.children.length} lines`;
+
+    // Auto-scroll
+    if (autoScroll && terminal) {
+        terminal.scrollTop = terminal.scrollHeight;
+    }
+}
+
+function _logViewerGetClass(line) {
+    if (line.includes(' - DEBUG - ')) return 'log-debug';
+    if (line.includes(' - INFO - ')) return 'log-info';
+    if (line.includes(' - WARNING - ')) return 'log-warning';
+    if (line.includes(' - ERROR - ') || line.includes(' - CRITICAL - ')) return 'log-error';
+    return 'log-plain';
+}
+
+async function _logViewerChangeSource() {
+    _logViewerStop();
+    _logViewerSource = document.getElementById('log-viewer-source')?.value || 'app';
+    const container = document.getElementById('log-viewer-lines');
+    if (container) container.innerHTML = '<div class="log-line log-info">Loading...</div>';
+    await _logViewerInit();
+}
+
+function _logViewerFilterLevel(btn) {
+    document.querySelectorAll('.log-filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    _logViewerFilter = btn.dataset.level || '';
+    // Reload with filter
+    _logViewerStop();
+    const container = document.getElementById('log-viewer-lines');
+    if (container) container.innerHTML = '';
+    _logViewerInit();
+}
+
+function _logViewerCopy() {
+    const container = document.getElementById('log-viewer-lines');
+    if (!container) return;
+    const text = Array.from(container.children).map(el => el.textContent).join('\n');
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => showToast('Logs copied', 'success'));
+    } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;left:-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showToast('Logs copied', 'success');
+    }
+}
+
+function _logViewerClear() {
+    const container = document.getElementById('log-viewer-lines');
+    if (container) container.innerHTML = '';
+    const countEl = document.getElementById('log-viewer-line-count');
+    if (countEl) countEl.textContent = '0 lines';
 }
 
 // ── Database Maintenance ──

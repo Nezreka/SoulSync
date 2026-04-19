@@ -17213,6 +17213,136 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #ef5350;
 }
 
+/* ── Live Log Viewer ── */
+.log-viewer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.log-viewer-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.log-viewer-select {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    color: #e0e0e0;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+.log-viewer-filters {
+    display: flex;
+    gap: 4px;
+}
+
+.log-filter-btn {
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.log-filter-btn:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
+.log-filter-btn.active { background: rgba(255, 255, 255, 0.1); color: #fff; border-color: rgba(255, 255, 255, 0.25); }
+.log-filter-btn.lvl-debug.active { color: #888; border-color: #666; }
+.log-filter-btn.lvl-info.active { color: #4fc3f7; border-color: #4fc3f7; }
+.log-filter-btn.lvl-warning.active { color: #ffd54f; border-color: #ffd54f; }
+.log-filter-btn.lvl-error.active { color: #ef5350; border-color: #ef5350; }
+
+.log-viewer-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.log-action-btn {
+    padding: 4px 12px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.log-action-btn:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+
+.log-autoscroll-label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+}
+
+.log-viewer-terminal {
+    background: #0a0a14;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    height: 520px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 12px;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.log-viewer-terminal::-webkit-scrollbar { width: 6px; }
+.log-viewer-terminal::-webkit-scrollbar-track { background: transparent; }
+.log-viewer-terminal::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+
+.log-viewer-lines {
+    word-break: break-all;
+}
+
+.log-line {
+    padding: 1px 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.log-debug { color: #666; }
+.log-info { color: #4fc3f7; }
+.log-warning { color: #ffd54f; }
+.log-error { color: #ef5350; font-weight: 500; }
+.log-plain { color: #aaa; }
+
+.log-viewer-status {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 6px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.log-live-dot {
+    color: #4caf50;
+    animation: log-pulse 2s ease-in-out infinite;
+}
+
+@keyframes log-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
 .config-options {
     display: flex;
     flex-direction: column;
