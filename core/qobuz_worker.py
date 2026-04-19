@@ -626,10 +626,14 @@ class QobuzWorker:
                 genre = data.get('genre', {})
                 genre_name = genre.get('name', '') if isinstance(genre, dict) else str(genre) if genre else ''
                 if genre_name:
-                    cursor.execute("""
-                        UPDATE albums SET genres = ?
-                        WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                    """, (json.dumps([genre_name]), album_id))
+                    from core.genre_filter import filter_genres
+                    from config.settings import config_manager as _cfg
+                    _filtered = filter_genres([genre_name], _cfg)
+                    if _filtered:
+                        cursor.execute("""
+                            UPDATE albums SET genres = ?
+                            WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
+                        """, (json.dumps(_filtered), album_id))
 
                 upc = data.get('upc')
                 if upc:

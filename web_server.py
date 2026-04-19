@@ -2237,6 +2237,9 @@ def _record_soulsync_library_entry(context, spotify_artist, album_info):
         spotify_track_id = track_info.get('id', '') or original_search.get('id', '')
 
         genres = (spotify_artist or {}).get('genres', [])
+        if genres:
+            from core.genre_filter import filter_genres as _gf2
+            genres = _gf2(genres, config_manager)
         genres_json = json.dumps(genres) if genres else ''
 
         bitrate = 0
@@ -6256,6 +6259,13 @@ def handle_log_level():
 # ===========================
 # AUTOMATIONS API
 # ===========================
+
+@app.route('/api/genre-whitelist/defaults', methods=['GET'])
+def get_genre_whitelist_defaults():
+    """Return the default genre whitelist."""
+    from core.genre_filter import DEFAULT_GENRES
+    return jsonify({'genres': sorted(DEFAULT_GENRES, key=str.lower)})
+
 
 @app.route('/api/automations', methods=['GET'])
 def list_automations():
@@ -19204,7 +19214,10 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
         metadata['date'] = spotify_album['release_date'][:4]
 
     if artist.get('genres'):
-        metadata['genre'] = ', '.join(artist['genres'][:2])
+        from core.genre_filter import filter_genres
+        _genre_list = filter_genres(list(artist['genres'][:2]), config_manager)
+        if _genre_list:
+            metadata['genre'] = ', '.join(_genre_list)
 
     metadata['album_art_url'] = album_info.get('album_image_url')
 
@@ -19945,6 +19958,8 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                                 ([audiodb_genre] if audiodb_genre and _tag_enabled('audiodb.tags.genre') else []) + \
                                 (lastfm_tags if _tag_enabled('lastfm.tags.genres') else [])
             if enrichment_genres:
+                from core.genre_filter import filter_genres as _gf
+                enrichment_genres = _gf(enrichment_genres, config_manager)
                 spotify_genres = [g.strip() for g in metadata.get('genre', '').split(',') if g.strip()]
                 seen = set()
                 merged = []

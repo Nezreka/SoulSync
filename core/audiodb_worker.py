@@ -480,10 +480,14 @@ class AudioDBWorker:
             # Backfill genres if artist has none
             genre = data.get('strGenre')
             if genre:
-                cursor.execute("""
-                    UPDATE artists SET genres = ?
-                    WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                """, (json.dumps([genre]), artist_id))
+                from core.genre_filter import filter_genres
+                from config.settings import config_manager as _cfg
+                _filtered = filter_genres([genre], _cfg)
+                if _filtered:
+                    cursor.execute("""
+                        UPDATE artists SET genres = ?
+                        WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
+                    """, (json.dumps(_filtered), artist_id))
 
             conn.commit()
 
@@ -528,10 +532,14 @@ class AudioDBWorker:
             # Backfill genres if album has none
             genre = data.get('strGenre')
             if genre:
-                cursor.execute("""
-                    UPDATE albums SET genres = ?
-                    WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                """, (json.dumps([genre]), album_id))
+                from core.genre_filter import filter_genres
+                from config.settings import config_manager as _cfg
+                _filtered = filter_genres([genre], _cfg)
+                if _filtered:
+                    cursor.execute("""
+                        UPDATE albums SET genres = ?
+                        WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
+                    """, (json.dumps(_filtered), album_id))
 
             conn.commit()
 

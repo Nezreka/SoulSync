@@ -570,6 +570,10 @@ class DeezerWorker:
                 if genres_data:
                     genre_names = [g.get('name') for g in genres_data if g.get('name')]
                     if genre_names:
+                        from core.genre_filter import filter_genres
+                        from config.settings import config_manager as _cfg
+                        genre_names = filter_genres(genre_names, _cfg)
+                    if genre_names:
                         cursor.execute("""
                             UPDATE albums SET genres = ?
                             WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')

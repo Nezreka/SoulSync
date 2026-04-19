@@ -438,10 +438,14 @@ class DiscogsWorker:
 
             # Backfill genres if empty
             if data.get('genres'):
-                cursor.execute("""
-                    UPDATE albums SET genres = ?
-                    WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                """, (genres, album_id))
+                from core.genre_filter import filter_genres
+                from config.settings import config_manager as _cfg
+                _filtered = filter_genres(data.get('genres', []), _cfg)
+                if _filtered:
+                    cursor.execute("""
+                        UPDATE albums SET genres = ?
+                        WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
+                    """, (json.dumps(_filtered), album_id))
 
             # Backfill thumb_url if empty
             if image_url:

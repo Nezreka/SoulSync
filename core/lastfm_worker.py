@@ -521,10 +521,13 @@ class LastFMWorker:
 
             # Backfill genres from tags
             if tags:
-                cursor.execute("""
-                    UPDATE albums SET genres = ?
-                    WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
-                """, (json.dumps(tags[:10]), album_id))
+                from core.genre_filter import filter_genres
+                filtered_tags = filter_genres(tags[:10], config_manager)
+                if filtered_tags:
+                    cursor.execute("""
+                        UPDATE albums SET genres = ?
+                        WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
+                    """, (json.dumps(filtered_tags), album_id))
 
             conn.commit()
 

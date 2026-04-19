@@ -6180,6 +6180,15 @@ async function loadSettingsData() {
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
 
+        // Populate Genre Whitelist
+        const gwEnabled = settings.genre_whitelist?.enabled === true;
+        document.getElementById('genre-whitelist-enabled').checked = gwEnabled;
+        const gwContainer = document.getElementById('genre-whitelist-container');
+        if (gwContainer) gwContainer.style.display = gwEnabled ? '' : 'none';
+        if (gwEnabled) {
+            _genreWhitelistRender(settings.genre_whitelist?.genres || []);
+        }
+
         // Populate Import settings
         document.getElementById('import-replace-lower-quality').checked = settings.import?.replace_lower_quality === true;
 
@@ -6882,6 +6891,88 @@ function collectMusicPaths() {
     return paths;
 }
 
+// ── Genre Whitelist ──
+let _genreWhitelistCache = [];
+
+function _genreWhitelistRender(genres) {
+    _genreWhitelistCache = genres && genres.length ? genres : [];
+    const container = document.getElementById('genre-whitelist-chips');
+    const countEl = document.getElementById('genre-whitelist-count');
+    if (!container) return;
+    if (!_genreWhitelistCache.length) {
+        container.innerHTML = '<div style="color:rgba(255,255,255,0.3);font-size:13px;padding:4px 0;">No genres configured. Click "Reset to Defaults" to load the default whitelist.</div>';
+        if (countEl) countEl.textContent = '';
+        return;
+    }
+    const searchVal = (document.getElementById('genre-whitelist-search')?.value || '').toLowerCase();
+    const filtered = searchVal ? _genreWhitelistCache.filter(g => g.toLowerCase().includes(searchVal)) : _genreWhitelistCache;
+    container.innerHTML = filtered.map(g =>
+        `<span class="genre-chip">${escapeHtml(g)}<button class="genre-chip-x" onclick="_genreWhitelistRemove('${escapeHtml(g.replace(/'/g, "\\'"))}')">&times;</button></span>`
+    ).join('');
+    if (countEl) countEl.textContent = `${_genreWhitelistCache.length} genres`;
+}
+
+function _genreWhitelistRemove(genre) {
+    _genreWhitelistCache = _genreWhitelistCache.filter(g => g !== genre);
+    _genreWhitelistRender(_genreWhitelistCache);
+    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
+}
+
+function _genreWhitelistAdd(genre) {
+    genre = genre.trim();
+    if (!genre) return;
+    if (_genreWhitelistCache.some(g => g.toLowerCase() === genre.toLowerCase())) return;
+    _genreWhitelistCache.push(genre);
+    _genreWhitelistCache.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    _genreWhitelistRender(_genreWhitelistCache);
+    if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
+}
+
+async function _genreWhitelistReset() {
+    try {
+        const resp = await fetch('/api/genre-whitelist/defaults');
+        const data = await resp.json();
+        if (data.genres) {
+            _genreWhitelistCache = data.genres;
+            _genreWhitelistRender(_genreWhitelistCache);
+            if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings();
+            showToast(`Loaded ${data.genres.length} default genres`, 'success');
+        }
+    } catch (e) {
+        showToast('Failed to load defaults', 'error');
+    }
+}
+
+// Toggle whitelist container visibility + init
+document.addEventListener('change', (e) => {
+    if (e.target.id === 'genre-whitelist-enabled') {
+        const container = document.getElementById('genre-whitelist-container');
+        if (container) container.style.display = e.target.checked ? '' : 'none';
+        // Auto-populate with defaults on first enable if empty
+        if (e.target.checked && _genreWhitelistCache.length === 0) {
+            _genreWhitelistReset();
+        }
+    }
+});
+
+// Search/add handler
+document.addEventListener('keydown', (e) => {
+    if (e.target.id === 'genre-whitelist-search' && e.key === 'Enter') {
+        e.preventDefault();
+        _genreWhitelistAdd(e.target.value);
+        e.target.value = '';
+    }
+});
+document.addEventListener('input', (e) => {
+    if (e.target.id === 'genre-whitelist-search') {
+        _genreWhitelistRender(_genreWhitelistCache);
+    }
+});
+
+function _collectGenreWhitelist() {
+    return _genreWhitelistCache;
+}
+
 // ── Database Maintenance ──
 async function loadDbMaintenanceInfo() {
     try {
@@ -7360,6 +7451,10 @@ async function saveSettings(quiet = false) {
         },
         content_filter: {
             allow_explicit: document.getElementById('allow-explicit').checked
+        },
+        genre_whitelist: {
+            enabled: document.getElementById('genre-whitelist-enabled').checked,
+            genres: _collectGenreWhitelist(),
         },
         library: {
             music_paths: collectMusicPaths(),
