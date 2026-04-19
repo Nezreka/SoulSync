@@ -11701,275 +11701,21 @@ def check_artist_discography_completion(artist_id):
         data = request.get_json()
         if not data or 'discography' not in data:
             return jsonify({"error": "Missing discography data"}), 400
-        
+        from core.metadata_service import check_artist_discography_completion as _check_artist_discography_completion
+
         discography = data['discography']
-        test_mode = data.get('test_mode', False)  # Add test mode for demonstration
-        albums_completion = []
-        singles_completion = []
-        
-        # Get database instance
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-        
-        # Get artist name - should be provided by the frontend
-        artist_name = data.get('artist_name', 'Unknown Artist')
-        
-        # If no artist name provided, try to infer it from the request
-        if artist_name == 'Unknown Artist':
-            print(f"No artist name provided in request, attempting to infer from discography data")
-            # Try to extract from first album's title by using a simple search
-            all_items = discography.get('albums', []) + discography.get('singles', [])
-            if all_items and spotify_client and spotify_client.is_authenticated():
-                try:
-                    first_item = all_items[0]
-                    # Search for the first track to get artist name
-                    search_results = spotify_client.search_tracks(first_item.get('name', ''), limit=1)
-                    if search_results and len(search_results) > 0:
-                        artist_name = search_results[0].artists[0] if search_results[0].artists else "Unknown Artist"
-                        print(f"Inferred artist name from search: {artist_name}")
-                except Exception as e:
-                    print(f"Could not infer artist name: {e}")
-                    artist_name = "Unknown Artist"
-        
-        print(f"Checking completion for artist: {artist_name}")
-        
-        # Process albums
-        for album in discography.get('albums', []):
-            completion_data = _check_album_completion(db, album, artist_name, test_mode)
-            albums_completion.append(completion_data)
-        
-        # Process singles/EPs
-        for single in discography.get('singles', []):
-            completion_data = _check_single_completion(db, single, artist_name, test_mode)
-            singles_completion.append(completion_data)
-        
-        return jsonify({
-            "albums": albums_completion,
-            "singles": singles_completion
-        })
-        
+        source_override = (data.get('source') or '').strip().lower() or None
+        result = _check_artist_discography_completion(
+            discography,
+            artist_name=data.get('artist_name', 'Unknown Artist'),
+            source_override=source_override,
+        )
+        return jsonify(result)
     except Exception as e:
         print(f"Error checking discography completion: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
-def _check_album_completion(db, album_data: dict, artist_name: str, test_mode: bool = False) -> dict:
-    """Check completion status for a single album"""
-    try:
-        album_name = album_data.get('name', '')
-        total_tracks = album_data.get('total_tracks', 0)
-        album_id = album_data.get('id', '')
-
-        # If total_tracks is 0 (Discogs masters don't include track counts),
-        # try to fetch the real count from the source
-        if total_tracks == 0 and album_id:
-            try:
-                fallback = _get_metadata_fallback_client()
-                album_detail = fallback.get_album_tracks(str(album_id))
-                if album_detail and album_detail.get('items'):
-                    total_tracks = len(album_detail['items'])
-                    logger.debug(f"Fetched track count for '{album_name}': {total_tracks}")
-            except Exception:
-                pass
-        
-        print(f"Checking album: '{album_name}' ({total_tracks} tracks)")
-        
-        formats = []
-        if test_mode:
-            # Generate test data to demonstrate the feature
-            import random
-            owned_tracks = random.randint(0, max(1, total_tracks))
-            expected_tracks = total_tracks
-            confidence = random.uniform(0.7, 1.0)
-            db_album = True  # Simulate found album
-            print(f"TEST MODE: Simulating {owned_tracks}/{expected_tracks} tracks for '{album_name}'")
-        else:
-            # Check if album exists in database with completeness info
-            try:
-                # Get active server for database checking
-                active_server = config_manager.get_active_media_server()
-                db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
-                    title=album_name,
-                    artist=artist_name,
-                    expected_track_count=total_tracks if total_tracks > 0 else None,
-                    confidence_threshold=0.7,  # Slightly lower threshold for better matching
-                    server_source=active_server  # Check only the active server
-                )
-            except Exception as db_error:
-                print(f"Database error for album '{album_name}': {db_error}")
-                # Return error state for this album
-                return {
-                    "id": album_id,
-                    "name": album_name,
-                    "status": "error",
-                    "owned_tracks": 0,
-                    "expected_tracks": total_tracks,
-                    "completion_percentage": 0,
-                    "confidence": 0.0,
-                    "found_in_db": False,
-                    "error_message": str(db_error),
-                    "formats": []
-                }
-        
-        # Calculate completion percentage
-        if expected_tracks > 0:
-            completion_percentage = (owned_tracks / expected_tracks) * 100
-        elif total_tracks > 0:
-            completion_percentage = (owned_tracks / total_tracks) * 100
-        else:
-            completion_percentage = 100 if owned_tracks > 0 else 0
-        
-        # Determine completion status — exact match, no percentage rounding
-        if owned_tracks > 0 and owned_tracks >= (expected_tracks or total_tracks):
-            status = "completed"
-        elif owned_tracks > 0:
-            status = "partial"
-        else:
-            status = "missing"
-        
-        print(f"  Result: {owned_tracks}/{expected_tracks or total_tracks} tracks ({completion_percentage:.1f}%) - {status}")
-        
-        return {
-            "id": album_id,
-            "name": album_name,
-            "status": status,
-            "owned_tracks": owned_tracks,
-            "expected_tracks": expected_tracks or total_tracks,
-            "completion_percentage": round(completion_percentage, 1),
-            "confidence": round(confidence, 2) if confidence else 0.0,
-            "found_in_db": db_album is not None,
-            "formats": formats
-        }
-
-    except Exception as e:
-        print(f"Error checking album completion for '{album_data.get('name', 'Unknown')}': {e}")
-        return {
-            "id": album_data.get('id', ''),
-            "name": album_data.get('name', 'Unknown'),
-            "status": "error",
-            "owned_tracks": 0,
-            "expected_tracks": album_data.get('total_tracks', 0),
-            "completion_percentage": 0,
-            "confidence": 0.0,
-            "found_in_db": False,
-            "formats": []
-        }
-
-def _check_single_completion(db, single_data: dict, artist_name: str, test_mode: bool = False) -> dict:
-    """Check completion status for a single/EP (treat EPs like albums, singles as single tracks)"""
-    try:
-        single_name = single_data.get('name', '')
-        total_tracks = single_data.get('total_tracks', 1)
-        single_id = single_data.get('id', '')
-        album_type = single_data.get('album_type', 'single')
-        formats = []
-
-        print(f"Checking {album_type}: '{single_name}' ({total_tracks} tracks)")
-
-        if test_mode:
-            # Generate test data for singles/EPs
-            import random
-            if album_type == 'ep' or total_tracks > 1:
-                owned_tracks = random.randint(0, total_tracks)
-                expected_tracks = total_tracks
-                confidence = random.uniform(0.7, 1.0)
-                print(f"TEST MODE: EP with {owned_tracks}/{expected_tracks} tracks")
-            else:
-                owned_tracks = random.choice([0, 1])  # 50/50 chance
-                expected_tracks = 1
-                confidence = random.uniform(0.7, 1.0) if owned_tracks else 0.0
-                print(f"TEST MODE: Single with {owned_tracks}/{expected_tracks} tracks")
-        elif album_type == 'ep' or total_tracks > 1:
-            # Treat EPs like albums
-            try:
-                # Get active server for database checking
-                active_server = config_manager.get_active_media_server()
-                db_album, confidence, owned_tracks, expected_tracks, is_complete, formats = db.check_album_exists_with_completeness(
-                    title=single_name,
-                    artist=artist_name,
-                    expected_track_count=total_tracks,
-                    confidence_threshold=0.7,
-                    server_source=active_server  # Check only the active server
-                )
-            except Exception as db_error:
-                print(f"Database error for EP '{single_name}': {db_error}")
-                owned_tracks, expected_tracks, confidence = 0, total_tracks, 0.0
-
-            # Calculate completion percentage
-            if expected_tracks > 0:
-                completion_percentage = (owned_tracks / expected_tracks) * 100
-            else:
-                completion_percentage = (owned_tracks / total_tracks) * 100
-
-            # Determine status — exact match, no percentage rounding
-            if owned_tracks > 0 and owned_tracks >= (expected_tracks or total_tracks):
-                status = "completed"
-            elif owned_tracks > 0:
-                status = "partial"
-            else:
-                status = "missing"
-
-            print(f"  EP Result: {owned_tracks}/{expected_tracks or total_tracks} tracks ({completion_percentage:.1f}%) - {status}")
-
-        else:
-            # Single track - just check if the track exists
-            try:
-                active_server = config_manager.get_active_media_server()
-                db_track, confidence = db.check_track_exists(
-                    title=single_name,
-                    artist=artist_name,
-                    confidence_threshold=0.7,
-                    server_source=active_server
-                )
-            except Exception as db_error:
-                print(f"Database error for single '{single_name}': {db_error}")
-                db_track, confidence = None, 0.0
-
-            owned_tracks = 1 if db_track else 0
-            expected_tracks = 1
-            completion_percentage = 100 if db_track else 0
-
-            status = "completed" if db_track else "missing"
-
-            # Extract format from single track
-            if db_track and db_track.file_path:
-                import os
-                ext = os.path.splitext(db_track.file_path)[1].lstrip('.').upper()
-                if ext == 'MP3' and db_track.bitrate:
-                    formats = [f"MP3-{db_track.bitrate}"]
-                elif ext:
-                    formats = [ext]
-
-            print(f"  Single Result: {owned_tracks}/1 tracks ({completion_percentage:.1f}%) - {status}")
-
-        return {
-            "id": single_id,
-            "name": single_name,
-            "status": status,
-            "owned_tracks": owned_tracks,
-            "expected_tracks": expected_tracks or total_tracks,
-            "completion_percentage": round(completion_percentage, 1),
-            "confidence": round(confidence, 2) if confidence else 0.0,
-            "found_in_db": (db_album if album_type == 'ep' or total_tracks > 1 else db_track) is not None,
-            "type": album_type,
-            "formats": formats
-        }
-
-    except Exception as e:
-        print(f"Error checking single/EP completion for '{single_data.get('name', 'Unknown')}': {e}")
-        return {
-            "id": single_data.get('id', ''),
-            "name": single_data.get('name', 'Unknown'),
-            "status": "error",
-            "owned_tracks": 0,
-            "expected_tracks": single_data.get('total_tracks', 1),
-            "completion_percentage": 0,
-            "confidence": 0.0,
-            "found_in_db": False,
-            "type": single_data.get('album_type', 'single'),
-            "formats": []
-        }
 
 @app.route('/api/artist/<artist_id>/completion-stream', methods=['POST'])
 def check_artist_discography_completion_stream(artist_id):
@@ -11984,75 +11730,22 @@ def check_artist_discography_completion_stream(artist_id):
     
     # Extract data for the generator
     discography = data['discography']
-    test_mode = data.get('test_mode', False)
     artist_name = data.get('artist_name', 'Unknown Artist')
-    
+    source_override = (data.get('source') or '').strip().lower() or None
+    from core.metadata_service import iter_artist_discography_completion_events
+
     def generate_completion_stream():
         try:
             print(f"Starting streaming completion check for artist: {artist_name}")
-            
-            # Get database instance
-            from database.music_database import MusicDatabase
-            db = MusicDatabase()
-            
-            # Process albums one by one
-            total_items = len(discography.get('albums', [])) + len(discography.get('singles', []))
-            processed_count = 0
-            
-            # Send initial status
-            yield f"data: {json.dumps({'type': 'start', 'total_items': total_items, 'artist_name': artist_name})}\n\n"
-            
-            # Process albums
-            for album in discography.get('albums', []):
-                try:
-                    completion_data = _check_album_completion(db, album, artist_name, test_mode)
-                    completion_data['type'] = 'album_completion'
-                    completion_data['container_type'] = 'albums'
-                    processed_count += 1
-                    completion_data['progress'] = round((processed_count / total_items) * 100, 1)
-                    
-                    yield f"data: {json.dumps(completion_data)}\n\n"
-                    
+            for event in iter_artist_discography_completion_events(
+                discography,
+                artist_name=artist_name,
+                source_override=source_override,
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+                if event.get('type') in ('album_completion', 'single_completion'):
                     # Small delay to make the streaming effect visible
                     time.sleep(0.1)  # 100ms delay between items
-                    
-                except Exception as e:
-                    error_data = {
-                        'type': 'error',
-                        'container_type': 'albums',
-                        'id': album.get('id', ''),
-                        'name': album.get('name', 'Unknown'),
-                        'error': str(e)
-                    }
-                    yield f"data: {json.dumps(error_data)}\n\n"
-            
-            # Process singles/EPs
-            for single in discography.get('singles', []):
-                try:
-                    completion_data = _check_single_completion(db, single, artist_name, test_mode)
-                    completion_data['type'] = 'single_completion'
-                    completion_data['container_type'] = 'singles'
-                    processed_count += 1
-                    completion_data['progress'] = round((processed_count / total_items) * 100, 1)
-                    
-                    yield f"data: {json.dumps(completion_data)}\n\n"
-                    
-                    # Small delay to make the streaming effect visible
-                    time.sleep(0.1)  # 100ms delay between items
-                    
-                except Exception as e:
-                    error_data = {
-                        'type': 'error',
-                        'container_type': 'singles',
-                        'id': single.get('id', ''),
-                        'name': single.get('name', 'Unknown'),
-                        'error': str(e)
-                    }
-                    yield f"data: {json.dumps(error_data)}\n\n"
-            
-            # Send completion signal
-            yield f"data: {json.dumps({'type': 'complete', 'processed_count': processed_count})}\n\n"
-            
         except Exception as e:
             print(f"Error in streaming completion check: {e}")
             import traceback
@@ -12084,8 +11777,8 @@ def library_completion_stream():
 
     def generate():
         try:
-            from database.music_database import MusicDatabase
-            db = MusicDatabase()
+            from core.metadata_service import check_album_completion, check_single_completion
+            db = get_database()
 
             categories = ['albums', 'eps', 'singles']
             all_items = []
@@ -12106,9 +11799,9 @@ def library_completion_stream():
                     }
 
                     if category == 'singles':
-                        result = _check_single_completion(db, mapped, artist_name)
+                        result = check_single_completion(db, mapped, artist_name)
                     else:
-                        result = _check_album_completion(db, mapped, artist_name)
+                        result = check_album_completion(db, mapped, artist_name)
 
                     result['spotify_id'] = item.get('spotify_id', '')
                     result['category'] = category
