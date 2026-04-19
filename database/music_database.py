@@ -6632,8 +6632,14 @@ class MusicDatabase:
             logger.error(f"Error removing track from wishlist: {e}")
             return False
     
-    def get_wishlist_tracks(self, limit: Optional[int] = None, profile_id: int = 1) -> List[Dict[str, Any]]:
-        """Get all tracks in the wishlist for the given profile, ordered by date added (oldest first for retry priority)"""
+    def get_wishlist_tracks(self, limit: Optional[int] = None, profile_id: int = 1,
+                            offset: int = 0, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get tracks in the wishlist for the given profile, ordered by date added
+        (oldest first for retry priority).
+
+        Supports SQL-level pagination via limit/offset and optional category
+        filtering (singles vs albums) pushed down to SQL using json_extract.
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -6643,12 +6649,26 @@ class MusicDatabase:
                            last_attempted, date_added, source_type, source_info
                     FROM wishlist_tracks
                     WHERE profile_id = ?
-                    ORDER BY date_added
                 """
 
-                params = [profile_id]
+                params: List[Any] = [profile_id]
+
+                if category == "albums":
+                    query += " AND json_extract(spotify_data, '$.album.album_type') = 'album'"
+                elif category == "singles":
+                    query += (
+                        " AND (json_extract(spotify_data, '$.album.album_type') IS NULL"
+                        " OR json_extract(spotify_data, '$.album.album_type') != 'album')"
+                    )
+
+                query += " ORDER BY date_added"
+
                 if limit:
-                    query += f" LIMIT {limit}"
+                    query += " LIMIT ?"
+                    params.append(int(limit))
+                    if offset:
+                        query += " OFFSET ?"
+                        params.append(int(offset))
 
                 cursor.execute(query, params)
                 rows = cursor.fetchall()
@@ -6679,7 +6699,7 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting wishlist tracks: {e}")
             return []
-    
+
     def update_wishlist_retry(self, spotify_track_id: str, success: bool, error_message: str = None, profile_id: int = 1) -> bool:
         """Update retry count and status for a wishlist track"""
         try:
@@ -6706,12 +6726,22 @@ class MusicDatabase:
             logger.error(f"Error updating wishlist retry status: {e}")
             return False
     
-    def get_wishlist_count(self, profile_id: int = 1) -> int:
-        """Get the total number of tracks in the wishlist for the given profile"""
+    def get_wishlist_count(self, profile_id: int = 1, category: Optional[str] = None) -> int:
+        """Get the total number of tracks in the wishlist for the given profile,
+        optionally filtered by category ('singles' or 'albums')."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM wishlist_tracks WHERE profile_id = ?", (profile_id,))
+                query = "SELECT COUNT(*) FROM wishlist_tracks WHERE profile_id = ?"
+                params: List[Any] = [profile_id]
+                if category == "albums":
+                    query += " AND json_extract(spotify_data, '$.album.album_type') = 'album'"
+                elif category == "singles":
+                    query += (
+                        " AND (json_extract(spotify_data, '$.album.album_type') IS NULL"
+                        " OR json_extract(spotify_data, '$.album.album_type') != 'album')"
+                    )
+                cursor.execute(query, params)
                 result = cursor.fetchone()
                 return result[0] if result else 0
         except Exception as e:
