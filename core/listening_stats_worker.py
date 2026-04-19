@@ -180,11 +180,17 @@ class ListeningStatsWorker:
                     'played_at': entry.get('played_at'),
                     'duration_ms': entry.get('duration_ms', 0),
                     'server_source': active_server,
-                    'db_track_id': self._resolve_db_track_id(
-                        entry.get('track_title', ''),
-                        entry.get('artist', '')
-                    ),
+                    # db_track_id filled in below by a single batched lookup
+                    'db_track_id': None,
                 })
+
+            # Batch-resolve track IDs for all events at once (was N+1 before).
+            id_map = self._resolve_db_track_ids_batch(events)
+            for ev in events:
+                title_l = (ev.get('title') or '').strip().lower()
+                artist_l = (ev.get('artist') or '').strip().lower()
+                if title_l:
+                    ev['db_track_id'] = id_map.get((title_l, artist_l))
 
             inserted = self.db.insert_listening_events(events)
             self.stats['events_added'] += inserted
@@ -269,59 +275,129 @@ class ListeningStatsWorker:
             logger.error(f"Failed to build stats cache: {e}")
 
     def _enrich_stats_items(self, cache):
-        """Add image URLs, IDs, and Last.fm data to cached stats items."""
+        """Add image URLs, IDs, and Last.fm data to cached stats items.
+
+        Previously ran one SELECT per artist / album / track entry. Now each
+        of the three lists is resolved with a single batched IN query so
+        cache rebuilds scale with the number of result sets, not with the
+        number of items in them.
+        """
+        top_artists = cache.get('top_artists') or []
+        top_albums = cache.get('top_albums') or []
+        top_tracks = cache.get('top_tracks') or []
+
+        if not (top_artists or top_albums or top_tracks):
+            return
+
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            for artist in (cache.get('top_artists') or []):
-                try:
-                    cursor.execute("""
-                        SELECT thumb_url, id, lastfm_listeners, lastfm_playcount, soul_id
-                        FROM artists WHERE LOWER(name) = LOWER(?) LIMIT 1
-                    """, (artist['name'],))
-                    r = cursor.fetchone()
-                    if r:
-                        artist['image_url'] = r[0] or None
-                        artist['id'] = r[1]
-                        artist['global_listeners'] = r[2]
-                        artist['global_playcount'] = r[3]
-                        artist['soul_id'] = r[4]
-                except Exception:
-                    pass
+            # ---- top_artists: match by LOWER(name) ----
+            if top_artists:
+                names = [a.get('name') or '' for a in top_artists]
+                unique_names = {n.lower() for n in names if n}
+                artist_rows = {}
+                if unique_names:
+                    name_list = list(unique_names)
+                    chunk = 500
+                    for i in range(0, len(name_list), chunk):
+                        sub = name_list[i:i + chunk]
+                        placeholders = ','.join(['?'] * len(sub))
+                        cursor.execute(
+                            f"""
+                            SELECT LOWER(name), thumb_url, id, lastfm_listeners,
+                                   lastfm_playcount, soul_id
+                            FROM artists
+                            WHERE LOWER(name) IN ({placeholders})
+                            """,
+                            sub,
+                        )
+                        for row in cursor.fetchall():
+                            # Keep first match per lowered name (LIMIT 1 equiv).
+                            artist_rows.setdefault(row[0], row)
 
-            for album in (cache.get('top_albums') or []):
-                try:
-                    cursor.execute("""
-                        SELECT al.thumb_url, al.id, al.artist_id FROM albums al
-                        WHERE LOWER(al.title) = LOWER(?) LIMIT 1
-                    """, (album['name'],))
-                    r = cursor.fetchone()
+                for artist in top_artists:
+                    key = (artist.get('name') or '').lower()
+                    r = artist_rows.get(key)
                     if r:
-                        album['image_url'] = r[0] or None
-                        album['id'] = r[1]
-                        album['artist_id'] = r[2]
-                except Exception:
-                    pass
+                        artist['image_url'] = r[1] or None
+                        artist['id'] = r[2]
+                        artist['global_listeners'] = r[3]
+                        artist['global_playcount'] = r[4]
+                        artist['soul_id'] = r[5]
 
-            for track in (cache.get('top_tracks') or []):
-                try:
-                    cursor.execute("""
-                        SELECT al.thumb_url, t.id, t.artist_id FROM tracks t
-                        JOIN albums al ON al.id = t.album_id
-                        JOIN artists ar ON ar.id = t.artist_id
-                        WHERE LOWER(t.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?) LIMIT 1
-                    """, (track['name'], track.get('artist', '')))
-                    r = cursor.fetchone()
+            # ---- top_albums: match by LOWER(title) ----
+            if top_albums:
+                titles = [a.get('name') or '' for a in top_albums]
+                unique_titles = {t.lower() for t in titles if t}
+                album_rows = {}
+                if unique_titles:
+                    title_list = list(unique_titles)
+                    chunk = 500
+                    for i in range(0, len(title_list), chunk):
+                        sub = title_list[i:i + chunk]
+                        placeholders = ','.join(['?'] * len(sub))
+                        cursor.execute(
+                            f"""
+                            SELECT LOWER(title), thumb_url, id, artist_id
+                            FROM albums
+                            WHERE LOWER(title) IN ({placeholders})
+                            """,
+                            sub,
+                        )
+                        for row in cursor.fetchall():
+                            album_rows.setdefault(row[0], row)
+
+                for album in top_albums:
+                    key = (album.get('name') or '').lower()
+                    r = album_rows.get(key)
                     if r:
-                        track['image_url'] = r[0] or None
-                        track['id'] = r[1]
-                        track['artist_id'] = r[2]
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                        album['image_url'] = r[1] or None
+                        album['id'] = r[2]
+                        album['artist_id'] = r[3]
+
+            # ---- top_tracks: match by (LOWER(title), LOWER(artist name)) ----
+            if top_tracks:
+                pairs = set()
+                for t in top_tracks:
+                    name = (t.get('name') or '').lower()
+                    artist = (t.get('artist') or '').lower()
+                    if name:
+                        pairs.add((name, artist))
+                track_rows = {}
+                if pairs:
+                    pair_list = list(pairs)
+                    chunk = 500
+                    for i in range(0, len(pair_list), chunk):
+                        sub = pair_list[i:i + chunk]
+                        placeholders = ','.join(['(?,?)'] * len(sub))
+                        flat = [v for pair in sub for v in pair]
+                        cursor.execute(
+                            f"""
+                            SELECT LOWER(t.title), LOWER(ar.name),
+                                   al.thumb_url, t.id, t.artist_id
+                            FROM tracks t
+                            JOIN albums al ON al.id = t.album_id
+                            JOIN artists ar ON ar.id = t.artist_id
+                            WHERE (LOWER(t.title), LOWER(ar.name)) IN ({placeholders})
+                            """,
+                            flat,
+                        )
+                        for row in cursor.fetchall():
+                            track_rows.setdefault((row[0], row[1]), row)
+
+                for track in top_tracks:
+                    key = ((track.get('name') or '').lower(),
+                           (track.get('artist') or '').lower())
+                    r = track_rows.get(key)
+                    if r:
+                        track['image_url'] = r[2] or None
+                        track['id'] = r[3]
+                        track['artist_id'] = r[4]
+        except Exception as e:
+            logger.error(f"Error enriching stats items: {e}")
         finally:
             if conn:
                 conn.close()
@@ -454,30 +530,95 @@ class ListeningStatsWorker:
             if conn:
                 conn.close()
 
+    def _resolve_db_track_ids_batch(self, events):
+        """Batch-resolve DB track IDs for a list of history events.
+
+        Returns a dict ``{(title_lower, artist_lower): track_id}`` so callers
+        can look up without another DB round-trip. Replaces the former N+1
+        pattern of one SELECT per event (500 events = 500 queries).
+
+        Uses row-value IN with chunking (500 pairs = 1000 variables, well
+        under SQLite's default limit). Case-insensitive matching is preserved.
+        """
+        pairs = set()
+        for ev in events:
+            title = (ev.get('title') or '').strip()
+            artist = (ev.get('artist') or '').strip()
+            if title:
+                pairs.add((title.lower(), artist.lower()))
+
+        result = {}
+        if not pairs:
+            return result
+
+        pair_list = list(pairs)
+        chunk_size = 500
+
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            for i in range(0, len(pair_list), chunk_size):
+                chunk = pair_list[i:i + chunk_size]
+                placeholders = ','.join(['(?,?)'] * len(chunk))
+                flat_args = [v for pair in chunk for v in pair]
+                cursor.execute(
+                    f"""
+                    SELECT LOWER(t.title), LOWER(ar.name), t.id
+                    FROM tracks t
+                    JOIN artists ar ON ar.id = t.artist_id
+                    WHERE (LOWER(t.title), LOWER(ar.name)) IN ({placeholders})
+                    """,
+                    flat_args,
+                )
+                for title_l, artist_l, tid in cursor.fetchall():
+                    # Keep first match per pair to match the LIMIT 1 semantics
+                    # of the original per-event query.
+                    result.setdefault((title_l, artist_l), tid)
+        except Exception as e:
+            logger.error(f"Error batch-resolving track IDs: {e}")
+        finally:
+            if conn:
+                conn.close()
+
+        return result
+
     def _map_play_counts_to_db(self, server_counts, server_source):
         """Map server track IDs to DB track IDs for play count updates.
 
-        Looks up tracks by matching the server's track ID stored in
-        the tracks table (from library sync).
+        Looks up which server IDs exist in the tracks table. Replaces a
+        previous N+1 pattern of one SELECT per server ID with a single
+        batched IN query (chunked for safety).
         """
+        if not server_counts:
+            return []
+
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            # Build a lookup of server_id → db_track_id
-            # The tracks table stores server IDs as the primary 'id' column
-            updates = []
-            for server_id, play_count in server_counts.items():
-                cursor.execute("SELECT id FROM tracks WHERE id = ?", (server_id,))
-                row = cursor.fetchone()
-                if row:
-                    updates.append({
-                        'db_track_id': row[0],
-                        'play_count': play_count,
-                        'last_played': None,  # Could be fetched separately
-                    })
-            return updates
+            ids = list(server_counts.keys())
+            existing = set()
+            chunk_size = 500
+            for i in range(0, len(ids), chunk_size):
+                chunk = ids[i:i + chunk_size]
+                placeholders = ','.join(['?'] * len(chunk))
+                cursor.execute(
+                    f"SELECT id FROM tracks WHERE id IN ({placeholders})",
+                    chunk,
+                )
+                existing.update(r[0] for r in cursor.fetchall())
+
+            return [
+                {
+                    'db_track_id': server_id,
+                    'play_count': play_count,
+                    'last_played': None,  # Could be fetched separately
+                }
+                for server_id, play_count in server_counts.items()
+                if server_id in existing
+            ]
         except Exception as e:
             logger.error(f"Error mapping play counts: {e}")
             return []
