@@ -4446,15 +4446,20 @@ def run_service_test(service, test_config):
         elif service == "soulsync":
             transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
             if os.path.isdir(transfer_path):
-                # Count audio files
+                # Quick check — count a few audio files to confirm it's a music folder
+                audio_exts = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav'}
                 count = 0
+                found_enough = False
                 for root, dirs, files in os.walk(transfer_path):
                     for f in files:
-                        if os.path.splitext(f)[1].lower() in ('.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav'):
+                        if os.path.splitext(f)[1].lower() in audio_exts:
                             count += 1
-                    if count > 100:
-                        break  # Don't count everything, just confirm files exist
-                return True, f"SoulSync standalone ready! Output folder: {transfer_path} ({count}+ audio files)"
+                            if count >= 10:
+                                found_enough = True
+                                break
+                    if found_enough:
+                        break
+                return True, f"SoulSync standalone ready! Output folder: {transfer_path}" + (f" ({count}+ audio files)" if count > 0 else " (empty)")
             else:
                 return False, f"Output folder not found: {transfer_path}"
         elif service == "soulseek":
