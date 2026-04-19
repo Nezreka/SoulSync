@@ -1,0 +1,28 @@
+name: Compile the app and run tests
+
+on:
+  push:
+
+jobs:
+  sanity-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements-dev.txt
+
+      - name: Build app
+        run: python -m compileall api core database services scripts web_server.py wsgi.py beatport_unified_scraper.py
+
+      - name: Run tests
+        run: pytest
