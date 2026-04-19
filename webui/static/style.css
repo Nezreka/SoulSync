@@ -14830,6 +14830,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-weight: 600;
 }
 
+.youtube-discovery-modal .discovery-table .discovery-status.wing-it {
+    color: #ffb84d;
+    font-weight: 600;
+}
+
 .youtube-discovery-modal .discovery-table .spotify-track,
 .youtube-discovery-modal .discovery-table .spotify-artist,
 .youtube-discovery-modal .discovery-table .spotify-album {
