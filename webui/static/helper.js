@@ -3599,7 +3599,7 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
-    '2.32': [
+    '2.33': [
         // --- April 18, 2026 ---
         { date: 'April 18, 2026' },
         { title: 'Live Log Viewer', desc: 'New Logs tab on the Settings page — real-time terminal-style log viewer with color-coded log levels. Filter by DEBUG/INFO/WARNING/ERROR, search logs in real-time, switch between log files (app, post-processing, acoustid, source reuse). Auto-scroll, copy, clear. Live WebSocket updates every 0.5s. Smart level detection works on both logger output and print statements', page: 'settings' },
@@ -3721,12 +3721,12 @@ const WHATS_NEW = {
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '2.32';
+    return btn ? btn.textContent.trim().replace('v', '') : '2.33';
 }
 
 function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
-    return versions[0] || '2.32';
+    return versions[0] || '2.33';
 }
 
 function openWhatsNew() {
