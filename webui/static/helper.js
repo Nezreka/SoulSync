@@ -3602,7 +3602,7 @@ const WHATS_NEW = {
     '2.32': [
         // --- April 18, 2026 ---
         { date: 'April 18, 2026' },
-        { title: 'Live Log Viewer', desc: 'New Logs tab on the Settings page — real-time terminal-style log viewer with color-coded log levels. Filter by DEBUG/INFO/WARNING/ERROR, switch between log files (app, post-processing, acoustid, source reuse), auto-scroll, copy, and clear. Live updates via WebSocket', page: 'settings' },
+        { title: 'Live Log Viewer', desc: 'New Logs tab on the Settings page — real-time terminal-style log viewer with color-coded log levels. Filter by DEBUG/INFO/WARNING/ERROR, search logs in real-time, switch between log files (app, post-processing, acoustid, source reuse). Auto-scroll, copy, clear. Live WebSocket updates every 0.5s. Smart level detection works on both logger output and print statements', page: 'settings' },
         { title: 'ReplayGain Post-Processing', desc: 'Optional ReplayGain tag analysis during post-processing. Enable in Settings → Library → Post-Processing. Analyzes loudness via ffmpeg and writes track-level gain/peak tags. Runs before lossy copy so both files get tagged. Off by default' },
         { title: 'Fix Your Albums Using Playlist Modal', desc: 'Albums in the Discover page "Your Albums" section now open with the proper album-style download modal instead of the playlist-style modal. Shows artist image, album art, and uses album download context for correct file organization', page: 'discover' },
         { title: 'Fix Tool Help Modal Not Closable', desc: 'The help "?" modal on automation triggers/actions could not be closed if the Tools page hadn\'t been visited first. Close button, backdrop click, and Escape key now work from any page' },
