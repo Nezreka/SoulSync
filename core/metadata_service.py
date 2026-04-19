@@ -343,6 +343,92 @@ def _sort_discography_releases(releases: List[Dict[str, Any]]) -> List[Dict[str,
     return sorted(releases, key=get_release_year, reverse=True)
 
 
+def _dedup_variant_releases(releases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Collapse obvious edition variants into a single canonical release card.
+
+    This keeps a clean UI while still preserving distinct releases when the
+    cleaned titles diverge enough that they are likely not variants.
+    """
+    if not releases:
+        return []
+
+    import re
+    from difflib import SequenceMatcher
+
+    variant_patterns = [
+        r'\s*[\(\[]\s*(explicit|clean|deluxe|deluxe edition|standard edition|clean version|explicit version|remastered|bonus track version)\s*[\)\]]',
+        r'\s*-\s*(explicit|clean|deluxe edition|single)\s*$',
+    ]
+
+    def _clean_title(title: Any) -> str:
+        cleaned = str(title or '').strip().lower()
+        for pattern in variant_patterns:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        return cleaned
+
+    def _is_compilation(release: Dict[str, Any]) -> bool:
+        title = str(_extract_lookup_value(release, 'name', 'title', default='') or '').lower()
+        album_type = str(_extract_lookup_value(release, 'album_type', default='') or '').lower()
+        return (
+            album_type == 'compilation'
+            or 'best of' in title
+            or 'greatest hits' in title
+            or 'collection' in title
+            or 'anthology' in title
+            or 'essential' in title
+        )
+
+    def _variant_score(release: Dict[str, Any]) -> tuple:
+        title = str(_extract_lookup_value(release, 'name', 'title', default='') or '').lower()
+        has_explicit = 'explicit' in title
+        has_clean = 'clean' in title and not has_explicit
+        track_count = int(_extract_lookup_value(release, 'track_count', 'total_tracks', default=0) or 0)
+        release_date = str(_extract_lookup_value(release, 'release_date', default='') or '')
+
+        # Higher is better.
+        return (
+            1 if not _is_compilation(release) else 0,
+            2 if has_explicit else (1 if not has_clean else 0),
+            track_count,
+            release_date,
+        )
+
+    grouped: Dict[tuple, Dict[str, Any]] = {}
+    ordered_keys: List[tuple] = []
+
+    for release in releases:
+        title = _extract_lookup_value(release, 'name', 'title', default='') or ''
+        release_date = _extract_lookup_value(release, 'release_date')
+        year = _extract_lookup_value(release, 'year')
+        if not year and release_date:
+            year = str(release_date)[:4]
+        year = str(year) if year is not None else ''
+
+        cleaned_title = _clean_title(title) or str(title).strip().lower()
+        key = (cleaned_title, year)
+
+        existing = grouped.get(key)
+        if existing is None:
+            grouped[key] = release
+            ordered_keys.append(key)
+            continue
+
+        # If the cleaned titles are still materially different, keep both.
+        existing_clean = _clean_title(_extract_lookup_value(existing, 'name', 'title', default='') or '')
+        if SequenceMatcher(None, cleaned_title, existing_clean).ratio() < 0.85:
+            alt_key = (str(title).strip().lower(), year)
+            if alt_key not in grouped:
+                grouped[alt_key] = release
+                ordered_keys.append(alt_key)
+            continue
+
+        if _variant_score(release) > _variant_score(existing):
+            grouped[key] = release
+
+    return [grouped[key] for key in ordered_keys]
+
+
 def get_artist_discography(
     artist_id: str,
     artist_name: str = '',
@@ -420,6 +506,100 @@ def get_artist_discography(
         'singles': singles_list,
         'source': active_source or (source_priority[0] if source_priority else 'unknown'),
         'source_priority': source_priority,
+    }
+
+
+def _build_artist_detail_release_card(release: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    release_id = _extract_lookup_value(release, 'id', 'album_id', 'release_id')
+    if not release_id:
+        return None
+
+    album_type = (_extract_lookup_value(release, 'album_type', default='album') or 'album').lower()
+    release_date = _extract_lookup_value(release, 'release_date')
+    release_year = None
+    if release_date:
+        try:
+            release_year = str(release_date)[:4]
+        except Exception:
+            release_year = None
+    if not release_year:
+        release_year = _extract_lookup_value(release, 'year')
+        if release_year is not None:
+            release_year = str(release_year)
+
+    card = {
+        'id': release_id,
+        'name': _extract_lookup_value(release, 'name', 'title', default=release_id),
+        'title': _extract_lookup_value(release, 'name', 'title', default=release_id),
+        'spotify_id': release_id,
+        'album_type': album_type,
+        'image_url': _extract_lookup_value(release, 'image_url', 'thumb_url', 'cover_image'),
+        'year': release_year,
+        'track_count': _extract_lookup_value(release, 'track_count', 'total_tracks', default=0) or 0,
+        'owned': None,
+        'track_completion': 'checking',
+    }
+
+    if release_date:
+        card['release_date'] = release_date
+    elif release_year:
+        card['release_date'] = f"{release_year}-01-01"
+
+    return card
+
+
+def get_artist_detail_discography(
+    artist_id: str,
+    artist_name: str = '',
+    options: Optional[MetadataLookupOptions] = None,
+) -> Dict[str, Any]:
+    """Get artist-detail-ready discography cards from the source-priority lookup flow."""
+    source_discography = get_artist_discography(
+        artist_id,
+        artist_name=artist_name,
+        options=options,
+    )
+
+    albums: List[Dict[str, Any]] = []
+    eps: List[Dict[str, Any]] = []
+    singles: List[Dict[str, Any]] = []
+    seen_ids = set()
+
+    for release in list(source_discography.get('albums', []) or []) + list(source_discography.get('singles', []) or []):
+        card = _build_artist_detail_release_card(release)
+        if not card:
+            continue
+
+        release_id = card['id']
+        if release_id in seen_ids:
+            continue
+        seen_ids.add(release_id)
+
+        album_type = (card.get('album_type') or 'album').lower()
+        if album_type == 'ep':
+            eps.append(card)
+        elif album_type == 'single':
+            singles.append(card)
+        else:
+            albums.append(card)
+
+    albums = _dedup_variant_releases(albums)
+    eps = _dedup_variant_releases(eps)
+    singles = _dedup_variant_releases(singles)
+
+    albums = _sort_discography_releases(albums)
+    eps = _sort_discography_releases(eps)
+    singles = _sort_discography_releases(singles)
+
+    has_releases = bool(albums or eps or singles)
+    return {
+        'success': has_releases,
+        'albums': albums,
+        'eps': eps,
+        'singles': singles,
+        'source': source_discography.get('source', 'unknown'),
+        'source_priority': source_discography.get('source_priority', []),
+        'error': None if has_releases else f'No releases found for artist "{artist_name or artist_id}"',
     }
 
 

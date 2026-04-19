@@ -383,3 +383,92 @@ def test_iter_artist_discography_completion_uses_release_artist_metadata(monkeyp
     assert events[1]["name"] == "Album Three"
     assert db.album_calls[0]["artist"] == "Explicit Artist"
     assert source.track_search_calls == []
+
+
+def test_get_artist_detail_discography_classifies_release_types(monkeypatch):
+    monkeypatch.setattr(
+        metadata_service,
+        "get_artist_discography",
+        lambda artist_id, artist_name='', options=None: {
+            "albums": [
+                {
+                    "id": "album-1",
+                    "name": "Album One",
+                    "album_type": "album",
+                    "image_url": "https://img.example/album-1.jpg",
+                    "release_date": "2024-01-05",
+                    "total_tracks": 10,
+                }
+            ],
+            "singles": [
+                {
+                    "id": "ep-1",
+                    "name": "EP One",
+                    "album_type": "ep",
+                    "image_url": "https://img.example/ep-1.jpg",
+                    "release_date": "2023-06-01",
+                    "total_tracks": 6,
+                },
+                {
+                    "id": "single-1",
+                    "name": "Single One",
+                    "album_type": "single",
+                    "image_url": "https://img.example/single-1.jpg",
+                    "release_date": "2022-03-10",
+                    "total_tracks": 1,
+                },
+            ],
+            "source": "deezer",
+            "source_priority": ["deezer", "spotify"],
+        },
+    )
+
+    result = metadata_service.get_artist_detail_discography("artist-1", "Artist One", MetadataLookupOptions())
+
+    assert result["success"] is True
+    assert result["source"] == "deezer"
+    assert result["source_priority"] == ["deezer", "spotify"]
+    assert [album["id"] for album in result["albums"]] == ["album-1"]
+    assert [ep["id"] for ep in result["eps"]] == ["ep-1"]
+    assert [single["id"] for single in result["singles"]] == ["single-1"]
+    assert result["albums"][0]["title"] == "Album One"
+    assert result["albums"][0]["spotify_id"] == "album-1"
+    assert result["albums"][0]["owned"] is None
+    assert result["albums"][0]["track_completion"] == "checking"
+
+
+def test_get_artist_detail_discography_dedups_variant_releases(monkeypatch):
+    monkeypatch.setattr(
+        metadata_service,
+        "get_artist_discography",
+        lambda artist_id, artist_name='', options=None: {
+            "albums": [
+                {
+                    "id": "album-standard",
+                    "name": "Variant Album",
+                    "album_type": "album",
+                    "image_url": "https://img.example/standard.jpg",
+                    "release_date": "2024-01-05",
+                    "total_tracks": 10,
+                },
+                {
+                    "id": "album-deluxe",
+                    "name": "Variant Album (Deluxe Edition)",
+                    "album_type": "album",
+                    "image_url": "https://img.example/deluxe.jpg",
+                    "release_date": "2024-01-05",
+                    "total_tracks": 14,
+                },
+            ],
+            "singles": [],
+            "source": "deezer",
+            "source_priority": ["deezer", "spotify"],
+        },
+    )
+
+    result = metadata_service.get_artist_detail_discography("artist-1", "Artist One", MetadataLookupOptions())
+
+    assert result["success"] is True
+    assert [album["id"] for album in result["albums"]] == ["album-deluxe"]
+    assert result["albums"][0]["title"] == "Variant Album (Deluxe Edition)"
+    assert result["albums"][0]["track_count"] == 14
