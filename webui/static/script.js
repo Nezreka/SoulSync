@@ -2773,6 +2773,31 @@ function initializeNavigation() {
             navigateToPage(page);
         });
     });
+
+    window.addEventListener('popstate', (event) => {
+        const page = (event.state && event.state.page) || _getPageFromPath();
+        if (page && page !== currentPage) {
+            navigateToPage(page, { skipPushState: true });
+        }
+    });
+}
+
+const _DEEPLINK_VALID_PAGES = new Set([
+    'dashboard', 'sync', 'downloads', 'discover', 'artists', 'automations',
+    'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
+    'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
+    'hydrabase', 'tools'
+]);
+
+function _getPageFromPath() {
+    const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
+    if (!path) return 'dashboard';
+    const basePage = path.split('/')[0];
+    if (!_DEEPLINK_VALID_PAGES.has(basePage)) return 'dashboard';
+    // Context-dependent pages fall back to a sensible parent
+    if (basePage === 'artist-detail') return 'artists';
+    if (basePage === 'playlist-explorer') return 'library';
+    return basePage;
 }
 
 // ===============================
@@ -2905,7 +2930,7 @@ function initializeDownloadManagerToggle() {
     console.log('Download manager toggle initialized');
 }
 
-function navigateToPage(pageId) {
+function navigateToPage(pageId, options = {}) {
     if (pageId === currentPage) return;
 
     // Permission guard — redirect to home page if not allowed
@@ -2936,6 +2961,13 @@ function navigateToPage(pageId) {
     document.getElementById(`${pageId}-page`).classList.add('active');
 
     currentPage = pageId;
+
+    if (!options.skipPushState) {
+        const urlPath = pageId === 'dashboard' ? '/' : '/' + pageId;
+        if (window.location.pathname !== urlPath) {
+            history.pushState({ page: pageId }, '', urlPath);
+        }
+    }
 
     // Show/hide global search bar (hide on downloads page where enhanced search exists)
     if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
@@ -10233,8 +10265,15 @@ async function loadInitialData() {
 
         // Navigate to user's home page (or dashboard for admin)
         const homePage = getProfileHomePage();
-        if (homePage !== 'dashboard') {
-            navigateToPage(homePage);
+        const urlPage = _getPageFromPath();
+        const targetPage = (urlPage && urlPage !== 'dashboard' && isPageAllowed(urlPage))
+            ? urlPage
+            : homePage;
+
+        history.replaceState({ page: targetPage }, '', (targetPage === 'dashboard' ? '/' : '/' + targetPage) + window.location.search + window.location.hash);
+
+        if (targetPage !== 'dashboard') {
+            navigateToPage(targetPage, { skipPushState: true });
         } else {
             await loadDashboardData();
             loadDashboardSyncHistory();

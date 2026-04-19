@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, redirect, send_file, Response, session, g
+from flask import Flask, render_template, request, jsonify, redirect, send_file, Response, session, g, abort
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger, setup_logging
 from utils.async_helpers import run_async
@@ -4873,6 +4873,13 @@ def run_detection(server_type):
 
 @app.route('/')
 def index():
+    return render_template('index.html')
+
+@app.route('/<path:page>')
+def spa_catch_all(page):
+    # Serve index.html for client-side routes; let Flask handle real routes first.
+    if page.startswith(('api/', 'static/', 'auth/', 'callback', 'deezer/', 'tidal/', 'status')):
+        abort(404)
     return render_template('index.html')
 
 # --- API Endpoints ---
