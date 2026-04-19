@@ -6385,15 +6385,6 @@ function toggleServer(serverType) {
         loadNavidromeMusicFolders();
     }
 
-    // Show Transfer path for SoulSync standalone
-    if (serverType === 'soulsync') {
-        const transferInput = document.getElementById('soulsync-transfer-path');
-        const transferPathEl = document.getElementById('transfer-path');
-        if (transferInput && transferPathEl) {
-            transferInput.value = transferPathEl.value || './Transfer';
-        }
-    }
-
     // Auto-save after server toggle change
     debouncedAutoSaveSettings();
 }
