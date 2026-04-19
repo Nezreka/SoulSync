@@ -6984,7 +6984,26 @@ function _collectGenreWhitelist() {
 let _logViewerActive = false;
 let _logViewerFilter = '';
 let _logViewerSource = 'app';
-const _LOG_MAX_LINES = 1000;
+let _logViewerSearch = '';
+const _LOG_MAX_LINES = 2000;
+
+function _logClassify(line) {
+    // Exact logger format first
+    if (line.includes(' - DEBUG - ')) return 'DEBUG';
+    if (line.includes(' - INFO - ')) return 'INFO';
+    if (line.includes(' - WARNING - ')) return 'WARNING';
+    if (line.includes(' - ERROR - ') || line.includes(' - CRITICAL - ')) return 'ERROR';
+    // Heuristic for print() output
+    const ll = line.toLowerCase();
+    if (ll.includes('error') || ll.includes('traceback') || ll.includes('exception') || ll.includes('failed')) return 'ERROR';
+    if (ll.includes('warning') || ll.includes('warn')) return 'WARNING';
+    if (ll.includes('debug')) return 'DEBUG';
+    return 'INFO';
+}
+
+function _logClassToCSS(level) {
+    return { DEBUG: 'log-debug', INFO: 'log-info', WARNING: 'log-warning', ERROR: 'log-error' }[level] || 'log-plain';
+}
 
 async function _logViewerInit() {
     if (_logViewerActive) return;
@@ -6993,8 +7012,9 @@ async function _logViewerInit() {
 
     // Fetch initial tail
     try {
-        const params = new URLSearchParams({ source: _logViewerSource, lines: 200 });
+        const params = new URLSearchParams({ source: _logViewerSource, lines: 300 });
         if (_logViewerFilter) params.set('level', _logViewerFilter);
+        if (_logViewerSearch) params.set('search', _logViewerSearch);
         const resp = await fetch(`/api/logs/tail?${params}`);
         const data = await resp.json();
         if (data.lines) {
@@ -7027,10 +7047,17 @@ function _logViewerStop() {
 function _logViewerOnLive(data) {
     if (!_logViewerActive || !data.lines) return;
     if (data.source !== _logViewerSource) return;
-    const filtered = _logViewerFilter
-        ? data.lines.filter(l => l.includes(` - ${_logViewerFilter} - `))
-        : data.lines;
-    if (filtered.length > 0) _logViewerAppendLines(filtered);
+    let lines = data.lines;
+    // Apply level filter client-side for live lines
+    if (_logViewerFilter) {
+        lines = lines.filter(l => _logClassify(l) === _logViewerFilter);
+    }
+    // Apply search filter
+    if (_logViewerSearch) {
+        const s = _logViewerSearch.toLowerCase();
+        lines = lines.filter(l => l.toLowerCase().includes(s));
+    }
+    if (lines.length > 0) _logViewerAppendLines(lines);
 }
 
 function _logViewerAppendLines(lines) {
@@ -7039,12 +7066,14 @@ function _logViewerAppendLines(lines) {
     const autoScroll = document.getElementById('log-viewer-autoscroll')?.checked;
     const terminal = document.getElementById('log-viewer-terminal');
 
+    const frag = document.createDocumentFragment();
     for (const line of lines) {
         const div = document.createElement('div');
-        div.className = 'log-line ' + _logViewerGetClass(line);
+        div.className = 'log-line ' + _logClassToCSS(_logClassify(line));
         div.textContent = line;
-        container.appendChild(div);
+        frag.appendChild(div);
     }
+    container.appendChild(frag);
 
     // Trim old lines
     while (container.children.length > _LOG_MAX_LINES) {
@@ -7061,14 +7090,6 @@ function _logViewerAppendLines(lines) {
     }
 }
 
-function _logViewerGetClass(line) {
-    if (line.includes(' - DEBUG - ')) return 'log-debug';
-    if (line.includes(' - INFO - ')) return 'log-info';
-    if (line.includes(' - WARNING - ')) return 'log-warning';
-    if (line.includes(' - ERROR - ') || line.includes(' - CRITICAL - ')) return 'log-error';
-    return 'log-plain';
-}
-
 async function _logViewerChangeSource() {
     _logViewerStop();
     _logViewerSource = document.getElementById('log-viewer-source')?.value || 'app';
@@ -7081,10 +7102,22 @@ function _logViewerFilterLevel(btn) {
     document.querySelectorAll('.log-filter-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     _logViewerFilter = btn.dataset.level || '';
-    // Reload with filter
+    _logViewerReload();
+}
+
+let _logSearchDebounce = null;
+function _logViewerOnSearch(input) {
+    clearTimeout(_logSearchDebounce);
+    _logSearchDebounce = setTimeout(() => {
+        _logViewerSearch = (input.value || '').trim();
+        _logViewerReload();
+    }, 300);
+}
+
+function _logViewerReload() {
     _logViewerStop();
     const container = document.getElementById('log-viewer-lines');
-    if (container) container.innerHTML = '';
+    if (container) container.innerHTML = '<div class="log-line log-info">Loading...</div>';
     _logViewerInit();
 }
 

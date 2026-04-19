@@ -6282,21 +6282,38 @@ def get_log_tail():
     }
     log_path = log_map.get(log_source, log_map['app'])
 
+    search = request.args.get('search', '').lower()
+
+    def _classify_log_level(line):
+        """Classify a log line's level. Returns DEBUG/INFO/WARNING/ERROR or empty for unclassified."""
+        if ' - DEBUG - ' in line: return 'DEBUG'
+        if ' - INFO - ' in line: return 'INFO'
+        if ' - WARNING - ' in line: return 'WARNING'
+        if ' - ERROR - ' in line or ' - CRITICAL - ' in line: return 'ERROR'
+        # Heuristic for print() output and non-logger lines
+        ll = line.lower()
+        if 'error' in ll or 'traceback' in ll or 'exception' in ll or 'failed' in ll: return 'ERROR'
+        if 'warning' in ll or 'warn' in ll: return 'WARNING'
+        if 'debug' in ll: return 'DEBUG'
+        return 'INFO'  # Default unclassified lines to INFO
+
     result_lines = []
     if os.path.exists(log_path):
         try:
             with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
                 all_lines = f.readlines()
             # Read more lines than requested so filtering has enough to work with
-            tail = all_lines[-(lines * 3):] if level_filter else all_lines[-lines:]
+            pool_size = lines * 5 if (level_filter or search) else lines
+            tail = all_lines[-pool_size:]
             for line in tail:
                 stripped = line.rstrip()
                 if not stripped:
                     continue
                 if level_filter and level_filter in ('DEBUG', 'INFO', 'WARNING', 'ERROR'):
-                    # Match lines like "2026-04-18 12:00:00 - name - INFO - message"
-                    if f' - {level_filter} - ' not in stripped:
+                    if _classify_log_level(stripped) != level_filter:
                         continue
+                if search and search not in stripped.lower():
+                    continue
                 result_lines.append(stripped)
             # Trim to requested count after filtering
             result_lines = result_lines[-lines:]
@@ -54470,7 +54487,7 @@ def _emit_live_log_loop():
         'source_reuse': os.path.join('logs', 'source_reuse.log'),
     }
     while not globals().get('IS_SHUTTING_DOWN', False):
-        socketio.sleep(2)
+        socketio.sleep(0.5)
         try:
             # Read which source clients want (stored by subscribe handler)
             source = getattr(_emit_live_log_loop, '_source', 'app')

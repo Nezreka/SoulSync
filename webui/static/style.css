@@ -17282,6 +17282,18 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .log-action-btn:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
 
+.log-viewer-search {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    color: #e0e0e0;
+    padding: 4px 10px;
+    font-size: 12px;
+    width: 160px;
+    outline: none;
+}
+.log-viewer-search:focus { border-color: rgba(255, 255, 255, 0.3); }
+
 .log-autoscroll-label {
     display: flex;
     align-items: center;
