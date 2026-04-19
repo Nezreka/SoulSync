@@ -452,12 +452,20 @@ def test_get_artist_detail_discography_dedups_variant_releases(monkeypatch):
                     "total_tracks": 10,
                 },
                 {
-                    "id": "album-deluxe",
-                    "name": "Variant Album (Deluxe Edition)",
+                    "id": "album-swedish",
+                    "name": "Variant Album (Swedish Edition)",
                     "album_type": "album",
-                    "image_url": "https://img.example/deluxe.jpg",
+                    "image_url": "https://img.example/swedish.jpg",
                     "release_date": "2024-01-05",
-                    "total_tracks": 14,
+                    "total_tracks": 12,
+                },
+                {
+                    "id": "album-remaster",
+                    "name": "Variant Album (2023 Abbey Road Remaster)",
+                    "album_type": "album",
+                    "image_url": "https://img.example/remaster.jpg",
+                    "release_date": "2024-01-05",
+                    "total_tracks": 10,
                 },
             ],
             "singles": [],
@@ -469,6 +477,6 @@ def test_get_artist_detail_discography_dedups_variant_releases(monkeypatch):
     result = metadata_service.get_artist_detail_discography("artist-1", "Artist One", MetadataLookupOptions())
 
     assert result["success"] is True
-    assert [album["id"] for album in result["albums"]] == ["album-deluxe"]
-    assert result["albums"][0]["title"] == "Variant Album (Deluxe Edition)"
-    assert result["albums"][0]["track_count"] == 14
+    assert [album["id"] for album in result["albums"]] == ["album-standard"]
+    assert result["albums"][0]["title"] == "Variant Album"
+    assert result["albums"][0]["track_count"] == 10
