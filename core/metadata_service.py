@@ -355,17 +355,35 @@ def _dedup_variant_releases(releases: List[Dict[str, Any]]) -> List[Dict[str, An
     import re
     from difflib import SequenceMatcher
 
-    variant_patterns = [
-        r'\s*[\(\[]\s*(explicit|clean|deluxe|deluxe edition|standard edition|clean version|explicit version|remastered|bonus track version)\s*[\)\]]',
+    variant_suffix_pattern = re.compile(
+        r'\s*[\(\[][^()\[\]]*\b(?:edition|editions|deluxe|remaster|remastered|'
+        r'explicit|clean|version|anniversary|collector|expanded|redux)\b[^()\[\]]*[\)\]]\s*$',
+        re.IGNORECASE,
+    )
+    legacy_suffix_pattern = re.compile(
         r'\s*-\s*(explicit|clean|deluxe edition|single)\s*$',
-    ]
+        re.IGNORECASE,
+    )
+    variant_keyword_pattern = re.compile(
+        r'\b(?:edition|editions|deluxe|remaster|remastered|explicit|clean|version|'
+        r'anniversary|collector|expanded|redux)\b',
+        re.IGNORECASE,
+    )
 
     def _clean_title(title: Any) -> str:
         cleaned = str(title or '').strip().lower()
-        for pattern in variant_patterns:
-            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+        while True:
+            new_cleaned = variant_suffix_pattern.sub('', cleaned).strip()
+            new_cleaned = legacy_suffix_pattern.sub('', new_cleaned).strip()
+            if new_cleaned == cleaned:
+                break
+            cleaned = new_cleaned
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         return cleaned
+
+    def _has_variant_suffix(title: Any) -> bool:
+        raw = str(title or '').strip()
+        return bool(re.search(r'[\(\[][^\)\]]*' + variant_keyword_pattern.pattern + r'[^\)\]]*[\)\]]\s*$', raw, flags=re.IGNORECASE))
 
     def _is_compilation(release: Dict[str, Any]) -> bool:
         title = str(_extract_lookup_value(release, 'name', 'title', default='') or '').lower()
@@ -385,10 +403,12 @@ def _dedup_variant_releases(releases: List[Dict[str, Any]]) -> List[Dict[str, An
         has_clean = 'clean' in title and not has_explicit
         track_count = int(_extract_lookup_value(release, 'track_count', 'total_tracks', default=0) or 0)
         release_date = str(_extract_lookup_value(release, 'release_date', default='') or '')
+        has_variant_suffix = _has_variant_suffix(title)
 
         # Higher is better.
         return (
             1 if not _is_compilation(release) else 0,
+            1 if not has_variant_suffix else 0,
             2 if has_explicit else (1 if not has_clean else 0),
             track_count,
             release_date,
