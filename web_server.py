@@ -10713,31 +10713,44 @@ def get_artist_detail(artist_id):
             if single.get('image_url'):
                 single['image_url'] = fix_artist_image_url(single['image_url'])
 
-        # Get Spotify discography for proper categorization and missing releases
-        spotify_artist_data = None
+        # Get source-priority discography for proper categorization and missing releases
+        artist_detail_discography = None
         try:
-            spotify_discography = get_spotify_artist_discography(artist_info['name'])
+            from core.metadata_service import MetadataLookupOptions, get_artist_detail_discography as _get_artist_detail_discography
 
-            if spotify_discography['success']:
-                print(f"Spotify discography found - Albums: {len(spotify_discography['albums'])}, EPs: {len(spotify_discography['eps'])}, Singles: {len(spotify_discography['singles'])}")
+            artist_detail_discography = _get_artist_detail_discography(
+                artist_id,
+                artist_name=artist_info['name'],
+                options=MetadataLookupOptions(
+                    allow_fallback=True,
+                    skip_cache=False,
+                    max_pages=0,
+                    limit=50,
+                ),
+            )
 
-                # Store Spotify artist data for the response
-                spotify_artist_data = {
-                    'spotify_artist_id': spotify_discography.get('spotify_artist_id'),
-                    'spotify_artist_name': spotify_discography.get('spotify_artist_name'),
-                    'artist_image': spotify_discography.get('artist_image')
-                }
-
-                # Merge owned and Spotify data for complete picture
-                merged_discography = merge_discography_data(owned_releases, spotify_discography, db=database, artist_name=artist_info['name'])
+            if artist_detail_discography['success']:
+                print(
+                    "Source-priority discography found - "
+                    f"Albums: {len(artist_detail_discography['albums'])}, "
+                    f"EPs: {len(artist_detail_discography['eps'])}, "
+                    f"Singles: {len(artist_detail_discography['singles'])}"
+                )
+                merged_discography = artist_detail_discography
             else:
-                print(f"Spotify discography not found: {spotify_discography.get('error', 'Unknown error')}")
-                # Fall back to our database categorization
+                print(f"Source-priority discography not found: {artist_detail_discography.get('error', 'Unknown error')}")
                 merged_discography = owned_releases
-        except Exception as spotify_error:
-            print(f"Error fetching Spotify data: {spotify_error}")
-            # Fall back to our database categorization
+        except Exception as detail_error:
+            print(f"Error fetching source-priority discography: {detail_error}")
             merged_discography = owned_releases
+
+        spotify_artist_data = None
+        if artist_info.get('spotify_artist_id'):
+            spotify_artist_data = {
+                'spotify_artist_id': artist_info.get('spotify_artist_id'),
+                'spotify_artist_name': artist_info.get('name'),
+                'artist_image': artist_info.get('image_url')
+            }
 
         # Compute per-artist track enrichment coverage
         enrichment_coverage = {}
@@ -11779,6 +11792,7 @@ def library_completion_stream():
         try:
             from core.metadata_service import check_album_completion, check_single_completion
             db = get_database()
+            source_override = (data.get('source') or '').strip().lower() or None
 
             categories = ['albums', 'eps', 'singles']
             all_items = []
@@ -11799,9 +11813,9 @@ def library_completion_stream():
                     }
 
                     if category == 'singles':
-                        result = check_single_completion(db, mapped, artist_name)
+                        result = check_single_completion(db, mapped, artist_name, source_override=source_override)
                     else:
-                        result = check_album_completion(db, mapped, artist_name)
+                        result = check_album_completion(db, mapped, artist_name, source_override=source_override)
 
                     result['spotify_id'] = item.get('spotify_id', '')
                     result['category'] = category
@@ -50726,232 +50740,6 @@ def start_oauth_callback_servers():
     tidal_thread.start()
     
     print("OAuth callback servers started")
-
-# ===============================================
-# Artist Detail Spotify Integration Functions
-# ===============================================
-
-def get_spotify_artist_discography(artist_name):
-    """Get complete artist discography from Spotify using proper matching"""
-    try:
-        from core.matching_engine import MusicMatchingEngine
-
-        print(f"Searching Spotify for artist: {artist_name}")
-
-        # Reuse cached profile-aware Spotify client
-        spotify_client = get_spotify_client_for_profile()
-        matching_engine = MusicMatchingEngine()
-
-        if not spotify_client:
-            return {
-                'success': False,
-                'error': 'Spotify client unavailable'
-            }
-
-        # Search for multiple potential matches (not just 1)
-        artists = spotify_client.search_artists(artist_name, limit=5)
-
-        if not artists:
-            return {
-                'success': False,
-                'error': f'Artist "{artist_name}" not found on Spotify'
-            }
-
-        # Since database names are exact Spotify names, try exact match first
-        best_match = None
-        highest_score = 0.0
-
-        # Step 1: Try exact case-insensitive match
-        for spotify_artist in artists:
-            if artist_name.lower().strip() == spotify_artist.name.lower().strip():
-                print(f"Exact match found: '{spotify_artist.name}'")
-                best_match = spotify_artist
-                highest_score = 1.0
-                break
-
-        # Step 2: If no exact match, use matching engine with higher threshold
-        if not best_match:
-            db_artist_normalized = matching_engine.normalize_string(artist_name)
-
-            for spotify_artist in artists:
-                spotify_artist_normalized = matching_engine.normalize_string(spotify_artist.name)
-                score = matching_engine.similarity_score(db_artist_normalized, spotify_artist_normalized)
-
-                print(f"Fuzzy match candidate: '{spotify_artist.name}' (score: {score:.3f})")
-
-                if score > highest_score:
-                    highest_score = score
-                    best_match = spotify_artist
-
-        # Require high confidence threshold since DB should have exact names
-        if not best_match or highest_score < 0.95:
-            return {
-                'success': False,
-                'error': f'No confident artist match found for "{artist_name}" (best: "{getattr(best_match, "name", "N/A")}", score: {highest_score:.3f})'
-            }
-
-        artist = best_match
-        spotify_artist_id = artist.id
-
-        print(f"Found Spotify artist: {artist.name} (ID: {spotify_artist_id}, confidence: {highest_score:.3f})")
-
-        # Get all albums (albums, singles, and compilations)
-        all_albums = spotify_client.get_artist_albums(spotify_artist_id, album_type='album,single,compilation')
-
-        if not all_albums:
-            return {
-                'success': False,
-                'error': f'No albums found for artist "{artist_name}"'
-            }
-
-        print(f"Found {len(all_albums)} releases on Spotify")
-
-        # Categorize releases
-        albums = []
-        eps = []
-        singles = []
-
-        for album in all_albums:
-            # Skip albums where this artist isn't the primary (first-listed) artist
-            if getattr(album, 'artist_ids', None) and album.artist_ids[0] != spotify_artist_id:
-                continue
-
-            # Use the Album object properties
-            track_count = album.total_tracks
-
-            release_data = {
-                'title': album.name,
-                'year': album.release_date[:4] if album.release_date else None,
-                'release_date': album.release_date if album.release_date else None,
-                'image_url': album.image_url,
-                'spotify_id': album.id,
-                'owned': False,  # Will be updated when merging with owned data
-                'track_count': track_count,
-                'album_type': album.album_type.lower()
-            }
-
-            # Categorize based on album_type from source (Spotify/iTunes/Deezer)
-            album_type = album.album_type.lower() if album.album_type else 'album'
-
-            if album_type == 'single':
-                singles.append(release_data)
-            elif album_type == 'ep':
-                eps.append(release_data)
-            elif album_type == 'compilation':
-                albums.append(release_data)
-            else:
-                albums.append(release_data)
-
-        # Deduplicate variant releases (Explicit/Clean, Standard/Deluxe)
-        def _dedup_releases(releases):
-            import re
-            _VARIANT_RE = re.compile(
-                r'\s*[\(\[](explicit|clean|deluxe|deluxe edition|standard edition|'
-                r'clean version|explicit version|remastered|bonus track version)[\)\]]'
-                r'|\s*-\s*(explicit|clean|deluxe edition|single)\s*$',
-                re.IGNORECASE
-            )
-            groups = {}
-            for r in releases:
-                norm = _VARIANT_RE.sub('', r['title']).strip().lower()
-                key = (norm, r.get('year'))
-                if key not in groups:
-                    groups[key] = r
-                else:
-                    existing = groups[key]
-                    # Only dedup if titles are genuinely similar (not just same year)
-                    from difflib import SequenceMatcher
-                    title_sim = SequenceMatcher(None, norm, _VARIANT_RE.sub('', existing['title']).strip().lower()).ratio()
-                    if title_sim < 0.85:
-                        # Titles are too different — not variants, keep both
-                        # Use full title as key to avoid collision
-                        groups[(r['title'].lower(), r.get('year'))] = r
-                        continue
-                    # Prefer: studio over compilation, explicit over clean, more tracks as tiebreaker
-                    r_is_compilation = r.get('album_type', '').lower() == 'compilation' or 'best of' in r['title'].lower() or 'greatest hits' in r['title'].lower()
-                    e_is_compilation = existing.get('album_type', '').lower() == 'compilation' or 'best of' in existing['title'].lower() or 'greatest hits' in existing['title'].lower()
-                    if e_is_compilation and not r_is_compilation:
-                        groups[key] = r  # Studio album wins over compilation
-                    elif r_is_compilation and not e_is_compilation:
-                        pass  # Keep existing studio album
-                    elif (r.get('track_count', 0) > existing.get('track_count', 0) or
-                          '(explicit' in r['title'].lower()):
-                        groups[key] = r
-            return list(groups.values())
-
-        albums = _dedup_releases(albums)
-        eps = _dedup_releases(eps)
-        singles = _dedup_releases(singles)
-
-        print(f"Categorized Spotify releases - Albums: {len(albums)}, EPs: {len(eps)}, Singles: {len(singles)}")
-
-        return {
-            'success': True,
-            'albums': albums,
-            'eps': eps,
-            'singles': singles,
-            'artist_image': artist.image_url if hasattr(artist, 'image_url') else None,
-            'spotify_artist_id': spotify_artist_id,
-            'spotify_artist_name': artist.name
-        }
-
-    except Exception as e:
-        print(f"Error getting Spotify discography for {artist_name}: {e}")
-        return {
-            'success': False,
-            'error': str(e)
-        }
-
-def merge_discography_data(owned_releases, spotify_discography, db=None, artist_name=None):
-    """Build discography from Spotify data with 'checking' state - ownership is resolved via SSE stream"""
-    try:
-        print("Building discography cards (fast path - no DB matching)...")
-
-        def build_category(spotify_category, category_name):
-            """Build cards for a category with checking state"""
-            cards = []
-            for spotify_release in spotify_category:
-                card = {
-                    'title': spotify_release['title'],
-                    'spotify_id': spotify_release.get('spotify_id'),
-                    'album_type': spotify_release.get('album_type', 'album'),
-                    'image_url': spotify_release.get('image_url'),
-                    'year': spotify_release.get('year'),
-                    'track_count': spotify_release.get('track_count', 0),
-                    'owned': None,  # null = checking (resolved by completion stream)
-                    'track_completion': 'checking',
-                }
-                if spotify_release.get('release_date'):
-                    card['release_date'] = spotify_release['release_date']
-                elif spotify_release.get('year'):
-                    card['release_date'] = f"{spotify_release['year']}-01-01"
-                cards.append(card)
-            return cards
-
-        albums = build_category(spotify_discography['albums'], 'Albums')
-        eps = build_category(spotify_discography['eps'], 'EPs')
-        singles = build_category(spotify_discography['singles'], 'Singles')
-
-        print(f"Built discography cards - Albums: {len(albums)}, EPs: {len(eps)}, Singles: {len(singles)}")
-
-        return {
-            'success': True,
-            'albums': albums,
-            'eps': eps,
-            'singles': singles
-        }
-
-    except Exception as e:
-        print(f"Error building discography: {e}")
-        import traceback
-        traceback.print_exc()
-        return {
-            'success': False,
-            'error': str(e),
-            'albums': [],
-            'eps': [],
-            'singles': []
-        }
 
 # ================================================================================================
 # MUSICBRAINZ ENRICHMENT - PHASE 5 WEB UI INTEGRATION
