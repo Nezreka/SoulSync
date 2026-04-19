@@ -3040,11 +3040,11 @@ async function loadPageData(pageId) {
                 break;
             case 'settings':
                 initializeSettings();
+                switchSettingsTab('connections');
                 await loadSettingsData();
                 await loadQualityProfile();
                 loadApiKeys();
                 loadBlacklistCount();
-                switchSettingsTab('connections');
                 break;
             case 'stats':
                 initializeStatsPage();
