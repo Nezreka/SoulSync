@@ -25,4 +25,6 @@ jobs:
         run: python -m compileall api core database services scripts web_server.py wsgi.py beatport_unified_scraper.py
 
       - name: Run tests
-        run: pytest
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m pytest
