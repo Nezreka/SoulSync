@@ -7705,11 +7705,11 @@
         </div>
     </div>
 
-    <div class="tool-help-modal" id="tool-help-modal">
+    <div class="tool-help-modal" id="tool-help-modal" onclick="if(event.target===this)closeToolHelpModal()">
         <div class="tool-help-modal-content">
             <div class="tool-help-modal-header">
                 <h3 id="tool-help-modal-title">Tool Information</h3>
-                <button class="tool-help-modal-close">&times;</button>
+                <button class="tool-help-modal-close" onclick="closeToolHelpModal()">&times;</button>
             </div>
             <div class="tool-help-modal-body" id="tool-help-modal-body">
                 <!-- Content will be dynamically inserted -->
