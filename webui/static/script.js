@@ -9227,7 +9227,7 @@ function initializeSearchModeToggle() {
 
         // Fetch metadata sources first, then YouTube last so it does not compete
         // with the primary artist/album/track results for early attention.
-        const orderedSources = ['spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'youtube_videos']
+        const orderedSources = ['spotify', 'itunes', 'deezer', 'discogs', 'musicbrainz', 'hydrabase', 'youtube_videos']
             .filter(src => alternateSources.includes(src) && src !== _activeSearchSource);
 
         orderedSources.forEach((src, index) => {
