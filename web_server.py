@@ -24628,7 +24628,7 @@ def _run_soulsync_deep_scan():
 
         print(f"[SoulSync Deep Scan] {summary}")
         add_activity_item("", "SoulSync Deep Scan", summary, "Now")
-        _db_update_finished_callback(0, 0, len(transfer_files), moved_count, stale_count)
+        _db_update_finished_callback(0, 0, len(transfer_files), moved_count + stale_count, 0)
 
     except Exception as e:
         print(f"[SoulSync Deep Scan] Error: {e}")
