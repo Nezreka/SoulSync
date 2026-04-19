@@ -15637,15 +15637,24 @@ def sync_artist_library(artist_id):
 
             # Resolve artist_id: could be a DB integer ID or a source artist ID (Spotify/iTunes/Deezer)
             db_artist_id = None
-            try:
-                candidate = int(artist_id)
-                cursor.execute("SELECT id FROM artists WHERE id = ?", (candidate,))
-                if cursor.fetchone():
-                    db_artist_id = candidate
-            except (ValueError, TypeError):
-                pass
+            # Try direct ID match first (works for both integer and text IDs)
+            cursor.execute("SELECT id FROM artists WHERE id = ?", (artist_id,))
+            row = cursor.fetchone()
+            if row:
+                db_artist_id = row['id']
+            # Also try as integer (legacy integer PKs)
             if not db_artist_id:
-                for col in ('spotify_artist_id', 'itunes_artist_id', 'deezer_id'):
+                try:
+                    candidate = int(artist_id)
+                    cursor.execute("SELECT id FROM artists WHERE id = ?", (candidate,))
+                    row = cursor.fetchone()
+                    if row:
+                        db_artist_id = row['id']
+                except (ValueError, TypeError):
+                    pass
+            # Try source-specific ID columns
+            if not db_artist_id:
+                for col in ('spotify_artist_id', 'itunes_artist_id', 'deezer_id', 'discogs_id'):
                     cursor.execute(f"SELECT id FROM artists WHERE {col} = ?", (artist_id,))
                     row = cursor.fetchone()
                     if row:
