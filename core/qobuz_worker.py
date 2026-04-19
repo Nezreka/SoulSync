@@ -388,6 +388,8 @@ class QobuzWorker:
         existing_id = self._get_existing_id('artist', artist_id)
         if existing_id:
             logger.debug(f"Preserving existing Qobuz ID for artist '{artist_name}': {existing_id}")
+            # Mark as matched so this row is not re-selected on every loop.
+            self._mark_status('artist', artist_id, 'matched')
             return
 
         result = self.client.search_artist(artist_name)
@@ -429,6 +431,7 @@ class QobuzWorker:
         existing_id = self._get_existing_id('album', album_id)
         if existing_id:
             logger.debug(f"Preserving existing Qobuz ID for album '{album_name}': {existing_id}")
+            self._mark_status('album', album_id, 'matched')
             return
 
         result = self.client.search_album(artist_name, album_name)
@@ -484,6 +487,7 @@ class QobuzWorker:
         existing_id = self._get_existing_id('track', track_id)
         if existing_id:
             logger.debug(f"Preserving existing Qobuz ID for track '{track_name}': {existing_id}")
+            self._mark_status('track', track_id, 'matched')
             return
 
         result = self.client.search_track(artist_name, track_name)
