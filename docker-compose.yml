@@ -39,13 +39,13 @@ services:
       # Use named volume for database persistence (separate from host database)
       # NOTE: Changed from /app/database to /app/data to avoid overwriting Python package
       - soulsync_database:/app/data
-      # IMPORTANT: Mount host paths that your download/transfer folders live on.
+      # IMPORTANT: Mount host paths that your input/output folders live on.
       # Replace these examples with your actual paths:
       #   Linux/Mac:  - /path/to/your/downloads:/host/downloads:rw
       #   WSL:        - /mnt/d/Music:/host/music:rw
       # You can add as many mounts as needed for your setup.
       # - /path/to/downloads:/host/downloads:rw
-      # - /path/to/transfer:/host/transfer:rw
+      # - /path/to/music-library:/host/music:rw
       # Optional: Mount your music library for Plex/Jellyfin/Navidrome access
       # - /path/to/your/music:/music:ro
     extra_hosts:

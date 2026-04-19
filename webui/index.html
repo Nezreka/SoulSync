@@ -4422,7 +4422,7 @@
                                         </div>
                                     </div>
                                     <div class="form-group">
-                                        <label>Library Folder (Transfer Path):</label>
+                                        <label>Library Folder (Output Path):</label>
                                         <input type="text" id="soulsync-transfer-path" disabled placeholder="Set in Paths section below">
                                         <small>Files in this folder are your library. Configure the path in the Paths section.</small>
                                     </div>
@@ -4449,7 +4449,7 @@
                                 </div>
 
                                 <div class="form-group">
-                                    <label>Slskd Download Dir:</label>
+                                    <label>Input Folder (Download Dir):</label>
                                     <div class="path-input-group">
                                         <input type="text" id="download-path" placeholder="./downloads" readonly>
                                         <button class="browse-button locked" onclick="togglePathLock('download', this)">Unlock</button>
@@ -4457,7 +4457,7 @@
                                 </div>
 
                                 <div class="form-group">
-                                    <label>Matched Transfer Dir (Plex Music Dir?):</label>
+                                    <label>Output Folder (Music Library):</label>
                                     <div class="path-input-group">
                                         <input type="text" id="transfer-path" placeholder="./Transfer" readonly>
                                         <button class="browse-button locked" onclick="togglePathLock('transfer', this)">Unlock</button>
@@ -4465,7 +4465,7 @@
                                 </div>
 
                                 <div class="form-group">
-                                    <label>Import Staging Dir:</label>
+                                    <label>Import Folder:</label>
                                     <div class="path-input-group">
                                         <input type="text" id="staging-path" placeholder="./Staging" readonly>
                                         <button class="browse-button locked" onclick="togglePathLock('staging', this)">Unlock</button>
@@ -6060,13 +6060,13 @@
             <div class="import-page-header">
                 <div class="import-page-title-row">
                     <h1 class="import-page-title"><img src="/static/import.png" class="page-header-icon" alt=""><span>Import Music</span></h1>
-                    <button class="import-page-refresh-btn" onclick="importPageRefreshStaging()" title="Re-scan staging folder">
+                    <button class="import-page-refresh-btn" onclick="importPageRefreshStaging()" title="Re-scan import folder">
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M13.65 2.35A8 8 0 1 0 16 8h-2a6 6 0 1 1-1.76-4.24L10 6h6V0l-2.35 2.35z"/></svg>
                         Refresh
                     </button>
                 </div>
                 <div class="import-page-staging-bar" id="import-staging-bar">
-                    <span class="import-staging-path" id="import-page-staging-path">Staging folder: loading...</span>
+                    <span class="import-staging-path" id="import-page-staging-path">Import folder: loading...</span>
                     <span class="import-staging-stats" id="import-page-staging-stats"></span>
                 </div>
             </div>
@@ -6097,7 +6097,7 @@
                             <span>Auto-Import</span>
                         </label>
                         <span class="auto-import-status" id="auto-import-status-text">Disabled</span>
-                        <button class="auto-import-scan-now-btn" id="auto-import-scan-now" onclick="_autoImportScanNow()" title="Scan staging folder now" style="display:none">
+                        <button class="auto-import-scan-now-btn" id="auto-import-scan-now" onclick="_autoImportScanNow()" title="Scan import folder now" style="display:none">
                             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M13.65 2.35A8 8 0 1 0 16 8h-2a6 6 0 1 1-1.76-4.24L10 6h6V0l-2.35 2.35z"/></svg>
                             Scan Now
                         </button>
@@ -6136,8 +6136,8 @@
                 </div>
                 <div class="auto-import-results" id="auto-import-results">
                     <div class="auto-import-empty">
-                        <p>Enable auto-import to watch your staging folder for new music.</p>
-                        <p style="opacity:0.5;font-size:12px;">Drop album folders or single tracks into your staging directory and SoulSync will identify, match, and import them automatically.</p>
+                        <p>Enable auto-import to watch your import folder for new music.</p>
+                        <p style="opacity:0.5;font-size:12px;">Drop album folders or single tracks into your import folder and SoulSync will identify, match, and import them automatically.</p>
                     </div>
                 </div>
             </div>
@@ -6147,7 +6147,7 @@
                 <!-- Search state -->
                 <div id="import-page-album-search-section">
                     <div class="import-page-suggestions" id="import-page-suggestions">
-                        <div class="import-page-section-label">Suggested from your staging folder</div>
+                        <div class="import-page-section-label">Suggested from your import folder</div>
                         <div class="import-page-album-grid" id="import-page-suggestions-grid"></div>
                     </div>
                     <div class="import-page-search-bar">
@@ -6199,7 +6199,7 @@
                     </div>
                 </div>
                 <div class="import-page-singles-list" id="import-page-singles-list">
-                    <div class="import-page-empty-state">Navigate to this page to scan your staging folder for audio files.</div>
+                    <div class="import-page-empty-state">Navigate to this page to scan your import folder for audio files.</div>
                 </div>
 
             </div>
@@ -6520,7 +6520,7 @@
                                 <button class="tool-help-button" data-tool="duplicate-cleaner"
                                     title="Learn more about this tool">?</button>
                             </div>
-                            <p class="tool-card-info">Detect and remove duplicate tracks in Transfer folder</p>
+                            <p class="tool-card-info">Detect and remove duplicate tracks in output folder</p>
                             <div class="tool-card-stats">
                                 <div class="stat-item">
                                     <span class="stat-item-label">Files Scanned:</span>
