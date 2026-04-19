@@ -43824,7 +43824,10 @@ function displayLibraryArtists(artists) {
     if (!grid) return;
 
     // Build all cards as HTML string for single DOM write (much faster than createElement loop)
-    grid.innerHTML = artists.map((artist, i) => buildLibraryArtistCardHTML(artist, i)).join('');
+    grid.innerHTML = artists.map((artist, i) => {
+        try { return buildLibraryArtistCardHTML(artist, i); }
+        catch (e) { console.error('Failed to render artist card:', artist.name, e); return ''; }
+    }).join('');
 
     // Attach click handlers via event delegation (single listener vs 75+ individual)
     grid.onclick = (e) => {
@@ -43872,7 +43875,7 @@ function buildLibraryArtistCardHTML(artist, index) {
     if (artist.tidal_id) badges.push({ logo: TIDAL_LOGO_URL, fb: 'TD', title: 'Tidal', url: `https://tidal.com/browse/artist/${artist.tidal_id}` });
     if (artist.qobuz_id) badges.push({ logo: QOBUZ_LOGO_URL, fb: 'Qz', title: 'Qobuz', url: `https://www.qobuz.com/artist/${artist.qobuz_id}` });
     if (artist.discogs_id) badges.push({ logo: DISCOGS_LOGO_URL, fb: 'DC', title: 'Discogs', url: `https://www.discogs.com/artist/${artist.discogs_id}` });
-    if (artist.soul_id && !artist.soul_id.startsWith('soul_unnamed_')) badges.push({ logo: '/static/trans2.png', fb: 'SS', title: `SoulID: ${artist.soul_id}`, url: null });
+    if (artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_')) badges.push({ logo: '/static/trans2.png', fb: 'SS', title: `SoulID: ${artist.soul_id}`, url: null });
 
     // Watchlist badge
     const hasActiveSourceId = currentMusicSourceName === 'iTunes'
@@ -44479,7 +44482,7 @@ function updateArtistDetailPageHeaderWithData(artist) {
         if (artist.tidal_id) badges.push(_hb(TIDAL_LOGO_URL, 'TD', 'Tidal', `https://tidal.com/browse/artist/${artist.tidal_id}`));
         if (artist.qobuz_id) badges.push(_hb(QOBUZ_LOGO_URL, 'Qz', 'Qobuz', `https://www.qobuz.com/artist/${artist.qobuz_id}`));
         if (artist.discogs_id) badges.push(_hb(DISCOGS_LOGO_URL, 'DC', 'Discogs', `https://www.discogs.com/artist/${artist.discogs_id}`));
-        if (artist.soul_id && !artist.soul_id.startsWith('soul_unnamed_')) badges.push(_hb('/static/trans2.png', 'SS', `SoulID: ${artist.soul_id}`, null));
+        if (artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_')) badges.push(_hb('/static/trans2.png', 'SS', `SoulID: ${artist.soul_id}`, null));
 
         badgesContainer.innerHTML = badges.join('');
     }
@@ -66406,7 +66409,7 @@ async function loadStatsData() {
             <span class="stats-ranked-num">${i + 1}</span>
             ${item.image_url ? `<img class="stats-ranked-img" src="${item.image_url}" alt="" onerror="this.style.display='none'">` : ''}
             <div class="stats-ranked-info">
-                <div class="stats-ranked-name">${item.id ? `<a class="stats-artist-link" onclick="navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${item.id}','${_esc(item.name).replace(/'/g, "\\'")}'),300)">${_esc(item.name)}</a>` : _esc(item.name)}${item.soul_id && !item.soul_id.startsWith('soul_unnamed_') ? ' <img src="/static/trans2.png" style="width:12px;height:12px;vertical-align:middle;opacity:0.5;" title="SoulID">' : ''}</div>
+                <div class="stats-ranked-name">${item.id ? `<a class="stats-artist-link" onclick="navigateToPage('library');setTimeout(()=>navigateToArtistDetail('${item.id}','${_esc(item.name).replace(/'/g, "\\'")}'),300)">${_esc(item.name)}</a>` : _esc(item.name)}${item.soul_id && !String(item.soul_id).startsWith('soul_unnamed_') ? ' <img src="/static/trans2.png" style="width:12px;height:12px;vertical-align:middle;opacity:0.5;" title="SoulID">' : ''}</div>
                 <div class="stats-ranked-meta">${item.global_listeners ? _fmt(item.global_listeners) + ' global listeners' : ''}</div>
             </div>
             <span class="stats-ranked-count">${_fmt(item.play_count)} plays</span>

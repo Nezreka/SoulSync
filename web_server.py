@@ -22480,6 +22480,7 @@ def get_version_info():
                     "• Fix replace lower quality setting not persisting",
                     "• Fix Spotify enrichment worker infinite loop on pre-matched artists",
                     "• Reject Qobuz 30-second sample/preview downloads",
+                    "• Fix library page crash on All filter — non-string soul_id broke card rendering",
                 ],
             },
             {
