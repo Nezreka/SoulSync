@@ -14973,13 +14973,16 @@ async function startMissingTracksProcess(playlistId) {
         };
 
         // If this is an artist album download, use album name and include full context
-        // Match 'artist_album_', 'enhanced_search_album_', 'enhanced_search_track_', 'discover_album_', and 'seasonal_album_' prefixes
-        if (playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('enhanced_search_track_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_') || playlistId.startsWith('spotify_library_') || playlistId.startsWith('issue_download_') || playlistId.startsWith('library_redownload_') || playlistId.startsWith('beatport_release_')) {
+        // Match 'artist_album_', 'enhanced_search_album_', 'discover_album_', and 'seasonal_album_' prefixes
+        // Note: 'enhanced_search_track_' is excluded — single track search results use singles context
+        const _isAlbumContext = playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_') || playlistId.startsWith('spotify_library_') || playlistId.startsWith('issue_download_') || playlistId.startsWith('library_redownload_') || playlistId.startsWith('beatport_release_');
+        const _isSearchTrack = playlistId.startsWith('enhanced_search_track_') || playlistId.startsWith('gsearch_track_');
+        if (_isAlbumContext || _isSearchTrack) {
             requestBody.playlist_name = process.album?.name || process.playlist.name;
-            requestBody.is_album_download = true;
+            requestBody.is_album_download = _isAlbumContext; // false for single track search results
             requestBody.album_context = process.album;   // Full Spotify album object
             requestBody.artist_context = process.artist; // Full Spotify artist object
-            console.log(`🎵 [Artist Album] Sending album context: ${process.album?.name} by ${process.artist?.name}`);
+            console.log(`🎵 [${_isAlbumContext ? 'Album' : 'Single Track'}] Sending context: ${process.album?.name} by ${process.artist?.name}`);
         } else {
             // For playlists/wishlists, use the virtual playlist name
             requestBody.playlist_name = process.playlist.name;
