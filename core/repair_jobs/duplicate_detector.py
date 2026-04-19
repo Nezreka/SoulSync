@@ -47,6 +47,11 @@ class DuplicateDetectorJob(RepairJob):
         artist_threshold = float(settings.get('artist_similarity', 0.80))
         ignore_cross_album = settings.get('ignore_cross_album', True)
 
+        # Respect the global "allow duplicate tracks across albums" setting —
+        # if the user explicitly allows duplicates across albums, never flag them
+        if context.config_manager and context.config_manager.get('library.allow_duplicate_tracks', False):
+            ignore_cross_album = True
+
         # Fetch all tracks with artist/album names via JOIN
         tracks = []
         conn = None
