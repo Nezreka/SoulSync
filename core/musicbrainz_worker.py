@@ -254,16 +254,27 @@ class MusicBrainzWorker:
                 conn.close()
 
     def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
-        """Check if an entity already has a musicbrainz_id (e.g. from manual match)."""
-        table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
-        table = table_map.get(entity_type)
-        if not table:
+        """Check if an entity already has a MusicBrainz ID (e.g. from manual match).
+
+        MusicBrainz ID columns differ per entity type: artists use `musicbrainz_id`,
+        albums use `musicbrainz_release_id`, and tracks use `musicbrainz_recording_id`.
+        Before this fix, all three were queried as `musicbrainz_id`, so the
+        existing-ID check silently failed for albums and tracks.
+        """
+        table_config = {
+            'artist': ('artists', 'musicbrainz_id'),
+            'album': ('albums', 'musicbrainz_release_id'),
+            'track': ('tracks', 'musicbrainz_recording_id'),
+        }
+        cfg = table_config.get(entity_type)
+        if not cfg:
             return None
+        table, column = cfg
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute(f"SELECT musicbrainz_id FROM {table} WHERE id = ?", (entity_id,))
+            cursor.execute(f"SELECT {column} FROM {table} WHERE id = ?", (entity_id,))
             row = cursor.fetchone()
             return row[0] if row and row[0] else None
         except Exception:
@@ -285,6 +296,17 @@ class MusicBrainzWorker:
             existing_id = self._get_existing_id(item_type, item_id)
             if existing_id:
                 logger.debug(f"Preserving existing MusicBrainz ID for {item_type} '{item_name}': {existing_id}")
+                # Mark as matched so this row is not re-selected forever when
+                # match_status is NULL but the MBID is already populated.
+                try:
+                    if item_type == 'artist':
+                        self.mb_service.update_artist_mbid(item_id, existing_id, 'matched')
+                    elif item_type == 'album':
+                        self.mb_service.update_album_mbid(item_id, existing_id, 'matched')
+                    elif item_type == 'track':
+                        self.mb_service.update_track_mbid(item_id, existing_id, 'matched')
+                except Exception as mark_err:
+                    logger.error(f"Error marking {item_type} #{item_id} matched: {mark_err}")
                 return
 
             if item_type == 'artist':

@@ -307,7 +307,12 @@ class LastFMWorker:
                 logger.error(f"Error updating item status: {e2}")
 
     def _get_existing_id(self, entity_type: str, entity_id: int) -> Optional[str]:
-        """Check if an entity already has a lastfm_id (e.g. from manual match)."""
+        """Check if an entity already has a lastfm_url (e.g. from manual match).
+
+        The Last.fm schema uses `lastfm_url` (not `lastfm_id`) on artists, albums,
+        and tracks. This helper always returned None before because it queried a
+        non-existent column and silently caught the exception.
+        """
         table_map = {'artist': 'artists', 'album': 'albums', 'track': 'tracks'}
         table = table_map.get(entity_type)
         if not table:
@@ -316,7 +321,7 @@ class LastFMWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute(f"SELECT lastfm_id FROM {table} WHERE id = ?", (entity_id,))
+            cursor.execute(f"SELECT lastfm_url FROM {table} WHERE id = ?", (entity_id,))
             row = cursor.fetchone()
             return row[0] if row and row[0] else None
         except Exception:
@@ -329,7 +334,10 @@ class LastFMWorker:
         """Process an artist: get full info from Last.fm"""
         existing_id = self._get_existing_id('artist', artist_id)
         if existing_id:
-            logger.debug(f"Preserving existing Last.fm ID for artist '{artist_name}': {existing_id}")
+            # Row already has a Last.fm URL but status is NULL (legacy/manual match).
+            # Mark as matched so the worker does not re-select it forever.
+            logger.debug(f"Preserving existing Last.fm URL for artist '{artist_name}': {existing_id}")
+            self._mark_status('artist', artist_id, 'matched')
             return
 
         # Use get_artist_info for detailed data (includes stats, bio, tags, similar)
@@ -353,7 +361,8 @@ class LastFMWorker:
         """Process an album: get full info from Last.fm"""
         existing_id = self._get_existing_id('album', album_id)
         if existing_id:
-            logger.debug(f"Preserving existing Last.fm ID for album '{album_name}': {existing_id}")
+            logger.debug(f"Preserving existing Last.fm URL for album '{album_name}': {existing_id}")
+            self._mark_status('album', album_id, 'matched')
             return
 
         result = self.client.get_album_info(artist_name, album_name)
@@ -376,7 +385,8 @@ class LastFMWorker:
         """Process a track: get full info from Last.fm"""
         existing_id = self._get_existing_id('track', track_id)
         if existing_id:
-            logger.debug(f"Preserving existing Last.fm ID for track '{track_name}': {existing_id}")
+            logger.debug(f"Preserving existing Last.fm URL for track '{track_name}': {existing_id}")
+            self._mark_status('track', track_id, 'matched')
             return
 
         result = self.client.get_track_info(artist_name, track_name)

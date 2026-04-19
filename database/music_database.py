@@ -409,6 +409,12 @@ class MusicDatabase:
             # Add Discogs enrichment columns (migration)
             self._add_discogs_columns(cursor)
 
+            # Backfill match_status for rows that already have an external ID but
+            # NULL status. Prevents enrichment workers from re-processing these
+            # rows forever. Must run AFTER all *_match_status columns have been
+            # created by the migrations above.
+            self._backfill_match_status_for_existing_ids(cursor)
+
             # Bubble snapshots table for persisting UI state across page refreshes
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bubble_snapshots (
@@ -1921,6 +1927,56 @@ class MusicDatabase:
 
         except Exception as e:
             logger.error(f"Error adding Discogs columns: {e}")
+
+    def _backfill_match_status_for_existing_ids(self, cursor):
+        """Set `<provider>_match_status = 'matched'` for rows that already have a
+        populated external ID but NULL match_status.
+
+        Prevents enrichment workers from re-selecting the same rows forever when
+        the ID was populated outside the worker (file tags, manual match,
+        pre-migration legacy data) without a corresponding status update.
+
+        Only runs columns that actually exist, so pre-migration databases are
+        handled safely. UPDATE statements are cheap no-ops when nothing matches.
+        """
+        # (table, id_column, status_column)
+        targets = [
+            ('artists', 'lastfm_url', 'lastfm_match_status'),
+            ('albums', 'lastfm_url', 'lastfm_match_status'),
+            ('tracks', 'lastfm_url', 'lastfm_match_status'),
+            ('artists', 'musicbrainz_id', 'musicbrainz_match_status'),
+            ('albums', 'musicbrainz_release_id', 'musicbrainz_match_status'),
+            ('tracks', 'musicbrainz_recording_id', 'musicbrainz_match_status'),
+            ('artists', 'tidal_id', 'tidal_match_status'),
+            ('albums', 'tidal_id', 'tidal_match_status'),
+            ('tracks', 'tidal_id', 'tidal_match_status'),
+            ('artists', 'qobuz_id', 'qobuz_match_status'),
+            ('albums', 'qobuz_id', 'qobuz_match_status'),
+            ('tracks', 'qobuz_id', 'qobuz_match_status'),
+        ]
+
+        total_backfilled = 0
+        for table, id_col, status_col in targets:
+            try:
+                cursor.execute(f"PRAGMA table_info({table})")
+                cols = {row[1] for row in cursor.fetchall()}
+                if id_col not in cols or status_col not in cols:
+                    continue
+                cursor.execute(
+                    f"UPDATE {table} SET {status_col} = 'matched' "
+                    f"WHERE {status_col} IS NULL AND {id_col} IS NOT NULL AND {id_col} != ''"
+                )
+                if cursor.rowcount and cursor.rowcount > 0:
+                    total_backfilled += cursor.rowcount
+                    logger.info(
+                        f"Backfilled {cursor.rowcount} rows in {table}.{status_col} "
+                        f"where {id_col} was already set."
+                    )
+            except Exception as e:
+                logger.error(f"Error backfilling {table}.{status_col}: {e}")
+
+        if total_backfilled == 0:
+            logger.debug("Match-status backfill: no rows needed updating.")
 
     def _add_deezer_columns(self, cursor):
         """Add Deezer tracking + generic metadata columns for enrichment (artists, albums, tracks)"""
