@@ -22529,6 +22529,7 @@ def get_version_info():
                     "• Reject Qobuz 30-second sample/preview downloads",
                     "• Fix library page crash on All filter — non-string soul_id broke card rendering",
                     "• Auto Wing It fallback for failed discovery — unmatched tracks download via Soulseek with raw metadata",
+                    "• Smarter Fix modal results — standard album versions sorted above live/remix/cover/soundtrack variants",
                     "• Unmatch discovery tracks — red ✕ button to remove bad matches from playlist discovery",
                     "• Customizable music video naming — path template with $artist, $title, $year variables",
                     "• Fix soulseek log spam when not configured as download source",

@@ -3602,6 +3602,7 @@ const WHATS_NEW = {
     '2.33': [
         // --- April 19, 2026 ---
         { date: 'April 19, 2026' },
+        { title: 'Smarter Fix Modal Search Results', desc: 'The discovery Fix modal now sorts search results to prioritize standard album versions over live recordings, remixes, covers, soundtracks, remasters, and deluxe editions. Previously the first result was often a live or remix version instead of the original studio track' },
         { title: 'Unmatch Discovery Tracks', desc: 'Found tracks in playlist discovery now have a red ✕ button to remove the match. Sets the track back to Not Found so it won\'t be downloaded. For mirrored playlists, the unmatch persists in the DB and is respected on re-discovery runs' },
         { title: 'Customizable Music Video Naming', desc: 'Music video file naming is now configurable via a path template in Settings → Library → Paths & Organization. Default unchanged (Artist/Title-video.mp4). Remove "-video" from the template to get clean filenames. Available variables: $artist, $artistletter, $title, $year', page: 'settings' },
         { title: 'Fix Soulseek Log Spam', desc: 'The "Clean Search History" automation no longer tries to connect to slskd when Soulseek is not the active download source, eliminating noisy connection error logs for users who don\'t use Soulseek' },
