@@ -18733,6 +18733,10 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
         print("Metadata enhancement disabled in config.")
         return True
 
+    # Normalize None album_info to empty dict to prevent AttributeError on .get() calls
+    if album_info is None:
+        album_info = {}
+
     # Acquire per-file lock to prevent concurrent metadata writes to the same file
     file_lock = _get_file_lock(file_path)
     with file_lock:
@@ -19081,7 +19085,16 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
         if _genre_list:
             metadata['genre'] = ', '.join(_genre_list)
 
-    metadata['album_art_url'] = album_info.get('album_image_url')
+    metadata['album_art_url'] = album_info.get('album_image_url') if album_info else None
+
+    # Playlist mode fallback: album_info is None, try to get art from spotify_album context
+    if not metadata['album_art_url']:
+        _spa = context.get('spotify_album', {})
+        if _spa:
+            _spa_img = _spa.get('image_url')
+            if not _spa_img and _spa.get('images'):
+                _spa_img = _spa['images'][0].get('url') if isinstance(_spa['images'][0], dict) else None
+            metadata['album_art_url'] = _spa_img
 
     # Extract source IDs (Spotify or iTunes) for tag embedding
     track_info = context.get("track_info", {})
