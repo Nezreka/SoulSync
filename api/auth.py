@@ -4,13 +4,35 @@ API key authentication for the SoulSync public API.
 
 import hashlib
 import secrets
+import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 from flask import request, current_app
 
 from .helpers import api_error
+
+
+# Throttle persistence of `last_used_at` so every authenticated request
+# does not rewrite the full app config. Maps key_hash -> last-persisted datetime.
+_USAGE_WRITE_INTERVAL = timedelta(minutes=15)
+_last_persisted_usage: dict[str, datetime] = {}
+_usage_lock = threading.Lock()
+
+
+def _should_persist_usage(key_hash: str, now: datetime) -> bool:
+    """Return True if `last_used_at` for the given key should be written to disk.
+
+    Thread-safe: tracks the last write per key hash in memory and only returns
+    True once per `_USAGE_WRITE_INTERVAL`.
+    """
+    with _usage_lock:
+        previous = _last_persisted_usage.get(key_hash)
+        if previous is None or (now - previous) >= _USAGE_WRITE_INTERVAL:
+            _last_persisted_usage[key_hash] = now
+            return True
+        return False
 
 
 def generate_api_key(label=""):
@@ -67,9 +89,12 @@ def require_api_key(f):
         if not matched:
             return api_error("INVALID_KEY", "Invalid API key.", 403)
 
-        # Update last-used timestamp (best-effort)
-        matched["last_used_at"] = datetime.now(timezone.utc).isoformat()
-        config_mgr.set("api_keys", stored_keys)
+        # Update last-used timestamp (best-effort, throttled to avoid rewriting
+        # the full app config on every authenticated request).
+        now = datetime.now(timezone.utc)
+        matched["last_used_at"] = now.isoformat()
+        if _should_persist_usage(key_hash, now):
+            config_mgr.set("api_keys", stored_keys)
 
         return f(*args, **kwargs)
 

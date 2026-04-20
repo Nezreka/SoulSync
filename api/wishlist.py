@@ -19,21 +19,19 @@ def register_routes(bp):
         fields = parse_fields(request)
         profile_id = parse_profile_id(request)
 
+        category_filter = category if category in ("singles", "albums") else None
+
         try:
             from database.music_database import get_database
             db = get_database()
-            raw_tracks = db.get_wishlist_tracks(profile_id=profile_id)
-
-            # Category filter
-            if category in ("singles", "albums"):
-                raw_tracks = [
-                    t for t in raw_tracks
-                    if _track_category(t) == category
-                ]
-
-            total = len(raw_tracks)
-            start = (page - 1) * limit
-            tracks = raw_tracks[start:start + limit]
+            offset = (page - 1) * limit
+            tracks = db.get_wishlist_tracks(
+                profile_id=profile_id,
+                category=category_filter,
+                limit=limit,
+                offset=offset,
+            )
+            total = db.get_wishlist_count(profile_id=profile_id, category=category_filter)
 
             return api_success(
                 {"tracks": [serialize_wishlist_track(t, fields) for t in tracks]},
@@ -104,15 +102,3 @@ def register_routes(bp):
             return api_error("NOT_AVAILABLE", "Wishlist processing function not available.", 501)
         except Exception as e:
             return api_error("WISHLIST_ERROR", str(e), 500)
-
-
-def _track_category(track):
-    """Determine if a wishlist track is a single or album track."""
-    album_type = ""
-    if isinstance(track, dict):
-        sd = track.get("spotify_data", {})
-        if isinstance(sd, dict):
-            album = sd.get("album", {})
-            if isinstance(album, dict):
-                album_type = album.get("album_type", "")
-    return "albums" if album_type == "album" else "singles"
