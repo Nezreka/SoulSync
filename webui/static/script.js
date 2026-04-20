@@ -76172,7 +76172,9 @@ async function _adlFetch() {
             _adlBatches = data.batches || [];
             _adlRender();
             _adlRenderBatchPanel();
-            _adlUpdateBadge();
+            // Don't call _adlUpdateBadge() here — it counts the truncated
+            // 300-item local array. The WebSocket status push already
+            // maintains the badge with the real server-side active count.
         }
     } catch (e) {
         console.error('Downloads page fetch error:', e);
