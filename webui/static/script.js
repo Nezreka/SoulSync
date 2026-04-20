@@ -20127,16 +20127,18 @@ async function handleAddToWishlist() {
  * Fetches ownership from the backend, then updates the modal DOM in-place.
  * If all tracks are owned (Spotify metadata discrepancy), also fixes the source card.
  */
-async function lazyLoadTrackOwnership(artistName, tracks, sourceCard) {
+async function lazyLoadTrackOwnership(artistName, tracks, sourceCard, albumName = null) {
     const myVersion = wishlistModalVersion;
     try {
+        const checkBody = {
+            artist_name: artistName,
+            tracks: tracks.map(t => ({ name: t.name, track_number: t.track_number }))
+        };
+        if (albumName) checkBody.album_name = albumName;
         const resp = await fetch('/api/library/check-tracks', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                artist_name: artistName,
-                tracks: tracks.map(t => ({ name: t.name, track_number: t.track_number }))
-            })
+            body: JSON.stringify(checkBody)
         });
         const data = await resp.json();
         if (!data.success) return;
@@ -20371,8 +20373,18 @@ async function addModalTracksToWishlist(playlistId) {
         let errorCount = 0;
 
         // Add each track to wishlist individually
+        let wingItSkipped = 0;
         for (const track of tracks) {
             try {
+                // Skip wing-it fallback tracks — they have no real metadata,
+                // adding them to wishlist would just retry with raw data
+                const trackId = track.id || '';
+                if (String(trackId).startsWith('wing_it_')) {
+                    wingItSkipped++;
+                    console.log(`⏭️ Skipping wing-it track from wishlist: ${track.name}`);
+                    continue;
+                }
+
                 // Format artists field to match backend expectations
                 let formattedArtists = track.artists;
                 if (typeof track.artists === 'string') {
@@ -20475,9 +20487,10 @@ async function addModalTracksToWishlist(playlistId) {
 
         // Show result toast
         if (successCount > 0) {
-            const message = errorCount > 0
+            let message = errorCount > 0
                 ? `Added ${successCount}/${tracks.length} tracks to wishlist (${errorCount} failed)`
                 : `Added ${successCount} tracks to wishlist`;
+            if (wingItSkipped > 0) message += ` (${wingItSkipped} wing-it skipped)`;
             showToast(message, 'success');
 
             // Close the modal on success
@@ -45289,7 +45302,7 @@ function createReleaseCard(release) {
             await openAddToWishlistModal(albumData, currentArtist, data.tracks, albumType);
 
             // Always lazy-load track ownership + metadata (non-blocking)
-            lazyLoadTrackOwnership(currentArtist.name, data.tracks, card);
+            lazyLoadTrackOwnership(currentArtist.name, data.tracks, card, albumData.name);
 
         } catch (error) {
             hideLoadingOverlay();

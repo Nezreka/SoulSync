@@ -5712,21 +5712,21 @@ def get_debug_info():
 
     # Watchlist count
     try:
-        db = get_db()
+        db = get_database()
         info['watchlist_count'] = db.get_watchlist_count()
     except Exception:
         info['watchlist_count'] = 0
 
     # Wishlist pending count
     try:
-        db = get_db()
+        db = get_database()
         info['wishlist_count'] = db.get_wishlist_count()
     except Exception:
         info['wishlist_count'] = 0
 
     # Automation count
     try:
-        db = get_db()
+        db = get_database()
         automations = db.get_automations()
         info['automations'] = {
             'total': len(automations),
@@ -12034,6 +12034,36 @@ def library_check_tracks():
         # Pre-compute normalized DB titles once (keep reference to db_track for metadata)
         db_title_entries = [(_normalize(t.title), _clean_title(t.title), t) for t in db_tracks]
 
+        # Album-aware matching: if album_name provided, prefer tracks from that album
+        target_album = data.get('album_name', '')
+        target_album_norm = _normalize(target_album) if target_album else ''
+
+        def _match_title(search_norm, search_clean, candidates):
+            """Find best matching track from a list of (norm, clean, db_track) candidates."""
+            for db_norm, db_clean, db_track in candidates:
+                if search_norm == db_norm or search_clean == db_clean:
+                    return db_track
+                sim = max(
+                    SequenceMatcher(None, search_norm, db_norm).ratio(),
+                    SequenceMatcher(None, search_clean, db_clean).ratio()
+                )
+                if sim >= 0.7:
+                    return db_track
+            return None
+
+        # Split DB tracks by album if album-aware matching is active
+        album_entries = []
+        other_entries = []
+        if target_album_norm:
+            for entry in db_title_entries:
+                db_album = _normalize(getattr(entry[2], 'album_title', '') or '')
+                if db_album and SequenceMatcher(None, target_album_norm, db_album).ratio() >= 0.7:
+                    album_entries.append(entry)
+                else:
+                    other_entries.append(entry)
+        else:
+            other_entries = db_title_entries
+
         owned_map = {}
         for track in tracks:
             track_name = track.get('name', '')
@@ -12042,21 +12072,14 @@ def library_check_tracks():
 
             search_norm = _normalize(track_name)
             search_clean = _clean_title(track_name)
-            matched_db_track = None
 
-            for db_norm, db_clean, db_track in db_title_entries:
-                # Check normalized match first (fast path for exact/near-exact)
-                if search_norm == db_norm or search_clean == db_clean:
-                    matched_db_track = db_track
-                    break
-                # Fuzzy match: try both normalized and cleaned
-                sim = max(
-                    SequenceMatcher(None, search_norm, db_norm).ratio(),
-                    SequenceMatcher(None, search_clean, db_clean).ratio()
-                )
-                if sim >= 0.7:
-                    matched_db_track = db_track
-                    break
+            # When album context provided, only match within that album —
+            # prevents false positives where "Thriller" on Album A shows as owned
+            # because it exists on Album B. Without album context, search all tracks.
+            if target_album_norm:
+                matched_db_track = _match_title(search_norm, search_clean, album_entries)
+            else:
+                matched_db_track = _match_title(search_norm, search_clean, other_entries)
 
             if matched_db_track:
                 import os
