@@ -22529,6 +22529,7 @@ def get_version_info():
                     "• Reject Qobuz 30-second sample/preview downloads",
                     "• Fix library page crash on All filter — non-string soul_id broke card rendering",
                     "• Auto Wing It fallback for failed discovery — unmatched tracks download via Soulseek with raw metadata",
+                    "• Unmatch discovery tracks — red ✕ button to remove bad matches from playlist discovery",
                     "• Customizable music video naming — path template with $artist, $title, $year variables",
                     "• Fix soulseek log spam when not configured as download source",
                 ],
@@ -34533,6 +34534,10 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                         else:
                             # Incomplete discovery — re-discover to get full metadata
                             undiscovered_tracks.append(track)
+                elif existing_extra.get('unmatched_by_user'):
+                    # User explicitly removed this match — respect their choice
+                    pl_skipped += 1
+                    total_skipped += 1
                 else:
                     undiscovered_tracks.append(track)
 
@@ -37462,6 +37467,84 @@ def get_youtube_discovery_status(url_hash):
     except Exception as e:
         print(f"Error getting YouTube discovery status: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/youtube/discovery/unmatch', methods=['POST'])
+@app.route('/api/tidal/discovery/unmatch', methods=['POST'])
+@app.route('/api/deezer/discovery/unmatch', methods=['POST'])
+@app.route('/api/spotify-public/discovery/unmatch', methods=['POST'])
+@app.route('/api/beatport/discovery/unmatch', methods=['POST'])
+@app.route('/api/listenbrainz/discovery/unmatch', methods=['POST'])
+def unmatch_discovery_track():
+    """Remove a discovery match — sets track back to Not Found"""
+    try:
+        data = request.get_json()
+        identifier = data.get('identifier')
+        track_index = data.get('track_index')
+
+        if not identifier or track_index is None:
+            return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+
+        # Find the state dict for this discovery
+        state = (youtube_playlist_states.get(identifier)
+                 or tidal_discovery_states.get(identifier)
+                 or deezer_discovery_states.get(identifier)
+                 or spotify_public_discovery_states.get(identifier)
+                 or beatport_chart_states.get(identifier)
+                 or listenbrainz_playlist_states.get(identifier))
+
+        if not state:
+            return jsonify({'success': False, 'error': 'Discovery state not found'}), 404
+
+        results = state.get('discovery_results', [])
+        if track_index >= len(results):
+            return jsonify({'success': False, 'error': 'Invalid track index'}), 400
+
+        result = results[track_index]
+        old_status = result.get('status_class')
+
+        # Clear the match
+        result['status'] = 'Not Found'
+        result['status_class'] = 'not-found'
+        result['spotify_track'] = ''
+        result['spotify_artist'] = ''
+        result['spotify_album'] = ''
+        result['spotify_data'] = None
+        result['matched_data'] = None
+        result['match_data'] = None
+        result['confidence'] = 0
+        result['wing_it_fallback'] = False
+        result['manual_match'] = False
+
+        # Update match count
+        if old_status in ('found', 'wing-it'):
+            state['spotify_matches'] = max(0, state.get('spotify_matches', 0) - 1)
+        if old_status == 'wing-it':
+            state['wing_it_count'] = max(0, state.get('wing_it_count', 0) - 1)
+
+        # If mirrored playlist, also clear in DB
+        if identifier.startswith('mirrored_'):
+            try:
+                db = get_database()
+                tracks = state.get('tracks', [])
+                if track_index < len(tracks):
+                    db_track_id = tracks[track_index].get('db_track_id')
+                    if db_track_id:
+                        db.update_mirrored_track_extra_data(db_track_id, {
+                            'discovered': False,
+                            'discovery_attempted': True,
+                            'provider': '',
+                            'unmatched_by_user': True,
+                        })
+            except Exception as e:
+                print(f"Error clearing mirrored track match: {e}")
+
+        print(f"Unmatched discovery track {track_index}: {result.get('yt_track', result.get('lb_track', ''))}")
+        return jsonify({'success': True})
+
+    except Exception as e:
+        print(f"Error unmatching discovery track: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/youtube/discovery/update_match', methods=['POST'])

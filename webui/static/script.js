@@ -19666,10 +19666,67 @@ function updateDiscoveryModalSingleRow(platform, identifier, trackIndex) {
     console.log(`✅ Updated row ${trackIndex} in discovery modal`);
 }
 
+async function unmatchDiscoveryTrack(platform, identifier, trackIndex) {
+    // Determine the correct API base for this platform
+    const apiBase = platform === 'tidal' ? '/api/tidal'
+        : platform === 'deezer' ? '/api/deezer'
+        : platform === 'spotify-public' ? '/api/spotify-public'
+        : platform === 'beatport' ? '/api/beatport'
+        : platform === 'listenbrainz' ? '/api/listenbrainz'
+        : '/api/youtube';
+
+    try {
+        const response = await fetch(`${apiBase}/discovery/unmatch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ identifier, track_index: trackIndex })
+        });
+        const data = await response.json();
+        if (data.success) {
+            // Update the row in the discovery modal table
+            const state = youtubePlaylistStates[identifier]
+                || (window.tidalDiscoveryStates && window.tidalDiscoveryStates[identifier])
+                || {};
+            if (state.discovery_results && state.discovery_results[trackIndex]) {
+                const r = state.discovery_results[trackIndex];
+                r.status = '❌ Not Found';
+                r.status_class = 'not-found';
+                r.spotify_track = '-';
+                r.spotify_artist = '-';
+                r.spotify_album = '-';
+                r.spotify_data = null;
+                r.matched_data = null;
+                r.confidence = 0;
+                r.wing_it_fallback = false;
+                r.manual_match = false;
+            }
+            // Re-render the row — discovery rows use id="discovery-row-{urlHash}-{index}"
+            const row = document.getElementById(`discovery-row-${identifier}-${trackIndex}`);
+            if (row) {
+                const statusCell = row.querySelector('.discovery-status');
+                if (statusCell) { statusCell.textContent = '❌ Not Found'; statusCell.className = 'discovery-status not-found'; }
+                const matchedCells = row.querySelectorAll('.spotify-track, .spotify-artist, .spotify-album');
+                matchedCells.forEach(c => c.textContent = '-');
+                const actionsCell = row.querySelector('.discovery-actions');
+                if (actionsCell) {
+                    actionsCell.innerHTML = `<button class="fix-match-btn" onclick="openDiscoveryFixModal('${platform}', '${identifier}', ${trackIndex})" title="Manually search for this track">🔧 Fix</button>`;
+                }
+            }
+            showToast('Match removed', 'success');
+        } else {
+            showToast(data.error || 'Failed to remove match', 'error');
+        }
+    } catch (e) {
+        console.error('Unmatch error:', e);
+        showToast('Failed to remove match', 'error');
+    }
+}
+
 // Make functions available globally for onclick handlers
 window.openDiscoveryFixModal = openDiscoveryFixModal;
 window.closeDiscoveryFixModal = closeDiscoveryFixModal;
 window.searchDiscoveryFix = searchDiscoveryFix;
+window.unmatchDiscoveryTrack = unmatchDiscoveryTrack;
 window.openMatchingModal = openMatchingModal;
 window.closeMatchingModal = closeMatchingModal;
 window.selectArtist = selectArtist;
@@ -34121,12 +34178,16 @@ function generateDiscoveryActionButton(result, identifier, platform) {
                 </button>`;
     }
 
-    // For found matches, show optional re-match button
+    // For found matches, show re-match and unmatch buttons
     if (isFound) {
         return `<button class="rematch-btn"
                         onclick="openDiscoveryFixModal('${platform}', '${identifier}', ${result.index})"
                         title="Change this match">
                     ↻
+                </button><button class="rematch-btn" style="margin-left:4px;color:#ff6b6b"
+                        onclick="unmatchDiscoveryTrack('${platform}', '${identifier}', ${result.index})"
+                        title="Remove this match">
+                    ✕
                 </button>`;
     }
 
