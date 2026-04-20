@@ -450,9 +450,13 @@ class LidarrDownloadClient:
             return self._to_status(dl) if dl else None
 
     def _to_status(self, dl: Dict) -> DownloadStatus:
+        filename = dl['filename']
+        # Append error info to filename for UI visibility when errored
+        if dl['state'] == 'Errored' and dl.get('error'):
+            filename = f"{filename} — {dl['error']}"
         return DownloadStatus(
             id=dl['id'],
-            filename=dl['filename'],
+            filename=filename,
             username='lidarr',
             state=dl['state'],
             progress=dl['progress'],

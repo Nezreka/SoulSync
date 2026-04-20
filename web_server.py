@@ -22614,6 +22614,7 @@ def get_version_info():
                     "• Reject Qobuz 30-second sample/preview downloads",
                     "• Fix library page crash on All filter — non-string soul_id broke card rendering",
                     "• Auto Wing It fallback for failed discovery — unmatched tracks download via Soulseek with raw metadata",
+                    "• Lidarr download source now production-ready — full orchestrator integration",
                     "• Fix M3U showing all tracks as missing — regenerate with real paths after post-processing",
                     "• Fix AcoustID retag not writing corrected tags to audio file",
                     "• Fix wishlist albums cycle stuck at 1 concurrent worker instead of configured value",

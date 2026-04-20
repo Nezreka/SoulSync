@@ -365,7 +365,7 @@ class DownloadOrchestrator:
         """
         # Get downloads from all available sources
         all_downloads = []
-        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl]:
+        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl, self.lidarr]:
             if client:
                 try:
                     all_downloads.extend(await client.get_all_downloads())
@@ -384,7 +384,7 @@ class DownloadOrchestrator:
             DownloadStatus object or None if not found
         """
         # Try each source until we find the download
-        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl]:
+        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl, self.lidarr]:
             if not client:
                 continue
             try:
@@ -418,7 +418,7 @@ class DownloadOrchestrator:
             return await self.soulseek.cancel_download(download_id, username, remove) if self.soulseek else False
 
         # Otherwise, try all available sources
-        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl]:
+        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl, self.lidarr]:
             if not client:
                 continue
             try:
@@ -453,7 +453,7 @@ class DownloadOrchestrator:
             True if successful
         """
         results = []
-        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl]:
+        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl, self.lidarr]:
             if client:
                 try:
                     results.append(await client.clear_all_completed_downloads())
@@ -524,7 +524,7 @@ class DownloadOrchestrator:
     async def cancel_all_downloads(self) -> bool:
         """Cancel and remove all downloads from all sources."""
         ok = True
-        for client in [self.soulseek, self.tidal, self.qobuz, self.hifi, self.deezer_dl]:
+        for client in [self.soulseek, self.tidal, self.qobuz, self.hifi, self.deezer_dl, self.lidarr]:
             if client:
                 try:
                     await client.cancel_all_downloads() if hasattr(client, 'cancel_all_downloads') else await client.clear_all_completed_downloads()
