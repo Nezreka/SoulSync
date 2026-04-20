@@ -194,7 +194,7 @@ class AcoustIDClient:
             result = client.fingerprint_and_lookup("/path/to/audio.mp3")
             if result:
                 for mbid in result['recording_mbids']:
-                    print(f"Match: {mbid}")
+                    logger.info(f"Match: {mbid}")
     """
 
     def __init__(self):

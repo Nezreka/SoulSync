@@ -421,7 +421,7 @@ class MusicMatchingEngine:
             
             if is_likely_album and 4 <= len(potential_album_part) <= 30:
                 cleaned_title = re.sub(dash_pattern, '', track_title).strip()
-                print(f"Heuristic album detection: '{original_title}' → '{cleaned_title}' (removed: '{potential_album_part}')")
+                logger.debug(f"Heuristic album detection: '{original_title}' → '{cleaned_title}' (removed: '{potential_album_part}')")
                 return cleaned_title, True
         
         return track_title, False
@@ -1004,13 +1004,13 @@ class MusicMatchingEngine:
         
         # Debug logging for troubleshooting
         if scored_results and not confident_results:
-            print(f"DEBUG: Found {len(scored_results)} scored results but none met confidence threshold 0.58")
+            logger.debug(f"Found {len(scored_results)} scored results but none met confidence threshold 0.58")
             for i, result in enumerate(sorted_results[:3]):  # Show top 3
-                print(f"   {i+1}. {result.confidence:.3f} - {getattr(result, 'version_type', 'unknown')} - {result.filename[:60]}...")
+                logger.debug(f"   {i+1}. {result.confidence:.3f} - {getattr(result, 'version_type', 'unknown')} - {result.filename[:60]}...")
         elif confident_results:
-            print(f"DEBUG: {len(confident_results)} results passed confidence threshold 0.58")
+            logger.debug(f"{len(confident_results)} results passed confidence threshold 0.58")
             for i, result in enumerate(confident_results[:3]):  # Show top 3
-                print(f"   {i+1}. {result.confidence:.3f} - {getattr(result, 'version_type', 'unknown')} - {result.filename[:60]}...")
+                logger.debug(f"   {i+1}. {result.confidence:.3f} - {getattr(result, 'version_type', 'unknown')} - {result.filename[:60]}...")
 
         return confident_results
     

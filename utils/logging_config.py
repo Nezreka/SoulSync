@@ -109,7 +109,7 @@ def set_log_level(level: str) -> bool:
         root_logger.info(f"Log level changed to: {level.upper()}")
         return True
     except Exception as e:
-        print(f"Error setting log level: {e}")
+        logging.getLogger("newmusic").error(f"Error setting log level: {e}")
         return False
 
 def get_current_log_level() -> str:

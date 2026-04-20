@@ -12,6 +12,11 @@ import threading
 import time
 from collections import deque, defaultdict
 
+from utils.logging_config import get_logger
+
+
+logger = get_logger("api_call_tracker")
+
 
 # Known rate limits per service (calls/minute)
 RATE_LIMITS = {
@@ -281,7 +286,7 @@ class ApiCallTracker:
             with open(_PERSIST_PATH, 'w') as f:
                 json.dump({'ts': now, 'history': data, 'events': events}, f)
         except Exception as e:
-            print(f"[ApiCallTracker] Failed to save history: {e}")
+            logger.error(f"[ApiCallTracker] Failed to save history: {e}")
 
     def _load(self):
         """Restore 24h minute history from disk. Called on init."""
@@ -305,9 +310,9 @@ class ApiCallTracker:
                 for e in events:
                     if e.get('ts', 0) >= cutoff:
                         self._events.append(e)
-            print(f"[ApiCallTracker] Restored history for {len(history)} services, {len(events)} events")
+            logger.info(f"[ApiCallTracker] Restored history for {len(history)} services, {len(events)} events")
         except Exception as e:
-            print(f"[ApiCallTracker] Failed to load history: {e}")
+            logger.error(f"[ApiCallTracker] Failed to load history: {e}")
 
 
 # Singleton instance
