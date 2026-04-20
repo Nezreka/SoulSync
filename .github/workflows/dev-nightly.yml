@@ -1,0 +1,108 @@
+name: Dev Nightly Build
+
+on:
+  # Nightly at 4:00 AM UTC — only if dev branch has new commits
+  schedule:
+    - cron: '0 4 * * *'
+  # Also build on every push to dev for immediate feedback
+  push:
+    branches:
+      - dev
+  # Manual trigger for testing
+  workflow_dispatch:
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    # Skip scheduled runs if dev branch has no new commits in the last 24h
+    # (pushes and manual triggers always run)
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout dev branch
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+
+      - name: Check for recent commits (scheduled only)
+        if: github.event_name == 'schedule'
+        id: recent
+        run: |
+          LAST_COMMIT=$(git log -1 --format=%ct)
+          NOW=$(date +%s)
+          DIFF=$(( NOW - LAST_COMMIT ))
+          if [ "$DIFF" -gt 86400 ]; then
+            echo "No commits in the last 24h, skipping build"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.recent.outputs.skip != 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies and run tests
+        if: steps.recent.outputs.skip != 'true'
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m compileall api core database services scripts web_server.py wsgi.py beatport_unified_scraper.py
+          python -m pytest
+
+      - name: Generate version tag
+        if: steps.recent.outputs.skip != 'true'
+        id: version
+        run: |
+          # Read base version from web_server.py
+          BASE=$(python -c "
+          import re
+          with open('web_server.py') as f:
+              m = re.search(r'_SOULSYNC_BASE_VERSION\s*=\s*\"(.+?)\"', f.read())
+              print(m.group(1) if m else 'dev')
+          ")
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          DATE=$(date -u +%Y%m%d)
+          TAG="${BASE}-dev.${DATE}.${SHORT_SHA}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Image tag: $TAG"
+
+      - name: Set up QEMU
+        if: steps.recent.outputs.skip != 'true'
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        if: steps.recent.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: steps.recent.outputs.skip != 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push to GHCR
+        if: steps.recent.outputs.skip != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          pull: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            COMMIT_SHA=${{ github.sha }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/soulsync:dev
+            ghcr.io/${{ github.repository_owner }}/soulsync:${{ steps.version.outputs.tag }}

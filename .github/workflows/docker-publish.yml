@@ -1,6 +1,11 @@
 name: Build and Push Docker Image
 
 on:
+  # Auto-build :latest on every push to main
+  push:
+    branches:
+      - main
+  # Manual trigger for tagged releases (e.g. 2.33)
   workflow_dispatch:
     inputs:
       version_tag:
@@ -34,16 +39,17 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          no-cache: true
           pull: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           build-args: |
             COMMIT_SHA=${{ github.sha }}
           tags: |
             boulderbadgedad/soulsync:latest
-            boulderbadgedad/soulsync:${{ inputs.version_tag }}
+            ${{ inputs.version_tag && format('boulderbadgedad/soulsync:{0}', inputs.version_tag) || '' }}
 
       - name: Announce release to Discord
-        if: success()
+        if: success() && inputs.version_tag
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_ANNOUNCEMENTS_WEBHOOK }}
         run: |
