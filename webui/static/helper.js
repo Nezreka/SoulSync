@@ -3599,7 +3599,7 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
-    '2.33': [
+    '2.34': [
         // --- April 19, 2026 ---
         { date: 'April 19, 2026' },
         { title: 'Fix Wishlist Albums Cycle Stuck at 1 Concurrent', desc: 'Auto-wishlist processing during the "albums" cycle was limited to 1 concurrent download even with higher configured settings. The max_concurrent=1 restriction is only needed for Soulseek folder-based album grabs, not individual wishlist track downloads. Albums cycle now uses the configured concurrency like singles' },
@@ -3735,12 +3735,12 @@ const WHATS_NEW = {
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '2.33';
+    return btn ? btn.textContent.trim().replace('v', '') : '2.34';
 }
 
 function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
-    return versions[0] || '2.33';
+    return versions[0] || '2.34';
 }
 
 function openWhatsNew() {
