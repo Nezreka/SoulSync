@@ -26,8 +26,6 @@ try:
 except ImportError:
     logger.warning("Could not import MusicMatchingEngine, falling back to basic similarity")
     _matching_engine = None
-# Temporarily enable debug logging for edition matching
-logger.setLevel(logging.DEBUG)
 
 @dataclass
 class DatabaseArtist:
