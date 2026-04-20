@@ -18056,6 +18056,26 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
         spotify_album = context.get('spotify_album', {})
         total_discs = spotify_album.get('total_discs', 1) if spotify_album else 1
 
+        # Single-track downloads from search don't know total_discs — resolve it
+        if total_discs <= 1 and spotify_album and spotify_album.get('id'):
+            # Quick check: if this track is on disc 2+, album is definitely multi-disc
+            if disc_number > 1:
+                total_discs = disc_number
+            else:
+                # Fetch album tracks to compute total_discs (cached by metadata client)
+                try:
+                    _album_id = spotify_album['id']
+                    _fb_client = _get_metadata_fallback_client()
+                    if _fb_client:
+                        _atd = _fb_client.get_album_tracks(str(_album_id))
+                        if _atd and _atd.get('items'):
+                            total_discs = max((t.get('disc_number', 1) for t in _atd['items']), default=1)
+                            if total_discs > 1:
+                                spotify_album['total_discs'] = total_discs
+                                print(f"[Multi-Disc] Resolved {total_discs} discs for single-track download of '{spotify_album.get('name')}'")
+                except Exception as _disc_err:
+                    print(f"[Multi-Disc] Could not resolve total_discs: {_disc_err}")
+
         # Check if user controls disc structure via $disc in their template
         album_template = config_manager.get('file_organization.templates.album_path', '')
         user_controls_disc = '$disc' in album_template
@@ -28506,6 +28526,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
         if force_download_all:
             print(f"[Force Download] Force download mode enabled for batch {batch_id} - treating all tracks as missing")
 
+        # Allow duplicate tracks across albums — when enabled, only skip tracks already
+        # owned in THIS album, not tracks owned in other albums
+        allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
+        if allow_duplicates and batch_is_album:
+            print(f"[Duplicates] Allow duplicate tracks enabled — only checking ownership within target album")
+
         # PREFLIGHT: Pre-populate MusicBrainz release cache for album downloads.
         # This ensures ALL tracks in the album use the same release MBID during
         # per-track post-processing, preventing Navidrome album splits.
@@ -28590,21 +28616,30 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         found, confidence = True, best_sim
                     else:
                         # Fall back to global per-track search for this track
-                        _fallback_album = batch_album_context.get('name') if batch_album_context else None
-                        for artist in artists:
-                            if isinstance(artist, str):
-                                artist_name = artist
-                            elif isinstance(artist, dict) and 'name' in artist:
-                                artist_name = artist['name']
-                            else:
-                                artist_name = str(artist)
-                            db_track, track_confidence = db.check_track_exists(
-                                track_name, artist_name, confidence_threshold=0.7, server_source=active_server, album=_fallback_album
-                            )
-                            if db_track and track_confidence >= 0.7:
-                                found, confidence = True, track_confidence
-                                break
+                        # When allow_duplicates is on for album downloads, skip global
+                        # search — the track isn't in THIS album so treat as missing
+                        if allow_duplicates and batch_is_album:
+                            found, confidence = False, 0.0
+                        else:
+                            _fallback_album = batch_album_context.get('name') if batch_album_context else None
+                            for artist in artists:
+                                if isinstance(artist, str):
+                                    artist_name = artist
+                                elif isinstance(artist, dict) and 'name' in artist:
+                                    artist_name = artist['name']
+                                else:
+                                    artist_name = str(artist)
+                                db_track, track_confidence = db.check_track_exists(
+                                    track_name, artist_name, confidence_threshold=0.7, server_source=active_server, album=_fallback_album
+                                )
+                                if db_track and track_confidence >= 0.7:
+                                    found, confidence = True, track_confidence
+                                    break
+            elif allow_duplicates and batch_is_album:
+                # Allow duplicates + album download + album not in DB yet → treat all as missing
+                found, confidence = False, 0.0
             else:
+                # Non-album download (playlist/single track) — always check global
                 for artist in artists:
                     # Handle both string format and Spotify API format {'name': 'Artist Name'}
                     if isinstance(artist, str):
