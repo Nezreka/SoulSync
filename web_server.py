@@ -2860,7 +2860,7 @@ class WebUIDownloadMonitor:
             self.monitored_batches.discard(batch_id)
             if not self.monitored_batches:
                 self.monitoring = False
-                logger.warning(f"Stopped download monitor (no active batches)")
+                logger.debug(f"Stopped download monitor (no active batches)")
 
     def shutdown(self):
         """Stop the monitor loop and clear active batch tracking."""
@@ -2945,7 +2945,7 @@ class WebUIDownloadMonitor:
                                 transferred = live_info.get('bytesTransferred', 0)
                                 if expected_size > 0 and transferred < expected_size:
                                     if not task.get('_incomplete_warned'):
-                                        logger.info(f"Monitor: {task_id} state={state} but bytes incomplete ({transferred}/{expected_size}) — waiting")
+                                        logger.debug(f"Monitor: {task_id} state={state} but bytes incomplete ({transferred}/{expected_size}) — waiting")
                                         task['_incomplete_warned'] = True
                                     continue
                             if has_completion and not has_error and task['status'] == 'downloading':
@@ -2971,19 +2971,19 @@ class WebUIDownloadMonitor:
             try:
                 if op[0] == 'cancel_download':
                     _, download_id, username = op
-                    logger.info(f"[Deferred] Cancelling download: {download_id} from {username}")
+                    logger.debug(f"[Deferred] Cancelling download: {download_id} from {username}")
                     run_async(soulseek_client.cancel_download(download_id, username, remove=True))
-                    logger.warning(f"[Deferred] Successfully cancelled download {download_id}")
+                    logger.debug(f"[Deferred] Successfully cancelled download {download_id}")
                 elif op[0] == 'cleanup_orphan':
                     _, context_key = op
                     with matched_context_lock:
                         matched_downloads_context.pop(context_key, None)
-                    logger.warning(f"[Deferred] Cleaned up orphaned download context: {context_key}")
+                    logger.debug(f"[Deferred] Cleaned up orphaned download context: {context_key}")
                 elif op[0] == 'restart_worker':
                     _, task_id, batch_id = op
-                    logger.info(f"[Deferred] Restarting worker for task {task_id}")
+                    logger.debug(f"[Deferred] Restarting worker for task {task_id}")
                     missing_download_executor.submit(_download_track_worker, task_id, batch_id)
-                    logger.info(f"[Deferred] Successfully restarted worker for task {task_id}")
+                    logger.debug(f"[Deferred] Successfully restarted worker for task {task_id}")
             except Exception as e:
                 logger.error(f"[Deferred] Error executing deferred operation {op[0]}: {e}")
 
@@ -3716,7 +3716,7 @@ def start_batch_healing_timer():
             return
         validate_and_heal_batch_states()
     except Exception as e:
-        logger.error(f"[Batch Healing Timer] Error: {e}")
+        logger.error(f"[Batch Healing Timer] {e}")
     finally:
         # Schedule next healing cycle
         _schedule_batch_healing_timer(30.0)
@@ -4136,7 +4136,7 @@ def _prepare_stream_task(track_data):
                                 found_file = _find_downloaded_file(download_path, track_data)
                             
                             if found_file:
-                                logger.info(f"Found downloaded file: {found_file}")
+                                logger.debug(f"Found downloaded file: {found_file}")
                                 
                                 # Move file to Stream folder
                                 original_filename = extract_filename(found_file)
@@ -4144,7 +4144,7 @@ def _prepare_stream_task(track_data):
                                 
                                 try:
                                     shutil.move(found_file, stream_path)
-                                    logger.info(f"Moved file to stream folder: {stream_path}")
+                                    logger.debug(f"Moved file to stream folder: {stream_path}")
                                     
                                     # Clean up empty directories (matching GUI)
                                     _cleanup_empty_directories(download_path, found_file)
@@ -4166,7 +4166,7 @@ def _prepare_stream_task(track_data):
                                                     download_id, track_data.get('username'), remove=True)
                                             )
                                             if success:
-                                                logger.info(f"Cleaned up download {download_id} from API")
+                                                logger.debug(f"Cleaned up download {download_id} from API")
                                     except Exception as e:
                                         logger.error(f"Error cleaning up download: {e}")
                                     
@@ -4191,7 +4191,7 @@ def _prepare_stream_task(track_data):
                                 return
                     else:
                         # No transfer found in API - may still be initializing
-                        logger.warning(f"No transfer found in API yet... (elapsed: {wait_count * poll_interval}s)")
+                        logger.debug(f"No transfer found in API yet... (elapsed: {wait_count * poll_interval}s)")
                         
                 except Exception as e:
                     logger.error(f"Error checking download progress: {e}")
@@ -4201,7 +4201,7 @@ def _prepare_stream_task(track_data):
                 time.sleep(poll_interval)
             
             # If we get here, download timed out
-            logger.info(f"Download timed out after {max_wait_time}s")
+            logger.warning(f"Download timed out after {max_wait_time}s")
             with stream_lock:
                 stream_state.update({
                     "status": "error", 
@@ -4290,15 +4290,15 @@ def _find_downloaded_file(download_path, track_data):
             safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
             target_filename_youtube = safe_title  # Extension-less for flexible matching
             source_name = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else 'Tidal')
-            logger.info(f"[{source_name} Stream] Looking for file starting with: {target_filename_youtube}")
+            logger.debug(f"[{source_name} Stream] Looking for file starting with: {target_filename_youtube}")
         else:
             # yt-dlp will create "Title.mp3" from "Title"
             target_filename_youtube = f"{title}.mp3"
-            logger.info(f"[YouTube Stream] Looking for file: {target_filename_youtube}")
+            logger.debug(f"[YouTube Stream] Looking for file: {target_filename_youtube}")
     elif is_streaming_source:
         # Fallback: if streaming source but no encoded format, use as-is
         target_filename_youtube = target_filename
-        logger.info(f"[Stream] Using direct filename: {target_filename_youtube}")
+        logger.debug(f"[Stream] Using direct filename: {target_filename_youtube}")
 
     try:
         # Walk through the downloads directory to find the file
@@ -4341,24 +4341,24 @@ def _find_downloaded_file(download_path, track_data):
 
                         # If we have a very good match (95%+), use it immediately
                         if similarity >= 0.95:
-                            logger.info(f"Found excellent match for streaming file: {file_path}")
+                            logger.debug(f"Found excellent match for streaming file: {file_path}")
                             return file_path
                 else:
                     # For Soulseek, exact match
                     if file == target_filename:
-                        logger.info(f"Found streaming file: {file_path}")
+                        logger.debug(f"Found streaming file: {file_path}")
                         return file_path
 
         # For YouTube/Tidal, if we found a good enough match (80%+), use it
         if is_streaming_source and best_match and best_similarity >= 0.80:
             source_label = 'Qobuz' if is_qobuz else ('Tidal' if is_tidal else 'YouTube')
-            logger.info(f"Found good match ({best_similarity:.2f}) for {source_label} streaming file: {best_match}")
+            logger.debug(f"Found good match ({best_similarity:.2f}) for {source_label} streaming file: {best_match}")
             return best_match
 
         logger.error(f"Could not find downloaded file: {target_filename}")
         if is_streaming_source:
             logger.debug(f"   Looking for: {target_filename_youtube}")
-            logger.info(f"   Best similarity: {best_similarity:.2f}")
+            logger.debug(f"   Best similarity: {best_similarity:.2f}")
         return None
 
     except Exception as e:
@@ -4653,7 +4653,7 @@ def run_service_test(service, test_config):
         if original_config:
             for key, value in original_config.items():
                 config_manager.set(f"{service}.{key}", value)
-            logger.info(f"Restored original config for '{service}' after test.")
+            logger.debug(f"Restored original config for '{service}' after test.")
 
 
 def run_detection(server_type):
@@ -4810,7 +4810,7 @@ def run_detection(server_type):
             return None
         
         # Priority 1: Test localhost first
-        logger.info(f"Testing localhost for {server_type}...")
+        logger.debug(f"Testing localhost for {server_type}...")
         localhost_result = test_func("localhost")
         if localhost_result:
             logger.info(f"Found {server_type} at localhost!")
@@ -4836,7 +4836,7 @@ def run_detection(server_type):
                 logger.error(f"Docker host detection failed: {e}")
         
         # Priority 2: Test local IP
-        logger.info(f"Testing local IP {local_ip} for {server_type}...")
+        logger.debug(f"Testing local IP {local_ip} for {server_type}...")
         local_result = test_func(local_ip)
         if local_result:
             logger.info(f"Found {server_type} at {local_ip}!")
@@ -4849,7 +4849,7 @@ def run_detection(server_type):
             local_ip.rsplit('.', 1)[0] + '.100', # Common static IP
         ]
         
-        logger.info(f"Testing common IPs for {server_type}...")
+        logger.debug(f"Testing common IPs for {server_type}...")
         for ip in common_ips:
             logger.info(f"  Checking {ip}...")
             result = test_func(ip)
@@ -4864,7 +4864,7 @@ def run_detection(server_type):
             step = max(1, len(network_hosts) // 50)
             network_hosts = network_hosts[::step]
         
-        logger.info(f"Scanning network range for {server_type} ({len(network_hosts)} hosts)...")
+        logger.debug(f"Scanning network range for {server_type} ({len(network_hosts)} hosts)...")
         
         # Use ThreadPoolExecutor for concurrent scanning (limited for web context)
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -5570,7 +5570,7 @@ def _build_system_stats():
                                         if isinstance(speed, (int, float)) and speed > 0:
                                             total_download_speed += float(speed)
         except Exception as e:
-            logger.error(f"Warning: Could not fetch download speeds: {e}")
+            logger.error(f"Could not fetch download speeds: {e}")
 
     # Convert bytes/sec to KB/s and format
     if total_download_speed > 0:
@@ -8207,12 +8207,12 @@ def get_beatport_hero_tracks():
         valid_tracks = []
         seen_urls = set()
 
-        logger.info(f"Processing {len(tracks)} raw tracks from scraper (SMART FILTERING)...")
+        logger.debug(f"Processing {len(tracks)} raw tracks from scraper (SMART FILTERING)...")
 
         for i, track in enumerate(tracks):
-            logger.info(f"   Track {i+1}: {track.get('title', 'NO_TITLE')} - {track.get('artist', 'NO_ARTIST')}")
-            logger.info(f"      URL: {track.get('url', 'NO_URL')}")
-            logger.info(f"      Image: {'YES' if track.get('image_url') else 'NO'}")
+            logger.debug(f"   Track {i+1}: {track.get('title', 'NO_TITLE')} - {track.get('artist', 'NO_ARTIST')}")
+            logger.debug(f"      URL: {track.get('url', 'NO_URL')}")
+            logger.debug(f"      Image: {'YES' if track.get('image_url') else 'NO'}")
 
             # Extract and clean basic data
             title = track.get('title', '').strip()
@@ -8258,7 +8258,7 @@ def get_beatport_hero_tracks():
                 skip_reasons.append("Duplicate URL")
 
             if not is_valid:
-                logger.info(f"      Track {i+1} filtered out: {', '.join(skip_reasons)}")
+                logger.debug(f"      Track {i+1} filtered out: {', '.join(skip_reasons)}")
                 continue
 
             # Mark URL as seen for deduplication
@@ -8301,7 +8301,7 @@ def get_beatport_hero_tracks():
                     break
 
             valid_tracks.append(track_data)
-            logger.info(f"      Track {i+1} added: {title} - {artist}")
+            logger.debug(f"      Track {i+1} added: {title} - {artist}")
 
         logger.info(f"Retrieved {len(valid_tracks)} valid unique Beatport tracks (SMART FILTERING)")
 
@@ -8487,17 +8487,17 @@ def get_beatport_featured_charts():
         gridsliders = soup.select('[class*="GridSlider-style__Wrapper"]')
         featured_container = None
 
-        logger.info(f"Checking {len(gridsliders)} GridSlider containers for featured charts...")
+        logger.debug(f"Checking {len(gridsliders)} GridSlider containers for featured charts...")
 
         for container in gridsliders:
             h2 = container.select_one('h2')
             if h2:
                 title = h2.get_text(strip=True).lower()
-                logger.info(f"Found section: '{h2.get_text(strip=True)}'")
+                logger.debug(f"Found section: '{h2.get_text(strip=True)}'")
 
                 if 'featured' in title and 'chart' in title:
                     featured_container = container
-                    logger.info(f"FOUND FEATURED CHARTS: '{h2.get_text(strip=True)}'")
+                    logger.debug(f"FOUND FEATURED CHARTS: '{h2.get_text(strip=True)}'")
                     break
 
         if not featured_container:
@@ -8512,7 +8512,7 @@ def get_beatport_featured_charts():
         charts = []
         chart_links = featured_container.select('a[href*="/chart/"]')
 
-        logger.info(f"Found {len(chart_links)} chart links in Featured Charts section")
+        logger.debug(f"Found {len(chart_links)} chart links in Featured Charts section")
 
         for i, link in enumerate(chart_links[:100]):  # Limit to 100 for 10 slides
             chart_data = {}
@@ -8580,7 +8580,7 @@ def get_beatport_featured_charts():
                 # Only add if we have meaningful data
                 if 'name' in chart_data and 'url' in chart_data:
                     charts.append(chart_data)
-                    logger.info(f"Chart {len(charts)}: {chart_data['name']} by {chart_data['creator']}")
+                    logger.debug(f"Chart {len(charts)}: {chart_data['name']} by {chart_data['creator']}")
 
         logger.info(f"Successfully extracted {len(charts)} featured charts")
 
@@ -8636,12 +8636,12 @@ def get_beatport_dj_charts():
         carousels = soup.select('[class*="Carousel-style__Wrapper"]')
         dj_container = None
 
-        logger.info(f"Checking {len(carousels)} Carousel containers for DJ charts...")
+        logger.debug(f"Checking {len(carousels)} Carousel containers for DJ charts...")
 
         # Based on test results, DJ charts are in the second carousel (index 1) with ~9 chart links
         for i, container in enumerate(carousels):
             chart_links = container.select('a[href*="/chart/"]')
-            logger.info(f"Carousel {i+1}: {len(chart_links)} chart links")
+            logger.debug(f"Carousel {i+1}: {len(chart_links)} chart links")
 
             # DJ charts container typically has 8-12 chart links (not 99+ like featured charts)
             if 5 <= len(chart_links) <= 15:
@@ -9565,7 +9565,7 @@ def download_music_video():
         except Exception as e:
             _music_video_downloads[video_id]['status'] = 'error'
             _music_video_downloads[video_id]['error'] = str(e)
-            logger.error(f"[Music Video] Error: {e}")
+            logger.error(f"[Music Video] {e}")
 
     # Run in background thread
     import threading
@@ -10366,7 +10366,7 @@ def download_selected_candidate(task_id):
         return jsonify({"success": True, "message": f"Download initiated for '{track_name}'"})
 
     except Exception as e:
-        logger.error(f"[Manual Download] Error: {e}")
+        logger.error(f"[Manual Download] {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -12353,7 +12353,7 @@ def enhance_artist_quality(artist_id):
             'failed_tracks': failed_tracks
         })
     except Exception as e:
-        logger.error(f"[Enhance] Error: {e}")
+        logger.error(f"[Enhance] {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -16405,7 +16405,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
                 logger.error(f"  - Failed to queue track: {filename}")
 
         except Exception as e:
-            logger.error(f"Error processing track in album batch: {track_data.get('filename')}. Error: {e}")
+            logger.error(f"Error processing track in album batch: {track_data.get('filename')}: {e}")
             continue
             
     return started_count
@@ -17016,7 +17016,7 @@ def _cleanup_empty_directories(download_path, moved_file_path):
             else:
                 break
     except Exception as e:
-        logger.error(f"Warning: An error occurred during directory cleanup: {e}")
+        logger.error(f"An error occurred during directory cleanup: {e}")
 
 
 def _sweep_empty_download_directories():
@@ -21334,7 +21334,7 @@ def _post_process_matched_download(context_key, context, file_path):
             clean_album_name = original_search.get('spotify_clean_album', 'Unknown Album')
             
             # DEBUG: Check what's in original_search
-            logger.debug(f"[DEBUG] Path 1 - Clean Spotify data path:")
+            logger.debug("Path 1 - Clean Spotify data path:")
             logger.info(f"   original_search keys: {list(original_search.keys())}")
             logger.info(f"   track_number in original_search: {'track_number' in original_search}")
             logger.info(f"   track_number value: {original_search.get('track_number', 'NOT_FOUND')}")
@@ -21359,7 +21359,7 @@ def _post_process_matched_download(context_key, context, file_path):
             clean_track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
             
             # DEBUG: Check what's in original_search for path 2
-            logger.debug(f"[DEBUG] Path 2 - Enhanced fallback album context path:")
+            logger.debug("Path 2 - Enhanced fallback album context path:")
             logger.info(f"   original_search keys: {list(original_search.keys())}")
             logger.info(f"   track_number in original_search: {'track_number' in original_search}")
             logger.info(f"   track_number value: {original_search.get('track_number', 'NOT_FOUND')}")
@@ -21444,7 +21444,7 @@ def _post_process_matched_download(context_key, context, file_path):
             track_number = album_info['track_number']
             
             # DEBUG: Check final track_number values
-            logger.debug(f"[DEBUG] Final track_number processing:")
+            logger.debug("Final track_number processing:")
             logger.info(f"   album_info source: {album_info.get('source', 'unknown')}")
             logger.info(f"   album_info track_number: {album_info.get('track_number', 'NOT_FOUND')}")
             logger.info(f"   track_number variable: {track_number}")
@@ -21460,7 +21460,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 logger.error(f"Invalid track number ({track_number}), defaulting to 1")
                 track_number = 1
                 
-            logger.debug(f"[DEBUG] FINAL track_number used for filename: {track_number}")
+            logger.debug(f"FINAL track_number used for filename: {track_number}")
             
             # CRITICAL FIX: Update album_info with corrected track_number for metadata enhancement
             album_info['track_number'] = track_number
@@ -21624,7 +21624,7 @@ def _post_process_matched_download(context_key, context, file_path):
                             found_variant = os.path.join(expected_dir, f)
                             break
                 if found_variant:
-                    logger.info(f"[Pre-Move] Source gone but found variant in destination (stream processor handled it): {os.path.basename(found_variant)}")
+                    logger.debug(f"[Pre-Move] Source gone but found variant in destination (stream processor handled it): {os.path.basename(found_variant)}")
                     context['_final_processed_path'] = found_variant
                     _download_cover_art(album_info, expected_dir, context)
                     _generate_lrc_file(found_variant, context, spotify_artist, album_info)
@@ -24154,7 +24154,7 @@ def _process_wishlist_automatically(automation_id=None):
 
             # CLEANUP: Remove tracks from wishlist that already exist in library
             # This prevents wasting bandwidth on tracks we already have
-            logger.info("[Auto-Wishlist] Checking wishlist against library for already-owned tracks...")
+            logger.debug("[Auto-Wishlist] Checking wishlist against library for already-owned tracks...")
             cleanup_tracks = []
             for p in all_profiles:
                 cleanup_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
@@ -24662,7 +24662,7 @@ def _run_soulsync_full_refresh():
         _db_update_finished_callback(artist_count, album_count, total, successful, failed)
 
     except Exception as e:
-        logger.error(f"[SoulSync Full Refresh] Error: {e}")
+        logger.error(f"[SoulSync Full Refresh] {e}")
         import traceback
         traceback.print_exc()
         _db_update_error_callback(f"Full refresh failed: {e}")
@@ -24796,7 +24796,7 @@ def _run_soulsync_deep_scan():
         _db_update_finished_callback(0, 0, len(transfer_files), moved_count + stale_count, 0)
 
     except Exception as e:
-        logger.error(f"[SoulSync Deep Scan] Error: {e}")
+        logger.error(f"[SoulSync Deep Scan] {e}")
         import traceback
         traceback.print_exc()
         _db_update_error_callback(f"Deep scan failed: {e}")
@@ -29584,12 +29584,12 @@ def _download_track_worker(task_id, batch_id=None):
                 download_tasks[task_id]['current_query_index'] = query_index
                     
             logger.debug(f"[Modal Worker] Query {query_index + 1}/{len(search_queries)}: '{query}'")
-            logger.debug(f"[DEBUG] About to call soulseek search for task {task_id}")
+            logger.debug(f"About to call soulseek search for task {task_id}")
             
             try:
                 # Perform search with timeout
                 tracks_result, _ = run_async(soulseek_client.search(query, timeout=30))
-                logger.debug(f"[DEBUG] Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
+                logger.debug(f"Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
                 
                 # CRITICAL: Check cancellation immediately after search returns
                 with tasks_lock:
@@ -30033,7 +30033,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                                 run_async(soulseek_client.cancel_download(download_id, username, remove=True))
                                 logger.warning(f"Successfully cancelled active download {download_id}")
                             except Exception as cancel_error:
-                                logger.error(f"Warning: Failed to cancel active download {download_id}: {cancel_error}")
+                                logger.error(f"Failed to cancel active download {download_id}: {cancel_error}")
                             
                             # Free worker slot
                             if batch_id:
@@ -31176,7 +31176,7 @@ def cancel_download_task():
                 run_async(soulseek_client.cancel_download(download_id, username, remove=True))
                 logger.warning(f"Successfully cancelled Soulseek download {download_id} for task {task_id}")
             except Exception as e:
-                logger.error(f"Warning: Failed to cancel download on slskd, but worker already moved on. Error: {e}")
+                logger.error(f"Failed to cancel download on slskd, but worker already moved on: {e}")
 
         ### NEW LOGIC START: Add cancelled track to wishlist ###
         try:
@@ -31391,14 +31391,14 @@ def cancel_task_v2():
             try:
                 _start_next_batch_of_downloads(batch_id)
             except Exception as e:
-                logger.error(f"[Atomic Cancel] Warning: Could not start next downloads: {e}")
+                logger.error(f"[Atomic Cancel] Could not start next downloads: {e}")
             
             # CRITICAL: Check for batch completion after V2 cancel
             # V2 system bypasses _on_download_completed, so we need to check completion manually
             try:
                 _check_batch_completion_v2(batch_id)
             except Exception as e:
-                logger.error(f"[Atomic Cancel] Warning: Could not check batch completion: {e}")
+                logger.error(f"[Atomic Cancel] Could not check batch completion: {e}")
         
         # Cancel Soulseek download if active (non-blocking)
         if task:
@@ -31502,7 +31502,7 @@ def cancel_task_v2():
         try:
             _add_cancelled_task_to_wishlist(task)
         except Exception as e:
-            logger.error(f"[Atomic Cancel] Warning: Could not add to wishlist: {e}")
+            logger.error(f"[Atomic Cancel] Could not add to wishlist: {e}")
         
         return jsonify({
             "success": True,
@@ -39005,7 +39005,7 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
         try:
             from database.music_database import MusicDatabase
             db = MusicDatabase()
-            logger.info(f"   Database initialized: {db is not None}")
+            logger.debug(f"   Database initialized: {db is not None}")
         except Exception as db_error:
             logger.error(f"   Database initialization failed: {db_error}")
         
@@ -39352,16 +39352,16 @@ def cancel_playlist_sync():
 def test_database_access():
     """Test endpoint to verify database connectivity for sync operations"""
     try:
-        logger.info(f"Testing database access for sync operations...")
+        logger.debug(f"Testing database access for sync operations...")
         
         # Test database initialization
         from database.music_database import MusicDatabase
         db = MusicDatabase()
-        logger.info(f"   Database initialized: {db is not None}")
+        logger.debug(f"   Database initialized: {db is not None}")
         
         # Test basic database query
         stats = db.get_database_info_for_server()
-        logger.info(f"   Database stats retrieved: {stats}")
+        logger.debug(f"   Database stats retrieved: {stats}")
         
         # Test track existence check (like sync service does)
         db_track, confidence = db.check_track_exists("test track", "test artist", confidence_threshold=0.7)
@@ -41095,7 +41095,7 @@ def start_watchlist_scan():
                     pass
                 for _bf_provider in providers_to_backfill:
                     try:
-                        logger.warning(f"Checking for missing {_bf_provider} IDs in watchlist...")
+                        logger.debug(f"Checking for missing {_bf_provider} IDs in watchlist...")
                         scanner._backfill_missing_ids(watchlist_artists, _bf_provider)
                     except Exception as backfill_error:
                         logger.error(f"Error during {_bf_provider} ID backfilling: {backfill_error}")
@@ -41433,7 +41433,7 @@ def watchlist_artist_config(artist_id):
                             'genres': artist_data.get('genres', [])
                         }
                 except Exception as e:
-                    logger.error(f"Warning: Could not fetch artist info from Spotify: {e}")
+                    logger.error(f"Could not fetch artist info from Spotify: {e}")
 
             # Fallback to database info if Spotify fetch failed
             if not artist_info:
@@ -41490,7 +41490,7 @@ def watchlist_artist_config(artist_id):
                 ]
                 conn2.close()
             except Exception as e:
-                logger.error(f"Warning: Could not enrich artist from library: {e}")
+                logger.error(f"Could not enrich artist from library: {e}")
                 releases = []
 
             config = {
@@ -46873,19 +46873,19 @@ def start_metadata_update():
                 return jsonify({"success": False, "error": "Plex client not available"}), 400
             
             # DEBUG: Check Plex connection details
-            logger.debug(f"[DEBUG] Active server: {active_server}")
-            logger.debug(f"[DEBUG] Plex client: {media_client}")
+            logger.debug(f"Active server: {active_server}")
+            logger.debug(f"Plex client: {media_client}")
             if hasattr(media_client, 'server') and media_client.server:
-                logger.debug(f"[DEBUG] Plex server URL: {getattr(media_client.server, '_baseurl', 'NO_URL')}")
-                logger.debug(f"[DEBUG] Plex server name: {getattr(media_client.server, 'friendlyName', 'NO_NAME')}")
+                logger.debug(f"Plex server URL: {getattr(media_client.server, '_baseurl', 'NO_URL')}")
+                logger.debug(f"Plex server name: {getattr(media_client.server, 'friendlyName', 'NO_NAME')}")
                 # Check available libraries
                 try:
                     sections = media_client.server.library.sections()
-                    logger.debug(f"[DEBUG] Available Plex libraries: {[(s.title, s.type) for s in sections]}")
+                    logger.debug(f"Available Plex libraries: {[(s.title, s.type) for s in sections]}")
                 except Exception as e:
-                    logger.debug(f"[DEBUG] Error getting Plex libraries: {e}")
+                    logger.debug(f"Error getting Plex libraries: {e}")
             else:
-                logger.debug(f"[DEBUG] Plex server is NOT connected!")
+                logger.debug("Plex server is NOT connected!")
         
         # Check Spotify client - EXACTLY like dashboard.py
         if not spotify_client:
@@ -48533,7 +48533,7 @@ def start_beatport_discovery(url_hash):
 
         # Get chart data from request body
         data = request.get_json() or {}
-        logger.info(f"Raw request data: {data}")
+        logger.debug(f"Raw request data: {data}")
 
         chart_data = data.get('chart_data')
         logger.debug(f"Chart data extracted: {chart_data is not None}")
@@ -48750,7 +48750,7 @@ def _run_beatport_discovery_worker(url_hash):
                 else:
                     track_artist = clean_beatport_text(str(track_artists))
 
-                logger.info(f"Searching {discovery_source.upper()} for: '{track_artist}' - '{track_title}'")
+                logger.debug(f"Searching {discovery_source.upper()} for: '{track_artist}' - '{track_title}'")
 
                 # Check discovery cache first
                 cache_key = _get_discovery_cache_key(track_title, track_artist)
@@ -48794,7 +48794,7 @@ def _run_beatport_discovery_worker(url_hash):
                         'album': None
                     })()
                     search_queries = matching_engine.generate_download_queries(temp_track)
-                    logger.info(f"Generated {len(search_queries)} search queries using matching engine")
+                    logger.debug(f"Generated {len(search_queries)} search queries using matching engine")
                 except Exception as e:
                     logger.error(f"Matching engine failed for Beatport, falling back to basic queries: {e}")
                     if use_spotify:
@@ -48837,10 +48837,10 @@ def _run_beatport_discovery_worker(url_hash):
                                 best_raw_track = _cache.get_entity('spotify', 'track', match.id)
                             else:
                                 best_raw_track = None
-                            logger.info(f"New best Beatport match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                            logger.debug(f"New best Beatport match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                         if best_confidence >= 0.9:
-                            logger.info(f"High confidence match found ({best_confidence:.3f}), stopping search")
+                            logger.debug(f"High confidence match found ({best_confidence:.3f}), stopping search")
                             break
 
                     except Exception as e:
@@ -48849,7 +48849,7 @@ def _run_beatport_discovery_worker(url_hash):
 
                 # Strategy 4: Extended search with higher limit (last resort)
                 if not found_track:
-                    logger.info(f"Beatport Strategy 4: Extended search with limit=50")
+                    logger.debug(f"Beatport Strategy 4: Extended search with limit=50")
                     query = f"{track_artist} {track_title}"
                     if use_spotify:
                         extended_results = spotify_client.search_tracks(query, limit=50)
@@ -48862,7 +48862,7 @@ def _run_beatport_discovery_worker(url_hash):
                         if match and confidence >= min_confidence:
                             found_track = match
                             best_confidence = confidence
-                            logger.info(f"Strategy 4 Beatport match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                            logger.debug(f"Strategy 4 Beatport match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                 if found_track:
                     logger.info(f"Final Beatport match: {found_track.artists[0]} - {found_track.name} (confidence: {best_confidence:.3f})")
@@ -48963,7 +48963,7 @@ def _run_beatport_discovery_worker(url_hash):
                                 cache_key[0], cache_key[1], discovery_source, best_confidence,
                                 cache_data, track_title, track_artist
                             )
-                            logger.info(f"CACHE SAVED: {track_artist} - {track_title} (confidence: {best_confidence:.3f})")
+                            logger.debug(f"CACHE SAVED: {track_artist} - {track_title} (confidence: {best_confidence:.3f})")
                         except Exception as cache_err:
                             logger.error(f"Cache save error: {cache_err}")
 
@@ -50317,7 +50317,7 @@ class WebMetadataUpdateWorker:
                     pass
                 
                 all_artists = self.media_client.get_all_artists()
-                logger.debug(f"[DEBUG] Raw artists returned: {[getattr(a, 'title', 'NO_TITLE') for a in (all_artists or [])]}")
+                logger.debug(f"Raw artists returned: {[getattr(a, 'title', 'NO_TITLE') for a in (all_artists or [])]}")
                 if not all_artists:
                     metadata_update_state['status'] = 'error'
                     metadata_update_state['error'] = f"No artists found in {self.server_type.title()} library"
@@ -51182,7 +51182,7 @@ try:
     mb_worker.start()
     if config_manager.get('musicbrainz_enrichment_paused', False):
         mb_worker.pause()
-        logger.warning("MusicBrainz enrichment worker initialized (paused — restored from config)")
+        logger.info("MusicBrainz enrichment worker initialized (paused — restored from config)")
     else:
         logger.info("MusicBrainz enrichment worker initialized and started")
 except Exception as e:
@@ -51259,7 +51259,7 @@ try:
     audiodb_worker.start()
     if config_manager.get('audiodb_enrichment_paused', False):
         audiodb_worker.pause()
-        logger.warning("AudioDB enrichment worker initialized (paused — restored from config)")
+        logger.info("AudioDB enrichment worker initialized (paused — restored from config)")
     else:
         logger.info("AudioDB enrichment worker initialized and started")
 except Exception as e:
@@ -51332,7 +51332,7 @@ try:
     discogs_worker.start()
     if config_manager.get('discogs_enrichment_paused', False):
         discogs_worker.pause()
-        logger.warning("Discogs enrichment worker initialized (paused — restored from config)")
+        logger.info("Discogs enrichment worker initialized (paused — restored from config)")
     else:
         logger.info("Discogs enrichment worker initialized and started")
 except Exception as e:
@@ -51394,7 +51394,7 @@ try:
     deezer_worker.start()
     if config_manager.get('deezer_enrichment_paused', False):
         deezer_worker.pause()
-        logger.warning("Deezer enrichment worker initialized (paused — restored from config)")
+        logger.info("Deezer enrichment worker initialized (paused — restored from config)")
     else:
         logger.info("Deezer enrichment worker initialized and started")
 except Exception as e:
@@ -51472,7 +51472,7 @@ try:
         spotify_enrichment_worker.paused = True  # Set BEFORE start() to prevent race condition
     spotify_enrichment_worker.start()
     if spotify_enrichment_worker.paused:
-        logger.warning("Spotify enrichment worker initialized (paused — restored from config)")
+        logger.info("Spotify enrichment worker initialized (paused — restored from config)")
     else:
         logger.info("Spotify enrichment worker initialized and started")
 except Exception as e:
@@ -51571,7 +51571,7 @@ try:
     itunes_enrichment_worker.start()
     if config_manager.get('itunes_enrichment_paused', False):
         itunes_enrichment_worker.pause()
-        logger.warning("iTunes enrichment worker initialized (paused — restored from config)")
+        logger.info("iTunes enrichment worker initialized (paused — restored from config)")
     else:
         logger.info("iTunes enrichment worker initialized and started")
 except Exception as e:
@@ -51647,7 +51647,7 @@ try:
     lastfm_worker.start()
     if config_manager.get('lastfm_enrichment_paused', False):
         lastfm_worker.pause()
-        logger.warning("Last.fm enrichment worker initialized (paused — restored from config)")
+        logger.info("Last.fm enrichment worker initialized (paused — restored from config)")
     else:
         logger.info("Last.fm enrichment worker initialized and started")
 except Exception as e:
@@ -51790,7 +51790,7 @@ try:
         genius_worker.paused = True
     genius_worker.start()
     if genius_worker.paused:
-        logger.warning("Genius enrichment worker initialized (paused — restored from config)")
+        logger.info("Genius enrichment worker initialized (paused — restored from config)")
     else:
         logger.info("Genius enrichment worker initialized and started")
 except Exception as e:
@@ -51867,7 +51867,7 @@ try:
     tidal_enrichment_worker.start()
     if config_manager.get('tidal_enrichment_paused', False):
         tidal_enrichment_worker.pause()
-        logger.warning("Tidal enrichment worker initialized (paused — restored from config)")
+        logger.info("Tidal enrichment worker initialized (paused — restored from config)")
     else:
         logger.info("Tidal enrichment worker initialized and started")
 except Exception as e:
@@ -51941,7 +51941,7 @@ try:
     qobuz_enrichment_worker.start()
     if config_manager.get('qobuz_enrichment_paused', False):
         qobuz_enrichment_worker.pause()
-        logger.warning("Qobuz enrichment worker initialized (paused — restored from config)")
+        logger.info("Qobuz enrichment worker initialized (paused — restored from config)")
     else:
         logger.info("Qobuz enrichment worker initialized and started")
 except Exception as e:
@@ -53844,7 +53844,7 @@ try:
         auto_import_worker.start()
         logger.info("Auto-import worker started")
     else:
-        logger.warning("Auto-import worker initialized (disabled)")
+        logger.info("Auto-import worker initialized (disabled)")
 except Exception as _ai_err:
     logger.error(f"Auto-import worker init failed: {_ai_err}")
 
