@@ -330,11 +330,13 @@ class AcoustIDVerification:
                     logger.info(f"AcoustID verification PASSED (scan match) - {msg}")
                     return VerificationResult.PASS, msg
 
-            # No match found — but if fingerprint score is very high (≥0.95),
-            # the audio IS correct and the title mismatch is likely a language
-            # difference (e.g. Japanese kanji vs English title for the same song).
+            # No match found — but if fingerprint score is very high (≥0.95)
+            # AND there's partial similarity in title or artist, the mismatch is
+            # likely a language/script difference (e.g. Japanese kanji vs English).
             # Skip rather than quarantine a correct file.
-            if best_score >= 0.95:
+            # But if both title AND artist similarity are very low, the download
+            # source gave us a completely wrong file — fail it.
+            if best_score >= 0.95 and (title_sim >= 0.55 or artist_sim >= ARTIST_MATCH_THRESHOLD):
                 top = recordings[0]
                 msg = (
                     f"Title/artist mismatch but fingerprint confidence very high ({best_score:.2f}): "
