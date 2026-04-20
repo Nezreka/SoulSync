@@ -324,6 +324,12 @@ class PlaylistSyncService:
                     for match_result in unmatched_tracks:
                         spotify_track = match_result.spotify_track
 
+                        # Skip wing-it fallback tracks — they have no real metadata
+                        # and should never be added to wishlist
+                        if str(spotify_track.id).startswith('wing_it_'):
+                            logger.info(f"Skipping wishlist for wing-it track: {spotify_track.name}")
+                            continue
+
                         # Check if we have original track data with full album objects
                         original_track_data = None
                         if hasattr(self, '_original_tracks_map') and self._original_tracks_map:
