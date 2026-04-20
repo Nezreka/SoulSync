@@ -10836,6 +10836,14 @@ def get_artist_detail(artist_id):
         try:
             from core.metadata_service import MetadataLookupOptions, get_artist_detail_discography as _get_artist_detail_discography
 
+            artist_source_ids = {
+                'spotify': artist_info.get('spotify_artist_id'),
+                'deezer': artist_info.get('deezer_id'),
+                'itunes': artist_info.get('itunes_artist_id'),
+                'discogs': artist_info.get('discogs_id'),
+                'hydrabase': artist_info.get('soul_id'),
+            }
+
             artist_detail_discography = _get_artist_detail_discography(
                 artist_id,
                 artist_name=artist_info['name'],
@@ -10844,6 +10852,7 @@ def get_artist_detail(artist_id):
                     skip_cache=False,
                     max_pages=0,
                     limit=50,
+                    artist_source_ids=artist_source_ids,
                 ),
             )
 

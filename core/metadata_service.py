@@ -34,6 +34,7 @@ class MetadataLookupOptions:
     skip_cache: bool = False
     max_pages: int = 0
     limit: int = 50
+    artist_source_ids: Optional[Dict[str, str]] = None
 
 
 # =============================================================================
@@ -166,7 +167,7 @@ def get_artist_albums_for_source(
     released albums to show up immediately.
     """
     client = get_client_for_source(source)
-    if not client or not artist_id or not hasattr(client, 'get_artist_albums'):
+    if not client or not hasattr(client, 'get_artist_albums'):
         return None
 
     def _fetch_for_artist(target_artist_id: str):
@@ -181,9 +182,12 @@ def get_artist_albums_for_source(
         return client.get_artist_albums(target_artist_id, **kwargs)
 
     try:
-        albums = _fetch_for_artist(artist_id) or []
-        if albums:
-            return albums
+        if artist_id:
+            albums = _fetch_for_artist(artist_id) or []
+            if albums:
+                return albums
+        else:
+            albums = []
 
         if not artist_name:
             return albums
@@ -451,6 +455,7 @@ def get_artist_discography(
     """
     options = options or MetadataLookupOptions()
     source_priority = _get_source_chain_for_lookup(options)
+    source_artist_ids = options.artist_source_ids or {}
 
     albums: List[Any] = []
     active_source: Optional[str] = None
@@ -461,10 +466,15 @@ def get_artist_discography(
             if not client:
                 continue
 
+            source_artist_id = (source_artist_ids.get(source) or '').strip()
+            lookup_artist_id = source_artist_id if source_artist_id else (artist_id if not source_artist_ids else '')
+            if source_artist_id:
+                logger.debug("Using %s artist id %s for discography lookup", source, source_artist_id)
+
             try:
                 albums = get_artist_albums_for_source(
                     source,
-                    artist_id,
+                    lookup_artist_id,
                     artist_name=artist_name,
                     limit=options.limit,
                     skip_cache=options.skip_cache,
