@@ -37520,7 +37520,8 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
             if (response.status === 401) {
                 throw new Error('Spotify not authenticated. Please check your API settings.');
             }
-            throw new Error(`Failed to load album tracks: ${response.status}`);
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || `Failed to load album tracks: ${response.status}`);
         }
 
         const data = await response.json();
