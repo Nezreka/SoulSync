@@ -2613,7 +2613,7 @@ def get_cached_transfer_data():
 
             # First, get Soulseek downloads from API
             transfers_data = None
-            if not soulseek_known_down and soulseek_client and soulseek_client.base_url:
+            if not soulseek_known_down and soulseek_client and getattr(soulseek_client, 'soulseek', None) and soulseek_client.soulseek.base_url:
                 transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 all_transfers = []
@@ -3030,7 +3030,7 @@ class WebUIDownloadMonitor:
 
             # Get Soulseek downloads from API
             transfers_data = None
-            if soulseek_active and soulseek_client and soulseek_client.base_url:
+            if soulseek_active and soulseek_client and getattr(soulseek_client, 'soulseek', None) and soulseek_client.soulseek.base_url:
                 transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 for user_data in transfers_data:
