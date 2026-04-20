@@ -1615,9 +1615,13 @@ class RepairWorker:
                         aid_artist.strip() or 'unknown'
                     )
                     new_artist_id = f"artist_local_{safe_artist_name}_{uuid.uuid4().hex[:8]}"
+                    # Include server_source to match the active media server context
+                    active_server = 'plex'
+                    if self._config_manager:
+                        active_server = self._config_manager.get('active_media_server', 'plex')
                     cursor.execute(
-                        "INSERT INTO artists (id, name) VALUES (?, ?)",
-                        (new_artist_id, aid_artist),
+                        "INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
+                        (new_artist_id, aid_artist, active_server),
                     )
                     cursor.execute("UPDATE tracks SET artist_id = ? WHERE id = ?",
                                    (new_artist_id, track_id))
@@ -1625,6 +1629,20 @@ class RepairWorker:
             conn.close()
         except Exception as e:
             return {'success': False, 'error': f'DB update failed: {e}'}
+
+        # Write corrected tags to the actual audio file
+        if file_path:
+            resolved = _resolve_file_path(file_path, self.transfer_folder)
+            if resolved and os.path.exists(resolved):
+                try:
+                    from core.tag_writer import write_tags_to_file
+                    tag_updates = {'title': aid_title}
+                    if aid_artist:
+                        tag_updates['artist_name'] = aid_artist
+                    write_tags_to_file(resolved, tag_updates)
+                    logger.info("Wrote corrected tags to file: %s", resolved)
+                except Exception as tag_err:
+                    logger.warning("Could not write tags to file %s: %s", resolved, tag_err)
 
         return {'success': True, 'action': 'retagged',
                 'message': f'Updated to: "{aid_title}" by {aid_artist}'}
