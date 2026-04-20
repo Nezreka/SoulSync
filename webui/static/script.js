@@ -19418,6 +19418,16 @@ function renderDiscoveryFixResults(tracks, fixModalOverlay) {
     const resultsContainer = fixModalOverlay.querySelector('#fix-modal-results');
     resultsContainer.innerHTML = '';
 
+    // Sort: standard album versions first, live/remix/cover/soundtrack last
+    const _variantPattern = /\b(live|remix|remaster|refix|cover|acoustic|demo|instrumental|radio edit|single version|deluxe|edition|soundtrack|from .* film|from .* movie|bonus track)\b|\b\w+ mix\b/i;
+    const _albumVariantPattern = /\b(live|greatest hits|best of|collection|compilation|soundtrack|from .* film|from .* movie|remaster|deluxe|redux|expanded|anniversary)\b/i;
+    tracks.sort((a, b) => {
+        const aVariant = _variantPattern.test(a.name || '') || _albumVariantPattern.test(a.album || '');
+        const bVariant = _variantPattern.test(b.name || '') || _albumVariantPattern.test(b.album || '');
+        if (aVariant !== bVariant) return aVariant ? 1 : -1;
+        return 0; // preserve original order within same category
+    });
+
     tracks.forEach(track => {
         const card = document.createElement('div');
         card.className = 'fix-result-card';
