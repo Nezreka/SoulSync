@@ -11653,8 +11653,8 @@ def get_artist_album_tracks(artist_id, album_id):
 
         # Get album tracks
         tracks_data = client.get_album_tracks(resolved_album_id)
-        if not tracks_data or 'items' not in tracks_data:
-            return jsonify({"error": "No tracks found for album"}), 404
+        if not tracks_data or 'items' not in tracks_data or len(tracks_data['items']) == 0:
+            return jsonify({"error": "No tracks found for album — it may be region-restricted or unavailable on this metadata source"}), 404
         
         # Handle both dict and object responses from spotify_client.get_album()
         if isinstance(album_data, dict):

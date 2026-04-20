@@ -735,13 +735,46 @@ class iTunesClient:
         # Check cache for album tracks listing
         cache = get_metadata_cache()
         cached = cache.get_entity('itunes', 'album', f"{album_id}_tracks")
-        if cached:
+        if cached and cached.get('items'):
             return cached
 
         results = self._lookup(id=album_id, entity='song')
 
         if not results:
             return None
+
+        # Check if results contain actual song tracks (not just collection metadata).
+        # iTunes sometimes returns only the collection/album info without songs
+        # (region-restricted tracks). The _lookup fallback only checks if results
+        # is empty, so a collection-only response bypasses fallback storefronts.
+        has_songs = any(
+            item.get('wrapperType') == 'track' and item.get('kind') == 'song'
+            for item in results
+        )
+        if not has_songs:
+            # Try fallback storefronts for actual song tracks
+            logger.info(f"Album {album_id} returned collection info but no songs, trying fallback storefronts")
+            for fallback in self.FALLBACK_COUNTRIES:
+                if fallback == self.country:
+                    continue
+                try:
+                    fb_results = self.session.get(
+                        self.LOOKUP_URL,
+                        params={'id': album_id, 'entity': 'song', 'country': fallback},
+                        timeout=15
+                    )
+                    if fb_results.status_code == 200:
+                        fb_data = fb_results.json().get('results', [])
+                        if any(i.get('wrapperType') == 'track' and i.get('kind') == 'song' for i in fb_data):
+                            logger.info(f"Found song tracks via fallback storefront: {fallback}")
+                            results = fb_data
+                            has_songs = True
+                            break
+                except Exception:
+                    continue
+            if not has_songs:
+                logger.warning(f"Album {album_id} has no song tracks in any storefront")
+                return None
 
         # First result is usually the album/collection info
         # Extract album information to include in each track (like Spotify does)
