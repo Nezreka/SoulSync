@@ -16185,12 +16185,14 @@ def search_match():
             hydrabase_worker.enqueue(query, context)
 
         if context == 'artist':
-            # Search for artists
+            # Search for artists — title-case the query for better API results
+            # (some metadata APIs return fewer results for all-lowercase queries)
+            search_query = query.title() if query == query.lower() else query
             if use_hydrabase:
-                artist_matches = hydrabase_client.search_artists(query, limit=8)
+                artist_matches = hydrabase_client.search_artists(search_query, limit=8)
                 provider = 'hydrabase'
             else:
-                artist_matches = _get_metadata_fallback_client().search_artists(query, limit=8)
+                artist_matches = _get_metadata_fallback_client().search_artists(search_query, limit=8)
                 provider = _get_metadata_fallback_source()
             results = []
 
