@@ -400,7 +400,15 @@ function handleServiceStatusUpdate(data) {
     const isSoulsyncStandalone = data.media_server?.type === 'soulsync';
     _isSoulsyncStandalone = isSoulsyncStandalone;
     document.querySelectorAll('.sync-to-server-btn, [id$="-sync-btn"], [onclick*="startPlaylistSync"], [onclick*="syncPlaylistToServer"], [onclick*="startDecadeSync"]').forEach(btn => {
-        btn.style.display = isSoulsyncStandalone ? 'none' : '';
+        if (isSoulsyncStandalone) {
+            btn.dataset.hiddenByStandalone = '1';
+            btn.style.display = 'none';
+        } else if (btn.dataset.hiddenByStandalone) {
+            delete btn.dataset.hiddenByStandalone;
+            btn.style.display = '';
+        }
+        // If not standalone and not previously hidden by standalone, leave display untouched
+        // (preserves display:none on undiscovered LB/Last.fm playlist sync buttons)
     });
 
     // Update enrichment service cards
@@ -39743,7 +39751,13 @@ async function fetchAndUpdateServiceStatus() {
         const isSoulsyncStandalone2 = data.media_server?.type === 'soulsync';
         _isSoulsyncStandalone = isSoulsyncStandalone2;
         document.querySelectorAll('.sync-to-server-btn, [id$="-sync-btn"], [onclick*="startPlaylistSync"], [onclick*="syncPlaylistToServer"], [onclick*="startDecadeSync"]').forEach(btn => {
-            btn.style.display = isSoulsyncStandalone2 ? 'none' : '';
+            if (isSoulsyncStandalone2) {
+                btn.dataset.hiddenByStandalone = '1';
+                btn.style.display = 'none';
+            } else if (btn.dataset.hiddenByStandalone) {
+                delete btn.dataset.hiddenByStandalone;
+                btn.style.display = '';
+            }
         });
 
         // Update enrichment service cards
