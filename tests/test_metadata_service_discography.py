@@ -1,5 +1,6 @@
 import sys
 import types
+import sqlite3
 
 import pytest
 
@@ -42,6 +43,7 @@ if "config.settings" not in sys.modules:
 
 from core import metadata_service
 from core.metadata_service import MetadataLookupOptions
+from database.music_database import MusicDatabase
 
 
 @pytest.fixture(autouse=True)
@@ -521,3 +523,56 @@ def test_get_artist_discography_keeps_provider_artist_ids(monkeypatch):
             },
         ),
     ]
+
+
+def test_get_artist_discography_prefers_source_specific_artist_ids(monkeypatch):
+    class _SourceIdClient(_FakeSourceClient):
+        def __init__(self, source_id, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.source_id = source_id
+
+        def get_artist_albums(self, artist_id, **kwargs):
+            self.album_calls.append((artist_id, dict(kwargs)))
+            if artist_id == self.source_id:
+                return [
+                    _album(f"{self.source_id}-album-1", f"{self.source_id} Album", "2024-01-01")
+                ]
+            return []
+
+    spotify = _SourceIdClient("spotify-artist-1")
+    deezer = _SourceIdClient("deezer-artist-1")
+    clients = {
+        "spotify": spotify,
+        "deezer": deezer,
+    }
+
+    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "spotify")
+    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "deezer"])
+    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: clients.get(source))
+
+    result = metadata_service.get_artist_discography(
+        "artist-1",
+        "Artist One",
+        MetadataLookupOptions(
+            artist_source_ids={
+                "spotify": "spotify-artist-1",
+                "deezer": "deezer-artist-1",
+            }
+        ),
+    )
+
+    assert result["source"] == "spotify"
+    assert [album["id"] for album in result["albums"]] == ["spotify-artist-1-album-1"]
+    assert spotify.album_calls == [
+        (
+            "spotify-artist-1",
+            {
+                "album_type": "album,single",
+                "limit": 50,
+                "allow_fallback": False,
+                "skip_cache": False,
+                "max_pages": 0,
+            },
+        )
+    ]
+    assert deezer.album_calls == []
