@@ -2604,12 +2604,16 @@ def get_cached_transfer_data():
         # Cache expired or empty, fetch new data
         live_transfers_lookup = {}
         try:
-            # Skip Soulseek API call if we already know it's disconnected (avoid timeout spam)
-            soulseek_known_down = not _status_cache.get('soulseek', {}).get('connected', True)
+            # Skip Soulseek API call if not active or known disconnected
+            _dl_mode = config_manager.get('download_source.mode', 'hybrid')
+            _hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
+            _slsk_active = (_dl_mode == 'soulseek' or
+                           (_dl_mode == 'hybrid' and 'soulseek' in _hybrid_order))
+            soulseek_known_down = not _slsk_active or not _status_cache.get('soulseek', {}).get('connected', True)
 
             # First, get Soulseek downloads from API
             transfers_data = None
-            if not soulseek_known_down:
+            if not soulseek_known_down and soulseek_client and soulseek_client.base_url:
                 transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 all_transfers = []
@@ -2625,13 +2629,17 @@ def get_cached_transfer_data():
                     key = _make_context_key(transfer.get('username'), transfer.get('filename', ''))
                     live_transfers_lookup[key] = transfer
 
-            # Also add YouTube/Tidal/Qobuz downloads (through orchestrator)
-            # Note: get_all_downloads() also hits slskd API — skip if we know it's down
+            # Also add non-Soulseek downloads (avoid redundant slskd call through orchestrator)
             try:
-                all_downloads = run_async(soulseek_client.get_all_downloads()) if not soulseek_known_down else []
+                all_downloads = []
+                for _dl_client in [soulseek_client.youtube, soulseek_client.tidal, soulseek_client.qobuz,
+                                   soulseek_client.hifi, soulseek_client.deezer_dl, soulseek_client.lidarr]:
+                    if _dl_client:
+                        try:
+                            all_downloads.extend(run_async(_dl_client.get_all_downloads()))
+                        except Exception:
+                            pass
                 for download in all_downloads:
-                    # Only add streaming source downloads (Soulseek ones are already in the lookup)
-                    if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
                         key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format
                         live_transfers_lookup[key] = {
@@ -3014,8 +3022,16 @@ class WebUIDownloadMonitor:
 
             live_transfers = {}
 
+            # Only hit slskd API if soulseek is actually configured and active
+            dl_mode = config_manager.get('download_source.mode', 'hybrid')
+            hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
+            soulseek_active = (dl_mode == 'soulseek' or
+                              (dl_mode == 'hybrid' and 'soulseek' in hybrid_order))
+
             # Get Soulseek downloads from API
-            transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
+            transfers_data = None
+            if soulseek_active and soulseek_client and soulseek_client.base_url:
+                transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
             if transfers_data:
                 for user_data in transfers_data:
                     username = user_data.get('username', 'Unknown')
@@ -3026,12 +3042,18 @@ class WebUIDownloadMonitor:
                                     key = _make_context_key(username, file_info.get('filename', ''))
                                     live_transfers[key] = file_info
 
-            # Also get YouTube/Tidal/Qobuz downloads (through orchestrator)
+            # Also get non-Soulseek downloads (YouTube/Tidal/Qobuz/HiFi/Deezer/Lidarr)
+            # Call each client directly to avoid redundant slskd API call through orchestrator
             try:
-                all_downloads = run_async(soulseek_client.get_all_downloads())
+                all_downloads = []
+                for _dl_client in [soulseek_client.youtube, soulseek_client.tidal, soulseek_client.qobuz,
+                                   soulseek_client.hifi, soulseek_client.deezer_dl, soulseek_client.lidarr]:
+                    if _dl_client:
+                        try:
+                            all_downloads.extend(run_async(_dl_client.get_all_downloads()))
+                        except Exception:
+                            pass
                 for download in all_downloads:
-                    # Only add streaming source downloads (Soulseek ones are already in the lookup from slskd API)
-                    if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
                         key = _make_context_key(download.username, download.filename)
                         # Convert DownloadStatus to transfer dict format for monitor compatibility
                         live_transfers[key] = {
