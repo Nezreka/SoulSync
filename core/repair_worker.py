@@ -489,6 +489,9 @@ class RepairWorker:
                 continue
 
             interval_hours = config['interval_hours']
+            if not interval_hours or interval_hours <= 0:
+                continue  # Skip jobs with invalid interval
+
             last_run = self._get_last_run(job_id)
 
             if not last_run or not last_run.get('finished_at'):
