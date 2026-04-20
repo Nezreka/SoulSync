@@ -276,18 +276,6 @@ def _build_discography_release_dict(release: Any, artist_id: str) -> Optional[Di
     if not release_id:
         return None
 
-    artist_ids = _extract_lookup_value(release, 'artist_ids') or []
-    if isinstance(artist_ids, (str, bytes)):
-        artist_ids = [artist_ids]
-    else:
-        try:
-            artist_ids = list(artist_ids)
-        except TypeError:
-            artist_ids = [artist_ids]
-
-    if artist_ids and str(artist_ids[0]) != str(artist_id):
-        return None
-
     album_type = _extract_lookup_value(release, 'album_type', default='album') or 'album'
     release_date = _extract_lookup_value(release, 'release_date')
 
@@ -551,7 +539,6 @@ def _build_artist_detail_release_card(release: Dict[str, Any]) -> Optional[Dict[
         'id': release_id,
         'name': _extract_lookup_value(release, 'name', 'title', default=release_id),
         'title': _extract_lookup_value(release, 'name', 'title', default=release_id),
-        'spotify_id': release_id,
         'album_type': album_type,
         'image_url': _extract_lookup_value(release, 'image_url', 'thumb_url', 'cover_image'),
         'year': release_year,
