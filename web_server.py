@@ -81,17 +81,14 @@ from services.sync_service import PlaylistSyncService
 # Pre-v1.3 docker-compose files mounted soulsync_database:/app/database, which overlays
 # the Python package with stale volume contents. Detect this after import.
 if not hasattr(MusicDatabase, 'get_system_automation_by_action'):
-    print("=" * 70)
-    print("ERROR: Stale database module detected!")
-    print("   MusicDatabase is missing required methods. This usually means")
-    print("   your docker-compose.yml has an outdated volume mount:")
-    print("")
-    print("   FIX: Change your docker-compose.yml volume:")
-    print("     OLD: soulsync_database:/app/database")
-    print("     NEW: soulsync_database:/app/data")
-    print("")
-    print("   Then run: docker compose down && docker compose up -d")
-    print("=" * 70)
+    logger.error(
+        "Stale database module detected!\n"
+        "MusicDatabase is missing required methods. This usually means your docker-compose.yml has an outdated volume mount.\n"
+        "Fix:\n"
+        "  OLD: soulsync_database:/app/database\n"
+        "  NEW: soulsync_database:/app/data\n"
+        "Then run: docker compose down && docker compose up -d"
+    )
 from datetime import datetime, timezone
 import yt_dlp
 from core.matching_engine import MusicMatchingEngine
@@ -119,7 +116,7 @@ DEV_STATIC_NO_CACHE = os.environ.get('SOULSYNC_WEB_DEV_NO_CACHE', '0').lower() i
 env_config_path = os.environ.get('SOULSYNC_CONFIG_PATH')
 if env_config_path:
     config_path = env_config_path
-    print(f"Using config path from environment: {config_path}")
+    logger.info(f"Using config path from environment: {config_path}")
 else:
     config_path = os.path.join(project_root, 'config', 'config.json')
 
@@ -133,20 +130,20 @@ if os.path.exists(config_path):
         current_loaded_path = current_loaded_path.resolve()
 
     if current_loaded_path == target_path and config_manager.config_data:
-        print(f"Web server configuration already loaded from: {config_path}")
+        logger.info(f"Web server configuration already loaded from: {config_path}")
     else:
-        print(f"Found config file at: {config_path}")
+        logger.info(f"Found config file at: {config_path}")
         # Load configuration into the existing singleton instance
         if hasattr(config_manager, 'load_config'):
             config_manager.load_config(config_path)
         else:
             # Fallback for older settings.py in Docker volumes
-            print("Legacy configuration detected: using fallback loading method")
+            logger.warning("Legacy configuration detected: using fallback loading method")
             config_manager.config_path = Path(config_path)
             config_manager._load_config()
-        print("Web server configuration loaded successfully.")
+        logger.info("Web server configuration loaded successfully.")
 else:
-    print(f"WARNING: config.json not found at {config_path}. Using default settings.")
+    logger.warning(f"config.json not found at {config_path}. Using default settings.")
 # Correctly point to the 'webui' directory for templates and static files
 app = Flask(
     __name__,
@@ -365,78 +362,78 @@ def _make_context_key(username, filename):
 # --- Initialize Core Application Components ---
 # Each client is initialized independently so one failure doesn't take down everything.
 # Previously, a single exception set ALL clients to None, breaking the entire app.
-print("Initializing SoulSync services for Web UI...")
+logger.info("Initializing SoulSync services for Web UI...")
 spotify_client = plex_client = jellyfin_client = navidrome_client = soulsync_library_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
 
 try:
     spotify_client = SpotifyClient()
-    print("  Spotify client initialized")
+    logger.info("  Spotify client initialized")
 except Exception as e:
-    print(f"  Spotify client failed to initialize: {e}")
+    logger.error(f"  Spotify client failed to initialize: {e}")
 
 try:
     plex_client = PlexClient()
-    print("  Plex client initialized")
+    logger.info("  Plex client initialized")
 except Exception as e:
-    print(f"  Plex client failed to initialize: {e}")
+    logger.error(f"  Plex client failed to initialize: {e}")
 
 try:
     jellyfin_client = JellyfinClient()
-    print("  Jellyfin client initialized")
+    logger.info("  Jellyfin client initialized")
 except Exception as e:
-    print(f"  Jellyfin client failed to initialize: {e}")
+    logger.error(f"  Jellyfin client failed to initialize: {e}")
 
 try:
     navidrome_client = NavidromeClient()
-    print("  Navidrome client initialized")
+    logger.info("  Navidrome client initialized")
 except Exception as e:
-    print(f"  Navidrome client failed to initialize: {e}")
+    logger.error(f"  Navidrome client failed to initialize: {e}")
 
 try:
     from core.soulsync_client import SoulSyncClient
     soulsync_library_client = SoulSyncClient()
-    print("  SoulSync library client initialized")
+    logger.info("  SoulSync library client initialized")
 except Exception as e:
-    print(f"  SoulSync library client failed to initialize: {e}")
+    logger.error(f"  SoulSync library client failed to initialize: {e}")
 
 try:
     soulseek_client = DownloadOrchestrator()
-    print("  Download orchestrator initialized")
+    logger.info("  Download orchestrator initialized")
 except Exception as e:
-    print(f"  Download orchestrator failed to initialize: {e}")
+    logger.error(f"  Download orchestrator failed to initialize: {e}")
 
 try:
     tidal_client = TidalClient()
-    print("  Tidal client initialized")
+    logger.info("  Tidal client initialized")
 except Exception as e:
-    print(f"  Tidal client failed to initialize: {e}")
+    logger.error(f"  Tidal client failed to initialize: {e}")
 
 try:
     matching_engine = MusicMatchingEngine()
-    print("  Matching engine initialized")
+    logger.info("  Matching engine initialized")
 except Exception as e:
-    print(f"  Matching engine failed to initialize: {e}")
+    logger.error(f"  Matching engine failed to initialize: {e}")
 
 try:
     sync_service = PlaylistSyncService(spotify_client, plex_client, soulseek_client, jellyfin_client, navidrome_client)
-    print("  Playlist sync service initialized")
+    logger.info("  Playlist sync service initialized")
 except Exception as e:
-    print(f"  Playlist sync service failed to initialize: {e}")
+    logger.error(f"  Playlist sync service failed to initialize: {e}")
 
 # Inject shutdown check callback into YouTube and Tidal clients (avoids circular imports)
 if soulseek_client:
     if hasattr(soulseek_client, 'youtube'):
          soulseek_client.youtube.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         print("  Configured YouTube client shutdown callback")
+         logger.info("  Configured YouTube client shutdown callback")
     if hasattr(soulseek_client, 'tidal'):
          soulseek_client.tidal.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         print("  Configured Tidal download client shutdown callback")
+         logger.info("  Configured Tidal download client shutdown callback")
     if hasattr(soulseek_client, 'qobuz'):
          soulseek_client.qobuz.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         print("  Configured Qobuz client shutdown callback")
+         logger.info("  Configured Qobuz client shutdown callback")
     if hasattr(soulseek_client, 'hifi'):
          soulseek_client.hifi.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
-         print("  Configured HiFi client shutdown callback")
+         logger.info("  Configured HiFi client shutdown callback")
 
 # Initialize web scan manager for automatic post-download scanning
 try:
@@ -447,18 +444,18 @@ try:
         'soulsync_library_client': soulsync_library_client,
     }
     web_scan_manager = WebScanManager(media_clients, delay_seconds=60)
-    print("  Web scan manager initialized")
+    logger.info("  Web scan manager initialized")
 except Exception as e:
-    print(f"  Web scan manager failed to initialize: {e}")
+    logger.error(f"  Web scan manager failed to initialize: {e}")
 
-print("Core service initialization complete.")
+logger.info("Core service initialization complete.")
 
 # --- Automation Engine ---
 try:
     automation_engine = AutomationEngine(get_database())
-    print("Automation engine initialized.")
+    logger.info("Automation engine initialized.")
 except Exception as e:
-    print(f"Automation engine failed to initialize: {e}")
+    logger.error(f"Automation engine failed to initialize: {e}")
     automation_engine = None
 
 def _register_automation_handlers():
@@ -825,7 +822,7 @@ def _register_automation_handlers():
                     if old_ids != new_ids:
                         added_count = len(new_ids - old_ids)
                         removed_count = len(old_ids - new_ids)
-                        print(f"[AUTOMATION] Playlist changed: '{pl.get('name', '')}' — {added_count} added, {removed_count} removed (old={len(old_ids)}, new={len(new_ids)})")
+                        logger.info(f"[AUTOMATION] Playlist changed: '{pl.get('name', '')}' — {added_count} added, {removed_count} removed (old={len(old_ids)}, new={len(new_ids)})")
                         _update_automation_progress(auto_id,
                             log_line=f'"{pl.get("name", "")}" — {added_count} added, {removed_count} removed', log_type='success')
                         try:
@@ -841,7 +838,7 @@ def _register_automation_handlers():
                         except Exception:
                             pass
                     else:
-                        print(f"[AUTOMATION] No changes: '{pl.get('name', '')}' (tracks={len(old_ids)})")
+                        logger.warning(f"[AUTOMATION] No changes: '{pl.get('name', '')}' (tracks={len(old_ids)})")
                         _update_automation_progress(auto_id,
                             log_line=f'No changes: "{pl.get("name", "")}"', log_type='skip')
             except Exception as e:
@@ -1119,7 +1116,7 @@ def _register_automation_handlers():
                     # but we pass None so it doesn't conflict with our pipeline progress
                     _run_playlist_discovery_worker(pls, automation_id=None)
                 except Exception as e:
-                    print(f"[Pipeline] Discovery error: {e}")
+                    logger.error(f"[Pipeline] Discovery error: {e}")
                 finally:
                     disc_done.set()
 
@@ -2014,7 +2011,7 @@ def _register_automation_handlers():
                 })
         web_scan_manager.add_scan_completion_callback(_on_library_scan_completed)
 
-    print("Automation action handlers registered")
+    logger.info("Automation action handlers registered")
 
 
 def _emit_track_downloaded(context):
@@ -2350,7 +2347,7 @@ def _record_soulsync_library_entry(context, spotify_artist, album_info):
                         pass
 
             conn.commit()
-            print(f"[SoulSync Library] Added: {artist_name} / {album_name} / {track_name}")
+            logger.info(f"[SoulSync Library] Added: {artist_name} / {album_name} / {track_name}")
 
     except Exception as e:
         logger.debug(f"[SoulSync Library] Non-critical error: {e}")
@@ -2372,9 +2369,9 @@ try:
         'hydrabase_client': None,       # updated after Hydrabase init
         'hydrabase_worker': None,       # updated after Hydrabase init
     }
-    print("Public REST API v1 registered at /api/v1")
+    logger.info("Public REST API v1 registered at /api/v1")
 except Exception as e:
-    print(f"Public REST API v1 failed to register: {e}")
+    logger.error(f"Public REST API v1 failed to register: {e}")
 
 # --- Global Streaming State Management ---
 # Thread-safe state tracking for streaming functionality
@@ -2653,14 +2650,14 @@ def get_cached_transfer_data():
                             'averageSpeed': download.speed,
                         }
             except Exception as e:
-                print(f"Could not fetch streaming source downloads: {e}")
+                logger.error(f"Could not fetch streaming source downloads: {e}")
 
             # Update cache
             transfer_data_cache['data'] = live_transfers_lookup
             transfer_data_cache['last_update'] = current_time
             
         except Exception as e:
-            print(f"Could not fetch live transfers (cached): {e}")
+            logger.error(f"Could not fetch live transfers (cached): {e}")
             # Return empty dict on error, but don't update cache timestamp
             # This way we'll retry on the next request
             return {}
@@ -2719,14 +2716,14 @@ def get_cached_beatport_data(section_type, data_key, genre_slug=None):
             # Check if cache is still valid
             age = current_time - cache_entry['timestamp']
             if age < cache_entry['ttl'] and cache_entry['data'] is not None:
-                print(f"Cache HIT for {section_type}/{data_key} (age: {age:.1f}s)")
+                logger.debug(f"Cache HIT for {section_type}/{data_key} (age: {age:.1f}s)")
                 return cache_entry['data']
             else:
-                print(f"⏰ Cache MISS for {section_type}/{data_key} (age: {age:.1f}s, ttl: {cache_entry['ttl']}s)")
+                logger.debug(f"⏰ Cache MISS for {section_type}/{data_key} (age: {age:.1f}s, ttl: {cache_entry['ttl']}s)")
                 return None
 
         except Exception as e:
-            print(f"Cache lookup error for {section_type}/{data_key}: {e}")
+            logger.error(f"Cache lookup error for {section_type}/{data_key}: {e}")
             return None
 
 def set_cached_beatport_data(section_type, data_key, data, genre_slug=None):
@@ -2747,7 +2744,7 @@ def set_cached_beatport_data(section_type, data_key, data, genre_slug=None):
                 if data_key in beatport_data_cache['homepage']:
                     beatport_data_cache['homepage'][data_key]['data'] = data
                     beatport_data_cache['homepage'][data_key]['timestamp'] = current_time
-                    print(f"Cached {section_type}/{data_key} (ttl: {beatport_data_cache['homepage'][data_key]['ttl']}s)")
+                    logger.info(f"Cached {section_type}/{data_key} (ttl: {beatport_data_cache['homepage'][data_key]['ttl']}s)")
             elif section_type == 'genre' and genre_slug:
                 # Initialize genre cache if not exists
                 if genre_slug not in beatport_data_cache['genre']:
@@ -2761,10 +2758,10 @@ def set_cached_beatport_data(section_type, data_key, data, genre_slug=None):
 
                 beatport_data_cache['genre'][genre_slug][data_key]['data'] = data
                 beatport_data_cache['genre'][genre_slug][data_key]['timestamp'] = current_time
-                print(f"Cached {section_type}/{genre_slug}/{data_key}")
+                logger.info(f"Cached {section_type}/{genre_slug}/{data_key}")
 
         except Exception as e:
-            print(f"Cache storage error for {section_type}/{data_key}: {e}")
+            logger.error(f"Cache storage error for {section_type}/{data_key}: {e}")
 
 def add_cache_headers(response, cache_duration=300):
     """
@@ -2855,7 +2852,7 @@ class WebUIDownloadMonitor:
                 self.monitoring = True
                 self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
                 self.monitor_thread.start()
-                print(f"Started download monitor for batch {batch_id}")
+                logger.info(f"Started download monitor for batch {batch_id}")
     
     def stop_monitoring(self, batch_id):
         """Stop monitoring a specific batch"""
@@ -2863,7 +2860,7 @@ class WebUIDownloadMonitor:
             self.monitored_batches.discard(batch_id)
             if not self.monitored_batches:
                 self.monitoring = False
-                print(f"Stopped download monitor (no active batches)")
+                logger.warning(f"Stopped download monitor (no active batches)")
 
     def shutdown(self):
         """Stop the monitor loop and clear active batch tracking."""
@@ -2871,7 +2868,7 @@ class WebUIDownloadMonitor:
             self.monitoring = False
             self.monitored_batches.clear()
             self.monitor_thread = None
-        print("Download monitor shutdown requested")
+        logger.info("Download monitor shutdown requested")
     
     def _monitor_loop(self):
         """Main monitoring loop - checks downloads every 1 second for responsive web UX"""
@@ -2885,12 +2882,12 @@ class WebUIDownloadMonitor:
             except Exception as e:
                 # If we get shutdown errors, stop monitoring gracefully
                 if "interpreter shutdown" in str(e) or "cannot schedule new futures" in str(e):
-                    print(f"Monitor detected shutdown, stopping gracefully")
+                    logger.info(f"Monitor detected shutdown, stopping gracefully")
                     self.monitoring = False
                     break
-                print(f"Download monitor error: {e}")
+                logger.error(f"Download monitor error: {e}")
                 
-        print(f"Download monitor loop ended")
+        logger.info(f"Download monitor loop ended")
     
     def _check_all_downloads(self):
         """Check all active downloads for timeouts and failures"""
@@ -2948,7 +2945,7 @@ class WebUIDownloadMonitor:
                                 transferred = live_info.get('bytesTransferred', 0)
                                 if expected_size > 0 and transferred < expected_size:
                                     if not task.get('_incomplete_warned'):
-                                        print(f"Monitor: {task_id} state={state} but bytes incomplete ({transferred}/{expected_size}) — waiting")
+                                        logger.info(f"Monitor: {task_id} state={state} but bytes incomplete ({transferred}/{expected_size}) — waiting")
                                         task['_incomplete_warned'] = True
                                     continue
                             if has_completion and not has_error and task['status'] == 'downloading':
@@ -2960,7 +2957,7 @@ class WebUIDownloadMonitor:
                                 # left tasks stuck in 'downloading' forever.
                                 task['status'] = 'post_processing'
                                 task['status_change_time'] = current_time
-                                print(f"Monitor detected completed download for {task_id} ({state}) - submitting post-processing")
+                                logger.info(f"Monitor detected completed download for {task_id} ({state}) - submitting post-processing")
                                 # Collect for handling outside the lock to prevent deadlock.
                                 # _on_download_completed acquires tasks_lock which is non-reentrant.
                                 completed_tasks.append((batch_id, task_id))
@@ -2974,21 +2971,21 @@ class WebUIDownloadMonitor:
             try:
                 if op[0] == 'cancel_download':
                     _, download_id, username = op
-                    print(f"[Deferred] Cancelling download: {download_id} from {username}")
+                    logger.info(f"[Deferred] Cancelling download: {download_id} from {username}")
                     run_async(soulseek_client.cancel_download(download_id, username, remove=True))
-                    print(f"[Deferred] Successfully cancelled download {download_id}")
+                    logger.warning(f"[Deferred] Successfully cancelled download {download_id}")
                 elif op[0] == 'cleanup_orphan':
                     _, context_key = op
                     with matched_context_lock:
                         matched_downloads_context.pop(context_key, None)
-                    print(f"[Deferred] Cleaned up orphaned download context: {context_key}")
+                    logger.warning(f"[Deferred] Cleaned up orphaned download context: {context_key}")
                 elif op[0] == 'restart_worker':
                     _, task_id, batch_id = op
-                    print(f"[Deferred] Restarting worker for task {task_id}")
+                    logger.info(f"[Deferred] Restarting worker for task {task_id}")
                     missing_download_executor.submit(_download_track_worker, task_id, batch_id)
-                    print(f"[Deferred] Successfully restarted worker for task {task_id}")
+                    logger.info(f"[Deferred] Successfully restarted worker for task {task_id}")
             except Exception as e:
-                print(f"[Deferred] Error executing deferred operation {op[0]}: {e}")
+                logger.error(f"[Deferred] Error executing deferred operation {op[0]}: {e}")
 
         # Handle completed downloads outside the lock to prevent deadlock
         # (_on_download_completed acquires tasks_lock internally)
@@ -2996,19 +2993,19 @@ class WebUIDownloadMonitor:
             try:
                 # Submit post-processing worker (file move, tagging, AcoustID verification)
                 # This makes batch downloads fully independent of browser polling.
-                print(f"[Monitor] Submitting post-processing worker for task {task_id}")
+                logger.info(f"[Monitor] Submitting post-processing worker for task {task_id}")
                 missing_download_executor.submit(_run_post_processing_worker, task_id, batch_id)
                 # Chain to next download in the batch queue
                 _on_download_completed(batch_id, task_id, success=True)
             except Exception as e:
-                print(f"[Monitor] Error handling completed task {task_id}: {e}")
+                logger.error(f"[Monitor] Error handling completed task {task_id}: {e}")
         # Handle exhausted retry tasks outside the lock to prevent deadlock
         for batch_id, task_id in exhausted_tasks:
             try:
-                print(f"[Monitor] Calling completion callback for exhausted task {task_id}")
+                logger.info(f"[Monitor] Calling completion callback for exhausted task {task_id}")
                 _on_download_completed(batch_id, task_id, success=False)
             except Exception as e:
-                print(f"[Monitor] Error handling exhausted task {task_id}: {e}")
+                logger.error(f"[Monitor] Error handling exhausted task {task_id}: {e}")
 
         # ENHANCED: Add worker count validation to detect ghost workers
         self._validate_worker_counts()
@@ -3067,7 +3064,7 @@ class WebUIDownloadMonitor:
                             'averageSpeed': download.speed,
                         }
             except Exception as yt_error:
-                print(f"Monitor: Could not fetch streaming source downloads: {yt_error}")
+                logger.error(f"Monitor: Could not fetch streaming source downloads: {yt_error}")
 
             return live_transfers
         except Exception as e:
@@ -3075,11 +3072,11 @@ class WebUIDownloadMonitor:
             if ("interpreter shutdown" in str(e) or 
                 "cannot schedule new futures" in str(e) or
                 "Event loop is closed" in str(e)):
-                print(f"Monitor detected shutdown, stopping immediately")
+                logger.info(f"Monitor detected shutdown, stopping immediately")
                 self.monitoring = False
                 return {}
             else:
-                print(f"Monitor: Could not fetch live transfers: {e}")
+                logger.error(f"Monitor: Could not fetch live transfers: {e}")
             return {}
     
     def _should_retry_task(self, task_id, task, live_transfers_lookup, current_time, deferred_ops):
@@ -3109,7 +3106,7 @@ class WebUIDownloadMonitor:
                 last_retry = task.get('last_retry_time', 0)
 
                 if retry_count < 3 and (current_time - last_retry) > 30:
-                    print(f"Task not in live transfers for >90s - retry {retry_count + 1}/3")
+                    logger.warning(f"Task not in live transfers for >90s - retry {retry_count + 1}/3")
                     task['stuck_retry_count'] = retry_count + 1
                     task['last_retry_time'] = current_time
 
@@ -3125,7 +3122,7 @@ class WebUIDownloadMonitor:
                         source_key = f"{task_username}_{task_filename}"
                         used_sources.add(source_key)
                         task['used_sources'] = used_sources
-                        print(f"Marked missing-transfer source as used: {source_key}")
+                        logger.warning(f"Marked missing-transfer source as used: {source_key}")
 
                     # Defer orphan cleanup
                     if task_username and task_filename:
@@ -3140,7 +3137,7 @@ class WebUIDownloadMonitor:
                     task.pop('queued_start_time', None)
                     task.pop('downloading_start_time', None)
                     task['status_change_time'] = current_time
-                    print(f"Task {task.get('track_info', {}).get('name', 'Unknown')} reset for missing-transfer retry")
+                    logger.warning(f"Task {task.get('track_info', {}).get('name', 'Unknown')} reset for missing-transfer retry")
 
                     batch_id = task.get('batch_id')
                     if task_id and batch_id:
@@ -3152,7 +3149,7 @@ class WebUIDownloadMonitor:
                     track_label = task.get('track_info', {}).get('name', 'Unknown')
                     tried_sources = task.get('used_sources', set())
                     sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
-                    print(f"Task failed after 3 retry attempts (not in live transfers)")
+                    logger.error(f"Task failed after 3 retry attempts (not in live transfers)")
                     task['status'] = 'failed'
                     task['error_message'] = f'Download disappeared from transfer list 3 times for "{track_label}"{sources_str} — source may be unavailable'
 
@@ -3172,7 +3169,7 @@ class WebUIDownloadMonitor:
 
             # Don't retry too frequently (wait at least 5 seconds between error retries)
             if retry_count < 3 and (current_time - last_retry) > 5:  # Max 3 error retry attempts
-                print(f"Task errored (state: {state_str}) - immediate retry {retry_count + 1}/3")
+                logger.error(f"Task errored (state: {state_str}) - immediate retry {retry_count + 1}/3")
                 task['error_retry_count'] = retry_count + 1
                 task['last_error_retry_time'] = current_time
 
@@ -3192,7 +3189,7 @@ class WebUIDownloadMonitor:
                     source_key = f"{username}_{filename}"
                     used_sources.add(source_key)
                     task['used_sources'] = used_sources
-                    print(f"Marked errored source as used: {source_key}")
+                    logger.error(f"Marked errored source as used: {source_key}")
 
                 # Defer orphan cleanup to outside the lock (needs matched_context_lock)
                 if username and filename:
@@ -3210,7 +3207,7 @@ class WebUIDownloadMonitor:
                 task.pop('queued_start_time', None)
                 task.pop('downloading_start_time', None)
                 task['status_change_time'] = current_time
-                print(f"Task {task.get('track_info', {}).get('name', 'Unknown')} reset for error retry")
+                logger.error(f"Task {task.get('track_info', {}).get('name', 'Unknown')} reset for error retry")
 
                 # Defer worker restart to outside the lock
                 batch_id = task.get('batch_id')
@@ -3225,7 +3222,7 @@ class WebUIDownloadMonitor:
                 track_label = task.get('track_info', {}).get('name', 'Unknown')
                 tried_sources = task.get('used_sources', set())
                 sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
-                print(f"Task failed after 3 error retry attempts")
+                logger.error(f"Task failed after 3 error retry attempts")
                 task['status'] = 'failed'
                 # Tidal-specific error: check if this was a quality issue.
                 # task['username'] is popped on error-retry (line ~2866) so we can't rely on it;
@@ -3250,7 +3247,7 @@ class WebUIDownloadMonitor:
                 # CRITICAL: Notify batch manager so track is added to permanently_failed_tracks
                 batch_id = task.get('batch_id')
                 if batch_id:
-                    print(f"[Retry Exhausted] Notifying batch manager of permanent failure for task {task_id}")
+                    logger.error(f"[Retry Exhausted] Notifying batch manager of permanent failure for task {task_id}")
                     return True  # Signal that we need to call completion outside the lock
                 return False
 
@@ -3275,7 +3272,7 @@ class WebUIDownloadMonitor:
 
                     # Don't retry too frequently (wait at least 30 seconds between retries)
                     if retry_count < 3 and (current_time - last_retry) > 30:  # Max 3 retry attempts
-                        print(f"Task stuck in queue for {queue_time:.1f}s - immediate retry {retry_count + 1}/3")
+                        logger.warning(f"Task stuck in queue for {queue_time:.1f}s - immediate retry {retry_count + 1}/3")
                         task['stuck_retry_count'] = retry_count + 1
                         task['last_retry_time'] = current_time
 
@@ -3296,7 +3293,7 @@ class WebUIDownloadMonitor:
                             source_key = f"{username}_{filename}"
                             used_sources.add(source_key)
                             task['used_sources'] = used_sources
-                            print(f"Marked timeout source as used: {source_key}")
+                            logger.error(f"Marked timeout source as used: {source_key}")
 
                         # Defer orphan cleanup to outside the lock (needs matched_context_lock)
                         if username and filename:
@@ -3314,7 +3311,7 @@ class WebUIDownloadMonitor:
                         task.pop('queued_start_time', None)
                         task.pop('downloading_start_time', None)
                         task['status_change_time'] = current_time
-                        print(f"Task {task.get('track_info', {}).get('name', 'Unknown')} reset for timeout retry")
+                        logger.error(f"Task {task.get('track_info', {}).get('name', 'Unknown')} reset for timeout retry")
 
                         # Defer worker restart to outside the lock
                         batch_id = task.get('batch_id')
@@ -3329,7 +3326,7 @@ class WebUIDownloadMonitor:
                         track_label = task.get('track_info', {}).get('name', 'Unknown')
                         tried_sources = task.get('used_sources', set())
                         sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
-                        print(f"Task failed after 3 retry attempts (queue timeout)")
+                        logger.error(f"Task failed after 3 retry attempts (queue timeout)")
                         task['status'] = 'failed'
                         task['error_message'] = f'Download stayed queued too long 3 times for "{track_label}"{sources_str} — peers may be offline or have full queues'
                         # Clear timers to prevent further retry loops
@@ -3339,7 +3336,7 @@ class WebUIDownloadMonitor:
                         # CRITICAL: Notify batch manager so track is added to permanently_failed_tracks
                         batch_id = task.get('batch_id')
                         if batch_id:
-                            print(f"[Retry Exhausted] Notifying batch manager of permanent failure for task {task_id}")
+                            logger.error(f"[Retry Exhausted] Notifying batch manager of permanent failure for task {task_id}")
                             return True  # Signal that we need to call completion outside the lock
                         return False
                 
@@ -3363,7 +3360,7 @@ class WebUIDownloadMonitor:
                     
                     # Don't retry too frequently (wait at least 30 seconds between retries)
                     if retry_count < 3 and (current_time - last_retry) > 30:  # Max 3 retry attempts
-                        print(f"Task stuck at 0% for {download_time:.1f}s - immediate retry {retry_count + 1}/3")
+                        logger.warning(f"Task stuck at 0% for {download_time:.1f}s - immediate retry {retry_count + 1}/3")
                         task['stuck_retry_count'] = retry_count + 1
                         task['last_retry_time'] = current_time
 
@@ -3384,7 +3381,7 @@ class WebUIDownloadMonitor:
                             source_key = f"{username}_{filename}"
                             used_sources.add(source_key)
                             task['used_sources'] = used_sources
-                            print(f"Marked 0% progress source as used: {source_key}")
+                            logger.info(f"Marked 0% progress source as used: {source_key}")
 
                         # Defer orphan cleanup to outside the lock (needs matched_context_lock)
                         if username and filename:
@@ -3402,7 +3399,7 @@ class WebUIDownloadMonitor:
                         task.pop('queued_start_time', None)
                         task.pop('downloading_start_time', None)
                         task['status_change_time'] = current_time
-                        print(f"Task {task.get('track_info', {}).get('name', 'Unknown')} reset for 0% retry")
+                        logger.warning(f"Task {task.get('track_info', {}).get('name', 'Unknown')} reset for 0% retry")
 
                         # Defer worker restart to outside the lock
                         batch_id = task.get('batch_id')
@@ -3416,7 +3413,7 @@ class WebUIDownloadMonitor:
                         track_label = task.get('track_info', {}).get('name', 'Unknown')
                         tried_sources = task.get('used_sources', set())
                         sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
-                        print(f"Task failed after 3 retry attempts (0% progress timeout)")
+                        logger.error(f"Task failed after 3 retry attempts (0% progress timeout)")
                         task['status'] = 'failed'
                         task['error_message'] = f'Download stuck at 0% three times for "{track_label}"{sources_str} — peers may have connection issues'
                         # Clear timers to prevent further retry loops
@@ -3426,7 +3423,7 @@ class WebUIDownloadMonitor:
                         # CRITICAL: Notify batch manager so track is added to permanently_failed_tracks
                         batch_id = task.get('batch_id')
                         if batch_id:
-                            print(f"[Retry Exhausted] Notifying batch manager of permanent failure for task {task_id}")
+                            logger.error(f"[Retry Exhausted] Notifying batch manager of permanent failure for task {task_id}")
                             return True  # Signal that we need to call completion outside the lock
                         return False
         else:
@@ -3453,7 +3450,7 @@ class WebUIDownloadMonitor:
                     last_retry = task.get('last_retry_time', 0)
 
                     if retry_count < 3 and (current_time - last_retry) > 30:
-                        print(f"Task stuck in unknown state '{state_str}' with 0 progress for {download_time:.1f}s - retry {retry_count + 1}/3")
+                        logger.warning(f"Task stuck in unknown state '{state_str}' with 0 progress for {download_time:.1f}s - retry {retry_count + 1}/3")
                         task['stuck_retry_count'] = retry_count + 1
                         task['last_retry_time'] = current_time
 
@@ -3470,7 +3467,7 @@ class WebUIDownloadMonitor:
                             source_key = f"{username}_{filename}"
                             used_sources.add(source_key)
                             task['used_sources'] = used_sources
-                            print(f"Marked unknown-state source as used: {source_key}")
+                            logger.info(f"Marked unknown-state source as used: {source_key}")
 
                         if username and filename:
                             old_context_key = _make_context_key(username, filename)
@@ -3493,7 +3490,7 @@ class WebUIDownloadMonitor:
                         track_label = task.get('track_info', {}).get('name', 'Unknown')
                         tried_sources = task.get('used_sources', set())
                         sources_str = f' (tried {len(tried_sources)} source{"s" if len(tried_sources) != 1 else ""})' if tried_sources else ''
-                        print(f"Task failed after 3 retry attempts (unknown state '{state_str}')")
+                        logger.error(f"Task failed after 3 retry attempts (unknown state '{state_str}')")
                         task['status'] = 'failed'
                         task['error_message'] = f'Download stuck in "{state_str}" state 3 times for "{track_label}"{sources_str}'
                         task.pop('queued_start_time', None)
@@ -3547,16 +3544,16 @@ class WebUIDownloadMonitor:
 
                     # Check for discrepancies
                     if reported_active != actually_active or orphaned_tasks:
-                        print(f"[Worker Validation] Batch {batch_id}: reported={reported_active}, actual={actually_active}, orphaned={len(orphaned_tasks)}")
+                        logger.warning(f"[Worker Validation] Batch {batch_id}: reported={reported_active}, actual={actually_active}, orphaned={len(orphaned_tasks)}")
 
                         if orphaned_tasks:
-                            print(f"[Worker Validation] Found {len(orphaned_tasks)} orphaned tasks to cleanup")
+                            logger.warning(f"[Worker Validation] Found {len(orphaned_tasks)} orphaned tasks to cleanup")
 
                         # Fix the active count if it's wrong
                         if reported_active != actually_active:
                             old_count = batch['active_count']
                             batch['active_count'] = actually_active
-                            print(f"[Worker Validation] Fixed active count: {old_count} → {actually_active}")
+                            logger.info(f"[Worker Validation] Fixed active count: {old_count} → {actually_active}")
 
                             # Defer starting workers to outside the lock
                             if actually_active < max_concurrent and queue_index < len(queue):
@@ -3565,13 +3562,13 @@ class WebUIDownloadMonitor:
             # Start replacement workers outside the lock
             for batch_id in batches_needing_workers:
                 try:
-                    print(f"[Worker Validation] Starting replacement workers for {batch_id}")
+                    logger.info(f"[Worker Validation] Starting replacement workers for {batch_id}")
                     _start_next_batch_of_downloads(batch_id)
                 except Exception as e:
-                    print(f"[Worker Validation] Error starting workers for {batch_id}: {e}")
+                    logger.error(f"[Worker Validation] Error starting workers for {batch_id}: {e}")
 
         except Exception as validation_error:
-            print(f"Error in worker count validation: {validation_error}")
+            logger.error(f"Error in worker count validation: {validation_error}")
 
 # Global download monitor instance
 download_monitor = WebUIDownloadMonitor()
@@ -3611,7 +3608,7 @@ def validate_and_heal_batch_states():
                         # Check if batch has been complete for >5 minutes
                         time_since_completion = current_time - completion_time
                         if time_since_completion > 300:  # 5 minutes
-                            print(f"[Auto-Cleanup] Removing stale completed batch {batch_id} (completed {time_since_completion:.0f}s ago)")
+                            logger.warning(f"[Auto-Cleanup] Removing stale completed batch {batch_id} (completed {time_since_completion:.0f}s ago)")
                             batches_to_cleanup.append(batch_id)
                             continue  # Skip other healing logic for this batch
 
@@ -3635,7 +3632,7 @@ def validate_and_heal_batch_states():
 
                 # Check for inconsistencies
                 if active_count != actually_active:
-                    print(f"[Batch Healing] {batch_id}: fixing active count {active_count} → {actually_active}")
+                    logger.info(f"[Batch Healing] {batch_id}: fixing active count {active_count} → {actually_active}")
                     batch_data['active_count'] = actually_active
                     healed_batches.append(batch_id)
 
@@ -3647,7 +3644,7 @@ def validate_and_heal_batch_states():
 
                 # Clean up orphaned tasks that are blocking progress
                 if orphaned_tasks and phase == 'downloading':
-                    print(f"[Batch Healing] Found {len(orphaned_tasks)} orphaned tasks in active batch {batch_id}")
+                    logger.warning(f"[Batch Healing] Found {len(orphaned_tasks)} orphaned tasks in active batch {batch_id}")
                     batches_needing_completion_check.append(batch_id)
 
             # Cleanup stale batches inside the lock (safe - just dict mutations)
@@ -3660,31 +3657,31 @@ def validate_and_heal_batch_states():
                         del download_tasks[task_id]
 
             if batches_to_cleanup:
-                print(f"[Auto-Cleanup] Removed {len(batches_to_cleanup)} stale completed batches")
+                logger.warning(f"[Auto-Cleanup] Removed {len(batches_to_cleanup)} stale completed batches")
 
             if healed_batches:
-                print(f"[Batch Healing] Healed {len(healed_batches)} batches: {healed_batches}")
+                logger.info(f"[Batch Healing] Healed {len(healed_batches)} batches: {healed_batches}")
 
         # ---- All work below runs WITHOUT tasks_lock held ----
 
         # Start replacement workers for healed batches
         for batch_id in batches_needing_workers:
             try:
-                print(f"[Batch Healing] Starting replacement workers for {batch_id}")
+                logger.info(f"[Batch Healing] Starting replacement workers for {batch_id}")
                 _start_next_batch_of_downloads(batch_id)
             except Exception as e:
-                print(f"[Batch Healing] Error starting workers for {batch_id}: {e}")
+                logger.error(f"[Batch Healing] Error starting workers for {batch_id}: {e}")
 
         # Trigger completion checks for batches with orphaned tasks
         for batch_id in batches_needing_completion_check:
             try:
-                print(f"[Batch Healing] Triggering completion check for batch with orphaned tasks")
+                logger.warning(f"[Batch Healing] Triggering completion check for batch with orphaned tasks")
                 _check_batch_completion_v2(batch_id)
             except Exception as e:
-                print(f"[Batch Healing] Error checking completion for {batch_id}: {e}")
+                logger.error(f"[Batch Healing] Error checking completion for {batch_id}: {e}")
             
     except Exception as healing_error:
-        print(f"[Batch Healing] Error during validation: {healing_error}")
+        logger.error(f"[Batch Healing] Error during validation: {healing_error}")
 
 # Start periodic batch healing (every 30 seconds)
 import threading
@@ -3719,7 +3716,7 @@ def start_batch_healing_timer():
             return
         validate_and_heal_batch_states()
     except Exception as e:
-        print(f"[Batch Healing Timer] Error: {e}")
+        logger.error(f"[Batch Healing Timer] Error: {e}")
     finally:
         # Schedule next healing cycle
         _schedule_batch_healing_timer(30.0)
@@ -3735,7 +3732,7 @@ import sys
 def cleanup_monitor():
     """Clean up background monitor on shutdown"""
     if download_monitor.monitoring:
-        print("Flask shutdown detected, stopping download monitor...")
+        logger.info("Flask shutdown detected, stopping download monitor...")
         download_monitor.shutdown()
         # Give the thread a moment to exit cleanly
         time.sleep(0.5)
@@ -3746,13 +3743,13 @@ def cleanup_monitor():
         if acquired:
             try:
                 batch_locks.clear()
-                print("Cleaned up batch locks")
+                logger.info("Cleaned up batch locks")
             finally:
                 tasks_lock.release()
         else:
-            print("Skipped batch lock cleanup - tasks_lock busy")
+            logger.warning("Skipped batch lock cleanup - tasks_lock busy")
     except Exception as e:
-        print(f"Error cleaning up batch locks: {e}")
+        logger.error(f"Error cleaning up batch locks: {e}")
 
 # Global shutdown flag
 IS_SHUTTING_DOWN = False
@@ -3762,10 +3759,10 @@ def _shutdown_executor(executor, name):
     if executor is None:
         return
     try:
-        print(f"Shutting down {name}...")
+        logger.info(f"Shutting down {name}...")
         executor.shutdown(wait=False, cancel_futures=True)
     except Exception as e:
-        print(f"Error shutting down {name}: {e}")
+        logger.error(f"Error shutting down {name}: {e}")
 
 def _stop_component(component, name, method_names=("stop", "shutdown")):
     """Call a best-effort stop method on a component if it has one."""
@@ -3775,10 +3772,10 @@ def _stop_component(component, name, method_names=("stop", "shutdown")):
         method = getattr(component, method_name, None)
         if callable(method):
             try:
-                print(f"Stopping {name}...")
+                logger.info(f"Stopping {name}...")
                 method()
             except Exception as e:
-                print(f"Error stopping {name}: {e}")
+                logger.error(f"Error stopping {name}: {e}")
             return
 
 def _stop_components_parallel(components):
@@ -3818,9 +3815,9 @@ def _shutdown_runtime_components():
     try:
         from core.api_call_tracker import api_call_tracker
         api_call_tracker.save()
-        print("API call history saved")
+        logger.info("API call history saved")
     except Exception as e:
-        print(f"Error saving API call history: {e}")
+        logger.error(f"Error saving API call history: {e}")
 
     # Stop the active DB update worker before tearing down the executor it runs on.
     # This lets an in-flight update observe should_stop and exit cleanly.
@@ -3871,7 +3868,7 @@ def _shutdown_runtime_components():
 
 def signal_handler(signum, frame):
     """Handle SIGINT (Ctrl+C) and SIGTERM"""
-    print(f"Signal {signum} received, cleaning up...")
+    logger.info(f"Signal {signum} received, cleaning up...")
     _shutdown_runtime_components()
     sys.exit(0)
 
@@ -3907,20 +3904,20 @@ def _handle_failed_download(batch_id, task_id, task, task_status):
             
             if task['retry_count'] > 2:  # Max 3 attempts total (matches GUI)
                 # All retries exhausted, mark as permanently failed
-                print(f"Task {task_id} failed after 3 retry attempts")
+                logger.error(f"Task {task_id} failed after 3 retry attempts")
                 task_status['status'] = 'failed'
                 task['status'] = 'failed'
                 return
             
             # Show retrying status while we process retry
             task_status['status'] = 'pending'  # Will show as pending until retry kicks in
-            print(f"Triggering retry {task['retry_count']}/3 for failed task {task_id}")
+            logger.error(f"Triggering retry {task['retry_count']}/3 for failed task {task_id}")
             
         # Trigger retry with next candidate (matches GUI retry_parallel_download_with_fallback)
         missing_download_executor.submit(download_monitor._retry_task_with_fallback, batch_id, task_id, task)
         
     except Exception as e:
-        print(f"Error handling failed download {task_id}: {e}")
+        logger.error(f"Error handling failed download {task_id}: {e}")
         task_status['status'] = 'failed'
         task['status'] = 'failed'
 
@@ -3989,7 +3986,7 @@ def _prepare_stream_task(track_data):
     last_progress_sent = 0.0
     
     try:
-        print(f"Starting stream preparation for: {track_data.get('filename')}")
+        logger.info(f"Starting stream preparation for: {track_data.get('filename')}")
         
         # Update state to loading
         with stream_lock:
@@ -4016,9 +4013,9 @@ def _prepare_stream_task(track_data):
                     os.remove(existing_file)
                 elif os.path.isdir(existing_file):
                     shutil.rmtree(existing_file)
-                print(f"Cleared old stream file: {existing_file}")
+                logger.info(f"Cleared old stream file: {existing_file}")
             except Exception as e:
-                print(f"Could not remove existing stream file: {e}")
+                logger.error(f"Could not remove existing stream file: {e}")
         
         # Start the download using the same mechanism as regular downloads
         loop = asyncio.new_event_loop()
@@ -4039,7 +4036,7 @@ def _prepare_stream_task(track_data):
                     })
                 return
             
-            print(f"Download initiated for streaming")
+            logger.info(f"Download initiated for streaming")
             
             # Enhanced monitoring with queue timeout detection (matching GUI)
             max_wait_time = 60  # Increased timeout
@@ -4065,7 +4062,7 @@ def _prepare_stream_task(track_data):
                         download_state = download_status.get('state', '').lower()
                         original_state = download_status.get('state', '')
                         
-                        print(f"API Download - State: {original_state}, Progress: {api_progress:.1f}%")
+                        logger.info(f"API Download - State: {original_state}, Progress: {api_progress:.1f}%")
                         
                         # Track queue state timing (matching GUI logic)
                         is_queued = ('queued' in download_state or 'initializing' in download_state)
@@ -4079,13 +4076,13 @@ def _prepare_stream_task(track_data):
                         # Handle queue state timing
                         if is_queued and queue_start_time is None:
                             queue_start_time = time.time()
-                            print(f"Download entered queue state: {original_state}")
+                            logger.info(f"Download entered queue state: {original_state}")
                             with stream_lock:
                                 stream_state["status"] = "queued"
                         elif is_downloading and not actively_downloading:
                             actively_downloading = True
                             queue_start_time = None  # Reset queue timer
-                            print(f"Download started actively downloading: {original_state}")
+                            logger.info(f"Download started actively downloading: {original_state}")
                             with stream_lock:
                                 stream_state["status"] = "loading"
                         
@@ -4093,7 +4090,7 @@ def _prepare_stream_task(track_data):
                         if is_queued and queue_start_time:
                             queue_elapsed = time.time() - queue_start_time
                             if queue_elapsed > queue_timeout:
-                                print(f"⏰ Queue timeout after {queue_elapsed:.1f}s - download stuck in queue")
+                                logger.error(f"⏰ Queue timeout after {queue_elapsed:.1f}s - download stuck in queue")
                                 with stream_lock:
                                     stream_state.update({
                                         "status": "error",
@@ -4109,7 +4106,7 @@ def _prepare_stream_task(track_data):
                         
                         # Check if download is complete
                         if is_completed:
-                            print(f"Download completed via API status: {original_state}")
+                            logger.info(f"Download completed via API status: {original_state}")
 
                             # Wait for file to stabilise on disk before moving
                             found_file = _find_downloaded_file(download_path, track_data)
@@ -4134,12 +4131,12 @@ def _prepare_stream_task(track_data):
                             for attempt in range(retry_attempts):
                                 if found_file:
                                     break
-                                print(f"File not found yet, attempt {attempt + 1}/{retry_attempts}")
+                                logger.warning(f"File not found yet, attempt {attempt + 1}/{retry_attempts}")
                                 time.sleep(1)
                                 found_file = _find_downloaded_file(download_path, track_data)
                             
                             if found_file:
-                                print(f"Found downloaded file: {found_file}")
+                                logger.info(f"Found downloaded file: {found_file}")
                                 
                                 # Move file to Stream folder
                                 original_filename = extract_filename(found_file)
@@ -4147,7 +4144,7 @@ def _prepare_stream_task(track_data):
                                 
                                 try:
                                     shutil.move(found_file, stream_path)
-                                    print(f"Moved file to stream folder: {stream_path}")
+                                    logger.info(f"Moved file to stream folder: {stream_path}")
                                     
                                     # Clean up empty directories (matching GUI)
                                     _cleanup_empty_directories(download_path, found_file)
@@ -4169,15 +4166,15 @@ def _prepare_stream_task(track_data):
                                                     download_id, track_data.get('username'), remove=True)
                                             )
                                             if success:
-                                                print(f"Cleaned up download {download_id} from API")
+                                                logger.info(f"Cleaned up download {download_id} from API")
                                     except Exception as e:
-                                        print(f"Error cleaning up download: {e}")
+                                        logger.error(f"Error cleaning up download: {e}")
                                     
-                                    print(f"Stream file ready for playback: {stream_path}")
+                                    logger.info(f"Stream file ready for playback: {stream_path}")
                                     return  # Success!
                                     
                                 except Exception as e:
-                                    print(f"Error moving file to stream folder: {e}")
+                                    logger.error(f"Error moving file to stream folder: {e}")
                                     with stream_lock:
                                         stream_state.update({
                                             "status": "error",
@@ -4185,7 +4182,7 @@ def _prepare_stream_task(track_data):
                                         })
                                     return
                             else:
-                                print("Could not find downloaded file after completion")
+                                logger.error("Could not find downloaded file after completion")
                                 with stream_lock:
                                     stream_state.update({
                                         "status": "error",
@@ -4194,17 +4191,17 @@ def _prepare_stream_task(track_data):
                                 return
                     else:
                         # No transfer found in API - may still be initializing
-                        print(f"No transfer found in API yet... (elapsed: {wait_count * poll_interval}s)")
+                        logger.warning(f"No transfer found in API yet... (elapsed: {wait_count * poll_interval}s)")
                         
                 except Exception as e:
-                    print(f"Error checking download progress: {e}")
+                    logger.error(f"Error checking download progress: {e}")
                     # Continue to next iteration if API call fails
                 
                 # Wait before next poll
                 time.sleep(poll_interval)
             
             # If we get here, download timed out
-            print(f"Download timed out after {max_wait_time}s")
+            logger.info(f"Download timed out after {max_wait_time}s")
             with stream_lock:
                 stream_state.update({
                     "status": "error", 
@@ -4212,7 +4209,7 @@ def _prepare_stream_task(track_data):
                 })
                 
         except asyncio.CancelledError:
-            print("Stream task cancelled")
+            logger.warning("Stream task cancelled")
             with stream_lock:
                 stream_state.update({
                     "status": "stopped",
@@ -4227,10 +4224,10 @@ def _prepare_stream_task(track_data):
                         loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                     loop.close()
                 except Exception as e:
-                    print(f"Error cleaning up streaming event loop: {e}")
+                    logger.error(f"Error cleaning up streaming event loop: {e}")
             
     except Exception as e:
-        print(f"Stream preparation failed: {e}")
+        logger.error(f"Stream preparation failed: {e}")
         with stream_lock:
             stream_state.update({
                 "status": "error",
@@ -4267,7 +4264,7 @@ def _find_streaming_download_in_all_downloads(all_downloads, track_data):
 
         return None
     except Exception as e:
-        print(f"Error finding streaming download: {e}")
+        logger.error(f"Error finding streaming download: {e}")
         return None
 
 def _find_downloaded_file(download_path, track_data):
@@ -4293,15 +4290,15 @@ def _find_downloaded_file(download_path, track_data):
             safe_title = re.sub(r'[<>:"/\\|?*]', '_', title)
             target_filename_youtube = safe_title  # Extension-less for flexible matching
             source_name = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else 'Tidal')
-            print(f"[{source_name} Stream] Looking for file starting with: {target_filename_youtube}")
+            logger.info(f"[{source_name} Stream] Looking for file starting with: {target_filename_youtube}")
         else:
             # yt-dlp will create "Title.mp3" from "Title"
             target_filename_youtube = f"{title}.mp3"
-            print(f"[YouTube Stream] Looking for file: {target_filename_youtube}")
+            logger.info(f"[YouTube Stream] Looking for file: {target_filename_youtube}")
     elif is_streaming_source:
         # Fallback: if streaming source but no encoded format, use as-is
         target_filename_youtube = target_filename
-        print(f"[Stream] Using direct filename: {target_filename_youtube}")
+        logger.info(f"[Stream] Using direct filename: {target_filename_youtube}")
 
     try:
         # Walk through the downloads directory to find the file
@@ -4335,7 +4332,7 @@ def _find_downloaded_file(download_path, track_data):
                     similarity = SequenceMatcher(None, compare_file, compare_target).ratio()
 
                     source_label = 'HiFi' if is_hifi else ('Qobuz' if is_qobuz else ('Tidal' if is_tidal else 'YouTube'))
-                    print(f"[{source_label} Stream] Comparing: '{file}' vs '{target_filename_youtube}' = {similarity:.2f}")
+                    logger.debug(f"[{source_label} Stream] Comparing: '{file}' vs '{target_filename_youtube}' = {similarity:.2f}")
 
                     # Keep track of best match
                     if similarity > best_similarity:
@@ -4344,28 +4341,28 @@ def _find_downloaded_file(download_path, track_data):
 
                         # If we have a very good match (95%+), use it immediately
                         if similarity >= 0.95:
-                            print(f"Found excellent match for streaming file: {file_path}")
+                            logger.info(f"Found excellent match for streaming file: {file_path}")
                             return file_path
                 else:
                     # For Soulseek, exact match
                     if file == target_filename:
-                        print(f"Found streaming file: {file_path}")
+                        logger.info(f"Found streaming file: {file_path}")
                         return file_path
 
         # For YouTube/Tidal, if we found a good enough match (80%+), use it
         if is_streaming_source and best_match and best_similarity >= 0.80:
             source_label = 'Qobuz' if is_qobuz else ('Tidal' if is_tidal else 'YouTube')
-            print(f"Found good match ({best_similarity:.2f}) for {source_label} streaming file: {best_match}")
+            logger.info(f"Found good match ({best_similarity:.2f}) for {source_label} streaming file: {best_match}")
             return best_match
 
-        print(f"Could not find downloaded file: {target_filename}")
+        logger.error(f"Could not find downloaded file: {target_filename}")
         if is_streaming_source:
-            print(f"   Looking for: {target_filename_youtube}")
-            print(f"   Best similarity: {best_similarity:.2f}")
+            logger.debug(f"   Looking for: {target_filename_youtube}")
+            logger.info(f"   Best similarity: {best_similarity:.2f}")
         return None
 
     except Exception as e:
-        print(f"Error searching for downloaded file: {e}")
+        logger.error(f"Error searching for downloaded file: {e}")
         return None
 
 # --- Refactored Logic from GUI Threads ---
@@ -4656,7 +4653,7 @@ def run_service_test(service, test_config):
         if original_config:
             for key, value in original_config.items():
                 config_manager.set(f"{service}.{key}", value)
-            print(f"Restored original config for '{service}' after test.")
+            logger.info(f"Restored original config for '{service}' after test.")
 
 
 def run_detection(server_type):
@@ -4664,7 +4661,7 @@ def run_detection(server_type):
     Performs comprehensive network detection for a given server type (plex, jellyfin, slskd).
     This implements the same scanning logic as the GUI's detection threads.
     """
-    print(f"Running comprehensive detection for {server_type}...")
+    logger.info(f"Running comprehensive detection for {server_type}...")
     
     def get_network_info():
         """Get comprehensive network information with subnet detection"""
@@ -4813,36 +4810,36 @@ def run_detection(server_type):
             return None
         
         # Priority 1: Test localhost first
-        print(f"Testing localhost for {server_type}...")
+        logger.info(f"Testing localhost for {server_type}...")
         localhost_result = test_func("localhost")
         if localhost_result:
-            print(f"Found {server_type} at localhost!")
+            logger.info(f"Found {server_type} at localhost!")
             return localhost_result
         
         # Priority 1.5: In Docker, try Docker host IP
         import os
         if os.path.exists('/.dockerenv'):
-            print(f"Docker detected, testing Docker host for {server_type}...")
+            logger.info(f"Docker detected, testing Docker host for {server_type}...")
             try:
                 # Try host.docker.internal (Windows/Mac)
                 host_result = test_func("host.docker.internal")
                 if host_result:
-                    print(f"Found {server_type} at Docker host!")
+                    logger.info(f"Found {server_type} at Docker host!")
                     return host_result.replace("host.docker.internal", "localhost")  # Convert back to localhost for config
                 
                 # Try Docker bridge gateway (Linux)
                 gateway_result = test_func("172.17.0.1")
                 if gateway_result:
-                    print(f"Found {server_type} at Docker gateway!")
+                    logger.info(f"Found {server_type} at Docker gateway!")
                     return gateway_result.replace("172.17.0.1", "localhost")  # Convert back to localhost for config
             except Exception as e:
-                print(f"Docker host detection failed: {e}")
+                logger.error(f"Docker host detection failed: {e}")
         
         # Priority 2: Test local IP
-        print(f"Testing local IP {local_ip} for {server_type}...")
+        logger.info(f"Testing local IP {local_ip} for {server_type}...")
         local_result = test_func(local_ip)
         if local_result:
-            print(f"Found {server_type} at {local_ip}!")
+            logger.info(f"Found {server_type} at {local_ip}!")
             return local_result
         
         # Priority 3: Test common IPs (router gateway, etc.)
@@ -4852,12 +4849,12 @@ def run_detection(server_type):
             local_ip.rsplit('.', 1)[0] + '.100', # Common static IP
         ]
         
-        print(f"Testing common IPs for {server_type}...")
+        logger.info(f"Testing common IPs for {server_type}...")
         for ip in common_ips:
-            print(f"  Checking {ip}...")
+            logger.info(f"  Checking {ip}...")
             result = test_func(ip)
             if result:
-                print(f"Found {server_type} at {ip}!")
+                logger.info(f"Found {server_type} at {ip}!")
                 return result
         
         # Priority 4: Scan the network range (limited to reasonable size)
@@ -4867,7 +4864,7 @@ def run_detection(server_type):
             step = max(1, len(network_hosts) // 50)
             network_hosts = network_hosts[::step]
         
-        print(f"Scanning network range for {server_type} ({len(network_hosts)} hosts)...")
+        logger.info(f"Scanning network range for {server_type} ({len(network_hosts)} hosts)...")
         
         # Use ThreadPoolExecutor for concurrent scanning (limited for web context)
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -4881,23 +4878,23 @@ def run_detection(server_type):
                     try:
                         result = future.result()
                         if result:
-                            print(f"Found {server_type} at {ip}!")
+                            logger.info(f"Found {server_type} at {ip}!")
                             # Cancel all pending futures before returning
                             for f in future_to_ip:
                                 if not f.done():
                                     f.cancel()
                             return result
                     except Exception as e:
-                        print(f"Error testing {ip}: {e}")
+                        logger.error(f"Error testing {ip}: {e}")
                         continue
             except Exception as e:
-                print(f"Error in concurrent scanning: {e}")
+                logger.error(f"Error in concurrent scanning: {e}")
         
-        print(f"No {server_type} server found on network")
+        logger.warning(f"No {server_type} server found on network")
         return None
         
     except Exception as e:
-        print(f"Error during {server_type} detection: {e}")
+        logger.error(f"Error during {server_type} detection: {e}")
         return None
 
 # --- Web UI Routes ---
@@ -5309,9 +5306,9 @@ def _regenerate_batch_m3u(batch, tracks):
         m3u_path = os.path.join(m3u_folder, f'{safe_fn}.m3u')
         with open(m3u_path, 'w', encoding='utf-8') as f:
             f.write(m3u_content)
-        print(f"[M3U] Regenerated M3U on batch complete: {m3u_path} ({found}/{len(tracks)} resolved)")
+        logger.info(f"[M3U] Regenerated M3U on batch complete: {m3u_path} ({found}/{len(tracks)} resolved)")
     except Exception as e:
-        print(f"[M3U] Error in _regenerate_batch_m3u: {e}")
+        logger.error(f"[M3U] Error in _regenerate_batch_m3u: {e}")
 
 
 @app.route('/api/save-playlist-m3u', methods=['POST'])
@@ -5573,7 +5570,7 @@ def _build_system_stats():
                                         if isinstance(speed, (int, float)) and speed > 0:
                                             total_download_speed += float(speed)
         except Exception as e:
-            print(f"Warning: Could not fetch download speeds: {e}")
+            logger.error(f"Warning: Could not fetch download speeds: {e}")
 
     # Convert bytes/sec to KB/s and format
     if total_download_speed > 0:
@@ -5989,9 +5986,9 @@ def add_activity_item(icon: str, title: str, subtitle: str, time_ago: str = "Now
             except Exception:
                 pass
 
-        print(f"Activity: {icon} {title} - {subtitle}")
+        logger.info(f"Activity: {icon} {title} - {subtitle}")
     except Exception as e:
-        print(f"Error adding activity item: {e}")
+        logger.error(f"Error adding activity item: {e}")
 
 # --- Internal API Key Management (browser-only, no auth) ---
 @app.route('/api/v1/api-keys-internal', methods=['GET'])
@@ -6059,7 +6056,7 @@ def handle_settings():
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
 
-            print("Settings saved successfully via Web UI.")
+            logger.info("Settings saved successfully via Web UI.")
             
             # Add activity for settings save
             changed_services = list(new_settings.keys())
@@ -6097,7 +6094,7 @@ def handle_settings():
                 tidal_enrichment_worker.client = tidal_client
             # Invalidate status cache so next poll reflects new settings (e.g. fallback source change)
             _status_cache_timestamps['spotify'] = 0
-            print("Service clients re-initialized with new settings.")
+            logger.info("Service clients re-initialized with new settings.")
             return jsonify({"success": True, "message": "Settings saved successfully."})
         except Exception as e:
             return jsonify({"success": False, "error": str(e)}), 500
@@ -6122,7 +6119,7 @@ def handle_dev_mode():
         data = request.get_json()
         if data.get('password') == 'hydratest':
             dev_mode_enabled = True
-            print("Dev mode activated")
+            logger.info("Dev mode activated")
             return jsonify({"success": True, "enabled": True})
         return jsonify({"success": False, "error": "Invalid password"}), 401
     return jsonify({"enabled": dev_mode_enabled})
@@ -6247,10 +6244,10 @@ def hydrabase_connect():
         config_manager.set('hydrabase.url', url)
         config_manager.set('hydrabase.api_key', api_key)
         config_manager.set('hydrabase.auto_connect', True)
-        print(f"[Hydrabase] Connected to {url}")
+        logger.info(f"[Hydrabase] Connected to {url}")
         return jsonify({"success": True, "message": "Connected"})
     except Exception as e:
-        print(f"[Hydrabase] Connection failed: {e}")
+        logger.error(f"[Hydrabase] Connection failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/hydrabase/disconnect', methods=['POST'])
@@ -6268,7 +6265,7 @@ def hydrabase_disconnect():
     # Only disable dev mode if not using Hydrabase as a regular fallback source
     if _get_metadata_fallback_source() != 'hydrabase':
         dev_mode_enabled = False
-    print("[Hydrabase] Disconnected")
+    logger.info("[Hydrabase] Disconnected")
     return jsonify({"success": True})
 
 @app.route('/api/hydrabase/status')
@@ -6326,10 +6323,10 @@ def hydrabase_send():
             result = json.loads(response)
         except json.JSONDecodeError:
             result = response
-        print(f"[Hydrabase] Sent payload — got response")
+        logger.info(f"[Hydrabase] Sent payload — got response")
         return jsonify({"success": True, "data": result})
     except Exception as e:
-        print(f"[Hydrabase] Send failed: {e}")
+        logger.error(f"[Hydrabase] Send failed: {e}")
         with _hydrabase_lock:
             try:
                 _hydrabase_ws.close()
@@ -6413,7 +6410,7 @@ def get_log_tail():
         if ' - INFO - ' in line: return 'INFO'
         if ' - WARNING - ' in line: return 'WARNING'
         if ' - ERROR - ' in line or ' - CRITICAL - ' in line: return 'ERROR'
-        # Heuristic for print() output and non-logger lines
+        # Heuristic for plain-text output and non-logger lines
         ll = line.lower()
         if 'error' in ll or 'traceback' in ll or 'exception' in ll or 'failed' in ll: return 'ERROR'
         if 'warning' in ll or 'warn' in ll: return 'WARNING'
@@ -7154,7 +7151,7 @@ def test_connection_endpoint():
     if not service:
         return jsonify({"success": False, "error": "No service specified."}), 400
 
-    print(f"Received test connection request for: {service}")
+    logger.info(f"Received test connection request for: {service}")
     
     # Get the current settings from the main config manager to test with
     test_config = config_manager.get(service, {})
@@ -7175,18 +7172,18 @@ def test_connection_endpoint():
             _status_cache['spotify']['connected'] = True
             _status_cache['spotify']['source'] = _get_metadata_fallback_source()
             _status_cache_timestamps['spotify'] = current_time
-            print("Updated Spotify status cache after successful test")
+            logger.info("Updated Spotify status cache after successful test")
         elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
             _status_cache['media_server']['connected'] = True
             _status_cache['media_server']['type'] = service
             _status_cache_timestamps['media_server'] = current_time
-            print(f"Updated {service} status cache after successful test")
+            logger.info(f"Updated {service} status cache after successful test")
         elif service == 'soulseek':
             _status_cache['soulseek']['connected'] = True
             _status_cache_timestamps['soulseek'] = current_time
-            print("Updated Soulseek status cache after successful test")
+            logger.info("Updated Soulseek status cache after successful test")
         elif service == 'listenbrainz':
-            print("ListenBrainz test successful")
+            logger.info("ListenBrainz test successful")
 
     # Add activity for connection test
     if success:
@@ -7204,7 +7201,7 @@ def test_dashboard_connection_endpoint():
     if not service:
         return jsonify({"success": False, "error": "No service specified."}), 400
 
-    print(f"Received dashboard test connection request for: {service}")
+    logger.info(f"Received dashboard test connection request for: {service}")
     
     # Get the current settings from the main config manager to test with
     test_config = config_manager.get(service, {})
@@ -7225,16 +7222,16 @@ def test_dashboard_connection_endpoint():
             _status_cache['spotify']['connected'] = True
             _status_cache['spotify']['source'] = _get_metadata_fallback_source()
             _status_cache_timestamps['spotify'] = current_time
-            print("Updated Spotify status cache after successful dashboard test")
+            logger.info("Updated Spotify status cache after successful dashboard test")
         elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
             _status_cache['media_server']['connected'] = True
             _status_cache['media_server']['type'] = service
             _status_cache_timestamps['media_server'] = current_time
-            print(f"Updated {service} status cache after successful dashboard test")
+            logger.info(f"Updated {service} status cache after successful dashboard test")
         elif service == 'soulseek':
             _status_cache['soulseek']['connected'] = True
             _status_cache_timestamps['soulseek'] = current_time
-            print("Updated Soulseek status cache after successful dashboard test")
+            logger.info("Updated Soulseek status cache after successful dashboard test")
 
     # Add activity for dashboard connection test (different from settings test)
     if success:
@@ -7248,7 +7245,7 @@ def test_dashboard_connection_endpoint():
 def detect_media_server_endpoint():
     data = request.get_json()
     server_type = data.get('server_type')
-    print(f"Received auto-detect request for: {server_type}")
+    logger.info(f"Received auto-detect request for: {server_type}")
     
     # Add activity for auto-detect start
     add_activity_item("", "Auto-Detect Started", f"Searching for {server_type} server", "Now")
@@ -7559,7 +7556,7 @@ def apply_quality_preset(preset_name):
 
 @app.route('/api/detect-soulseek', methods=['POST'])
 def detect_soulseek_endpoint():
-    print("Received auto-detect request for slskd")
+    logger.info("Received auto-detect request for slskd")
 
     # Add activity for soulseek auto-detect start
     add_activity_item("", "Auto-Detect Started", "Searching for slskd server", "Now")
@@ -7600,10 +7597,10 @@ def auth_spotify():
                         state=f'profile_{profile_id_int}'
                     )
                     auth_url = auth_manager.get_authorize_url()
-                    print(f"Per-profile Spotify auth initiated for profile {profile_id_int}")
+                    logger.info(f"Per-profile Spotify auth initiated for profile {profile_id_int}")
                     return redirect(auth_url)
             except (ValueError, Exception) as e:
-                print(f"Per-profile Spotify auth failed, falling back to global: {e}")
+                logger.error(f"Per-profile Spotify auth failed, falling back to global: {e}")
 
         # Global auth (admin or fallback)
         temp_spotify_client = SpotifyClient()
@@ -7611,7 +7608,7 @@ def auth_spotify():
             # Get the authorization URL
             auth_url = temp_spotify_client.sp.auth_manager.get_authorize_url()
             configured_uri = config_manager.get_spotify_config().get('redirect_uri', 'http://127.0.0.1:8888/callback')
-            print(f"Spotify auth initiated — redirect_uri: {configured_uri}")
+            logger.info(f"Spotify auth initiated — redirect_uri: {configured_uri}")
             add_activity_item("", "Spotify Auth Started", "Please complete OAuth in browser", "Now")
 
             # Detect if accessing remotely
@@ -7728,7 +7725,7 @@ def auth_spotify():
         else:
             return "<h1>Spotify Authentication Failed</h1><p>Could not initialize Spotify client. Check your credentials.</p>", 400
     except Exception as e:
-        print(f"Error starting Spotify auth: {e}")
+        logger.error(f"Error starting Spotify auth: {e}")
         return f"<h1>Spotify Authentication Error</h1><p>{str(e)}</p>", 500
 
 @app.route('/auth/tidal')
@@ -7736,7 +7733,7 @@ def auth_tidal():
     """
     Initiates Tidal OAuth authentication flow
     """
-    print("TIDAL AUTH ROUTE CALLED ")
+    logger.info("TIDAL AUTH ROUTE CALLED ")
     try:
         # Create a fresh tidal client to get OAuth URL
         from core.tidal_client import TidalClient
@@ -7759,20 +7756,20 @@ def auth_tidal():
         configured_redirect = config_manager.get('tidal.redirect_uri', '')
         if configured_redirect:
             temp_tidal_client.redirect_uri = configured_redirect
-            print(f"Using configured Tidal redirect_uri: {configured_redirect}")
+            logger.info(f"Using configured Tidal redirect_uri: {configured_redirect}")
         else:
             # Fallback: dynamically set based on request host (non-Docker local access)
             request_host = request.host.split(':')[0]
             if request_host not in ('127.0.0.1', 'localhost'):
                 dynamic_redirect = f"http://{request_host}:8889/tidal/callback"
                 temp_tidal_client.redirect_uri = dynamic_redirect
-                print(f"Tidal redirect_uri set from request host: {dynamic_redirect}")
+                logger.info(f"Tidal redirect_uri set from request host: {dynamic_redirect}")
 
         # Store PKCE + redirect_uri for callback to use the same values
         with tidal_oauth_lock:
             tidal_oauth_state["redirect_uri"] = temp_tidal_client.redirect_uri
 
-        print(f"Stored PKCE - verifier: {temp_tidal_client.code_verifier[:20]}... challenge: {temp_tidal_client.code_challenge[:20]}...")
+        logger.info(f"Stored PKCE - verifier: {temp_tidal_client.code_verifier[:20]}... challenge: {temp_tidal_client.code_challenge[:20]}...")
 
         # Store profile_id for per-profile auth
         profile_id = request.args.get('profile_id', '')
@@ -7792,8 +7789,8 @@ def auth_tidal():
         
         auth_url = f"{temp_tidal_client.auth_url}?" + urllib.parse.urlencode(params)
         
-        print(f"Generated Tidal OAuth URL: {auth_url}")
-        print(f"Redirect URI in URL: {params['redirect_uri']}")
+        logger.info(f"Generated Tidal OAuth URL: {auth_url}")
+        logger.info(f"Redirect URI in URL: {params['redirect_uri']}")
         
         add_activity_item("", "Tidal Auth Started", "Please complete OAuth in browser", "Now")
 
@@ -7865,9 +7862,9 @@ def auth_tidal():
             return f'<h1>Tidal Authentication</h1><p>Please visit this URL to authenticate:</p><p><a href="{auth_url}" target="_blank">{auth_url}</a></p><p>After authentication, return to the app.</p>'
         
     except Exception as e:
-        print(f"Error starting Tidal auth: {e}")
+        logger.error(f"Error starting Tidal auth: {e}")
         import traceback
-        print(f"Full traceback: {traceback.format_exc()}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return f"<h1>Tidal Authentication Error</h1><p>{str(e)}</p>", 500
 
 
@@ -7884,19 +7881,19 @@ def spotify_callback():
     if not auth_code:
         error = request.args.get('error')
         if error:
-            print(f"Spotify OAuth error on port 8008: Spotify returned error: {error}")
+            logger.error(f"Spotify OAuth error on port 8008: Spotify returned error: {error}")
             add_activity_item("", "Spotify Auth Failed", f"Spotify returned error: {error}", "Now")
             return f"<h1>Spotify Authentication Failed</h1><p>Spotify returned error: {error}</p>", 400
 
         # No code AND no error — check if query params were stripped
         if request.args:
-            print(f"Spotify callback on port 8008 received unexpected params: {dict(request.args)}")
+            logger.info(f"Spotify callback on port 8008 received unexpected params: {dict(request.args)}")
         else:
             # Completely empty — likely a healthcheck or spurious request
             pass
         return '', 204
 
-    print(f"Spotify callback received on port 8008 with authorization code")
+    logger.info(f"Spotify callback received on port 8008 with authorization code")
 
     # Check for per-profile state parameter
     state = request.args.get('state', '')
@@ -7904,7 +7901,7 @@ def spotify_callback():
     if state and state.startswith('profile_'):
         try:
             profile_id_from_state = int(state.replace('profile_', ''))
-            print(f"Per-profile callback detected for profile {profile_id_from_state}")
+            logger.info(f"Per-profile callback detected for profile {profile_id_from_state}")
         except ValueError:
             pass
 
@@ -7940,7 +7937,7 @@ def spotify_callback():
         # Global callback (admin)
         config = config_manager.get_spotify_config()
         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
-        print(f"Using redirect_uri for token exchange: {configured_uri}")
+        logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
         auth_manager = SpotifyOAuth(
             client_id=config['client_id'],
@@ -7975,7 +7972,7 @@ def spotify_callback():
         else:
             raise Exception("Failed to exchange authorization code for access token")
     except Exception as e:
-        print(f"Spotify OAuth callback error on port 8008: {e}")
+        logger.error(f"Spotify OAuth callback error on port 8008: {e}")
         add_activity_item("", "Spotify Auth Failed", f"Token processing failed: {str(e)}", "Now")
         return f"<h1>Spotify Authentication Failed</h1><p>{str(e)}</p>", 400
 
@@ -8078,7 +8075,7 @@ def tidal_callback():
                     add_activity_item("", "Tidal Auth Complete", f"Profile {profile_id_int} authenticated with Tidal", "Now")
                     return "<h1>Tidal Authentication Successful!</h1><p>Your personal Tidal account is now connected. You can close this window.</p>"
                 except Exception as profile_err:
-                    print(f"Per-profile Tidal auth failed, falling back to global: {profile_err}")
+                    logger.error(f"Per-profile Tidal auth failed, falling back to global: {profile_err}")
 
             # Global: Re-initialize the main global tidal_client instance with the new token
             tidal_client = TidalClient()
@@ -8088,7 +8085,7 @@ def tidal_callback():
         else:
             return "<h1>Tidal Authentication Failed</h1><p>Could not exchange authorization code for a token. Please try again.</p>", 400
     except Exception as e:
-        print(f"Error during Tidal token exchange: {e}")
+        logger.error(f"Error during Tidal token exchange: {e}")
         return f"<h1>An Error Occurred</h1><p>An unexpected error occurred during the authentication process: {e}</p>", 500
 
 
@@ -8819,7 +8816,7 @@ def search_music():
         return jsonify({"results": all_results})
         
     except Exception as e:
-        print(f"Search error: {e}")
+        logger.error(f"Search error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/enhanced-search', methods=['POST'])
@@ -9503,16 +9500,16 @@ def download_music_video():
                         track_title = best.name
                         if hasattr(best, 'release_date') and best.release_date:
                             year = str(best.release_date)[:4]
-                        print(f"[Music Video] Matched to: {artist_name} - {track_title} (confidence: {best_score:.2f})")
+                        logger.info(f"[Music Video] Matched to: {artist_name} - {track_title} (confidence: {best_score:.2f})")
                     else:
                         # Parse artist from video title: "Artist - Title" pattern
                         if ' - ' in raw_title:
                             parts = raw_title.split(' - ', 1)
                             artist_name = parts[0].strip()
                             track_title = _re.sub(r'\s*[\(\[].*?[\)\]]', '', parts[1]).strip()
-                        print(f"[Music Video] No metadata match, using parsed: {artist_name} - {track_title}")
+                        logger.warning(f"[Music Video] No metadata match, using parsed: {artist_name} - {track_title}")
             except Exception as e:
-                print(f"[Music Video] Metadata lookup failed: {e}")
+                logger.error(f"[Music Video] Metadata lookup failed: {e}")
                 if ' - ' in raw_title:
                     parts = raw_title.split(' - ', 1)
                     artist_name = parts[0].strip()
@@ -9558,17 +9555,17 @@ def download_music_video():
                 _music_video_downloads[video_id]['status'] = 'completed'
                 _music_video_downloads[video_id]['progress'] = 100
                 _music_video_downloads[video_id]['path'] = final_path
-                print(f"[Music Video] Downloaded: {artist_name} - {track_title} → {final_path}")
+                logger.info(f"[Music Video] Downloaded: {artist_name} - {track_title} → {final_path}")
                 add_activity_item("", "Music Video Downloaded", f"{artist_name} - {track_title}", "Now")
             else:
                 _music_video_downloads[video_id]['status'] = 'error'
                 _music_video_downloads[video_id]['error'] = 'Download failed — file not found'
-                print(f"[Music Video] Download failed for: {artist_name} - {track_title}")
+                logger.error(f"[Music Video] Download failed for: {artist_name} - {track_title}")
 
         except Exception as e:
             _music_video_downloads[video_id]['status'] = 'error'
             _music_video_downloads[video_id]['error'] = str(e)
-            print(f"[Music Video] Error: {e}")
+            logger.error(f"[Music Video] Error: {e}")
 
     # Run in background thread
     import threading
@@ -9761,11 +9758,11 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
                     file_path = os.path.join(root, file)
                     # Fast path: if path aligns with expected directory structure, return now
                     if api_dir_parts and _path_matches_api_dirs(file_path):
-                        print(f"Found path-confirmed match in {location_name}: {file_path}")
+                        logger.info(f"Found path-confirmed match in {location_name}: {file_path}")
                         return file_path, 1.0
                     if not api_dir_parts:
                         # No directory info to disambiguate — return first match (original behavior)
-                        print(f"Found exact match in {location_name}: {file_path}")
+                        logger.info(f"Found exact match in {location_name}: {file_path}")
                         return file_path, 1.0
                     exact_matches.append(file_path)
                     continue
@@ -9777,10 +9774,10 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
                 if stripped_stem != file_stem and stripped_stem + file_ext_part == target_basename:
                     file_path = os.path.join(root, file)
                     if api_dir_parts and _path_matches_api_dirs(file_path):
-                        print(f"Found path-confirmed dedup match in {location_name}: {file_path}")
+                        logger.info(f"Found path-confirmed dedup match in {location_name}: {file_path}")
                         return file_path, 1.0
                     if not api_dir_parts:
-                        print(f"Found dedup-suffix match in {location_name}: {file_path}")
+                        logger.info(f"Found dedup-suffix match in {location_name}: {file_path}")
                         return file_path, 1.0
                     exact_matches.append(file_path)
                     continue
@@ -9796,7 +9793,7 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
         # Return best exact match (disambiguated by path), or fall back to fuzzy
         if exact_matches:
             if len(exact_matches) == 1:
-                print(f"Found exact match in {location_name}: {exact_matches[0]}")
+                logger.info(f"Found exact match in {location_name}: {exact_matches[0]}")
                 return exact_matches[0], 1.0
             # Multiple files share the basename — pick the one whose path best
             # matches the expected directory structure from the Soulseek remote path
@@ -9808,7 +9805,7 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
                 if score > best_score:
                     best_score = score
                     best = m
-            print(f"Found {len(exact_matches)} files named '{target_basename}' in {location_name}, picked best path match: {best}")
+            logger.info(f"Found {len(exact_matches)} files named '{target_basename}' in {location_name}, picked best path match: {best}")
             return best, 1.0
 
         return best_fuzzy_path, highest_fuzzy_similarity
@@ -9830,7 +9827,7 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
     if downloads_similarity > 0.85:
         location = 'downloads'
         if downloads_similarity < 1.0:
-            print(f"Found fuzzy match in downloads ({downloads_similarity:.2f}): {best_downloads_path}")
+            logger.info(f"Found fuzzy match in downloads ({downloads_similarity:.2f}): {best_downloads_path}")
         return (best_downloads_path, location)
 
     # If not found in downloads and transfer_dir is provided, search there
@@ -9841,7 +9838,7 @@ def _find_completed_file_robust(download_dir, api_filename, transfer_dir=None):
         if transfer_similarity > 0.85:
             location = 'transfer'
             if transfer_similarity < 1.0:
-                print(f"Found fuzzy match in transfer ({transfer_similarity:.2f}): {best_transfer_path}")
+                logger.info(f"Found fuzzy match in transfer ({transfer_similarity:.2f}): {best_transfer_path}")
             return (best_transfer_path, location)
 
     # Don't spam logs - file not found is common for completed/processed downloads
@@ -9910,7 +9907,7 @@ def get_download_status():
                                         with matched_context_lock:
                                             has_active_context = context_key in matched_downloads_context
                                         if has_active_context:
-                                            print(f"Orphaned key {context_key} has active context — retry re-used same source, treating as active")
+                                            logger.warning(f"Orphaned key {context_key} has active context — retry re-used same source, treating as active")
                                             _orphaned_download_keys.discard(context_key)
                                             # Fall through to normal processing below
                                         else:
@@ -9921,10 +9918,10 @@ def get_download_status():
                                             if found_path:
                                                 try:
                                                     os.remove(found_path)
-                                                    print(f"Deleted orphaned download: {os.path.basename(found_path)}")
+                                                    logger.warning(f"Deleted orphaned download: {os.path.basename(found_path)}")
                                                     orphan_cleaned = True
                                                 except Exception as e:
-                                                    print(f"Failed to delete orphaned file (will retry next poll): {e}")
+                                                    logger.error(f"Failed to delete orphaned file (will retry next poll): {e}")
                                             else:
                                                 # File not on disk (already gone or never written) — nothing to clean
                                                 orphan_cleaned = True
@@ -9948,11 +9945,11 @@ def get_download_status():
                                         available_keys = list(matched_downloads_context.keys())[:5] if not context else None
 
                                     if context:
-                                        print(f"[Context Lookup] Found context for key: {context_key}")
+                                        logger.info(f"[Context Lookup] Found context for key: {context_key}")
                                     elif context_key not in _stale_transfer_keys:
                                         # Only log once per stale key to avoid spamming every poll cycle
-                                        print(f"[Context Lookup] No context found for key: {context_key}")
-                                        print(f"   Available keys: {available_keys}...")
+                                        logger.warning(f"[Context Lookup] No context found for key: {context_key}")
+                                        logger.info(f"   Available keys: {available_keys}...")
                                         _stale_transfer_keys.add(context_key)
 
                                     if context:
@@ -9965,10 +9962,10 @@ def get_download_status():
                                             # Prevent two contexts from claiming the same physical file
                                             _norm_path = os.path.normpath(found_path)
                                             if _norm_path in _files_claimed_this_cycle:
-                                                print(f"File already claimed by another context this cycle: {os.path.basename(found_path)} — deferring to next poll")
+                                                logger.info(f"File already claimed by another context this cycle: {os.path.basename(found_path)} — deferring to next poll")
                                             else:
                                                 _files_claimed_this_cycle.add(_norm_path)
-                                                print(f"Found completed matched file on disk: {found_path}")
+                                                logger.info(f"Found completed matched file on disk: {found_path}")
                                                 completed_matched_downloads.append((context_key, context, found_path))
                                                 # Don't add to _processed_download_ids yet - wait until thread starts successfully
 
@@ -9977,7 +9974,7 @@ def get_download_status():
                                                     if context_key in _download_retry_attempts:
                                                         retry_count = _download_retry_attempts[context_key]['count']
                                                         elapsed = time.time() - _download_retry_attempts[context_key]['first_attempt']
-                                                        print(f"File found after {retry_count} retry attempt(s) ({elapsed:.1f}s): {os.path.basename(filename_from_api)}")
+                                                        logger.warning(f"File found after {retry_count} retry attempt(s) ({elapsed:.1f}s): {os.path.basename(filename_from_api)}")
                                                         del _download_retry_attempts[context_key]
                                         else:
                                             # File not found yet - implement retry logic instead of immediate give-up
@@ -9989,7 +9986,7 @@ def get_download_status():
                                                         'count': 1,
                                                         'first_attempt': time.time()
                                                     }
-                                                    print(f"File not found yet: '{os.path.basename(filename_from_api)}' - Will retry (attempt 1/{_download_retry_max})")
+                                                    logger.warning(f"File not found yet: '{os.path.basename(filename_from_api)}' - Will retry (attempt 1/{_download_retry_max})")
                                                 else:
                                                     # Increment retry count
                                                     _download_retry_attempts[context_key]['count'] += 1
@@ -9998,19 +9995,19 @@ def get_download_status():
 
                                                     if retry_count >= _download_retry_max:
                                                         # Max retries reached, give up
-                                                        print(f"CRITICAL: Could not find '{os.path.basename(filename_from_api)}' after {retry_count} attempts over {elapsed:.1f}s. Giving up.")
+                                                        logger.error(f"CRITICAL: Could not find '{os.path.basename(filename_from_api)}' after {retry_count} attempts over {elapsed:.1f}s. Giving up.")
                                                         _processed_download_ids.add(context_key)
                                                         # Clean up retry tracking
                                                         del _download_retry_attempts[context_key]
                                                     else:
-                                                        print(f"File not found yet: '{os.path.basename(filename_from_api)}' - Will retry (attempt {retry_count}/{_download_retry_max}, elapsed: {elapsed:.1f}s)")
+                                                        logger.warning(f"File not found yet: '{os.path.basename(filename_from_api)}' - Will retry (attempt {retry_count}/{_download_retry_max}, elapsed: {elapsed:.1f}s)")
 
         # If we found completed matched downloads, start processing them in background threads
         if completed_matched_downloads:
             def process_completed_downloads():
                 for context_key, context, found_path in completed_matched_downloads:
                     try:
-                        print(f"Starting post-processing thread for: {context_key}")
+                        logger.info(f"Starting post-processing thread for: {context_key}")
                         # Use verification wrapper if context has task tracking IDs,
                         # otherwise call directly (race guard flag still gets set on context)
                         _pp_task_id = context.get('task_id')
@@ -10027,16 +10024,16 @@ def get_download_status():
 
                         # Only mark as processed AFTER thread starts successfully
                         _processed_download_ids.add(context_key)
-                        print(f"Marked as processed: {context_key}")
+                        logger.info(f"Marked as processed: {context_key}")
 
                         # DON'T remove context immediately - verification worker needs it
                         # Context will be cleaned up by verification worker after both processors complete
-                        print(f"Keeping context for verification worker: {context_key}")
+                        logger.info(f"Keeping context for verification worker: {context_key}")
 
                     except Exception as e:
-                        print(f"Error starting post-processing thread for {context_key}: {e}")
+                        logger.error(f"Error starting post-processing thread for {context_key}: {e}")
                         # Don't add to processed set if thread failed to start
-                        print(f"Will retry {context_key} on next check")
+                        logger.warning(f"Will retry {context_key} on next check")
 
             # Start a single thread to manage the launching of all processing threads
             processing_thread = threading.Thread(target=process_completed_downloads)
@@ -10082,14 +10079,14 @@ def get_download_status():
                                 # Prevent two contexts from claiming the same physical file
                                 _st_norm = os.path.normpath(found_path)
                                 if _st_norm in _files_claimed_this_cycle:
-                                    print(f"[{source_label}] File already claimed this cycle: {os.path.basename(found_path)} — deferring")
+                                    logger.info(f"[{source_label}] File already claimed this cycle: {os.path.basename(found_path)} — deferring")
                                     continue
                                 _files_claimed_this_cycle.add(_st_norm)
-                                print(f"[{source_label}] Found completed matched file on disk: {found_path}")
+                                logger.info(f"[{source_label}] Found completed matched file on disk: {found_path}")
                                 # Start post-processing thread
                                 def process_streaming_download(_ctx_key=context_key, _ctx=context, _path=found_path, _label=source_label):
                                     try:
-                                        print(f"[{_label}] Starting post-processing thread for: {_ctx_key}")
+                                        logger.info(f"[{_label}] Starting post-processing thread for: {_ctx_key}")
                                         # Use verification wrapper if context has task tracking IDs
                                         _st_task_id = _ctx.get('task_id')
                                         _st_batch_id = _ctx.get('batch_id')
@@ -10103,9 +10100,9 @@ def get_download_status():
                                         thread.daemon = True
                                         thread.start()
                                         _processed_download_ids.add(_ctx_key)
-                                        print(f"[{_label}] Marked as processed: {_ctx_key}")
+                                        logger.info(f"[{_label}] Marked as processed: {_ctx_key}")
                                     except Exception as e:
-                                        print(f"[{_label}] Error starting post-processing thread for {_ctx_key}: {e}")
+                                        logger.error(f"[{_label}] Error starting post-processing thread for {_ctx_key}: {e}")
 
                                 processing_thread = threading.Thread(target=process_streaming_download)
                                 processing_thread.daemon = True
@@ -10116,7 +10113,7 @@ def get_download_status():
                                 _processed_download_ids.add(context_key)
         except Exception as streaming_error:
             import traceback
-            print(f"Could not fetch YouTube/Tidal downloads for status: {streaming_error}")
+            logger.error(f"Could not fetch YouTube/Tidal downloads for status: {streaming_error}")
             traceback.print_exc()
 
         # Enrich transfers with metadata from download context (artist, album, artwork)
@@ -10140,7 +10137,7 @@ def get_download_status():
         return jsonify({"transfers": all_transfers})
 
     except Exception as e:
-        print(f"Error fetching download status: {e}")
+        logger.error(f"Error fetching download status: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -10170,7 +10167,7 @@ def cancel_download():
         else:
             return jsonify({"success": False, "error": "Failed to cancel download via slskd."}), 500
     except Exception as e:
-        print(f"Error cancelling download: {e}")
+        logger.error(f"Error cancelling download: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/downloads/cancel-all', methods=['POST'])
@@ -10192,7 +10189,7 @@ def cancel_all_downloads():
 
         return jsonify({"success": True, "message": "All downloads cancelled and cleared."})
     except Exception as e:
-        print(f"Error cancelling all downloads: {e}")
+        logger.error(f"Error cancelling all downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/downloads/clear-finished', methods=['POST'])
@@ -10210,7 +10207,7 @@ def clear_finished_downloads():
         else:
             return jsonify({"success": False, "error": "Backend failed to clear downloads."}), 500
     except Exception as e:
-        print(f"Error clearing finished downloads: {e}")
+        logger.error(f"Error clearing finished downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/downloads/task/<task_id>/candidates', methods=['GET'])
@@ -10257,7 +10254,7 @@ def get_task_candidates(task_id):
             "candidate_count": len(serialized),
         })
     except Exception as e:
-        print(f"[Candidates] Error fetching candidates for task {task_id}: {e}")
+        logger.error(f"[Candidates] Error fetching candidates for task {task_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/downloads/task/<task_id>/download-candidate', methods=['POST'])
@@ -10365,11 +10362,11 @@ def download_selected_candidate(task_id):
         missing_download_executor.submit(_run_manual_download)
 
         track_name = track_info.get('name', 'Unknown')
-        print(f"[Manual Download] User selected candidate for '{track_name}' from {username}")
+        logger.info(f"[Manual Download] User selected candidate for '{track_name}' from {username}")
         return jsonify({"success": True, "message": f"Download initiated for '{track_name}'"})
 
     except Exception as e:
-        print(f"[Manual Download] Error: {e}")
+        logger.error(f"[Manual Download] Error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -10396,12 +10393,12 @@ def clear_quarantine():
                     shutil.rmtree(entry_path)
                     removed_files += 1
             except Exception as e:
-                print(f"[Quarantine] Failed to remove {entry}: {e}")
+                logger.error(f"[Quarantine] Failed to remove {entry}: {e}")
 
-        print(f"[Quarantine] Cleared {removed_files} item(s) from quarantine folder")
+        logger.info(f"[Quarantine] Cleared {removed_files} item(s) from quarantine folder")
         return jsonify({"success": True, "message": f"Quarantine cleared ({removed_files} item{'s' if removed_files != 1 else ''} removed)."})
     except Exception as e:
-        print(f"[Quarantine] Error clearing quarantine: {e}")
+        logger.error(f"[Quarantine] Error clearing quarantine: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/scan/request', methods=['POST'])
@@ -10598,7 +10595,7 @@ def clear_all_searches():
         else:
             return jsonify({"success": False, "error": "Backend failed to clear searches."}), 500
     except Exception as e:
-        print(f"Error clearing searches: {e}")
+        logger.error(f"Error clearing searches: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/searches/maintain', methods=['POST'])
@@ -10620,7 +10617,7 @@ def maintain_search_history():
         else:
             return jsonify({"success": False, "error": "Backend failed to maintain search history."}), 500
     except Exception as e:
-        print(f"Error maintaining search history: {e}")
+        logger.error(f"Error maintaining search history: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 def fix_artist_image_url(thumb_url):
@@ -10641,13 +10638,13 @@ def fix_artist_image_url(thumb_url):
 
         if needs_fixing:
             active_server = config_manager.get_active_media_server()
-            print(f"Fixing URL: {thumb_url}, Active server: {active_server}")
+            logger.debug(f"Fixing URL: {thumb_url}, Active server: {active_server}")
 
             if active_server == 'plex':
                 plex_config = config_manager.get_plex_config()
                 plex_base_url = plex_config.get('base_url', '')
                 plex_token = plex_config.get('token', '')
-                print(f"Plex config - base_url: {plex_base_url}, token: {plex_token[:10]}...")
+                logger.info(f"Plex config - base_url: {plex_base_url}, token: {plex_token[:10]}...")
 
                 if plex_base_url and plex_token:
                     # Extract the path from URL
@@ -10662,14 +10659,14 @@ def fix_artist_image_url(thumb_url):
 
                     # Construct proper Plex URL with token
                     fixed_url = f"{plex_base_url.rstrip('/')}{path}?X-Plex-Token={plex_token}"
-                    print(f"Fixed URL: {fixed_url}")
+                    logger.info(f"Fixed URL: {fixed_url}")
                     return fixed_url
 
             elif active_server == 'jellyfin':
                 jellyfin_config = config_manager.get_jellyfin_config()
                 jellyfin_base_url = jellyfin_config.get('base_url', '')
                 jellyfin_token = jellyfin_config.get('api_key', '')
-                print(f"Jellyfin config - base_url: {jellyfin_base_url}, token: {jellyfin_token[:10] if jellyfin_token else 'None'}...")
+                logger.info(f"Jellyfin config - base_url: {jellyfin_base_url}, token: {jellyfin_token[:10] if jellyfin_token else 'None'}...")
 
                 if jellyfin_base_url:
                     # Extract the path from URL
@@ -10688,7 +10685,7 @@ def fix_artist_image_url(thumb_url):
                         fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}{separator}X-Emby-Token={jellyfin_token}"
                     else:
                         fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}"
-                    print(f"Fixed URL: {fixed_url}")
+                    logger.info(f"Fixed URL: {fixed_url}")
                     return fixed_url
 
             elif active_server == 'navidrome':
@@ -10696,7 +10693,7 @@ def fix_artist_image_url(thumb_url):
                 navidrome_base_url = navidrome_config.get('base_url', '')
                 navidrome_username = navidrome_config.get('username', '')
                 navidrome_password = navidrome_config.get('password', '')
-                print(f"Navidrome config - base_url: {navidrome_base_url}, username: {navidrome_username}")
+                logger.info(f"Navidrome config - base_url: {navidrome_base_url}, username: {navidrome_username}")
 
                 if navidrome_base_url and navidrome_username and navidrome_password:
                     # Extract the path from URL
@@ -10721,16 +10718,16 @@ def fix_artist_image_url(thumb_url):
 
                     # Construct proper Navidrome Subsonic URL
                     fixed_url = f"{navidrome_base_url.rstrip('/')}{path}{separator}{auth_params}"
-                    print(f"Fixed URL: {fixed_url}")
+                    logger.info(f"Fixed URL: {fixed_url}")
                     return fixed_url
 
-            print(f"No configuration found for {active_server} or unsupported server type")
+            logger.warning(f"No configuration found for {active_server} or unsupported server type")
 
         # Return original URL if no fixing needed/possible
         return thumb_url
 
     except Exception as e:
-        print(f"Error fixing image URL '{thumb_url}': {e}")
+        logger.error(f"Error fixing image URL '{thumb_url}': {e}")
         return thumb_url
 
 @app.route('/api/library/history')
@@ -10797,7 +10794,7 @@ def get_library_artists():
         })
 
     except Exception as e:
-        print(f"Error fetching library artists: {e}")
+        logger.error(f"Error fetching library artists: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -10826,7 +10823,7 @@ def test_artist_endpoint(artist_id):
 def get_artist_detail(artist_id):
     """Get artist detail data"""
     try:
-        print(f"Getting artist detail for ID: {artist_id}")
+        logger.info(f"Getting artist detail for ID: {artist_id}")
 
         # Get database instance
         database = get_database()
@@ -10835,7 +10832,7 @@ def get_artist_detail(artist_id):
         db_result = database.get_artist_discography(artist_id)
 
         if not db_result.get('success'):
-            print(f"Database returned error: {db_result}")
+            logger.error(f"Database returned error: {db_result}")
             return jsonify({
                 "success": False,
                 "error": db_result.get('error', 'Artist not found')
@@ -10844,18 +10841,18 @@ def get_artist_detail(artist_id):
         artist_info = db_result['artist']
         owned_releases = db_result['owned_releases']
 
-        print(f"Found artist: {artist_info['name']} with {len(owned_releases['albums'])} albums")
+        logger.info(f"Found artist: {artist_info['name']} with {len(owned_releases['albums'])} albums")
 
         # Fix artist image URL
-        print(f"Artist image before fix: '{artist_info.get('image_url')}'")
+        logger.info(f"Artist image before fix: '{artist_info.get('image_url')}'")
         if artist_info.get('image_url'):
             artist_info['image_url'] = fix_artist_image_url(artist_info['image_url'])
-            print(f"Artist image after fix: '{artist_info['image_url']}'")
+            logger.info(f"Artist image after fix: '{artist_info['image_url']}'")
         else:
-            print(f"No artist image URL found for {artist_info['name']}")
+            logger.warning(f"No artist image URL found for {artist_info['name']}")
 
         # Debug final artist data being sent
-        print(f"Final artist data being sent: {artist_info}")
+        logger.info(f"Final artist data being sent: {artist_info}")
 
         # Fix image URLs for all albums
         for album in owned_releases['albums']:
@@ -10897,7 +10894,7 @@ def get_artist_detail(artist_id):
             )
 
             if artist_detail_discography['success']:
-                print(
+                logger.debug(
                     "Source-priority discography found - "
                     f"Albums: {len(artist_detail_discography['albums'])}, "
                     f"EPs: {len(artist_detail_discography['eps'])}, "
@@ -10905,10 +10902,10 @@ def get_artist_detail(artist_id):
                 )
                 merged_discography = artist_detail_discography
             else:
-                print(f"Source-priority discography not found: {artist_detail_discography.get('error', 'Unknown error')}")
+                logger.debug(f"Source-priority discography not found: {artist_detail_discography.get('error', 'Unknown error')}")
                 merged_discography = owned_releases
         except Exception as detail_error:
-            print(f"Error fetching source-priority discography: {detail_error}")
+            logger.error(f"Error fetching source-priority discography: {detail_error}")
             merged_discography = owned_releases
 
         spotify_artist_data = None
@@ -10969,7 +10966,7 @@ def get_artist_detail(artist_id):
         return jsonify(response_data)
 
     except Exception as e:
-        print(f"Error in get_artist_detail: {e}")
+        logger.error(f"Error in get_artist_detail: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -11029,7 +11026,7 @@ def get_similar_artists_stream(artist_name):
     """
     def generate():
         try:
-            print(f"Streaming similar artists for: {artist_name}")
+            logger.info(f"Streaming similar artists for: {artist_name}")
 
             # Import required libraries
             from bs4 import BeautifulSoup
@@ -11038,7 +11035,7 @@ def get_similar_artists_stream(artist_name):
             url_artist = artist_name.lower().replace(' ', '+')
             musicmap_url = f'https://www.music-map.com/{url_artist}'
 
-            print(f"Fetching MusicMap: {musicmap_url}")
+            logger.debug(f"Fetching MusicMap: {musicmap_url}")
 
             # Set headers to mimic a browser
             headers = {
@@ -11073,7 +11070,7 @@ def get_similar_artists_stream(artist_name):
 
                 similar_artist_names.append(artist_text)
 
-            print(f"Found {len(similar_artist_names)} similar artists from MusicMap")
+            logger.debug(f"Found {len(similar_artist_names)} similar artists from MusicMap")
 
             # Determine metadata source
             use_hydrabase = _is_hydrabase_active()
@@ -11092,9 +11089,9 @@ def get_similar_artists_stream(artist_name):
                     searched_results = spotify_client.search_artists(artist_name, limit=1)
                 if searched_results and len(searched_results) > 0:
                     searched_artist_id = searched_results[0].id
-                    print(f"Searched artist ID: {searched_artist_id}")
+                    logger.info(f"Searched artist ID: {searched_artist_id}")
             except Exception as e:
-                print(f"Could not get searched artist ID: {e}")
+                logger.error(f"Could not get searched artist ID: {e}")
 
             # Match each artist one by one and stream results
             max_artists = 20
@@ -11103,7 +11100,7 @@ def get_similar_artists_stream(artist_name):
 
             for artist_name_to_match in similar_artist_names[:max_artists]:
                 try:
-                    print(f"Matching: {artist_name_to_match}")
+                    logger.info(f"Matching: {artist_name_to_match}")
 
                     # Search for the artist via active metadata source
                     if use_hydrabase:
@@ -11116,12 +11113,12 @@ def get_similar_artists_stream(artist_name):
 
                         # Skip if this is the searched artist
                         if spotify_artist.id == searched_artist_id:
-                            print(f"Skipping searched artist: {spotify_artist.name}")
+                            logger.info(f"Skipping searched artist: {spotify_artist.name}")
                             continue
 
                         # Skip if we've already seen this artist ID (deduplication)
                         if spotify_artist.id in seen_artist_ids:
-                            print(f"Skipping duplicate artist: {spotify_artist.name}")
+                            logger.warning(f"Skipping duplicate artist: {spotify_artist.name}")
                             continue
 
                         seen_artist_ids.add(spotify_artist.id)
@@ -11138,24 +11135,24 @@ def get_similar_artists_stream(artist_name):
                         yield f"data: {json.dumps({'artist': artist_data})}\n\n"
                         matched_count += 1
 
-                        print(f"Matched and streamed: {spotify_artist.name}")
+                        logger.info(f"Matched and streamed: {spotify_artist.name}")
                     else:
-                        print(f"No Spotify match found for: {artist_name_to_match}")
+                        logger.warning(f"No Spotify match found for: {artist_name_to_match}")
 
                 except Exception as match_error:
-                    print(f"Error matching {artist_name_to_match}: {match_error}")
+                    logger.error(f"Error matching {artist_name_to_match}: {match_error}")
                     continue
 
             # Send completion message
             yield f"data: {json.dumps({'complete': True, 'total': matched_count})}\n\n"
-            print(f"Streaming complete: {matched_count} artists matched")
+            logger.info(f"Streaming complete: {matched_count} artists matched")
 
         except requests.exceptions.RequestException as e:
-            print(f"Error fetching MusicMap: {e}")
+            logger.debug(f"Error fetching MusicMap: {e}")
             yield f"data: {json.dumps({'error': f'Failed to fetch from MusicMap: {str(e)}'})}\n\n"
 
         except Exception as e:
-            print(f"Error streaming similar artists: {e}")
+            logger.error(f"Error streaming similar artists: {e}")
             import traceback
             traceback.print_exc()
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -11174,7 +11171,7 @@ def get_similar_artists(artist_name):
         JSON with similar artists matched to Spotify data
     """
     try:
-        print(f"Getting similar artists for: {artist_name}")
+        logger.info(f"Getting similar artists for: {artist_name}")
 
         # Import required libraries
         from bs4 import BeautifulSoup
@@ -11183,7 +11180,7 @@ def get_similar_artists(artist_name):
         url_artist = artist_name.lower().replace(' ', '+')
         musicmap_url = f'https://www.music-map.com/{url_artist}'
 
-        print(f"Fetching MusicMap: {musicmap_url}")
+        logger.debug(f"Fetching MusicMap: {musicmap_url}")
 
         # Set headers to mimic a browser
         headers = {
@@ -11220,7 +11217,7 @@ def get_similar_artists(artist_name):
 
             similar_artist_names.append(artist_text)
 
-        print(f"Found {len(similar_artist_names)} similar artists from MusicMap")
+        logger.debug(f"Found {len(similar_artist_names)} similar artists from MusicMap")
 
         # Determine metadata source
         use_hydrabase = _is_hydrabase_active()
@@ -11241,9 +11238,9 @@ def get_similar_artists(artist_name):
                 searched_results = spotify_client.search_artists(artist_name, limit=1)
             if searched_results and len(searched_results) > 0:
                 searched_artist_id = searched_results[0].id
-                print(f"Searched artist ID: {searched_artist_id}")
+                logger.info(f"Searched artist ID: {searched_artist_id}")
         except Exception as e:
-            print(f"Could not get searched artist ID: {e}")
+            logger.error(f"Could not get searched artist ID: {e}")
 
         # Match each artist (limit to first 20 for performance)
         matched_artists = []
@@ -11252,7 +11249,7 @@ def get_similar_artists(artist_name):
 
         for artist_name_to_match in similar_artist_names[:max_artists]:
             try:
-                print(f"Matching: {artist_name_to_match}")
+                logger.info(f"Matching: {artist_name_to_match}")
 
                 # Search for the artist via active metadata source
                 if use_hydrabase:
@@ -11265,12 +11262,12 @@ def get_similar_artists(artist_name):
 
                     # Skip if this is the searched artist
                     if spotify_artist.id == searched_artist_id:
-                        print(f"Skipping searched artist: {spotify_artist.name}")
+                        logger.info(f"Skipping searched artist: {spotify_artist.name}")
                         continue
 
                     # Skip if we've already seen this artist ID (deduplication)
                     if spotify_artist.id in seen_artist_ids:
-                        print(f"Skipping duplicate artist: {spotify_artist.name}")
+                        logger.warning(f"Skipping duplicate artist: {spotify_artist.name}")
                         continue
 
                     seen_artist_ids.add(spotify_artist.id)
@@ -11283,15 +11280,15 @@ def get_similar_artists(artist_name):
                         'popularity': spotify_artist.popularity if hasattr(spotify_artist, 'popularity') else 0
                     })
 
-                    print(f"Matched: {spotify_artist.name}")
+                    logger.info(f"Matched: {spotify_artist.name}")
                 else:
-                    print(f"No Spotify match found for: {artist_name_to_match}")
+                    logger.warning(f"No Spotify match found for: {artist_name_to_match}")
 
             except Exception as match_error:
-                print(f"Error matching {artist_name_to_match}: {match_error}")
+                logger.error(f"Error matching {artist_name_to_match}: {match_error}")
                 continue
 
-        print(f"Successfully matched {len(matched_artists)} artists to Spotify")
+        logger.info(f"Successfully matched {len(matched_artists)} artists to Spotify")
 
         return jsonify({
             "success": True,
@@ -11302,14 +11299,14 @@ def get_similar_artists(artist_name):
         })
 
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching MusicMap: {e}")
+        logger.debug(f"Error fetching MusicMap: {e}")
         return jsonify({
             "success": False,
             "error": f"Failed to fetch from MusicMap: {str(e)}"
         }), 500
 
     except Exception as e:
-        print(f"Error getting similar artists: {e}")
+        logger.error(f"Error getting similar artists: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -11371,7 +11368,7 @@ def get_artist_image(artist_id):
             image_url = fallback._get_artist_image_from_albums(artist_id)
             return jsonify({"success": True, "image_url": image_url})
     except Exception as e:
-        print(f"Error fetching artist image: {e}")
+        logger.error(f"Error fetching artist image: {e}")
         return jsonify({"success": False, "image_url": None, "error": str(e)})
 
 @app.route('/api/artist/<artist_id>/discography', methods=['GET'])
@@ -11692,7 +11689,7 @@ def download_discography(artist_id):
 
                     total_added += added
                     total_skipped += skipped
-                    print(f"[Discography] {album_name}: {added} added, {skipped} skipped")
+                    logger.warning(f"[Discography] {album_name}: {added} added, {skipped} skipped")
                     yield json.dumps({
                         "album_id": album_id, "name": album_name, "status": "done",
                         "tracks_added": added, "tracks_skipped": skipped, "tracks_total": len(tracks)
@@ -11701,13 +11698,13 @@ def download_discography(artist_id):
                 except Exception as album_err:
                     yield json.dumps({"album_id": album_id, "status": "error", "message": str(album_err)}) + '\n'
 
-            print(f"[Discography] Complete for {artist_name}: {total_added} tracks added, {total_skipped} skipped across {len(album_ids)} albums")
+            logger.warning(f"[Discography] Complete for {artist_name}: {total_added} tracks added, {total_skipped} skipped across {len(album_ids)} albums")
             yield json.dumps({"status": "complete", "total_added": total_added, "total_skipped": total_skipped, "total_albums": len(album_ids)}) + '\n'
 
         return app.response_class(generate_ndjson(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
 
     except Exception as e:
-        print(f"Error in download discography: {e}")
+        logger.error(f"Error in download discography: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/artist/<artist_id>/completion', methods=['POST'])
@@ -11728,7 +11725,7 @@ def check_artist_discography_completion(artist_id):
         )
         return jsonify(result)
     except Exception as e:
-        print(f"Error checking discography completion: {e}")
+        logger.error(f"Error checking discography completion: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -11752,7 +11749,7 @@ def check_artist_discography_completion_stream(artist_id):
 
     def generate_completion_stream():
         try:
-            print(f"Starting streaming completion check for artist: {artist_name}")
+            logger.info(f"Starting streaming completion check for artist: {artist_name}")
             for event in iter_artist_discography_completion_events(
                 discography,
                 artist_name=artist_name,
@@ -11763,7 +11760,7 @@ def check_artist_discography_completion_stream(artist_id):
                     # Small delay to make the streaming effect visible
                     time.sleep(0.1)  # 100ms delay between items
         except Exception as e:
-            print(f"Error in streaming completion check: {e}")
+            logger.error(f"Error in streaming completion check: {e}")
             import traceback
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
@@ -11832,7 +11829,7 @@ def library_completion_stream():
             yield f"data: {json.dumps({'type': 'complete', 'processed_count': len(all_items)})}\n\n"
 
         except Exception as e:
-            print(f"Error in library completion stream: {e}")
+            logger.error(f"Error in library completion stream: {e}")
             import traceback
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
@@ -11963,7 +11960,7 @@ def library_check_tracks():
         return jsonify({"success": True, "owned_tracks": owned_map})
 
     except Exception as e:
-        print(f"Error checking track ownership: {e}")
+        logger.error(f"Error checking track ownership: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -12172,7 +12169,7 @@ def enhance_artist_quality(artist_id):
                             'external_urls': {},
                         }
                 except Exception as e:
-                    print(f"[Enhance] Spotify lookup failed for {spotify_tid}: {e}")
+                    logger.error(f"[Enhance] Spotify lookup failed for {spotify_tid}: {e}")
 
             if not matched_track_data and spotify_client:
                 # Fallback: Spotify search matching — need full track data for wishlist
@@ -12246,7 +12243,7 @@ def enhance_artist_quality(artist_id):
                                 'external_urls': best_match.external_urls or {},
                             }
                 except Exception as e:
-                    print(f"[Enhance] Search match failed for {title}: {e}")
+                    logger.error(f"[Enhance] Search match failed for {title}: {e}")
 
             # Fallback source when Spotify unavailable or no match found
             if not matched_track_data:
@@ -12315,9 +12312,9 @@ def enhance_artist_quality(artist_id):
                             'preview_url': itunes_best.preview_url,
                             'external_urls': itunes_best.external_urls or {},
                         }
-                        print(f"[Enhance] Fallback match for {title}: {itunes_best.artists[0]} - {itunes_best.name} (conf: {itunes_best_conf:.3f})")
+                        logger.warning(f"[Enhance] Fallback match for {title}: {itunes_best.artists[0]} - {itunes_best.name} (conf: {itunes_best_conf:.3f})")
                 except Exception as e:
-                    print(f"[Enhance] Fallback source failed for {title}: {e}")
+                    logger.error(f"[Enhance] Fallback source failed for {title}: {e}")
 
             if not matched_track_data:
                 failed_count += 1
@@ -12344,7 +12341,7 @@ def enhance_artist_quality(artist_id):
 
             if success:
                 enhanced_count += 1
-                print(f"[Enhance] Queued for upgrade: {artist_name} - {title} ({tier_name})")
+                logger.info(f"[Enhance] Queued for upgrade: {artist_name} - {title} ({tier_name})")
             else:
                 failed_count += 1
                 failed_tracks.append({'track_id': track_id, 'title': title, 'reason': 'Wishlist add failed'})
@@ -12356,7 +12353,7 @@ def enhance_artist_quality(artist_id):
             'failed_tracks': failed_tracks
         })
     except Exception as e:
-        print(f"[Enhance] Error: {e}")
+        logger.error(f"[Enhance] Error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -13555,9 +13552,9 @@ def reorganize_album_files(album_id):
                             if not os.path.exists(sidecar_dst):
                                 try:
                                     shutil.move(sidecar_src, sidecar_dst)
-                                    print(f"[Reorganize] Moved {sidecar} to {dest_dir}")
+                                    logger.info(f"[Reorganize] Moved {sidecar} to {dest_dir}")
                                 except Exception as sc_err:
-                                    print(f"[Reorganize] Failed to move {sidecar}: {sc_err}")
+                                    logger.error(f"[Reorganize] Failed to move {sidecar}: {sc_err}")
 
                 # Clean up empty directories left behind (after sidecars moved)
                 for src_dir in moved_dirs:
@@ -14070,7 +14067,7 @@ def library_play_track():
         else:
             return jsonify({"success": False, "error": _get_file_not_found_error(file_path)}), 404
 
-        print(f"Library play request: {os.path.basename(file_path)}")
+        logger.info(f"Library play request: {os.path.basename(file_path)}")
 
         # Set stream state to ready with the library file path directly
         with stream_lock:
@@ -14090,7 +14087,7 @@ def library_play_track():
         return jsonify({"success": True, "message": "Library track ready for playback"})
 
     except Exception as e:
-        print(f"Error playing library track: {e}")
+        logger.error(f"Error playing library track: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 _enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')}
@@ -14164,7 +14161,7 @@ def library_enrich_entity():
         })
 
     except Exception as e:
-        print(f"Error enriching entity: {e}")
+        logger.error(f"Error enriching entity: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -14321,7 +14318,7 @@ def library_search_service():
         return jsonify({"success": True, "results": results})
 
     except Exception as e:
-        print(f"Error searching service: {e}")
+        logger.error(f"Error searching service: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -14645,7 +14642,7 @@ def library_manual_match():
         })
 
     except Exception as e:
-        print(f"Error manual matching: {e}")
+        logger.error(f"Error manual matching: {e}")
 
 @app.route('/api/library/clear-match', methods=['PUT'])
 def library_clear_match():
@@ -14703,7 +14700,7 @@ def library_clear_match():
         })
 
     except Exception as e:
-        print(f"Error clearing match: {e}")
+        logger.error(f"Error clearing match: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
         import traceback
@@ -14787,7 +14784,7 @@ def library_delete_track(track_id):
                 result["file_error"] = file_error
             return jsonify(result)
     except Exception as e:
-        print(f"Error deleting track {track_id}: {e}")
+        logger.error(f"Error deleting track {track_id}: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -15429,24 +15426,24 @@ def sync_artist_library(artist_id):
 
                     # Fetch the artist object from the server
                     server_artist = None
-                    print(f"[Artist Sync] Fetching artist {db_artist_id} from {server_source}...")
+                    logger.info(f"[Artist Sync] Fetching artist {db_artist_id} from {server_source}...")
                     if server_source == 'plex' and hasattr(media_client, 'server'):
                         try:
                             server_artist = media_client.server.fetchItem(int(db_artist_id))
-                            print(f"[Artist Sync] Plex returned: {getattr(server_artist, 'title', 'None')}")
+                            logger.info(f"[Artist Sync] Plex returned: {getattr(server_artist, 'title', 'None')}")
                         except Exception as e:
-                            print(f"[Artist Sync] Plex fetchItem failed: {e}")
+                            logger.error(f"[Artist Sync] Plex fetchItem failed: {e}")
                     elif hasattr(media_client, 'get_artist_by_id'):
                         try:
                             server_artist = media_client.get_artist_by_id(str(db_artist_id))
-                            print(f"[Artist Sync] Server returned: {getattr(server_artist, 'title', None) or server_artist}")
+                            logger.info(f"[Artist Sync] Server returned: {getattr(server_artist, 'title', None) or server_artist}")
                         except Exception as e:
-                            print(f"[Artist Sync] get_artist_by_id failed: {e}")
+                            logger.error(f"[Artist Sync] get_artist_by_id failed: {e}")
                     else:
-                        print(f"[Artist Sync] No get_artist_by_id method on {type(media_client).__name__}")
+                        logger.warning(f"[Artist Sync] No get_artist_by_id method on {type(media_client).__name__}")
 
                     if not server_artist:
-                        print(f"[Artist Sync] Could not fetch artist from server — skipping pull phase")
+                        logger.error(f"[Artist Sync] Could not fetch artist from server — skipping pull phase")
 
                     if server_artist:
                         # Check for name change
@@ -15456,7 +15453,7 @@ def sync_artist_library(artist_id):
                                 "UPDATE artists SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                                 (new_name, db_artist_id)
                             )
-                            print(f"[Artist Sync] Name updated: '{artist_name}' → '{new_name}'")
+                            logger.info(f"[Artist Sync] Name updated: '{artist_name}' → '{new_name}'")
                             artist_name = new_name
                             name_updated = True
 
@@ -15464,10 +15461,10 @@ def sync_artist_library(artist_id):
                         success, details, new_albums, new_tracks = worker._process_artist_with_content(
                             server_artist, skip_existing_tracks=True
                         )
-                        print(f"[Artist Sync] Server pull for {artist_name}: {details}")
+                        logger.info(f"[Artist Sync] Server pull for {artist_name}: {details}")
 
                 except Exception as e:
-                    print(f"[Artist Sync] Server pull failed for {artist_name}: {e}")
+                    logger.error(f"[Artist Sync] Server pull failed for {artist_name}: {e}")
 
         # ── Phase 2: Remove stale entries (files no longer on disk) ──
         stale_removed = 0
@@ -15507,7 +15504,7 @@ def sync_artist_library(artist_id):
 
             conn.commit()
 
-        print(f"[Artist Sync] {artist_name}: +{new_albums} albums, +{new_tracks} tracks, "
+        logger.warning(f"[Artist Sync] {artist_name}: +{new_albums} albums, +{new_tracks} tracks, "
               f"-{stale_removed} stale, -{empty_albums_removed} empty albums")
 
         return jsonify({
@@ -15521,7 +15518,7 @@ def sync_artist_library(artist_id):
         })
 
     except Exception as e:
-        print(f"Error syncing artist {artist_id}: {e}")
+        logger.error(f"Error syncing artist {artist_id}: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -15597,7 +15594,7 @@ def library_delete_album(album_id):
                 "files_failed": files_failed
             })
     except Exception as e:
-        print(f"Error deleting album {album_id}: {e}")
+        logger.error(f"Error deleting album {album_id}: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -15622,7 +15619,7 @@ def library_delete_tracks_batch():
             conn.commit()
             return jsonify({"success": True, "deleted_count": cursor.rowcount})
     except Exception as e:
-        print(f"Error batch deleting tracks: {e}")
+        logger.error(f"Error batch deleting tracks: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -15653,7 +15650,7 @@ def library_radio():
 
         return jsonify(result)
     except Exception as e:
-        print(f"Error getting radio tracks: {e}")
+        logger.error(f"Error getting radio tracks: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -15670,7 +15667,7 @@ def stream_start():
     if not data:
         return jsonify({"success": False, "error": "No track data provided"}), 400
     
-    print(f"Web UI Stream request for: {data.get('filename')}")
+    logger.info(f"Web UI Stream request for: {data.get('filename')}")
     
     try:
         # Stop any existing streaming task
@@ -15694,7 +15691,7 @@ def stream_start():
         return jsonify({"success": True, "message": "Streaming started"})
         
     except Exception as e:
-        print(f"Error starting stream: {e}")
+        logger.error(f"Error starting stream: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/stream/status')
@@ -15710,7 +15707,7 @@ def stream_status():
                 "error_message": stream_state["error_message"]
             })
     except Exception as e:
-        print(f"Error getting stream status: {e}")
+        logger.error(f"Error getting stream status: {e}")
         return jsonify({
             "status": "error",
             "progress": 0,
@@ -15731,7 +15728,7 @@ def stream_audio():
         if not os.path.exists(file_path):
             return jsonify({"error": "Audio file not found"}), 404
         
-        print(f"Serving audio file: {os.path.basename(file_path)}")
+        logger.info(f"Serving audio file: {os.path.basename(file_path)}")
         
         # Determine MIME type based on file extension
         file_ext = os.path.splitext(file_path)[1].lower()
@@ -15813,7 +15810,7 @@ def stream_audio():
             return response
         
     except Exception as e:
-        print(f"Error serving audio file: {e}")
+        logger.error(f"Error serving audio file: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stream/stop', methods=['POST'])
@@ -15839,9 +15836,9 @@ def stream_stop():
                     file_path = os.path.join(stream_folder, filename)
                     if os.path.isfile(file_path):
                         os.remove(file_path)
-                        print(f"Removed stream file: {filename}")
+                        logger.info(f"Removed stream file: {filename}")
         else:
-            print(f"Library playback stopped - skipping file deletion")
+            logger.info(f"Library playback stopped - skipping file deletion")
 
         # Reset stream state
         with stream_lock:
@@ -15857,7 +15854,7 @@ def stream_stop():
         return jsonify({"success": True, "message": "Stream stopped"})
 
     except Exception as e:
-        print(f"Error stopping stream: {e}")
+        logger.error(f"Error stopping stream: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # --- Matched Downloads API Endpoints ---
@@ -15871,22 +15868,22 @@ def _generate_artist_suggestions(search_result, is_album=False, album_result=Non
         return []
     
     try:
-        print(f"Generating artist suggestions for: {search_result.get('artist', '')} - {search_result.get('title', '')}")
+        logger.info(f"Generating artist suggestions for: {search_result.get('artist', '')} - {search_result.get('title', '')}")
         suggestions = []
         
         # Special handling for albums - use album title to find artist
         if is_album and album_result and album_result.get('album_title'):
-            print(f"Album mode detected - using album title for artist search")
+            logger.info(f"Album mode detected - using album title for artist search")
             album_title = album_result.get('album_title', '')
             
             # Clean album title (remove year prefixes like "(2005)")
             import re
             clean_album_title = re.sub(r'^\(\d{4}\)\s*', '', album_title).strip()
-            print(f"    clean_album_title: '{clean_album_title}'")
+            logger.info(f"    clean_album_title: '{clean_album_title}'")
             
             # Search tracks using album title to find the artist
             tracks = spotify_client.search_tracks(clean_album_title, limit=10)
-            print(f"Found {len(tracks)} tracks from album search")
+            logger.info(f"Found {len(tracks)} tracks from album search")
             
             # Collect unique artists and their associated tracks/albums
             unique_artists = {}  # artist_name -> list of (track, album) tuples
@@ -15906,7 +15903,7 @@ def _generate_artist_suggestions(search_result, is_album=False, album_result=Non
                     if matches:
                         return artist_name, matches[0]
                 except Exception as e:
-                    print(f"Error fetching artist '{artist_name}': {e}")
+                    logger.error(f"Error fetching artist '{artist_name}': {e}")
                 return artist_name, None
             
             # Use limited concurrency to respect rate limits
@@ -15957,7 +15954,7 @@ def _generate_artist_suggestions(search_result, is_album=False, album_result=Non
             if not search_artist:
                 return []
             
-            print(f"Single track mode - searching for artist: '{search_artist}'")
+            logger.info(f"Single track mode - searching for artist: '{search_artist}'")
             
             # Search for artists directly
             artist_matches = spotify_client.search_artists(search_artist, limit=10)
@@ -15985,7 +15982,7 @@ def _generate_artist_suggestions(search_result, is_album=False, album_result=Non
         return suggestions[:4]
         
     except Exception as e:
-        print(f"Error generating artist suggestions: {e}")
+        logger.error(f"Error generating artist suggestions: {e}")
         return []
 
 def _generate_album_suggestions(selected_artist, search_result):
@@ -15997,22 +15994,22 @@ def _generate_album_suggestions(selected_artist, search_result):
         return []
     
     try:
-        print(f"Generating album suggestions for artist: {selected_artist['name']}")
+        logger.info(f"Generating album suggestions for artist: {selected_artist['name']}")
         
         # Determine target album name from search result
         target_album_name = search_result.get('album', '') or search_result.get('album_title', '')
         if not target_album_name:
-            print("No album name found in search result")
+            logger.warning("No album name found in search result")
             return []
         
         # Clean target album name
         import re
         clean_target = re.sub(r'^\(\d{4}\)\s*', '', target_album_name).strip()
-        print(f"    target_album: '{clean_target}'")
+        logger.info(f"    target_album: '{clean_target}'")
         
         # Get artist's albums from Spotify
         artist_albums = spotify_client.get_artist_albums(selected_artist['id'])
-        print(f"Found {len(artist_albums)} albums for artist")
+        logger.info(f"Found {len(artist_albums)} albums for artist")
         
         album_matches = []
         for album in artist_albums:
@@ -16039,7 +16036,7 @@ def _generate_album_suggestions(selected_artist, search_result):
         return album_matches[:4]
         
     except Exception as e:
-        print(f"Error generating album suggestions: {e}")
+        logger.error(f"Error generating album suggestions: {e}")
         return []
 
 @app.route('/api/match/suggestions', methods=['POST'])
@@ -16063,7 +16060,7 @@ def get_match_suggestions():
         return jsonify({"suggestions": suggestions})
         
     except Exception as e:
-        print(f"Error in match suggestions: {e}")
+        logger.error(f"Error in match suggestions: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/match/search', methods=['POST'])
@@ -16161,7 +16158,7 @@ def search_match():
             return jsonify({"error": "Invalid context. Must be 'artist' or 'album'"}), 400
         
     except Exception as e:
-        print(f"Error in match search: {e}")
+        logger.error(f"Error in match search: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -16211,10 +16208,10 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
                     _mb_release_cache[(spotify_album['name'].lower().strip(), _pf_artist_key)] = _pf_mbid
                 with _mb_release_detail_cache_lock:
                     _mb_release_detail_cache[_pf_mbid] = _pf_release
-                print(f"[Preflight] Pre-cached MB release for '{spotify_album['name']}': "
+                logger.info(f"[Preflight] Pre-cached MB release for '{spotify_album['name']}': "
                       f"'{_pf_release.get('title', '')}' ({_pf_mbid[:8]}...)")
     except Exception as pf_err:
-        print(f"[Preflight] MB release preflight failed: {pf_err}")
+        logger.error(f"[Preflight] MB release preflight failed: {pf_err}")
 
     # Process matched tracks with full Spotify metadata
     for matched_item in enhanced_tracks:
@@ -16313,18 +16310,18 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
     match and correct the metadata for each individual track before downloading,
     ensuring perfect tagging and naming.
     """
-    print(f"Processing matched album download for '{spotify_album['name']}' with {len(album_result.get('tracks', []))} tracks.")
+    logger.info(f"Processing matched album download for '{spotify_album['name']}' with {len(album_result.get('tracks', []))} tracks.")
     
     tracks_to_download = album_result.get('tracks', [])
     if not tracks_to_download:
-        print("Album result contained no tracks. Aborting.")
+        logger.warning("Album result contained no tracks. Aborting.")
         return 0
 
     # --- THIS IS THE NEW LOGIC ---
     # Fetch the official tracklist from Spotify ONCE for the entire album.
     official_spotify_tracks = _get_spotify_album_tracks(spotify_album)
     if not official_spotify_tracks:
-        print("Could not fetch official tracklist from Spotify. Metadata may be inaccurate.")
+        logger.error("Could not fetch official tracklist from Spotify. Metadata may be inaccurate.")
     # --- END OF NEW LOGIC ---
 
     # Compute total_discs for multi-disc album subfolder support
@@ -16348,10 +16345,10 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
                     _mb_release_cache[(spotify_album['name'].lower().strip(), _pf_artist_key)] = _pf_mbid
                 with _mb_release_detail_cache_lock:
                     _mb_release_detail_cache[_pf_mbid] = _pf_release
-                print(f"[Preflight] Pre-cached MB release for '{spotify_album['name']}': "
+                logger.info(f"[Preflight] Pre-cached MB release for '{spotify_album['name']}': "
                       f"'{_pf_release.get('title', '')}' ({_pf_mbid[:8]}...)")
     except Exception as pf_err:
-        print(f"[Preflight] MB release preflight failed: {pf_err}")
+        logger.error(f"[Preflight] MB release preflight failed: {pf_err}")
 
     started_count = 0
     for track_data in tracks_to_download:
@@ -16372,7 +16369,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
             # --- END OF CRITICAL STEP ---
 
             if _is_explicit_blocked(corrected_meta):
-                print(f"[Content Filter] Skipping explicit track: '{corrected_meta.get('title')}'")
+                logger.info(f"[Content Filter] Skipping explicit track: '{corrected_meta.get('title')}'")
                 continue
 
             # Create a clean context object using the CORRECTED metadata
@@ -16402,13 +16399,13 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
                         "original_search_result": enhanced_context, # Contains corrected data + clean title
                         "is_album_download": True
                     }
-                print(f"  + Queued track: {filename} (Matched to: '{corrected_meta.get('title')}')")
+                logger.info(f"  + Queued track: {filename} (Matched to: '{corrected_meta.get('title')}')")
                 started_count += 1
             else:
-                print(f"  - Failed to queue track: {filename}")
+                logger.error(f"  - Failed to queue track: {filename}")
 
         except Exception as e:
-            print(f"Error processing track in album batch: {track_data.get('filename')}. Error: {e}")
+            logger.error(f"Error processing track in album batch: {track_data.get('filename')}. Error: {e}")
             continue
             
     return started_count
@@ -16613,7 +16610,7 @@ def _parse_filename_metadata(filename: str) -> dict:
             cleaned_album = re.sub(r'^\d{4}\s*-\s*', '', potential_album).strip()
             metadata['album'] = cleaned_album
 
-    print(f"Parsed Filename '{base_name}': Artist='{metadata['artist']}', Title='{metadata['title']}', Album='{metadata['album']}', Track#='{metadata['track_number']}'")
+    logger.info(f"Parsed Filename '{base_name}': Artist='{metadata['artist']}', Title='{metadata['title']}', Album='{metadata['album']}', Track#='{metadata['track_number']}'")
     return metadata
 
 
@@ -16783,7 +16780,7 @@ def _search_track_in_album_context(original_search: dict, artist: dict) -> dict:
                 matching_engine.normalize_string(track_data['name'])
             )
             if similarity > 0.7:
-                print(f"Found track in album context: '{track_data['name']}'")
+                logger.info(f"Found track in album context: '{track_data['name']}'")
                 return {
                     'is_album': True,
                     'album_name': spotify_album.name,
@@ -16793,7 +16790,7 @@ def _search_track_in_album_context(original_search: dict, artist: dict) -> dict:
                 }
         return None
     except Exception as e:
-        print(f"Error in _search_track_in_album_context: {e}")
+        logger.error(f"Error in _search_track_in_album_context: {e}")
         return None
 
 
@@ -16807,35 +16804,35 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
     try:
         # Log available data for debugging (GUI PARITY)
         original_search = context.get("original_search_result", {})
-        print(f"\n[Album Detection] Starting for track: '{original_search.get('title', 'Unknown')}'")
-        print(f"[Data Available]:")
-        print(f"   - Clean Spotify title: '{original_search.get('spotify_clean_title', 'None')}'")
-        print(f"   - Clean Spotify album: '{original_search.get('spotify_clean_album', 'None')}'")
-        print(f"   - Filename album: '{original_search.get('album', 'None')}'")
-        print(f"   - Artist: '{artist.get('name', 'Unknown')}'")
-        print(f"   - Context has clean data: {context.get('has_clean_spotify_data', False)}")
-        print(f"   - Is album download: {context.get('is_album_download', False)}")
+        logger.info(f"\n[Album Detection] Starting for track: '{original_search.get('title', 'Unknown')}'")
+        logger.info(f"[Data Available]:")
+        logger.info(f"   - Clean Spotify title: '{original_search.get('spotify_clean_title', 'None')}'")
+        logger.info(f"   - Clean Spotify album: '{original_search.get('spotify_clean_album', 'None')}'")
+        logger.info(f"   - Filename album: '{original_search.get('album', 'None')}'")
+        logger.info(f"   - Artist: '{artist.get('name', 'Unknown')}'")
+        logger.info(f"   - Context has clean data: {context.get('has_clean_spotify_data', False)}")
+        logger.info(f"   - Is album download: {context.get('is_album_download', False)}")
         spotify_album_context = context.get("spotify_album")
         is_album_download = context.get("is_album_download", False)
         artist_name = artist['name']
         
-        print(f"Album detection for '{original_search.get('title', 'Unknown')}' by '{artist_name}':")
-        print(f"    Has album attr: {bool(original_search.get('album'))}")
+        logger.info(f"Album detection for '{original_search.get('title', 'Unknown')}' by '{artist_name}':")
+        logger.info(f"    Has album attr: {bool(original_search.get('album'))}")
         if original_search.get('album'):
-            print(f"    Album value: '{original_search.get('album')}'")
+            logger.info(f"    Album value: '{original_search.get('album')}'")
 
         # --- THIS IS THE CRITICAL FIX ---
         # If this is part of a matched album download, we TRUST the context data completely.
         # This is the exact logic from downloads.py.
         if is_album_download and spotify_album_context:
-            print("Matched Album context found. Prioritizing pre-matched Spotify data.")
+            logger.info("Matched Album context found. Prioritizing pre-matched Spotify data.")
             
             # We exclusively use the track number and title that were matched
             # *before* the download started. We do not try to re-parse the filename.
             track_number = original_search.get('track_number', 1)
             clean_track_name = original_search.get('title', 'Unknown Track')
 
-            print(f"   -> Using pre-matched Track #{track_number} and Title '{clean_track_name}'")
+            logger.info(f"   -> Using pre-matched Track #{track_number} and Title '{clean_track_name}'")
 
             return {
                 'is_album': True,
@@ -16862,7 +16859,7 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
         
         if album_name_to_use:
             track_title = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown')
-            print(f"ALBUM-AWARE SEARCH ({album_source}): Looking for '{track_title}' in album '{album_name_to_use}'")
+            logger.info(f"ALBUM-AWARE SEARCH ({album_source}): Looking for '{track_title}' in album '{album_name_to_use}'")
             
             # Temporarily set the album for the search
             original_album = original_search.get('album')
@@ -16871,10 +16868,10 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
             try:
                 album_result = _search_track_in_album_context_web(context, artist)
                 if album_result:
-                    print(f"PRIORITY 1 SUCCESS: Found track using {album_source} album name - FORCING album classification")
+                    logger.info(f"PRIORITY 1 SUCCESS: Found track using {album_source} album name - FORCING album classification")
                     return album_result
                 else:
-                    print(f"PRIORITY 1 FAILED: Track not found using {album_source} album name")
+                    logger.error(f"PRIORITY 1 FAILED: Track not found using {album_source} album name")
             finally:
                 # Restore original album value
                 if original_album is not None:
@@ -16883,13 +16880,13 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
                     original_search.pop('album', None)
 
         # PRIORITY 2: Fallback to individual track search for clean metadata
-        print(f"Searching Spotify for individual track info (PRIORITY 2)...")
+        logger.info(f"Searching Spotify for individual track info (PRIORITY 2)...")
         
         # Clean the track title before searching - remove artist prefix  
         # Prioritize clean Spotify title over filename-parsed title
         track_title_to_use = original_search.get('spotify_clean_title') or original_search.get('title', '')
         clean_title = _clean_track_title_web(track_title_to_use, artist_name)
-        print(f"Cleaned title: '{track_title_to_use}' -> '{clean_title}'")
+        logger.info(f"Cleaned title: '{track_title_to_use}' -> '{clean_title}'")
         
         # Search for the track by artist and cleaned title
         query = f"artist:{artist_name} track:{clean_title}"
@@ -16928,25 +16925,25 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
 
         # If we found a good Spotify match, use it for clean metadata
         if best_match and best_confidence > 0.75:
-            print(f"Found matching Spotify track: '{best_match.name}' - Album: '{best_match.album}' (confidence: {best_confidence:.2f})")
+            logger.info(f"Found matching Spotify track: '{best_match.name}' - Album: '{best_match.album}' (confidence: {best_confidence:.2f})")
             
             # Get detailed track information using Spotify's track API
             detailed_track = None
             if hasattr(best_match, 'id') and best_match.id:
-                print(f"Getting detailed track info from Spotify API for track ID: {best_match.id}")
+                logger.info(f"Getting detailed track info from Spotify API for track ID: {best_match.id}")
                 detailed_track = spotify_client.get_track_details(best_match.id)
             
             # Use detailed track data if available
             if detailed_track:
-                print(f"Got detailed track data from Spotify API")
+                logger.info(f"Got detailed track data from Spotify API")
                 album_name = _clean_album_title_web(detailed_track['album']['name'], artist_name)
                 clean_track_name = detailed_track['name']  # Use Spotify's clean track name
                 album_type = detailed_track['album'].get('album_type', 'album')
                 total_tracks = detailed_track['album'].get('total_tracks', 1)
                 spotify_track_number = detailed_track.get('track_number', 1)
                 
-                print(f"Spotify album info: '{album_name}' (type: {album_type}, total_tracks: {total_tracks}, track#: {spotify_track_number})")
-                print(f"Clean track name from Spotify: '{clean_track_name}'")
+                logger.info(f"Spotify album info: '{album_name}' (type: {album_type}, total_tracks: {total_tracks}, track#: {spotify_track_number})")
+                logger.info(f"Clean track name from Spotify: '{clean_track_name}'")
                 
                 # Enhanced album detection using detailed API data (GUI PARITY)
                 is_album = (
@@ -16964,7 +16961,7 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
                 if detailed_track['album'].get('images'):
                     album_image_url = detailed_track['album']['images'][0].get('url')
                 
-                print(f"Album classification: {is_album} (type={album_type}, tracks={total_tracks})")
+                logger.info(f"Album classification: {is_album} (type={album_type}, tracks={total_tracks})")
                 
                 return {
                     'is_album': is_album,
@@ -16977,7 +16974,7 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
                 }
 
         # Fallback: Use original data with basic cleaning
-        print("No good Spotify match found, using original data")
+        logger.warning("No good Spotify match found, using original data")
         fallback_title = _clean_track_title_web(original_search.get('title', 'Unknown Track'), artist_name)
 
         # Preserve track_number from context if available (playlist sync tracks have it)
@@ -16995,7 +16992,7 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
         }
 
     except Exception as e:
-        print(f"Error in _detect_album_info_web: {e}")
+        logger.error(f"Error in _detect_album_info_web: {e}")
         clean_title = _clean_track_title_web(context.get("original_search_result", {}).get('title', 'Unknown'), artist.get('name', ''))
         _err_tn = (context.get("original_search_result", {}).get('track_number')
                    or context.get('track_info', {}).get('track_number')
@@ -17013,13 +17010,13 @@ def _cleanup_empty_directories(download_path, moved_file_path):
         while current_dir != download_path and current_dir.startswith(download_path):
             is_empty = not any(not f.startswith('.') for f in os.listdir(current_dir))
             if is_empty:
-                print(f"Removing empty directory: {current_dir}")
+                logger.warning(f"Removing empty directory: {current_dir}")
                 os.rmdir(current_dir)
                 current_dir = os.path.dirname(current_dir)
             else:
                 break
     except Exception as e:
-        print(f"Warning: An error occurred during directory cleanup: {e}")
+        logger.error(f"Warning: An error occurred during directory cleanup: {e}")
 
 
 def _sweep_empty_download_directories():
@@ -17061,10 +17058,10 @@ def _sweep_empty_download_directories():
                     pass  # Directory not actually empty or locked — skip silently
 
         if removed > 0:
-            print(f"[Folder Cleanup] Removed {removed} empty director{'y' if removed == 1 else 'ies'} from downloads folder")
+            logger.warning(f"[Folder Cleanup] Removed {removed} empty director{'y' if removed == 1 else 'ies'} from downloads folder")
         return removed
     except Exception as e:
-        print(f"[Folder Cleanup] Error sweeping empty directories: {e}")
+        logger.error(f"[Folder Cleanup] Error sweeping empty directories: {e}")
         return 0
 
 
@@ -17124,7 +17121,7 @@ def _detect_deluxe_edition(album_name: str) -> bool:
     
     for indicator in deluxe_indicators:
         if indicator in album_lower:
-            print(f"Detected deluxe edition: '{album_name}' contains '{indicator}'")
+            logger.info(f"Detected deluxe edition: '{album_name}' contains '{indicator}'")
             return True
     
     return False
@@ -17147,7 +17144,7 @@ def _normalize_base_album_name(base_album: str, artist_name: str) -> str:
     # Check for exact matches in our corrections
     for variant, correction in known_corrections.items():
         if normalized_lower == variant.lower():
-            print(f"Album correction applied: '{base_album}' -> '{correction}'")
+            logger.info(f"Album correction applied: '{base_album}' -> '{correction}'")
             return correction
     
     # Handle punctuation variations 
@@ -17158,7 +17155,7 @@ def _normalize_base_album_name(base_album: str, artist_name: str) -> str:
     normalized = re.sub(r'\s+', ' ', normalized)  # Clean multiple spaces
     normalized = normalized.strip()
     
-    print(f"Album variant normalization: '{base_album}' -> '{normalized}'")
+    logger.info(f"Album variant normalization: '{base_album}' -> '{normalized}'")
     return normalized
 
 def _resolve_album_group(spotify_artist: dict, album_info: dict, original_album: str = None) -> str:
@@ -17191,10 +17188,10 @@ def _resolve_album_group(spotify_artist: dict, album_info: dict, original_album:
             # Check if we already have a cached result for this album
             if album_key in album_name_cache:
                 cached_name = album_name_cache[album_key]
-                print(f"Using cached album name for '{album_key}': '{cached_name}'")
+                logger.info(f"Using cached album name for '{album_key}': '{cached_name}'")
                 return cached_name
             
-            print(f"Album grouping - Key: '{album_key}', Detected: '{detected_album}'")
+            logger.info(f"Album grouping - Key: '{album_key}', Detected: '{detected_album}'")
             
             # Check if this track indicates a deluxe edition
             is_deluxe_track = False
@@ -17208,7 +17205,7 @@ def _resolve_album_group(spotify_artist: dict, album_info: dict, original_album:
             
             # SMART ALGORITHM: Upgrade to deluxe if this track is deluxe
             if is_deluxe_track and current_edition == "standard":
-                print(f"UPGRADE: Album '{base_album}' upgraded from standard to deluxe!")
+                logger.info(f"UPGRADE: Album '{base_album}' upgraded from standard to deluxe!")
                 album_editions[album_key] = "deluxe"
                 current_edition = "deluxe"
             
@@ -17223,12 +17220,12 @@ def _resolve_album_group(spotify_artist: dict, album_info: dict, original_album:
             album_name_cache[album_key] = final_album_name
             album_artists[album_key] = artist_name
             
-            print(f"Album resolution: '{detected_album}' -> '{final_album_name}' (edition: {current_edition})")
+            logger.info(f"Album resolution: '{detected_album}' -> '{final_album_name}' (edition: {current_edition})")
             
             return final_album_name
         
     except Exception as e:
-        print(f"Error resolving album group: {e}")
+        logger.error(f"Error resolving album group: {e}")
         return album_info.get('album_name', 'Unknown Album')
 
 def _clean_album_title_web(album_title: str, artist_name: str) -> str:
@@ -17238,7 +17235,7 @@ def _clean_album_title_web(album_title: str, artist_name: str) -> str:
     # Start with the original title
     original = album_title.strip()
     cleaned = original
-    print(f"Album Title Cleaning: '{original}' (artist: '{artist_name}')")
+    logger.info(f"Album Title Cleaning: '{original}' (artist: '{artist_name}')")
     
     # Remove "Album - " prefix
     cleaned = re.sub(r'^Album\s*-\s*', '', cleaned, flags=re.IGNORECASE)
@@ -17277,7 +17274,7 @@ def _clean_album_title_web(album_title: str, artist_name: str) -> str:
     # Remove leading/trailing punctuation
     cleaned = re.sub(r'^[-\s]+|[-\s]+$', '', cleaned)
     
-    print(f"Album Title Result: '{original}' -> '{cleaned}'")
+    logger.info(f"Album Title Result: '{original}' -> '{cleaned}'")
     return cleaned if cleaned else original
 
 def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> dict:
@@ -17296,10 +17293,10 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
         artist_name = spotify_artist["name"]
         
         if not album_name or not track_title:
-            print(f"Album-aware search failed: Missing album ({album_name}) or track ({track_title})")
+            logger.error(f"Album-aware search failed: Missing album ({album_name}) or track ({track_title})")
             return None
         
-        print(f"Album-aware search: '{track_title}' in album '{album_name}' by '{artist_name}'")
+        logger.info(f"Album-aware search: '{track_title}' in album '{album_name}' by '{artist_name}'")
         
         # Clean the album name for better search results
         clean_album = _clean_album_title_web(album_name, artist_name)
@@ -17307,21 +17304,21 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
         
         # Search for the specific album first
         album_query = f"album:{clean_album} artist:{artist_name}"
-        print(f"Searching albums: {album_query}")
+        logger.info(f"Searching albums: {album_query}")
         albums = spotify_client.search_albums(album_query, limit=5)
         
         if not albums:
-            print(f"No albums found for query: {album_query}")
+            logger.warning(f"No albums found for query: {album_query}")
             return None
         
         # Check each album to see if our track is in it
         for album in albums:
-            print(f"Checking album: '{album.name}' ({album.total_tracks} tracks)")
+            logger.info(f"Checking album: '{album.name}' ({album.total_tracks} tracks)")
             
             # Get tracks from this album
             album_tracks_data = spotify_client.get_album_tracks(album.id)
             if not album_tracks_data or 'items' not in album_tracks_data:
-                print(f"Could not get tracks for album: {album.name}")
+                logger.error(f"Could not get tracks for album: {album.name}")
                 continue
             
             # Check if our track is in this album
@@ -17340,7 +17337,7 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
                 threshold = 0.9 if is_remix else 0.65  # Lower threshold to favor album matches over singles
                 
                 if similarity > threshold:
-                    print(f"FOUND: '{track_name}' (track #{track_number}) matches '{clean_track}' (similarity: {similarity:.2f})")
+                    logger.info(f"FOUND: '{track_name}' (track #{track_number}) matches '{clean_track}' (similarity: {similarity:.2f})")
 
                     # Classify as album vs single using same logic as _detect_album_info_web
                     ctx_album_type = getattr(album, 'album_type', 'album') or 'album'
@@ -17351,7 +17348,7 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
                         matching_engine.normalize_string(album.name) != matching_engine.normalize_string(clean_track) and
                         matching_engine.normalize_string(album.name) != matching_engine.normalize_string(artist_name)
                     )
-                    print(f"Album context classification: is_album={ctx_is_album} (type={ctx_album_type}, tracks={ctx_total_tracks})")
+                    logger.info(f"Album context classification: is_album={ctx_is_album} (type={ctx_album_type}, tracks={ctx_total_tracks})")
 
                     return {
                         'is_album': ctx_is_album,
@@ -17363,13 +17360,13 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
                         'source': 'album_context_search'
                     }
             
-            print(f"Track '{clean_track}' not found in album '{album.name}'")
+            logger.warning(f"Track '{clean_track}' not found in album '{album.name}'")
         
-        print(f"Track '{clean_track}' not found in any matching albums")
+        logger.warning(f"Track '{clean_track}' not found in any matching albums")
         return None
         
     except Exception as e:
-        print(f"Error in album-aware search: {e}")
+        logger.error(f"Error in album-aware search: {e}")
         return None
 
 def _clean_track_title_web(track_title: str, artist_name: str) -> str:
@@ -17379,7 +17376,7 @@ def _clean_track_title_web(track_title: str, artist_name: str) -> str:
     # Start with the original title
     original = track_title.strip()
     cleaned = original
-    print(f"Track Title Cleaning: '{original}' (artist: '{artist_name}')")
+    logger.info(f"Track Title Cleaning: '{original}' (artist: '{artist_name}')")
     
     # Remove artist name prefix if it appears at the beginning
     # This handles cases like "Kendrick Lamar - HUMBLE."
@@ -17408,7 +17405,7 @@ def _clean_track_title_web(track_title: str, artist_name: str) -> str:
     # Remove leading/trailing punctuation
     cleaned = re.sub(r'^[-\s]+|[-\s]+$', '', cleaned)
     
-    print(f"Track Title Result: '{original}' -> '{cleaned}'")
+    logger.info(f"Track Title Result: '{original}' -> '{cleaned}'")
     return cleaned if cleaned else original
 
 
@@ -17444,7 +17441,7 @@ def clean_youtube_track_title(title, artist_name=None):
         cleaned_title = re.sub(artist_pattern, '', title, flags=re.IGNORECASE).strip()
 
         if cleaned_title != title:
-            print(f"Removed artist from start: '{title}' -> '{cleaned_title}' (artist: '{artist_name}')")
+            logger.info(f"Removed artist from start: '{title}' -> '{cleaned_title}' (artist: '{artist_name}')")
             title = cleaned_title
             artist_removed = True
         else:
@@ -17454,7 +17451,7 @@ def clean_youtube_track_title(title, artist_name=None):
             cleaned_title = re.sub(artist_end_pattern, '', title, flags=re.IGNORECASE).strip()
 
             if cleaned_title != title:
-                print(f"Removed artist from end: '{title}' -> '{cleaned_title}' (artist: '{artist_name}')")
+                logger.info(f"Removed artist from end: '{title}' -> '{cleaned_title}' (artist: '{artist_name}')")
                 title = cleaned_title
                 artist_removed = True
 
@@ -17516,7 +17513,7 @@ def clean_youtube_track_title(title, artist_name=None):
             title = re.sub(rf'\b{re.escape(artist_name)}\s*[-–—:]\s*', '', title, flags=re.IGNORECASE)
             title = re.sub(rf'^{re.escape(artist_name)}\s*[-–—:]\s*', '', title, flags=re.IGNORECASE)
         else:
-            print(f"Skipping artist removal - collaboration detected: '{title}'")
+            logger.info(f"Skipping artist removal - collaboration detected: '{title}'")
     
     # Remove "prod. Producer" patterns
     title = re.sub(r'\s+prod\.?\s+\S+', '', title, flags=re.IGNORECASE)
@@ -17544,7 +17541,7 @@ def clean_youtube_track_title(title, artist_name=None):
         title = original_title
     
     if title != original_title:
-        print(f"YouTube title cleaned: '{original_title}' → '{title}'")
+        logger.info(f"YouTube title cleaned: '{original_title}' → '{title}'")
     
     return title
 
@@ -17609,7 +17606,7 @@ def clean_youtube_artist(artist_string):
         artist_string = original_artist
     
     if artist_string != original_artist:
-        print(f"YouTube artist cleaned: '{original_artist}' → '{artist_string}'")
+        logger.info(f"YouTube artist cleaned: '{original_artist}' → '{artist_string}'")
     
     return artist_string
 
@@ -17636,14 +17633,14 @@ def parse_youtube_playlist(url):
             playlist_info = ydl.extract_info(url, download=False)
             
             if not playlist_info:
-                print("Could not extract playlist information")
+                logger.error("Could not extract playlist information")
                 return None
             
             playlist_name = playlist_info.get('title', 'Unknown Playlist')
             playlist_id = playlist_info.get('id', 'unknown_id')
             entries = list(playlist_info.get('entries', []) or [])
             
-            print(f"Found YouTube playlist: '{playlist_name}' with {len(entries)} entries")
+            logger.info(f"Found YouTube playlist: '{playlist_name}' with {len(entries)} entries")
             
             for entry in entries:
                 if not entry:
@@ -17683,11 +17680,11 @@ def parse_youtube_playlist(url):
                 'image_url': playlist_info.get('thumbnail', '') or '',
             }
             
-            print(f"Successfully parsed YouTube playlist: {len(tracks)} tracks extracted")
+            logger.info(f"Successfully parsed YouTube playlist: {len(tracks)} tracks extracted")
             return playlist_data
             
     except Exception as e:
-        print(f"Error parsing YouTube playlist: {e}")
+        logger.error(f"Error parsing YouTube playlist: {e}")
         return None
 
 
@@ -17767,7 +17764,7 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
         original_stem = os.path.splitext(os.path.basename(original_path))[0]
         final_path = os.path.join(original_dir, original_stem + file_ext)
         os.makedirs(original_dir, exist_ok=True)
-        print(f"[Enhance] Using original file location: {final_path}")
+        logger.info(f"[Enhance] Using original file location: {final_path}")
         return final_path, True
 
     # Extract year and album_type from spotify_album for template use (safe for all modes)
@@ -17939,9 +17936,9 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
                             total_discs = max((t.get('disc_number', 1) for t in _atd['items']), default=1)
                             if total_discs > 1:
                                 spotify_album['total_discs'] = total_discs
-                                print(f"[Multi-Disc] Resolved {total_discs} discs for single-track download of '{spotify_album.get('name')}'")
+                                logger.info(f"[Multi-Disc] Resolved {total_discs} discs for single-track download of '{spotify_album.get('name')}'")
                 except Exception as _disc_err:
-                    print(f"[Multi-Disc] Could not resolve total_discs: {_disc_err}")
+                    logger.warning(f"[Multi-Disc] Could not resolve total_discs: {_disc_err}")
 
         # Check if user controls disc structure via $disc in their template
         album_template = config_manager.get('file_organization.templates.album_path', '')
@@ -18166,13 +18163,13 @@ def _downsample_hires_flac(final_path, context):
         original_bits = audio.info.bits_per_sample
         original_rate = audio.info.sample_rate
     except Exception as e:
-        print(f"[Downsample] Could not read FLAC info: {e}")
+        logger.error(f"[Downsample] Could not read FLAC info: {e}")
         return None
 
     if original_bits <= 16 and original_rate <= 44100:
         return None  # Already CD quality or below
 
-    print(f"[Downsample] Converting {original_bits}-bit/{original_rate}Hz → 16-bit/44100Hz: {os.path.basename(final_path)}")
+    logger.info(f"[Downsample] Converting {original_bits}-bit/{original_rate}Hz → 16-bit/44100Hz: {os.path.basename(final_path)}")
 
     ffmpeg_bin = shutil.which('ffmpeg')
     if not ffmpeg_bin:
@@ -18180,7 +18177,7 @@ def _downsample_hires_flac(final_path, context):
         if os.path.isfile(local):
             ffmpeg_bin = local
         else:
-            print("[Downsample] ffmpeg not found — skipping hi-res conversion")
+            logger.warning("[Downsample] ffmpeg not found — skipping hi-res conversion")
             return None
 
     temp_path = final_path + '.tmp.flac'
@@ -18195,27 +18192,27 @@ def _downsample_hires_flac(final_path, context):
         ], capture_output=True, text=True, timeout=300)
 
         if result.returncode != 0:
-            print(f"[Downsample] ffmpeg failed: {result.stderr[:200]}")
+            logger.error(f"[Downsample] ffmpeg failed: {result.stderr[:200]}")
             if os.path.exists(temp_path):
                 os.remove(temp_path)
             return None
 
         # Verify the output is a valid 16-bit FLAC
         if not os.path.isfile(temp_path) or os.path.getsize(temp_path) == 0:
-            print(f"[Downsample] Output file missing or empty")
+            logger.warning(f"[Downsample] Output file missing or empty")
             if os.path.exists(temp_path):
                 os.remove(temp_path)
             return None
 
         verify_audio = FLAC(temp_path)
         if verify_audio.info.bits_per_sample != 16:
-            print(f"[Downsample] Output not 16-bit ({verify_audio.info.bits_per_sample}-bit), aborting")
+            logger.info(f"[Downsample] Output not 16-bit ({verify_audio.info.bits_per_sample}-bit), aborting")
             os.remove(temp_path)
             return None
 
         # Atomic swap — replace original with downsampled version
         os.replace(temp_path, final_path)
-        print(f"[Downsample] Converted to 16-bit/44.1kHz: {os.path.basename(final_path)}")
+        logger.info(f"[Downsample] Converted to 16-bit/44.1kHz: {os.path.basename(final_path)}")
 
         # Update QUALITY tag in the new file
         new_quality = 'FLAC 16bit'
@@ -18224,7 +18221,7 @@ def _downsample_hires_flac(final_path, context):
             updated_audio['QUALITY'] = new_quality
             updated_audio.save()
         except Exception as tag_err:
-            print(f"[Downsample] Could not update QUALITY tag: {tag_err}")
+            logger.error(f"[Downsample] Could not update QUALITY tag: {tag_err}")
 
         # Update context so downstream (lossy copy, metadata) reflects new quality
         old_quality = context.get('_audio_quality', '')
@@ -18236,7 +18233,7 @@ def _downsample_hires_flac(final_path, context):
             new_path = os.path.join(os.path.dirname(final_path), new_basename)
             try:
                 os.rename(final_path, new_path)
-                print(f"[Downsample] Renamed: {os.path.basename(final_path)} → {new_basename}")
+                logger.info(f"[Downsample] Renamed: {os.path.basename(final_path)} → {new_basename}")
                 # Rename matching lyrics sidecar file if it exists (.lrc or .txt)
                 for lyrics_ext in ('.lrc', '.txt'):
                     old_lyrics = os.path.splitext(final_path)[0] + lyrics_ext
@@ -18245,16 +18242,16 @@ def _downsample_hires_flac(final_path, context):
                         os.rename(old_lyrics, new_lyrics)
                 return new_path
             except Exception as rename_err:
-                print(f"[Downsample] Could not rename file: {rename_err}")
+                logger.error(f"[Downsample] Could not rename file: {rename_err}")
 
         return final_path
 
     except subprocess.TimeoutExpired:
-        print(f"[Downsample] Conversion timed out for: {os.path.basename(final_path)}")
+        logger.info(f"[Downsample] Conversion timed out for: {os.path.basename(final_path)}")
         if os.path.exists(temp_path):
             os.remove(temp_path)
     except Exception as e:
-        print(f"[Downsample] Conversion error: {e}")
+        logger.error(f"[Downsample] Conversion error: {e}")
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
@@ -18296,7 +18293,7 @@ def _create_lossy_copy(final_path):
     }
 
     if codec not in codec_map:
-        print(f"[Lossy Copy] Unknown codec '{codec}' — skipping conversion")
+        logger.info(f"[Lossy Copy] Unknown codec '{codec}' — skipping conversion")
         return None
 
     ffmpeg_codec, out_ext, quality_label, extra_args = codec_map[codec]
@@ -18316,11 +18313,11 @@ def _create_lossy_copy(final_path):
         if os.path.isfile(local):
             ffmpeg_bin = local
         else:
-            print(f"[Lossy Copy] ffmpeg not found — skipping {codec.upper()} conversion")
+            logger.warning(f"[Lossy Copy] ffmpeg not found — skipping {codec.upper()} conversion")
             return None
 
     try:
-        print(f"[Lossy Copy] Converting to {quality_label}: {os.path.basename(final_path)}")
+        logger.info(f"[Lossy Copy] Converting to {quality_label}: {os.path.basename(final_path)}")
         cmd = [
             ffmpeg_bin, '-i', final_path,
             '-codec:a', ffmpeg_codec,
@@ -18331,7 +18328,7 @@ def _create_lossy_copy(final_path):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
         if result.returncode == 0:
-            print(f"[Lossy Copy] Created {quality_label} copy: {os.path.basename(out_path)}")
+            logger.info(f"[Lossy Copy] Created {quality_label} copy: {os.path.basename(out_path)}")
 
             # Fix QUALITY tag — the FLAC's tag was copied verbatim by ffmpeg
             try:
@@ -18348,7 +18345,7 @@ def _create_lossy_copy(final_path):
                         audio['----:com.apple.iTunes:QUALITY'] = [MP4FreeForm(quality_label.encode('utf-8'))]
                     audio.save()
             except Exception as tag_err:
-                print(f"[Lossy Copy] Could not update QUALITY tag: {tag_err}")
+                logger.error(f"[Lossy Copy] Could not update QUALITY tag: {tag_err}")
 
             # Embed cover art from source FLAC into the lossy copy
             # Opus/OGG can't inherit FLAC cover art via ffmpeg -map_metadata alone
@@ -18378,7 +18375,7 @@ def _create_lossy_copy(final_path):
                                 pic.depth = 0
                                 pic.colors = 0
                                 pic.data = img_data
-                                print(f"[Lossy Copy] Using cover.jpg as art source (FLAC had no embedded art)")
+                                logger.warning(f"[Lossy Copy] Using cover.jpg as art source (FLAC had no embedded art)")
                             except Exception:
                                 pass
 
@@ -18403,15 +18400,15 @@ def _create_lossy_copy(final_path):
                                     )
                                     dest_audio['METADATA_BLOCK_PICTURE'] = [base64.b64encode(picture_data).decode('ascii')]
                                     dest_audio.save()
-                                    print(f"[Lossy Copy] Embedded cover art in Opus file")
+                                    logger.info(f"[Lossy Copy] Embedded cover art in Opus file")
                             elif codec == 'aac':
                                 from mutagen.mp4 import MP4Cover
                                 fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in pic.mime else MP4Cover.FORMAT_PNG
                                 dest_audio['covr'] = [MP4Cover(pic.data, imageformat=fmt)]
                                 dest_audio.save()
-                                print(f"[Lossy Copy] Embedded cover art in M4A file")
+                                logger.info(f"[Lossy Copy] Embedded cover art in M4A file")
                 except Exception as art_err:
-                    print(f"[Lossy Copy] Could not embed cover art: {art_err}")
+                    logger.error(f"[Lossy Copy] Could not embed cover art: {art_err}")
 
             # Blasphemy Mode: delete original FLAC if enabled and output is verified
             if config_manager.get('lossy_copy.delete_original', False):
@@ -18427,7 +18424,7 @@ def _create_lossy_copy(final_path):
                             except Exception:
                                 pass
                             os.remove(final_path)
-                            print(f"[Blasphemy Mode] Deleted original: {os.path.basename(final_path)}")
+                            logger.info(f"[Blasphemy Mode] Deleted original: {os.path.basename(final_path)}")
                             # Rename lyrics sidecar file to match the output filename
                             for lyrics_ext in ('.lrc', '.txt'):
                                 src_lyrics = os.path.splitext(final_path)[0] + lyrics_ext
@@ -18435,16 +18432,16 @@ def _create_lossy_copy(final_path):
                                     dst_lyrics = os.path.splitext(out_path)[0] + lyrics_ext
                                     try:
                                         os.rename(src_lyrics, dst_lyrics)
-                                        print(f"[Blasphemy Mode] Renamed {lyrics_ext}: {os.path.basename(src_lyrics)} -> {os.path.basename(dst_lyrics)}")
+                                        logger.info(f"[Blasphemy Mode] Renamed {lyrics_ext}: {os.path.basename(src_lyrics)} -> {os.path.basename(dst_lyrics)}")
                                     except Exception as lrc_err:
-                                        print(f"[Blasphemy Mode] Could not rename {lyrics_ext}: {lrc_err}")
+                                        logger.error(f"[Blasphemy Mode] Could not rename {lyrics_ext}: {lrc_err}")
                             return out_path
                         else:
-                            print(f"[Blasphemy Mode] Output failed audio validation, keeping original: {os.path.basename(final_path)}")
+                            logger.error(f"[Blasphemy Mode] Output failed audio validation, keeping original: {os.path.basename(final_path)}")
                     else:
-                        print(f"[Blasphemy Mode] Output missing or empty, keeping original: {os.path.basename(final_path)}")
+                        logger.warning(f"[Blasphemy Mode] Output missing or empty, keeping original: {os.path.basename(final_path)}")
                 except Exception as del_err:
-                    print(f"[Blasphemy Mode] Error during original deletion, keeping original: {del_err}")
+                    logger.error(f"[Blasphemy Mode] Error during original deletion, keeping original: {del_err}")
         else:
             # ffmpeg always prints its version banner to stderr (~300 chars).
             # Strip it so the actual error is visible, and show more than 200 chars.
@@ -18459,17 +18456,17 @@ def _create_lossy_copy(final_path):
                 elif line.strip() == '':
                     past_banner = True
             error_msg = '\n'.join(error_lines).strip() if error_lines else stderr[-500:]
-            print(f"[Lossy Copy] ffmpeg failed (exit code {result.returncode}): {error_msg[:500]}")
+            logger.error(f"[Lossy Copy] ffmpeg failed (exit code {result.returncode}): {error_msg[:500]}")
             # Clean up empty/broken output file
             if os.path.isfile(out_path) and os.path.getsize(out_path) == 0:
                 os.remove(out_path)
-                print(f"[Lossy Copy] Removed empty output file: {os.path.basename(out_path)}")
+                logger.warning(f"[Lossy Copy] Removed empty output file: {os.path.basename(out_path)}")
     except subprocess.TimeoutExpired:
-        print(f"[Lossy Copy] Conversion timed out for: {os.path.basename(final_path)}")
+        logger.info(f"[Lossy Copy] Conversion timed out for: {os.path.basename(final_path)}")
         if os.path.isfile(out_path) and os.path.getsize(out_path) == 0:
             os.remove(out_path)
     except Exception as e:
-        print(f"[Lossy Copy] Conversion error: {e}")
+        logger.error(f"[Lossy Copy] Conversion error: {e}")
     return None
 
 def _apply_path_template(template: str, context: dict) -> str:
@@ -18686,10 +18683,10 @@ def _wipe_source_tags(file_path: str) -> bool:
         else:
             audio.save()
         if tag_count > 0:
-            print(f"[Tag Wipe] Stripped {tag_count} source tags from: {os.path.basename(file_path)}")
+            logger.info(f"[Tag Wipe] Stripped {tag_count} source tags from: {os.path.basename(file_path)}")
         return True
     except Exception as e:
-        print(f"[Tag Wipe] Failed (non-fatal): {e}")
+        logger.error(f"[Tag Wipe] Failed (non-fatal): {e}")
         return False
 
 
@@ -18711,11 +18708,11 @@ def _strip_all_non_audio_tags(file_path: str) -> dict:
         apev2_tags.delete(file_path)
         summary['apev2_stripped'] = True
         summary['apev2_tag_count'] = tag_count
-        print(f"Stripped {tag_count} APEv2 tags: {', '.join(tag_keys[:10])}")
+        logger.info(f"Stripped {tag_count} APEv2 tags: {', '.join(tag_keys[:10])}")
     except APENoHeaderError:
         pass  # No APEv2 tags — common case
     except Exception as e:
-        print(f"Could not strip APEv2 tags (non-fatal): {e}")
+        logger.error(f"Could not strip APEv2 tags (non-fatal): {e}")
     return summary
 
 def _verify_metadata_written(file_path: str) -> bool:
@@ -18723,7 +18720,7 @@ def _verify_metadata_written(file_path: str) -> bool:
     try:
         check = MutagenFile(file_path)
         if check is None or check.tags is None:
-            print(f"[VERIFY] Tags are None after save: {file_path}")
+            logger.info(f"[VERIFY] Tags are None after save: {file_path}")
             return False
         title_found = False
         artist_found = False
@@ -18733,7 +18730,7 @@ def _verify_metadata_written(file_path: str) -> bool:
             # Confirm APEv2 is gone
             try:
                 APEv2(file_path)
-                print(f"[VERIFY] APEv2 tags still present after processing!")
+                logger.info(f"[VERIFY] APEv2 tags still present after processing!")
                 return False
             except APENoHeaderError:
                 pass
@@ -18744,12 +18741,12 @@ def _verify_metadata_written(file_path: str) -> bool:
             title_found = bool(check.get('\xa9nam'))
             artist_found = bool(check.get('\xa9ART'))
         if not title_found or not artist_found:
-            print(f"[VERIFY] Missing metadata - title:{title_found} artist:{artist_found}")
+            logger.warning(f"[VERIFY] Missing metadata - title:{title_found} artist:{artist_found}")
             return False
-        print(f"[VERIFY] Metadata verified OK")
+        logger.info(f"[VERIFY] Metadata verified OK")
         return True
     except Exception as e:
-        print(f"[VERIFY] Verification error (non-fatal): {e}")
+        logger.error(f"[VERIFY] Verification error (non-fatal): {e}")
         return False
 
 def _is_ogg_opus(audio_file):
@@ -18767,7 +18764,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
     which stripped the ID3v2 header from MP3 files, leaving them tagless.
     """
     if not config_manager.get('metadata_enhancement.enabled', True):
-        print("Metadata enhancement disabled in config.")
+        logger.warning("Metadata enhancement disabled in config.")
         return True
 
     # Normalize None album_info to empty dict to prevent AttributeError on .get() calls
@@ -18777,14 +18774,14 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
     # Acquire per-file lock to prevent concurrent metadata writes to the same file
     file_lock = _get_file_lock(file_path)
     with file_lock:
-        print(f"Enhancing metadata for: {os.path.basename(file_path)}")
+        logger.info(f"Enhancing metadata for: {os.path.basename(file_path)}")
         try:
             # Strip APEv2 tags from MP3 (invisible to ID3 handler)
             strip_summary = _strip_all_non_audio_tags(file_path)
 
             audio_file = MutagenFile(file_path)
             if audio_file is None:
-                print(f"Could not load audio file with Mutagen: {file_path}")
+                logger.error(f"Could not load audio file with Mutagen: {file_path}")
                 return False
 
             # ── Wipe ALL existing tags and save immediately ──
@@ -18799,7 +18796,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
             if audio_file.tags is not None:
                 if len(audio_file.tags) > 0:
                     tag_keys = list(audio_file.tags.keys())[:15]
-                    print(f"Clearing {len(audio_file.tags)} existing tags: "
+                    logger.info(f"Clearing {len(audio_file.tags)} existing tags: "
                           f"{', '.join(str(k) for k in tag_keys)}")
                 audio_file.tags.clear()
             else:
@@ -18815,7 +18812,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
 
             metadata = _extract_spotify_metadata(context, artist, album_info)
             if not metadata:
-                print("Could not extract Spotify metadata, saving with cleared tags.")
+                logger.error("Could not extract Spotify metadata, saving with cleared tags.")
                 if isinstance(audio_file.tags, ID3):
                     audio_file.save(v1=0, v2_version=4)
                 elif isinstance(audio_file, FLAC):
@@ -18931,18 +18928,18 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
             # Verify metadata was written
             verified = _verify_metadata_written(file_path)
             if verified:
-                print("Metadata enhanced successfully.")
+                logger.info("Metadata enhanced successfully.")
             else:
-                print("Metadata saved but verification found issues (see above).")
+                logger.info("Metadata saved but verification found issues (see above).")
             return True
         except Exception as e:
             import traceback
-            print(f"Error enhancing metadata for {file_path}: {e}")
-            print(f"[Metadata Debug] Exception type: {type(e).__name__}")
-            print(f"[Metadata Debug] File exists: {os.path.exists(file_path)}")
-            print(f"[Metadata Debug] Artist: {artist.get('name', 'MISSING') if artist else 'None'}")
-            print(f"[Metadata Debug] Album info: {album_info.get('album_name', 'MISSING') if album_info else 'None'}")
-            print(f"[Metadata Debug] Traceback:\n{traceback.format_exc()}")
+            logger.error(f"Error enhancing metadata for {file_path}: {e}")
+            logger.error(f"[Metadata Debug] Exception type: {type(e).__name__}")
+            logger.info(f"[Metadata Debug] File exists: {os.path.exists(file_path)}")
+            logger.warning(f"[Metadata Debug] Artist: {artist.get('name', 'MISSING') if artist else 'None'}")
+            logger.warning(f"[Metadata Debug] Album info: {album_info.get('album_name', 'MISSING') if album_info else 'None'}")
+            logger.error(f"[Metadata Debug] Traceback:\n{traceback.format_exc()}")
             return False
 
 def _generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
@@ -18991,14 +18988,14 @@ def _generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: 
         )
 
         if success:
-            print(f"LRC file generated for: {track_name}")
+            logger.info(f"LRC file generated for: {track_name}")
         else:
-            print(f"No lyrics found for: {track_name}")
+            logger.warning(f"No lyrics found for: {track_name}")
 
         return success
 
     except Exception as e:
-        print(f"Error generating LRC file for {file_path}: {e}")
+        logger.error(f"Error generating LRC file for {file_path}: {e}")
         return False
 
 def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> dict:
@@ -19012,15 +19009,15 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
     # Priority 1: Spotify clean title from context
     if original_search.get('spotify_clean_title'):
         metadata['title'] = original_search['spotify_clean_title']
-        print(f"Metadata: Using Spotify clean title: '{metadata['title']}'")
+        logger.info(f"Metadata: Using Spotify clean title: '{metadata['title']}'")
     # Priority 2: Album info clean name
     elif album_info.get('clean_track_name'):
         metadata['title'] = album_info['clean_track_name']
-        print(f"Metadata: Using album info clean name: '{metadata['title']}'")
+        logger.info(f"Metadata: Using album info clean name: '{metadata['title']}'")
     # Priority 3: Original title as fallback
     else:
         metadata['title'] = original_search.get('title', '')
-        print(f"Metadata: Using original title as fallback: '{metadata['title']}'")
+        logger.warning(f"Metadata: Using original title as fallback: '{metadata['title']}'")
     # Handle multiple artists from Spotify data
     original_search = context.get("original_search_result", {})
     if 'artists' in original_search and isinstance(original_search['artists'], list) and len(original_search['artists']) > 0:
@@ -19032,29 +19029,12 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
                 all_artists.append(a)
             else:
                 all_artists.append(str(a))
-
-        # Configurable artist separator (default: comma-space)
-        _artist_sep = config_manager.get('metadata_enhancement.tags.artist_separator', ', ') or ', '
-        _feat_in_title = config_manager.get('metadata_enhancement.tags.feat_in_title', False)
-
-        # Featured artist in title mode: keep only primary artist, append rest to title
-        if _feat_in_title and len(all_artists) > 1:
-            metadata['artist'] = all_artists[0]
-            _feat_str = ', '.join(all_artists[1:])
-            _title = metadata.get('title', '')
-            if _title and not re.search(r'\b(feat\.?|ft\.?|featuring)\b', _title, re.IGNORECASE):
-                metadata['title'] = f"{_title} (feat. {_feat_str})"
-        else:
-            metadata['artist'] = _artist_sep.join(all_artists)
-
-        # Store raw artist list for multi-value tag writing
-        metadata['_artists_list'] = all_artists
-        print(f"Metadata: Using all artists: '{metadata['artist']}'")
+        metadata['artist'] = ', '.join(all_artists)
+        logger.info(f"Metadata: Using all artists: '{metadata['artist']}'")
     else:
         # Fallback to single artist
         metadata['artist'] = artist.get('name', '')
-        metadata['_artists_list'] = [metadata['artist']] if metadata['artist'] else []
-        print(f"Metadata: Using primary artist: '{metadata['artist']}'")
+        logger.info(f"Metadata: Using primary artist: '{metadata['artist']}'")
 
     # Resolve album_artist for consistent tagging across all tracks in an album.
     # Priority: 1) explicit batch artist context (same artist for whole album)
@@ -19114,18 +19094,18 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
         track_num = album_info.get('track_number', 1)
         metadata['track_number'] = track_num
         metadata['total_tracks'] = spotify_album.get('total_tracks', 1) if spotify_album else 1
-        print(f"[METADATA] Album track - track_number: {track_num}, album: {metadata['album']}")
+        logger.info(f"[METADATA] Album track - track_number: {track_num}, album: {metadata['album']}")
     else:
         # SAFEGUARD: If we have spotify_album context, never use track title as album name
         # This prevents album tracks from being tagged as singles due to classification errors
         if spotify_album and spotify_album.get('name'):
-            print(f"[SAFEGUARD] Using spotify_album name instead of track title for album metadata")
+            logger.info(f"[SAFEGUARD] Using spotify_album name instead of track title for album metadata")
             metadata['album'] = spotify_album['name']
             # Use corrected track_number from album_info (which should be updated by post-processing)
             corrected_track_number = album_info.get('track_number', 1) if album_info else 1
             metadata['track_number'] = corrected_track_number
             metadata['total_tracks'] = spotify_album.get('total_tracks', 1)
-            print(f"[SAFEGUARD] Using track_number: {corrected_track_number}")
+            logger.info(f"[SAFEGUARD] Using track_number: {corrected_track_number}")
         else:
             metadata['album'] = metadata['title'] # For true singles, album is the title
             metadata['track_number'] = 1
@@ -19186,7 +19166,7 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
             metadata['spotify_album_id'] = album_id
 
     # Summary log for debugging metadata issues (e.g. wrong album_artist / track_number)
-    print(f"[Metadata Summary] title='{metadata.get('title')}' | artist='{metadata.get('artist')}' | album_artist='{metadata.get('album_artist')}' | album='{metadata.get('album')}' | track={metadata.get('track_number')}/{metadata.get('total_tracks')} | disc={metadata.get('disc_number')}")
+    logger.info(f"[Metadata Summary] title='{metadata.get('title')}' | artist='{metadata.get('artist')}' | album_artist='{metadata.get('album_artist')}' | album='{metadata.get('album')}' | track={metadata.get('track_number')}/{metadata.get('total_tracks')} | disc={metadata.get('disc_number')}")
 
     return metadata
 
@@ -19233,7 +19213,7 @@ def _embed_album_art_metadata(audio_file, metadata: dict):
                     image_data = response.read()
                     mime_type = response.info().get_content_type() or 'image/jpeg'
                 if image_data and len(image_data) > 1000:
-                    print(f"Cover art from Cover Art Archive ({len(image_data) // 1024}KB)")
+                    logger.info(f"Cover art from Cover Art Archive ({len(image_data) // 1024}KB)")
                 else:
                     image_data = None  # Too small, likely an error page
             except Exception:
@@ -19243,14 +19223,14 @@ def _embed_album_art_metadata(audio_file, metadata: dict):
         if not image_data:
             art_url = metadata.get('album_art_url')
             if not art_url:
-                print("No album art URL available for embedding.")
+                logger.warning("No album art URL available for embedding.")
                 return
             with urllib.request.urlopen(art_url, timeout=10) as response:
                 image_data = response.read()
                 mime_type = response.info().get_content_type()
 
         if not image_data:
-            print("Failed to download album art data.")
+            logger.error("Failed to download album art data.")
             return
 
         # MP3 (ID3)
@@ -19273,9 +19253,9 @@ def _embed_album_art_metadata(audio_file, metadata: dict):
             fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in mime_type else MP4Cover.FORMAT_PNG
             audio_file['covr'] = [MP4Cover(image_data, imageformat=fmt)]
         
-        print("Album art successfully embedded.")
+        logger.info("Album art successfully embedded.")
     except Exception as e:
-        print(f"Error embedding album art: {e}")
+        logger.error(f"Error embedding album art: {e}")
 
 def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
     """
@@ -19479,13 +19459,13 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                         """, (int(release_year), _pp_album_name, _pp_artist_name))
                         if cursor.rowcount > 0:
                             conn.commit()
-                            print(f"Updated album year to {release_year} in database")
+                            logger.info(f"Updated album year to {release_year} in database")
                         else:
                             conn.rollback()
                     finally:
                         conn.close()
             except Exception as e:
-                print(f"Could not update album year in DB: {e}")
+                logger.error(f"Could not update album year in DB: {e}")
 
         # (All source lookups now handled by _pp_lookup_* functions called via configurable order above)
         if False:  # Dead code — old inline blocks preserved for reference during transition
@@ -19557,10 +19537,10 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                                         break
                             except (ValueError, TypeError):
                                 pass
-                        print(f"MusicBrainz release details: type={primary_type or '?'}, "
+                        logger.info(f"MusicBrainz release details: type={primary_type or '?'}, "
                               f"country={country or '?'}, media={id_tags.get('MEDIA', '?')}")
             except Exception as e:
-                print(f"MusicBrainz release detail lookup failed (non-fatal): {e}")
+                logger.error(f"MusicBrainz release detail lookup failed (non-fatal): {e}")
 
         # ── 2b. Deezer lookup for BPM, ISRC fallback, and source IDs ──
         deezer_bpm = None
@@ -19579,7 +19559,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                         dz_artist_id = dz_result.get('artist', {}).get('id')
                         if dz_artist_id:
                             id_tags['DEEZER_ARTIST_ID'] = str(dz_artist_id)
-                        print(f"Deezer track matched: {dz_track_id}")
+                        logger.info(f"Deezer track matched: {dz_track_id}")
 
                         # Get full track details for BPM and ISRC
                         dz_details = dz_client.get_track_details(dz_track_id)
@@ -19591,9 +19571,9 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                             if dz_isrc:
                                 deezer_isrc = dz_isrc
                 else:
-                    print("Deezer worker not available, skipping Deezer lookup")
+                    logger.info("Deezer worker not available, skipping Deezer lookup")
             except Exception as e:
-                print(f"Deezer lookup failed (non-fatal): {e}")
+                logger.error(f"Deezer lookup failed (non-fatal): {e}")
 
         # ── 2c. AudioDB lookup for mood, style, genre, and source ID ──
         audiodb_mood = None
@@ -19611,13 +19591,13 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                         adb_track_id = adb_result.get('idTrack')
                         if adb_track_id:
                             id_tags['AUDIODB_TRACK_ID'] = str(adb_track_id)
-                            print(f"AudioDB track matched: {adb_track_id}")
+                            logger.info(f"AudioDB track matched: {adb_track_id}")
                         # Use AudioDB's MusicBrainz IDs as fallbacks for any missing from MB lookup
                         adb_mb_track = adb_result.get('strMusicBrainzID')
                         if adb_mb_track and 'MUSICBRAINZ_RECORDING_ID' not in id_tags:
                             id_tags['MUSICBRAINZ_RECORDING_ID'] = adb_mb_track
                             recording_mbid = adb_mb_track
-                            print(f"MusicBrainz recording ID from AudioDB fallback: {adb_mb_track}")
+                            logger.warning(f"MusicBrainz recording ID from AudioDB fallback: {adb_mb_track}")
                         # NOTE: AudioDB's strMusicBrainzAlbumID is intentionally
                         # NOT used as a fallback for MUSICBRAINZ_RELEASE_ID.
                         # AudioDB links each track to its original album in MB,
@@ -19628,14 +19608,14 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                         if adb_mb_artist and 'MUSICBRAINZ_ARTIST_ID' not in id_tags:
                             id_tags['MUSICBRAINZ_ARTIST_ID'] = adb_mb_artist
                             artist_mbid = adb_mb_artist
-                            print(f"MusicBrainz artist ID from AudioDB fallback: {adb_mb_artist}")
+                            logger.warning(f"MusicBrainz artist ID from AudioDB fallback: {adb_mb_artist}")
                         audiodb_mood = adb_result.get('strMood') or None
                         audiodb_style = adb_result.get('strStyle') or None
                         audiodb_genre = adb_result.get('strGenre') or None
                 else:
-                    print("AudioDB worker not available, skipping AudioDB lookup")
+                    logger.info("AudioDB worker not available, skipping AudioDB lookup")
             except Exception as e:
-                print(f"AudioDB lookup failed (non-fatal): {e}")
+                logger.error(f"AudioDB lookup failed (non-fatal): {e}")
 
         # ── 2d. Tidal lookup for ISRC fallback, copyright, and source IDs ──
         tidal_isrc = None
@@ -19650,7 +19630,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                         td_track_id = td_result.get('id')
                         if td_track_id:
                             id_tags['TIDAL_TRACK_ID'] = str(td_track_id)
-                            print(f"Tidal track matched: {td_track_id}")
+                            logger.info(f"Tidal track matched: {td_track_id}")
                         td_artist = td_result.get('artist', {})
                         if isinstance(td_artist, dict) and td_artist.get('id'):
                             id_tags['TIDAL_ARTIST_ID'] = str(td_artist['id'])
@@ -19667,7 +19647,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                                 if td_copyright:
                                     tidal_copyright = td_copyright
             except Exception as e:
-                print(f"Tidal lookup failed (non-fatal): {e}")
+                logger.error(f"Tidal lookup failed (non-fatal): {e}")
 
         # ── 2e. Qobuz lookup for ISRC fallback, copyright, label, and source IDs ──
         qobuz_isrc = None
@@ -19690,7 +19670,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                             qz_track_id = qz_result.get('id')
                             if qz_track_id:
                                 id_tags['QOBUZ_TRACK_ID'] = str(qz_track_id)
-                                print(f"Qobuz track matched: {qz_track_id}")
+                                logger.info(f"Qobuz track matched: {qz_track_id}")
                             if isinstance(qz_performer, dict) and qz_performer.get('id'):
                                 id_tags['QOBUZ_ARTIST_ID'] = str(qz_performer['id'])
                             qz_isrc = qz_result.get('isrc')
@@ -19709,7 +19689,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                                 if isinstance(qz_label_info, dict) and qz_label_info.get('name'):
                                     qobuz_label = qz_label_info['name']
             except Exception as e:
-                print(f"Qobuz lookup failed (non-fatal): {e}")
+                logger.error(f"Qobuz lookup failed (non-fatal): {e}")
 
         # ── 2f. Last.fm lookup for tags (genre merge) and URL ──
         lastfm_tags = []
@@ -19732,9 +19712,9 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                                 lastfm_tags = [t.get('name', '') for t in tag_list if isinstance(t, dict) and t.get('name')]
                             elif isinstance(tag_list, dict) and tag_list.get('name'):
                                 lastfm_tags = [tag_list['name']]
-                        print(f"Last.fm track info found: {len(lastfm_tags)} tags")
+                        logger.info(f"Last.fm track info found: {len(lastfm_tags)} tags")
             except Exception as e:
-                print(f"Last.fm lookup failed (non-fatal): {e}")
+                logger.error(f"Last.fm lookup failed (non-fatal): {e}")
 
         # ── 2g. Genius lookup for source ID and URL ──
         # Genius has an aggressive global rate limiter (30→60→120s backoff) that
@@ -19748,7 +19728,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
             try:
                 import core.genius_client as _genius_module
                 if time.time() < _genius_module._rate_limit_until:
-                    print("Genius rate-limited, skipping (non-blocking)")
+                    logger.info("Genius rate-limited, skipping (non-blocking)")
                 else:
                     g_client = genius_worker.client if genius_worker else None
                     if g_client:
@@ -19757,12 +19737,12 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                             g_id = g_result.get('id')
                             if g_id:
                                 id_tags['GENIUS_TRACK_ID'] = str(g_id)
-                                print(f"Genius song matched: {g_id}")
+                                logger.info(f"Genius song matched: {g_id}")
                             g_url = g_result.get('url')
                             if g_url:
                                 genius_url = g_url
             except Exception as e:
-                print(f"Genius lookup failed (non-fatal): {e}")
+                logger.error(f"Genius lookup failed (non-fatal): {e}")
 
         if not id_tags and not deezer_bpm and not deezer_isrc and not audiodb_mood and not audiodb_style:
             return
@@ -19850,7 +19830,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                 written.append(key)
 
         if written:
-            print(f"Embedded IDs: {', '.join(written)}")
+            logger.info(f"Embedded IDs: {', '.join(written)}")
 
         # ── 3a½. Write date tag if discovered during lookups (initial write had no date) ──
         if _needs_date_tag and release_year:
@@ -19860,7 +19840,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                 audio_file['date'] = [release_year]
             elif isinstance(audio_file, MP4):
                 audio_file['\xa9day'] = [release_year]
-            print(f"Date tag: {release_year}")
+            logger.info(f"Date tag: {release_year}")
 
         # ── 3b. Write BPM tag (from Deezer) ──
         if _tag_enabled('deezer.tags.bpm') and deezer_bpm and deezer_bpm > 0:
@@ -19871,7 +19851,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                 audio_file['BPM'] = [str(bpm_int)]
             elif isinstance(audio_file, MP4):
                 audio_file['tmpo'] = [bpm_int]
-            print(f"BPM: {bpm_int}")
+            logger.info(f"BPM: {bpm_int}")
 
         # ── 3c. Write mood tag (from AudioDB) ──
         if _tag_enabled('audiodb.tags.mood') and audiodb_mood:
@@ -19881,7 +19861,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                 audio_file['MOOD'] = [audiodb_mood]
             elif isinstance(audio_file, MP4):
                 audio_file['----:com.apple.iTunes:MOOD'] = [MP4FreeForm(audiodb_mood.encode('utf-8'))]
-            print(f"Mood: {audiodb_mood}")
+            logger.info(f"Mood: {audiodb_mood}")
 
         # ── 3d. Write style tag (from AudioDB) ──
         if _tag_enabled('audiodb.tags.style') and audiodb_style:
@@ -19891,7 +19871,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                 audio_file['STYLE'] = [audiodb_style]
             elif isinstance(audio_file, MP4):
                 audio_file['----:com.apple.iTunes:STYLE'] = [MP4FreeForm(audiodb_style.encode('utf-8'))]
-            print(f"Style: {audiodb_style}")
+            logger.info(f"Style: {audiodb_style}")
 
         # ── 4. Merge genres (Spotify + MusicBrainz + AudioDB + Last.fm) and overwrite tag ──
         if _tag_enabled('metadata_enhancement.tags.genre_merge'):
@@ -19920,7 +19900,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                         audio_file['GENRE'] = [genre_string]
                     elif isinstance(audio_file, MP4):
                         audio_file['\xa9gen'] = [genre_string]
-                    print(f"Genres merged: {genre_string}")
+                    logger.info(f"Genres merged: {genre_string}")
 
         # ── 5. Write ISRC if available (per-source fallback chain) ──
         _isrc_candidates = []
@@ -19940,7 +19920,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                 audio_file['ISRC'] = [final_isrc]
             elif isinstance(audio_file, MP4):
                 audio_file['----:com.apple.iTunes:ISRC'] = [MP4FreeForm(final_isrc.encode('utf-8'))]
-            print(f"ISRC ({source}): {final_isrc}")
+            logger.info(f"ISRC ({source}): {final_isrc}")
 
         # ── 6. Write copyright tag (Tidal → Qobuz fallback) ──
         _copyright_candidates = []
@@ -19956,7 +19936,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                 audio_file['COPYRIGHT'] = [final_copyright]
             elif isinstance(audio_file, MP4):
                 audio_file['cprt'] = [final_copyright]
-            print(f"©️ Copyright ({source}): {final_copyright[:60]}")
+            logger.info(f"©️ Copyright ({source}): {final_copyright[:60]}")
 
         # ── 7. Write label/publisher tag (from Qobuz) ──
         if _tag_enabled('qobuz.tags.label') and qobuz_label:
@@ -19966,7 +19946,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                 audio_file['LABEL'] = [qobuz_label]
             elif isinstance(audio_file, MP4):
                 audio_file['----:com.apple.iTunes:LABEL'] = [MP4FreeForm(qobuz_label.encode('utf-8'))]
-            print(f"Label (Qobuz): {qobuz_label}")
+            logger.info(f"Label (Qobuz): {qobuz_label}")
 
         # ── 8. Write Last.fm and Genius URLs as custom tags ──
         if _tag_enabled('lastfm.tags.url') and lastfm_url:
@@ -19986,7 +19966,7 @@ def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
                 audio_file['----:com.apple.iTunes:GENIUS_URL'] = [MP4FreeForm(genius_url.encode('utf-8'))]
 
     except Exception as e:
-        print(f"Error embedding source IDs (non-fatal): {e}")
+        logger.error(f"Error embedding source IDs (non-fatal): {e}")
 
 def _download_cover_art(album_info: dict, target_dir: str, context: dict = None):
     """Downloads cover.jpg into the specified directory.
@@ -20011,7 +19991,7 @@ def _download_cover_art(album_info: dict, target_dir: str, context: dict = None)
                         return  # Already high-res, skip
                     # Low-res cover exists — try to upgrade from CAA
                     is_upgrade = True
-                    print(f"Existing cover.jpg is {existing_size // 1024}KB — attempting CAA upgrade...")
+                    logger.info(f"Existing cover.jpg is {existing_size // 1024}KB — attempting CAA upgrade...")
                 except Exception:
                     return
             else:
@@ -20030,7 +20010,7 @@ def _download_cover_art(album_info: dict, target_dir: str, context: dict = None)
                 with urllib.request.urlopen(req, timeout=10) as response:
                     image_data = response.read()
                 if image_data and len(image_data) > 1000:
-                    print(f"Cover art from Cover Art Archive ({len(image_data) // 1024}KB)")
+                    logger.info(f"Cover art from Cover Art Archive ({len(image_data) // 1024}KB)")
                 else:
                     image_data = None
             except Exception:
@@ -20038,7 +20018,7 @@ def _download_cover_art(album_info: dict, target_dir: str, context: dict = None)
 
         # If upgrading and CAA failed, keep existing cover — don't overwrite with same low-res
         if is_upgrade and not image_data:
-            print(f"CAA upgrade failed — keeping existing cover.jpg")
+            logger.error(f"CAA upgrade failed — keeping existing cover.jpg")
             return
 
         # Fallback to Spotify/iTunes/Deezer URL
@@ -20054,7 +20034,7 @@ def _download_cover_art(album_info: dict, target_dir: str, context: dict = None)
                     if images and isinstance(images, list) and len(images) > 0:
                         art_url = images[0].get('url') if isinstance(images[0], dict) else None
                 if art_url:
-                    print(f"Using cover art URL from spotify_album context")
+                    logger.info(f"Using cover art URL from spotify_album context")
             # Upgrade to highest available resolution before fetching
             if art_url and 'i.scdn.co' in art_url:
                 from core.spotify_client import _upgrade_spotify_image_url
@@ -20063,7 +20043,7 @@ def _download_cover_art(album_info: dict, target_dir: str, context: dict = None)
                 import re as _re
                 art_url = _re.sub(r'\d+x\d+bb', '3000x3000bb', art_url)
             if not art_url:
-                print("No cover art URL available for download.")
+                logger.warning("No cover art URL available for download.")
                 return
             with urllib.request.urlopen(art_url, timeout=10) as response:
                 image_data = response.read()
@@ -20074,9 +20054,9 @@ def _download_cover_art(album_info: dict, target_dir: str, context: dict = None)
         with open(cover_path, 'wb') as f:
             f.write(image_data)
 
-        print(f"Cover art downloaded to: {cover_path}")
+        logger.info(f"Cover art downloaded to: {cover_path}")
     except Exception as e:
-        print(f"Error downloading cover.jpg: {e}")
+        logger.error(f"Error downloading cover.jpg: {e}")
 
 
 
@@ -20097,7 +20077,7 @@ def _get_spotify_album_tracks(spotify_album: dict) -> list:
             } for item in tracks_data['items']]
         return []
     except Exception as e:
-        print(f"Error fetching Spotify album tracks: {e}")
+        logger.error(f"Error fetching Spotify album tracks: {e}")
         return []
 
 def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -> dict:
@@ -20113,7 +20093,7 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
         track_num = slsk_track_meta['track_number']
         for sp_track in spotify_tracks:
             if sp_track.get('track_number') == track_num:
-                print(f"Matched track by number ({track_num}): '{slsk_track_meta['title']}' -> '{sp_track['name']}'")
+                logger.info(f"Matched track by number ({track_num}): '{slsk_track_meta['title']}' -> '{sp_track['name']}'")
                 # Return a new dict with the corrected title and number
                 return {
                     'title': sp_track['name'],
@@ -20137,7 +20117,7 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
             best_match = sp_track
 
     if best_match:
-        print(f"Matched track by title similarity ({best_score:.2f}): '{slsk_track_meta['title']}' -> '{best_match['name']}'")
+        logger.info(f"Matched track by title similarity ({best_score:.2f}): '{slsk_track_meta['title']}' -> '{best_match['name']}'")
         return {
             'title': best_match['name'],
             'artist': slsk_track_meta.get('artist'),
@@ -20147,7 +20127,7 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
             'explicit': best_match.get('explicit', False)
         }
 
-    print(f"Could not confidently match track '{slsk_track_meta['title']}'. Using original metadata.")
+    logger.error(f"Could not confidently match track '{slsk_track_meta['title']}'. Using original metadata.")
     return slsk_track_meta # Fallback to original
 
 
@@ -20170,13 +20150,13 @@ def _pp_lookup_musicbrainz(pp, _names_match):
     try:
         mb_service = mb_worker.mb_service if mb_worker else None
         if not mb_service:
-            print("MusicBrainz worker not available, skipping MBID lookup")
+            logger.info("MusicBrainz worker not available, skipping MBID lookup")
             return
         result = mb_service.match_recording(track_title, artist_name)
         if result and result.get('mbid'):
             pp['recording_mbid'] = result['mbid']
             id_tags['MUSICBRAINZ_RECORDING_ID'] = pp['recording_mbid']
-            print(f"MusicBrainz recording matched: {pp['recording_mbid']}")
+            logger.info(f"MusicBrainz recording matched: {pp['recording_mbid']}")
             details = mb_service.mb_client.get_recording(pp['recording_mbid'], includes=['isrcs', 'genres'])
             if details:
                 isrcs = details.get('isrcs', [])
@@ -20281,13 +20261,13 @@ def _pp_lookup_musicbrainz(pp, _names_match):
                                         if _release_recording.get('id'):
                                             pp['recording_mbid'] = _release_recording['id']
                                             id_tags['MUSICBRAINZ_RECORDING_ID'] = _release_recording['id']
-                                            print(f"MusicBrainz recording from release tracklist: {_release_recording['id']}")
+                                            logger.info(f"MusicBrainz recording from release tracklist: {_release_recording['id']}")
                                         break
                                 break
                     except (ValueError, TypeError):
                         pass
     except Exception as e:
-        print(f"MusicBrainz lookup failed (non-fatal): {e}")
+        logger.error(f"MusicBrainz lookup failed (non-fatal): {e}")
 
 
 def _pp_lookup_deezer(pp, _names_match):
@@ -20301,7 +20281,7 @@ def _pp_lookup_deezer(pp, _names_match):
     try:
         dz_client = deezer_worker.client if deezer_worker else None
         if not dz_client:
-            print("Deezer worker not available, skipping Deezer lookup")
+            logger.info("Deezer worker not available, skipping Deezer lookup")
             return
         dz_result = dz_client.search_track(artist_name, track_title)
         if dz_result and _names_match(dz_result.get('title', ''), track_title) and \
@@ -20311,7 +20291,7 @@ def _pp_lookup_deezer(pp, _names_match):
             dz_artist_id = dz_result.get('artist', {}).get('id')
             if dz_artist_id:
                 id_tags['DEEZER_ARTIST_ID'] = str(dz_artist_id)
-            print(f"Deezer track matched: {dz_track_id}")
+            logger.info(f"Deezer track matched: {dz_track_id}")
             dz_details = dz_client.get_track_details(dz_track_id)
             if dz_details:
                 bpm_val = dz_details.get('bpm')
@@ -20327,7 +20307,7 @@ def _pp_lookup_deezer(pp, _names_match):
                 if len(dz_release) >= 4 and dz_release[:4].isdigit():
                     pp['release_year'] = dz_release[:4]
     except Exception as e:
-        print(f"Deezer lookup failed (non-fatal): {e}")
+        logger.error(f"Deezer lookup failed (non-fatal): {e}")
 
 
 def _pp_lookup_audiodb(pp, _names_match):
@@ -20341,7 +20321,7 @@ def _pp_lookup_audiodb(pp, _names_match):
     try:
         adb_client = audiodb_worker.client if audiodb_worker else None
         if not adb_client:
-            print("AudioDB worker not available, skipping AudioDB lookup")
+            logger.info("AudioDB worker not available, skipping AudioDB lookup")
             return
         adb_result = adb_client.search_track(artist_name, track_title)
         if adb_result and _names_match(adb_result.get('strTrack', ''), track_title) and \
@@ -20349,22 +20329,22 @@ def _pp_lookup_audiodb(pp, _names_match):
             adb_track_id = adb_result.get('idTrack')
             if adb_track_id:
                 id_tags['AUDIODB_TRACK_ID'] = str(adb_track_id)
-                print(f"AudioDB track matched: {adb_track_id}")
+                logger.info(f"AudioDB track matched: {adb_track_id}")
             adb_mb_track = adb_result.get('strMusicBrainzID')
             if adb_mb_track and 'MUSICBRAINZ_RECORDING_ID' not in id_tags:
                 id_tags['MUSICBRAINZ_RECORDING_ID'] = adb_mb_track
                 pp['recording_mbid'] = adb_mb_track
-                print(f"MusicBrainz recording ID from AudioDB fallback: {adb_mb_track}")
+                logger.warning(f"MusicBrainz recording ID from AudioDB fallback: {adb_mb_track}")
             adb_mb_artist = adb_result.get('strMusicBrainzArtistID')
             if adb_mb_artist and 'MUSICBRAINZ_ARTIST_ID' not in id_tags:
                 id_tags['MUSICBRAINZ_ARTIST_ID'] = adb_mb_artist
                 pp['artist_mbid'] = adb_mb_artist
-                print(f"MusicBrainz artist ID from AudioDB fallback: {adb_mb_artist}")
+                logger.warning(f"MusicBrainz artist ID from AudioDB fallback: {adb_mb_artist}")
             pp['audiodb_mood'] = adb_result.get('strMood') or None
             pp['audiodb_style'] = adb_result.get('strStyle') or None
             pp['audiodb_genre'] = adb_result.get('strGenre') or None
     except Exception as e:
-        print(f"AudioDB lookup failed (non-fatal): {e}")
+        logger.error(f"AudioDB lookup failed (non-fatal): {e}")
 
 
 def _pp_lookup_tidal(pp, _names_match):
@@ -20383,7 +20363,7 @@ def _pp_lookup_tidal(pp, _names_match):
             td_track_id = td_result.get('id')
             if td_track_id:
                 id_tags['TIDAL_TRACK_ID'] = str(td_track_id)
-                print(f"Tidal track matched: {td_track_id}")
+                logger.info(f"Tidal track matched: {td_track_id}")
             td_artist = td_result.get('artist', {})
             if isinstance(td_artist, dict) and td_artist.get('id'):
                 id_tags['TIDAL_ARTIST_ID'] = str(td_artist['id'])
@@ -20407,7 +20387,7 @@ def _pp_lookup_tidal(pp, _names_match):
                 if len(td_release) >= 4 and td_release[:4].isdigit():
                     pp['release_year'] = td_release[:4]
     except Exception as e:
-        print(f"Tidal lookup failed (non-fatal): {e}")
+        logger.error(f"Tidal lookup failed (non-fatal): {e}")
 
 
 def _pp_lookup_qobuz(pp, _names_match):
@@ -20433,7 +20413,7 @@ def _pp_lookup_qobuz(pp, _names_match):
                 qz_track_id = qz_result.get('id')
                 if qz_track_id:
                     id_tags['QOBUZ_TRACK_ID'] = str(qz_track_id)
-                    print(f"Qobuz track matched: {qz_track_id}")
+                    logger.info(f"Qobuz track matched: {qz_track_id}")
                 if isinstance(qz_performer, dict) and qz_performer.get('id'):
                     id_tags['QOBUZ_ARTIST_ID'] = str(qz_performer['id'])
                 qz_isrc = qz_result.get('isrc')
@@ -20463,7 +20443,7 @@ def _pp_lookup_qobuz(pp, _names_match):
                         if len(qz_release) >= 4 and qz_release[:4].isdigit():
                             pp['release_year'] = qz_release[:4]
     except Exception as e:
-        print(f"Qobuz lookup failed (non-fatal): {e}")
+        logger.error(f"Qobuz lookup failed (non-fatal): {e}")
 
 
 def _pp_lookup_lastfm(pp, _names_match):
@@ -20489,9 +20469,9 @@ def _pp_lookup_lastfm(pp, _names_match):
                     pp['lastfm_tags'] = [t.get('name', '') for t in tag_list if isinstance(t, dict) and t.get('name')]
                 elif isinstance(tag_list, dict) and tag_list.get('name'):
                     pp['lastfm_tags'] = [tag_list['name']]
-            print(f"Last.fm track info found: {len(pp['lastfm_tags'])} tags")
+            logger.info(f"Last.fm track info found: {len(pp['lastfm_tags'])} tags")
     except Exception as e:
-        print(f"Last.fm lookup failed (non-fatal): {e}")
+        logger.error(f"Last.fm lookup failed (non-fatal): {e}")
 
 
 def _pp_lookup_genius(pp, _names_match):
@@ -20505,7 +20485,7 @@ def _pp_lookup_genius(pp, _names_match):
     try:
         import core.genius_client as _genius_module
         if time.time() < _genius_module._rate_limit_until:
-            print("Genius rate-limited, skipping (non-blocking)")
+            logger.info("Genius rate-limited, skipping (non-blocking)")
             return
         g_client = genius_worker.client if genius_worker else None
         if not g_client:
@@ -20515,12 +20495,12 @@ def _pp_lookup_genius(pp, _names_match):
             g_id = g_result.get('id')
             if g_id:
                 id_tags['GENIUS_TRACK_ID'] = str(g_id)
-                print(f"Genius song matched: {g_id}")
+                logger.info(f"Genius song matched: {g_id}")
             g_url = g_result.get('url')
             if g_url:
                 pp['genius_url'] = g_url
     except Exception as e:
-        print(f"Genius lookup failed (non-fatal): {e}")
+        logger.error(f"Genius lookup failed (non-fatal): {e}")
 
 
 def _post_process_matched_download_with_verification(context_key, context, file_path, task_id, batch_id):
@@ -20724,16 +20704,16 @@ def _check_flac_bit_depth(file_path, context, context_key):
         track_info = context.get('track_info', {})
         track_name = track_info.get('name', os.path.basename(file_path))
         if _downsample_enabled:
-            print(f"[FLAC Downsample] Accepted {_actual_bits}-bit FLAC (will be downsampled to {_flac_pref}-bit): {track_name}")
+            logger.info(f"[FLAC Downsample] Accepted {_actual_bits}-bit FLAC (will be downsampled to {_flac_pref}-bit): {track_name}")
         else:
-            print(f"[FLAC Fallback] Accepted {_actual_bits}-bit FLAC (preferred {_flac_pref}-bit): {track_name}")
+            logger.warning(f"[FLAC Fallback] Accepted {_actual_bits}-bit FLAC (preferred {_flac_pref}-bit): {track_name}")
         return False
 
     # Strict mode — reject and quarantine
     rejection_msg = f"FLAC bit depth mismatch: file is {_actual_bits}-bit, preference is {_flac_pref}-bit"
     try:
         quarantine_path = _move_to_quarantine(file_path, context, rejection_msg)
-        print(f"File quarantined due to bit depth filter: {quarantine_path}")
+        logger.info(f"File quarantined due to bit depth filter: {quarantine_path}")
     except Exception as quarantine_error:
         logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
         try:
@@ -20970,9 +20950,9 @@ def _post_process_matched_download(context_key, context, file_path):
         if not os.path.exists(file_path):
             existing_final = context.get('_final_processed_path')
             if existing_final and os.path.exists(existing_final):
-                print(f"[Race Guard] Source gone but destination exists — already processed by another thread: {os.path.basename(existing_final)}")
+                logger.info(f"[Race Guard] Source gone but destination exists — already processed by another thread: {os.path.basename(existing_final)}")
                 return
-            print(f"[Race Guard] Source file gone and no known destination — marking as failed: {os.path.basename(file_path)}")
+            logger.error(f"[Race Guard] Source file gone and no known destination — marking as failed: {os.path.basename(file_path)}")
             context['_race_guard_failed'] = True
             return
         # --- END RACE CONDITION GUARD ---
@@ -20993,10 +20973,10 @@ def _post_process_matched_download(context_key, context, file_path):
                 break
             _prev_size = _cur_size
             if _stability_check == 0:
-                print(f"Waiting for file to stabilise: {_basename} ({_cur_size} bytes)")
+                logger.info(f"Waiting for file to stabilise: {_basename} ({_cur_size} bytes)")
             time.sleep(1.5)
         else:
-            print(f"File may still be writing after stability checks: {_basename} ({_prev_size} bytes)")
+            logger.info(f"File may still be writing after stability checks: {_basename} ({_prev_size} bytes)")
         # --- END FILE STABILITY CHECK ---
 
         # --- ACOUSTID VERIFICATION ---
@@ -21040,26 +21020,26 @@ def _post_process_matched_download(context_key, context, file_path):
                     expected_artist = spotify_artist.get('name', '')
 
                 if expected_track and expected_artist:
-                    print(f"Running AcoustID verification for: '{expected_track}' by '{expected_artist}'")
+                    logger.info(f"Running AcoustID verification for: '{expected_track}' by '{expected_artist}'")
                     verification_result, verification_msg = verifier.verify_audio_file(
                         file_path,
                         expected_track,
                         expected_artist,
                         context
                     )
-                    print(f"AcoustID verification result: {verification_result.value} - {verification_msg}")
+                    logger.info(f"AcoustID verification result: {verification_result.value} - {verification_msg}")
                     context['_acoustid_result'] = verification_result.value
 
                     if verification_result == VerificationResult.FAIL:
                         # Move to quarantine instead of Transfer
                         try:
                             quarantine_path = _move_to_quarantine(file_path, context, verification_msg)
-                            print(f"File quarantined due to verification failure: {quarantine_path}")
+                            logger.error(f"File quarantined due to verification failure: {quarantine_path}")
                         except Exception as quarantine_error:
                             # Quarantine failed — delete the known-wrong file instead
                             # NEVER save a file we've confirmed is wrong
                             logger.error(f"Quarantine failed ({quarantine_error}), deleting wrong file: {file_path}")
-                            print(f"Quarantine failed, deleting wrong file: {file_path}")
+                            logger.error(f"Quarantine failed, deleting wrong file: {file_path}")
                             try:
                                 os.remove(file_path)
                             except Exception as del_error:
@@ -21089,14 +21069,14 @@ def _post_process_matched_download(context_key, context, file_path):
 
                         return  # NEVER continue processing a known-wrong file
                 else:
-                    print(f"AcoustID verification skipped: missing track/artist info")
+                    logger.warning(f"AcoustID verification skipped: missing track/artist info")
                     context['_acoustid_result'] = 'skip'
             else:
-                print(f"ℹ️ AcoustID verification not available: {available_reason}")
+                logger.info(f"ℹ️ AcoustID verification not available: {available_reason}")
                 context['_acoustid_result'] = 'disabled'
         except Exception as verify_error:
             # Any verification error should NOT block the download - fail open
-            print(f"AcoustID verification error (continuing normally): {verify_error}")
+            logger.error(f"AcoustID verification error (continuing normally): {verify_error}")
             context['_acoustid_result'] = 'error'
         # --- END ACOUSTID VERIFICATION ---
 
@@ -21169,11 +21149,11 @@ def _post_process_matched_download(context_key, context, file_path):
             return
         # --- END SIMPLE DOWNLOAD HANDLING ---
 
-        print(f"Starting robust post-processing for: {context_key}")
+        logger.info(f"Starting robust post-processing for: {context_key}")
 
         spotify_artist = context.get("spotify_artist")
         if not spotify_artist:
-            print(f"Post-processing failed: Missing spotify_artist context.")
+            logger.error(f"Post-processing failed: Missing spotify_artist context.")
             return
 
         # ── UNKNOWN ARTIST GUARD ──
@@ -21182,7 +21162,7 @@ def _post_process_matched_download(context_key, context, file_path):
         _junk_artist_names = {'', 'unknown', 'unknown artist', 'various artists', 'none', 'null'}
         _artist_name = (spotify_artist.get('name', '') if isinstance(spotify_artist, dict) else '').strip()
         if _artist_name.lower() in _junk_artist_names:
-            print(f"[Unknown Artist Guard] Artist name is '{_artist_name}' — attempting to resolve")
+            logger.info(f"[Unknown Artist Guard] Artist name is '{_artist_name}' — attempting to resolve")
             _resolved = False
             track_info_guard = context.get("track_info", {}) or {}
             original_search_guard = context.get("original_search_result", {}) or {}
@@ -21194,7 +21174,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 _name = _first.get('name', '') if isinstance(_first, dict) else str(_first)
                 if _name and _name.strip().lower() not in _junk_artist_names:
                     spotify_artist['name'] = _name.strip()
-                    print(f"[Unknown Artist Guard] Resolved from track_info.artists: '{_name}'")
+                    logger.info(f"[Unknown Artist Guard] Resolved from track_info.artists: '{_name}'")
                     _resolved = True
 
             # Try 2: Pull from original_search_result
@@ -21202,7 +21182,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 _os_artist = original_search_guard.get('artist') or original_search_guard.get('artist_name') or ''
                 if isinstance(_os_artist, str) and _os_artist.strip().lower() not in _junk_artist_names:
                     spotify_artist['name'] = _os_artist.strip()
-                    print(f"[Unknown Artist Guard] Resolved from original_search_result: '{_os_artist}'")
+                    logger.info(f"[Unknown Artist Guard] Resolved from original_search_result: '{_os_artist}'")
                     _resolved = True
 
             # Try 3: Re-fetch from metadata source using track ID
@@ -21220,13 +21200,13 @@ def _post_process_matched_download(context_key, context, file_path):
                                     _d_name = _d_first.get('name', '') if isinstance(_d_first, dict) else str(_d_first)
                                     if _d_name and _d_name.strip().lower() not in _junk_artist_names:
                                         spotify_artist['name'] = _d_name.strip()
-                                        print(f"[Unknown Artist Guard] Resolved from metadata API: '{_d_name}'")
+                                        logger.info(f"[Unknown Artist Guard] Resolved from metadata API: '{_d_name}'")
                                         _resolved = True
                     except Exception as _guard_err:
-                        print(f"[Unknown Artist Guard] Metadata re-fetch failed: {_guard_err}")
+                        logger.error(f"[Unknown Artist Guard] Metadata re-fetch failed: {_guard_err}")
 
             if not _resolved:
-                print(f"[Unknown Artist Guard] Could not resolve artist — proceeding with '{_artist_name}'")
+                logger.error(f"[Unknown Artist Guard] Could not resolve artist — proceeding with '{_artist_name}'")
 
             context['spotify_artist'] = spotify_artist
         # ── END UNKNOWN ARTIST GUARD ──
@@ -21235,28 +21215,28 @@ def _post_process_matched_download(context_key, context, file_path):
         track_info = context.get("track_info", {})
         playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
 
-        print(f"[Debug] Post-processing - track_info type: {type(track_info)}, is None: {track_info is None}, is empty: {not track_info}")
-        print(f"[Debug] Post-processing - playlist_folder_mode: {playlist_folder_mode}")
+        logger.debug(f"[Debug] Post-processing - track_info type: {type(track_info)}, is None: {track_info is None}, is empty: {not track_info}")
+        logger.debug(f"[Debug] Post-processing - playlist_folder_mode: {playlist_folder_mode}")
         if track_info:
-            print(f"[Debug] Post-processing - track_info keys: {list(track_info.keys())}")
+            logger.debug(f"[Debug] Post-processing - track_info keys: {list(track_info.keys())}")
 
         if playlist_folder_mode:
             # Use shared path builder for playlist mode
             playlist_name = track_info.get("_playlist_name", "Unknown Playlist")
-            print(f"[Playlist Folder Mode] Organizing in playlist folder: {playlist_name}")
+            logger.info(f"[Playlist Folder Mode] Organizing in playlist folder: {playlist_name}")
 
             file_ext = os.path.splitext(file_path)[1]
 
             # Build final path FIRST so we can check for already-processed files
             final_path, _ = _build_final_path_for_track(context, spotify_artist, None, file_ext)
-            print(f"Playlist mode final path: '{final_path}'")
+            logger.info(f"Playlist mode final path: '{final_path}'")
 
             # RACE CONDITION GUARD: If source file is gone but destination exists,
             # another thread (stream processor or verification worker) already moved it.
             # Return early to avoid deleting the successfully processed file.
             if not os.path.exists(file_path):
                 if os.path.exists(final_path):
-                    print(f"[Playlist Folder Mode] Source gone but destination exists — already processed by another thread: {os.path.basename(final_path)}")
+                    logger.info(f"[Playlist Folder Mode] Source gone but destination exists — already processed by another thread: {os.path.basename(final_path)}")
                     context['_final_processed_path'] = final_path
                     return
                 else:
@@ -21265,7 +21245,7 @@ def _post_process_matched_download(context_key, context, file_path):
 
             context['_audio_quality'] = _get_audio_quality_string(file_path)
             if context['_audio_quality']:
-                print(f"Audio quality detected: {context['_audio_quality']}")
+                logger.info(f"Audio quality detected: {context['_audio_quality']}")
 
             # FLAC bit depth filter
             if _check_flac_bit_depth(file_path, context, context_key):
@@ -21273,7 +21253,7 @@ def _post_process_matched_download(context_key, context, file_path):
 
             # Enhance metadata before moving
             try:
-                print(f"[Metadata Input] Playlist mode - artist: '{spotify_artist.get('name', 'MISSING')}' (id: {spotify_artist.get('id', 'MISSING')})")
+                logger.warning(f"[Metadata Input] Playlist mode - artist: '{spotify_artist.get('name', 'MISSING')}' (id: {spotify_artist.get('id', 'MISSING')})")
                 _enhance_file_metadata(file_path, context, spotify_artist, None)
             except Exception as meta_err:
                 import traceback
@@ -21281,7 +21261,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 _wipe_source_tags(file_path)
 
             # Move file to playlist folder
-            print(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
+            logger.info(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
             _safe_move_file(file_path, final_path)
 
             # Store final path for verification wrapper (before conversions may override)
@@ -21314,13 +21294,13 @@ def _post_process_matched_download(context_key, context, file_path):
             downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
             _cleanup_empty_directories(downloads_path, file_path)
 
-            print(f"[Playlist Folder Mode] Post-processing complete: {final_path}")
+            logger.info(f"[Playlist Folder Mode] Post-processing complete: {final_path}")
 
             # WISHLIST REMOVAL: Check if this track should be removed from wishlist
             try:
                 _check_and_remove_from_wishlist(context)
             except Exception as wishlist_error:
-                print(f"[Playlist Folder] Error checking wishlist removal: {wishlist_error}")
+                logger.error(f"[Playlist Folder] Error checking wishlist removal: {wishlist_error}")
 
             _emit_track_downloaded(context)
             _record_library_history_download(context)
@@ -21335,7 +21315,7 @@ def _post_process_matched_download(context_key, context, file_path):
                     if task_id in download_tasks:
                         download_tasks[task_id]['stream_processed'] = True
                         download_tasks[task_id]['status'] = 'completed'
-                        print(f"[Playlist Folder Mode] Marked task {task_id} as completed")
+                        logger.info(f"[Playlist Folder Mode] Marked task {task_id} as completed")
                 _on_download_completed(batch_id, task_id, success=True)
 
             return  # Skip normal album/artist folder structure processing
@@ -21345,7 +21325,7 @@ def _post_process_matched_download(context_key, context, file_path):
 
         if is_album_download and has_clean_spotify_data:
             # Build album_info directly from clean Spotify metadata (GUI PARITY)
-            print("Album context with clean Spotify data found - using direct album info")
+            logger.info("Album context with clean Spotify data found - using direct album info")
             original_search = context.get("original_search_result", {})
             spotify_album = context.get("spotify_album", {})
             
@@ -21354,10 +21334,10 @@ def _post_process_matched_download(context_key, context, file_path):
             clean_album_name = original_search.get('spotify_clean_album', 'Unknown Album')
             
             # DEBUG: Check what's in original_search
-            print(f"[DEBUG] Path 1 - Clean Spotify data path:")
-            print(f"   original_search keys: {list(original_search.keys())}")
-            print(f"   track_number in original_search: {'track_number' in original_search}")
-            print(f"   track_number value: {original_search.get('track_number', 'NOT_FOUND')}")
+            logger.debug(f"[DEBUG] Path 1 - Clean Spotify data path:")
+            logger.info(f"   original_search keys: {list(original_search.keys())}")
+            logger.info(f"   track_number in original_search: {'track_number' in original_search}")
+            logger.info(f"   track_number value: {original_search.get('track_number', 'NOT_FOUND')}")
             
             album_info = {
                 'is_album': True,
@@ -21370,20 +21350,20 @@ def _post_process_matched_download(context_key, context, file_path):
                 'source': 'clean_spotify_metadata'
             }
 
-            print(f"Using clean Spotify album: '{clean_album_name}' for track: '{clean_track_name}'")
+            logger.info(f"Using clean Spotify album: '{clean_album_name}' for track: '{clean_track_name}'")
         elif is_album_download:
             # CRITICAL FIX: Album context without clean Spotify data - still force album treatment
-            print("Album context found but no clean Spotify data - using enhanced fallback")
+            logger.warning("Album context found but no clean Spotify data - using enhanced fallback")
             original_search = context.get("original_search_result", {})
             spotify_album = context.get("spotify_album", {})
             clean_track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
             
             # DEBUG: Check what's in original_search for path 2
-            print(f"[DEBUG] Path 2 - Enhanced fallback album context path:")
-            print(f"   original_search keys: {list(original_search.keys())}")
-            print(f"   track_number in original_search: {'track_number' in original_search}")
-            print(f"   track_number value: {original_search.get('track_number', 'NOT_FOUND')}")
-            print(f"   spotify_album name: {spotify_album.get('name', 'NOT_FOUND')}")
+            logger.debug(f"[DEBUG] Path 2 - Enhanced fallback album context path:")
+            logger.info(f"   original_search keys: {list(original_search.keys())}")
+            logger.info(f"   track_number in original_search: {'track_number' in original_search}")
+            logger.info(f"   track_number value: {original_search.get('track_number', 'NOT_FOUND')}")
+            logger.info(f"   spotify_album name: {spotify_album.get('name', 'NOT_FOUND')}")
             
             # ENHANCEMENT: Use spotify_clean_album if available for consistency 
             album_name = (original_search.get('spotify_clean_album') or 
@@ -21400,10 +21380,10 @@ def _post_process_matched_download(context_key, context, file_path):
                 'confidence': 0.9,  # Higher confidence - user explicitly chose album
                 'source': 'enhanced_fallback_album_context'
             }
-            print(f"[FORCED ALBUM] Using album: '{album_name}' for track: '{clean_track_name}'")
+            logger.info(f"[FORCED ALBUM] Using album: '{album_name}' for track: '{clean_track_name}'")
         else:
             # For singles, we still need to detect if they belong to an album.
-            print("Single track download - attempting album detection")
+            logger.info("Single track download - attempting album detection")
             album_info = _detect_album_info_web(context, spotify_artist)
 
         # --- Album grouping resolution ---
@@ -21411,8 +21391,8 @@ def _post_process_matched_download(context_key, context, file_path):
         # Explicit album downloads already have the correct Spotify album name —
         # re-grouping would mangle names like "(Reworked and Remastered)" into "(Deluxe Edition)".
         if album_info and album_info['is_album'] and not is_album_download:
-            print(f"\nSMART ALBUM GROUPING for track: '{album_info.get('clean_track_name', 'Unknown')}'")
-            print(f"   Original album: '{album_info.get('album_name', 'None')}'")
+            logger.info(f"\nSMART ALBUM GROUPING for track: '{album_info.get('clean_track_name', 'Unknown')}'")
+            logger.info(f"   Original album: '{album_info.get('album_name', 'None')}'")
 
             # Get original album name from context if available
             original_album = None
@@ -21423,17 +21403,17 @@ def _post_process_matched_download(context_key, context, file_path):
             consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album)
             album_info['album_name'] = consistent_album_name
 
-            print(f"   Final album name: '{consistent_album_name}'")
-            print(f"Album grouping complete!\n")
+            logger.info(f"   Final album name: '{consistent_album_name}'")
+            logger.info(f"Album grouping complete!\n")
         elif album_info and album_info['is_album'] and is_album_download:
-            print(f"\nEXPLICIT ALBUM DOWNLOAD - preserving Spotify album name: '{album_info.get('album_name', 'None')}'")
-            print(f"   Skipping smart grouping (not needed for explicit album downloads)\n")
+            logger.info(f"\nEXPLICIT ALBUM DOWNLOAD - preserving Spotify album name: '{album_info.get('album_name', 'None')}'")
+            logger.info(f"   Skipping smart grouping (not needed for explicit album downloads)\n")
 
         # 1. Get transfer path (directory creation handled by _build_final_path_for_track)
         file_ext = os.path.splitext(file_path)[1]
         context['_audio_quality'] = _get_audio_quality_string(file_path)
         if context['_audio_quality']:
-            print(f"Audio quality detected: {context['_audio_quality']}")
+            logger.info(f"Audio quality detected: {context['_audio_quality']}")
 
         # FLAC bit depth filter
         if _check_flac_bit_depth(file_path, context, context_key):
@@ -21450,46 +21430,46 @@ def _post_process_matched_download(context_key, context, file_path):
             # Priority 1: Spotify clean title from context
             if original_search.get('spotify_clean_title'):
                 clean_track_name = original_search['spotify_clean_title']
-                print(f"Using Spotify clean title: '{clean_track_name}'")
+                logger.info(f"Using Spotify clean title: '{clean_track_name}'")
             # Priority 2: Album info clean name
             elif album_info.get('clean_track_name'):
                 clean_track_name = album_info['clean_track_name']
-                print(f"Using album info clean name: '{clean_track_name}'")
+                logger.info(f"Using album info clean name: '{clean_track_name}'")
             # Priority 3: Original title as fallback
             else:
                 clean_track_name = original_search.get('title', 'Unknown Track')
-                print(f"Using original title as fallback: '{clean_track_name}'")
+                logger.warning(f"Using original title as fallback: '{clean_track_name}'")
             
             final_track_name_sanitized = _sanitize_filename(clean_track_name)
             track_number = album_info['track_number']
             
             # DEBUG: Check final track_number values
-            print(f"[DEBUG] Final track_number processing:")
-            print(f"   album_info source: {album_info.get('source', 'unknown')}")
-            print(f"   album_info track_number: {album_info.get('track_number', 'NOT_FOUND')}")
-            print(f"   track_number variable: {track_number}")
+            logger.debug(f"[DEBUG] Final track_number processing:")
+            logger.info(f"   album_info source: {album_info.get('source', 'unknown')}")
+            logger.info(f"   album_info track_number: {album_info.get('track_number', 'NOT_FOUND')}")
+            logger.info(f"   track_number variable: {track_number}")
             
             # Fix: Handle None track_number
             if track_number is None:
-                print(f"Track number is None, extracting from filename: {os.path.basename(file_path)}")
+                logger.info(f"Track number is None, extracting from filename: {os.path.basename(file_path)}")
                 track_number = _extract_track_number_from_filename(file_path)
-                print(f"   -> Extracted track number: {track_number}")
+                logger.info(f"   -> Extracted track number: {track_number}")
             
             # Ensure track_number is valid
             if not isinstance(track_number, int) or track_number < 1:
-                print(f"Invalid track number ({track_number}), defaulting to 1")
+                logger.error(f"Invalid track number ({track_number}), defaulting to 1")
                 track_number = 1
                 
-            print(f"[DEBUG] FINAL track_number used for filename: {track_number}")
+            logger.debug(f"[DEBUG] FINAL track_number used for filename: {track_number}")
             
             # CRITICAL FIX: Update album_info with corrected track_number for metadata enhancement
             album_info['track_number'] = track_number
             album_info['clean_track_name'] = clean_track_name  # Ensure clean name is in album_info
-            print(f"[FIX] Updated album_info track_number to {track_number} for consistent metadata")
+            logger.info(f"[FIX] Updated album_info track_number to {track_number} for consistent metadata")
 
             # Use shared path builder for album mode
             final_path, _ = _build_final_path_for_track(context, spotify_artist, album_info, file_ext)
-            print(f"Album path: '{final_path}'")
+            logger.info(f"Album path: '{final_path}'")
         else:
             # Single track structure: Transfer/ARTIST/ARTIST - SINGLE/SINGLE.ext
             # --- GUI PARITY: Use multiple sources for clean track name ---
@@ -21499,15 +21479,15 @@ def _post_process_matched_download(context_key, context, file_path):
             # Priority 1: Spotify clean title from context  
             if original_search.get('spotify_clean_title'):
                 clean_track_name = original_search['spotify_clean_title']
-                print(f"Using Spotify clean title: '{clean_track_name}'")
+                logger.info(f"Using Spotify clean title: '{clean_track_name}'")
             # Priority 2: Album info clean name
             elif album_info and album_info.get('clean_track_name'):
                 clean_track_name = album_info['clean_track_name']
-                print(f"Using album info clean name: '{clean_track_name}'")
+                logger.info(f"Using album info clean name: '{clean_track_name}'")
             # Priority 3: Original title as fallback
             else:
                 clean_track_name = original_search.get('title', 'Unknown Track')
-                print(f"Using original title as fallback: '{clean_track_name}'")
+                logger.warning(f"Using original title as fallback: '{clean_track_name}'")
             
             # Ensure clean name is in album_info for path builder
             if album_info:
@@ -21515,7 +21495,7 @@ def _post_process_matched_download(context_key, context, file_path):
 
             # Use shared path builder for single mode
             final_path, _ = _build_final_path_for_track(context, spotify_artist, album_info, file_ext)
-            print(f"Single path: '{final_path}'")
+            logger.info(f"Single path: '{final_path}'")
 
         # Store the actual computed path so verification uses this exact path
         # instead of recomputing independently (which can produce mismatches)
@@ -21523,11 +21503,11 @@ def _post_process_matched_download(context_key, context, file_path):
 
         # 3. Enhance metadata, move file, download art, and cleanup
         try:
-            print(f"[Metadata Input] artist: '{spotify_artist.get('name', 'MISSING')}' (id: {spotify_artist.get('id', 'MISSING')})")
+            logger.warning(f"[Metadata Input] artist: '{spotify_artist.get('name', 'MISSING')}' (id: {spotify_artist.get('id', 'MISSING')})")
             if album_info:
-                print(f"[Metadata Input] album: '{album_info.get('album_name', 'MISSING')}', track#: {album_info.get('track_number', 'MISSING')}, disc#: {album_info.get('disc_number', 'MISSING')}, source: {album_info.get('source', 'unknown')}")
+                logger.warning(f"[Metadata Input] album: '{album_info.get('album_name', 'MISSING')}', track#: {album_info.get('track_number', 'MISSING')}, disc#: {album_info.get('disc_number', 'MISSING')}, source: {album_info.get('source', 'unknown')}")
             else:
-                print(f"[Metadata Input] album_info: None (single track)")
+                logger.info(f"[Metadata Input] album_info: None (single track)")
             _enhance_file_metadata(file_path, context, spotify_artist, album_info)
         except Exception as meta_err:
             import traceback
@@ -21545,12 +21525,12 @@ def _post_process_matched_download(context_key, context, file_path):
                 _enhance_source_info = {}
         is_enhance_download = _enhance_source_info.get('enhance', False)
 
-        print(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
+        logger.info(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
         if os.path.exists(final_path):
             # PROTECTION: If destination already exists, check before overwriting
             # If the source file is gone, another thread already handled this - don't delete the destination
             if not os.path.exists(file_path):
-                print(f"[Protection] Destination exists and source already gone - file already transferred: {os.path.basename(final_path)}")
+                logger.info(f"[Protection] Destination exists and source already gone - file already transferred: {os.path.basename(final_path)}")
                 return
             try:
                 from mutagen import File as MutagenFile
@@ -21565,50 +21545,50 @@ def _post_process_matched_download(context_key, context, file_path):
                         _incoming_tier = _get_quality_tier_from_extension(file_path)
                         if _incoming_tier[1] < _existing_tier[1]:
                             # Incoming is higher quality (lower tier number) — replace
-                            print(f"[Quality Replace] Replacing {_existing_tier[0]} with {_incoming_tier[0]}: {os.path.basename(final_path)}")
+                            logger.info(f"[Quality Replace] Replacing {_existing_tier[0]} with {_incoming_tier[0]}: {os.path.basename(final_path)}")
                             try:
                                 os.remove(final_path)
                             except Exception as e:
-                                print(f"[Quality Replace] Could not remove existing file: {e}")
+                                logger.error(f"[Quality Replace] Could not remove existing file: {e}")
                         else:
-                            print(f"[Protection] Existing file is same or better quality ({_existing_tier[0]} vs {_incoming_tier[0]}) - skipping: {os.path.basename(final_path)}")
+                            logger.info(f"[Protection] Existing file is same or better quality ({_existing_tier[0]} vs {_incoming_tier[0]}) - skipping: {os.path.basename(final_path)}")
                             try:
                                 os.remove(file_path)
                             except FileNotFoundError:
                                 pass
                             except Exception as e:
-                                print(f"[Protection] Error removing redundant file: {e}")
+                                logger.error(f"[Protection] Error removing redundant file: {e}")
                             return
                     else:
-                        print(f"[Protection] Existing file already has metadata enhancement - skipping overwrite: {os.path.basename(final_path)}")
-                        print(f"[Protection] Removing redundant download file: {os.path.basename(file_path)}")
+                        logger.info(f"[Protection] Existing file already has metadata enhancement - skipping overwrite: {os.path.basename(final_path)}")
+                        logger.info(f"[Protection] Removing redundant download file: {os.path.basename(file_path)}")
                         try:
                             os.remove(file_path)
                         except FileNotFoundError:
-                            print(f"[Protection] Could not remove redundant file (already gone): {file_path}")
+                            logger.error(f"[Protection] Could not remove redundant file (already gone): {file_path}")
                         except Exception as e:
-                            print(f"[Protection] Error removing redundant file: {e}")
+                            logger.error(f"[Protection] Error removing redundant file: {e}")
                         return  # Don't overwrite the good file
                 elif is_enhance_download:
                     # ENHANCE BYPASS: Allow overwrite — backup original, then remove to allow move
-                    print(f"[Enhance] Quality enhance mode — replacing existing file: {os.path.basename(final_path)}")
+                    logger.info(f"[Enhance] Quality enhance mode — replacing existing file: {os.path.basename(final_path)}")
                     try:
                         os.remove(final_path)
                     except Exception as e:
-                        print(f"[Enhance] Could not remove existing file for replacement: {e}")
+                        logger.error(f"[Enhance] Could not remove existing file for replacement: {e}")
                 else:
-                    print(f"[Protection] Existing file lacks metadata - safe to overwrite: {os.path.basename(final_path)}")
+                    logger.info(f"[Protection] Existing file lacks metadata - safe to overwrite: {os.path.basename(final_path)}")
                     try:
                         os.remove(final_path)
                     except FileNotFoundError:
                         pass # It was just there, but now gone?
             except Exception as check_error:
-                print(f"[Protection] Error checking existing file metadata, proceeding with overwrite: {check_error}")
+                logger.error(f"[Protection] Error checking existing file metadata, proceeding with overwrite: {check_error}")
                 try:
                     if os.path.exists(final_path):
                         os.remove(final_path)
                 except Exception as e:
-                    print(f"[Protection] Failed to remove existing file for overwrite: {e}")
+                    logger.error(f"[Protection] Failed to remove existing file for overwrite: {e}")
 
         # --- PRE-MOVE SOURCE CHECK ---
         # Right before moving, verify the source file still exists.
@@ -21616,7 +21596,7 @@ def _post_process_matched_download(context_key, context, file_path):
         # already moved this file during the sleep + metadata enhancement window.
         if not os.path.exists(file_path):
             if os.path.exists(final_path):
-                print(f"[Pre-Move] Source already gone and destination exists - another thread completed transfer: {os.path.basename(final_path)}")
+                logger.info(f"[Pre-Move] Source already gone and destination exists - another thread completed transfer: {os.path.basename(final_path)}")
                 # Still do cover art + lyrics since the other thread might not have finished those
                 _download_cover_art(album_info, os.path.dirname(final_path), context)
                 _generate_lrc_file(final_path, context, spotify_artist, album_info)
@@ -21644,13 +21624,13 @@ def _post_process_matched_download(context_key, context, file_path):
                             found_variant = os.path.join(expected_dir, f)
                             break
                 if found_variant:
-                    print(f"[Pre-Move] Source gone but found variant in destination (stream processor handled it): {os.path.basename(found_variant)}")
+                    logger.info(f"[Pre-Move] Source gone but found variant in destination (stream processor handled it): {os.path.basename(found_variant)}")
                     context['_final_processed_path'] = found_variant
                     _download_cover_art(album_info, expected_dir, context)
                     _generate_lrc_file(found_variant, context, spotify_artist, album_info)
                     return
                 else:
-                    print(f"[Pre-Move] Source file gone and no matching file in destination: {os.path.basename(file_path)}")
+                    logger.warning(f"[Pre-Move] Source file gone and no matching file in destination: {os.path.basename(file_path)}")
                     raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
 
         _safe_move_file(file_path, final_path)
@@ -21663,13 +21643,13 @@ def _post_process_matched_download(context_key, context, file_path):
                     os.remove(original_enhance_path)
                     old_fmt = os.path.splitext(original_enhance_path)[1]
                     new_fmt = os.path.splitext(final_path)[1]
-                    print(f"[Enhance] Upgraded {old_fmt} → {new_fmt}: {os.path.basename(final_path)}")
+                    logger.info(f"[Enhance] Upgraded {old_fmt} → {new_fmt}: {os.path.basename(final_path)}")
                 except Exception as e:
-                    print(f"[Enhance] Could not remove old-format file: {e}")
+                    logger.error(f"[Enhance] Could not remove old-format file: {e}")
             elif is_enhance_download:
                 old_fmt = _enhance_source_info.get('original_format', 'unknown')
                 new_fmt = os.path.splitext(final_path)[1]
-                print(f"[Enhance] Replaced in-place ({old_fmt} → {new_fmt}): {os.path.basename(final_path)}")
+                logger.info(f"[Enhance] Replaced in-place ({old_fmt} → {new_fmt}): {os.path.basename(final_path)}")
 
         _download_cover_art(album_info, os.path.dirname(final_path), context)
 
@@ -21702,7 +21682,7 @@ def _post_process_matched_download(context_key, context, file_path):
         downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
         _cleanup_empty_directories(downloads_path, file_path)
 
-        print(f"Post-processing complete for: {context.get('_final_processed_path', final_path)}")
+        logger.info(f"Post-processing complete for: {context.get('_final_processed_path', final_path)}")
 
         _emit_track_downloaded(context)
         _record_library_history_download(context)
@@ -21715,7 +21695,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 completed_path = context.get('_final_processed_path', final_path)
                 _record_retag_download(context, spotify_artist, album_info, completed_path)
         except Exception as retag_err:
-            print(f"[Post-Process] Retag data capture failed (non-fatal): {retag_err}")
+            logger.error(f"[Post-Process] Retag data capture failed (non-fatal): {retag_err}")
 
         # REPAIR: Register album folder for repair scanning when batch completes
         try:
@@ -21726,7 +21706,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 if album_folder:
                     repair_worker.register_folder(batch_id_for_repair, album_folder)
         except Exception as repair_err:
-            print(f"[Post-Process] Repair folder registration failed: {repair_err}")
+            logger.error(f"[Post-Process] Repair folder registration failed: {repair_err}")
 
         # ALBUM CONSISTENCY: Register completed file for post-batch MB tag reconciliation
         try:
@@ -21744,19 +21724,19 @@ def _post_process_matched_download(context_key, context, file_path):
                     if batch_id_for_consistency in download_batches:
                         download_batches[batch_id_for_consistency].setdefault('_consistency_files', []).append(_file_info)
         except Exception as cons_err:
-            print(f"[Post-Process] Album consistency registration failed: {cons_err}")
+            logger.error(f"[Post-Process] Album consistency registration failed: {cons_err}")
 
         # WISHLIST REMOVAL: Check if this track should be removed from wishlist after successful download
         try:
             _check_and_remove_from_wishlist(context)
         except Exception as wishlist_error:
-            print(f"[Post-Process] Error checking wishlist removal: {wishlist_error}")
+            logger.error(f"[Post-Process] Error checking wishlist removal: {wishlist_error}")
 
         # Call completion callback for missing downloads tasks to start next batch
         task_id = context.get('task_id')
         batch_id = context.get('batch_id')
         if task_id and batch_id:
-            print(f"[Post-Process] Calling completion callback for task {task_id} in batch {batch_id}")
+            logger.info(f"[Post-Process] Calling completion callback for task {task_id} in batch {batch_id}")
             
             # Mark task as stream processed and set terminal status so
             # _validate_worker_counts won't count this task as active
@@ -21768,7 +21748,7 @@ def _post_process_matched_download(context_key, context, file_path):
                 if task_id in download_tasks:
                     download_tasks[task_id]['stream_processed'] = True
                     download_tasks[task_id]['status'] = 'completed'
-                    print(f"[Post-Process] Marked task {task_id} as completed")
+                    logger.info(f"[Post-Process] Marked task {task_id} as completed")
             
             _on_download_completed(batch_id, task_id, success=True)
 
@@ -21776,7 +21756,7 @@ def _post_process_matched_download(context_key, context, file_path):
         import traceback
         pp_logger.info(f"[inner] EXCEPTION in post-processing for {context_key}: {e}")
         pp_logger.info(traceback.format_exc())
-        print(f"\nCRITICAL ERROR in post-processing for {context_key}: {e}")
+        logger.error(f"\nCRITICAL ERROR in post-processing for {context_key}: {e}")
         traceback.print_exc()
 
         # Only retry if the source file still exists - otherwise retrying is pointless
@@ -21787,15 +21767,15 @@ def _post_process_matched_download(context_key, context, file_path):
             # Remove from processed set so it can be retried
             if context_key in _processed_download_ids:
                 _processed_download_ids.remove(context_key)
-                print(f"Removed {context_key} from processed set - will retry on next check")
+                logger.warning(f"Removed {context_key} from processed set - will retry on next check")
 
             # Re-add to matched context for retry
             with matched_context_lock:
                 if context_key not in matched_downloads_context:
                     matched_downloads_context[context_key] = context
-                    print(f"Re-added {context_key} to context for retry")
+                    logger.warning(f"Re-added {context_key} to context for retry")
         else:
-            print(f"Source file gone, not retrying: {context_key}")
+            logger.warning(f"Source file gone, not retrying: {context_key}")
     finally:
         file_lock.release()
         # Clean up the lock entry to prevent unbounded memory growth
@@ -21893,7 +21873,7 @@ def _record_retag_download(context, spotify_artist, album_info, final_path):
             title=title, file_path=str(final_path), file_format=file_format,
             spotify_track_id=spotify_track_id, itunes_track_id=itunes_track_id
         )
-        print(f"[Retag] Recorded track for retag: '{title}' in '{album_name}'")
+        logger.info(f"[Retag] Recorded track for retag: '{title}' in '{album_name}'")
 
     # Cap retag groups at 100, remove oldest
     db.trim_retag_groups(100)
@@ -21992,7 +21972,7 @@ def _execute_retag(group_id, album_id):
             if best_match:
                 matched_pairs.append((existing_track, best_match))
             else:
-                print(f"[Retag] No match found for track: '{existing_track.get('title')}'")
+                logger.warning(f"[Retag] No match found for track: '{existing_track.get('title')}'")
                 matched_pairs.append((existing_track, None))
 
         with retag_lock:
@@ -22014,7 +21994,7 @@ def _execute_retag(group_id, album_id):
 
             # Verify file exists
             if not os.path.exists(current_file_path):
-                print(f"[Retag] File not found, skipping: {current_file_path}")
+                logger.warning(f"[Retag] File not found, skipping: {current_file_path}")
                 with retag_lock:
                     retag_state['processed'] += 1
                     retag_state['progress'] = int(retag_state['processed'] / retag_state['total_tracks'] * 100)
@@ -22056,9 +22036,9 @@ def _execute_retag(group_id, album_id):
             # Re-write metadata tags
             try:
                 _enhance_file_metadata(current_file_path, context, new_artist, album_info)
-                print(f"[Retag] Re-tagged: '{track_title}'")
+                logger.info(f"[Retag] Re-tagged: '{track_title}'")
             except Exception as meta_err:
-                print(f"[Retag] Metadata write failed for '{track_title}': {meta_err}")
+                logger.error(f"[Retag] Metadata write failed for '{track_title}': {meta_err}")
 
             # Compute new path and move if different
             file_ext = os.path.splitext(current_file_path)[1]
@@ -22066,7 +22046,7 @@ def _execute_retag(group_id, album_id):
                 new_path, _ = _build_final_path_for_track(context, new_artist, album_info, file_ext)
 
                 if os.path.normpath(current_file_path) != os.path.normpath(new_path):
-                    print(f"[Retag] Moving '{os.path.basename(current_file_path)}' -> '{new_path}'")
+                    logger.info(f"[Retag] Moving '{os.path.basename(current_file_path)}' -> '{new_path}'")
                     old_dir = os.path.dirname(current_file_path)
                     os.makedirs(os.path.dirname(new_path), exist_ok=True)
                     _safe_move_file(current_file_path, new_path)
@@ -22078,9 +22058,9 @@ def _execute_retag(group_id, album_id):
                             new_lyrics = os.path.splitext(new_path)[0] + lyrics_ext
                             try:
                                 _safe_move_file(old_lyrics, new_lyrics)
-                                print(f"[Retag] Moved {lyrics_ext} file alongside audio")
+                                logger.info(f"[Retag] Moved {lyrics_ext} file alongside audio")
                             except Exception as lrc_err:
-                                print(f"[Retag] Failed to move {lyrics_ext} file: {lrc_err}")
+                                logger.error(f"[Retag] Failed to move {lyrics_ext} file: {lrc_err}")
 
                     # Remove old cover.jpg if directory changed and old dir is now empty of audio
                     new_dir = os.path.dirname(new_path)
@@ -22094,7 +22074,7 @@ def _execute_retag(group_id, album_id):
                             if not remaining_audio:
                                 try:
                                     os.remove(old_cover)
-                                    print(f"[Retag] Removed orphaned cover.jpg from old directory")
+                                    logger.warning(f"[Retag] Removed orphaned cover.jpg from old directory")
                                 except Exception:
                                     pass
 
@@ -22106,15 +22086,15 @@ def _execute_retag(group_id, album_id):
                     db.update_retag_track_path(existing_track['id'], str(new_path))
                     current_file_path = new_path
                 else:
-                    print(f"[Retag] Path unchanged for '{track_title}', no move needed")
+                    logger.warning(f"[Retag] Path unchanged for '{track_title}', no move needed")
             except Exception as move_err:
-                print(f"[Retag] Path/move failed for '{track_title}': {move_err}")
+                logger.error(f"[Retag] Path/move failed for '{track_title}': {move_err}")
 
             # Download cover art to album directory
             try:
                 _download_cover_art(album_info, os.path.dirname(current_file_path), context)
             except Exception as cover_err:
-                print(f"[Retag] Cover art download failed: {cover_err}")
+                logger.error(f"[Retag] Cover art download failed: {cover_err}")
 
             with retag_lock:
                 retag_state['processed'] += 1
@@ -22145,12 +22125,12 @@ def _execute_retag(group_id, album_id):
                 "progress": 100,
                 "current_track": ""
             })
-        print(f"[Retag] Retag operation complete for group {group_id}")
+        logger.info(f"[Retag] Retag operation complete for group {group_id}")
 
     except Exception as e:
         import traceback
-        print(f"[Retag] Error during retag: {e}")
-        print(traceback.format_exc())
+        logger.error(f"[Retag] Error during retag: {e}")
+        logger.error(traceback.format_exc())
         with retag_lock:
             retag_state.update({
                 "status": "error",
@@ -22175,17 +22155,17 @@ def _check_and_remove_from_wishlist(context):
         track_info = context.get('track_info', {})
         if track_info.get('id'):
             spotify_track_id = track_info['id']
-            print(f"[Wishlist] Found Spotify ID from track_info: {spotify_track_id}")
+            logger.info(f"[Wishlist] Found Spotify ID from track_info: {spotify_track_id}")
         
         # Method 2: From original search result
         elif context.get('original_search_result', {}).get('id'):
             spotify_track_id = context['original_search_result']['id']
-            print(f"[Wishlist] Found Spotify ID from original_search_result: {spotify_track_id}")
+            logger.info(f"[Wishlist] Found Spotify ID from original_search_result: {spotify_track_id}")
         
         # Method 3: Check if this is a wishlist download (context has wishlist_id)
         elif 'wishlist_id' in track_info:
             wishlist_id = track_info['wishlist_id']
-            print(f"[Wishlist] Found wishlist_id in context: {wishlist_id}")
+            logger.info(f"[Wishlist] Found wishlist_id in context: {wishlist_id}")
             
             # Get the Spotify track ID from the wishlist entry (search all profiles)
             database = get_database()
@@ -22196,7 +22176,7 @@ def _check_and_remove_from_wishlist(context):
             for wl_track in wishlist_tracks:
                 if wl_track.get('wishlist_id') == wishlist_id:
                     spotify_track_id = wl_track.get('spotify_track_id') or wl_track.get('id')
-                    print(f"[Wishlist] Found Spotify ID from wishlist entry: {spotify_track_id}")
+                    logger.info(f"[Wishlist] Found Spotify ID from wishlist entry: {spotify_track_id}")
                     break
 
         # Method 4: Try to construct ID from track metadata for fuzzy matching
@@ -22205,7 +22185,7 @@ def _check_and_remove_from_wishlist(context):
             artist_name = _get_track_artist_name(track_info) or _get_track_artist_name(context.get('original_search_result', {}))
 
             if track_name and artist_name:
-                print(f"[Wishlist] No Spotify ID found, checking for fuzzy match: '{track_name}' by '{artist_name}'")
+                logger.warning(f"[Wishlist] No Spotify ID found, checking for fuzzy match: '{track_name}' by '{artist_name}'")
 
                 # Get all wishlist tracks and find potential matches (search all profiles)
                 if not wishlist_tracks:
@@ -22229,22 +22209,22 @@ def _check_and_remove_from_wishlist(context):
                     # Simple fuzzy matching
                     if (wl_name == track_name.lower() and wl_artist_name == artist_name.lower()):
                         spotify_track_id = wl_track.get('spotify_track_id') or wl_track.get('id')
-                        print(f"[Wishlist] Found fuzzy match - Spotify ID: {spotify_track_id}")
+                        logger.info(f"[Wishlist] Found fuzzy match - Spotify ID: {spotify_track_id}")
                         break
         
         # If we found a Spotify track ID, remove it from wishlist
         if spotify_track_id:
-            print(f"[Wishlist] Attempting to remove track from wishlist: {spotify_track_id}")
+            logger.info(f"[Wishlist] Attempting to remove track from wishlist: {spotify_track_id}")
             removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
             if removed:
-                print(f"[Wishlist] Successfully removed track from wishlist: {spotify_track_id}")
+                logger.info(f"[Wishlist] Successfully removed track from wishlist: {spotify_track_id}")
             else:
-                print(f"ℹ️ [Wishlist] Track not found in wishlist or already removed: {spotify_track_id}")
+                logger.warning(f"ℹ️ [Wishlist] Track not found in wishlist or already removed: {spotify_track_id}")
         else:
-            print(f"ℹ️ [Wishlist] No Spotify track ID found for wishlist removal check")
+            logger.warning(f"ℹ️ [Wishlist] No Spotify track ID found for wishlist removal check")
             
     except Exception as e:
-        print(f"[Wishlist] Error in wishlist removal check: {e}")
+        logger.error(f"[Wishlist] Error in wishlist removal check: {e}")
         import traceback
         traceback.print_exc()
 
@@ -22262,13 +22242,13 @@ def _check_and_remove_track_from_wishlist_by_metadata(track_data):
         track_id = track_data.get('id', '')
         artists = track_data.get('artists', [])
         
-        print(f"[Analysis] Checking if track should be removed from wishlist: '{track_name}' (ID: {track_id})")
+        logger.info(f"[Analysis] Checking if track should be removed from wishlist: '{track_name}' (ID: {track_id})")
         
         # Method 1: Direct Spotify ID match
         if track_id:
             removed = wishlist_service.mark_track_download_result(track_id, success=True)
             if removed:
-                print(f"[Analysis] Removed track from wishlist via direct ID match: {track_id}")
+                logger.info(f"[Analysis] Removed track from wishlist via direct ID match: {track_id}")
                 return True
         
         # Method 2: Fuzzy matching by name and artist if no direct ID match
@@ -22282,7 +22262,7 @@ def _check_and_remove_track_from_wishlist_by_metadata(track_data):
             else:
                 primary_artist = str(artists[0])
             
-            print(f"[Analysis] No direct ID match, trying fuzzy match: '{track_name}' by '{primary_artist}'")
+            logger.warning(f"[Analysis] No direct ID match, trying fuzzy match: '{track_name}' by '{primary_artist}'")
 
             # Get all wishlist tracks and find matches (search all profiles)
             database = get_database()
@@ -22308,14 +22288,14 @@ def _check_and_remove_track_from_wishlist_by_metadata(track_data):
                     if spotify_track_id:
                         removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
                         if removed:
-                            print(f"[Analysis] Removed track from wishlist via fuzzy match: {spotify_track_id}")
+                            logger.info(f"[Analysis] Removed track from wishlist via fuzzy match: {spotify_track_id}")
                             return True
         
-        print(f"ℹ️ [Analysis] Track not found in wishlist or already removed: '{track_name}'")
+        logger.warning(f"ℹ️ [Analysis] Track not found in wishlist or already removed: '{track_name}'")
         return False
         
     except Exception as e:
-        print(f"[Analysis] Error checking wishlist removal by metadata: {e}")
+        logger.error(f"[Analysis] Error checking wishlist removal by metadata: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -22333,7 +22313,7 @@ def _automatic_wishlist_cleanup_after_db_update():
         db = MusicDatabase()
         active_server = config_manager.get_active_media_server()
         
-        print("[Auto Cleanup] Starting automatic wishlist cleanup after database update...")
+        logger.info("[Auto Cleanup] Starting automatic wishlist cleanup after database update...")
 
         # Get all wishlist tracks (across all profiles - cleanup is global)
         database = get_database()
@@ -22342,10 +22322,10 @@ def _automatic_wishlist_cleanup_after_db_update():
         for p in all_profiles:
             wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
         if not wishlist_tracks:
-            print("[Auto Cleanup] No tracks in wishlist to clean up")
+            logger.warning("[Auto Cleanup] No tracks in wishlist to clean up")
             return
         
-        print(f"[Auto Cleanup] Found {len(wishlist_tracks)} tracks in wishlist")
+        logger.info(f"[Auto Cleanup] Found {len(wishlist_tracks)} tracks in wishlist")
         
         removed_count = 0
         
@@ -22380,11 +22360,11 @@ def _automatic_wishlist_cleanup_after_db_update():
                     
                     if db_track and confidence >= 0.7:
                         found_in_db = True
-                        print(f"[Auto Cleanup] Track found in database: '{track_name}' by {artist_name} (confidence: {confidence:.2f})")
+                        logger.info(f"[Auto Cleanup] Track found in database: '{track_name}' by {artist_name} (confidence: {confidence:.2f})")
                         break
                         
                 except Exception as db_error:
-                    print(f"[Auto Cleanup] Error checking database for track '{track_name}': {db_error}")
+                    logger.error(f"[Auto Cleanup] Error checking database for track '{track_name}': {db_error}")
                     continue
             
             # If found in database, remove from wishlist
@@ -22393,14 +22373,14 @@ def _automatic_wishlist_cleanup_after_db_update():
                     removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
                     if removed:
                         removed_count += 1
-                        print(f"[Auto Cleanup] Removed track from wishlist: '{track_name}' ({spotify_track_id})")
+                        logger.info(f"[Auto Cleanup] Removed track from wishlist: '{track_name}' ({spotify_track_id})")
                 except Exception as remove_error:
-                    print(f"[Auto Cleanup] Error removing track from wishlist: {remove_error}")
+                    logger.error(f"[Auto Cleanup] Error removing track from wishlist: {remove_error}")
         
-        print(f"[Auto Cleanup] Completed automatic cleanup: {removed_count} tracks removed from wishlist")
+        logger.info(f"[Auto Cleanup] Completed automatic cleanup: {removed_count} tracks removed from wishlist")
         
     except Exception as e:
-        print(f"[Auto Cleanup] Error in automatic wishlist cleanup: {e}")
+        logger.error(f"[Auto Cleanup] Error in automatic wishlist cleanup: {e}")
         import traceback
         traceback.print_exc()
 
@@ -23897,7 +23877,7 @@ _OLD_V2_NOTES = r"""
 def _simple_monitor_task():
     """The actual monitoring task that runs in the background thread.
     Search cleanup and download cleanup are now handled by system automations."""
-    print("Simple background monitor started")
+    logger.info("Simple background monitor started")
 
     while not globals().get('IS_SHUTTING_DOWN', False):
         try:
@@ -23918,15 +23898,15 @@ def _simple_monitor_task():
                     if current_time - data['first_attempt'] > 60
                 ]
                 for key in stale_keys:
-                    print(f"Cleaning up stale retry attempt: {key}")
+                    logger.warning(f"Cleaning up stale retry attempt: {key}")
                     del _download_retry_attempts[key]
 
             time.sleep(1)
         except Exception as e:
-            print(f"Simple monitor error: {e}")
+            logger.error(f"Simple monitor error: {e}")
             time.sleep(10)
 
-    print("Simple background monitor stopped")
+    logger.info("Simple background monitor stopped")
 
 def start_simple_background_monitor():
     """Starts the simple background monitor thread."""
@@ -23944,7 +23924,7 @@ def _sanitize_track_data_for_processing(track_data):
     Preserves album dict to retain full metadata (images, id, etc.) and normalizes artist field.
     """
     if not isinstance(track_data, dict):
-        print(f"[Sanitize] Unexpected track data type: {type(track_data)}")
+        logger.info(f"[Sanitize] Unexpected track data type: {type(track_data)}")
         return track_data
     
     # Create a copy to avoid modifying original data
@@ -23969,7 +23949,7 @@ def _sanitize_track_data_for_processing(track_data):
                 processed_artists.append(str(artist))
         sanitized['artists'] = processed_artists
     else:
-        print(f"[Sanitize] Unexpected artists format: {type(raw_artists)}")
+        logger.info(f"[Sanitize] Unexpected artists format: {type(raw_artists)}")
         sanitized['artists'] = [str(raw_artists)] if raw_artists else []
     
     return sanitized
@@ -23992,7 +23972,7 @@ def check_and_recover_stuck_flags():
         time_stuck = current_time - wishlist_auto_processing_timestamp
         if time_stuck > stuck_timeout:
             stuck_minutes = time_stuck / 60
-            print(f"[Stuck Detection] Wishlist auto-processing flag has been stuck for {stuck_minutes:.1f} minutes - RESETTING")
+            logger.info(f"[Stuck Detection] Wishlist auto-processing flag has been stuck for {stuck_minutes:.1f} minutes - RESETTING")
             with wishlist_timer_lock:
                 wishlist_auto_processing = False
                 wishlist_auto_processing_timestamp = 0
@@ -24004,7 +23984,7 @@ def check_and_recover_stuck_flags():
         time_stuck = current_time - watchlist_auto_scanning_timestamp
         if time_stuck > stuck_timeout:
             stuck_minutes = time_stuck / 60
-            print(f"[Stuck Detection] Watchlist auto-scanning flag has been stuck for {stuck_minutes:.1f} minutes - RESETTING")
+            logger.info(f"[Stuck Detection] Watchlist auto-scanning flag has been stuck for {stuck_minutes:.1f} minutes - RESETTING")
             with watchlist_timer_lock:
                 watchlist_auto_scanning = False
                 watchlist_auto_scanning_timestamp = 0
@@ -24029,7 +24009,7 @@ def is_wishlist_actually_processing():
     # If more than 15 minutes, flag is stuck - auto-recover and return False
     if time_since_start > 900:  # 15 minutes
         stuck_minutes = time_since_start / 60
-        print(f"[Stuck Detection] Wishlist flag stuck for {stuck_minutes:.1f} minutes - auto-recovering")
+        logger.warning(f"[Stuck Detection] Wishlist flag stuck for {stuck_minutes:.1f} minutes - auto-recovering")
         check_and_recover_stuck_flags()
         return False
 
@@ -24052,7 +24032,7 @@ def is_watchlist_actually_scanning():
     # If more than 15 minutes, flag is stuck - auto-recover and return False
     if time_since_start > 900:  # 15 minutes
         stuck_minutes = time_since_start / 60
-        print(f"[Stuck Detection] Watchlist flag stuck for {stuck_minutes:.1f} minutes - auto-recovering")
+        logger.warning(f"[Stuck Detection] Watchlist flag stuck for {stuck_minutes:.1f} minutes - auto-recovering")
         check_and_recover_stuck_flags()
         return False
 
@@ -24099,13 +24079,13 @@ def _process_wishlist_automatically(automation_id=None):
     """Main automatic processing logic that runs in background thread."""
     global wishlist_auto_processing, wishlist_auto_processing_timestamp
 
-    print("[Auto-Wishlist] Timer triggered - starting automatic wishlist processing...")
+    logger.info("[Auto-Wishlist] Timer triggered - starting automatic wishlist processing...")
 
     try:
         # CRITICAL FIX: Use smart stuck detection BEFORE acquiring lock
         # This prevents deadlock and handles stuck flags (2-hour timeout)
         if is_wishlist_actually_processing():
-            print("[Auto-Wishlist] Already processing (verified with stuck detection), skipping.")
+            logger.info("[Auto-Wishlist] Already processing (verified with stuck detection), skipping.")
             return
 
         # Check conditions and set flag
@@ -24114,7 +24094,7 @@ def _process_wishlist_automatically(automation_id=None):
         with wishlist_timer_lock:
             # Re-check inside lock to handle race conditions
             if wishlist_auto_processing:
-                print("[Auto-Wishlist] Already processing (race condition check), skipping.")
+                logger.info("[Auto-Wishlist] Already processing (race condition check), skipping.")
                 should_skip_already_running = True
 
             else:
@@ -24122,7 +24102,7 @@ def _process_wishlist_automatically(automation_id=None):
                 import time
                 wishlist_auto_processing = True
                 wishlist_auto_processing_timestamp = time.time()
-                print(f"[Auto-Wishlist] Flag set at timestamp {wishlist_auto_processing_timestamp}")
+                logger.info(f"[Auto-Wishlist] Flag set at timestamp {wishlist_auto_processing_timestamp}")
 
         if should_skip_already_running:
             return
@@ -24136,17 +24116,17 @@ def _process_wishlist_automatically(automation_id=None):
             database = get_database()
             all_profiles = database.get_all_profiles()
             count = sum(wishlist_service.get_wishlist_count(profile_id=p['id']) for p in all_profiles)
-            print(f"[Auto-Wishlist] Wishlist count check: {count} tracks found across {len(all_profiles)} profiles")
+            logger.info(f"[Auto-Wishlist] Wishlist count check: {count} tracks found across {len(all_profiles)} profiles")
             _update_automation_progress(automation_id, progress=10, phase='Checking wishlist',
                                          log_line=f'{count} tracks across {len(all_profiles)} profiles', log_type='info')
             if count == 0:
-                print("ℹ️ [Auto-Wishlist] No tracks in wishlist for auto-processing.")
+                logger.warning("ℹ️ [Auto-Wishlist] No tracks in wishlist for auto-processing.")
                 with wishlist_timer_lock:
                     wishlist_auto_processing = False
                     wishlist_auto_processing_timestamp = 0
                 return
 
-            print(f"[Auto-Wishlist] Found {count} tracks in wishlist, starting automatic processing...")
+            logger.info(f"[Auto-Wishlist] Found {count} tracks in wishlist, starting automatic processing...")
             
             # Check if wishlist processing is already active (auto or manual)
             playlist_id = "wishlist"
@@ -24156,7 +24136,7 @@ def _process_wishlist_automatically(automation_id=None):
                     # Check for both auto ('wishlist') and manual ('wishlist_manual') batches
                     if (batch_playlist_id in ['wishlist', 'wishlist_manual'] and
                         batch_data.get('phase') not in ['complete', 'error', 'cancelled']):
-                        print(f"Wishlist processing already active in another batch ({batch_playlist_id}), skipping automatic start")
+                        logger.info(f"Wishlist processing already active in another batch ({batch_playlist_id}), skipping automatic start")
                         with wishlist_timer_lock:
                             wishlist_auto_processing = False
                         return
@@ -24166,15 +24146,15 @@ def _process_wishlist_automatically(automation_id=None):
             from database.music_database import MusicDatabase
             db = MusicDatabase()
 
-            print("[Auto-Wishlist] Cleaning duplicate tracks before processing...")
+            logger.warning("[Auto-Wishlist] Cleaning duplicate tracks before processing...")
             for p in all_profiles:
                 duplicates_removed = db.remove_wishlist_duplicates(profile_id=p['id'])
                 if duplicates_removed > 0:
-                    print(f"[Auto-Wishlist] Removed {duplicates_removed} duplicate tracks from profile {p['id']}")
+                    logger.warning(f"[Auto-Wishlist] Removed {duplicates_removed} duplicate tracks from profile {p['id']}")
 
             # CLEANUP: Remove tracks from wishlist that already exist in library
             # This prevents wasting bandwidth on tracks we already have
-            print("[Auto-Wishlist] Checking wishlist against library for already-owned tracks...")
+            logger.info("[Auto-Wishlist] Checking wishlist against library for already-owned tracks...")
             cleanup_tracks = []
             for p in all_profiles:
                 cleanup_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
@@ -24219,12 +24199,12 @@ def _process_wishlist_automatically(automation_id=None):
                         removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
                         if removed:
                             cleanup_removed += 1
-                            print(f"[Auto-Wishlist] Removed already-owned track: '{track_name}' by {artist_name}")
+                            logger.info(f"[Auto-Wishlist] Removed already-owned track: '{track_name}' by {artist_name}")
                     except Exception as remove_error:
-                        print(f"[Auto-Wishlist] Error removing track from wishlist: {remove_error}")
+                        logger.error(f"[Auto-Wishlist] Error removing track from wishlist: {remove_error}")
 
             if cleanup_removed > 0:
-                print(f"[Auto-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
+                logger.info(f"[Auto-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
                 _update_automation_progress(automation_id, progress=25, phase='Cleaned up duplicates',
                                              log_line=f'Removed {cleanup_removed} already-owned tracks', log_type='success')
             else:
@@ -24236,7 +24216,7 @@ def _process_wishlist_automatically(automation_id=None):
             for p in all_profiles:
                 raw_wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
             if not raw_wishlist_tracks:
-                print("No tracks returned from wishlist service.")
+                logger.warning("No tracks returned from wishlist service.")
                 with wishlist_timer_lock:
                     wishlist_auto_processing = False
                     wishlist_auto_processing_timestamp = 0
@@ -24260,8 +24240,8 @@ def _process_wishlist_automatically(automation_id=None):
                     seen_track_ids_sanitation.add(spotify_track_id)
 
             if duplicates_found > 0:
-                print(f"[Auto-Wishlist] Found and removed {duplicates_found} duplicate tracks during sanitization")
-            print(f"[Auto-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
+                logger.warning(f"[Auto-Wishlist] Found and removed {duplicates_found} duplicate tracks during sanitization")
+            logger.info(f"[Auto-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
 
             # CYCLE FILTERING: Get current cycle and filter tracks by category
             with db._get_connection() as conn:
@@ -24299,14 +24279,14 @@ def _process_wishlist_automatically(automation_id=None):
                         # No ID - can't deduplicate safely, always add
                         filtered_tracks.append(track)
 
-            print(f"[Auto-Wishlist] Current cycle: {current_cycle}")
-            print(f"[Auto-Wishlist] Filtered {len(filtered_tracks)}/{len(wishlist_tracks)} tracks for '{current_cycle}' category")
+            logger.info(f"[Auto-Wishlist] Current cycle: {current_cycle}")
+            logger.info(f"[Auto-Wishlist] Filtered {len(filtered_tracks)}/{len(wishlist_tracks)} tracks for '{current_cycle}' category")
             _update_automation_progress(automation_id, progress=40, phase=f'Processing {current_cycle}',
                                          log_line=f'Cycle: {current_cycle} — {len(filtered_tracks)} tracks to process', log_type='info')
 
             # If no tracks in this category, skip to next cycle immediately
             if len(filtered_tracks) == 0:
-                print(f"ℹ️ [Auto-Wishlist] No {current_cycle} tracks in wishlist, toggling cycle and scheduling next run")
+                logger.warning(f"ℹ️ [Auto-Wishlist] No {current_cycle} tracks in wishlist, toggling cycle and scheduling next run")
 
                 # Toggle cycle
                 next_cycle = 'singles' if current_cycle == 'albums' else 'albums'
@@ -24317,7 +24297,7 @@ def _process_wishlist_automatically(automation_id=None):
                         VALUES ('wishlist_cycle', ?, CURRENT_TIMESTAMP)
                     """, (next_cycle,))
                     conn.commit()
-                print(f"[Auto-Wishlist] Cycle toggled: {current_cycle} → {next_cycle}")
+                logger.info(f"[Auto-Wishlist] Cycle toggled: {current_cycle} → {next_cycle}")
 
                 with wishlist_timer_lock:
                     wishlist_auto_processing = False
@@ -24360,7 +24340,7 @@ def _process_wishlist_automatically(automation_id=None):
                     'profile_id': 1
                 }
             
-            print(f"Starting automatic wishlist batch {batch_id} with {len(wishlist_tracks)} tracks")
+            logger.info(f"Starting automatic wishlist batch {batch_id} with {len(wishlist_tracks)} tracks")
             _update_automation_progress(automation_id, progress=50, phase=f'Downloading {len(wishlist_tracks)} tracks',
                                          log_line=f'Started batch: {len(wishlist_tracks)} {current_cycle}', log_type='success')
             
@@ -24370,7 +24350,7 @@ def _process_wishlist_automatically(automation_id=None):
             # Don't mark auto_processing as False here - let completion handler do it
             
     except Exception as e:
-        print(f"Error in automatic wishlist processing: {e}")
+        logger.error(f"Error in automatic wishlist processing: {e}")
         import traceback
         traceback.print_exc()
         _update_automation_progress(automation_id, log_line=f'Error: {str(e)}', log_type='error')
@@ -24385,7 +24365,7 @@ def _process_wishlist_automatically(automation_id=None):
 # ===============================
 
 def _db_update_progress_callback(current_item, processed, total, percentage):
-    print(f"[DB Progress] {current_item} - {processed}/{total} ({percentage:.1f}%)")
+    logger.info(f"[DB Progress] {current_item} - {processed}/{total} ({percentage:.1f}%)")
     with db_update_lock:
         db_update_state.update({
             "current_item": current_item,
@@ -24398,7 +24378,7 @@ def _db_update_progress_callback(current_item, processed, total, percentage):
                                 current_item=current_item)
 
 def _db_update_phase_callback(phase):
-    print(f"[DB Phase] {phase}")
+    logger.info(f"[DB Phase] {phase}")
     with db_update_lock:
         db_update_state["phase"] = phase
     _update_automation_progress(_db_update_automation_id, phase=phase)
@@ -24500,11 +24480,11 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
 
     # WISHLIST CLEANUP: Automatically clean up wishlist after database update
     try:
-        print("[DB Update] Database update completed, starting automatic wishlist cleanup...")
+        logger.info("[DB Update] Database update completed, starting automatic wishlist cleanup...")
         # Run cleanup in background to avoid blocking the UI
         missing_download_executor.submit(_automatic_wishlist_cleanup_after_db_update)
     except Exception as cleanup_error:
-        print(f"[DB Update] Error starting automatic wishlist cleanup: {cleanup_error}")
+        logger.error(f"[DB Update] Error starting automatic wishlist cleanup: {cleanup_error}")
 
 def _db_update_error_callback(error_message):
     global _db_update_automation_id
@@ -24538,7 +24518,7 @@ def _pause_workers_for_scan():
             w.pause()
             _workers_paused_by_scan.add(name)
     if _workers_paused_by_scan:
-        print(f"Paused {len(_workers_paused_by_scan)} workers during database scan: {', '.join(_workers_paused_by_scan)}")
+        logger.warning(f"Paused {len(_workers_paused_by_scan)} workers during database scan: {', '.join(_workers_paused_by_scan)}")
 
 def _resume_workers_after_scan():
     """Resume only the workers that WE paused (don't resume manually-paused ones)."""
@@ -24555,7 +24535,7 @@ def _resume_workers_after_scan():
             w.resume()
             resumed += 1
     if resumed:
-        print(f"Resumed {resumed} workers after database scan")
+        logger.info(f"Resumed {resumed} workers after database scan")
     _workers_paused_by_scan = set()
 
 def _run_soulsync_full_refresh():
@@ -24568,7 +24548,7 @@ def _run_soulsync_full_refresh():
             _db_update_error_callback(f"Output folder not found: {transfer_path}")
             return
 
-        print(f"[SoulSync Full Refresh] Starting — clearing soulsync data, re-scanning: {transfer_path}")
+        logger.info(f"[SoulSync Full Refresh] Starting — clearing soulsync data, re-scanning: {transfer_path}")
         _db_update_phase_callback('Clearing library...')
 
         db = get_database()
@@ -24584,7 +24564,7 @@ def _run_soulsync_full_refresh():
                     audio_files.append(os.path.join(root, fname))
 
         total = len(audio_files)
-        print(f"[SoulSync Full Refresh] Found {total} audio files, rebuilding library...")
+        logger.info(f"[SoulSync Full Refresh] Found {total} audio files, rebuilding library...")
         if total == 0:
             _db_update_finished_callback(0, 0, 0, 0, 0)
             return
@@ -24664,11 +24644,11 @@ def _run_soulsync_full_refresh():
                                 successful += 1
                             except Exception as e:
                                 failed += 1
-                                print(f"[SoulSync Full Refresh] Track insert error: {e}")
+                                logger.error(f"[SoulSync Full Refresh] Track insert error: {e}")
 
                 conn.commit()
         except Exception as e:
-            print(f"[SoulSync Full Refresh] DB error: {e}")
+            logger.error(f"[SoulSync Full Refresh] DB error: {e}")
             _db_update_error_callback(f"Database error: {e}")
             return
 
@@ -24677,12 +24657,12 @@ def _run_soulsync_full_refresh():
         summary = f"Full refresh complete: {successful} tracks from {album_count} albums by {artist_count} artists"
         if failed > 0:
             summary += f" ({failed} failed)"
-        print(f"[SoulSync Full Refresh] {summary}")
+        logger.info(f"[SoulSync Full Refresh] {summary}")
         add_activity_item("", "SoulSync Full Refresh", summary, "Now")
         _db_update_finished_callback(artist_count, album_count, total, successful, failed)
 
     except Exception as e:
-        print(f"[SoulSync Full Refresh] Error: {e}")
+        logger.error(f"[SoulSync Full Refresh] Error: {e}")
         import traceback
         traceback.print_exc()
         _db_update_error_callback(f"Full refresh failed: {e}")
@@ -24705,7 +24685,7 @@ def _run_soulsync_deep_scan():
             _db_update_error_callback(f"Output folder not found: {transfer_path}")
             return
 
-        print(f"[SoulSync Deep Scan] Starting — Transfer: {transfer_path}")
+        logger.info(f"[SoulSync Deep Scan] Starting — Transfer: {transfer_path}")
         _db_update_phase_callback('scanning')
 
         # Phase 1: Collect all audio files in Transfer
@@ -24716,7 +24696,7 @@ def _run_soulsync_deep_scan():
                 if os.path.splitext(filename)[1].lower() in audio_extensions:
                     transfer_files.add(os.path.join(root, filename))
 
-        print(f"[SoulSync Deep Scan] Found {len(transfer_files)} audio files in Transfer")
+        logger.info(f"[SoulSync Deep Scan] Found {len(transfer_files)} audio files in Transfer")
 
         # Phase 2: Get all soulsync file paths from DB
         db = get_database()
@@ -24729,9 +24709,9 @@ def _run_soulsync_deep_scan():
                     if row['file_path']:
                         db_paths.add(row['file_path'])
         except Exception as e:
-            print(f"[SoulSync Deep Scan] Error reading DB paths: {e}")
+            logger.error(f"[SoulSync Deep Scan] Error reading DB paths: {e}")
 
-        print(f"[SoulSync Deep Scan] {len(db_paths)} tracks in soulsync DB")
+        logger.info(f"[SoulSync Deep Scan] {len(db_paths)} tracks in soulsync DB")
 
         # Phase 3: Find untracked files (in Transfer but not in DB)
         untracked = transfer_files - db_paths
@@ -24753,7 +24733,7 @@ def _run_soulsync_deep_scan():
                     shutil.move(file_path, dest_path)
                     moved_count += 1
                 except Exception as e:
-                    print(f"[SoulSync Deep Scan] Could not move {os.path.basename(file_path)}: {e}")
+                    logger.error(f"[SoulSync Deep Scan] Could not move {os.path.basename(file_path)}: {e}")
 
             # Clean up empty directories in Transfer after moving files
             for root, dirs, files in os.walk(transfer_path, topdown=False):
@@ -24799,9 +24779,9 @@ def _run_soulsync_deep_scan():
                     conn.commit()
 
                     if orphan_albums > 0 or orphan_artists > 0:
-                        print(f"[SoulSync Deep Scan] Cleaned up {orphan_albums} orphaned albums, {orphan_artists} orphaned artists")
+                        logger.warning(f"[SoulSync Deep Scan] Cleaned up {orphan_albums} orphaned albums, {orphan_artists} orphaned artists")
             except Exception as e:
-                print(f"[SoulSync Deep Scan] Error cleaning stale records: {e}")
+                logger.error(f"[SoulSync Deep Scan] Error cleaning stale records: {e}")
 
         summary = f"Deep scan complete: {len(transfer_files)} files scanned"
         if moved_count > 0:
@@ -24811,12 +24791,12 @@ def _run_soulsync_deep_scan():
         if moved_count == 0 and stale_count == 0:
             summary += " — library is clean"
 
-        print(f"[SoulSync Deep Scan] {summary}")
+        logger.info(f"[SoulSync Deep Scan] {summary}")
         add_activity_item("", "SoulSync Deep Scan", summary, "Now")
         _db_update_finished_callback(0, 0, len(transfer_files), moved_count + stale_count, 0)
 
     except Exception as e:
-        print(f"[SoulSync Deep Scan] Error: {e}")
+        logger.error(f"[SoulSync Deep Scan] Error: {e}")
         import traceback
         traceback.print_exc()
         _db_update_error_callback(f"Deep scan failed: {e}")
@@ -24832,7 +24812,7 @@ def _run_db_update_task(full_refresh, server_type):
             _run_soulsync_full_refresh()
         else:
             # Incremental: library updates at download/import time, nothing to do
-            print("[SoulSync Standalone] Incremental scan skipped — library updates at download time. Use Deep Scan or Full Refresh.")
+            logger.warning("[SoulSync Standalone] Incremental scan skipped — library updates at download time. Use Deep Scan or Full Refresh.")
             _db_update_finished_callback(0, 0, 0, 0, 0)
         return
 
@@ -24936,7 +24916,7 @@ def get_database_stats():
         stats = db.get_database_info_for_server()
         return jsonify(stats)
     except Exception as e:
-        print(f"Error getting database stats: {e}")
+        logger.error(f"Error getting database stats: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/wishlist/process', methods=['POST'])
@@ -24964,7 +24944,7 @@ def get_wishlist_count():
         count = wishlist_service.get_wishlist_count(profile_id=get_current_profile_id())
         return jsonify({"count": count})
     except Exception as e:
-        print(f"Error getting wishlist count: {e}")
+        logger.error(f"Error getting wishlist count: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/wishlist/stats', methods=['GET'])
@@ -25033,7 +25013,7 @@ def get_wishlist_stats():
         })
 
     except Exception as e:
-        print(f"Error getting wishlist stats: {e}")
+        logger.error(f"Error getting wishlist stats: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -25070,7 +25050,7 @@ def get_wishlist_cycle():
         return jsonify({"cycle": cycle})
 
     except Exception as e:
-        print(f"Error getting wishlist cycle: {e}")
+        logger.error(f"Error getting wishlist cycle: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/wishlist/cycle', methods=['POST'])
@@ -25100,11 +25080,11 @@ def set_wishlist_cycle():
             """, (cycle,))
             conn.commit()
 
-        print(f"Wishlist cycle set to: {cycle}")
+        logger.info(f"Wishlist cycle set to: {cycle}")
         return jsonify({"success": True, "cycle": cycle})
 
     except Exception as e:
-        print(f"Error setting wishlist cycle: {e}")
+        logger.error(f"Error setting wishlist cycle: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/discovery/lookback-period', methods=['GET'])
@@ -25139,7 +25119,7 @@ def get_discovery_lookback_period():
         return jsonify({"period": period})
 
     except Exception as e:
-        print(f"Error getting discovery lookback period: {e}")
+        logger.error(f"Error getting discovery lookback period: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/discovery/lookback-period', methods=['POST'])
@@ -25187,11 +25167,11 @@ def set_discovery_lookback_period():
 
             conn.commit()
 
-        print(f"Discovery lookback period set to: {period}")
+        logger.info(f"Discovery lookback period set to: {period}")
         return jsonify({"success": True, "period": period})
 
     except Exception as e:
-        print(f"Error setting discovery lookback period: {e}")
+        logger.error(f"Error setting discovery lookback period: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/discovery/hemisphere', methods=['GET'])
@@ -25267,9 +25247,9 @@ def get_wishlist_tracks():
             db = MusicDatabase()
             duplicates_removed = db.remove_wishlist_duplicates(profile_id=get_current_profile_id())
             if duplicates_removed > 0:
-                print(f"Cleaned {duplicates_removed} duplicate tracks from wishlist")
+                logger.warning(f"Cleaned {duplicates_removed} duplicate tracks from wishlist")
         else:
-            print(f"Skipping wishlist duplicate cleanup - download in progress")
+            logger.warning(f"Skipping wishlist duplicate cleanup - download in progress")
 
         wishlist_service = get_wishlist_service()
         raw_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=get_current_profile_id())
@@ -25292,7 +25272,7 @@ def get_wishlist_tracks():
                 seen_track_ids_sanitation.add(spotify_track_id)
 
         if duplicates_found > 0:
-            print(f"[API-Wishlist-Tracks] Found and removed {duplicates_found} duplicate tracks during sanitization")
+            logger.warning(f"[API-Wishlist-Tracks] Found and removed {duplicates_found} duplicate tracks during sanitization")
 
         # FILTER by category if specified
         if category:
@@ -25321,7 +25301,7 @@ def get_wishlist_tracks():
             # Count total in category (quick scan — no heavy processing, just classification)
             total_in_category = sum(1 for t in sanitized_tracks if _classify_wishlist_track(t) == category)
 
-            print(f"Wishlist filter: {len(filtered_tracks)}/{total_in_category} tracks in '{category}' category (limit: {limit or 'none'})")
+            logger.info(f"Wishlist filter: {len(filtered_tracks)}/{total_in_category} tracks in '{category}' category (limit: {limit or 'none'})")
             return jsonify({"tracks": filtered_tracks, "category": category, "total": total_in_category})
 
         # Apply limit to non-filtered results
@@ -25329,7 +25309,7 @@ def get_wishlist_tracks():
         result_tracks = sanitized_tracks[:limit] if limit else sanitized_tracks
         return jsonify({"tracks": result_tracks, "total": total_count})
     except Exception as e:
-        print(f"Error getting wishlist tracks: {e}")
+        logger.error(f"Error getting wishlist tracks: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/wishlist/download_missing', methods=['POST'])
@@ -25361,16 +25341,16 @@ def start_wishlist_missing_downloads():
 
         # CRITICAL: Clean duplicates BEFORE fetching tracks to prevent count mismatches
         # This prevents the "11 tracks shown but 12 counted" bug
-        print("[Manual-Wishlist] Cleaning duplicate tracks before download...")
+        logger.warning("[Manual-Wishlist] Cleaning duplicate tracks before download...")
         db = MusicDatabase()
         manual_profile_id = get_current_profile_id()
         duplicates_removed = db.remove_wishlist_duplicates(profile_id=manual_profile_id)
         if duplicates_removed > 0:
-            print(f"[Manual-Wishlist] Removed {duplicates_removed} duplicate tracks")
+            logger.warning(f"[Manual-Wishlist] Removed {duplicates_removed} duplicate tracks")
 
         # CLEANUP: Remove tracks from wishlist that already exist in library
         # This prevents wasting bandwidth on tracks we already have
-        print("[Manual-Wishlist] Checking wishlist against library for already-owned tracks...")
+        logger.info("[Manual-Wishlist] Checking wishlist against library for already-owned tracks...")
         cleanup_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=manual_profile_id)
         cleanup_removed = 0
 
@@ -25417,12 +25397,12 @@ def start_wishlist_missing_downloads():
                     removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
                     if removed:
                         cleanup_removed += 1
-                        print(f"[Manual-Wishlist] Removed already-owned track: '{track_name}' by {artist_name}")
+                        logger.info(f"[Manual-Wishlist] Removed already-owned track: '{track_name}' by {artist_name}")
                 except Exception as remove_error:
-                    print(f"[Manual-Wishlist] Error removing track from wishlist: {remove_error}")
+                    logger.error(f"[Manual-Wishlist] Error removing track from wishlist: {remove_error}")
 
         if cleanup_removed > 0:
-            print(f"[Manual-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
+            logger.info(f"[Manual-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
 
         # Get wishlist tracks formatted for download modal (after cleanup)
         raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=manual_profile_id)
@@ -25447,8 +25427,8 @@ def start_wishlist_missing_downloads():
                 seen_track_ids_sanitation.add(spotify_track_id)
 
         if duplicates_found > 0:
-            print(f"[Manual-Wishlist] Found and removed {duplicates_found} duplicate tracks during sanitization")
-        print(f"[Manual-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
+            logger.warning(f"[Manual-Wishlist] Found and removed {duplicates_found} duplicate tracks during sanitization")
+        logger.info(f"[Manual-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
 
         # FILTER BY TRACK IDs if specified (prioritized - prevents race conditions)
         if track_ids:
@@ -25472,7 +25452,7 @@ def start_wishlist_missing_downloads():
                     seen_track_ids.add(tid)
 
             wishlist_tracks = filtered_tracks
-            print(f"[Manual-Wishlist] Filtered to {len(wishlist_tracks)} specific tracks by ID (preserving frontend display order)")
+            logger.info(f"[Manual-Wishlist] Filtered to {len(wishlist_tracks)} specific tracks by ID (preserving frontend display order)")
 
         # FILTER BY CATEGORY if specified and no track_ids (backward compatibility)
         elif category:
@@ -25523,7 +25503,7 @@ def start_wishlist_missing_downloads():
                         filtered_tracks.append(track)
 
             wishlist_tracks = filtered_tracks
-            print(f"[Manual-Wishlist] Filtered to {len(wishlist_tracks)} tracks for category: {category}")
+            logger.info(f"[Manual-Wishlist] Filtered to {len(wishlist_tracks)} tracks for category: {category}")
 
         # Stamp original index on each track so task indices match frontend row order
         for i, track in enumerate(wishlist_tracks):
@@ -25570,7 +25550,7 @@ def start_wishlist_missing_downloads():
         })
         
     except Exception as e:
-        print(f"Error starting wishlist download process: {e}")
+        logger.error(f"Error starting wishlist download process: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/wishlist/clear', methods=['POST'])
@@ -25601,7 +25581,7 @@ def clear_wishlist():
                     wishlist_auto_processing_timestamp = 0
 
             if cancelled_count > 0:
-                print(f"[Wishlist Clear] Cancelled {cancelled_count} active wishlist downloads")
+                logger.warning(f"[Wishlist Clear] Cancelled {cancelled_count} active wishlist downloads")
                 add_activity_item("", "Wishlist Cleared", f"Wishlist cleared and {cancelled_count} downloads cancelled", "Now")
 
             return jsonify({"success": True, "message": "Wishlist cleared successfully", "cancelled_downloads": cancelled_count})
@@ -25609,7 +25589,7 @@ def clear_wishlist():
             return jsonify({"success": False, "error": "Failed to clear wishlist"}), 500
 
     except Exception as e:
-        print(f"Error clearing wishlist: {e}")
+        logger.error(f"Error clearing wishlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/wishlist/cleanup', methods=['POST'])
@@ -25623,7 +25603,7 @@ def cleanup_wishlist():
         db = MusicDatabase()
         active_server = config_manager.get_active_media_server()
         
-        print("[Wishlist Cleanup] Starting wishlist cleanup process...")
+        logger.info("[Wishlist Cleanup] Starting wishlist cleanup process...")
 
         # Get wishlist tracks for current profile
         cleanup_profile_id = get_current_profile_id()
@@ -25631,7 +25611,7 @@ def cleanup_wishlist():
         if not wishlist_tracks:
             return jsonify({"success": True, "message": "No tracks in wishlist to clean up", "removed_count": 0})
 
-        print(f"[Wishlist Cleanup] Found {len(wishlist_tracks)} tracks in wishlist")
+        logger.info(f"[Wishlist Cleanup] Found {len(wishlist_tracks)} tracks in wishlist")
         
         removed_count = 0
         processed_count = 0
@@ -25647,7 +25627,7 @@ def cleanup_wishlist():
             if not track_name or not artists or not spotify_track_id:
                 continue
 
-            print(f"[Wishlist Cleanup] Checking track {processed_count}/{len(wishlist_tracks)}: '{track_name}'")
+            logger.info(f"[Wishlist Cleanup] Checking track {processed_count}/{len(wishlist_tracks)}: '{track_name}'")
 
             # Check each artist
             found_in_db = False
@@ -25670,11 +25650,11 @@ def cleanup_wishlist():
                     
                     if db_track and confidence >= 0.7:
                         found_in_db = True
-                        print(f"[Wishlist Cleanup] Track found in database: '{track_name}' by {artist_name} (confidence: {confidence:.2f})")
+                        logger.info(f"[Wishlist Cleanup] Track found in database: '{track_name}' by {artist_name} (confidence: {confidence:.2f})")
                         break
                         
                 except Exception as db_error:
-                    print(f"[Wishlist Cleanup] Error checking database for track '{track_name}': {db_error}")
+                    logger.error(f"[Wishlist Cleanup] Error checking database for track '{track_name}': {db_error}")
                     continue
             
             # If found in database, remove from wishlist
@@ -25683,13 +25663,13 @@ def cleanup_wishlist():
                     removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
                     if removed:
                         removed_count += 1
-                        print(f"[Wishlist Cleanup] Removed track from wishlist: '{track_name}' ({spotify_track_id})")
+                        logger.info(f"[Wishlist Cleanup] Removed track from wishlist: '{track_name}' ({spotify_track_id})")
                     else:
-                        print(f"[Wishlist Cleanup] Failed to remove track from wishlist: '{track_name}' ({spotify_track_id})")
+                        logger.error(f"[Wishlist Cleanup] Failed to remove track from wishlist: '{track_name}' ({spotify_track_id})")
                 except Exception as remove_error:
-                    print(f"[Wishlist Cleanup] Error removing track from wishlist: {remove_error}")
+                    logger.error(f"[Wishlist Cleanup] Error removing track from wishlist: {remove_error}")
         
-        print(f"[Wishlist Cleanup] Completed cleanup: {removed_count} tracks removed from wishlist")
+        logger.info(f"[Wishlist Cleanup] Completed cleanup: {removed_count} tracks removed from wishlist")
         
         return jsonify({
             "success": True, 
@@ -25699,7 +25679,7 @@ def cleanup_wishlist():
         })
         
     except Exception as e:
-        print(f"Error in wishlist cleanup: {e}")
+        logger.error(f"Error in wishlist cleanup: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -25922,20 +25902,20 @@ def add_album_track_to_wishlist():
         )
 
         if success:
-            print(f"Added track '{track.get('name')}' by '{artist.get('name')}' to wishlist")
+            logger.info(f"Added track '{track.get('name')}' by '{artist.get('name')}' to wishlist")
             return jsonify({
                 "success": True,
                 "message": f"Added '{track.get('name')}' to wishlist"
             })
         else:
-            print(f"Failed to add track '{track.get('name')}' to wishlist")
+            logger.error(f"Failed to add track '{track.get('name')}' to wishlist")
             return jsonify({
                 "success": False,
                 "error": "Failed to add track to wishlist"
             })
 
     except Exception as e:
-        print(f"Error adding track to wishlist: {e}")
+        logger.error(f"Error adding track to wishlist: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -25978,7 +25958,7 @@ def get_database_update_status():
     with db_update_lock:
         # Debug: Log current state occasionally
         if db_update_state["status"] == "running":
-            print(f"[Status Check] {db_update_state['processed']}/{db_update_state['total']} ({db_update_state['progress']:.1f}%) - {db_update_state['phase']}")
+            logger.info(f"[Status Check] {db_update_state['processed']}/{db_update_state['total']} ({db_update_state['progress']:.1f}%) - {db_update_state['phase']}")
         return jsonify(db_update_state)
 
 @app.route('/api/database/update/stop', methods=['POST'])
@@ -26709,7 +26689,7 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
             quality_scanner_state["results"] = []
             quality_scanner_state["error_message"] = ""
 
-        print(f"[Quality Scanner] Starting scan with scope: {scope}")
+        logger.info(f"[Quality Scanner] Starting scan with scope: {scope}")
 
         # Get database instance
         db = MusicDatabase()
@@ -26734,7 +26714,7 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
                     tier_num = QUALITY_TIERS[tier_name]['tier']
                     min_acceptable_tier = min(min_acceptable_tier, tier_num)
 
-        print(f"[Quality Scanner] Minimum acceptable tier: {min_acceptable_tier}")
+        logger.info(f"[Quality Scanner] Minimum acceptable tier: {min_acceptable_tier}")
 
         # Get tracks to scan based on scope
         with quality_scanner_lock:
@@ -26748,12 +26728,12 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
                     quality_scanner_state["status"] = "finished"
                     quality_scanner_state["phase"] = "No watchlist artists found"
                     quality_scanner_state["error_message"] = "Please add artists to watchlist first"
-                print(f"[Quality Scanner] No watchlist artists found")
+                logger.warning(f"[Quality Scanner] No watchlist artists found")
                 return
 
             # Get artist names from watchlist
             artist_names = [artist.artist_name for artist in watchlist_artists]
-            print(f"[Quality Scanner] Scanning {len(artist_names)} watchlist artists")
+            logger.info(f"[Quality Scanner] Scanning {len(artist_names)} watchlist artists")
 
             # Get all tracks for these artists by name
             conn = db._get_connection()
@@ -26783,7 +26763,7 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
             conn.close()
 
         total_tracks = len(tracks_to_scan)
-        print(f"[Quality Scanner] Found {total_tracks} tracks to scan")
+        logger.info(f"[Quality Scanner] Found {total_tracks} tracks to scan")
 
         with quality_scanner_lock:
             quality_scanner_state["total"] = total_tracks
@@ -26795,7 +26775,7 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
                 quality_scanner_state["status"] = "error"
                 quality_scanner_state["phase"] = "Spotify not authenticated"
                 quality_scanner_state["error_message"] = "Please authenticate with Spotify first"
-            print(f"[Quality Scanner] Spotify not authenticated")
+            logger.info(f"[Quality Scanner] Spotify not authenticated")
             return
 
         wishlist_service = get_wishlist_service()
@@ -26804,7 +26784,7 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
         for idx, track_row in enumerate(tracks_to_scan, 1):
             # Check for stop request
             if quality_scanner_state.get('status') != 'running':
-                print(f"[Quality Scanner] Stop requested, halting at track {idx}/{total_tracks}")
+                logger.info(f"[Quality Scanner] Stop requested, halting at track {idx}/{total_tracks}")
                 break
 
             try:
@@ -26830,7 +26810,7 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
                 with quality_scanner_lock:
                     quality_scanner_state["low_quality"] += 1
 
-                print(f"[Quality Scanner] Low quality: {artist_name} - {title} ({tier_name}, {file_path})")
+                logger.info(f"[Quality Scanner] Low quality: {artist_name} - {title} ({tier_name}, {file_path})")
 
                 # Attempt to match to Spotify using matching_engine
                 matched = False
@@ -26845,7 +26825,7 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
                     })()
 
                     search_queries = matching_engine.generate_download_queries(temp_track)
-                    print(f"[Quality Scanner] Generated {len(search_queries)} search queries for {artist_name} - {title}")
+                    logger.info(f"[Quality Scanner] Generated {len(search_queries)} search queries for {artist_name} - {title}")
 
                     # Find best match using confidence scoring
                     best_match = None
@@ -26889,31 +26869,31 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
                                     elif _at == 'ep':
                                         combined_confidence += 0.01
 
-                                    print(f"[Quality Scanner] Candidate: '{spotify_track.artists[0]}' - '{spotify_track.name}' (confidence: {combined_confidence:.3f})")
+                                    logger.info(f"[Quality Scanner] Candidate: '{spotify_track.artists[0]}' - '{spotify_track.name}' (confidence: {combined_confidence:.3f})")
 
                                     # Update best match if this is better
                                     if combined_confidence > best_confidence and combined_confidence >= min_confidence:
                                         best_confidence = combined_confidence
                                         best_match = spotify_track
-                                        print(f"[Quality Scanner] New best match: {spotify_track.artists[0]} - {spotify_track.name} (confidence: {combined_confidence:.3f})")
+                                        logger.info(f"[Quality Scanner] New best match: {spotify_track.artists[0]} - {spotify_track.name} (confidence: {combined_confidence:.3f})")
 
                                 except Exception as e:
-                                    print(f"[Quality Scanner] Error scoring result: {e}")
+                                    logger.error(f"[Quality Scanner] Error scoring result: {e}")
                                     continue
 
                             # If we found a very high confidence match, stop searching
                             if best_confidence >= 0.9:
-                                print(f"[Quality Scanner] High confidence match found ({best_confidence:.3f}), stopping search")
+                                logger.info(f"[Quality Scanner] High confidence match found ({best_confidence:.3f}), stopping search")
                                 break
 
                         except Exception as e:
-                            print(f"[Quality Scanner] Error searching with query '{search_query}': {e}")
+                            logger.debug(f"[Quality Scanner] Error searching with query '{search_query}': {e}")
                             continue
 
                     # Process best match
                     if best_match:
                         matched = True
-                        print(f"[Quality Scanner] Final match: {best_match.artists[0]} - {best_match.name} (confidence: {best_confidence:.3f})")
+                        logger.info(f"[Quality Scanner] Final match: {best_match.artists[0]} - {best_match.name} (confidence: {best_confidence:.3f})")
 
                         # Build full Spotify track data for wishlist
                         matched_track_data = {
@@ -26953,14 +26933,14 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
                         if success:
                             with quality_scanner_lock:
                                 quality_scanner_state["matched"] += 1
-                            print(f"[Quality Scanner] Matched and added to wishlist: {artist_name} - {title}")
+                            logger.info(f"[Quality Scanner] Matched and added to wishlist: {artist_name} - {title}")
                         else:
-                            print(f"[Quality Scanner] Failed to add to wishlist: {artist_name} - {title}")
+                            logger.error(f"[Quality Scanner] Failed to add to wishlist: {artist_name} - {title}")
                     else:
-                        print(f"[Quality Scanner] No suitable match found (best confidence: {best_confidence:.3f}, required: {min_confidence:.3f})")
+                        logger.warning(f"[Quality Scanner] No suitable match found (best confidence: {best_confidence:.3f}, required: {min_confidence:.3f})")
 
                 except Exception as matching_error:
-                    print(f"[Quality Scanner] Matching error for {artist_name} - {title}: {matching_error}")
+                    logger.error(f"[Quality Scanner] Matching error for {artist_name} - {title}: {matching_error}")
 
                 # Store result
                 result_entry = {
@@ -26979,10 +26959,10 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
                     quality_scanner_state["results"].append(result_entry)
 
                 if not matched:
-                    print(f"[Quality Scanner] No Spotify match found for: {artist_name} - {title}")
+                    logger.warning(f"[Quality Scanner] No Spotify match found for: {artist_name} - {title}")
 
             except Exception as track_error:
-                print(f"[Quality Scanner] Error processing track: {track_error}")
+                logger.error(f"[Quality Scanner] Error processing track: {track_error}")
                 continue
 
         # Scan complete (don't overwrite if already stopped by user)
@@ -26993,7 +26973,7 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
             if not was_stopped:
                 quality_scanner_state["phase"] = "Scan complete"
 
-        print(f"[Quality Scanner] Scan {'stopped' if was_stopped else 'complete'}: {quality_scanner_state['processed']} processed, "
+        logger.info(f"[Quality Scanner] Scan {'stopped' if was_stopped else 'complete'}: {quality_scanner_state['processed']} processed, "
               f"{quality_scanner_state['low_quality']} low quality, {quality_scanner_state['matched']} matched to Spotify")
 
         # Add activity
@@ -27011,7 +26991,7 @@ def _run_quality_scanner(scope='watchlist', profile_id=1):
             pass
 
     except Exception as e:
-        print(f"[Quality Scanner] Critical error: {e}")
+        logger.error(f"[Quality Scanner] Critical error: {e}")
         import traceback
         traceback.print_exc()
 
@@ -27040,7 +27020,7 @@ def _run_duplicate_cleaner():
             duplicate_cleaner_state["space_freed"] = 0
             duplicate_cleaner_state["error_message"] = ""
 
-        print(f"[Duplicate Cleaner] Starting duplicate scan...")
+        logger.warning(f"[Duplicate Cleaner] Starting duplicate scan...")
 
         # Get Transfer folder path from config
         transfer_folder = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
@@ -27049,13 +27029,13 @@ def _run_duplicate_cleaner():
                 duplicate_cleaner_state["status"] = "error"
                 duplicate_cleaner_state["phase"] = "Output folder not configured or does not exist"
                 duplicate_cleaner_state["error_message"] = "Please configure output folder in settings"
-            print(f"[Duplicate Cleaner] Transfer folder not found: {transfer_folder}")
+            logger.warning(f"[Duplicate Cleaner] Transfer folder not found: {transfer_folder}")
             return
 
         # Create deleted folder if it doesn't exist
         deleted_folder = os.path.join(transfer_folder, 'deleted')
         os.makedirs(deleted_folder, exist_ok=True)
-        print(f"[Duplicate Cleaner] Deleted folder: {deleted_folder}")
+        logger.warning(f"[Duplicate Cleaner] Deleted folder: {deleted_folder}")
 
         # Phase 1: Count total files for progress tracking
         with duplicate_cleaner_lock:
@@ -27068,7 +27048,7 @@ def _run_duplicate_cleaner():
                 dirs.remove('deleted')
             total_files += len(files)
 
-        print(f"[Duplicate Cleaner] Found {total_files} total files to scan")
+        logger.warning(f"[Duplicate Cleaner] Found {total_files} total files to scan")
 
         with duplicate_cleaner_lock:
             duplicate_cleaner_state["total_files"] = total_files
@@ -27135,7 +27115,7 @@ def _run_duplicate_cleaner():
                     continue
 
                 duplicates_found += len(file_versions) - 1  # Count all but the one we keep
-                print(f"[Duplicate Cleaner] Found {len(file_versions)} versions of '{filename}' in {directory}")
+                logger.warning(f"[Duplicate Cleaner] Found {len(file_versions)} versions of '{filename}' in {directory}")
 
                 # Sort by priority: best format first, then largest size
                 def sort_key(f):
@@ -27147,7 +27127,7 @@ def _run_duplicate_cleaner():
 
                 # Keep the first one (best quality), delete the rest
                 best_version = sorted_versions[0]
-                print(f"[Duplicate Cleaner] Keeping: {os.path.basename(best_version['full_path'])} "
+                logger.warning(f"[Duplicate Cleaner] Keeping: {os.path.basename(best_version['full_path'])} "
                       f"({best_version['extension']}, {best_version['size']} bytes)")
 
                 for duplicate_file in sorted_versions[1:]:
@@ -27166,7 +27146,7 @@ def _run_duplicate_cleaner():
                         deleted_count += 1
                         space_freed += duplicate_file['size']
 
-                        print(f"[Duplicate Cleaner] Moved to deleted: {os.path.basename(duplicate_file['full_path'])} "
+                        logger.warning(f"[Duplicate Cleaner] Moved to deleted: {os.path.basename(duplicate_file['full_path'])} "
                               f"({duplicate_file['extension']}, {duplicate_file['size']} bytes)")
 
                         # Update stats
@@ -27176,7 +27156,7 @@ def _run_duplicate_cleaner():
                             duplicate_cleaner_state["duplicates_found"] = duplicates_found
 
                     except Exception as e:
-                        print(f"[Duplicate Cleaner] Error moving file {duplicate_file['full_path']}: {e}")
+                        logger.error(f"[Duplicate Cleaner] Error moving file {duplicate_file['full_path']}: {e}")
                         continue
 
         # Scan complete
@@ -27186,7 +27166,7 @@ def _run_duplicate_cleaner():
             duplicate_cleaner_state["phase"] = "Cleaning complete"
 
         space_mb = space_freed / (1024 * 1024)
-        print(f"[Duplicate Cleaner] Scan complete: {files_scanned} files scanned, "
+        logger.warning(f"[Duplicate Cleaner] Scan complete: {files_scanned} files scanned, "
               f"{duplicates_found} duplicates found, {deleted_count} files moved to deleted folder, "
               f"{space_mb:.2f} MB freed")
 
@@ -27205,7 +27185,7 @@ def _run_duplicate_cleaner():
             pass
 
     except Exception as e:
-        print(f"[Duplicate Cleaner] Critical error: {e}")
+        logger.error(f"[Duplicate Cleaner] Critical error: {e}")
         import traceback
         traceback.print_exc()
 
@@ -27224,7 +27204,7 @@ def start_quality_scan():
         data = request.get_json() or {}
         scope = data.get('scope', 'watchlist')  # 'watchlist' or 'all'
 
-        print(f"[Quality Scanner API] Starting scan with scope: {scope}")
+        logger.info(f"[Quality Scanner API] Starting scan with scope: {scope}")
 
         # Reset state
         quality_scanner_state["status"] = "running"
@@ -27270,7 +27250,7 @@ def start_duplicate_cleaner():
         if duplicate_cleaner_state["status"] == "running":
             return jsonify({"success": False, "error": "A scan is already in progress"}), 409
 
-        print(f"[Duplicate Cleaner API] Starting duplicate cleaner...")
+        logger.warning(f"[Duplicate Cleaner API] Starting duplicate cleaner...")
 
         # Reset state
         duplicate_cleaner_state["status"] = "running"
@@ -27361,7 +27341,7 @@ def search_retag_albums():
             })
         return jsonify({"success": True, "albums": albums})
     except Exception as e:
-        print(f"[Retag] Album search error: {e}")
+        logger.error(f"[Retag] Album search error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/retag/execute', methods=['POST'])
@@ -27518,15 +27498,15 @@ def get_valid_candidates(results, spotify_track, query):
             # Sort by confidence (best match first)
             scored.sort(key=lambda x: x.confidence, reverse=True)
             best = scored[0]
-            print(f"[{source_label}] {len(scored)}/{len(results)} candidates passed validation "
+            logger.info(f"[{source_label}] {len(scored)}/{len(results)} candidates passed validation "
                   f"(best: {best.confidence:.2f} '{best.artist} - {best.title}')")
             return scored
         else:
             if results[0].username == 'youtube':
-                print(f"[{source_label}] No streaming results passed validation — falling through to filename matching")
+                logger.warning(f"[{source_label}] No streaming results passed validation — falling through to filename matching")
                 # YouTube artist data is unreliable, allow fallback to filename-based matching
             else:
-                print(f"[{source_label}] No streaming results passed validation (threshold: 0.60, artist gate: 0.40) — rejecting all candidates")
+                logger.warning(f"[{source_label}] No streaming results passed validation (threshold: 0.60, artist gate: 0.40) — rejecting all candidates")
                 return []  # Tidal/Qobuz/HiFi/Deezer have structured metadata; don't fall back to filename matching
 
     # Uses the existing, powerful matching engine for scoring (Soulseek P2P results)
@@ -27540,7 +27520,7 @@ def get_valid_candidates(results, spotify_track, query):
 
     if is_streaming_source:
         source_label = initial_candidates[0].username.title()
-        print(f"[{source_label}] Skipping quality filter - streaming source handles quality internally")
+        logger.info(f"[{source_label}] Skipping quality filter - streaming source handles quality internally")
         quality_filtered_candidates = initial_candidates
     else:
         # Filter by user's quality profile before artist verification (Soulseek only)
@@ -27552,7 +27532,7 @@ def get_valid_candidates(results, spotify_track, query):
         # and no results match, we should fail the download rather than force a fallback.
         # The quality filter already has its own fallback logic controlled by the user's settings.
         if not quality_filtered_candidates:
-            print(f"[Quality Filter] No candidates match quality profile - download will fail per user preferences")
+            logger.error(f"[Quality Filter] No candidates match quality profile - download will fail per user preferences")
             return []
 
     verified_candidates = []
@@ -27611,18 +27591,18 @@ def _recover_worker_slot(batch_id, task_id):
     This prevents permanent worker slot leaks that cause modal to show wrong worker counts.
     """
     try:
-        print(f"[Worker Recovery] Attempting to recover worker slot for batch {batch_id}, task {task_id}")
+        logger.warning(f"[Worker Recovery] Attempting to recover worker slot for batch {batch_id}, task {task_id}")
         
         # Acquire lock with timeout to prevent deadlock
         lock_acquired = tasks_lock.acquire(timeout=3.0)
         if not lock_acquired:
-            print(f"[Worker Recovery] FATAL: Could not acquire lock for recovery - worker slot LEAKED")
+            logger.error(f"[Worker Recovery] FATAL: Could not acquire lock for recovery - worker slot LEAKED")
             return False
             
         try:
             # Verify batch still exists
             if batch_id not in download_batches:
-                print(f"[Worker Recovery] Batch {batch_id} not found - nothing to recover")
+                logger.warning(f"[Worker Recovery] Batch {batch_id} not found - nothing to recover")
                 return True
                 
             batch = download_batches[batch_id]
@@ -27632,11 +27612,11 @@ def _recover_worker_slot(batch_id, task_id):
             if old_active > 0:
                 batch['active_count'] -= 1
                 new_active = batch['active_count']
-                print(f"[Worker Recovery] Recovered worker slot - Active count: {old_active} → {new_active}")
+                logger.warning(f"[Worker Recovery] Recovered worker slot - Active count: {old_active} → {new_active}")
                 
                 # Try to start next worker if queue isn't empty
                 if batch['queue_index'] < len(batch['queue']) and new_active < batch['max_concurrent']:
-                    print(f"[Worker Recovery] Attempting to start replacement worker")
+                    logger.warning(f"[Worker Recovery] Attempting to start replacement worker")
                     # Release lock temporarily to avoid deadlock in _start_next_batch_of_downloads
                     tasks_lock.release()
                     try:
@@ -27647,14 +27627,14 @@ def _recover_worker_slot(batch_id, task_id):
                         
                 return True
             else:
-                print(f"[Worker Recovery] Active count already 0 - no recovery needed")
+                logger.warning(f"[Worker Recovery] Active count already 0 - no recovery needed")
                 return True
                 
         finally:
             tasks_lock.release()
             
     except Exception as recovery_error:
-        print(f"[Worker Recovery] FATAL ERROR in recovery: {recovery_error}")
+        logger.error(f"[Worker Recovery] FATAL ERROR in recovery: {recovery_error}")
         return False
 
 def _get_batch_lock(batch_id):
@@ -27673,7 +27653,7 @@ def _start_next_batch_of_downloads(batch_id):
     with batch_lock:
         # Prevent starting new tasks if shutting down
         if IS_SHUTTING_DOWN:
-            print(f"[Batch Manager] Server shutting down - skipping new tasks for batch {batch_id}")
+            logger.info(f"[Batch Manager] Server shutting down - skipping new tasks for batch {batch_id}")
             return
 
         with tasks_lock:
@@ -27686,7 +27666,7 @@ def _start_next_batch_of_downloads(batch_id):
             queue_index = batch['queue_index']
             active_count = batch['active_count']
             
-            print(f"[Batch Lock] Starting workers for {batch_id}: active={active_count}, max={max_concurrent}, queue_pos={queue_index}/{len(queue)}")
+            logger.info(f"[Batch Lock] Starting workers for {batch_id}: active={active_count}, max={max_concurrent}, queue_pos={queue_index}/{len(queue)}")
             
             # Start downloads up to the concurrent limit
             while active_count < max_concurrent and queue_index < len(queue):
@@ -27696,7 +27676,7 @@ def _start_next_batch_of_downloads(batch_id):
                 if task_id in download_tasks:
                     current_status = download_tasks[task_id]['status']
                     if current_status == 'cancelled':
-                        print(f"[Batch Lock] Skipping cancelled task {task_id} (queue position {queue_index + 1})")
+                        logger.warning(f"[Batch Lock] Skipping cancelled task {task_id} (queue position {queue_index + 1})")
                         download_batches[batch_id]['queue_index'] += 1
                         queue_index += 1
                         continue  # Skip to next task without consuming worker slot
@@ -27705,9 +27685,9 @@ def _start_next_batch_of_downloads(batch_id):
                     # Must be done INSIDE the lock to prevent race conditions with status polling
                     download_tasks[task_id]['status'] = 'searching'
                     download_tasks[task_id]['status_change_time'] = time.time()
-                    print(f"[Batch Manager] Set task {task_id} status to 'searching'")
+                    logger.info(f"[Batch Manager] Set task {task_id} status to 'searching'")
                 else:
-                    print(f"[Batch Lock] Task {task_id} not found in download_tasks - skipping")
+                    logger.warning(f"[Batch Lock] Task {task_id} not found in download_tasks - skipping")
                     download_batches[batch_id]['queue_index'] += 1
                     queue_index += 1
                     continue
@@ -27721,26 +27701,26 @@ def _start_next_batch_of_downloads(batch_id):
                     download_batches[batch_id]['active_count'] += 1
                     download_batches[batch_id]['queue_index'] += 1
                     
-                    print(f"[Batch Lock] Started download {queue_index + 1}/{len(queue)} - Active: {active_count + 1}/{max_concurrent}")
+                    logger.info(f"[Batch Lock] Started download {queue_index + 1}/{len(queue)} - Active: {active_count + 1}/{max_concurrent}")
                     
                     # Update local counters for next iteration
                     active_count += 1
                     queue_index += 1
                     
                 except Exception as submit_error:
-                    print(f"[Batch Lock] CRITICAL: Failed to submit task {task_id} to executor: {submit_error}")
-                    print(f"[Batch Lock] Worker slot NOT consumed - preventing ghost worker")
+                    logger.error(f"[Batch Lock] CRITICAL: Failed to submit task {task_id} to executor: {submit_error}")
+                    logger.info(f"[Batch Lock] Worker slot NOT consumed - preventing ghost worker")
                     
                     # Reset task status since worker never started
                     if task_id in download_tasks:
                         download_tasks[task_id]['status'] = 'failed'
-                        print(f"[Batch Lock] Set task {task_id} status to 'failed' due to submit failure")
+                        logger.error(f"[Batch Lock] Set task {task_id} status to 'failed' due to submit failure")
                     
                     # Don't increment counters - no worker was actually started
                     # This prevents the "ghost worker" issue where active_count is incremented but no actual worker runs
                     break  # Stop trying to start more workers if executor is failing
             
-            print(f"[Batch Lock] Finished starting workers for {batch_id}: final_active={download_batches[batch_id]['active_count']}, max={max_concurrent}")
+            logger.info(f"[Batch Lock] Finished starting workers for {batch_id}: final_active={download_batches[batch_id]['active_count']}, max={max_concurrent}")
 
 def _get_track_artist_name(track_info):
     """Extract artist name from track info, handling different data formats (replicating sync.py)"""
@@ -27846,11 +27826,11 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         from core.wishlist_service import get_wishlist_service
         from datetime import datetime
         
-        print(f"[Wishlist Processing] Starting wishlist processing for batch {batch_id}")
+        logger.info(f"[Wishlist Processing] Starting wishlist processing for batch {batch_id}")
 
         with tasks_lock:
             if batch_id not in download_batches:
-                print(f"[Wishlist Processing] Batch {batch_id} not found")
+                logger.warning(f"[Wishlist Processing] Batch {batch_id} not found")
                 return {'tracks_added': 0, 'errors': 0}
 
         batch = download_batches[batch_id]
@@ -27858,13 +27838,13 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         # Wing It mode — skip wishlist entirely for failed tracks
         if batch.get('wing_it'):
             failed_count = len(batch.get('permanently_failed_tracks', []))
-            print(f"[Wing It] Skipping wishlist for {failed_count} failed tracks (wing it mode)")
+            logger.error(f"[Wing It] Skipping wishlist for {failed_count} failed tracks (wing it mode)")
             return {'tracks_added': 0, 'errors': 0}
         permanently_failed_tracks = batch.get('permanently_failed_tracks', [])
         cancelled_tracks = batch.get('cancelled_tracks', set())
         
         # STEP 0: Remove completed tracks from wishlist (THIS WAS MISSING!)
-        print(f"[Wishlist Processing] Checking completed tracks for wishlist removal")
+        logger.info(f"[Wishlist Processing] Checking completed tracks for wishlist removal")
         for task_id in batch.get('queue', []):
             if task_id in download_tasks:
                 task = download_tasks[task_id]
@@ -27874,12 +27854,12 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                         context = {'track_info': track_info, 'original_search_result': track_info}
                         _check_and_remove_from_wishlist(context)
                     except Exception as e:
-                        print(f"[Wishlist Processing] Error removing completed track from wishlist: {e}")
+                        logger.error(f"[Wishlist Processing] Error removing completed track from wishlist: {e}")
         
         # STEP 1: Add cancelled tracks that were missing to permanently_failed_tracks (replicating sync.py)
         # This matches sync.py's logic for adding cancelled missing tracks to the failed list
         if cancelled_tracks:
-            print(f"[Wishlist Processing] Processing {len(cancelled_tracks)} cancelled tracks")
+            logger.warning(f"[Wishlist Processing] Processing {len(cancelled_tracks)} cancelled tracks")
             
             # Process cancelled tracks with safeguard to prevent infinite loops
             processed_count = 0
@@ -27913,9 +27893,9 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                                 if not any(t.get('table_index') == track_index for t in permanently_failed_tracks):
                                     permanently_failed_tracks.append(cancelled_track_info)
                                     processed_count += 1
-                                    print(f"[Wishlist Processing] Added cancelled missing track {cancelled_track_info['track_name']} to failed list for wishlist")
+                                    logger.error(f"[Wishlist Processing] Added cancelled missing track {cancelled_track_info['track_name']} to failed list for wishlist")
             
-            print(f"[Wishlist Processing] Processed {processed_count} cancelled tracks")
+            logger.warning(f"[Wishlist Processing] Processed {processed_count} cancelled tracks")
 
         # STEP 1.5: Recover any failed/not_found tasks not captured in permanently_failed_tracks.
         # Stuck detection (in _on_download_completed, _check_batch_completion_v2, and the Safety Valve)
@@ -27941,14 +27921,14 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                                 'candidates': task.get('cached_candidates', [])
                             }
                             permanently_failed_tracks.append(recovered_track_info)
-                            print(f"[Wishlist Processing] Recovered uncaptured failed track for wishlist: {recovered_track_info['track_name']}")
+                            logger.error(f"[Wishlist Processing] Recovered uncaptured failed track for wishlist: {recovered_track_info['track_name']}")
 
         # STEP 2: Add permanently failed tracks to wishlist (exact sync.py logic)
         failed_count = len(permanently_failed_tracks)
         wishlist_added_count = 0
         error_count = 0
         
-        print(f"[Wishlist Processing] Processing {failed_count} failed tracks for wishlist")
+        logger.error(f"[Wishlist Processing] Processing {failed_count} failed tracks for wishlist")
         
         if permanently_failed_tracks:
             try:
@@ -27976,10 +27956,10 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                         sp_id = sp_track.get('id', '') if isinstance(sp_track, dict) else ''
                         if str(sp_id).startswith('wing_it_'):
                             wing_it_skipped += 1
-                            print(f"[Wishlist Processing] Skipping wing-it track: {track_name}")
+                            logger.info(f"[Wishlist Processing] Skipping wing-it track: {track_name}")
                             continue
 
-                        print(f"[Wishlist Processing] Adding track {i+1}/{max_failed_tracks}: {track_name}")
+                        logger.error(f"[Wishlist Processing] Adding track {i+1}/{max_failed_tracks}: {track_name}")
                         
                         success = wishlist_service.add_failed_track_from_modal(
                             track_info=failed_track_info,
@@ -27989,7 +27969,7 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                         )
                         if success:
                             wishlist_added_count += 1
-                            print(f"[Wishlist Processing] Added {track_name} to wishlist")
+                            logger.info(f"[Wishlist Processing] Added {track_name} to wishlist")
                             try:
                                 if automation_engine:
                                     automation_engine.emit('wishlist_item_added', {
@@ -28000,23 +27980,23 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                             except Exception:
                                 pass
                         else:
-                            print(f"[Wishlist Processing] Failed to add {track_name} to wishlist")
+                            logger.error(f"[Wishlist Processing] Failed to add {track_name} to wishlist")
                             
                     except Exception as e:
                         error_count += 1
-                        print(f"[Wishlist Processing] Exception adding track to wishlist: {e}")
+                        logger.error(f"[Wishlist Processing] Exception adding track to wishlist: {e}")
                 
                 if wing_it_skipped:
-                    print(f"[Wishlist Processing] Skipped {wing_it_skipped} wing-it fallback tracks")
-                print(f"[Wishlist Processing] Added {wishlist_added_count}/{failed_count} failed tracks to wishlist (errors: {error_count})")
+                    logger.warning(f"[Wishlist Processing] Skipped {wing_it_skipped} wing-it fallback tracks")
+                logger.error(f"[Wishlist Processing] Added {wishlist_added_count}/{failed_count} failed tracks to wishlist (errors: {error_count})")
                         
             except Exception as e:
                 error_count = len(permanently_failed_tracks)
-                print(f"[Wishlist Processing] Critical error adding failed tracks to wishlist: {e}")
+                logger.error(f"[Wishlist Processing] Critical error adding failed tracks to wishlist: {e}")
                 import traceback
                 traceback.print_exc()
         else:
-            print(f"ℹ️ [Wishlist Processing] No failed tracks to add to wishlist")
+            logger.error(f"ℹ️ [Wishlist Processing] No failed tracks to add to wishlist")
         
         # Store completion summary in batch for API response (matching sync.py pattern)
         completion_summary = {
@@ -28031,7 +28011,7 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                 download_batches[batch_id]['wishlist_processing_complete'] = True
                 # Phase already set to 'complete' in _on_download_completed
 
-        print(f"[Wishlist Processing] Completed wishlist processing for batch {batch_id}")
+        logger.info(f"[Wishlist Processing] Completed wishlist processing for batch {batch_id}")
 
         # Auto-cleanup: Clear completed downloads from slskd
         try:
@@ -28050,7 +28030,7 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         return completion_summary
     
     except Exception as e:
-        print(f"[Wishlist Processing] CRITICAL ERROR in wishlist processing: {e}")
+        logger.error(f"[Wishlist Processing] CRITICAL ERROR in wishlist processing: {e}")
         import traceback
         traceback.print_exc()
         
@@ -28068,7 +28048,7 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                     }
                     download_batches[batch_id]['wishlist_processing_complete'] = True
         except Exception as lock_error:
-            print(f"[Wishlist Processing] Failed to update batch after error: {lock_error}")
+            logger.error(f"[Wishlist Processing] Failed to update batch after error: {lock_error}")
         
         return {'tracks_added': 0, 'errors': 1, 'total_failed': 0}
 
@@ -28080,7 +28060,7 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
     global wishlist_auto_processing
     
     try:
-        print(f"[Auto-Wishlist] Processing completion for auto-initiated batch {batch_id}")
+        logger.info(f"[Auto-Wishlist] Processing completion for auto-initiated batch {batch_id}")
         
         # Run standard wishlist processing
         completion_summary = _process_failed_tracks_to_wishlist_exact(batch_id)
@@ -28088,7 +28068,7 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
         # Log auto-processing completion
         tracks_added = completion_summary.get('tracks_added', 0)
         total_failed = completion_summary.get('total_failed', 0)
-        print(f"[Auto-Wishlist] Background processing complete: {tracks_added} added to wishlist, {total_failed} failed")
+        logger.error(f"[Auto-Wishlist] Background processing complete: {tracks_added} added to wishlist, {total_failed} failed")
         
         # Add activity for wishlist processing
         if tracks_added > 0:
@@ -28114,9 +28094,9 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
                 """, (next_cycle,))
                 conn.commit()
 
-            print(f"[Auto-Wishlist] Cycle toggled after completion: {current_cycle} → {next_cycle}")
+            logger.info(f"[Auto-Wishlist] Cycle toggled after completion: {current_cycle} → {next_cycle}")
         except Exception as cycle_error:
-            print(f"[Auto-Wishlist] Error toggling cycle: {cycle_error}")
+            logger.error(f"[Auto-Wishlist] Error toggling cycle: {cycle_error}")
 
         # Mark auto-processing as complete and reset timestamp
         with wishlist_timer_lock:
@@ -28136,7 +28116,7 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
         return completion_summary
 
     except Exception as e:
-        print(f"[Auto-Wishlist] Error in auto-completion processing: {e}")
+        logger.error(f"[Auto-Wishlist] Error in auto-completion processing: {e}")
         import traceback
         traceback.print_exc()
 
@@ -28151,7 +28131,7 @@ def _on_download_completed(batch_id, task_id, success=True):
     """Called when a download completes to start the next one in queue"""
     with tasks_lock:
         if batch_id not in download_batches:
-            print(f"[Batch Manager] Batch {batch_id} not found for completed task {task_id}")
+            logger.warning(f"[Batch Manager] Batch {batch_id} not found for completed task {task_id}")
             return
 
         # Guard against double-calling: track which tasks have already been completed
@@ -28164,7 +28144,7 @@ def _on_download_completed(batch_id, task_id, success=True):
         completed_tasks = download_batches[batch_id].setdefault('_completed_task_ids', set())
         _is_duplicate_completion = task_id in completed_tasks
         if _is_duplicate_completion:
-            print(f"[Batch Manager] Task {task_id} already completed — skipping decrement, still checking batch completion")
+            logger.info(f"[Batch Manager] Task {task_id} already completed — skipping decrement, still checking batch completion")
             # Set terminal status so the monitor loop stops re-processing this task
             if task_id in download_tasks and download_tasks[task_id].get('status') in ('downloading', 'queued'):
                 download_tasks[task_id]['status'] = 'completed'
@@ -28197,15 +28177,15 @@ def _on_download_completed(batch_id, task_id, success=True):
 
                 if task_status == 'cancelled':
                     download_batches[batch_id]['cancelled_tracks'].add(task.get('track_index', 0))
-                    print(f"[Batch Manager] Added cancelled track to batch tracking: {track_info['track_name']}")
+                    logger.warning(f"[Batch Manager] Added cancelled track to batch tracking: {track_info['track_name']}")
                     add_activity_item("", "Download Cancelled", f"'{track_info['track_name']}'", "Now")
                 elif task_status in ('failed', 'not_found'):
                     download_batches[batch_id]['permanently_failed_tracks'].append(track_info)
                     if task_status == 'not_found':
-                        print(f"[Batch Manager] Added not-found track to batch tracking: {track_info['track_name']}")
+                        logger.info(f"[Batch Manager] Added not-found track to batch tracking: {track_info['track_name']}")
                         add_activity_item("", "Not Found", f"'{track_info['track_name']}'", "Now")
                     else:
-                        print(f"[Batch Manager] Added failed track to batch tracking: {track_info['track_name']}")
+                        logger.error(f"[Batch Manager] Added failed track to batch tracking: {track_info['track_name']}")
                         add_activity_item("", "Download Failed", f"'{track_info['track_name']}'", "Now")
 
                     try:
@@ -28223,7 +28203,7 @@ def _on_download_completed(batch_id, task_id, success=True):
                 try:
                     task = download_tasks[task_id]
                     track_info = task.get('track_info', {})
-                    print(f"[Batch Manager] Successful download - checking wishlist removal for task {task_id}")
+                    logger.info(f"[Batch Manager] Successful download - checking wishlist removal for task {task_id}")
 
                     # Add activity for successful download
                     track_name = track_info.get('name', 'Unknown Track')
@@ -28249,18 +28229,18 @@ def _on_download_completed(batch_id, task_id, success=True):
                         }
                         _check_and_remove_from_wishlist(context)
                 except Exception as wishlist_error:
-                    print(f"[Batch Manager] Error checking wishlist removal for successful download: {wishlist_error}")
+                    logger.error(f"[Batch Manager] Error checking wishlist removal for successful download: {wishlist_error}")
 
             # Decrement active count
             old_active = download_batches[batch_id]['active_count']
             download_batches[batch_id]['active_count'] -= 1
             new_active = download_batches[batch_id]['active_count']
 
-            print(f"[Batch Manager] Task {task_id} completed ({'success' if success else 'failed/cancelled'}). Active workers: {old_active} → {new_active}/{download_batches[batch_id]['max_concurrent']}")
+            logger.error(f"[Batch Manager] Task {task_id} completed ({'success' if success else 'failed/cancelled'}). Active workers: {old_active} → {new_active}/{download_batches[batch_id]['max_concurrent']}")
 
         # ENHANCED: Always check batch completion after any task completes (including duplicate calls)
         # This ensures completion is detected even when mixing normal downloads with cancelled tasks
-        print(f"[Batch Manager] Checking batch completion after task {task_id} completed")
+        logger.info(f"[Batch Manager] Checking batch completion after task {task_id} completed")
         
         # FIXED: Check if batch is truly complete (all tasks finished, not just workers freed)
         batch = download_batches[batch_id]
@@ -28283,7 +28263,7 @@ def _on_download_completed(batch_id, task_id, success=True):
                 if task_status == 'searching':
                     task_age = current_time - task.get('status_change_time', current_time)
                     if task_age > 600:  # 10 minutes
-                        print(f"⏰ [Stuck Detection] Task {task_id} stuck in searching for {task_age:.0f}s - forcing not_found")
+                        logger.info(f"⏰ [Stuck Detection] Task {task_id} stuck in searching for {task_age:.0f}s - forcing not_found")
                         task['status'] = 'not_found'
                         task['error_message'] = f'Search stuck for {int(task_age // 60)} minutes with no results — timed out'
                         finished_count += 1
@@ -28292,7 +28272,7 @@ def _on_download_completed(batch_id, task_id, success=True):
                 elif task_status == 'post_processing':
                     task_age = current_time - task.get('status_change_time', current_time)
                     if task_age > 300:  # 5 minutes (post-processing should be fast)
-                        print(f"⏰ [Stuck Detection] Task {task_id} stuck in post_processing for {task_age:.0f}s - forcing completion")
+                        logger.info(f"⏰ [Stuck Detection] Task {task_id} stuck in post_processing for {task_age:.0f}s - forcing completion")
                         task['status'] = 'completed'  # Assume it worked if file verification is taking too long
                         finished_count += 1
                     else:
@@ -28301,19 +28281,19 @@ def _on_download_completed(batch_id, task_id, success=True):
                     finished_count += 1
             else:
                 # Task ID in queue but not in download_tasks - treat as completed to prevent blocking
-                print(f"[Orphaned Task] Task {task_id} in queue but not in download_tasks - counting as finished")
+                logger.warning(f"[Orphaned Task] Task {task_id} in queue but not in download_tasks - counting as finished")
                 finished_count += 1
         
         all_tasks_truly_finished = finished_count >= len(queue)
         has_retrying_tasks = retrying_count > 0
         
         if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
-            print(f"[Batch Manager] Batch {batch_id} truly complete - all {finished_count}/{len(queue)} tasks finished - processing failed tracks to wishlist")
+            logger.error(f"[Batch Manager] Batch {batch_id} truly complete - all {finished_count}/{len(queue)} tasks finished - processing failed tracks to wishlist")
         elif all_tasks_started and no_active_workers and has_retrying_tasks:
-            print(f"[Batch Manager] Batch {batch_id}: all workers free but {retrying_count} tasks retrying - continuing monitoring")
+            logger.warning(f"[Batch Manager] Batch {batch_id}: all workers free but {retrying_count} tasks retrying - continuing monitoring")
         elif all_tasks_started and no_active_workers:
             # This used to incorrectly mark batch as complete!
-            print(f"[Batch Manager] Batch {batch_id}: all workers free but only {finished_count}/{len(queue)} tasks finished - continuing monitoring")
+            logger.info(f"[Batch Manager] Batch {batch_id}: all workers free but only {finished_count}/{len(queue)} tasks finished - continuing monitoring")
         
         if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
             
@@ -28354,30 +28334,30 @@ def _on_download_completed(batch_id, task_id, success=True):
                     url_hash = playlist_id.replace('youtube_', '')
                     if url_hash in youtube_playlist_states:
                         youtube_playlist_states[url_hash]['phase'] = 'download_complete'
-                        print(f"Updated YouTube playlist {url_hash} to download_complete phase")
+                        logger.info(f"Updated YouTube playlist {url_hash} to download_complete phase")
 
                 # Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
                 if playlist_id and playlist_id.startswith('tidal_'):
                     tidal_playlist_id = playlist_id.replace('tidal_', '')
                     if tidal_playlist_id in tidal_discovery_states:
                         tidal_discovery_states[tidal_playlist_id]['phase'] = 'download_complete'
-                        print(f"Updated Tidal playlist {tidal_playlist_id} to download_complete phase")
+                        logger.info(f"Updated Tidal playlist {tidal_playlist_id} to download_complete phase")
 
                 # Update Deezer playlist phase to 'download_complete' if this is a Deezer playlist
                 if playlist_id and playlist_id.startswith('deezer_'):
                     deezer_playlist_id = playlist_id.replace('deezer_', '')
                     if deezer_playlist_id in deezer_discovery_states:
                         deezer_discovery_states[deezer_playlist_id]['phase'] = 'download_complete'
-                        print(f"Updated Deezer playlist {deezer_playlist_id} to download_complete phase")
+                        logger.info(f"Updated Deezer playlist {deezer_playlist_id} to download_complete phase")
 
                 # Update Spotify Public playlist phase to 'download_complete' if this is a Spotify Public playlist
                 if playlist_id and playlist_id.startswith('spotify_public_'):
                     spotify_public_url_hash = playlist_id.replace('spotify_public_', '')
                     if spotify_public_url_hash in spotify_public_discovery_states:
                         spotify_public_discovery_states[spotify_public_url_hash]['phase'] = 'download_complete'
-                        print(f"Updated Spotify Public playlist {spotify_public_url_hash} to download_complete phase")
+                        logger.info(f"Updated Spotify Public playlist {spotify_public_url_hash} to download_complete phase")
 
-                print(f"[Batch Manager] Batch {batch_id} complete - stopping monitor")
+                logger.info(f"[Batch Manager] Batch {batch_id} complete - stopping monitor")
                 download_monitor.stop_monitoring(batch_id)
 
                 # M3U REGENERATION: Regenerate M3U with real library paths now that
@@ -28401,7 +28381,7 @@ def _on_download_completed(batch_id, task_id, success=True):
                         if m3u_tracks:
                             _regenerate_batch_m3u(batch, m3u_tracks)
                     except Exception as m3u_err:
-                        print(f"[M3U] Error regenerating M3U on batch complete: {m3u_err}")
+                        logger.error(f"[M3U] Error regenerating M3U on batch complete: {m3u_err}")
 
                 # REPAIR: Scan all album folders from this batch for track number issues
                 if repair_worker:
@@ -28432,12 +28412,12 @@ def _on_download_completed(batch_id, task_id, success=True):
                                     file_lock_fn=_get_file_lock,
                                 )
                                 if _cons_result.get('success'):
-                                    print(f"[Album Consistency] {_cons_result['tags_written']}/{_cons_result['total_files']} files "
+                                    logger.info(f"[Album Consistency] {_cons_result['tags_written']}/{_cons_result['total_files']} files "
                                           f"harmonized to release {_cons_result.get('release_mbid', '')[:8]}...")
                                 elif _cons_result.get('error'):
-                                    print(f"[Album Consistency] Skipped: {_cons_result['error']}")
+                                    logger.error(f"[Album Consistency] Skipped: {_cons_result['error']}")
                         except Exception as cons_err:
-                            print(f"[Album Consistency] Failed (non-fatal): {cons_err}")
+                            logger.error(f"[Album Consistency] Failed (non-fatal): {cons_err}")
 
                 # Mark that wishlist processing is starting (prevents premature cleanup)
                 batch['wishlist_processing_started'] = True
@@ -28450,12 +28430,12 @@ def _on_download_completed(batch_id, task_id, success=True):
                     # For manual batches, use standard wishlist processing
                     missing_download_executor.submit(_process_failed_tracks_to_wishlist_exact, batch_id)
             else:
-                print(f"[Batch Manager] Batch {batch_id} already marked complete - skipping duplicate processing")
+                logger.warning(f"[Batch Manager] Batch {batch_id} already marked complete - skipping duplicate processing")
 
             return  # Don't start next batch if we're done
     
     # Start next downloads in queue
-    print(f"[Batch Manager] Starting next batch for {batch_id}")
+    logger.info(f"[Batch Manager] Starting next batch for {batch_id}")
     _start_next_batch_of_downloads(batch_id)
 
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
@@ -28490,13 +28470,13 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                 batch_artist_context = download_batches[batch_id].get('artist_context')
 
         if force_download_all:
-            print(f"[Force Download] Force download mode enabled for batch {batch_id} - treating all tracks as missing")
+            logger.warning(f"[Force Download] Force download mode enabled for batch {batch_id} - treating all tracks as missing")
 
         # Allow duplicate tracks across albums — when enabled, only skip tracks already
         # owned in THIS album, not tracks owned in other albums
         allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
         if allow_duplicates and batch_is_album:
-            print(f"[Duplicates] Allow duplicate tracks enabled — only checking ownership within target album")
+            logger.info(f"[Duplicates] Allow duplicate tracks enabled — only checking ownership within target album")
 
         # PREFLIGHT: Pre-populate MusicBrainz release cache for album downloads.
         # This ensures ALL tracks in the album use the same release MBID during
@@ -28521,12 +28501,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                             # Also cache the full release detail for tag extraction
                             with _mb_release_detail_cache_lock:
                                 _mb_release_detail_cache[release_mbid] = release
-                            print(f"[Preflight] Pre-cached MB release for '{album_name_pf}': "
+                            logger.info(f"[Preflight] Pre-cached MB release for '{album_name_pf}': "
                                   f"'{release.get('title', '')}' ({release_mbid[:8]}...)")
                         else:
-                            print(f"[Preflight] No MB release found for '{album_name_pf}' — per-track lookup will be used")
+                            logger.warning(f"[Preflight] No MB release found for '{album_name_pf}' — per-track lookup will be used")
             except Exception as pf_err:
-                print(f"[Preflight] MB release preflight failed: {pf_err}")
+                logger.error(f"[Preflight] MB release preflight failed: {pf_err}")
 
         # ALBUM FAST PATH: If this is an album download, try to find the album in the DB first
         # and match tracks within it — faster and more accurate than N global searches
@@ -28547,11 +28527,11 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         db_album_tracks = db.get_tracks_by_album(db_album.id)
                         for t in db_album_tracks:
                             album_tracks_map[t.title.lower().strip()] = t
-                        print(f"[Album Analysis] Found album '{db_album.title}' in DB with {len(db_album_tracks)} tracks (confidence: {album_confidence:.2f})")
+                        logger.info(f"[Album Analysis] Found album '{db_album.title}' in DB with {len(db_album_tracks)} tracks (confidence: {album_confidence:.2f})")
                     else:
-                        print(f"[Album Analysis] Album '{album_name}' not found in DB — falling back to per-track search")
+                        logger.warning(f"[Album Analysis] Album '{album_name}' not found in DB — falling back to per-track search")
                 except Exception as album_err:
-                    print(f"[Album Analysis] Album lookup error: {album_err} — falling back to per-track search")
+                    logger.error(f"[Album Analysis] Album lookup error: {album_err} — falling back to per-track search")
 
         for i, track_data in enumerate(tracks_json):
             # Use original table index if provided (for partial track selection),
@@ -28563,7 +28543,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
 
             # Skip database check if force download is enabled
             if force_download_all:
-                print(f"[Force Download] Skipping database check for '{track_name}' - treating as missing")
+                logger.warning(f"[Force Download] Skipping database check for '{track_name}' - treating as missing")
                 found, confidence = False, 0.0
             elif album_tracks_map:
                 # Album-scoped matching: check against known album tracks first
@@ -28630,7 +28610,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                 try:
                     _check_and_remove_track_from_wishlist_by_metadata(track_data)
                 except Exception as wishlist_error:
-                    print(f"[Analysis] Error checking wishlist removal for found track: {wishlist_error}")
+                    logger.error(f"[Analysis] Error checking wishlist removal for found track: {wishlist_error}")
 
             with tasks_lock:
                 if batch_id in download_batches:
@@ -28646,7 +28626,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
             missing_tracks = [res for res in missing_tracks if not _is_explicit_blocked(res.get('track', {}))]
             skipped = before_count - len(missing_tracks)
             if skipped > 0:
-                print(f"[Content Filter] Filtered out {skipped} explicit track(s) from download queue")
+                logger.warning(f"[Content Filter] Filtered out {skipped} explicit track(s) from download queue")
 
         with tasks_lock:
             if batch_id in download_batches:
@@ -28654,7 +28634,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
 
         # PHASE 2: TRANSITION TO DOWNLOAD (if necessary)
         if not missing_tracks:
-            print(f"Analysis for batch {batch_id} complete. No missing tracks.")
+            logger.warning(f"Analysis for batch {batch_id} complete. No missing tracks.")
 
             # Record sync history — all tracks found, nothing to download
             tracks_found = sum(1 for r in analysis_results if r.get('found'))
@@ -28705,37 +28685,37 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         url_hash = playlist_id.replace('youtube_', '')
                         if url_hash in youtube_playlist_states:
                             youtube_playlist_states[url_hash]['phase'] = 'download_complete'
-                            print(f"Updated YouTube playlist {url_hash} to download_complete phase (no missing tracks)")
+                            logger.warning(f"Updated YouTube playlist {url_hash} to download_complete phase (no missing tracks)")
 
                     # Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
                     if playlist_id.startswith('tidal_'):
                         tidal_playlist_id = playlist_id.replace('tidal_', '')
                         if tidal_playlist_id in tidal_discovery_states:
                             tidal_discovery_states[tidal_playlist_id]['phase'] = 'download_complete'
-                            print(f"Updated Tidal playlist {tidal_playlist_id} to download_complete phase (no missing tracks)")
+                            logger.warning(f"Updated Tidal playlist {tidal_playlist_id} to download_complete phase (no missing tracks)")
 
                     # Update Deezer playlist phase to 'download_complete' if this is a Deezer playlist
                     if playlist_id.startswith('deezer_'):
                         deezer_playlist_id = playlist_id.replace('deezer_', '')
                         if deezer_playlist_id in deezer_discovery_states:
                             deezer_discovery_states[deezer_playlist_id]['phase'] = 'download_complete'
-                            print(f"Updated Deezer playlist {deezer_playlist_id} to download_complete phase (no missing tracks)")
+                            logger.warning(f"Updated Deezer playlist {deezer_playlist_id} to download_complete phase (no missing tracks)")
 
                     # Update Spotify Public playlist phase to 'download_complete' if this is a Spotify Public playlist
                     if playlist_id.startswith('spotify_public_'):
                         spotify_public_url_hash = playlist_id.replace('spotify_public_', '')
                         if spotify_public_url_hash in spotify_public_discovery_states:
                             spotify_public_discovery_states[spotify_public_url_hash]['phase'] = 'download_complete'
-                            print(f"Updated Spotify Public playlist {spotify_public_url_hash} to download_complete phase (no missing tracks)")
+                            logger.warning(f"Updated Spotify Public playlist {spotify_public_url_hash} to download_complete phase (no missing tracks)")
 
             # Handle auto-initiated wishlist completion even when no missing tracks
             if is_auto_batch and playlist_id == 'wishlist':
-                print("[Auto-Wishlist] No missing tracks found - calling auto-completion handler to toggle cycle and reschedule")
+                logger.warning("[Auto-Wishlist] No missing tracks found - calling auto-completion handler to toggle cycle and reschedule")
                 missing_download_executor.submit(_process_failed_tracks_to_wishlist_exact_with_auto_completion, batch_id)
 
             return
 
-        print(f" transitioning batch {batch_id} to download phase with {len(missing_tracks)} tracks.")
+        logger.warning(f" transitioning batch {batch_id} to download phase with {len(missing_tracks)} tracks.")
 
         # Read batch context (quick lock) before doing any network I/O
         with tasks_lock:
@@ -28764,7 +28744,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                 try:
                     _sr = source_reuse_logger
                     _sr.info(f"[Album Pre-flight] Searching for '{artist_name} {album_name}'")
-                    print(f"[Album Pre-flight] Searching Soulseek for complete album: '{artist_name} - {album_name}'")
+                    logger.info(f"[Album Pre-flight] Searching Soulseek for complete album: '{artist_name} - {album_name}'")
 
                     slsk = soulseek_client.soulseek if hasattr(soulseek_client, 'soulseek') else soulseek_client
 
@@ -28803,7 +28783,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
 
                             _sr.info(f"[Album Pre-flight] Best album result: {best_album.username}:{best_album.album_path} "
                                      f"({best_album.track_count} tracks, quality={best_album.dominant_quality})")
-                            print(f"[Album Pre-flight] Found album folder: {best_album.username} — "
+                            logger.info(f"[Album Pre-flight] Found album folder: {best_album.username} — "
                                   f"{best_album.track_count} tracks ({best_album.dominant_quality})")
 
                             # Browse the user's folder to get all tracks (may have more than search returned)
@@ -28819,7 +28799,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                                     }
                                     preflight_tracks = folder_tracks
                                     _sr.info(f"[Album Pre-flight] Browsed folder: {len(folder_tracks)} audio tracks available")
-                                    print(f"[Album Pre-flight] Cached {len(folder_tracks)} tracks from {best_album.username} for source reuse")
+                                    logger.info(f"[Album Pre-flight] Cached {len(folder_tracks)} tracks from {best_album.username} for source reuse")
                                 else:
                                     _sr.info(f"[Album Pre-flight] Browse returned files but no audio tracks")
                             else:
@@ -28830,16 +28810,16 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                                     'folder_path': best_album.album_path
                                 }
                                 preflight_tracks = best_album.tracks
-                                print(f"[Album Pre-flight] Using {len(best_album.tracks)} tracks from search results (browse unavailable)")
+                                logger.info(f"[Album Pre-flight] Using {len(best_album.tracks)} tracks from search results (browse unavailable)")
                         else:
                             _sr.info(f"[Album Pre-flight] No album results passed quality filter")
-                            print(f"[Album Pre-flight] No album results matched quality preferences")
+                            logger.warning(f"[Album Pre-flight] No album results matched quality preferences")
                     else:
                         _sr.info(f"[Album Pre-flight] Search returned no album results (got {len(track_results)} individual tracks)")
-                        print(f"[Album Pre-flight] No complete album folders found, falling back to track-by-track search")
+                        logger.warning(f"[Album Pre-flight] No complete album folders found, falling back to track-by-track search")
 
                 except Exception as preflight_err:
-                    print(f"[Album Pre-flight] Search failed (non-fatal, falling back to track-by-track): {preflight_err}")
+                    logger.error(f"[Album Pre-flight] Search failed (non-fatal, falling back to track-by-track): {preflight_err}")
                     source_reuse_logger.info(f"[Album Pre-flight] Exception: {preflight_err}")
 
         with tasks_lock:
@@ -28852,7 +28832,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                 download_batches[batch_id]['last_good_source'] = preflight_source
                 download_batches[batch_id]['source_folder_tracks'] = preflight_tracks
                 download_batches[batch_id]['failed_sources'] = set()
-                print(f"[Album Pre-flight] Pre-loaded source reuse data on batch {batch_id}")
+                logger.info(f"[Album Pre-flight] Pre-loaded source reuse data on batch {batch_id}")
 
             # Compute total_discs for multi-disc album subfolder support
             # Use ALL tracks (tracks_json), not just missing ones, to correctly detect multi-disc
@@ -28861,7 +28841,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                 total_discs = max((t.get('disc_number', 1) for t in tracks_json), default=1)
                 batch_album_context['total_discs'] = total_discs
                 if total_discs > 1:
-                    print(f"[Multi-Disc] Detected {total_discs} discs for album '{batch_album_context.get('name')}'")
+                    logger.info(f"[Multi-Disc] Detected {total_discs} discs for album '{batch_album_context.get('name')}'")
 
             # Pre-compute per-album data for wishlist tracks (grouped by album ID)
             # Wishlist tracks aren't batch_is_album but each track has disc_number in spotify_data
@@ -28922,7 +28902,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                                     else:
                                         _fallback_name = t.get('artist', '')
                                     wishlist_album_artist_map[album_id] = {'name': _fallback_name or 'Unknown Artist'}
-                            print(f"[Wishlist Album Grouping] Album '{_wl_album.get('name', album_id)}' → artist: '{wishlist_album_artist_map[album_id].get('name', '?')}'")
+                            logger.info(f"[Wishlist Album Grouping] Album '{_wl_album.get('name', album_id)}' → artist: '{wishlist_album_artist_map[album_id].get('name', '?')}'")
 
 
 
@@ -28935,7 +28915,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                     track_info['_explicit_album_context'] = batch_album_context
                     track_info['_explicit_artist_context'] = batch_artist_context
                     track_info['_is_explicit_album_download'] = True
-                    print(f"[Task Creation] Added explicit album context for: {track_info.get('name')}")
+                    logger.info(f"[Task Creation] Added explicit album context for: {track_info.get('name')}")
 
                 # SPECIAL WISHLIST HANDLING: Inject album context if available to force grouping
                 elif playlist_id == 'wishlist':
@@ -28994,16 +28974,16 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         track_info['_explicit_album_context'] = album_ctx
                         track_info['_explicit_artist_context'] = artist_ctx
                         track_info['_is_explicit_album_download'] = True
-                        print(f"[Wishlist] Added album context for: '{track_info.get('name')}' -> '{album_ctx['name']}'")
+                        logger.info(f"[Wishlist] Added album context for: '{track_info.get('name')}' -> '{album_ctx['name']}'")
 
 
                 # Add playlist folder mode flag for sync page playlists
                 if batch_playlist_folder_mode:
                     track_info['_playlist_folder_mode'] = True
                     track_info['_playlist_name'] = batch_playlist_name
-                    print(f"[Task Creation] Added playlist folder mode for: {track_info.get('name')} → {batch_playlist_name}")
+                    logger.info(f"[Task Creation] Added playlist folder mode for: {track_info.get('name')} → {batch_playlist_name}")
                 else:
-                    print(f"[Debug] Task Creation - playlist folder mode NOT enabled for: {track_info.get('name')}")
+                    logger.debug(f"[Debug] Task Creation - playlist folder mode NOT enabled for: {track_info.get('name')}")
 
                 download_tasks[task_id] = {
                     'status': 'pending', 'track_info': track_info,
@@ -29019,7 +28999,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
         _start_next_batch_of_downloads(batch_id)
 
     except Exception as e:
-        print(f"Master worker for batch {batch_id} failed: {e}")
+        logger.error(f"Master worker for batch {batch_id} failed: {e}")
         import traceback
         traceback.print_exc()
 
@@ -29035,11 +29015,11 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                     url_hash = playlist_id.replace('youtube_', '')
                     if url_hash in youtube_playlist_states:
                         youtube_playlist_states[url_hash]['phase'] = 'discovered'
-                        print(f"Reset YouTube playlist {url_hash} to discovered phase (error)")
+                        logger.error(f"Reset YouTube playlist {url_hash} to discovered phase (error)")
 
         # Handle auto-initiated wishlist errors - reset flag
         if is_auto_batch and playlist_id == 'wishlist':
-            print("[Auto-Wishlist] Master worker error - resetting auto-processing flag")
+            logger.error("[Auto-Wishlist] Master worker error - resetting auto-processing flag")
             global wishlist_auto_processing, wishlist_auto_processing_timestamp
             with wishlist_timer_lock:
                 wishlist_auto_processing = False
@@ -29051,21 +29031,21 @@ def _run_post_processing_worker(task_id, batch_id):
     after successful file verification and processing. This matches sync.py's reliability.
     """
     try:
-        print(f"[Post-Processing] Starting verification for task {task_id}")
+        logger.info(f"[Post-Processing] Starting verification for task {task_id}")
         
         # Retrieve task details from global state
         with tasks_lock:
             if task_id not in download_tasks:
-                print(f"[Post-Processing] Task {task_id} not found in download_tasks")
+                logger.warning(f"[Post-Processing] Task {task_id} not found in download_tasks")
                 return
             task = download_tasks[task_id].copy()
             
         # Check if task was cancelled or already completed during post-processing
         if task['status'] == 'cancelled':
-            print(f"[Post-Processing] Task {task_id} was cancelled, skipping verification")
+            logger.warning(f"[Post-Processing] Task {task_id} was cancelled, skipping verification")
             return
         if task['status'] == 'completed' or task.get('stream_processed'):
-            print(f"[Post-Processing] Task {task_id} already completed by stream processor, skipping verification")
+            logger.info(f"[Post-Processing] Task {task_id} already completed by stream processor, skipping verification")
             return
             
         # Extract file information for verification
@@ -29074,7 +29054,7 @@ def _run_post_processing_worker(task_id, batch_id):
         task_username = task.get('username') or track_info.get('username')
         
         if not task_filename or not task_username:
-            print(f"[Post-Processing] Missing filename or username for task {task_id}")
+            logger.warning(f"[Post-Processing] Missing filename or username for task {task_id}")
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id]['status'] = 'failed'
@@ -29090,39 +29070,39 @@ def _run_post_processing_worker(task_id, batch_id):
         context_key = _make_context_key(task_username, task_filename)
         expected_final_filename = None
         
-        print(f"[Post-Processing] Looking up context with key: {context_key}")
+        logger.info(f"[Post-Processing] Looking up context with key: {context_key}")
         
         with matched_context_lock:
             context = matched_downloads_context.get(context_key)
             # Debug: Show all available context keys
             available_keys = list(matched_downloads_context.keys())
-            print(f"[Post-Processing] Available context keys: {available_keys[:10]}...")  # Show first 10 keys
+            logger.info(f"[Post-Processing] Available context keys: {available_keys[:10]}...")  # Show first 10 keys
             
         if context:
-            print(f"[Post-Processing] Found context for key: {context_key}")
+            logger.info(f"[Post-Processing] Found context for key: {context_key}")
             try:
                 original_search = context.get("original_search_result", {})
-                print(f"[Post-Processing] original_search keys: {list(original_search.keys())}")
+                logger.info(f"[Post-Processing] original_search keys: {list(original_search.keys())}")
                 
                 spotify_clean_title = original_search.get('spotify_clean_title')
                 track_number = original_search.get('track_number')
                 
-                print(f"[Post-Processing] spotify_clean_title: '{spotify_clean_title}', track_number: {track_number}")
+                logger.info(f"[Post-Processing] spotify_clean_title: '{spotify_clean_title}', track_number: {track_number}")
                 
                 if spotify_clean_title and track_number:
                     # Generate expected final filename that stream processor would create
                     # Pattern: f"{track_number:02d} - {clean_title}.flac"
                     sanitized_title = spotify_clean_title.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
                     expected_final_filename = f"{track_number:02d} - {sanitized_title}.flac"
-                    print(f"[Post-Processing] Generated expected final filename: {expected_final_filename}")
+                    logger.info(f"[Post-Processing] Generated expected final filename: {expected_final_filename}")
                 else:
-                    print(f"[Post-Processing] Missing required data - spotify_clean_title: {bool(spotify_clean_title)}, track_number: {bool(track_number)}")
+                    logger.warning(f"[Post-Processing] Missing required data - spotify_clean_title: {bool(spotify_clean_title)}, track_number: {bool(track_number)}")
             except Exception as e:
-                print(f"[Post-Processing] Error generating expected filename: {e}")
+                logger.error(f"[Post-Processing] Error generating expected filename: {e}")
                 import traceback
                 traceback.print_exc()
         else:
-            print(f"[Post-Processing] No context found for key: {context_key}")
+            logger.warning(f"[Post-Processing] No context found for key: {context_key}")
             # Try fuzzy matching with similar keys containing the filename
             # SAFETY: Constrain to same Soulseek username to prevent cross-album
             # metadata contamination during mass downloads (e.g., two albums both
@@ -29134,35 +29114,35 @@ def _run_post_processing_worker(task_id, batch_id):
                 # Use the first similar key found
                 fuzzy_key = similar_keys[0]
                 context = matched_downloads_context.get(fuzzy_key)
-                print(f"[Post-Processing] Found context using fuzzy key matching: {fuzzy_key}")
+                logger.info(f"[Post-Processing] Found context using fuzzy key matching: {fuzzy_key}")
                 
                 # Generate expected final filename using the found context
                 try:
                     original_search = context.get("original_search_result", {})
-                    print(f"[Post-Processing] fuzzy context original_search keys: {list(original_search.keys())}")
+                    logger.info(f"[Post-Processing] fuzzy context original_search keys: {list(original_search.keys())}")
                     
                     spotify_clean_title = original_search.get('spotify_clean_title')
                     track_number = original_search.get('track_number')
                     
-                    print(f"[Post-Processing] fuzzy context spotify_clean_title: '{spotify_clean_title}', track_number: {track_number}")
+                    logger.info(f"[Post-Processing] fuzzy context spotify_clean_title: '{spotify_clean_title}', track_number: {track_number}")
                     
                     if spotify_clean_title and track_number:
                         # Generate expected final filename that stream processor would create
                         # Pattern: f"{track_number:02d} - {clean_title}.flac"
                         sanitized_title = spotify_clean_title.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
                         expected_final_filename = f"{track_number:02d} - {sanitized_title}.flac"
-                        print(f"[Post-Processing] Generated expected final filename from fuzzy match: {expected_final_filename}")
+                        logger.info(f"[Post-Processing] Generated expected final filename from fuzzy match: {expected_final_filename}")
                     else:
-                        print(f"[Post-Processing] Missing required data from fuzzy match - spotify_clean_title: {bool(spotify_clean_title)}, track_number: {bool(track_number)}")
+                        logger.warning(f"[Post-Processing] Missing required data from fuzzy match - spotify_clean_title: {bool(spotify_clean_title)}, track_number: {bool(track_number)}")
                 except Exception as e:
-                    print(f"[Post-Processing] Error generating expected filename from fuzzy match: {e}")
+                    logger.error(f"[Post-Processing] Error generating expected filename from fuzzy match: {e}")
                     import traceback
                     traceback.print_exc()
             else:
-                print(f"[Post-Processing] No similar keys found containing '{task_basename}'")
+                logger.warning(f"[Post-Processing] No similar keys found containing '{task_basename}'")
                 # Show a sample of what keys actually exist for debugging
                 sample_keys = list(matched_downloads_context.keys())[:5]
-                print(f"[Post-Processing] Sample of existing keys: {sample_keys}")
+                logger.info(f"[Post-Processing] Sample of existing keys: {sample_keys}")
         
         # RESILIENT FILE-FINDING LOOP: Try up to 3 times with delays
         found_file = None
@@ -29217,51 +29197,51 @@ def _run_post_processing_worker(task_id, batch_id):
         for retry_count in range(_file_search_max_retries):
             # If we already resolved the file (e.g. via YouTube status), skip searching
             if found_file:
-                print(f"[Post-Processing] Skipping search loop, file already resolved: {found_file}")
+                logger.info(f"[Post-Processing] Skipping search loop, file already resolved: {found_file}")
                 break
 
             # Check if stream processor already completed this task while we were waiting
             with tasks_lock:
                 if task_id in download_tasks:
                     if download_tasks[task_id].get('stream_processed') or download_tasks[task_id]['status'] == 'completed':
-                        print(f"[Post-Processing] Task {task_id} was completed by stream processor during file search - done")
+                        logger.info(f"[Post-Processing] Task {task_id} was completed by stream processor during file search - done")
                         return
 
-            print(f"[Post-Processing] Attempt {retry_count + 1}/{_file_search_max_retries} to find file")
-            print(f"[Post-Processing] Original filename: {task_basename}")
+            logger.warning(f"[Post-Processing] Attempt {retry_count + 1}/{_file_search_max_retries} to find file")
+            logger.info(f"[Post-Processing] Original filename: {task_basename}")
             if expected_final_filename:
-                print(f"[Post-Processing] Expected final filename: {expected_final_filename}")
+                logger.info(f"[Post-Processing] Expected final filename: {expected_final_filename}")
             else:
-                print(f"[Post-Processing] No expected final filename available")
+                logger.warning(f"[Post-Processing] No expected final filename available")
 
             # Strategy 1: Try with original filename in both downloads and transfer
-            print(f"[Post-Processing] Strategy 1: Searching with original filename...")
+            logger.info(f"[Post-Processing] Strategy 1: Searching with original filename...")
             found_file, file_location = _find_completed_file_robust(download_dir, task_filename, transfer_dir)
 
             if found_file:
-                print(f"[Post-Processing] Strategy 1 SUCCESS: Found file with original filename in {file_location}: {found_file}")
+                logger.info(f"[Post-Processing] Strategy 1 SUCCESS: Found file with original filename in {file_location}: {found_file}")
             else:
-                print(f"[Post-Processing] Strategy 1 FAILED: Original filename not found in either location")
+                logger.error(f"[Post-Processing] Strategy 1 FAILED: Original filename not found in either location")
 
             # Strategy 2: If not found and we have an expected final filename, try that in transfer folder
             if not found_file and expected_final_filename:
-                print(f"[Post-Processing] Strategy 2: Searching transfer folder with expected final filename...")
+                logger.info(f"[Post-Processing] Strategy 2: Searching transfer folder with expected final filename...")
                 found_result = _find_completed_file_robust(transfer_dir, expected_final_filename)
                 if found_result and found_result[0]:
                     found_file, file_location = found_result[0], 'transfer'
-                    print(f"[Post-Processing] Strategy 2 SUCCESS: Found file with expected final filename: {found_file}")
+                    logger.info(f"[Post-Processing] Strategy 2 SUCCESS: Found file with expected final filename: {found_file}")
                 else:
-                    print(f"[Post-Processing] Strategy 2 FAILED: Expected final filename not found in transfer folder")
+                    logger.error(f"[Post-Processing] Strategy 2 FAILED: Expected final filename not found in transfer folder")
             elif not expected_final_filename:
-                print(f"[Post-Processing] Strategy 2 SKIPPED: No expected final filename available")
+                logger.warning(f"[Post-Processing] Strategy 2 SKIPPED: No expected final filename available")
 
             if found_file:
-                print(f"[Post-Processing] FILE FOUND after {retry_count + 1} attempts in {file_location}: {found_file}")
+                logger.warning(f"[Post-Processing] FILE FOUND after {retry_count + 1} attempts in {file_location}: {found_file}")
                 break
             else:
-                print(f"[Post-Processing] All search strategies failed on attempt {retry_count + 1}/{_file_search_max_retries}")
+                logger.error(f"[Post-Processing] All search strategies failed on attempt {retry_count + 1}/{_file_search_max_retries}")
                 if retry_count < _file_search_max_retries - 1:  # Don't sleep on final attempt
-                    print(f"[Post-Processing] Waiting 5 seconds before next attempt...")
+                    logger.info(f"[Post-Processing] Waiting 5 seconds before next attempt...")
                     time.sleep(5)
 
         if not found_file:
@@ -29271,7 +29251,7 @@ def _run_post_processing_worker(task_id, batch_id):
             with tasks_lock:
                 if task_id in download_tasks:
                     if download_tasks[task_id].get('stream_processed') or download_tasks[task_id]['status'] == 'completed':
-                        print(f"[Post-Processing] Task {task_id} was completed by stream processor - not marking as failed")
+                        logger.error(f"[Post-Processing] Task {task_id} was completed by stream processor - not marking as failed")
                         return
                     download_tasks[task_id]['status'] = 'failed'
                     download_tasks[task_id]['error_message'] = f'File not found on disk after {_file_search_max_retries} search attempts. Expected: {os.path.basename(task_filename)}'
@@ -29280,7 +29260,7 @@ def _run_post_processing_worker(task_id, batch_id):
             
         # Handle file found in transfer folder - already completed by stream processor
         if file_location == 'transfer':
-            print(f"[Post-Processing] File found in transfer folder - already completed by stream processor: {found_file}")
+            logger.info(f"[Post-Processing] File found in transfer folder - already completed by stream processor: {found_file}")
             
             # Check if metadata enhancement was completed
             metadata_enhanced = False
@@ -29289,7 +29269,7 @@ def _run_post_processing_worker(task_id, batch_id):
                     metadata_enhanced = download_tasks[task_id].get('metadata_enhanced', False)
             
             if not metadata_enhanced:
-                print(f"[Post-Processing] File in transfer folder missing metadata enhancement - completing now")
+                logger.warning(f"[Post-Processing] File in transfer folder missing metadata enhancement - completing now")
                 # Attempt to complete metadata enhancement using context
                 if context and expected_final_filename:
                     try:
@@ -29308,13 +29288,13 @@ def _run_post_processing_worker(task_id, batch_id):
                             
                             # If no track number in context, extract from filename 
                             if track_number == 1 and found_file:
-                                print(f"[Verification] No track_number in context, extracting from filename: {os.path.basename(found_file)}")
+                                logger.warning(f"[Verification] No track_number in context, extracting from filename: {os.path.basename(found_file)}")
                                 track_number = _extract_track_number_from_filename(found_file)
-                                print(f"   -> Extracted track number: {track_number}")
+                                logger.info(f"   -> Extracted track number: {track_number}")
                             
                             # Ensure track_number is valid
                             if not isinstance(track_number, int) or track_number < 1:
-                                print(f"[Verification] Invalid track number ({track_number}), defaulting to 1")
+                                logger.error(f"[Verification] Invalid track number ({track_number}), defaulting to 1")
                                 track_number = 1
                             
                             # Get clean track name 
@@ -29347,42 +29327,42 @@ def _run_post_processing_worker(task_id, batch_id):
                                     consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album_ctx)
                                     album_info['album_name'] = consistent_album_name
                                 except Exception as group_err:
-                                    print(f"[Verification] Album grouping failed, using raw name: {group_err}")
+                                    logger.error(f"[Verification] Album grouping failed, using raw name: {group_err}")
                             else:
-                                print(f"[Verification] Explicit album download - preserving Spotify album name: '{album_info['album_name']}'")
+                                logger.info(f"[Verification] Explicit album download - preserving Spotify album name: '{album_info['album_name']}'")
 
-                            print(f"[Verification] Created proper album_info - track_number: {track_number}, album: {album_info['album_name']}")
+                            logger.info(f"[Verification] Created proper album_info - track_number: {track_number}, album: {album_info['album_name']}")
 
-                            print(f"[Post-Processing] Attempting metadata enhancement for: {found_file}")
-                            print(f"[Metadata Input] Verification worker - artist: '{spotify_artist.get('name', 'MISSING')}' (id: {spotify_artist.get('id', 'MISSING')})")
-                            print(f"[Metadata Input] Verification worker - album: '{album_info.get('album_name', 'MISSING')}', track#: {album_info.get('track_number', 'MISSING')}, source: {album_info.get('source', 'unknown')}")
+                            logger.info(f"[Post-Processing] Attempting metadata enhancement for: {found_file}")
+                            logger.warning(f"[Metadata Input] Verification worker - artist: '{spotify_artist.get('name', 'MISSING')}' (id: {spotify_artist.get('id', 'MISSING')})")
+                            logger.warning(f"[Metadata Input] Verification worker - album: '{album_info.get('album_name', 'MISSING')}', track#: {album_info.get('track_number', 'MISSING')}, source: {album_info.get('source', 'unknown')}")
                             enhancement_success = _enhance_file_metadata(found_file, context, spotify_artist, album_info)
 
                             if enhancement_success:
                                 with tasks_lock:
                                     if task_id in download_tasks:
                                         download_tasks[task_id]['metadata_enhanced'] = True
-                                print(f"[Post-Processing] Successfully completed metadata enhancement for: {os.path.basename(found_file)}")
+                                logger.info(f"[Post-Processing] Successfully completed metadata enhancement for: {os.path.basename(found_file)}")
                             else:
-                                print(f"[Post-Processing] Metadata enhancement returned False for: {os.path.basename(found_file)}")
+                                logger.info(f"[Post-Processing] Metadata enhancement returned False for: {os.path.basename(found_file)}")
                         else:
-                            print(f"[Post-Processing] Missing spotify_artist or spotify_album in context")
-                            print(f"[Post-Processing] spotify_artist: {spotify_artist is not None}, spotify_album: {spotify_album is not None}")
+                            logger.warning(f"[Post-Processing] Missing spotify_artist or spotify_album in context")
+                            logger.info(f"[Post-Processing] spotify_artist: {spotify_artist is not None}, spotify_album: {spotify_album is not None}")
                             # Wipe source tags even without full enhancement — prevents
                             # Soulseek uploader's MusicBrainz IDs from causing album splits
                             if found_file and os.path.exists(found_file):
                                 _wipe_source_tags(found_file)
                     except Exception as enhancement_error:
                         import traceback
-                        print(f"[Post-Processing] Error during metadata enhancement: {enhancement_error}\n{traceback.format_exc()}")
+                        logger.error(f"[Post-Processing] Error during metadata enhancement: {enhancement_error}\n{traceback.format_exc()}")
                         if found_file and os.path.exists(found_file):
                             _wipe_source_tags(found_file)
                 else:
-                    print(f"[Post-Processing] Cannot complete metadata enhancement - missing context or expected filename")
+                    logger.warning(f"[Post-Processing] Cannot complete metadata enhancement - missing context or expected filename")
                     if found_file and os.path.exists(found_file):
                         _wipe_source_tags(found_file)
             else:
-                print(f"[Post-Processing] File already has metadata enhancement completed")
+                logger.info(f"[Post-Processing] File already has metadata enhancement completed")
             
             with tasks_lock:
                 if task_id in download_tasks:
@@ -29393,7 +29373,7 @@ def _run_post_processing_worker(task_id, batch_id):
             with matched_context_lock:
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
-                    print(f"[Verification] Cleaned up context after successful verification: {context_key}")
+                    logger.info(f"[Verification] Cleaned up context after successful verification: {context_key}")
             
             _on_download_completed(batch_id, task_id, success=True)
             return
@@ -29408,12 +29388,12 @@ def _run_post_processing_worker(task_id, batch_id):
                 context = matched_downloads_context.get(context_key)
                 
             if context:
-                print(f"[Post-Processing] Found matched context, running full post-processing for: {context_key}")
+                logger.info(f"[Post-Processing] Found matched context, running full post-processing for: {context_key}")
                 # Run the existing post-processing logic with verification
                 _post_process_matched_download_with_verification(context_key, context, found_file, task_id, batch_id)
             else:
                 # No matched context - just mark as completed since file exists
-                print(f"[Post-Processing] No matched context, marking as completed: {os.path.basename(found_file)}")
+                logger.warning(f"[Post-Processing] No matched context, marking as completed: {os.path.basename(found_file)}")
                 with tasks_lock:
                     if task_id in download_tasks:
                         track_info = download_tasks[task_id].get('track_info')
@@ -29423,13 +29403,13 @@ def _run_post_processing_worker(task_id, batch_id):
                 with matched_context_lock:
                     if context_key in matched_downloads_context:
                         del matched_downloads_context[context_key]
-                        print(f"[Verification] Cleaned up leftover context: {context_key}")
+                        logger.info(f"[Verification] Cleaned up leftover context: {context_key}")
                 
                 # Call completion callback since there's no other post-processing to handle it
                 _on_download_completed(batch_id, task_id, success=True)
                 
         except Exception as processing_error:
-            print(f"[Post-Processing] Processing failed for task {task_id}: {processing_error}")
+            logger.error(f"[Post-Processing] Processing failed for task {task_id}: {processing_error}")
             with tasks_lock:
                 if task_id in download_tasks:
                     download_tasks[task_id]['status'] = 'failed'
@@ -29437,7 +29417,7 @@ def _run_post_processing_worker(task_id, batch_id):
             _on_download_completed(batch_id, task_id, success=False)
             
     except Exception as e:
-        print(f"[Post-Processing] Critical error in post-processing worker for task {task_id}: {e}")
+        logger.error(f"[Post-Processing] Critical error in post-processing worker for task {task_id}: {e}")
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['status'] = 'failed'
@@ -29454,33 +29434,33 @@ def _download_track_worker(task_id, batch_id=None):
         # Retrieve task details from global state
         with tasks_lock:
             if task_id not in download_tasks:
-                print(f"[Modal Worker] Task {task_id} not found in download_tasks")
+                logger.warning(f"[Modal Worker] Task {task_id} not found in download_tasks")
                 return
             task = download_tasks[task_id].copy()
             
         # Cancellation Checkpoint 1: Before doing anything
         with tasks_lock:
             if task_id not in download_tasks:
-                print(f"[Modal Worker] Task {task_id} was deleted before starting")
+                logger.info(f"[Modal Worker] Task {task_id} was deleted before starting")
                 return
             if download_tasks[task_id]['status'] == 'cancelled':
-                print(f"[Modal Worker] Task {task_id} cancelled before starting")
+                logger.warning(f"[Modal Worker] Task {task_id} cancelled before starting")
                 # V2 FIX: Don't call _on_download_completed for cancelled V2 tasks
                 # V2 system handles worker slot freeing in atomic cancel function
                 task_playlist_id = download_tasks[task_id].get('playlist_id')
                 if task_playlist_id:
-                    print(f"[Modal Worker] V2 task {task_id} cancelled - worker slot already freed by V2 system")
+                    logger.warning(f"[Modal Worker] V2 task {task_id} cancelled - worker slot already freed by V2 system")
                     return  # V2 system already handled worker slot management
                 elif batch_id:
                     # Legacy system - use old completion callback
-                    print(f"[Modal Worker] Legacy task {task_id} cancelled - using legacy completion callback")
+                    logger.warning(f"[Modal Worker] Legacy task {task_id} cancelled - using legacy completion callback")
                     _on_download_completed(batch_id, task_id, success=False)
                 return
 
         track_data = task['track_info']
         track_name = track_data.get('name', 'Unknown Track')
         
-        print(f"[Modal Worker] Task {task_id} starting search for track: '{track_name}'")
+        logger.info(f"[Modal Worker] Task {task_id} starting search for track: '{track_name}'")
         
         # Recreate a SpotifyTrack object for the matching engine
         # Handle both string format and Spotify API format for artists
@@ -29511,7 +29491,7 @@ def _download_track_worker(task_id, batch_id=None):
             duration_ms=track_data.get('duration_ms', 0),
             popularity=track_data.get('popularity', 0)
         )
-        print(f"[Modal Worker] Starting download task for: {track.name} by {track.artists[0] if track.artists else 'Unknown'}")
+        logger.info(f"[Modal Worker] Starting download task for: {track.name} by {track.artists[0] if track.artists else 'Unknown'}")
 
         # === SOURCE REUSE: Check batch's last good source before searching ===
         if _try_source_reuse(task_id, batch_id, track):
@@ -29585,8 +29565,8 @@ def _download_track_worker(task_id, batch_id=None):
                 seen.add(query.lower())
         
         search_queries = unique_queries
-        print(f"[Modal Worker] Generated {len(search_queries)} smart search queries for '{track.name}': {search_queries}")
-        print(f"[Modal Worker] About to start search loop for task {task_id} (track: '{track.name}')")
+        logger.info(f"[Modal Worker] Generated {len(search_queries)} smart search queries for '{track.name}': {search_queries}")
+        logger.info(f"[Modal Worker] About to start search loop for task {task_id} (track: '{track.name}')")
 
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages
@@ -29595,29 +29575,29 @@ def _download_track_worker(task_id, batch_id=None):
             # Cancellation check before each query
             with tasks_lock:
                 if task_id not in download_tasks:
-                    print(f"[Modal Worker] Task {task_id} was deleted during query {query_index + 1}")
+                    logger.debug(f"[Modal Worker] Task {task_id} was deleted during query {query_index + 1}")
                     return
                 if download_tasks[task_id]['status'] == 'cancelled':
-                    print(f"[Modal Worker] Task {task_id} cancelled during query {query_index + 1}")
+                    logger.debug(f"[Modal Worker] Task {task_id} cancelled during query {query_index + 1}")
                     # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
                     return
                 download_tasks[task_id]['current_query_index'] = query_index
                     
-            print(f"[Modal Worker] Query {query_index + 1}/{len(search_queries)}: '{query}'")
-            print(f"[DEBUG] About to call soulseek search for task {task_id}")
+            logger.debug(f"[Modal Worker] Query {query_index + 1}/{len(search_queries)}: '{query}'")
+            logger.debug(f"[DEBUG] About to call soulseek search for task {task_id}")
             
             try:
                 # Perform search with timeout
                 tracks_result, _ = run_async(soulseek_client.search(query, timeout=30))
-                print(f"[DEBUG] Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
+                logger.debug(f"[DEBUG] Search completed for task {task_id}, got {len(tracks_result) if tracks_result else 0} results")
                 
                 # CRITICAL: Check cancellation immediately after search returns
                 with tasks_lock:
                     if task_id not in download_tasks:
-                        print(f"[Modal Worker] Task {task_id} was deleted after search returned")
+                        logger.info(f"[Modal Worker] Task {task_id} was deleted after search returned")
                         return
                     if download_tasks[task_id]['status'] == 'cancelled':
-                        print(f"[Modal Worker] Task {task_id} cancelled after search returned - ignoring results")
+                        logger.warning(f"[Modal Worker] Task {task_id} cancelled after search returned - ignoring results")
                         # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
                         # The cancellation endpoint already handles batch management properly
                         return
@@ -29627,15 +29607,15 @@ def _download_track_worker(task_id, batch_id=None):
                     # Validate candidates using GUI's get_valid_candidates logic
                     candidates = get_valid_candidates(tracks_result, track, query)
                     if candidates:
-                        print(f"[Modal Worker] Found {len(candidates)} valid candidates for query '{query}'")
+                        logger.debug(f"[Modal Worker] Found {len(candidates)} valid candidates for query '{query}'")
 
                         # CRITICAL: Check cancellation before processing candidates
                         with tasks_lock:
                             if task_id not in download_tasks:
-                                print(f"[Modal Worker] Task {task_id} was deleted before processing candidates")
+                                logger.info(f"[Modal Worker] Task {task_id} was deleted before processing candidates")
                                 return
                             if download_tasks[task_id]['status'] == 'cancelled':
-                                print(f"[Modal Worker] Task {task_id} cancelled before processing candidates")
+                                logger.warning(f"[Modal Worker] Task {task_id} cancelled before processing candidates")
                                 # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
                                 return
                             # Store candidates for retry fallback (like GUI)
@@ -29646,7 +29626,7 @@ def _download_track_worker(task_id, batch_id=None):
                         if success:
                             # Download initiated successfully - let the download monitoring system handle completion
                             if batch_id:
-                                print(f"[Modal Worker] Download initiated successfully for task {task_id} - monitoring will handle completion")
+                                logger.info(f"[Modal Worker] Download initiated successfully for task {task_id} - monitoring will handle completion")
                             # Store this source for batch reuse
                             with tasks_lock:
                                 used_filename = download_tasks.get(task_id, {}).get('filename')
@@ -29663,7 +29643,7 @@ def _download_track_worker(task_id, batch_id=None):
                     search_diagnostics.append(f'"{query}": no results found')
 
             except Exception as e:
-                print(f"[Modal Worker] Search failed for query '{query}': {e}")
+                logger.debug(f"[Modal Worker] Search failed for query '{query}': {e}")
                 search_diagnostics.append(f'"{query}": search error — {e}')
                 continue
 
@@ -29695,7 +29675,7 @@ def _download_track_worker(task_id, batch_id=None):
                 # harmless (streaming sources return fast).
                 remaining_sources = [s for s in hybrid_order[1:] if s in source_clients and source_clients[s]]
                 if remaining_sources:
-                    print(f"[Hybrid Fallback] Primary source had no valid matches. Trying fallback sources: {remaining_sources}")
+                    logger.warning(f"[Hybrid Fallback] Primary source had no valid matches. Trying fallback sources: {remaining_sources}")
 
                 for fallback_source in remaining_sources:
                     fb_client = source_clients[fallback_source]
@@ -29705,27 +29685,27 @@ def _download_track_worker(task_id, batch_id=None):
                     # Use first 2 queries only for speed
                     for fb_query in search_queries[:2]:
                         try:
-                            print(f"[Hybrid Fallback] Trying {fallback_source}: '{fb_query}'")
+                            logger.warning(f"[Hybrid Fallback] Trying {fallback_source}: '{fb_query}'")
                             fb_results, _ = run_async(fb_client.search(fb_query, timeout=20))
                             if not fb_results:
                                 continue
                             fb_candidates = get_valid_candidates(fb_results, track, fb_query)
                             if fb_candidates:
-                                print(f"[Hybrid Fallback] {fallback_source} found {len(fb_candidates)} valid candidates!")
+                                logger.warning(f"[Hybrid Fallback] {fallback_source} found {len(fb_candidates)} valid candidates!")
                                 success = _attempt_download_with_candidates(task_id, fb_candidates, track, batch_id)
                                 if success:
                                     return
                         except Exception as e:
-                            print(f"[Hybrid Fallback] {fallback_source} search failed: {e}")
+                            logger.error(f"[Hybrid Fallback] {fallback_source} search failed: {e}")
                             continue
 
-                    print(f"[Hybrid Fallback] {fallback_source} returned no valid candidates")
+                    logger.warning(f"[Hybrid Fallback] {fallback_source} returned no valid candidates")
 
             except Exception as e:
-                print(f"[Hybrid Fallback] Error in fallback logic: {e}")
+                logger.error(f"[Hybrid Fallback] Error in fallback logic: {e}")
 
         # If we get here, all search queries and hybrid fallbacks failed
-        print(f"[Modal Worker] No valid candidates found for '{track.name}' after trying all {len(search_queries)} queries.")
+        logger.warning(f"[Modal Worker] No valid candidates found for '{track.name}' after trying all {len(search_queries)} queries.")
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['status'] = 'not_found'
@@ -29740,12 +29720,12 @@ def _download_track_worker(task_id, batch_id=None):
             try:
                 _on_download_completed(batch_id, task_id, success=False)
             except Exception as completion_error:
-                print(f"Error in batch completion callback for {task_id}: {completion_error}")
+                logger.error(f"Error in batch completion callback for {task_id}: {completion_error}")
 
     except Exception as e:
         import traceback
         track_name_safe = locals().get('track_name', 'unknown')  # Safe fallback for track_name
-        print(f"CRITICAL ERROR in download task for '{track_name_safe}' (task_id: {task_id}): {e}")
+        logger.error(f"CRITICAL ERROR in download task for '{track_name_safe}' (task_id: {task_id}): {e}")
         traceback.print_exc()
         
         # Update task status safely with timeout
@@ -29756,27 +29736,27 @@ def _download_track_worker(task_id, batch_id=None):
                     if task_id in download_tasks:
                         download_tasks[task_id]['status'] = 'failed'
                         download_tasks[task_id]['error_message'] = f'Unexpected error during download: {type(e).__name__}: {e}'
-                        print(f"[Exception Recovery] Set task {task_id} status to 'failed'")
+                        logger.error(f"[Exception Recovery] Set task {task_id} status to 'failed'")
                 finally:
                     tasks_lock.release()
             else:
-                print(f"[Exception Recovery] Could not acquire lock to update task {task_id} status")
+                logger.error(f"[Exception Recovery] Could not acquire lock to update task {task_id} status")
         except Exception as status_error:
-            print(f"Error updating task status in exception handler: {status_error}")
+            logger.error(f"Error updating task status in exception handler: {status_error}")
         
         # Notify batch manager that this task completed (failed) - THREAD SAFE with RECOVERY
         if batch_id:
             try:
                 _on_download_completed(batch_id, task_id, success=False)
-                print(f"[Exception Recovery] Successfully freed worker slot for task {task_id}")
+                logger.error(f"[Exception Recovery] Successfully freed worker slot for task {task_id}")
             except Exception as completion_error:
-                print(f"[Exception Recovery] Error in batch completion callback for {task_id}: {completion_error}")
+                logger.error(f"[Exception Recovery] Error in batch completion callback for {task_id}: {completion_error}")
                 # CRITICAL: If batch completion fails, we need to manually recover the worker slot
                 try:
-                    print(f"[Exception Recovery] Attempting manual worker slot recovery for batch {batch_id}")
+                    logger.error(f"[Exception Recovery] Attempting manual worker slot recovery for batch {batch_id}")
                     _recover_worker_slot(batch_id, task_id)
                 except Exception as recovery_error:
-                    print(f"[Exception Recovery] FATAL: Could not recover worker slot: {recovery_error}")
+                    logger.error(f"[Exception Recovery] FATAL: Could not recover worker slot: {recovery_error}")
 
 def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None):
     """
@@ -29797,10 +29777,10 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
         # Check cancellation before each attempt
         with tasks_lock:
             if task_id not in download_tasks:
-                print(f"[Modal Worker] Task {task_id} was deleted during candidate {candidate_index + 1}")
+                logger.info(f"[Modal Worker] Task {task_id} was deleted during candidate {candidate_index + 1}")
                 return False
             if download_tasks[task_id]['status'] == 'cancelled':
-                print(f"[Modal Worker] Task {task_id} cancelled during candidate {candidate_index + 1}")
+                logger.warning(f"[Modal Worker] Task {task_id} cancelled during candidate {candidate_index + 1}")
                 # Don't call _on_download_completed for cancelled tasks as it can stop monitoring
                 return False
             download_tasks[task_id]['current_candidate_index'] = candidate_index
@@ -29808,14 +29788,14 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
         # Create source key to avoid duplicate attempts (like GUI)
         source_key = f"{candidate.username}_{candidate.filename}"
         if source_key in used_sources:
-            print(f"[Modal Worker] Skipping already tried source: {source_key}")
+            logger.info(f"[Modal Worker] Skipping already tried source: {source_key}")
             continue
 
         # Blacklist check — skip sources the user has flagged as bad matches
         try:
             _bl_db = get_database()
             if _bl_db.is_blacklisted(candidate.username, candidate.filename):
-                print(f"[Modal Worker] Skipping blacklisted source: {source_key}")
+                logger.info(f"[Modal Worker] Skipping blacklisted source: {source_key}")
                 continue
         except Exception:
             pass
@@ -29825,9 +29805,9 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
         with tasks_lock:
             if task_id in download_tasks:
                 download_tasks[task_id]['used_sources'].add(source_key)
-                print(f"[Modal Worker] Marked source as used before download attempt: {source_key}")
+                logger.info(f"[Modal Worker] Marked source as used before download attempt: {source_key}")
             
-        print(f"[Modal Worker] Trying candidate {candidate_index + 1}/{len(candidates)}: {candidate.filename} (Confidence: {candidate.confidence:.2f})")
+        logger.info(f"[Modal Worker] Trying candidate {candidate_index + 1}/{len(candidates)}: {candidate.filename} (Confidence: {candidate.confidence:.2f})")
         
         try:
             # Update task status to downloading
@@ -29875,7 +29855,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                     'album_type': explicit_album.get('album_type', 'album'),
                     'artists': explicit_album.get('artists', [{'name': spotify_artist_context.get('name', '')}])
                 }
-                print(f"[Explicit Context] Using real album data: '{spotify_album_context['name']}' ({spotify_album_context['album_type']}, {spotify_album_context['total_discs']} disc(s))")
+                logger.info(f"[Explicit Context] Using real album data: '{spotify_album_context['name']}' ({spotify_album_context['album_type']}, {spotify_album_context['total_discs']} disc(s))")
             else:
                 # Fallback to generic context for playlists/wishlists
                 # Extract album metadata from track_info if available (discovery enriches tracks with full album objects)
@@ -29913,7 +29893,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
             size = download_payload.get('size', 0)
 
             if not username or not filename:
-                print(f"[Modal Worker] Invalid candidate data: missing username or filename")
+                logger.error(f"[Modal Worker] Invalid candidate data: missing username or filename")
                 continue
 
             # PROTECTION: Check if there's already an active download for this task
@@ -29923,12 +29903,12 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                     current_download_id = download_tasks[task_id].get('download_id')
             
             if current_download_id:
-                print(f"[Modal Worker] Task {task_id} already has active download {current_download_id} - skipping new download attempt")
-                print(f"[Modal Worker] This prevents race condition where multiple retries start overlapping downloads")
+                logger.info(f"[Modal Worker] Task {task_id} already has active download {current_download_id} - skipping new download attempt")
+                logger.info(f"[Modal Worker] This prevents race condition where multiple retries start overlapping downloads")
                 continue
 
             # Initiate download
-            print(f"[Modal Worker] Starting download: {username} / {os.path.basename(filename)}")
+            logger.info(f"[Modal Worker] Starting download: {username} / {os.path.basename(filename)}")
             download_id = run_async(soulseek_client.download(username, filename, size))
 
             if download_id:
@@ -29947,7 +29927,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         enhanced_payload['spotify_clean_artist'] = track.artists[0] if track.artists else enhanced_payload.get('artist', '')
                         # Preserve all artists for metadata tagging
                         enhanced_payload['artists'] = [{'name': artist} for artist in track.artists] if track.artists else []
-                        print(f"[Context] Using clean Spotify metadata - Album: '{track.album}', Title: '{track.name}'")
+                        logger.info(f"[Context] Using clean Spotify metadata - Album: '{track.album}', Title: '{track.name}'")
                         
                         # Get track_number and disc_number — prefer track data we already have,
                         # fall back to detailed API call only if needed
@@ -29960,14 +29940,14 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                             enhanced_payload['track_number'] = tn
                             enhanced_payload['disc_number'] = dn
                             got_track_number = True
-                            print(f"[Context] Added track_number from track_info: {tn}, disc_number: {dn}")
+                            logger.info(f"[Context] Added track_number from track_info: {tn}, disc_number: {dn}")
 
                         # 2. Try the track object itself (from album tracks response)
                         if not got_track_number and hasattr(track, 'track_number') and track.track_number:
                             enhanced_payload['track_number'] = track.track_number
                             enhanced_payload['disc_number'] = getattr(track, 'disc_number', 1) or 1
                             got_track_number = True
-                            print(f"[Context] Added track_number from track object: {track.track_number}, disc_number: {enhanced_payload['disc_number']}")
+                            logger.info(f"[Context] Added track_number from track object: {track.track_number}, disc_number: {enhanced_payload['disc_number']}")
 
                         # 3. Last resort — fetch from metadata source API
                         if not got_track_number and hasattr(track, 'id') and track.id:
@@ -29977,7 +29957,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                                     enhanced_payload['track_number'] = detailed_track['track_number']
                                     enhanced_payload['disc_number'] = detailed_track.get('disc_number', 1)
                                     got_track_number = True
-                                    print(f"[Context] Added track_number from API: {detailed_track['track_number']}, disc_number: {enhanced_payload['disc_number']}")
+                                    logger.info(f"[Context] Added track_number from API: {detailed_track['track_number']}, disc_number: {enhanced_payload['disc_number']}")
 
                                     # Backfill album metadata from detailed track when context
                                     # has incomplete data (missing release_date, total_tracks, etc.)
@@ -29985,7 +29965,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                                         dt_album = detailed_track['album']
                                         if not spotify_album_context.get('release_date') and dt_album.get('release_date'):
                                             spotify_album_context['release_date'] = dt_album['release_date']
-                                            print(f"[Context] Backfilled release_date from API: {dt_album['release_date']}")
+                                            logger.info(f"[Context] Backfilled release_date from API: {dt_album['release_date']}")
                                         if not spotify_album_context.get('album_type') and dt_album.get('album_type'):
                                             spotify_album_context['album_type'] = dt_album['album_type']
                                         if not spotify_album_context.get('total_tracks') and dt_album.get('total_tracks'):
@@ -29995,18 +29975,18 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                                         if not spotify_album_context.get('image_url') and dt_album.get('images'):
                                             spotify_album_context['image_url'] = dt_album['images'][0].get('url', '')
                             except Exception as e:
-                                print(f"[Context] API track details failed: {e}")
+                                logger.error(f"[Context] API track details failed: {e}")
 
                         if not got_track_number:
                             enhanced_payload.setdefault('track_number', 0)
                             enhanced_payload.setdefault('disc_number', 1)
-                            print(f"[Context] No track_number found from any source")
+                            logger.warning(f"[Context] No track_number found from any source")
                         
                         # Determine if this should be treated as album download
                         # First check if we have explicit album context from artist page
                         if has_explicit_context:
                             is_album_context = True
-                            print(f"[Context] Using explicit album context flag from artist page")
+                            logger.info(f"[Context] Using explicit album context flag from artist page")
                         else:
                             # Fall back to guessing based on clean data
                             is_album_context = (
@@ -30025,7 +30005,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                             enhanced_payload['artists'] = [{'name': enhanced_payload['artist']}]
                         enhanced_payload['track_number'] = track_info.get('track_number', 1)  # Fallback when no clean Spotify data
                         is_album_context = False
-                        print(f"[Context] Using fallback data - no clean Spotify metadata available, track_number={enhanced_payload['track_number']}")
+                        logger.warning(f"[Context] Using fallback data - no clean Spotify metadata available, track_number={enhanced_payload['track_number']}")
                     
                     matched_downloads_context[context_key] = {
                         "spotify_artist": spotify_artist_context,
@@ -30039,21 +30019,21 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         "_download_username": username,  # Source username for AcoustID skip logic
                     }
 
-                    print(f"[Context] Set is_album_download: {is_album_context} (has clean data: {has_clean_spotify_data})")
-                    print(f"[Debug] Context creation - track_info: {track_info is not None}, playlist_folder_mode: {track_info.get('_playlist_folder_mode', False) if track_info else False}")
+                    logger.info(f"[Context] Set is_album_download: {is_album_context} (has clean data: {has_clean_spotify_data})")
+                    logger.debug(f"[Debug] Context creation - track_info: {track_info is not None}, playlist_folder_mode: {track_info.get('_playlist_folder_mode', False) if track_info else False}")
                 
                 # Update task with successful download info
                 with tasks_lock:
                     if task_id in download_tasks:
                         # PHASE 3: Final cancellation check after download started (GUI PARITY)
                         if download_tasks[task_id]['status'] == 'cancelled':
-                            print(f"[Modal Worker] Task {task_id} cancelled after download {download_id} started - attempting to cancel download")
+                            logger.warning(f"[Modal Worker] Task {task_id} cancelled after download {download_id} started - attempting to cancel download")
                             # Try to cancel the download immediately
                             try:
                                 run_async(soulseek_client.cancel_download(download_id, username, remove=True))
-                                print(f"Successfully cancelled active download {download_id}")
+                                logger.warning(f"Successfully cancelled active download {download_id}")
                             except Exception as cancel_error:
-                                print(f"Warning: Failed to cancel active download {download_id}: {cancel_error}")
+                                logger.error(f"Warning: Failed to cancel active download {download_id}: {cancel_error}")
                             
                             # Free worker slot
                             if batch_id:
@@ -30067,10 +30047,10 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                         download_tasks[task_id]['username'] = username
                         download_tasks[task_id]['filename'] = filename
                         
-                print(f"[Modal Worker] Download started successfully for '{filename}'. Download ID: {download_id}")
+                logger.info(f"[Modal Worker] Download started successfully for '{filename}'. Download ID: {download_id}")
                 return True  # Success!
             else:
-                print(f"[Modal Worker] Failed to start download for '{filename}'")
+                logger.error(f"[Modal Worker] Failed to start download for '{filename}'")
                 # Reset status back to searching for next attempt
                 with tasks_lock:
                     if task_id in download_tasks:
@@ -30079,7 +30059,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
                 
         except Exception as e:
             import traceback
-            print(f"[Modal Worker] Error attempting download for '{candidate.filename}': {e}")
+            logger.error(f"[Modal Worker] Error attempting download for '{candidate.filename}': {e}")
             traceback.print_exc()
             # Reset status back to searching for next attempt
             with tasks_lock:
@@ -30088,7 +30068,7 @@ def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None)
             continue
 
     # All candidates failed
-    print(f"[Modal Worker] All {len(candidates)} candidates failed for '{track.name}'")
+    logger.error(f"[Modal Worker] All {len(candidates)} candidates failed for '{track.name}'")
     return False
 
 # ── Staging folder match cache (per-batch, avoids re-scanning for every track) ──
@@ -30129,7 +30109,7 @@ def _get_staging_file_cache(batch_id):
                 'extension': ext,
             })
 
-    print(f"[Staging] Scanned {len(files)} audio files in staging folder")
+    logger.info(f"[Staging] Scanned {len(files)} audio files in staging folder")
     with _staging_cache_lock:
         _staging_cache[batch_id] = files
     return files
@@ -30197,7 +30177,7 @@ def _try_staging_match(task_id, batch_id, track):
     if not best_match or best_score < 0.75:
         return False
 
-    print(f"[Staging] Match found for '{track_title}' by '{track_artist}': "
+    logger.info(f"[Staging] Match found for '{track_title}' by '{track_artist}': "
           f"{os.path.basename(best_match['full_path'])} (score: {best_score:.2f})")
 
     # Copy the file to the transfer folder
@@ -30214,7 +30194,7 @@ def _try_staging_match(task_id, batch_id, track):
 
         import shutil
         shutil.copy2(best_match['full_path'], dest_path)
-        print(f"[Staging] Copied to transfer: {dest_path}")
+        logger.info(f"[Staging] Copied to transfer: {dest_path}")
 
         # Mark task as completed with staging context
         with tasks_lock:
@@ -30334,7 +30314,7 @@ def _try_staging_match(task_id, batch_id, track):
         return True
 
     except Exception as e:
-        print(f"[Staging] Failed to use staging file: {e}")
+        logger.error(f"[Staging] Failed to use staging file: {e}")
         return False
 
 
@@ -30550,7 +30530,7 @@ def start_playlist_missing_downloads(playlist_id):
         missing_tracks = [t for t in missing_tracks if not _is_explicit_blocked(t.get('track', t))]
         skipped = before_count - len(missing_tracks)
         if skipped > 0:
-            print(f"[Content Filter] Filtered out {skipped} explicit track(s) from playlist download")
+            logger.warning(f"[Content Filter] Filtered out {skipped} explicit track(s) from playlist download")
         if not missing_tracks:
             return jsonify({"success": False, "error": "All tracks were filtered by explicit content setting"}), 400
 
@@ -30611,7 +30591,7 @@ def start_playlist_missing_downloads(playlist_id):
         return jsonify({"success": True, "batch_id": batch_id, "message": f"Queued {len(missing_tracks)} downloads for processing."})
         
     except Exception as e:
-        print(f"Error starting missing downloads: {e}")
+        logger.error(f"Error starting missing downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/active-processes', methods=['GET'])
@@ -30669,7 +30649,7 @@ def get_active_processes():
                 "download_process_id": state.get('download_process_id')  # batch_id for download modal rehydration
             })
     
-    print(f"Active processes check: {len([p for p in active_processes if p['type'] == 'batch'])} download batches, {len([p for p in active_processes if p['type'] == 'youtube_playlist'])} YouTube playlists")
+    logger.info(f"Active processes check: {len([p for p in active_processes if p['type'] == 'batch'])} download batches, {len([p for p in active_processes if p['type'] == 'youtube_playlist'])} YouTube playlists")
     return jsonify({"active_processes": active_processes})
 
 def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
@@ -30719,21 +30699,21 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                         transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
                         found_file, file_location = _find_completed_file_robust(download_dir, task_filename, transfer_dir)
                         if found_file:
-                            print(f"[Safety Valve] Task {task_id} stuck but file found in {file_location} — routing to post-processing")
+                            logger.info(f"[Safety Valve] Task {task_id} stuck but file found in {file_location} — routing to post-processing")
                             task['status'] = 'post_processing'
                             task['status_change_time'] = current_time
                             missing_download_executor.submit(_run_post_processing_worker, task_id, batch_id)
                             recovered = True
                     except Exception as e:
-                        print(f"[Safety Valve] Error checking for completed file: {e}")
+                        logger.error(f"[Safety Valve] Error checking for completed file: {e}")
 
                 if not recovered:
                     if stuck_state == 'searching':
-                        print(f"⏰ [Safety Valve] Task {task_id} stuck in searching for {task_age:.1f}s - marking not_found")
+                        logger.info(f"⏰ [Safety Valve] Task {task_id} stuck in searching for {task_age:.1f}s - marking not_found")
                         task['status'] = 'not_found'
                         task['error_message'] = f'Search stuck for {int(task_age // 60)} minutes with no results — timed out'
                     else:
-                        print(f"⏰ [Safety Valve] Task {task_id} stuck for {task_age:.1f}s - forcing failure")
+                        logger.error(f"⏰ [Safety Valve] Task {task_id} stuck for {task_age:.1f}s - forcing failure")
                         task['status'] = 'failed'
                         task['error_message'] = f'Task stuck in {stuck_state} state for {int(task_age // 60)} minutes — forcibly stopped'
 
@@ -30771,7 +30751,7 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                         elif 'Failed' in state_str or 'Errored' in state_str or 'Rejected' in state_str or 'TimedOut' in state_str:
                             # UNIFIED ERROR HANDLING: Let monitor handle errors for consistency
                             # Monitor will detect errored state and trigger retry within 5 seconds
-                            print(f"Task {task_id} API shows error state: {state_str} - letting monitor handle retry")
+                            logger.error(f"Task {task_id} API shows error state: {state_str} - letting monitor handle retry")
                             
                             # Keep task in current status (downloading/queued) so monitor can detect error
                             # Don't mark as failed here - let the unified retry system handle it
@@ -30787,13 +30767,13 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                             if expected_size > 0 and transferred < expected_size:
                                 # State says complete but bytes don't match — keep current status
                                 task_status['status'] = task['status']
-                                print(f"Task {task_id} state says complete but bytes incomplete ({transferred}/{expected_size})")
+                                logger.info(f"Task {task_id} state says complete but bytes incomplete ({transferred}/{expected_size})")
                             # NEW VERIFICATION WORKFLOW: Use intermediate post_processing status
                             # Only set this status once to prevent multiple worker submissions
                             elif task['status'] != 'post_processing':
                                 task_status['status'] = 'post_processing'
                                 task['status'] = 'post_processing'
-                                print(f"Task {task_id} API reports 'Succeeded' - starting post-processing verification")
+                                logger.info(f"Task {task_id} API reports 'Succeeded' - starting post-processing verification")
                                 
                                 # Submit post-processing worker to verify file and complete the task
                                 missing_download_executor.submit(_run_post_processing_worker, task_id, batch_id)
@@ -30801,7 +30781,7 @@ def _build_batch_status_data(batch_id, batch, live_transfers_lookup):
                                 # FIXED: Always require verification workflow - no bypass for stream processed tasks
                                 # Stream processing only handles metadata, not file verification
                                 task_status['status'] = 'post_processing'
-                                print(f"Task {task_id} waiting for verification worker to complete")
+                                logger.info(f"Task {task_id} waiting for verification worker to complete")
                         elif 'InProgress' in state_str: 
                             task_status['status'] = 'downloading'
                         else: 
@@ -30895,7 +30875,7 @@ def get_batched_download_statuses():
                     )
                 except Exception as batch_error:
                     # Don't fail entire request if one batch has issues
-                    print(f"Error processing batch {batch_id}: {batch_error}")
+                    logger.error(f"Error processing batch {batch_id}: {batch_error}")
                     response["batches"][batch_id] = {"error": str(batch_error)}
         
         # Add metadata for debugging/monitoring
@@ -30924,12 +30904,12 @@ def get_batched_download_statuses():
         
         response["debug_info"] = debug_info
         
-        print(f"[Batched Status] Returning status for {len(response['batches'])} batches")
+        logger.info(f"[Batched Status] Returning status for {len(response['batches'])} batches")
         
         # Log worker discrepancies for debugging
         discrepancies = [bid for bid, info in debug_info.items() if info.get("worker_discrepancy")]
         if discrepancies:
-            print(f"[Batched Status] Worker count discrepancies in batches: {discrepancies}")
+            logger.info(f"[Batched Status] Worker count discrepancies in batches: {discrepancies}")
         
         return jsonify(response)
 
@@ -31139,7 +31119,7 @@ def cancel_download_task():
             current_status = task.get('status', 'unknown')
             download_id = task.get('download_id')
             username = task.get('username')
-            print(f"[Cancel Debug] Task {task_id} - Current status: '{current_status}', download_id: {download_id}, username: {username}")
+            logger.info(f"[Cancel Debug] Task {task_id} - Current status: '{current_status}', download_id: {download_id}, username: {username}")
             
             # Immediately mark as cancelled to prevent race conditions
             task['status'] = 'cancelled'
@@ -31159,8 +31139,8 @@ def cancel_download_task():
                         # Free worker slot if there are active workers and task was actively running
                         # This is more reliable than checking task status which can be inconsistent
                         if active_count > 0 and current_status in ['pending', 'searching', 'downloading', 'queued']:
-                            print(f"[Cancel] Task {task_id} (status: {current_status}) - freeing worker slot for batch {batch_id}")
-                            print(f"[Cancel] Active count before: {active_count}")
+                            logger.info(f"[Cancel] Task {task_id} (status: {current_status}) - freeing worker slot for batch {batch_id}")
+                            logger.info(f"[Cancel] Active count before: {active_count}")
                             
                             # Use the completion callback with error handling
                             _on_download_completed(batch_id, task_id, success=False)
@@ -31168,35 +31148,35 @@ def cancel_download_task():
                             
                             # Verify slot was actually freed
                             new_active = download_batches[batch_id]['active_count']
-                            print(f"[Cancel] Active count after: {new_active}")
+                            logger.info(f"[Cancel] Active count after: {new_active}")
                             
                         elif active_count == 0:
-                            print(f"[Cancel] Task {task_id} - no active workers to free")
+                            logger.warning(f"[Cancel] Task {task_id} - no active workers to free")
                         else:
-                            print(f"[Cancel] Task {task_id} (status: {current_status}) - not actively running, no slot to free")
+                            logger.warning(f"[Cancel] Task {task_id} (status: {current_status}) - not actively running, no slot to free")
                     else:
-                        print(f"[Cancel] Task {task_id} - batch {batch_id} not found")
+                        logger.warning(f"[Cancel] Task {task_id} - batch {batch_id} not found")
                         
             except Exception as slot_error:
-                print(f"[Cancel] Error managing worker slot for {task_id}: {slot_error}")
+                logger.error(f"[Cancel] Error managing worker slot for {task_id}: {slot_error}")
                 # Attempt emergency recovery if normal completion failed
                 if not worker_slot_freed:
                     try:
-                        print(f"[Cancel] Attempting emergency worker slot recovery")
+                        logger.warning(f"[Cancel] Attempting emergency worker slot recovery")
                         _recover_worker_slot(batch_id, task_id)
                     except Exception as recovery_error:
-                        print(f"[Cancel] FATAL: Emergency recovery failed: {recovery_error}")
+                        logger.error(f"[Cancel] FATAL: Emergency recovery failed: {recovery_error}")
         else:
-            print(f"[Cancel] Task {task_id} cancelled (no batch_id - likely already completed)")
+            logger.warning(f"[Cancel] Task {task_id} cancelled (no batch_id - likely already completed)")
 
         # Optionally try to cancel the Soulseek download (don't block worker progression)
         if download_id and username:
             try:
                 # This is an async call, so we run it and wait
                 run_async(soulseek_client.cancel_download(download_id, username, remove=True))
-                print(f"Successfully cancelled Soulseek download {download_id} for task {task_id}")
+                logger.warning(f"Successfully cancelled Soulseek download {download_id} for task {task_id}")
             except Exception as e:
-                print(f"Warning: Failed to cancel download on slskd, but worker already moved on. Error: {e}")
+                logger.error(f"Warning: Failed to cancel download on slskd, but worker already moved on. Error: {e}")
 
         ### NEW LOGIC START: Add cancelled track to wishlist ###
         try:
@@ -31267,11 +31247,11 @@ def cancel_download_task():
             )
 
             if success:
-                print(f"Added cancelled track '{track_info.get('name')}' to wishlist.")
+                logger.warning(f"Added cancelled track '{track_info.get('name')}' to wishlist.")
             else:
-                print(f"Failed to add cancelled track '{track_info.get('name')}' to wishlist.")
+                logger.error(f"Failed to add cancelled track '{track_info.get('name')}' to wishlist.")
         except Exception as e:
-            print(f"CRITICAL ERROR adding cancelled track to wishlist: {e}")
+            logger.error(f"CRITICAL ERROR adding cancelled track to wishlist: {e}")
         ### NEW LOGIC END ###
 
         return jsonify({"success": True, "message": "Task cancelled and added to wishlist for retry."})
@@ -31314,7 +31294,7 @@ def _atomic_cancel_task(playlist_id, track_index):
         original_status = current_status  # Store original status before changing it
         batch_id = task.get('batch_id')
         
-        print(f"[Atomic Cancel] Starting atomic cancel: playlist={playlist_id}, track={track_index}, task={task_id}, status={current_status}")
+        logger.info(f"[Atomic Cancel] Starting atomic cancel: playlist={playlist_id}, track={track_index}, task={task_id}, status={current_status}")
         
         # Mark task as cancelled immediately (within same lock context)
         task['status'] = 'cancelled'
@@ -31335,23 +31315,23 @@ def _atomic_cancel_task(playlist_id, track_index):
             # Free worker slot if task was consuming one
             # More precise check: only free if task was actually running
             if active_count > 0 and current_status in ['pending', 'searching', 'downloading', 'queued']:
-                print(f"[Atomic Cancel] Freeing worker slot for {task_id} (was {current_status})")
+                logger.info(f"[Atomic Cancel] Freeing worker slot for {task_id} (was {current_status})")
                 
                 # CRITICAL: Direct worker slot management to prevent _on_download_completed race
                 old_active = batch['active_count']
                 batch['active_count'] = max(0, old_active - 1)  # Prevent negative counts
                 worker_slot_freed = True
                 
-                print(f"[Atomic Cancel] Worker count: {old_active} → {batch['active_count']}")
+                logger.info(f"[Atomic Cancel] Worker count: {old_active} → {batch['active_count']}")
                 
                 # Try to start next task if available (still within lock)
                 if (batch['queue_index'] < len(batch['queue']) and 
                     batch['active_count'] < batch['max_concurrent']):
-                    print(f"[Atomic Cancel] Starting next task in queue")
+                    logger.info(f"[Atomic Cancel] Starting next task in queue")
                     # Call the existing function to start next downloads
                     # Note: This will be called outside the lock to prevent deadlock
                 else:
-                    print(f"[Atomic Cancel] No next task to start (queue_index: {batch['queue_index']}/{len(batch['queue'])}, active: {batch['active_count']}/{batch['max_concurrent']})")
+                    logger.warning(f"[Atomic Cancel] No next task to start (queue_index: {batch['queue_index']}/{len(batch['queue'])}, active: {batch['active_count']}/{batch['max_concurrent']})")
         
         # Build result info
         task_info = {
@@ -31364,11 +31344,11 @@ def _atomic_cancel_task(playlist_id, track_index):
             'worker_slot_freed': worker_slot_freed
         }
         
-        print(f"[Atomic Cancel] Successfully cancelled task {task_id}")
+        logger.warning(f"[Atomic Cancel] Successfully cancelled task {task_id}")
         return True, "Task cancelled successfully", task_info
         
     except Exception as e:
-        print(f"[Atomic Cancel] Error in atomic cancel: {e}")
+        logger.error(f"[Atomic Cancel] Error in atomic cancel: {e}")
         import traceback
         traceback.print_exc()
         return False, f"Internal error: {str(e)}", None
@@ -31411,14 +31391,14 @@ def cancel_task_v2():
             try:
                 _start_next_batch_of_downloads(batch_id)
             except Exception as e:
-                print(f"[Atomic Cancel] Warning: Could not start next downloads: {e}")
+                logger.error(f"[Atomic Cancel] Warning: Could not start next downloads: {e}")
             
             # CRITICAL: Check for batch completion after V2 cancel
             # V2 system bypasses _on_download_completed, so we need to check completion manually
             try:
                 _check_batch_completion_v2(batch_id)
             except Exception as e:
-                print(f"[Atomic Cancel] Warning: Could not check batch completion: {e}")
+                logger.error(f"[Atomic Cancel] Warning: Could not check batch completion: {e}")
         
         # Cancel Soulseek download if active (non-blocking)
         if task:
@@ -31427,27 +31407,27 @@ def cancel_task_v2():
             current_status = task.get('status')
             original_status = task_info.get('original_status', current_status)  # Get original status from task_info
             
-            print(f"[Atomic Cancel] Task {task_id} state: status='{current_status}', original_status='{original_status}', download_id='{download_id}', username='{username}'")
-            print(f"[Atomic Cancel] Download ID type: {type(download_id)}, length: {len(str(download_id)) if download_id else 0}")
+            logger.info(f"[Atomic Cancel] Task {task_id} state: status='{current_status}', original_status='{original_status}', download_id='{download_id}', username='{username}'")
+            logger.info(f"[Atomic Cancel] Download ID type: {type(download_id)}, length: {len(str(download_id)) if download_id else 0}")
             backslash = '\\'
-            print(f"[Atomic Cancel] Download ID looks like filename: {download_id and ('/' in str(download_id) or backslash in str(download_id))}")
+            logger.info(f"[Atomic Cancel] Download ID looks like filename: {download_id and ('/' in str(download_id) or backslash in str(download_id))}")
             
             if download_id and username:
                 # Always try to cancel in slskd - doesn't matter what status it was
                 # If it's not there or already done, the DELETE request will just fail harmlessly
                 try:
-                        print(f"[Atomic Cancel] Attempting to cancel Soulseek download:")
-                        print(f"   Username: {username}")  
-                        print(f"   Download ID: {download_id}")
-                        print(f"   Base URL: {soulseek_client.base_url}")
-                        print(f"   Expected URL: {soulseek_client.base_url}/transfers/downloads/{username}/{download_id}?remove=true")
+                        logger.info(f"[Atomic Cancel] Attempting to cancel Soulseek download:")
+                        logger.info(f"   Username: {username}")  
+                        logger.info(f"   Download ID: {download_id}")
+                        logger.info(f"   Base URL: {soulseek_client.base_url}")
+                        logger.info(f"   Expected URL: {soulseek_client.base_url}/transfers/downloads/{username}/{download_id}?remove=true")
                         
                         # CRITICAL: Must use REAL download ID from slskd, not filename
                         success = False
                         real_download_id = None
                         
                         # Step 1: Always search for real download ID first
-                        print(f"[Atomic Cancel] Searching slskd transfers for real download ID")
+                        logger.info(f"[Atomic Cancel] Searching slskd transfers for real download ID")
                         try:
                             all_transfers = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
                             if all_transfers:
@@ -31461,68 +31441,68 @@ def cancel_task_v2():
                                                 if (file_filename == download_id or 
                                                     __import__('os').path.basename(file_filename) == __import__('os').path.basename(str(download_id))):
                                                     real_download_id = file_data.get('id')
-                                                    print(f"[Atomic Cancel] Found real download ID: {real_download_id} for file: {file_filename}")
+                                                    logger.info(f"[Atomic Cancel] Found real download ID: {real_download_id} for file: {file_filename}")
                                                     break
                                             if real_download_id:
                                                 break
                                     if real_download_id:
                                         break
                         except Exception as search_error:
-                            print(f"[Atomic Cancel] Error searching transfers: {search_error}")
+                            logger.error(f"[Atomic Cancel] Error searching transfers: {search_error}")
                         
                         # Step 2: Try cancellation with real ID if found
                         if real_download_id:
-                            print(f"[Atomic Cancel] Attempting cancel with real ID: {real_download_id}")
+                            logger.info(f"[Atomic Cancel] Attempting cancel with real ID: {real_download_id}")
                             try:
                                 # Use EXACT format from slskd web UI: DELETE /api/v0/transfers/downloads/{username}/{download_id}?remove=false
                                 endpoint = f'transfers/downloads/{username}/{real_download_id}?remove=true'
-                                print(f"[Atomic Cancel] Using slskd web UI format: {endpoint}")
+                                logger.info(f"[Atomic Cancel] Using slskd web UI format: {endpoint}")
                                 
                                 response = run_async(soulseek_client._make_request('DELETE', endpoint))
                                 if response is not None:
-                                    print(f"[Atomic Cancel] Successfully cancelled with slskd web UI format: {real_download_id}")
+                                    logger.warning(f"[Atomic Cancel] Successfully cancelled with slskd web UI format: {real_download_id}")
                                     success = True
                                 else:
-                                    print(f"[Atomic Cancel] Web UI format failed, trying alternative formats")
+                                    logger.error(f"[Atomic Cancel] Web UI format failed, trying alternative formats")
                                     
                                     # Fallback: Try without remove parameter
                                     endpoint2 = f'transfers/downloads/{username}/{real_download_id}'
                                     response2 = run_async(soulseek_client._make_request('DELETE', endpoint2))
                                     if response2 is not None:
-                                        print(f"[Atomic Cancel] Successfully cancelled without remove param: {real_download_id}")
+                                        logger.warning(f"[Atomic Cancel] Successfully cancelled without remove param: {real_download_id}")
                                         success = True
                                     else:
                                         # Final fallback: Try simple format (sync.py style)
                                         endpoint3 = f'transfers/downloads/{real_download_id}'
                                         response3 = run_async(soulseek_client._make_request('DELETE', endpoint3))
                                         if response3 is not None:
-                                            print(f"[Atomic Cancel] Successfully cancelled with simple format: {real_download_id}")
+                                            logger.warning(f"[Atomic Cancel] Successfully cancelled with simple format: {real_download_id}")
                                             success = True
                                         else:
-                                            print(f"[Atomic Cancel] All DELETE formats failed for real ID: {real_download_id}")
+                                            logger.error(f"[Atomic Cancel] All DELETE formats failed for real ID: {real_download_id}")
                             except Exception as cancel_error:
-                                print(f"[Atomic Cancel] Exception cancelling real ID {real_download_id}: {cancel_error}")
+                                logger.error(f"[Atomic Cancel] Exception cancelling real ID {real_download_id}: {cancel_error}")
                         else:
-                            print(f"[Atomic Cancel] Could not find real download ID in slskd transfers")
-                            print(f"[Atomic Cancel] This might be a pending download not yet in slskd - relying on status='cancelled' to prevent it")
+                            logger.error(f"[Atomic Cancel] Could not find real download ID in slskd transfers")
+                            logger.warning(f"[Atomic Cancel] This might be a pending download not yet in slskd - relying on status='cancelled' to prevent it")
                             # For pending downloads, the status='cancelled' will prevent them from starting
                             success = True  # Consider this success since pending downloads are prevented
                         
                         if not success:
-                            print(f"[Atomic Cancel] Failed to cancel download in slskd API")
+                            logger.error(f"[Atomic Cancel] Failed to cancel download in slskd API")
                 except Exception as e:
-                    print(f"[Atomic Cancel] Exception cancelling Soulseek download {download_id}: {e}")
+                    logger.error(f"[Atomic Cancel] Exception cancelling Soulseek download {download_id}: {e}")
                     # Print more details about the error
                     import traceback
-                    print(f"[Atomic Cancel] Cancel error traceback: {traceback.format_exc()}")
+                    logger.error(f"[Atomic Cancel] Cancel error traceback: {traceback.format_exc()}")
             else:
-                print(f"ℹ️ [Atomic Cancel] No download_id or username available - skipping slskd cancel")
+                logger.warning(f"ℹ️ [Atomic Cancel] No download_id or username available - skipping slskd cancel")
         
         # Add to wishlist (non-blocking, best effort)
         try:
             _add_cancelled_task_to_wishlist(task)
         except Exception as e:
-            print(f"[Atomic Cancel] Warning: Could not add to wishlist: {e}")
+            logger.error(f"[Atomic Cancel] Warning: Could not add to wishlist: {e}")
         
         return jsonify({
             "success": True,
@@ -31535,7 +31515,7 @@ def cancel_task_v2():
         })
         
     except Exception as e:
-        print(f"[Cancel V2] Unexpected error: {e}")
+        logger.error(f"[Cancel V2] Unexpected error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -31550,7 +31530,7 @@ def _check_batch_completion_v2(batch_id):
     try:
         with tasks_lock:
             if batch_id not in download_batches:
-                print(f"[Completion Check V2] Batch {batch_id} not found")
+                logger.warning(f"[Completion Check V2] Batch {batch_id} not found")
                 return
             
             batch = download_batches[batch_id]
@@ -31572,7 +31552,7 @@ def _check_batch_completion_v2(batch_id):
                     if task_status == 'searching':
                         task_age = current_time - task.get('status_change_time', current_time)
                         if task_age > 600:  # 10 minutes
-                            print(f"⏰ [Stuck Detection V2] Task {task_id} stuck in searching for {task_age:.0f}s - forcing not_found")
+                            logger.info(f"⏰ [Stuck Detection V2] Task {task_id} stuck in searching for {task_age:.0f}s - forcing not_found")
                             task['status'] = 'not_found'
                             task['error_message'] = f'Search stuck for {int(task_age // 60)} minutes with no results — timed out'
                             finished_count += 1
@@ -31581,7 +31561,7 @@ def _check_batch_completion_v2(batch_id):
                     elif task_status == 'post_processing':
                         task_age = current_time - task.get('status_change_time', current_time)
                         if task_age > 300:  # 5 minutes (post-processing should be fast)
-                            print(f"⏰ [Stuck Detection V2] Task {task_id} stuck in post_processing for {task_age:.0f}s - forcing completion")
+                            logger.info(f"⏰ [Stuck Detection V2] Task {task_id} stuck in post_processing for {task_age:.0f}s - forcing completion")
                             task['status'] = 'completed'  # Assume it worked if file verification is taking too long
                             finished_count += 1
                         else:
@@ -31590,18 +31570,18 @@ def _check_batch_completion_v2(batch_id):
                         finished_count += 1
                 else:
                     # Task ID in queue but not in download_tasks - treat as completed to prevent blocking
-                    print(f"[Orphaned Task V2] Task {task_id} in queue but not in download_tasks - counting as finished")
+                    logger.warning(f"[Orphaned Task V2] Task {task_id} in queue but not in download_tasks - counting as finished")
                     finished_count += 1
             
             all_tasks_truly_finished = finished_count >= len(queue)
             has_retrying_tasks = retrying_count > 0
             
-            print(f"[Completion Check V2] Batch {batch_id}: tasks_started={all_tasks_started}, workers={no_active_workers}, finished={finished_count}/{len(queue)}, retrying={retrying_count}")
+            logger.warning(f"[Completion Check V2] Batch {batch_id}: tasks_started={all_tasks_started}, workers={no_active_workers}, finished={finished_count}/{len(queue)}, retrying={retrying_count}")
             
             if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
                 # FIXED: Ensure batch is not already marked as complete to prevent duplicate processing
                 if batch.get('phase') != 'complete':
-                    print(f"[Completion Check V2] Batch {batch_id} is complete - marking as finished")
+                    logger.info(f"[Completion Check V2] Batch {batch_id} is complete - marking as finished")
 
                     # Check if this is an auto-initiated batch
                     is_auto_batch = batch.get('auto_initiated', False)
@@ -31629,7 +31609,7 @@ def _check_batch_completion_v2(batch_id):
                         except Exception:
                             pass
                 else:
-                    print(f"[Completion Check V2] Batch {batch_id} already marked complete - skipping duplicate processing")
+                    logger.warning(f"[Completion Check V2] Batch {batch_id} already marked complete - skipping duplicate processing")
                     return True  # Already complete
 
                 # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
@@ -31638,30 +31618,30 @@ def _check_batch_completion_v2(batch_id):
                     url_hash = playlist_id.replace('youtube_', '')
                     if url_hash in youtube_playlist_states:
                         youtube_playlist_states[url_hash]['phase'] = 'download_complete'
-                        print(f"[Completion Check V2] Updated YouTube playlist {url_hash} to download_complete phase")
+                        logger.info(f"[Completion Check V2] Updated YouTube playlist {url_hash} to download_complete phase")
                 
                 # Update Tidal playlist phase to 'download_complete' if this is a Tidal playlist
                 if playlist_id and playlist_id.startswith('tidal_'):
                     tidal_playlist_id = playlist_id.replace('tidal_', '')
                     if tidal_playlist_id in tidal_discovery_states:
                         tidal_discovery_states[tidal_playlist_id]['phase'] = 'download_complete'
-                        print(f"[Completion Check V2] Updated Tidal playlist {tidal_playlist_id} to download_complete phase")
+                        logger.info(f"[Completion Check V2] Updated Tidal playlist {tidal_playlist_id} to download_complete phase")
 
                 # Update Deezer playlist phase to 'download_complete' if this is a Deezer playlist
                 if playlist_id and playlist_id.startswith('deezer_'):
                     deezer_playlist_id = playlist_id.replace('deezer_', '')
                     if deezer_playlist_id in deezer_discovery_states:
                         deezer_discovery_states[deezer_playlist_id]['phase'] = 'download_complete'
-                        print(f"[Completion Check V2] Updated Deezer playlist {deezer_playlist_id} to download_complete phase")
+                        logger.info(f"[Completion Check V2] Updated Deezer playlist {deezer_playlist_id} to download_complete phase")
 
                 # Update Spotify Public playlist phase to 'download_complete' if this is a Spotify Public playlist
                 if playlist_id and playlist_id.startswith('spotify_public_'):
                     spotify_public_url_hash = playlist_id.replace('spotify_public_', '')
                     if spotify_public_url_hash in spotify_public_discovery_states:
                         spotify_public_discovery_states[spotify_public_url_hash]['phase'] = 'download_complete'
-                        print(f"[Completion Check V2] Updated Spotify Public playlist {spotify_public_url_hash} to download_complete phase")
+                        logger.info(f"[Completion Check V2] Updated Spotify Public playlist {spotify_public_url_hash} to download_complete phase")
 
-                print(f"[Completion Check V2] Batch {batch_id} complete - stopping monitor")
+                logger.info(f"[Completion Check V2] Batch {batch_id} complete - stopping monitor")
                 download_monitor.stop_monitoring(batch_id)
 
                 # REPAIR: Scan all album folders from this batch for track number issues
@@ -31689,32 +31669,32 @@ def _check_batch_completion_v2(batch_id):
                                     file_lock_fn=_get_file_lock,
                                 )
                                 if _cons_result.get('success'):
-                                    print(f"[Album Consistency V2] {_cons_result['tags_written']}/{_cons_result['total_files']} files "
+                                    logger.info(f"[Album Consistency V2] {_cons_result['tags_written']}/{_cons_result['total_files']} files "
                                           f"harmonized to release {_cons_result.get('release_mbid', '')[:8]}...")
                                 elif _cons_result.get('error'):
-                                    print(f"[Album Consistency V2] Skipped: {_cons_result['error']}")
+                                    logger.error(f"[Album Consistency V2] Skipped: {_cons_result['error']}")
                         except Exception as cons_err:
-                            print(f"[Album Consistency V2] Failed (non-fatal): {cons_err}")
+                            logger.error(f"[Album Consistency V2] Failed (non-fatal): {cons_err}")
 
         # Process wishlist outside of the lock to prevent threading issues
         if all_tasks_started and no_active_workers and all_tasks_truly_finished and not has_retrying_tasks:
             # Call wishlist processing outside the lock
             if is_auto_batch:
-                print(f"[Completion Check V2] Processing auto-initiated batch completion")
+                logger.info(f"[Completion Check V2] Processing auto-initiated batch completion")
                 # Use the existing auto-completion function
                 _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id)
             else:
-                print(f"[Completion Check V2] Processing regular batch completion")
+                logger.info(f"[Completion Check V2] Processing regular batch completion")
                 # Use the regular completion function
                 _process_failed_tracks_to_wishlist_exact(batch_id)
             
             return True  # Batch was completed
         else:
-            print(f"[Completion Check V2] Batch {batch_id} not yet complete: finished={finished_count}/{len(queue)}, retrying={retrying_count}, workers={batch['active_count']}")
+            logger.warning(f"[Completion Check V2] Batch {batch_id} not yet complete: finished={finished_count}/{len(queue)}, retrying={retrying_count}, workers={batch['active_count']}")
             return False  # Batch still in progress
                 
     except Exception as e:
-        print(f"[Completion Check V2] Error checking batch completion: {e}")
+        logger.error(f"[Completion Check V2] Error checking batch completion: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -31790,12 +31770,12 @@ def _add_cancelled_task_to_wishlist(task):
         )
         
         if success:
-            print(f"[Atomic Cancel] Added '{track_info.get('name')}' to wishlist")
+            logger.info(f"[Atomic Cancel] Added '{track_info.get('name')}' to wishlist")
         else:
-            print(f"[Atomic Cancel] Failed to add '{track_info.get('name')}' to wishlist")
+            logger.error(f"[Atomic Cancel] Failed to add '{track_info.get('name')}' to wishlist")
             
     except Exception as e:
-        print(f"[Atomic Cancel] Critical error adding to wishlist: {e}")
+        logger.error(f"[Atomic Cancel] Critical error adding to wishlist: {e}")
 
 @app.route('/api/playlists/<batch_id>/cancel_batch', methods=['POST'])
 def cancel_batch(batch_id):
@@ -31823,16 +31803,16 @@ def cancel_batch(batch_id):
                     with wishlist_timer_lock:
                         wishlist_auto_processing = False
                         wishlist_auto_processing_timestamp = 0
-                    print(f"[Wishlist Cancel] Reset wishlist auto-processing flag for cancelled auto-batch")
+                    logger.warning(f"[Wishlist Cancel] Reset wishlist auto-processing flag for cancelled auto-batch")
                 else:
-                    print(f"ℹ️ [Wishlist Cancel] Manual wishlist batch cancelled (no flag reset needed)")
+                    logger.warning(f"ℹ️ [Wishlist Cancel] Manual wishlist batch cancelled (no flag reset needed)")
 
             # Reset YouTube playlist phase to 'discovered' if this is a YouTube playlist
             if playlist_id and playlist_id.startswith('youtube_'):
                 url_hash = playlist_id.replace('youtube_', '')
                 if url_hash in youtube_playlist_states:
                     youtube_playlist_states[url_hash]['phase'] = 'discovered'
-                    print(f"Reset YouTube playlist {url_hash} to discovered phase (batch cancelled)")
+                    logger.warning(f"Reset YouTube playlist {url_hash} to discovered phase (batch cancelled)")
             
             # Cancel all individual tasks in the batch
             cancelled_count = 0
@@ -31847,11 +31827,11 @@ def cancel_batch(batch_id):
             playlist_name = download_batches[batch_id].get('playlist_name', 'Unknown Playlist')
             add_activity_item("", "Batch Cancelled", f"'{playlist_name}' - {cancelled_count} downloads cancelled", "Now")
             
-            print(f"Cancelled batch {batch_id} with {cancelled_count} tasks")
+            logger.warning(f"Cancelled batch {batch_id} with {cancelled_count} tasks")
             return jsonify({"success": True, "cancelled_tasks": cancelled_count})
             
     except Exception as e:
-        print(f"Error cancelling batch {batch_id}: {e}")
+        logger.error(f"Error cancelling batch {batch_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # NEW ENDPOINT: Add this function to web_server.py
@@ -31876,7 +31856,7 @@ def cleanup_batch():
                 # This prevents a race condition where cleanup deletes the batch before
                 # the wishlist processing thread can access it
                 if batch.get('wishlist_processing_started') and not batch.get('wishlist_processing_complete'):
-                    print(f"[Cleanup] Batch {batch_id} cleanup deferred - wishlist processing in progress")
+                    logger.info(f"[Cleanup] Batch {batch_id} cleanup deferred - wishlist processing in progress")
                     return jsonify({
                         "success": False,
                         "error": "Batch cleanup deferred - wishlist processing in progress",
@@ -31894,15 +31874,15 @@ def cleanup_batch():
                     if task_id in download_tasks:
                         del download_tasks[task_id]
                 
-                print(f"Cleaned up batch '{batch_id}' and its associated tasks from server state.")
+                logger.info(f"Cleaned up batch '{batch_id}' and its associated tasks from server state.")
                 return jsonify({"success": True, "message": f"Batch {batch_id} cleaned up."})
             else:
                 # It's not an error if the batch is already gone
-                print(f"Cleanup requested for non-existent batch '{batch_id}'. Already cleaned up?")
+                logger.info(f"Cleanup requested for non-existent batch '{batch_id}'. Already cleaned up?")
                 return jsonify({"success": True, "message": "Batch already cleaned up."})
 
     except Exception as e:
-        print(f"Error during batch cleanup for '{batch_id}': {e}")
+        logger.error(f"Error during batch cleanup for '{batch_id}': {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================
@@ -32773,12 +32753,12 @@ def start_missing_tracks_process(playlist_id):
 
     # Log album context if provided
     if is_album_download and album_context and artist_context:
-        print(f"[Artist Album] Received album context: '{album_context.get('name')}' by '{artist_context.get('name')}' ({album_context.get('album_type', 'album')})")
-        print(f"   Release: {album_context.get('release_date', 'Unknown')}, Tracks: {album_context.get('total_tracks', len(tracks))}")
+        logger.info(f"[Artist Album] Received album context: '{album_context.get('name')}' by '{artist_context.get('name')}' ({album_context.get('album_type', 'album')})")
+        logger.info(f"   Release: {album_context.get('release_date', 'Unknown')}, Tracks: {album_context.get('total_tracks', len(tracks))}")
 
     # Log playlist folder mode if enabled
     if playlist_folder_mode:
-        print(f"[Playlist Folder] Enabled for playlist: '{playlist_name}'")
+        logger.info(f"[Playlist Folder] Enabled for playlist: '{playlist_name}'")
 
     # Limit concurrent analysis processes to prevent resource exhaustion
     with tasks_lock:
@@ -32838,7 +32818,7 @@ def start_missing_tracks_process(playlist_id):
             youtube_playlist_states[url_hash]['download_process_id'] = batch_id
             youtube_playlist_states[url_hash]['phase'] = 'downloading'
             youtube_playlist_states[url_hash]['converted_spotify_playlist_id'] = playlist_id
-            print(f"Linked YouTube playlist {url_hash} to download process {batch_id} (converted ID: {playlist_id})")
+            logger.info(f"Linked YouTube playlist {url_hash} to download process {batch_id} (converted ID: {playlist_id})")
     
     # Link Tidal playlist to download process if this is a Tidal playlist
     if playlist_id.startswith('tidal_'):
@@ -32847,7 +32827,7 @@ def start_missing_tracks_process(playlist_id):
             tidal_discovery_states[tidal_playlist_id]['download_process_id'] = batch_id
             tidal_discovery_states[tidal_playlist_id]['phase'] = 'downloading'
             tidal_discovery_states[tidal_playlist_id]['converted_spotify_playlist_id'] = playlist_id
-            print(f"Linked Tidal playlist {tidal_playlist_id} to download process {batch_id} (converted ID: {playlist_id})")
+            logger.info(f"Linked Tidal playlist {tidal_playlist_id} to download process {batch_id} (converted ID: {playlist_id})")
 
     # Link Spotify Public playlist to download process if this is a Spotify Public playlist
     if playlist_id.startswith('spotify_public_'):
@@ -32856,7 +32836,7 @@ def start_missing_tracks_process(playlist_id):
             spotify_public_discovery_states[sp_url_hash]['download_process_id'] = batch_id
             spotify_public_discovery_states[sp_url_hash]['phase'] = 'downloading'
             spotify_public_discovery_states[sp_url_hash]['converted_spotify_playlist_id'] = playlist_id
-            print(f"Linked Spotify Public playlist {sp_url_hash} to download process {batch_id} (converted ID: {playlist_id})")
+            logger.info(f"Linked Spotify Public playlist {sp_url_hash} to download process {batch_id} (converted ID: {playlist_id})")
 
     # Link Deezer playlist to download process if this is a Deezer playlist
     if playlist_id.startswith('deezer_'):
@@ -32865,7 +32845,7 @@ def start_missing_tracks_process(playlist_id):
             deezer_discovery_states[deezer_playlist_id]['download_process_id'] = batch_id
             deezer_discovery_states[deezer_playlist_id]['phase'] = 'downloading'
             deezer_discovery_states[deezer_playlist_id]['converted_spotify_playlist_id'] = playlist_id
-            print(f"Linked Deezer playlist {deezer_playlist_id} to download process {batch_id} (converted ID: {playlist_id})")
+            logger.info(f"Linked Deezer playlist {deezer_playlist_id} to download process {batch_id} (converted ID: {playlist_id})")
 
     # Stamp original index to keep task indices aligned with frontend row order
     for i, track in enumerate(tracks):
@@ -32935,7 +32915,7 @@ def start_missing_downloads():
         return jsonify({"success": True, "batch_id": batch_id, "message": f"Queued {len(missing_tracks)} downloads for processing."})
         
     except Exception as e:
-        print(f"Error starting missing downloads: {e}")
+        logger.error(f"Error starting missing downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================
@@ -32952,7 +32932,7 @@ def _load_sync_status_file():
             return data
         return {}
     except Exception as e:
-        print(f"Error loading sync status: {e}")
+        logger.error(f"Error loading sync status: {e}")
         return {}
 
 def _save_sync_status_file(sync_statuses):
@@ -32961,7 +32941,7 @@ def _save_sync_status_file(sync_statuses):
         database = get_database()
         database.set_preference('sync_statuses', json.dumps(sync_statuses))
     except Exception as e:
-        print(f"Error saving sync status: {e}")
+        logger.error(f"Error saving sync status: {e}")
 
 def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, snapshot_id, **kwargs):
     """Updates the sync status for a given playlist and saves to file (same logic as GUI)."""
@@ -32986,10 +32966,10 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
         
         # Save to file
         _save_sync_status_file(sync_statuses)
-        print(f"Updated sync status for playlist '{playlist_name}' (ID: {playlist_id})")
+        logger.info(f"Updated sync status for playlist '{playlist_name}' (ID: {playlist_id})")
         
     except Exception as e:
-        print(f"Error updating sync status for {playlist_id}: {e}")
+        logger.error(f"Error updating sync status for {playlist_id}: {e}")
 
 @app.route('/api/spotify/playlists', methods=['GET'])
 def get_spotify_playlists():
@@ -33010,24 +32990,24 @@ def get_spotify_playlists():
             # Handle snapshot_id safely - may not exist in core Playlist class
             playlist_snapshot = getattr(p, 'snapshot_id', '')
 
-            print(f"Processing playlist: {p.name} (ID: {p.id})")
-            print(f"   - Playlist snapshot: '{playlist_snapshot}'")
-            print(f"   - Status info: {status_info}")
+            logger.info(f"Processing playlist: {p.name} (ID: {p.id})")
+            logger.info(f"   - Playlist snapshot: '{playlist_snapshot}'")
+            logger.info(f"   - Status info: {status_info}")
 
             if 'last_synced' in status_info:
                 stored_snapshot = status_info.get('snapshot_id')
                 last_sync_time = datetime.fromisoformat(status_info['last_synced']).strftime('%b %d, %H:%M')
-                print(f"   - Stored snapshot: '{stored_snapshot}'")
-                print(f"   - Snapshots match: {playlist_snapshot == stored_snapshot}")
+                logger.info(f"   - Stored snapshot: '{stored_snapshot}'")
+                logger.info(f"   - Snapshots match: {playlist_snapshot == stored_snapshot}")
 
                 if playlist_snapshot != stored_snapshot:
                     sync_status = f"Last Sync: {last_sync_time}"
-                    print(f"   - Result: Needs Sync (showing: {sync_status})")
+                    logger.info(f"   - Result: Needs Sync (showing: {sync_status})")
                 else:
                     sync_status = f"Synced: {last_sync_time}"
-                    print(f"   - Result: {sync_status}")
+                    logger.info(f"   - Result: {sync_status}")
             else:
-                print(f"   - No last_synced found - Never Synced")
+                logger.warning(f"   - No last_synced found - Never Synced")
 
             playlist_data.append({
                 "id": p.id, "name": p.name, "owner": p.owner,
@@ -33063,9 +33043,9 @@ def get_spotify_playlists():
                     "sync_status": sync_status,
                     "snapshot_id": ""  # Liked Songs doesn't have a snapshot_id
                 })
-                print(f"Added virtual 'Liked Songs' playlist with {liked_songs_count} tracks (count only)")
+                logger.info(f"Added virtual 'Liked Songs' playlist with {liked_songs_count} tracks (count only)")
         except Exception as liked_error:
-            print(f"Failed to add Liked Songs playlist: {liked_error}")
+            logger.error(f"Failed to add Liked Songs playlist: {liked_error}")
             # Don't fail the entire request if Liked Songs fails
 
         return jsonify(playlist_data)
@@ -33393,7 +33373,7 @@ def search_spotify():
         return jsonify({'tracks': {'items': tracks_items}})
 
     except Exception as e:
-        print(f"Error searching Spotify: {e}")
+        logger.error(f"Error searching Spotify: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify/search_tracks', methods=['GET'])
@@ -33442,7 +33422,7 @@ def search_spotify_tracks():
         return jsonify({'tracks': tracks_dict})
 
     except Exception as e:
-        print(f"Error searching Spotify tracks: {e}")
+        logger.error(f"Error searching Spotify tracks: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -33492,7 +33472,7 @@ def search_itunes_tracks():
         return jsonify({'tracks': tracks_dict})
 
     except Exception as e:
-        print(f"Error searching iTunes tracks: {e}")
+        logger.error(f"Error searching iTunes tracks: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -33534,7 +33514,7 @@ def search_deezer_tracks():
         return jsonify({'tracks': tracks_dict})
 
     except Exception as e:
-        print(f"Error searching Deezer tracks: {e}")
+        logger.error(f"Error searching Deezer tracks: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -34108,7 +34088,7 @@ def get_tidal_playlists():
                 
             playlist_data.append(playlist_dict)
             
-        print(f"Loaded {len(playlist_data)} Tidal playlists with track data")
+        logger.info(f"Loaded {len(playlist_data)} Tidal playlists with track data")
         return jsonify(playlist_data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -34119,7 +34099,7 @@ def get_tidal_playlist_tracks(playlist_id):
     if not tidal_client or not tidal_client.is_authenticated():
         return jsonify({"error": "Tidal not authenticated."}), 401
     try:
-        print(f"Getting full Tidal playlist with tracks for: {playlist_id}")
+        logger.info(f"Getting full Tidal playlist with tracks for: {playlist_id}")
 
         # Fetch this single playlist directly — no need to re-fetch all playlists
         full_playlist = tidal_client.get_playlist(playlist_id)
@@ -34129,7 +34109,7 @@ def get_tidal_playlist_tracks(playlist_id):
         if not full_playlist.tracks:
             return jsonify({"error": "This playlist appears to have no tracks or they cannot be accessed"}), 403
         
-        print(f"Loaded {len(full_playlist.tracks)} tracks from Tidal playlist: {full_playlist.name}")
+        logger.info(f"Loaded {len(full_playlist.tracks)} tracks from Tidal playlist: {full_playlist.name}")
         
         # Convert playlist to dict (matches sync.py structure)
         playlist_dict = {
@@ -34154,7 +34134,7 @@ def get_tidal_playlist_tracks(playlist_id):
         
         return jsonify(playlist_dict)
     except Exception as e:
-        print(f"Error getting Tidal playlist tracks: {e}")
+        logger.error(f"Error getting Tidal playlist tracks: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -34221,11 +34201,11 @@ def start_tidal_discovery(playlist_id):
         future = tidal_discovery_executor.submit(_run_tidal_discovery_worker, playlist_id)
         state['discovery_future'] = future
         
-        print(f"Started Spotify discovery for Tidal playlist: {target_playlist.name}")
+        logger.info(f"Started Spotify discovery for Tidal playlist: {target_playlist.name}")
         return jsonify({"success": True, "message": "Discovery started"})
         
     except Exception as e:
-        print(f"Error starting Tidal discovery: {e}")
+        logger.error(f"Error starting Tidal discovery: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/tidal/discovery/status/<playlist_id>', methods=['GET'])
@@ -34251,7 +34231,7 @@ def get_tidal_discovery_status(playlist_id):
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error getting Tidal discovery status: {e}")
+        logger.error(f"Error getting Tidal discovery status: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -34312,8 +34292,8 @@ def update_tidal_discovery_match():
         if old_status != 'found' and old_status != 'Found':
             state['spotify_matches'] = state.get('spotify_matches', 0) + 1
 
-        print(f"Manual match updated: tidal - {identifier} - track {track_index}")
-        print(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+        logger.info(f"Manual match updated: tidal - {identifier} - track {track_index}")
+        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
 
         # Save manual fix to discovery cache so it appears in discovery pool
         try:
@@ -34345,14 +34325,14 @@ def update_tidal_discovery_match():
                 cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
                 original_name, original_artist
             )
-            print(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
+            logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
         except Exception as cache_err:
-            print(f"Error saving manual fix to discovery cache: {cache_err}")
+            logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
 
         return jsonify({'success': True, 'result': result})
 
     except Exception as e:
-        print(f"Error updating Tidal discovery match: {e}")
+        logger.error(f"Error updating Tidal discovery match: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -34382,11 +34362,11 @@ def get_tidal_playlist_states():
             }
             states.append(state_info)
         
-        print(f"Returning {len(states)} stored Tidal playlist states for hydration")
+        logger.info(f"Returning {len(states)} stored Tidal playlist states for hydration")
         return jsonify({"states": states})
         
     except Exception as e:
-        print(f"Error getting Tidal playlist states: {e}")
+        logger.error(f"Error getting Tidal playlist states: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/tidal/state/<playlist_id>', methods=['GET'])
@@ -34419,7 +34399,7 @@ def get_tidal_playlist_state(playlist_id):
         return jsonify(response)
         
     except Exception as e:
-        print(f"Error getting Tidal playlist state: {e}")
+        logger.error(f"Error getting Tidal playlist state: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/tidal/reset/<playlist_id>', methods=['POST'])
@@ -34448,11 +34428,11 @@ def reset_tidal_playlist(playlist_id):
         state['discovery_future'] = None
         state['last_accessed'] = time.time()
         
-        print(f"Reset Tidal playlist to fresh: {playlist_id}")
+        logger.info(f"Reset Tidal playlist to fresh: {playlist_id}")
         return jsonify({"success": True, "message": "Playlist reset to fresh phase"})
         
     except Exception as e:
-        print(f"Error resetting Tidal playlist: {e}")
+        logger.error(f"Error resetting Tidal playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/tidal/delete/<playlist_id>', methods=['POST'])
@@ -34471,11 +34451,11 @@ def delete_tidal_playlist(playlist_id):
         # Remove from state dictionary
         del tidal_discovery_states[playlist_id]
         
-        print(f"Deleted Tidal playlist state: {playlist_id}")
+        logger.info(f"Deleted Tidal playlist state: {playlist_id}")
         return jsonify({"success": True, "message": "Playlist deleted"})
         
     except Exception as e:
-        print(f"Error deleting Tidal playlist: {e}")
+        logger.error(f"Error deleting Tidal playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/tidal/update_phase/<playlist_id>', methods=['POST'])
@@ -34500,11 +34480,11 @@ def update_tidal_playlist_phase(playlist_id):
         state['phase'] = new_phase
         state['last_accessed'] = time.time()
         
-        print(f"Updated Tidal playlist {playlist_id} phase: {old_phase} → {new_phase}")
+        logger.info(f"Updated Tidal playlist {playlist_id} phase: {old_phase} → {new_phase}")
         return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
         
     except Exception as e:
-        print(f"Error updating Tidal playlist phase: {e}")
+        logger.error(f"Error updating Tidal playlist phase: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -34525,7 +34505,7 @@ def _pause_enrichment_workers(label='discovery'):
             if worker and not worker.paused:
                 worker.pause()
                 was_running[name] = True
-                print(f"Paused {name} enrichment worker during {label}")
+                logger.warning(f"Paused {name} enrichment worker during {label}")
         except Exception:
             pass
     return was_running
@@ -34543,7 +34523,7 @@ def _resume_enrichment_workers(was_running, label='discovery'):
         try:
             if was_running.get(name) and worker:
                 worker.resume()
-                print(f"Resumed {name} enrichment worker after {label}")
+                logger.info(f"Resumed {name} enrichment worker after {label}")
         except Exception:
             pass
 
@@ -34562,10 +34542,10 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
                 break
 
         if not mirrored_pl:
-            print(f"[Discovery Sync] No mirrored playlist found for {source_type}:{source_playlist_id} (profile {profile_id})")
+            logger.warning(f"[Discovery Sync] No mirrored playlist found for {source_type}:{source_playlist_id} (profile {profile_id})")
             return
 
-        print(f"[Discovery Sync] Found mirrored playlist '{mirrored_pl.get('name')}' (DB id={mirrored_pl['id']}) for {source_type}:{source_playlist_id}")
+        logger.info(f"[Discovery Sync] Found mirrored playlist '{mirrored_pl.get('name')}' (DB id={mirrored_pl['id']}) for {source_type}:{source_playlist_id}")
         mirrored_tracks = db.get_mirrored_playlist_tracks(mirrored_pl['id'])
         if not mirrored_tracks:
             return
@@ -34623,11 +34603,11 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
             updated += 1
 
         if updated > 0:
-            print(f"Synced {updated} discovery results back to mirrored playlist '{mirrored_pl.get('name', '')}'")
+            logger.info(f"Synced {updated} discovery results back to mirrored playlist '{mirrored_pl.get('name', '')}'")
 
     except Exception as e:
         import traceback
-        print(f"Failed to sync discovery results to mirrored playlist: {e}")
+        logger.error(f"Failed to sync discovery results to mirrored playlist: {e}")
         traceback.print_exc()
 
 
@@ -34645,7 +34625,7 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
             try:
                 itunes_client_instance = _get_metadata_fallback_client()
             except Exception:
-                print(f"Neither Spotify nor {_get_metadata_fallback_source()} available for discovery")
+                logger.warning(f"Neither Spotify nor {_get_metadata_fallback_source()} available for discovery")
                 _update_automation_progress(automation_id, status='error', progress=100,
                                             phase='Error', log_line=f'Neither Spotify nor {_get_metadata_fallback_source()} available',
                                             log_type='error')
@@ -34677,7 +34657,7 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
             if not tracks:
                 continue
 
-            print(f"Starting discovery for playlist '{pl_name}' ({len(tracks)} tracks, using {discovery_source.upper()})")
+            logger.info(f"Starting discovery for playlist '{pl_name}' ({len(tracks)} tracks, using {discovery_source.upper()})")
             _update_automation_progress(automation_id, phase=f'Discovering: "{pl_name}"',
                                          log_line=f'Playlist "{pl_name}" — {len(tracks)} tracks ({discovery_source.upper()})', log_type='info')
 
@@ -34734,7 +34714,7 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                 # Check for cancellation
                 if automation_id and automation_id in _playlist_discovery_cancelled:
                     _playlist_discovery_cancelled.discard(automation_id)
-                    print(f"Playlist discovery cancelled (automation {automation_id})")
+                    logger.warning(f"Playlist discovery cancelled (automation {automation_id})")
                     _update_automation_progress(automation_id, status='finished', progress=100,
                                                  phase='Discovery cancelled',
                                                  log_line=f'Cancelled: {total_discovered} discovered, {total_failed} failed',
@@ -34760,7 +34740,7 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                         }
                         db.update_mirrored_track_extra_data(track_id, extra_data)
                         total_discovered += 1
-                        print(f"CACHE [{i+1}/{len(undiscovered_tracks)}]: {track_name} → {cached_match.get('name', '?')}")
+                        logger.info(f"CACHE [{i+1}/{len(undiscovered_tracks)}]: {track_name} → {cached_match.get('name', '?')}")
                         _update_automation_progress(automation_id,
                             progress=((total_skipped + total_discovered + total_failed) / max(1, grand_total)) * 100,
                             current_item=track_name,
@@ -34895,7 +34875,7 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                     except Exception:
                         pass
 
-                    print(f"[{i+1}/{len(undiscovered_tracks)}] {track_name} → {matched_data['name']} ({best_confidence:.2f})")
+                    logger.info(f"[{i+1}/{len(undiscovered_tracks)}] {track_name} → {matched_data['name']} ({best_confidence:.2f})")
                     _update_automation_progress(automation_id,
                         progress=((total_skipped + total_discovered + total_failed) / max(1, grand_total)) * 100,
                         processed=total_discovered + total_failed,
@@ -34913,7 +34893,7 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
                     }
                     db.update_mirrored_track_extra_data(track_id, extra_data)
                     total_discovered += 1
-                    print(f"[{i+1}/{len(undiscovered_tracks)}] Wing It: {track_name} by {artist_name}")
+                    logger.info(f"[{i+1}/{len(undiscovered_tracks)}] Wing It: {track_name} by {artist_name}")
                     _update_automation_progress(automation_id,
                         progress=((total_skipped + total_discovered + total_failed) / max(1, grand_total)) * 100,
                         processed=total_discovered + total_failed,
@@ -34938,14 +34918,14 @@ def _run_playlist_discovery_worker(playlists, automation_id=None):
         except Exception:
             pass
 
-        print(f"Playlist discovery complete: {total_discovered} discovered, {total_failed} failed, {total_skipped} skipped")
+        logger.error(f"Playlist discovery complete: {total_discovered} discovered, {total_failed} failed, {total_skipped} skipped")
         _update_automation_progress(automation_id, status='finished', progress=100,
                                      phase='Discovery complete',
                                      log_line=f'Done: {total_discovered} discovered, {total_failed} failed, {total_skipped} skipped',
                                      log_type='success')
 
     except Exception as e:
-        print(f"Error in playlist discovery worker: {e}")
+        logger.error(f"Error in playlist discovery worker: {e}")
         import traceback
         traceback.print_exc()
         _update_automation_progress(automation_id, status='error', progress=100,
@@ -35006,7 +34986,7 @@ def _validate_discovery_cache_artist(source_artist, cached_match):
             best_sim = sim
 
     if best_sim < min_artist_similarity:
-        print(f"Cache artist mismatch: source='{source_artist}' vs cached='{cached_artists[0]}' (sim={best_sim:.2f}), re-searching")
+        logger.info(f"Cache artist mismatch: source='{source_artist}' vs cached='{cached_artists[0]}' (sim={best_sim:.2f}), re-searching")
         return False
     return True
 
@@ -35093,7 +35073,7 @@ def _discovery_score_candidates(source_title, source_artist, source_duration_ms,
                 best_index = idx
 
         except Exception as e:
-            print(f"Error scoring candidate {idx}: {e}")
+            logger.error(f"Error scoring candidate {idx}: {e}")
             continue
 
     return best_match, best_confidence, best_index
@@ -35116,7 +35096,7 @@ def _run_tidal_discovery_worker(playlist_id):
         if not use_spotify:
             itunes_client_instance = _get_metadata_fallback_client()
 
-        print(f"Starting Tidal discovery for: {playlist.name} (using {discovery_source.upper()})")
+        logger.info(f"Starting Tidal discovery for: {playlist.name} (using {discovery_source.upper()})")
 
         # Store discovery source in state for frontend
         state['discovery_source'] = discovery_source
@@ -35128,7 +35108,7 @@ def _run_tidal_discovery_worker(playlist_id):
                 break
 
             try:
-                print(f"[{i+1}/{len(playlist.tracks)}] Searching {discovery_source.upper()}: {tidal_track.name} by {', '.join(tidal_track.artists)}")
+                logger.info(f"[{i+1}/{len(playlist.tracks)}] Searching {discovery_source.upper()}: {tidal_track.name} by {', '.join(tidal_track.artists)}")
 
                 # Check discovery cache first
                 cache_key = _get_discovery_cache_key(tidal_track.name, tidal_track.artists[0] if tidal_track.artists else '')
@@ -35136,7 +35116,7 @@ def _run_tidal_discovery_worker(playlist_id):
                     cache_db = get_database()
                     cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
                     if cached_match and _validate_discovery_cache_artist(tidal_track.artists[0] if tidal_track.artists else '', cached_match):
-                        print(f"CACHE HIT [{i+1}/{len(playlist.tracks)}]: {tidal_track.name} by {', '.join(tidal_track.artists)}")
+                        logger.debug(f"CACHE HIT [{i+1}/{len(playlist.tracks)}]: {tidal_track.name} by {', '.join(tidal_track.artists)}")
                         result = {
                             'tidal_track': {
                                 'id': tidal_track.id,
@@ -35156,7 +35136,7 @@ def _run_tidal_discovery_worker(playlist_id):
                         state['discovery_progress'] = int(((i + 1) / len(playlist.tracks)) * 100)
                         continue
                 except Exception as cache_err:
-                    print(f"Cache lookup error: {cache_err}")
+                    logger.error(f"Cache lookup error: {cache_err}")
 
                 # Use the search function with appropriate provider
                 track_result = _search_spotify_for_tidal_track(
@@ -35246,9 +35226,9 @@ def _run_tidal_discovery_worker(playlist_id):
                             result['match_data'], tidal_track.name,
                             tidal_track.artists[0] if tidal_track.artists else ''
                         )
-                        print(f"CACHE SAVED: {tidal_track.name} (confidence: {match_confidence:.3f})")
+                        logger.info(f"CACHE SAVED: {tidal_track.name} (confidence: {match_confidence:.3f})")
                     except Exception as cache_err:
-                        print(f"Cache save error: {cache_err}")
+                        logger.error(f"Cache save error: {cache_err}")
 
                 # Auto Wing It fallback for unmatched tracks
                 if result['status'] != 'found':
@@ -35275,7 +35255,7 @@ def _run_tidal_discovery_worker(playlist_id):
                 time.sleep(0.1)
 
             except Exception as e:
-                print(f"Error processing track {i+1}: {e}")
+                logger.error(f"Error processing track {i+1}: {e}")
                 # Add error result
                 result = {
                     'tidal_track': {
@@ -35300,13 +35280,13 @@ def _run_tidal_discovery_worker(playlist_id):
         source_label = discovery_source.upper()
         add_activity_item("", f"Tidal Discovery Complete ({source_label})", f"'{playlist.name}' - {successful_discoveries}/{len(playlist.tracks)} tracks found", "Now")
 
-        print(f"Tidal discovery complete ({source_label}): {successful_discoveries}/{len(playlist.tracks)} tracks found")
+        logger.info(f"Tidal discovery complete ({source_label}): {successful_discoveries}/{len(playlist.tracks)} tracks found")
 
         # Sync discovery results back to mirrored playlist
         _sync_discovery_results_to_mirrored('tidal', playlist_id, state.get('discovery_results', []), discovery_source, profile_id=state.get('_profile_id', 1))
 
     except Exception as e:
-        print(f"Error in Tidal discovery worker: {e}")
+        logger.error(f"Error in Tidal discovery worker: {e}")
         state['phase'] = 'error'
         state['status'] = f'error: {str(e)}'
     finally:
@@ -35344,7 +35324,7 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
         source_duration = getattr(tidal_track, 'duration_ms', 0) or 0
         source_name = "Spotify" if use_spotify else _get_metadata_fallback_source().capitalize()
 
-        print(f"Tidal track: '{artist_name}' - '{track_name}' (searching {source_name})")
+        logger.info(f"Tidal track: '{artist_name}' - '{track_name}' (searching {source_name})")
 
         # Use matching engine to generate search queries (with fallback)
         try:
@@ -35354,9 +35334,9 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                 'album': None
             })()
             search_queries = matching_engine.generate_download_queries(temp_track)
-            print(f"Generated {len(search_queries)} search queries for Tidal track")
+            logger.info(f"Generated {len(search_queries)} search queries for Tidal track")
         except Exception as e:
-            print(f"Matching engine failed for Tidal, falling back to basic queries: {e}")
+            logger.error(f"Matching engine failed for Tidal, falling back to basic queries: {e}")
             if use_spotify:
                 search_queries = [
                     f'track:"{track_name}" artist:"{artist_name}"',
@@ -35377,7 +35357,7 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
 
         for query_idx, search_query in enumerate(search_queries):
             try:
-                print(f"Tidal query {query_idx + 1}/{len(search_queries)}: {search_query} ({source_name})")
+                logger.debug(f"Tidal query {query_idx + 1}/{len(search_queries)}: {search_query} ({source_name})")
 
                 if use_spotify and not _spotify_rate_limited():
                     results = spotify_client.search_tracks(search_query, limit=10)
@@ -35401,19 +35381,19 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                         best_match_raw = _cache.get_entity('spotify', 'track', match.id)
                     else:
                         best_match_raw = None
-                    print(f"New best Tidal match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                    logger.info(f"New best Tidal match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                 if best_confidence >= 0.9:
-                    print(f"High confidence Tidal match found ({best_confidence:.3f}), stopping search")
+                    logger.info(f"High confidence Tidal match found ({best_confidence:.3f}), stopping search")
                     break
 
             except Exception as e:
-                print(f"Error in Tidal {source_name} search for query '{search_query}': {e}")
+                logger.debug(f"Error in Tidal {source_name} search for query '{search_query}': {e}")
                 continue
 
         # Strategy 4: Extended search with higher limit (last resort)
         if not best_match:
-            print(f"Tidal Strategy 4: Extended search with limit=50")
+            logger.info(f"Tidal Strategy 4: Extended search with limit=50")
             query = f"{artist_name} {track_name}"
             if use_spotify:
                 extended_results = spotify_client.search_tracks(query, limit=50)
@@ -35426,17 +35406,17 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                 if match and confidence >= min_confidence:
                     best_match = match
                     best_confidence = confidence
-                    print(f"Strategy 4 Tidal match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                    logger.info(f"Strategy 4 Tidal match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
         if best_match:
             if use_spotify:
-                print(f"Final Tidal Spotify match: {best_match.artists[0]} - {best_match.name} (confidence: {best_confidence:.3f})")
+                logger.info(f"Final Tidal Spotify match: {best_match.artists[0]} - {best_match.name} (confidence: {best_confidence:.3f})")
                 return (best_match, best_match_raw, best_confidence)
             else:
                 result_artists = best_match.artists if hasattr(best_match, 'artists') else []
                 result_artist = result_artists[0] if result_artists else 'Unknown'
                 result_name = best_match.name if hasattr(best_match, 'name') else 'Unknown'
-                print(f"Final Tidal {source_name} match: {result_artist} - {result_name} (confidence: {best_confidence:.3f})")
+                logger.info(f"Final Tidal {source_name} match: {result_artist} - {result_name} (confidence: {best_confidence:.3f})")
 
                 album_name = best_match.album if hasattr(best_match, 'album') else 'Unknown Album'
                 image_url = best_match.image_url if hasattr(best_match, 'image_url') else ''
@@ -35473,11 +35453,11 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                         if detailed:
                             track_number = detailed.get('track_number')
                             disc_number = detailed.get('disc_number')
-                            print(f"[Discovery Enrich] {result_name}: track_number={track_number}, disc={disc_number}")
+                            logger.info(f"[Discovery Enrich] {result_name}: track_number={track_number}, disc={disc_number}")
                         else:
-                            print(f"[Discovery Enrich] get_track_details returned None for ID {track_id} ({result_name})")
+                            logger.info(f"[Discovery Enrich] get_track_details returned None for ID {track_id} ({result_name})")
                     except Exception as _enrich_err:
-                        print(f"[Discovery Enrich] Failed for {result_name} (ID {track_id}): {_enrich_err}")
+                        logger.error(f"[Discovery Enrich] Failed for {result_name} (ID {track_id}): {_enrich_err}")
 
                 result_data = {
                     'id': track_id,
@@ -35494,11 +35474,11 @@ def _search_spotify_for_tidal_track(tidal_track, use_spotify=True, itunes_client
                     result_data['disc_number'] = disc_number
                 return result_data
         else:
-            print(f"No suitable Tidal match found (best confidence was {best_confidence:.3f}, required {min_confidence:.3f})")
+            logger.warning(f"No suitable Tidal match found (best confidence was {best_confidence:.3f}, required {min_confidence:.3f})")
             return None
 
     except Exception as e:
-        print(f"Error searching Spotify for Tidal track: {e}")
+        logger.error(f"Error searching Spotify for Tidal track: {e}")
         return None
 
 
@@ -35535,7 +35515,7 @@ def convert_tidal_results_to_spotify_tracks(discovery_results):
             }
             spotify_tracks.append(track)
 
-    print(f"Converted {len(spotify_tracks)} Tidal matches to Spotify tracks for sync")
+    logger.info(f"Converted {len(spotify_tracks)} Tidal matches to Spotify tracks for sync")
     return spotify_tracks
 
 
@@ -35589,11 +35569,11 @@ def start_tidal_sync(playlist_id):
         future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
         active_sync_workers[sync_playlist_id] = future
 
-        print(f"Started Tidal sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
+        logger.info(f"Started Tidal sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
         return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
 
     except Exception as e:
-        print(f"Error starting Tidal sync: {e}")
+        logger.error(f"Error starting Tidal sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/tidal/sync/status/<playlist_id>', methods=['GET'])
@@ -35639,7 +35619,7 @@ def get_tidal_sync_status(playlist_id):
         return jsonify(response)
         
     except Exception as e:
-        print(f"Error getting Tidal sync status: {e}")
+        logger.error(f"Error getting Tidal sync status: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/tidal/sync/cancel/<playlist_id>', methods=['POST'])
@@ -35670,7 +35650,7 @@ def cancel_tidal_sync(playlist_id):
         return jsonify({"success": True, "message": "Tidal sync cancelled"})
         
     except Exception as e:
-        print(f"Error cancelling Tidal sync: {e}")
+        logger.error(f"Error cancelling Tidal sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -35771,7 +35751,7 @@ def get_deezer_arl_playlists():
                 'sync_status': 'Never Synced',
             })
 
-        print(f"Loaded {len(playlist_data)} Deezer user playlists via ARL")
+        logger.info(f"Loaded {len(playlist_data)} Deezer user playlists via ARL")
         return jsonify(playlist_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -35791,7 +35771,7 @@ def get_deezer_arl_playlist_tracks(playlist_id):
         if not playlist:
             return jsonify({'error': 'Playlist not found or unable to access.'}), 404
 
-        print(f"Loaded {len(playlist.get('tracks', []))} tracks from Deezer playlist: {playlist.get('name')}")
+        logger.info(f"Loaded {len(playlist.get('tracks', []))} tracks from Deezer playlist: {playlist.get('name')}")
         return jsonify(playlist)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -35817,7 +35797,7 @@ def get_deezer_playlist(playlist_id):
         return jsonify(playlist)
 
     except Exception as e:
-        print(f"Error fetching Deezer playlist: {e}")
+        logger.error(f"Error fetching Deezer playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/deezer/discovery/start/<playlist_id>', methods=['POST'])
@@ -35890,11 +35870,11 @@ def start_deezer_discovery(playlist_id):
         future = deezer_discovery_executor.submit(_run_deezer_discovery_worker, playlist_id)
         state['discovery_future'] = future
 
-        print(f"Started Spotify discovery for Deezer playlist: {playlist_name}")
+        logger.info(f"Started Spotify discovery for Deezer playlist: {playlist_name}")
         return jsonify({"success": True, "message": "Discovery started"})
 
     except Exception as e:
-        print(f"Error starting Deezer discovery: {e}")
+        logger.error(f"Error starting Deezer discovery: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/deezer/discovery/status/<playlist_id>', methods=['GET'])
@@ -35920,7 +35900,7 @@ def get_deezer_discovery_status(playlist_id):
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error getting Deezer discovery status: {e}")
+        logger.error(f"Error getting Deezer discovery status: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/deezer/discovery/update_match', methods=['POST'])
@@ -35980,8 +35960,8 @@ def update_deezer_discovery_match():
         if old_status != 'found' and old_status != 'Found':
             state['spotify_matches'] = state.get('spotify_matches', 0) + 1
 
-        print(f"Manual match updated: deezer - {identifier} - track {track_index}")
-        print(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+        logger.info(f"Manual match updated: deezer - {identifier} - track {track_index}")
+        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
 
         # Save manual fix to discovery cache so it appears in discovery pool
         try:
@@ -36011,14 +35991,14 @@ def update_deezer_discovery_match():
                 cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
                 original_name, original_artist
             )
-            print(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
+            logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
         except Exception as cache_err:
-            print(f"Error saving manual fix to discovery cache: {cache_err}")
+            logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
 
         return jsonify({'success': True, 'result': result})
 
     except Exception as e:
-        print(f"Error updating Deezer discovery match: {e}")
+        logger.error(f"Error updating Deezer discovery match: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/deezer/playlists/states', methods=['GET'])
@@ -36045,11 +36025,11 @@ def get_deezer_playlist_states():
             }
             states.append(state_info)
 
-        print(f"Returning {len(states)} stored Deezer playlist states for hydration")
+        logger.info(f"Returning {len(states)} stored Deezer playlist states for hydration")
         return jsonify({"states": states})
 
     except Exception as e:
-        print(f"Error getting Deezer playlist states: {e}")
+        logger.error(f"Error getting Deezer playlist states: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/deezer/state/<playlist_id>', methods=['GET'])
@@ -36082,7 +36062,7 @@ def get_deezer_playlist_state(playlist_id):
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error getting Deezer playlist state: {e}")
+        logger.error(f"Error getting Deezer playlist state: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/deezer/reset/<playlist_id>', methods=['POST'])
@@ -36111,11 +36091,11 @@ def reset_deezer_playlist(playlist_id):
         state['discovery_future'] = None
         state['last_accessed'] = time.time()
 
-        print(f"Reset Deezer playlist to fresh: {playlist_id}")
+        logger.info(f"Reset Deezer playlist to fresh: {playlist_id}")
         return jsonify({"success": True, "message": "Playlist reset to fresh phase"})
 
     except Exception as e:
-        print(f"Error resetting Deezer playlist: {e}")
+        logger.error(f"Error resetting Deezer playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/deezer/delete/<playlist_id>', methods=['POST'])
@@ -36134,11 +36114,11 @@ def delete_deezer_playlist(playlist_id):
         # Remove from state dictionary
         del deezer_discovery_states[playlist_id]
 
-        print(f"Deleted Deezer playlist state: {playlist_id}")
+        logger.info(f"Deleted Deezer playlist state: {playlist_id}")
         return jsonify({"success": True, "message": "Playlist deleted"})
 
     except Exception as e:
-        print(f"Error deleting Deezer playlist: {e}")
+        logger.error(f"Error deleting Deezer playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/deezer/update_phase/<playlist_id>', methods=['POST'])
@@ -36171,11 +36151,11 @@ def update_deezer_playlist_phase(playlist_id):
         if 'converted_spotify_playlist_id' in data:
             state['converted_spotify_playlist_id'] = data['converted_spotify_playlist_id']
 
-        print(f"Updated Deezer playlist {playlist_id} phase: {old_phase} → {new_phase}")
+        logger.info(f"Updated Deezer playlist {playlist_id} phase: {old_phase} → {new_phase}")
         return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
 
     except Exception as e:
-        print(f"Error updating Deezer playlist phase: {e}")
+        logger.error(f"Error updating Deezer playlist phase: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -36196,7 +36176,7 @@ def _run_deezer_discovery_worker(playlist_id):
         if not use_spotify:
             itunes_client_instance = _get_metadata_fallback_client()
 
-        print(f"Starting Deezer discovery for: {playlist['name']} (using {discovery_source.upper()})")
+        logger.info(f"Starting Deezer discovery for: {playlist['name']} (using {discovery_source.upper()})")
 
         # Store discovery source in state for frontend
         state['discovery_source'] = discovery_source
@@ -36215,7 +36195,7 @@ def _run_deezer_discovery_worker(playlist_id):
                 track_album = deezer_track.get('album', '')
                 track_duration_ms = deezer_track.get('duration_ms', 0)
 
-                print(f"[{i+1}/{len(tracks)}] Searching {discovery_source.upper()}: {track_name} by {', '.join(track_artists)}")
+                logger.info(f"[{i+1}/{len(tracks)}] Searching {discovery_source.upper()}: {track_name} by {', '.join(track_artists)}")
 
                 # Check discovery cache first
                 cache_key = _get_discovery_cache_key(track_name, track_artists[0] if track_artists else '')
@@ -36223,7 +36203,7 @@ def _run_deezer_discovery_worker(playlist_id):
                     cache_db = get_database()
                     cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
                     if cached_match and _validate_discovery_cache_artist(track_artists[0] if track_artists else '', cached_match):
-                        print(f"CACHE HIT [{i+1}/{len(tracks)}]: {track_name} by {', '.join(track_artists)}")
+                        logger.debug(f"CACHE HIT [{i+1}/{len(tracks)}]: {track_name} by {', '.join(track_artists)}")
                         # Extract display-friendly artist string from cached match
                         cached_artists = cached_match.get('artists', [])
                         if cached_artists:
@@ -36261,7 +36241,7 @@ def _run_deezer_discovery_worker(playlist_id):
                         state['discovery_progress'] = int(((i + 1) / len(tracks)) * 100)
                         continue
                 except Exception as cache_err:
-                    print(f"Cache lookup error: {cache_err}")
+                    logger.error(f"Cache lookup error: {cache_err}")
 
                 # Create a SimpleNamespace duck-type object for _search_spotify_for_tidal_track
                 track_ns = types.SimpleNamespace(
@@ -36375,9 +36355,9 @@ def _run_deezer_discovery_worker(playlist_id):
                             result['match_data'], track_name,
                             track_artists[0] if track_artists else ''
                         )
-                        print(f"CACHE SAVED: {track_name} (confidence: {match_confidence:.3f})")
+                        logger.info(f"CACHE SAVED: {track_name} (confidence: {match_confidence:.3f})")
                     except Exception as cache_err:
-                        print(f"Cache save error: {cache_err}")
+                        logger.error(f"Cache save error: {cache_err}")
 
                 # Auto Wing It fallback for unmatched tracks
                 if result['status_class'] == 'not-found':
@@ -36407,7 +36387,7 @@ def _run_deezer_discovery_worker(playlist_id):
                 time.sleep(0.1)
 
             except Exception as e:
-                print(f"Error processing track {i+1}: {e}")
+                logger.error(f"Error processing track {i+1}: {e}")
                 # Add error result
                 result = {
                     'deezer_track': {
@@ -36437,13 +36417,13 @@ def _run_deezer_discovery_worker(playlist_id):
         source_label = discovery_source.upper()
         add_activity_item("", f"Deezer Discovery Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
 
-        print(f"Deezer discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
+        logger.info(f"Deezer discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
 
         # Sync discovery results back to mirrored playlist
         _sync_discovery_results_to_mirrored('deezer', playlist_id, state.get('discovery_results', []), discovery_source, profile_id=state.get('_profile_id', 1))
 
     except Exception as e:
-        print(f"Error in Deezer discovery worker: {e}")
+        logger.error(f"Error in Deezer discovery worker: {e}")
         if playlist_id in deezer_discovery_states:
             deezer_discovery_states[playlist_id]['phase'] = 'error'
             deezer_discovery_states[playlist_id]['status'] = f'error: {str(e)}'
@@ -36482,7 +36462,7 @@ def convert_deezer_results_to_spotify_tracks(discovery_results):
             }
             spotify_tracks.append(track)
 
-    print(f"Converted {len(spotify_tracks)} Deezer matches to Spotify tracks for sync")
+    logger.info(f"Converted {len(spotify_tracks)} Deezer matches to Spotify tracks for sync")
     return spotify_tracks
 
 
@@ -36536,11 +36516,11 @@ def start_deezer_sync(playlist_id):
         future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
         active_sync_workers[sync_playlist_id] = future
 
-        print(f"Started Deezer sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
+        logger.info(f"Started Deezer sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
         return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
 
     except Exception as e:
-        print(f"Error starting Deezer sync: {e}")
+        logger.error(f"Error starting Deezer sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/deezer/sync/status/<playlist_id>', methods=['GET'])
@@ -36583,7 +36563,7 @@ def get_deezer_sync_status(playlist_id):
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error getting Deezer sync status: {e}")
+        logger.error(f"Error getting Deezer sync status: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/deezer/sync/cancel/<playlist_id>', methods=['POST'])
@@ -36614,7 +36594,7 @@ def cancel_deezer_sync(playlist_id):
         return jsonify({"success": True, "message": "Deezer sync cancelled"})
 
     except Exception as e:
-        print(f"Error cancelling Deezer sync: {e}")
+        logger.error(f"Error cancelling Deezer sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -36642,7 +36622,7 @@ def parse_spotify_public_endpoint():
         if not parsed:
             return jsonify({"error": "Invalid Spotify URL. Please use a playlist or album link from open.spotify.com"}), 400
 
-        print(f"Scraping public Spotify {parsed['type']}: {parsed['id']}")
+        logger.info(f"Scraping public Spotify {parsed['type']}: {parsed['id']}")
 
         result = scrape_spotify_embed(parsed['type'], parsed['id'])
 
@@ -36701,11 +36681,11 @@ def parse_spotify_public_endpoint():
             spotify_public_discovery_states[url_hash]['playlist'] = response_data
             spotify_public_discovery_states[url_hash]['last_accessed'] = time.time()
 
-        print(f"Spotify {parsed['type']} scraped: {result['name']} ({len(spotify_tracks)} tracks)")
+        logger.info(f"Spotify {parsed['type']} scraped: {result['name']} ({len(spotify_tracks)} tracks)")
         return jsonify(response_data)
 
     except Exception as e:
-        print(f"Error parsing Spotify URL: {e}")
+        logger.error(f"Error parsing Spotify URL: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -36740,11 +36720,11 @@ def start_spotify_public_discovery(url_hash):
         future = spotify_public_discovery_executor.submit(_run_spotify_public_discovery_worker, url_hash)
         state['discovery_future'] = future
 
-        print(f"Started Spotify discovery for Spotify Public playlist: {playlist_name}")
+        logger.info(f"Started Spotify discovery for Spotify Public playlist: {playlist_name}")
         return jsonify({"success": True, "message": "Discovery started"})
 
     except Exception as e:
-        print(f"Error starting Spotify Public discovery: {e}")
+        logger.error(f"Error starting Spotify Public discovery: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify-public/discovery/status/<url_hash>', methods=['GET'])
@@ -36770,7 +36750,7 @@ def get_spotify_public_discovery_status(url_hash):
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error getting Spotify Public discovery status: {e}")
+        logger.error(f"Error getting Spotify Public discovery status: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify-public/discovery/update_match', methods=['POST'])
@@ -36830,8 +36810,8 @@ def update_spotify_public_discovery_match():
         if old_status != 'found' and old_status != 'Found':
             state['spotify_matches'] = state.get('spotify_matches', 0) + 1
 
-        print(f"Manual match updated: spotify_public - {identifier} - track {track_index}")
-        print(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+        logger.info(f"Manual match updated: spotify_public - {identifier} - track {track_index}")
+        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
 
         # Save manual fix to discovery cache so it appears in discovery pool
         try:
@@ -36861,14 +36841,14 @@ def update_spotify_public_discovery_match():
                 cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
                 original_name, original_artist
             )
-            print(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
+            logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
         except Exception as cache_err:
-            print(f"Error saving manual fix to discovery cache: {cache_err}")
+            logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
 
         return jsonify({'success': True, 'result': result})
 
     except Exception as e:
-        print(f"Error updating Spotify Public discovery match: {e}")
+        logger.error(f"Error updating Spotify Public discovery match: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/spotify-public/playlists/states', methods=['GET'])
@@ -36895,11 +36875,11 @@ def get_spotify_public_playlist_states():
             }
             states.append(state_info)
 
-        print(f"Returning {len(states)} stored Spotify Public playlist states for hydration")
+        logger.info(f"Returning {len(states)} stored Spotify Public playlist states for hydration")
         return jsonify({"states": states})
 
     except Exception as e:
-        print(f"Error getting Spotify Public playlist states: {e}")
+        logger.error(f"Error getting Spotify Public playlist states: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify-public/state/<url_hash>', methods=['GET'])
@@ -36931,7 +36911,7 @@ def get_spotify_public_playlist_state(url_hash):
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error getting Spotify Public playlist state: {e}")
+        logger.error(f"Error getting Spotify Public playlist state: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify-public/reset/<url_hash>', methods=['POST'])
@@ -36960,11 +36940,11 @@ def reset_spotify_public_playlist(url_hash):
         state['discovery_future'] = None
         state['last_accessed'] = time.time()
 
-        print(f"Reset Spotify Public playlist to fresh: {url_hash}")
+        logger.info(f"Reset Spotify Public playlist to fresh: {url_hash}")
         return jsonify({"success": True, "message": "Playlist reset to fresh phase"})
 
     except Exception as e:
-        print(f"Error resetting Spotify Public playlist: {e}")
+        logger.error(f"Error resetting Spotify Public playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify-public/delete/<url_hash>', methods=['POST'])
@@ -36983,11 +36963,11 @@ def delete_spotify_public_playlist(url_hash):
         # Remove from state dictionary
         del spotify_public_discovery_states[url_hash]
 
-        print(f"Deleted Spotify Public playlist state: {url_hash}")
+        logger.info(f"Deleted Spotify Public playlist state: {url_hash}")
         return jsonify({"success": True, "message": "Playlist deleted"})
 
     except Exception as e:
-        print(f"Error deleting Spotify Public playlist: {e}")
+        logger.error(f"Error deleting Spotify Public playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify-public/update_phase/<url_hash>', methods=['POST'])
@@ -37020,11 +37000,11 @@ def update_spotify_public_playlist_phase(url_hash):
         if 'converted_spotify_playlist_id' in data:
             state['converted_spotify_playlist_id'] = data['converted_spotify_playlist_id']
 
-        print(f"Updated Spotify Public playlist {url_hash} phase: {old_phase} → {new_phase}")
+        logger.info(f"Updated Spotify Public playlist {url_hash} phase: {old_phase} → {new_phase}")
         return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
 
     except Exception as e:
-        print(f"Error updating Spotify Public playlist phase: {e}")
+        logger.error(f"Error updating Spotify Public playlist phase: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -37045,7 +37025,7 @@ def _run_spotify_public_discovery_worker(url_hash):
         if not use_spotify:
             itunes_client_instance = _get_metadata_fallback_client()
 
-        print(f"Starting Spotify Public discovery for: {playlist['name']} (using {discovery_source.upper()})")
+        logger.info(f"Starting Spotify Public discovery for: {playlist['name']} (using {discovery_source.upper()})")
 
         # Store discovery source in state for frontend
         state['discovery_source'] = discovery_source
@@ -37075,7 +37055,7 @@ def _run_spotify_public_discovery_worker(url_hash):
                     track_album_name = track_album or ''
                 track_duration_ms = sp_track.get('duration_ms', 0)
 
-                print(f"[{i+1}/{len(tracks)}] Searching {discovery_source.upper()}: {track_name} by {', '.join(track_artists)}")
+                logger.info(f"[{i+1}/{len(tracks)}] Searching {discovery_source.upper()}: {track_name} by {', '.join(track_artists)}")
 
                 # Check discovery cache first
                 cache_key = _get_discovery_cache_key(track_name, track_artists[0] if track_artists else '')
@@ -37083,7 +37063,7 @@ def _run_spotify_public_discovery_worker(url_hash):
                     cache_db = get_database()
                     cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
                     if cached_match and _validate_discovery_cache_artist(track_artists[0] if track_artists else '', cached_match):
-                        print(f"CACHE HIT [{i+1}/{len(tracks)}]: {track_name} by {', '.join(track_artists)}")
+                        logger.debug(f"CACHE HIT [{i+1}/{len(tracks)}]: {track_name} by {', '.join(track_artists)}")
                         # Extract display-friendly artist string from cached match
                         cached_artists = cached_match.get('artists', [])
                         if cached_artists:
@@ -37121,7 +37101,7 @@ def _run_spotify_public_discovery_worker(url_hash):
                         state['discovery_progress'] = int(((i + 1) / len(tracks)) * 100)
                         continue
                 except Exception as cache_err:
-                    print(f"Cache lookup error: {cache_err}")
+                    logger.error(f"Cache lookup error: {cache_err}")
 
                 # Create a SimpleNamespace duck-type object for _search_spotify_for_tidal_track
                 track_ns = types.SimpleNamespace(
@@ -37235,9 +37215,9 @@ def _run_spotify_public_discovery_worker(url_hash):
                             result['match_data'], track_name,
                             track_artists[0] if track_artists else ''
                         )
-                        print(f"CACHE SAVED: {track_name} (confidence: {match_confidence:.3f})")
+                        logger.info(f"CACHE SAVED: {track_name} (confidence: {match_confidence:.3f})")
                     except Exception as cache_err:
-                        print(f"Cache save error: {cache_err}")
+                        logger.error(f"Cache save error: {cache_err}")
 
                 # Auto Wing It fallback for unmatched tracks
                 if result['status_class'] == 'not-found':
@@ -37267,7 +37247,7 @@ def _run_spotify_public_discovery_worker(url_hash):
                 time.sleep(0.1)
 
             except Exception as e:
-                print(f"Error processing track {i+1}: {e}")
+                logger.error(f"Error processing track {i+1}: {e}")
                 # Add error result
                 result = {
                     'spotify_public_track': {
@@ -37297,10 +37277,10 @@ def _run_spotify_public_discovery_worker(url_hash):
         source_label = discovery_source.upper()
         add_activity_item("", f"Spotify Link Discovery Complete ({source_label})", f"'{playlist['name']}' - {successful_discoveries}/{len(tracks)} tracks found", "Now")
 
-        print(f"Spotify Public discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
+        logger.info(f"Spotify Public discovery complete ({source_label}): {successful_discoveries}/{len(tracks)} tracks found")
 
     except Exception as e:
-        print(f"Error in Spotify Public discovery worker: {e}")
+        logger.error(f"Error in Spotify Public discovery worker: {e}")
         if url_hash in spotify_public_discovery_states:
             spotify_public_discovery_states[url_hash]['phase'] = 'error'
             spotify_public_discovery_states[url_hash]['status'] = f'error: {str(e)}'
@@ -37340,7 +37320,7 @@ def convert_spotify_public_results_to_spotify_tracks(discovery_results):
             }
             spotify_tracks.append(track)
 
-    print(f"Converted {len(spotify_tracks)} Spotify Public matches to Spotify tracks for sync")
+    logger.info(f"Converted {len(spotify_tracks)} Spotify Public matches to Spotify tracks for sync")
     return spotify_tracks
 
 
@@ -37394,11 +37374,11 @@ def start_spotify_public_sync(url_hash):
         future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
         active_sync_workers[sync_playlist_id] = future
 
-        print(f"Started Spotify Public sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
+        logger.info(f"Started Spotify Public sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
         return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
 
     except Exception as e:
-        print(f"Error starting Spotify Public sync: {e}")
+        logger.error(f"Error starting Spotify Public sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify-public/sync/status/<url_hash>', methods=['GET'])
@@ -37441,7 +37421,7 @@ def get_spotify_public_sync_status(url_hash):
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error getting Spotify Public sync status: {e}")
+        logger.error(f"Error getting Spotify Public sync status: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify-public/sync/cancel/<url_hash>', methods=['POST'])
@@ -37472,7 +37452,7 @@ def cancel_spotify_public_sync(url_hash):
         return jsonify({"success": True, "message": "Spotify Public sync cancelled"})
 
     except Exception as e:
-        print(f"Error cancelling Spotify Public sync: {e}")
+        logger.error(f"Error cancelling Spotify Public sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -37506,7 +37486,7 @@ def parse_youtube_playlist_endpoint():
         if not ('youtube.com/playlist' in url or 'music.youtube.com/playlist' in url):
             return jsonify({"error": "Invalid YouTube playlist URL"}), 400
         
-        print(f"Parsing YouTube playlist: {url}")
+        logger.info(f"Parsing YouTube playlist: {url}")
         
         # Parse the playlist using our function
         playlist_data = parse_youtube_playlist(url)
@@ -37571,11 +37551,11 @@ def parse_youtube_playlist_endpoint():
         
         playlist_data['url_hash'] = url_hash
         
-        print(f"YouTube playlist parsed successfully: {playlist_data['name']} ({len(playlist_data['tracks'])} tracks)")
+        logger.info(f"YouTube playlist parsed successfully: {playlist_data['name']} ({len(playlist_data['tracks'])} tracks)")
         return jsonify(playlist_data)
         
     except Exception as e:
-        print(f"Error parsing YouTube playlist: {e}")
+        logger.error(f"Error parsing YouTube playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/youtube/discovery/start/<url_hash>', methods=['POST'])
@@ -37611,11 +37591,11 @@ def start_youtube_discovery(url_hash):
         future = youtube_discovery_executor.submit(_run_youtube_discovery_worker, url_hash)
         state['discovery_future'] = future
         
-        print(f"Started Spotify discovery for YouTube playlist: {state['playlist']['name']}")
+        logger.info(f"Started Spotify discovery for YouTube playlist: {state['playlist']['name']}")
         return jsonify({"success": True, "message": "Discovery started"})
         
     except Exception as e:
-        print(f"Error starting YouTube discovery: {e}")
+        logger.error(f"Error starting YouTube discovery: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/youtube/discovery/status/<url_hash>', methods=['GET'])
@@ -37641,7 +37621,7 @@ def get_youtube_discovery_status(url_hash):
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error getting YouTube discovery status: {e}")
+        logger.error(f"Error getting YouTube discovery status: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -37713,13 +37693,13 @@ def unmatch_discovery_track():
                             'unmatched_by_user': True,
                         })
             except Exception as e:
-                print(f"Error clearing mirrored track match: {e}")
+                logger.error(f"Error clearing mirrored track match: {e}")
 
-        print(f"Unmatched discovery track {track_index}: {result.get('yt_track', result.get('lb_track', ''))}")
+        logger.info(f"Unmatched discovery track {track_index}: {result.get('yt_track', result.get('lb_track', ''))}")
         return jsonify({'success': True})
 
     except Exception as e:
-        print(f"Error unmatching discovery track: {e}")
+        logger.error(f"Error unmatching discovery track: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
@@ -37780,8 +37760,8 @@ def update_youtube_discovery_match():
         if old_status != 'found' and old_status != 'Found':
             state['spotify_matches'] = state.get('spotify_matches', 0) + 1
 
-        print(f"Manual match updated: youtube - {identifier} - track {track_index}")
-        print(f"   → {result['spotify_artist']} - {result['spotify_track']}")
+        logger.info(f"Manual match updated: youtube - {identifier} - track {track_index}")
+        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
 
         # Save manual fix to discovery cache so it appears in discovery pool
         try:
@@ -37815,9 +37795,9 @@ def update_youtube_discovery_match():
                 cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
                 original_name, original_artist
             )
-            print(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
+            logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
         except Exception as cache_err:
-            print(f"Error saving manual fix to discovery cache: {cache_err}")
+            logger.error(f"Error saving manual fix to discovery cache: {cache_err}")
 
         # Persist manual fix to DB for mirrored playlists
         if identifier.startswith('mirrored_'):
@@ -37836,14 +37816,14 @@ def update_youtube_discovery_match():
                         }
                         db.update_mirrored_track_extra_data(db_track_id, extra_data)
                         result['matched_data'] = matched_data
-                        print(f"Persisted manual fix to DB for track {db_track_id}")
+                        logger.info(f"Persisted manual fix to DB for track {db_track_id}")
             except Exception as wb_err:
-                print(f"Error persisting manual fix to DB: {wb_err}")
+                logger.error(f"Error persisting manual fix to DB: {wb_err}")
 
         return jsonify({'success': True, 'result': result})
 
     except Exception as e:
-        print(f"Error updating YouTube discovery match: {e}")
+        logger.error(f"Error updating YouTube discovery match: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -37877,7 +37857,7 @@ def _run_youtube_discovery_worker(url_hash):
         # Get fallback client
         itunes_client = _get_metadata_fallback_client()
 
-        print(f"Starting {discovery_source} discovery for {len(tracks)} YouTube tracks...")
+        logger.info(f"Starting {discovery_source} discovery for {len(tracks)} YouTube tracks...")
 
         # Store the discovery source in state
         state['discovery_source'] = discovery_source
@@ -37887,7 +37867,7 @@ def _run_youtube_discovery_worker(url_hash):
             try:
                 # Check for cancellation (phase changed by reset/delete/close)
                 if state.get('phase') != 'discovering':
-                    print(f"Discovery cancelled for {url_hash} (phase changed to '{state.get('phase')}')")
+                    logger.warning(f"Discovery cancelled for {url_hash} (phase changed to '{state.get('phase')}')")
                     return
 
                 # Update progress
@@ -37901,7 +37881,7 @@ def _run_youtube_discovery_worker(url_hash):
                 cleaned_title = track['name']
                 cleaned_artist = track['artists'][0] if track['artists'] else 'Unknown Artist'
 
-                print(f"Searching {discovery_source} for: '{cleaned_artist}' - '{cleaned_title}'")
+                logger.info(f"Searching {discovery_source} for: '{cleaned_artist}' - '{cleaned_title}'")
 
                 # Check discovery cache first
                 cache_key = _get_discovery_cache_key(cleaned_title, cleaned_artist)
@@ -37909,7 +37889,7 @@ def _run_youtube_discovery_worker(url_hash):
                     cache_db = get_database()
                     cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
                     if cached_match and _validate_discovery_cache_artist(cleaned_artist, cached_match):
-                        print(f"CACHE HIT [{i+1}/{len(tracks)}]: {cleaned_artist} - {cleaned_title}")
+                        logger.debug(f"CACHE HIT [{i+1}/{len(tracks)}]: {cleaned_artist} - {cleaned_title}")
                         result = {
                             'index': i,
                             'yt_track': cleaned_title,
@@ -37928,7 +37908,7 @@ def _run_youtube_discovery_worker(url_hash):
                         state['discovery_results'].append(result)
                         continue
                 except Exception as cache_err:
-                    print(f"Cache lookup error: {cache_err}")
+                    logger.error(f"Cache lookup error: {cache_err}")
 
                 # Try multiple search strategies using matching engine
                 matched_track = None
@@ -37945,14 +37925,14 @@ def _run_youtube_discovery_worker(url_hash):
                         'album': None
                     })()
                     search_queries = matching_engine.generate_download_queries(temp_track)
-                    print(f"Generated {len(search_queries)} search queries for YouTube track")
+                    logger.info(f"Generated {len(search_queries)} search queries for YouTube track")
                 except Exception as e:
-                    print(f"Matching engine failed for YouTube, falling back to basic query: {e}")
+                    logger.error(f"Matching engine failed for YouTube, falling back to basic query: {e}")
                     search_queries = [f"{cleaned_artist} {cleaned_title}", cleaned_title]
 
                 for query_idx, search_query in enumerate(search_queries):
                     try:
-                        print(f"YouTube query {query_idx + 1}/{len(search_queries)}: {search_query}")
+                        logger.debug(f"YouTube query {query_idx + 1}/{len(search_queries)}: {search_query}")
 
                         search_results = None
 
@@ -37977,22 +37957,22 @@ def _run_youtube_discovery_worker(url_hash):
                                 best_raw_track = _cache.get_entity('spotify', 'track', match.id)
                             else:
                                 best_raw_track = None
-                            print(f"New best YouTube match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                            logger.info(f"New best YouTube match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                         if best_confidence >= 0.9:
-                            print(f"High confidence YouTube match found ({best_confidence:.3f}), stopping search")
+                            logger.info(f"High confidence YouTube match found ({best_confidence:.3f}), stopping search")
                             break
 
                     except Exception as e:
-                        print(f"Error in YouTube search for query '{search_query}': {e}")
+                        logger.debug(f"Error in YouTube search for query '{search_query}': {e}")
                         continue
 
                 if matched_track:
-                    print(f"Strategy 1 YouTube match: {matched_track.artists[0]} - {matched_track.name} (confidence: {best_confidence:.3f})")
+                    logger.info(f"Strategy 1 YouTube match: {matched_track.artists[0]} - {matched_track.name} (confidence: {best_confidence:.3f})")
 
                 # Strategy 2: Swapped search (if first failed) - score results properly
                 if not matched_track:
-                    print("YouTube Strategy 2: Trying swapped search (artist/title reversed)")
+                    logger.info("YouTube Strategy 2: Trying swapped search (artist/title reversed)")
                     if use_spotify:
                         query = f"artist:{cleaned_title} track:{cleaned_artist}"
                         fallback_results = spotify_client.search_tracks(query, limit=5)
@@ -38006,13 +37986,13 @@ def _run_youtube_discovery_worker(url_hash):
                         if match and confidence >= min_confidence:
                             matched_track = match
                             best_confidence = confidence
-                            print(f"Strategy 2 YouTube match (swapped): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                            logger.info(f"Strategy 2 YouTube match (swapped): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                 # Strategy 3: Raw data search (if still failed) - score results properly
                 if not matched_track:
                     raw_title = track.get('raw_title', cleaned_title)
                     raw_artist = track.get('raw_artist', cleaned_artist)
-                    print(f"YouTube Strategy 3: Trying raw data search: '{raw_artist} {raw_title}'")
+                    logger.info(f"YouTube Strategy 3: Trying raw data search: '{raw_artist} {raw_title}'")
                     query = f"{raw_artist} {raw_title}"
                     if use_spotify:
                         fallback_results = spotify_client.search_tracks(query, limit=5)
@@ -38025,11 +38005,11 @@ def _run_youtube_discovery_worker(url_hash):
                         if match and confidence >= min_confidence:
                             matched_track = match
                             best_confidence = confidence
-                            print(f"Strategy 3 YouTube match (raw): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                            logger.info(f"Strategy 3 YouTube match (raw): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                 # Strategy 4: Extended search with higher limit (last resort)
                 if not matched_track:
-                    print(f"YouTube Strategy 4: Extended search with limit=50")
+                    logger.info(f"YouTube Strategy 4: Extended search with limit=50")
                     query = f"{cleaned_artist} {cleaned_title}"
                     if use_spotify:
                         extended_results = spotify_client.search_tracks(query, limit=50)
@@ -38042,7 +38022,7 @@ def _run_youtube_discovery_worker(url_hash):
                         if match and confidence >= min_confidence:
                             matched_track = match
                             best_confidence = confidence
-                            print(f"Strategy 4 YouTube match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                            logger.info(f"Strategy 4 YouTube match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                 # Create result entry
                 result = {
@@ -38096,9 +38076,9 @@ def _run_youtube_discovery_worker(url_hash):
                                 cache_key[0], cache_key[1], discovery_source, best_confidence,
                                 result['matched_data'], cleaned_title, cleaned_artist
                             )
-                            print(f"CACHE SAVED: {cleaned_artist} - {cleaned_title} (confidence: {best_confidence:.3f})")
+                            logger.info(f"CACHE SAVED: {cleaned_artist} - {cleaned_title} (confidence: {best_confidence:.3f})")
                         except Exception as cache_err:
-                            print(f"Cache save error: {cache_err}")
+                            logger.error(f"Cache save error: {cache_err}")
 
                 else:
                     # Auto Wing It fallback — build stub from raw source data
@@ -38115,10 +38095,10 @@ def _run_youtube_discovery_worker(url_hash):
 
                 state['discovery_results'].append(result)
 
-                print(f"  {'' if matched_track else ''} Track {i+1}/{len(tracks)}: {result['status']}")
+                logger.info(f"  {'' if matched_track else ''} Track {i+1}/{len(tracks)}: {result['status']}")
 
             except Exception as e:
-                print(f"Error processing track {i}: {e}")
+                logger.error(f"Error processing track {i}: {e}")
                 result = {
                     'index': i,
                     'yt_track': track['name'],
@@ -38173,9 +38153,9 @@ def _run_youtube_discovery_worker(url_hash):
                             'provider': discovery_source,
                         }
                         db.update_mirrored_track_extra_data(db_track_id, extra_data)
-                print(f"Wrote discovery results to DB for {url_hash}")
+                logger.info(f"Wrote discovery results to DB for {url_hash}")
             except Exception as wb_err:
-                print(f"Error writing discovery results to DB: {wb_err}")
+                logger.error(f"Error writing discovery results to DB: {wb_err}")
 
         playlist_name = playlist['name']
         source_label = discovery_source.upper()
@@ -38185,10 +38165,10 @@ def _run_youtube_discovery_worker(url_hash):
             activity_msg += f", {wing_it_count} wing it"
         add_activity_item("", f"YouTube Discovery Complete ({source_label})", activity_msg, "Now")
 
-        print(f"YouTube discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched, {wing_it_count} wing it")
+        logger.info(f"YouTube discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched, {wing_it_count} wing it")
 
     except Exception as e:
-        print(f"Error in YouTube discovery worker: {e}")
+        logger.error(f"Error in YouTube discovery worker: {e}")
         state['status'] = 'error'
         state['phase'] = 'fresh'
     finally:
@@ -38211,7 +38191,7 @@ def _run_listenbrainz_discovery_worker(state_key):
         # Get fallback client
         itunes_client = _get_metadata_fallback_client()
 
-        print(f"Starting {discovery_source} discovery for {len(tracks)} ListenBrainz tracks...")
+        logger.info(f"Starting {discovery_source} discovery for {len(tracks)} ListenBrainz tracks...")
 
         # Store the discovery source in state
         state['discovery_source'] = discovery_source
@@ -38221,7 +38201,7 @@ def _run_listenbrainz_discovery_worker(state_key):
             try:
                 # Check for cancellation
                 if state.get('phase') != 'discovering':
-                    print(f"ListenBrainz discovery cancelled (phase changed to '{state.get('phase')}')")
+                    logger.warning(f"ListenBrainz discovery cancelled (phase changed to '{state.get('phase')}')")
                     return
 
                 # Update progress
@@ -38233,7 +38213,7 @@ def _run_listenbrainz_discovery_worker(state_key):
                 album_name = track.get('album_name', '')
                 duration_ms = track.get('duration_ms', 0)
 
-                print(f"Searching {discovery_source} for: '{cleaned_artist}' - '{cleaned_title}'")
+                logger.info(f"Searching {discovery_source} for: '{cleaned_artist}' - '{cleaned_title}'")
 
                 # Check discovery cache first
                 cache_key = _get_discovery_cache_key(cleaned_title, cleaned_artist)
@@ -38241,7 +38221,7 @@ def _run_listenbrainz_discovery_worker(state_key):
                     cache_db = get_database()
                     cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
                     if cached_match and _validate_discovery_cache_artist(cleaned_artist, cached_match):
-                        print(f"CACHE HIT [{i+1}/{len(tracks)}]: {cleaned_artist} - {cleaned_title}")
+                        logger.debug(f"CACHE HIT [{i+1}/{len(tracks)}]: {cleaned_artist} - {cleaned_title}")
                         result = {
                             'index': i,
                             'lb_track': cleaned_title,
@@ -38260,7 +38240,7 @@ def _run_listenbrainz_discovery_worker(state_key):
                         state['discovery_results'].append(result)
                         continue
                 except Exception as cache_err:
-                    print(f"Cache lookup error: {cache_err}")
+                    logger.error(f"Cache lookup error: {cache_err}")
 
                 # Try multiple search strategies using matching engine
                 matched_track = None
@@ -38277,14 +38257,14 @@ def _run_listenbrainz_discovery_worker(state_key):
                         'album': album_name if album_name else None
                     })()
                     search_queries = matching_engine.generate_download_queries(temp_track)
-                    print(f"Generated {len(search_queries)} search queries for ListenBrainz track")
+                    logger.info(f"Generated {len(search_queries)} search queries for ListenBrainz track")
                 except Exception as e:
-                    print(f"Matching engine failed for ListenBrainz, falling back to basic query: {e}")
+                    logger.error(f"Matching engine failed for ListenBrainz, falling back to basic query: {e}")
                     search_queries = [f"{cleaned_artist} {cleaned_title}", cleaned_title]
 
                 for query_idx, search_query in enumerate(search_queries):
                     try:
-                        print(f"ListenBrainz query {query_idx + 1}/{len(search_queries)}: {search_query}")
+                        logger.debug(f"ListenBrainz query {query_idx + 1}/{len(search_queries)}: {search_query}")
 
                         search_results = None
 
@@ -38309,22 +38289,22 @@ def _run_listenbrainz_discovery_worker(state_key):
                                 best_raw_track = _cache.get_entity('spotify', 'track', match.id)
                             else:
                                 best_raw_track = None
-                            print(f"New best ListenBrainz match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                            logger.info(f"New best ListenBrainz match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                         if best_confidence >= 0.9:
-                            print(f"High confidence ListenBrainz match found ({best_confidence:.3f}), stopping search")
+                            logger.info(f"High confidence ListenBrainz match found ({best_confidence:.3f}), stopping search")
                             break
 
                     except Exception as e:
-                        print(f"Error in ListenBrainz search for query '{search_query}': {e}")
+                        logger.debug(f"Error in ListenBrainz search for query '{search_query}': {e}")
                         continue
 
                 if matched_track:
-                    print(f"Strategy 1 ListenBrainz match: {matched_track.artists[0]} - {matched_track.name} (confidence: {best_confidence:.3f})")
+                    logger.info(f"Strategy 1 ListenBrainz match: {matched_track.artists[0]} - {matched_track.name} (confidence: {best_confidence:.3f})")
 
                 # Strategy 2: Swapped search (if first failed) - score results properly
                 if not matched_track:
-                    print("ListenBrainz Strategy 2: Trying swapped search (artist/title reversed)")
+                    logger.info("ListenBrainz Strategy 2: Trying swapped search (artist/title reversed)")
                     if use_spotify:
                         query = f"artist:{cleaned_title} track:{cleaned_artist}"
                         fallback_results = spotify_client.search_tracks(query, limit=5)
@@ -38338,11 +38318,11 @@ def _run_listenbrainz_discovery_worker(state_key):
                         if match and confidence >= min_confidence:
                             matched_track = match
                             best_confidence = confidence
-                            print(f"Strategy 2 ListenBrainz match (swapped): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                            logger.info(f"Strategy 2 ListenBrainz match (swapped): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                 # Strategy 3: Album-based search (if still failed and we have album name) - score results properly
                 if not matched_track and album_name:
-                    print(f"ListenBrainz Strategy 3: Trying album-based search: '{cleaned_artist} {album_name} {cleaned_title}'")
+                    logger.info(f"ListenBrainz Strategy 3: Trying album-based search: '{cleaned_artist} {album_name} {cleaned_title}'")
                     if use_spotify:
                         query = f"artist:{cleaned_artist} album:{album_name} track:{cleaned_title}"
                         fallback_results = spotify_client.search_tracks(query, limit=5)
@@ -38356,11 +38336,11 @@ def _run_listenbrainz_discovery_worker(state_key):
                         if match and confidence >= min_confidence:
                             matched_track = match
                             best_confidence = confidence
-                            print(f"Strategy 3 ListenBrainz match (album): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                            logger.info(f"Strategy 3 ListenBrainz match (album): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                 # Strategy 4: Extended search with higher limit (last resort)
                 if not matched_track:
-                    print(f"ListenBrainz Strategy 4: Extended search with limit=50")
+                    logger.info(f"ListenBrainz Strategy 4: Extended search with limit=50")
                     query = f"{cleaned_artist} {cleaned_title}"
                     if use_spotify:
                         extended_results = spotify_client.search_tracks(query, limit=50)
@@ -38373,7 +38353,7 @@ def _run_listenbrainz_discovery_worker(state_key):
                         if match and confidence >= min_confidence:
                             matched_track = match
                             best_confidence = confidence
-                            print(f"Strategy 4 ListenBrainz match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                            logger.info(f"Strategy 4 ListenBrainz match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                 # Create result entry
                 result = {
@@ -38427,9 +38407,9 @@ def _run_listenbrainz_discovery_worker(state_key):
                                 cache_key[0], cache_key[1], discovery_source, best_confidence,
                                 result['matched_data'], cleaned_title, cleaned_artist
                             )
-                            print(f"CACHE SAVED: {cleaned_artist} - {cleaned_title} (confidence: {best_confidence:.3f})")
+                            logger.info(f"CACHE SAVED: {cleaned_artist} - {cleaned_title} (confidence: {best_confidence:.3f})")
                         except Exception as cache_err:
-                            print(f"Cache save error: {cache_err}")
+                            logger.error(f"Cache save error: {cache_err}")
 
                 else:
                     # Auto Wing It fallback — build stub from raw source data
@@ -38446,10 +38426,10 @@ def _run_listenbrainz_discovery_worker(state_key):
 
                 state['discovery_results'].append(result)
 
-                print(f"  {'' if matched_track else ''} Track {i+1}/{len(tracks)}: {result['status']}")
+                logger.info(f"  {'' if matched_track else ''} Track {i+1}/{len(tracks)}: {result['status']}")
 
             except Exception as e:
-                print(f"Error processing track {i}: {e}")
+                logger.error(f"Error processing track {i}: {e}")
                 result = {
                     'index': i,
                     'lb_track': track['track_name'],
@@ -38472,10 +38452,10 @@ def _run_listenbrainz_discovery_worker(state_key):
         source_label = discovery_source.upper()
         add_activity_item("", f"ListenBrainz Discovery Complete ({source_label})", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
 
-        print(f"ListenBrainz discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched")
+        logger.info(f"ListenBrainz discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched")
 
     except Exception as e:
-        print(f"Error in ListenBrainz discovery worker: {e}")
+        logger.error(f"Error in ListenBrainz discovery worker: {e}")
         state['status'] = 'error'
         state['phase'] = 'fresh'
     finally:
@@ -38551,11 +38531,11 @@ def start_youtube_sync(url_hash):
         future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id(), playlist_image_url)
         active_sync_workers[sync_playlist_id] = future
 
-        print(f"Started YouTube sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
+        logger.info(f"Started YouTube sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
         return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
 
     except Exception as e:
-        print(f"Error starting YouTube sync: {e}")
+        logger.error(f"Error starting YouTube sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/youtube/sync/status/<url_hash>', methods=['GET'])
@@ -38599,7 +38579,7 @@ def get_youtube_sync_status(url_hash):
         return jsonify(response)
         
     except Exception as e:
-        print(f"Error getting YouTube sync status: {e}")
+        logger.error(f"Error getting YouTube sync status: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/youtube/sync/cancel/<url_hash>', methods=['POST'])
@@ -38630,7 +38610,7 @@ def cancel_youtube_sync(url_hash):
         return jsonify({"success": True, "message": "YouTube sync cancelled"})
         
     except Exception as e:
-        print(f"Error cancelling YouTube sync: {e}")
+        logger.error(f"Error cancelling YouTube sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 # New YouTube Playlist Management Endpoints (for persistent state)
@@ -38666,11 +38646,11 @@ def get_all_youtube_playlists():
             }
             playlists.append(playlist_info)
         
-        print(f"Returning {len(playlists)} stored YouTube playlists for hydration")
+        logger.info(f"Returning {len(playlists)} stored YouTube playlists for hydration")
         return jsonify({"playlists": playlists})
         
     except Exception as e:
-        print(f"Error getting YouTube playlists: {e}")
+        logger.error(f"Error getting YouTube playlists: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/youtube/state/<url_hash>', methods=['GET'])
@@ -38704,7 +38684,7 @@ def get_youtube_playlist_state(url_hash):
         return jsonify(response)
         
     except Exception as e:
-        print(f"Error getting YouTube playlist state: {e}")
+        logger.error(f"Error getting YouTube playlist state: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/youtube/reset/<url_hash>', methods=['POST'])
@@ -38732,11 +38712,11 @@ def reset_youtube_playlist(url_hash):
         state['discovery_future'] = None
         state['last_accessed'] = time.time()
         
-        print(f"Reset YouTube playlist to fresh phase: {state['playlist']['name']}")
+        logger.info(f"Reset YouTube playlist to fresh phase: {state['playlist']['name']}")
         return jsonify({"success": True, "message": "Playlist reset to fresh state"})
         
     except Exception as e:
-        print(f"Error resetting YouTube playlist: {e}")
+        logger.error(f"Error resetting YouTube playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/youtube/delete/<url_hash>', methods=['DELETE'])
@@ -38756,11 +38736,11 @@ def delete_youtube_playlist(url_hash):
         playlist_name = state['playlist']['name']
         del youtube_playlist_states[url_hash]
         
-        print(f"Deleted YouTube playlist from backend: {playlist_name}")
+        logger.info(f"Deleted YouTube playlist from backend: {playlist_name}")
         return jsonify({"success": True, "message": f"Playlist '{playlist_name}' deleted"})
         
     except Exception as e:
-        print(f"Error deleting YouTube playlist: {e}")
+        logger.error(f"Error deleting YouTube playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/youtube/update_phase/<url_hash>', methods=['POST'])
@@ -38785,11 +38765,11 @@ def update_youtube_playlist_phase(url_hash):
         state['phase'] = new_phase
         state['last_accessed'] = time.time()
         
-        print(f"Updated YouTube playlist {url_hash} phase: {old_phase} → {new_phase}")
+        logger.info(f"Updated YouTube playlist {url_hash} phase: {old_phase} → {new_phase}")
         return jsonify({"success": True, "message": f"Phase updated to {new_phase}", "old_phase": old_phase, "new_phase": new_phase})
         
     except Exception as e:
-        print(f"Error updating YouTube playlist phase: {e}")
+        logger.error(f"Error updating YouTube playlist phase: {e}")
         return jsonify({"error": str(e)}), 500
 
 def convert_youtube_results_to_spotify_tracks(discovery_results):
@@ -38825,7 +38805,7 @@ def convert_youtube_results_to_spotify_tracks(discovery_results):
             }
             spotify_tracks.append(track)
 
-    print(f"Converted {len(spotify_tracks)} YouTube matches to Spotify tracks for sync")
+    logger.info(f"Converted {len(spotify_tracks)} YouTube matches to Spotify tracks for sync")
     return spotify_tracks
 
 
@@ -38836,8 +38816,8 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
     global sync_states, sync_service
 
     task_start_time = time.time()
-    print(f"[TIMING] _run_sync_task STARTED for playlist '{playlist_name}' at {time.strftime('%H:%M:%S')}")
-    print(f"Received {len(tracks_json)} tracks from frontend")
+    logger.info(f"[TIMING] _run_sync_task STARTED for playlist '{playlist_name}' at {time.strftime('%H:%M:%S')}")
+    logger.info(f"Received {len(tracks_json)} tracks from frontend")
 
     # Record sync history start (skip for re-syncs triggered from history)
     _is_resync = playlist_id.startswith('resync_')
@@ -38865,7 +38845,7 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
     try:
         # Recreate a Playlist object from the JSON data sent by the frontend
         # This avoids needing to re-fetch it from Spotify
-        print(f"Converting JSON tracks to SpotifyTrack objects...")
+        logger.info(f"Converting JSON tracks to SpotifyTrack objects...")
 
         # Store original track data with full album objects (for wishlist with cover art)
         # Normalize formats for wishlist: album must be dict {'name': ...}, artists must be [{'name': ...}]
@@ -38931,9 +38911,9 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
             )
             tracks.append(track)
             if i < 3:  # Log first 3 tracks for debugging
-                print(f"  Track {i+1}: '{track.name}' by {track.artists}")
+                logger.info(f"  Track {i+1}: '{track.name}' by {track.artists}")
         
-        print(f"Created {len(tracks)} SpotifyTrack objects")
+        logger.info(f"Created {len(tracks)} SpotifyTrack objects")
         
         playlist = SpotifyPlaylist(
             id=playlist_id, 
@@ -38945,7 +38925,7 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
             tracks=tracks, 
             total_tracks=len(tracks)
         )
-        print(f"Created SpotifyPlaylist object: '{playlist.name}' with {playlist.total_tracks} tracks")
+        logger.info(f"Created SpotifyPlaylist object: '{playlist.name}' with {playlist.total_tracks} tracks")
 
         first_callback_time = [None]  # Use list to allow modification in nested function
         
@@ -38954,17 +38934,17 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
             if first_callback_time[0] is None:
                 first_callback_time[0] = time.time()
                 first_callback_duration = (first_callback_time[0] - task_start_time) * 1000
-                print(f"⏱️ [TIMING] FIRST progress callback at {time.strftime('%H:%M:%S')} (took {first_callback_duration:.1f}ms from start)")
+                logger.info(f"⏱️ [TIMING] FIRST progress callback at {time.strftime('%H:%M:%S')} (took {first_callback_duration:.1f}ms from start)")
 
-            print(f"PROGRESS CALLBACK: {progress.current_step} - {progress.current_track}")
-            print(f"   Progress: {progress.progress}% ({progress.matched_tracks}/{progress.total_tracks} matched, {progress.failed_tracks} failed)")
+            logger.info(f"PROGRESS CALLBACK: {progress.current_step} - {progress.current_track}")
+            logger.error(f"   Progress: {progress.progress}% ({progress.matched_tracks}/{progress.total_tracks} matched, {progress.failed_tracks} failed)")
 
             with sync_lock:
                 sync_states[playlist_id] = {
                     "status": "syncing",
                     "progress": progress.__dict__ # Convert dataclass to dict
                 }
-                print(f"   Updated sync_states for {playlist_id}")
+                logger.info(f"   Updated sync_states for {playlist_id}")
 
             # Update automation progress card
             if automation_id:
@@ -38984,7 +38964,7 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
                     log_line=f'{track} — {step}' if track else step, log_type=log_type)
                 
     except Exception as setup_error:
-        print(f"SETUP ERROR in _run_sync_task: {setup_error}")
+        logger.error(f"SETUP ERROR in _run_sync_task: {setup_error}")
         import traceback
         traceback.print_exc()
         with sync_lock:
@@ -38998,53 +38978,53 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
         return
 
     try:
-        print(f"Setting up sync service...")
-        print(f"   sync_service available: {sync_service is not None}")
+        logger.info(f"Setting up sync service...")
+        logger.info(f"   sync_service available: {sync_service is not None}")
         
         if sync_service is None:
             raise Exception("sync_service is None - not initialized properly")
             
         # Check sync service components
-        print(f"   spotify_client: {sync_service.spotify_client is not None}")
-        print(f"   plex_client: {sync_service.plex_client is not None}")
-        print(f"   jellyfin_client: {sync_service.jellyfin_client is not None}")
+        logger.info(f"   spotify_client: {sync_service.spotify_client is not None}")
+        logger.info(f"   plex_client: {sync_service.plex_client is not None}")
+        logger.info(f"   jellyfin_client: {sync_service.jellyfin_client is not None}")
         
         # Check media server connection before starting
         from config.settings import config_manager
         active_server = config_manager.get_active_media_server()
-        print(f"   Active media server: {active_server}")
+        logger.info(f"   Active media server: {active_server}")
         
         media_client, server_type = sync_service._get_active_media_client()
-        print(f"   Media client available: {media_client is not None}")
+        logger.info(f"   Media client available: {media_client is not None}")
         
         if media_client:
             is_connected = media_client.is_connected()
-            print(f"   Media client connected: {is_connected}")
+            logger.info(f"   Media client connected: {is_connected}")
         
         # Check database access
         try:
             from database.music_database import MusicDatabase
             db = MusicDatabase()
-            print(f"   Database initialized: {db is not None}")
+            logger.info(f"   Database initialized: {db is not None}")
         except Exception as db_error:
-            print(f"   Database initialization failed: {db_error}")
+            logger.error(f"   Database initialization failed: {db_error}")
         
-        print(f"Attaching progress callback...")
+        logger.info(f"Attaching progress callback...")
         # Attach the progress callback
         sync_service.set_progress_callback(progress_callback, playlist.name)
-        print(f"Progress callback attached for playlist: {playlist.name}")
+        logger.info(f"Progress callback attached for playlist: {playlist.name}")
 
         # CRITICAL FIX: Add database-only fallback for web context
         # If media client is not connected, patch the sync service to use database-only matching
         if media_client is None or not media_client.is_connected():
-            print(f"Media client not connected - patching sync service for database-only matching")
+            logger.info(f"Media client not connected - patching sync service for database-only matching")
             
             # Store original method
             original_find_track = sync_service._find_track_in_media_server
             
             # Create database-only replacement method
             async def database_only_find_track(spotify_track):
-                print(f"Database-only search for: '{spotify_track.name}' by {spotify_track.artists}")
+                logger.info(f"Database-only search for: '{spotify_track.name}' by {spotify_track.artists}")
                 try:
                     from database.music_database import MusicDatabase
                     from config.settings import config_manager
@@ -39066,9 +39046,9 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
                                             self.ratingKey = db_t.id
                                             self.title = db_t.title
                                             self.id = db_t.id
-                                    print(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
+                                    logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
                                     return DatabaseTrackCached(db_track_check), cached['confidence']
-                                print(f"Sync cache stale for '{original_title}' — track gone")
+                                logger.warning(f"Sync cache stale for '{original_title}' — track gone")
                         except Exception:
                             pass
                     # --- End cache fast-path ---
@@ -39090,7 +39070,7 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
                         )
 
                         if db_track and confidence >= 0.80:
-                            print(f"Database match: '{db_track.title}' (confidence: {confidence:.2f})")
+                            logger.info(f"Database match: '{db_track.title}' (confidence: {confidence:.2f})")
 
                             # Save to sync match cache
                             if spotify_id:
@@ -39113,21 +39093,21 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
 
                             return DatabaseTrackMock(db_track), confidence
 
-                    print(f"No database match found for: '{original_title}'")
+                    logger.warning(f"No database match found for: '{original_title}'")
                     return None, 0.0
 
                 except Exception as e:
-                    print(f"Database search error: {e}")
+                    logger.error(f"Database search error: {e}")
                     return None, 0.0
             
             # Patch the method
             sync_service._find_track_in_media_server = database_only_find_track
-            print(f"Patched sync service to use database-only matching")
+            logger.info(f"Patched sync service to use database-only matching")
 
         sync_start_time = time.time()
         setup_duration = (sync_start_time - task_start_time) * 1000
-        print(f"⏱️ [TIMING] Setup completed at {time.strftime('%H:%M:%S')} (took {setup_duration:.1f}ms)")
-        print(f"Starting actual sync process with run_async()...")
+        logger.info(f"⏱️ [TIMING] Setup completed at {time.strftime('%H:%M:%S')} (took {setup_duration:.1f}ms)")
+        logger.info(f"Starting actual sync process with run_async()...")
 
         # Attach original tracks map to sync_service for wishlist with album images
         sync_service._original_tracks_map = original_tracks_map
@@ -39147,9 +39127,9 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
 
         sync_duration = (time.time() - sync_start_time) * 1000
         total_duration = (time.time() - task_start_time) * 1000
-        print(f"⏱️ [TIMING] Sync completed at {time.strftime('%H:%M:%S')} (sync: {sync_duration:.1f}ms, total: {total_duration:.1f}ms)")
-        print(f"Sync process completed! Result type: {type(result)}")
-        print(f"   Result details: matched={getattr(result, 'matched_tracks', 'N/A')}, total={getattr(result, 'total_tracks', 'N/A')}")
+        logger.info(f"⏱️ [TIMING] Sync completed at {time.strftime('%H:%M:%S')} (sync: {sync_duration:.1f}ms, total: {total_duration:.1f}ms)")
+        logger.info(f"Sync process completed! Result type: {type(result)}")
+        logger.info(f"   Result details: matched={getattr(result, 'matched_tracks', 'N/A')}, total={getattr(result, 'total_tracks', 'N/A')}")
 
         # Update final state on completion
         # Convert result to JSON-serializable dict (datetime/errors can't be emitted via SocketIO)
@@ -39174,24 +39154,24 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
                 "progress": result_dict,
                 "result": result_dict
             }
-        print(f"Sync finished for {playlist_id} - state updated")
+        logger.info(f"Sync finished for {playlist_id} - state updated")
 
         # Set playlist poster image if available (Plex, Jellyfin, Emby)
         _synced = getattr(result, 'synced_tracks', 0)
-        print(f"[PLAYLIST IMAGE] image_url={playlist_image_url!r}, synced_tracks={_synced}")
+        logger.info(f"[PLAYLIST IMAGE] image_url={playlist_image_url!r}, synced_tracks={_synced}")
         if playlist_image_url and _synced > 0:
             try:
                 active_server = config_manager.get_active_media_server()
-                print(f"[PLAYLIST IMAGE] active_server={active_server}")
+                logger.info(f"[PLAYLIST IMAGE] active_server={active_server}")
                 if active_server == 'plex' and plex_client:
                     ok = plex_client.set_playlist_image(playlist_name, playlist_image_url)
-                    print(f"[PLAYLIST IMAGE] Plex upload result: {ok}")
+                    logger.info(f"[PLAYLIST IMAGE] Plex upload result: {ok}")
                 elif active_server in ('jellyfin', 'emby') and jellyfin_client:
                     ok = jellyfin_client.set_playlist_image(playlist_name, playlist_image_url)
-                    print(f"[PLAYLIST IMAGE] Jellyfin upload result: {ok}")
+                    logger.info(f"[PLAYLIST IMAGE] Jellyfin upload result: {ok}")
                 # Navidrome doesn't support custom playlist images
             except Exception as img_err:
-                print(f"[PLAYLIST IMAGE] Exception: {img_err}")
+                logger.error(f"[PLAYLIST IMAGE] Exception: {img_err}")
 
         # Record sync history completion with per-track data
         try:
@@ -39218,11 +39198,11 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
                 try:
                     track_results_json = json.dumps(match_details, default=str)
                     saved = db.update_sync_history_track_results(target_batch_id, track_results_json)
-                    print(f"[Sync History] Saved {len(match_details)} track results for batch {target_batch_id} (saved={saved})")
+                    logger.info(f"[Sync History] Saved {len(match_details)} track results for batch {target_batch_id} (saved={saved})")
                 except Exception as json_err:
-                    print(f"[Sync History] Failed to serialize track results: {json_err}")
+                    logger.error(f"[Sync History] Failed to serialize track results: {json_err}")
             else:
-                print(f"[Sync History] No match_details on SyncResult for batch {target_batch_id}")
+                logger.warning(f"[Sync History] No match_details on SyncResult for batch {target_batch_id}")
         except Exception as e:
             logger.warning(f"Failed to record sync history completion: {e}")
 
@@ -39259,7 +39239,7 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
             tracks_hash=_tracks_hash)
 
     except Exception as e:
-        print(f"SYNC FAILED for {playlist_id}: {e}")
+        logger.error(f"SYNC FAILED for {playlist_id}: {e}")
         import traceback
         traceback.print_exc()
         with sync_lock:
@@ -39271,21 +39251,21 @@ def _run_sync_task(playlist_id, playlist_name, tracks_json, automation_id=None, 
             _update_automation_progress(automation_id, status='error', progress=100,
                 phase='Error', log_line=f'Sync failed: {str(e)}', log_type='error')
     finally:
-        print(f"Cleaning up progress callback for {playlist.name}")
+        logger.info(f"Cleaning up progress callback for {playlist.name}")
         # Clean up the callback
         if sync_service:
             sync_service.clear_progress_callback(playlist.name)
             # Clean up original tracks map
             if hasattr(sync_service, '_original_tracks_map'):
                 del sync_service._original_tracks_map
-        print(f"Cleanup completed for {playlist_id}")
+        logger.info(f"Cleanup completed for {playlist_id}")
 
 
 @app.route('/api/sync/start', methods=['POST'])
 def start_playlist_sync():
     """Starts a new sync process for a given playlist."""
     request_start_time = time.time()
-    print(f"⏱️ [TIMING] Sync request received at {time.strftime('%H:%M:%S')}")
+    logger.info(f"⏱️ [TIMING] Sync request received at {time.strftime('%H:%M:%S')}")
     
     data = request.get_json()
     playlist_id = data.get('playlist_id')
@@ -39315,10 +39295,10 @@ def start_playlist_sync():
         future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id, playlist_image_url)
         active_sync_workers[playlist_id] = future
         thread_submit_duration = (time.time() - thread_submit_time) * 1000
-        print(f"⏱️ [TIMING] Thread submitted at {time.strftime('%H:%M:%S')} (took {thread_submit_duration:.1f}ms)")
+        logger.info(f"⏱️ [TIMING] Thread submitted at {time.strftime('%H:%M:%S')} (took {thread_submit_duration:.1f}ms)")
 
     total_request_time = (time.time() - request_start_time) * 1000
-    print(f"⏱️ [TIMING] Request completed at {time.strftime('%H:%M:%S')} (total: {total_request_time:.1f}ms)")
+    logger.info(f"⏱️ [TIMING] Request completed at {time.strftime('%H:%M:%S')} (total: {total_request_time:.1f}ms)")
     return jsonify({"success": True, "message": "Sync started."})
 
 
@@ -39372,34 +39352,34 @@ def cancel_playlist_sync():
 def test_database_access():
     """Test endpoint to verify database connectivity for sync operations"""
     try:
-        print(f"Testing database access for sync operations...")
+        logger.info(f"Testing database access for sync operations...")
         
         # Test database initialization
         from database.music_database import MusicDatabase
         db = MusicDatabase()
-        print(f"   Database initialized: {db is not None}")
+        logger.info(f"   Database initialized: {db is not None}")
         
         # Test basic database query
         stats = db.get_database_info_for_server()
-        print(f"   Database stats retrieved: {stats}")
+        logger.info(f"   Database stats retrieved: {stats}")
         
         # Test track existence check (like sync service does)
         db_track, confidence = db.check_track_exists("test track", "test artist", confidence_threshold=0.7)
-        print(f"   Track existence check works: found={db_track is not None}, confidence={confidence}")
+        logger.info(f"   Track existence check works: found={db_track is not None}, confidence={confidence}")
         
         # Test config manager
         from config.settings import config_manager
         active_server = config_manager.get_active_media_server()
-        print(f"   Active media server: {active_server}")
+        logger.info(f"   Active media server: {active_server}")
         
         # Test media clients 
-        print(f"   Media clients status:")
-        print(f"     plex_client: {plex_client is not None}")
+        logger.info(f"   Media clients status:")
+        logger.info(f"     plex_client: {plex_client is not None}")
         if plex_client:
-            print(f"     plex_client.is_connected(): {plex_client.is_connected()}")
-        print(f"     jellyfin_client: {jellyfin_client is not None}")
+            logger.info(f"     plex_client.is_connected(): {plex_client.is_connected()}")
+        logger.info(f"     jellyfin_client: {jellyfin_client is not None}")
         if jellyfin_client:
-            print(f"     jellyfin_client.is_connected(): {jellyfin_client.is_connected()}")
+            logger.info(f"     jellyfin_client.is_connected(): {jellyfin_client.is_connected()}")
         
         return jsonify({
             "success": True, 
@@ -39414,7 +39394,7 @@ def test_database_access():
         })
         
     except Exception as e:
-        print(f"   Database test failed: {e}")
+        logger.error(f"   Database test failed: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -39443,7 +39423,7 @@ def save_discover_download_snapshot():
         db.save_bubble_snapshot('discover_downloads', downloads, profile_id=get_current_profile_id())
 
         download_count = len(downloads)
-        print(f"Saved discover download snapshot: {download_count} downloads")
+        logger.info(f"Saved discover download snapshot: {download_count} downloads")
 
         return jsonify({
             'success': True,
@@ -39452,7 +39432,7 @@ def save_discover_download_snapshot():
         })
 
     except Exception as e:
-        print(f"Error saving discover download snapshot: {e}")
+        logger.error(f"Error saving discover download snapshot: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -39488,7 +39468,7 @@ def hydrate_discover_downloads():
                 snapshot_dt = datetime.fromisoformat(snapshot_time.replace('Z', '+00:00'))
                 cutoff = datetime.now() - timedelta(hours=48)
                 if snapshot_dt < cutoff:
-                    print(f"Cleaning up old discover download snapshot from {snapshot_time}")
+                    logger.info(f"Cleaning up old discover download snapshot from {snapshot_time}")
                     db.delete_bubble_snapshot('discover_downloads', profile_id=get_current_profile_id())
                     return jsonify({
                         'success': True,
@@ -39496,7 +39476,7 @@ def hydrate_discover_downloads():
                         'message': 'Old snapshot cleaned up'
                     })
         except ValueError as e:
-            print(f"Error checking discover snapshot age: {e}")
+            logger.error(f"Error checking discover snapshot age: {e}")
 
         # Get current active download processes for live status
         current_processes = {}
@@ -39512,11 +39492,11 @@ def hydrate_discover_downloads():
                                 'phase': batch_data.get('phase')
                             }
         except Exception as e:
-            print(f"Error fetching active processes for discover download hydration: {e}")
+            logger.error(f"Error fetching active processes for discover download hydration: {e}")
 
         # If no active processes exist, the app likely restarted - clean up snapshots
         if not current_processes:
-            print(f"No active processes found - app likely restarted, cleaning up discover download snapshot")
+            logger.warning(f"No active processes found - app likely restarted, cleaning up discover download snapshot")
             db.delete_bubble_snapshot('discover_downloads', profile_id=get_current_profile_id())
             return jsonify({
                 'success': True,
@@ -39531,11 +39511,11 @@ def hydrate_discover_downloads():
             if playlist_id in current_processes:
                 process_info = current_processes[playlist_id]
                 live_status = 'in_progress'
-                print(f"Found active process for discover download {playlist_id}: {process_info['phase']}")
+                logger.info(f"Found active process for discover download {playlist_id}: {process_info['phase']}")
             else:
                 # No active process - likely completed
                 live_status = 'completed'
-                print(f"No active process for discover download {playlist_id} - marking as completed")
+                logger.warning(f"No active process for discover download {playlist_id} - marking as completed")
 
             # Create updated download entry
             hydrated_downloads[playlist_id] = {
@@ -39551,7 +39531,7 @@ def hydrate_discover_downloads():
         active_count = sum(1 for d in hydrated_downloads.values() if d['status'] == 'in_progress')
         completed_count = sum(1 for d in hydrated_downloads.values() if d['status'] == 'completed')
 
-        print(f"Hydrated {download_count} discover downloads: {active_count} active, {completed_count} completed")
+        logger.info(f"Hydrated {download_count} discover downloads: {active_count} active, {completed_count} completed")
 
         return jsonify({
             'success': True,
@@ -39564,7 +39544,7 @@ def hydrate_discover_downloads():
         })
 
     except Exception as e:
-        print(f"Error hydrating discover downloads: {e}")
+        logger.error(f"Error hydrating discover downloads: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -39592,7 +39572,7 @@ def save_artist_bubble_snapshot():
         db.save_bubble_snapshot('artist_bubbles', bubbles, profile_id=get_current_profile_id())
 
         bubble_count = len(bubbles)
-        print(f"Saved artist bubble snapshot: {bubble_count} artists")
+        logger.info(f"Saved artist bubble snapshot: {bubble_count} artists")
 
         return jsonify({
             'success': True,
@@ -39601,7 +39581,7 @@ def save_artist_bubble_snapshot():
         })
 
     except Exception as e:
-        print(f"Error saving artist bubble snapshot: {e}")
+        logger.error(f"Error saving artist bubble snapshot: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -39637,7 +39617,7 @@ def hydrate_artist_bubbles():
                 snapshot_dt = datetime.fromisoformat(snapshot_time.replace('Z', '+00:00'))
                 cutoff = datetime.now() - timedelta(hours=48)
                 if snapshot_dt < cutoff:
-                    print(f"Cleaning up old snapshot from {snapshot_time}")
+                    logger.info(f"Cleaning up old snapshot from {snapshot_time}")
                     db.delete_bubble_snapshot('artist_bubbles', profile_id=get_current_profile_id())
                     return jsonify({
                         'success': True,
@@ -39645,7 +39625,7 @@ def hydrate_artist_bubbles():
                         'message': 'Old snapshot cleaned up'
                     })
         except ValueError as e:
-            print(f"Error checking snapshot age: {e}")
+            logger.error(f"Error checking snapshot age: {e}")
 
         # Get current active download processes for live status
         current_processes = {}
@@ -39661,11 +39641,11 @@ def hydrate_artist_bubbles():
                                 'phase': batch_data.get('phase')
                             }
         except Exception as e:
-            print(f"Error fetching active processes for hydration: {e}")
+            logger.error(f"Error fetching active processes for hydration: {e}")
 
         # If no active processes exist, the app likely restarted - clean up snapshots
         if not current_processes:
-            print(f"No active processes found - app likely restarted, cleaning up snapshot")
+            logger.warning(f"No active processes found - app likely restarted, cleaning up snapshot")
             db.delete_bubble_snapshot('artist_bubbles', profile_id=get_current_profile_id())
             return jsonify({
                 'success': True,
@@ -39689,11 +39669,11 @@ def hydrate_artist_bubbles():
                 if virtual_playlist_id in current_processes:
                     process_info = current_processes[virtual_playlist_id]
                     live_status = 'in_progress'
-                    print(f"Found active process for {download['album']['name']}: {process_info['phase']}")
+                    logger.info(f"Found active process for {download['album']['name']}: {process_info['phase']}")
                 else:
                     # No active process - likely completed
                     live_status = 'view_results'
-                    print(f"No active process for {download['album']['name']} - marking as completed")
+                    logger.warning(f"No active process for {download['album']['name']} - marking as completed")
                 
                 # Create updated download entry
                 updated_download = {
@@ -39722,7 +39702,7 @@ def hydrate_artist_bubbles():
                              for download in bubble['downloads'] 
                              if download['status'] == 'view_results')
         
-        print(f"Hydrated {bubble_count} artist bubbles: {active_count} active, {completed_count} completed")
+        logger.info(f"Hydrated {bubble_count} artist bubbles: {active_count} active, {completed_count} completed")
         
         return jsonify({
             'success': True,
@@ -39736,7 +39716,7 @@ def hydrate_artist_bubbles():
         })
         
     except Exception as e:
-        print(f"Error hydrating artist bubbles: {e}")
+        logger.error(f"Error hydrating artist bubbles: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -39764,7 +39744,7 @@ def save_search_bubble_snapshot():
         db.save_bubble_snapshot('search_bubbles', bubbles, profile_id=get_current_profile_id())
 
         bubble_count = len(bubbles)
-        print(f"Saved search bubble snapshot: {bubble_count} albums/tracks")
+        logger.info(f"Saved search bubble snapshot: {bubble_count} albums/tracks")
 
         return jsonify({
             'success': True,
@@ -39773,7 +39753,7 @@ def save_search_bubble_snapshot():
         })
 
     except Exception as e:
-        print(f"Error saving search bubble snapshot: {e}")
+        logger.error(f"Error saving search bubble snapshot: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -39809,7 +39789,7 @@ def hydrate_search_bubbles():
                 snapshot_dt = datetime.fromisoformat(snapshot_time.replace('Z', '+00:00'))
                 cutoff = datetime.now() - timedelta(hours=48)
                 if snapshot_dt < cutoff:
-                    print(f"Cleaning up old search snapshot from {snapshot_time}")
+                    logger.info(f"Cleaning up old search snapshot from {snapshot_time}")
                     db.delete_bubble_snapshot('search_bubbles', profile_id=get_current_profile_id())
                     return jsonify({
                         'success': True,
@@ -39817,7 +39797,7 @@ def hydrate_search_bubbles():
                         'message': 'Old snapshot cleaned up'
                     })
         except ValueError as e:
-            print(f"Error checking snapshot age: {e}")
+            logger.error(f"Error checking snapshot age: {e}")
 
         # Get current active download processes for live status
         current_processes = {}
@@ -39833,11 +39813,11 @@ def hydrate_search_bubbles():
                                 'phase': batch_data.get('phase')
                             }
         except Exception as e:
-            print(f"Error fetching active processes for hydration: {e}")
+            logger.error(f"Error fetching active processes for hydration: {e}")
 
         # If no active processes exist, the app likely restarted - clean up snapshots
         if not current_processes:
-            print(f"No active processes found - app likely restarted, cleaning up search snapshot")
+            logger.warning(f"No active processes found - app likely restarted, cleaning up search snapshot")
             db.delete_bubble_snapshot('search_bubbles', profile_id=get_current_profile_id())
             return jsonify({
                 'success': True,
@@ -39860,11 +39840,11 @@ def hydrate_search_bubbles():
                 if virtual_playlist_id in current_processes:
                     process_info = current_processes[virtual_playlist_id]
                     live_status = 'in_progress'
-                    print(f"Found active process for {download['item']['name']}: {process_info['phase']}")
+                    logger.info(f"Found active process for {download['item']['name']}: {process_info['phase']}")
                 else:
                     # No active process - likely completed
                     live_status = 'view_results'
-                    print(f"No active process for {download['item']['name']} - marking as completed")
+                    logger.warning(f"No active process for {download['item']['name']} - marking as completed")
 
                 # Create updated download entry
                 updated_download = {
@@ -39889,7 +39869,7 @@ def hydrate_search_bubbles():
                              for download in bubble['downloads']
                              if download['status'] == 'view_results')
 
-        print(f"Hydrated {bubble_count} search bubbles (artists): {active_count} active, {completed_count} completed")
+        logger.info(f"Hydrated {bubble_count} search bubbles (artists): {active_count} active, {completed_count} completed")
 
         return jsonify({
             'success': True,
@@ -39903,7 +39883,7 @@ def hydrate_search_bubbles():
         })
 
     except Exception as e:
-        print(f"Error hydrating search bubbles: {e}")
+        logger.error(f"Error hydrating search bubbles: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -39927,7 +39907,7 @@ def save_beatport_bubble_snapshot():
         db.save_bubble_snapshot('beatport_bubbles', bubbles, profile_id=get_current_profile_id())
 
         bubble_count = len(bubbles)
-        print(f"Saved Beatport bubble snapshot: {bubble_count} charts")
+        logger.info(f"Saved Beatport bubble snapshot: {bubble_count} charts")
 
         return jsonify({
             'success': True,
@@ -39936,7 +39916,7 @@ def save_beatport_bubble_snapshot():
         })
 
     except Exception as e:
-        print(f"Error saving Beatport bubble snapshot: {e}")
+        logger.error(f"Error saving Beatport bubble snapshot: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -39969,7 +39949,7 @@ def hydrate_beatport_bubbles():
                 snapshot_dt = datetime.fromisoformat(snapshot_time.replace('Z', '+00:00'))
                 cutoff = datetime.now() - timedelta(hours=48)
                 if snapshot_dt < cutoff:
-                    print(f"Cleaning up old Beatport snapshot from {snapshot_time}")
+                    logger.info(f"Cleaning up old Beatport snapshot from {snapshot_time}")
                     db.delete_bubble_snapshot('beatport_bubbles', profile_id=get_current_profile_id())
                     return jsonify({
                         'success': True,
@@ -39977,7 +39957,7 @@ def hydrate_beatport_bubbles():
                         'message': 'Old snapshot cleaned up'
                     })
         except ValueError as e:
-            print(f"Error checking Beatport snapshot age: {e}")
+            logger.error(f"Error checking Beatport snapshot age: {e}")
 
         # Get current active download processes for live status
         current_processes = {}
@@ -39993,11 +39973,11 @@ def hydrate_beatport_bubbles():
                                 'phase': batch_data.get('phase')
                             }
         except Exception as e:
-            print(f"Error fetching active processes for Beatport hydration: {e}")
+            logger.error(f"Error fetching active processes for Beatport hydration: {e}")
 
         # If no active processes exist, app likely restarted — clean up
         if not current_processes:
-            print(f"No active processes found - cleaning up Beatport snapshot")
+            logger.warning(f"No active processes found - cleaning up Beatport snapshot")
             db.delete_bubble_snapshot('beatport_bubbles', profile_id=get_current_profile_id())
             return jsonify({
                 'success': True,
@@ -40036,7 +40016,7 @@ def hydrate_beatport_bubbles():
         completed_count = sum(1 for b in hydrated_bubbles.values()
                              for d in b['downloads'] if d['status'] == 'view_results')
 
-        print(f"Hydrated {bubble_count} Beatport bubbles: {active_count} active, {completed_count} completed")
+        logger.info(f"Hydrated {bubble_count} Beatport bubbles: {active_count} active, {completed_count} completed")
 
         return jsonify({
             'success': True,
@@ -40049,7 +40029,7 @@ def hydrate_beatport_bubbles():
         })
 
     except Exception as e:
-        print(f"Error hydrating Beatport bubbles: {e}")
+        logger.error(f"Error hydrating Beatport bubbles: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({
@@ -40595,7 +40575,7 @@ def get_watchlist_count():
             "next_run_in_seconds": next_run_in_seconds
         })
     except Exception as e:
-        print(f"Error getting watchlist count: {e}")
+        logger.error(f"Error getting watchlist count: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/watchlist/artists', methods=['GET'])
@@ -40631,7 +40611,7 @@ def get_watchlist_artists():
 
         return jsonify({"success": True, "artists": artists_data})
     except Exception as e:
-        print(f"Error getting watchlist artists: {e}")
+        logger.error(f"Error getting watchlist artists: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/watchlist/add', methods=['POST'])
@@ -40702,18 +40682,18 @@ def add_to_watchlist():
                             dc_data = dc.get_artist(artist_id)
                             if dc_data:
                                 image_url = dc_data.get('image_url')
-                                print(f"Discogs artist image: {image_url[:60] if image_url else 'None'}")
+                                logger.info(f"Discogs artist image: {image_url[:60] if image_url else 'None'}")
                         elif source == 'deezer' or fallback_source == 'deezer':
                             # Deezer: fetch artist image directly from API
                             dz_resp = requests.get(f'https://api.deezer.com/artist/{artist_id}', timeout=5)
                             if dz_resp.ok:
                                 dz_data = dz_resp.json()
                                 image_url = dz_data.get('picture_xl') or dz_data.get('picture_big') or dz_data.get('picture_medium')
-                                print(f"Deezer artist image: {image_url[:60] if image_url else 'None'}")
+                                logger.info(f"Deezer artist image: {image_url[:60] if image_url else 'None'}")
                         else:
                             # iTunes: look up album entity for artwork
                             itunes_url = f"https://itunes.apple.com/lookup?id={artist_id}&entity=album&limit=5"
-                            print(f"Fetching iTunes artist image: {itunes_url}")
+                            logger.info(f"Fetching iTunes artist image: {itunes_url}")
                             resp = requests.get(itunes_url, timeout=5)
 
                             image_url = None
@@ -40729,11 +40709,11 @@ def add_to_watchlist():
 
                         if image_url:
                             database.update_watchlist_artist_image(artist_id, image_url)
-                            print(f"Cached {fallback_source} artist image for {artist_name}")
+                            logger.warning(f"Cached {fallback_source} artist image for {artist_name}")
                         else:
-                            print(f"No artwork found for {fallback_source} artist {artist_name}")
+                            logger.warning(f"No artwork found for {fallback_source} artist {artist_name}")
                     except Exception as fb_error:
-                        print(f"Error fetching {fallback_source} artwork: {fb_error}")
+                        logger.error(f"Error fetching {fallback_source} artwork: {fb_error}")
                 elif spotify_client and spotify_client.is_authenticated():
                     # For Spotify artists, fetch from Spotify API
                     artist_data = spotify_client.get_artist(artist_id)
@@ -40748,16 +40728,16 @@ def add_to_watchlist():
                         # Update in database
                         if image_url:
                             database.update_watchlist_artist_image(artist_id, image_url)
-                            print(f"Cached artist image for {artist_name}")
+                            logger.info(f"Cached artist image for {artist_name}")
                         else:
-                            print(f"No image URL found for {artist_name}")
+                            logger.warning(f"No image URL found for {artist_name}")
                     else:
-                        print(f"No images in Spotify data for {artist_name}")
+                        logger.warning(f"No images in Spotify data for {artist_name}")
                 else:
-                    print(f"Spotify client not available for fetching artist image")
+                    logger.info(f"Spotify client not available for fetching artist image")
             except Exception as img_error:
                 # Don't fail the add operation if image fetch fails
-                print(f"Could not fetch artist image for {artist_name}: {img_error}")
+                logger.error(f"Could not fetch artist image for {artist_name}: {img_error}")
 
             # Push updated count to this profile's WebSocket room immediately
             try:
@@ -40779,7 +40759,7 @@ def add_to_watchlist():
             return jsonify({"success": False, "error": "Failed to add artist to watchlist"}), 500
 
     except Exception as e:
-        print(f"Error adding to watchlist: {e}")
+        logger.error(f"Error adding to watchlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/watchlist/remove', methods=['POST'])
@@ -40816,7 +40796,7 @@ def remove_from_watchlist():
             return jsonify({"success": False, "error": "Failed to remove artist from watchlist"}), 500
 
     except Exception as e:
-        print(f"Error removing from watchlist: {e}")
+        logger.error(f"Error removing from watchlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/watchlist/add-batch', methods=['POST'])
@@ -40879,7 +40859,7 @@ def add_batch_to_watchlist():
                             if image_url:
                                 database.update_watchlist_artist_image(artist_id, image_url)
                 except Exception as img_error:
-                    print(f"Could not fetch artist image for {artist_name}: {img_error}")
+                    logger.error(f"Could not fetch artist image for {artist_name}: {img_error}")
 
         return jsonify({
             "success": True,
@@ -40889,7 +40869,7 @@ def add_batch_to_watchlist():
         })
 
     except Exception as e:
-        print(f"Error batch adding to watchlist: {e}")
+        logger.error(f"Error batch adding to watchlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/library/watchlist-all-unwatched', methods=['POST'])
@@ -40969,7 +40949,7 @@ def watchlist_all_unwatched_library_artists():
         })
 
     except Exception as e:
-        print(f"Error bulk watchlisting library artists: {e}")
+        logger.error(f"Error bulk watchlisting library artists: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -40997,7 +40977,7 @@ def remove_batch_from_watchlist():
         })
 
     except Exception as e:
-        print(f"Error batch removing from watchlist: {e}")
+        logger.error(f"Error batch removing from watchlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/watchlist/check', methods=['POST'])
@@ -41016,7 +40996,7 @@ def check_watchlist_status():
         return jsonify({"success": True, "is_watching": is_watching})
         
     except Exception as e:
-        print(f"Error checking watchlist status: {e}")
+        logger.error(f"Error checking watchlist status: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/watchlist/check-batch', methods=['POST'])
@@ -41037,7 +41017,7 @@ def check_watchlist_status_batch():
         return jsonify({"success": True, "results": results})
 
     except Exception as e:
-        print(f"Error batch checking watchlist status: {e}")
+        logger.error(f"Error batch checking watchlist status: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/watchlist/scan', methods=['POST'])
@@ -41080,7 +41060,7 @@ def start_watchlist_scan():
                 with watchlist_timer_lock:
                     watchlist_auto_scanning = True
                     watchlist_auto_scanning_timestamp = time.time()
-                    print(f"[Manual Watchlist Scan] Flag set at timestamp {watchlist_auto_scanning_timestamp}")
+                    logger.info(f"[Manual Watchlist Scan] Flag set at timestamp {watchlist_auto_scanning_timestamp}")
 
                 # Get list of artists to scan (for the current profile)
                 database = get_database()
@@ -41115,17 +41095,17 @@ def start_watchlist_scan():
                     pass
                 for _bf_provider in providers_to_backfill:
                     try:
-                        print(f"Checking for missing {_bf_provider} IDs in watchlist...")
+                        logger.warning(f"Checking for missing {_bf_provider} IDs in watchlist...")
                         scanner._backfill_missing_ids(watchlist_artists, _bf_provider)
                     except Exception as backfill_error:
-                        print(f"Error during {_bf_provider} ID backfilling: {backfill_error}")
+                        logger.error(f"Error during {_bf_provider} ID backfilling: {backfill_error}")
                         # Continue with next provider
                 try:
                     filled = scanner.backfill_watchlist_artist_images(scan_profile_id)
                     if filled:
-                        print(f"Backfilled {filled} watchlist artist images")
+                        logger.info(f"Backfilled {filled} watchlist artist images")
                 except Exception as img_err:
-                    print(f"Image backfill error: {img_err}")
+                    logger.error(f"Image backfill error: {img_err}")
 
                 # Initialize detailed progress tracking
                 watchlist_scan_state.update({
@@ -41175,26 +41155,26 @@ def start_watchlist_scan():
                         'tracks_added_to_wishlist': total_added_to_wishlist
                     }
 
-                    print(f"Watchlist scan completed: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
-                    print(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
+                    logger.info(f"Watchlist scan completed: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
+                    logger.info(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
                 else:
-                    print(f"Watchlist scan cancelled — skipping post-scan steps")
+                    logger.warning(f"Watchlist scan cancelled — skipping post-scan steps")
 
                 # Post-scan steps — skip if cancelled
                 if not was_cancelled:
                     # Populate discovery pool from similar artists
-                    print("Starting discovery pool population...")
+                    logger.info("Starting discovery pool population...")
                     watchlist_scan_state['current_phase'] = 'populating_discovery_pool'
                     try:
                         scanner.populate_discovery_pool(profile_id=scan_profile_id)
-                        print("Discovery pool population complete")
+                        logger.info("Discovery pool population complete")
                     except Exception as discovery_error:
-                        print(f"Error populating discovery pool: {discovery_error}")
+                        logger.error(f"Error populating discovery pool: {discovery_error}")
                         import traceback
                         traceback.print_exc()
 
                     # Update ListenBrainz playlists cache
-                    print("Starting ListenBrainz playlists update...")
+                    logger.info("Starting ListenBrainz playlists update...")
                     watchlist_scan_state['current_phase'] = 'updating_listenbrainz'
                     try:
                         from core.listenbrainz_manager import ListenBrainzManager
@@ -41207,22 +41187,22 @@ def start_watchlist_scan():
                                 lb_manager = ListenBrainzManager(db_path, profile_id=lb_prof['id'], token=lb_prof['token'], base_url=lb_prof['base_url'])
                                 lb_result = lb_manager.update_all_playlists()
                                 if lb_result.get('success'):
-                                    print(f"ListenBrainz update complete for profile {lb_prof['id']}: {lb_result.get('summary', {})}")
+                                    logger.info(f"ListenBrainz update complete for profile {lb_prof['id']}: {lb_result.get('summary', {})}")
                         else:
                             # Fallback: use global config token
                             lb_manager = ListenBrainzManager(db_path)
                             lb_result = lb_manager.update_all_playlists()
                             if lb_result.get('success'):
-                                print(f"ListenBrainz update complete (global): {lb_result.get('summary', {})}")
+                                logger.info(f"ListenBrainz update complete (global): {lb_result.get('summary', {})}")
                             elif lb_result.get('error'):
-                                print(f"ListenBrainz update skipped: {lb_result.get('error')}")
+                                logger.error(f"ListenBrainz update skipped: {lb_result.get('error')}")
                     except Exception as lb_error:
-                        print(f"Error updating ListenBrainz: {lb_error}")
+                        logger.error(f"Error updating ListenBrainz: {lb_error}")
                         import traceback
                         traceback.print_exc()
 
                     # Update current seasonal playlist (weekly refresh)
-                    print("Starting seasonal content update...")
+                    logger.info("Starting seasonal content update...")
                     watchlist_scan_state['current_phase'] = 'updating_seasonal'
                     try:
                         from core.seasonal_discovery import get_seasonal_discovery_service
@@ -41232,39 +41212,39 @@ def start_watchlist_scan():
                         current_season = seasonal_service.get_current_season()
                         if current_season:
                             if seasonal_service.should_populate_seasonal_content(current_season, days_threshold=7):
-                                print(f"Updating {current_season} seasonal content...")
+                                logger.info(f"Updating {current_season} seasonal content...")
                                 seasonal_service.populate_seasonal_content(current_season)
                                 seasonal_service.curate_seasonal_playlist(current_season)
-                                print(f"{current_season.capitalize()} seasonal content updated")
+                                logger.info(f"{current_season.capitalize()} seasonal content updated")
                             else:
-                                print(f"{current_season.capitalize()} seasonal content recently updated, skipping")
+                                logger.info(f"{current_season.capitalize()} seasonal content recently updated, skipping")
                         else:
-                            print("ℹ️ No active season at this time")
+                            logger.warning("ℹ️ No active season at this time")
                     except Exception as seasonal_error:
-                        print(f"Error updating seasonal content: {seasonal_error}")
+                        logger.error(f"Error updating seasonal content: {seasonal_error}")
                         import traceback
                         traceback.print_exc()
 
                     # Generate Last.fm radio playlists (weekly refresh)
-                    print("Starting Last.fm radio generation...")
+                    logger.info("Starting Last.fm radio generation...")
                     watchlist_scan_state['current_phase'] = 'generating_lastfm_radio'
                     try:
                         scanner._generate_lastfm_radio_playlists()
-                        print("Last.fm radio generation complete")
+                        logger.info("Last.fm radio generation complete")
                     except Exception as lastfm_error:
-                        print(f"Error generating Last.fm radio playlists: {lastfm_error}")
+                        logger.error(f"Error generating Last.fm radio playlists: {lastfm_error}")
 
                     # Sync Spotify library cache
-                    print("Syncing Spotify library cache...")
+                    logger.info("Syncing Spotify library cache...")
                     watchlist_scan_state['current_phase'] = 'syncing_spotify_library'
                     try:
                         scanner.sync_spotify_library_cache(profile_id=scan_profile_id)
-                        print("Spotify library cache sync complete")
+                        logger.info("Spotify library cache sync complete")
                     except Exception as lib_error:
-                        print(f"Error syncing Spotify library: {lib_error}")
+                        logger.error(f"Error syncing Spotify library: {lib_error}")
 
             except Exception as e:
-                print(f"Error during watchlist scan: {e}")
+                logger.error(f"Error during watchlist scan: {e}")
                 watchlist_scan_state['status'] = 'error'
                 watchlist_scan_state['error'] = str(e)
 
@@ -41282,7 +41262,7 @@ def start_watchlist_scan():
                 with watchlist_timer_lock:
                     watchlist_auto_scanning = False
                     watchlist_auto_scanning_timestamp = 0
-                    print("[Manual Watchlist Scan] Flag reset - scan complete")
+                    logger.info("[Manual Watchlist Scan] Flag reset - scan complete")
         
         # Initialize scan state
         global watchlist_scan_state
@@ -41303,7 +41283,7 @@ def start_watchlist_scan():
         return jsonify({"success": True, "message": "Watchlist scan started"})
         
     except Exception as e:
-        print(f"Error starting watchlist scan: {e}")
+        logger.error(f"Error starting watchlist scan: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/watchlist/scan/status', methods=['GET'])
@@ -41333,7 +41313,7 @@ def get_watchlist_scan_status():
         return jsonify({"success": True, **state})
 
     except Exception as e:
-        print(f"Error getting watchlist scan status: {e}")
+        logger.error(f"Error getting watchlist scan status: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/watchlist/scan/cancel', methods=['POST'])
@@ -41345,11 +41325,11 @@ def cancel_watchlist_scan():
             return jsonify({"success": False, "error": "No scan is currently running"}), 400
 
         watchlist_scan_state['cancel_requested'] = True
-        print("[Watchlist Scan] Cancel requested by user")
+        logger.info("[Watchlist Scan] Cancel requested by user")
         return jsonify({"success": True, "message": "Cancel request sent"})
 
     except Exception as e:
-        print(f"Error cancelling watchlist scan: {e}")
+        logger.error(f"Error cancelling watchlist scan: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # Similar Artists Update State
@@ -41389,7 +41369,7 @@ def update_similar_artists_endpoint():
         return jsonify({"success": True, "message": "Similar artists update started"})
 
     except Exception as e:
-        print(f"Error starting similar artists update: {e}")
+        logger.error(f"Error starting similar artists update: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/watchlist/similar-artists-status', methods=['GET'])
@@ -41399,7 +41379,7 @@ def get_similar_artists_update_status():
         global similar_artists_update_state
         return jsonify({"success": True, **similar_artists_update_state})
     except Exception as e:
-        print(f"Error getting similar artists status: {e}")
+        logger.error(f"Error getting similar artists status: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/watchlist/artist/<artist_id>/config', methods=['GET', 'POST'])
@@ -41453,7 +41433,7 @@ def watchlist_artist_config(artist_id):
                             'genres': artist_data.get('genres', [])
                         }
                 except Exception as e:
-                    print(f"Warning: Could not fetch artist info from Spotify: {e}")
+                    logger.error(f"Warning: Could not fetch artist info from Spotify: {e}")
 
             # Fallback to database info if Spotify fetch failed
             if not artist_info:
@@ -41510,7 +41490,7 @@ def watchlist_artist_config(artist_id):
                 ]
                 conn2.close()
             except Exception as e:
-                print(f"Warning: Could not enrich artist from library: {e}")
+                logger.error(f"Warning: Could not enrich artist from library: {e}")
                 releases = []
 
             config = {
@@ -41601,7 +41581,7 @@ def watchlist_artist_config(artist_id):
 
             conn.close()
 
-            print(f"Updated watchlist config for artist {artist_id}: albums={include_albums}, eps={include_eps}, singles={include_singles}, live={include_live}, remixes={include_remixes}, acoustic={include_acoustic}, compilations={include_compilations}, instrumentals={include_instrumentals}")
+            logger.info(f"Updated watchlist config for artist {artist_id}: albums={include_albums}, eps={include_eps}, singles={include_singles}, live={include_live}, remixes={include_remixes}, acoustic={include_acoustic}, compilations={include_compilations}, instrumentals={include_instrumentals}")
 
             return jsonify({
                 "success": True,
@@ -41619,7 +41599,7 @@ def watchlist_artist_config(artist_id):
             })
 
     except Exception as e:
-        print(f"Error in watchlist artist config: {e}")
+        logger.error(f"Error in watchlist artist config: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -41684,7 +41664,7 @@ def watchlist_artist_link_provider(artist_id):
         conn.close()
 
         action = 'Cleared' if is_clear else 'Linked'
-        print(f"{action} watchlist artist '{artist_name}' {provider} ID: {new_provider_id or 'NULL'}")
+        logger.info(f"{action} watchlist artist '{artist_name}' {provider} ID: {new_provider_id or 'NULL'}")
 
         return jsonify({
             "success": True,
@@ -41693,7 +41673,7 @@ def watchlist_artist_link_provider(artist_id):
         })
 
     except Exception as e:
-        print(f"Error linking watchlist artist provider: {e}")
+        logger.error(f"Error linking watchlist artist provider: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -41748,7 +41728,7 @@ def watchlist_global_config():
             config_manager.set('watchlist.global_include_instrumentals', include_instrumentals)
             config_manager.set('watchlist.exclude_terms', exclude_terms)
 
-            print(f"Updated global watchlist config: override={global_override_enabled}, "
+            logger.info(f"Updated global watchlist config: override={global_override_enabled}, "
                   f"albums={include_albums}, eps={include_eps}, singles={include_singles}, "
                   f"live={include_live}, remixes={include_remixes}, acoustic={include_acoustic}, "
                   f"compilations={include_compilations}, instrumentals={include_instrumentals}, "
@@ -41772,7 +41752,7 @@ def watchlist_global_config():
             })
 
     except Exception as e:
-        print(f"Error in watchlist global config: {e}")
+        logger.error(f"Error in watchlist global config: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -41786,7 +41766,7 @@ def _update_similar_artists_worker():
         from database.music_database import get_database
         import time
 
-        print("[Similar Artists] Starting similar artists update...")
+        logger.info("[Similar Artists] Starting similar artists update...")
 
         database = get_database()
         all_profiles = database.get_all_profiles()
@@ -41803,11 +41783,11 @@ def _update_similar_artists_worker():
 
         if not artist_profiles:
             similar_artists_update_state['status'] = 'completed'
-            print("[Similar Artists] No watchlist artists to process")
+            logger.warning("[Similar Artists] No watchlist artists to process")
             return
 
         similar_artists_update_state['total_artists'] = len(artist_profiles)
-        print(f"[Similar Artists] Processing {len(artist_profiles)} unique watchlist artists across {len(all_profiles)} profiles")
+        logger.info(f"[Similar Artists] Processing {len(artist_profiles)} unique watchlist artists across {len(all_profiles)} profiles")
 
         scanner = get_watchlist_scanner(spotify_client)
 
@@ -41816,7 +41796,7 @@ def _update_similar_artists_worker():
                 similar_artists_update_state['artists_processed'] = idx
                 similar_artists_update_state['current_artist'] = artist.artist_name
 
-                print(f"[{idx}/{len(artist_profiles)}] Updating similar artists for {artist.artist_name} (profiles: {profile_ids})")
+                logger.info(f"[{idx}/{len(artist_profiles)}] Updating similar artists for {artist.artist_name} (profiles: {profile_ids})")
 
                 # Update similar artists for each profile that watches this artist
                 for pid in profile_ids:
@@ -41827,17 +41807,17 @@ def _update_similar_artists_worker():
                     time.sleep(2.0)  # 2 seconds between artists
 
             except Exception as artist_error:
-                print(f"[Similar Artists] Error processing {artist.artist_name}: {artist_error}")
+                logger.error(f"[Similar Artists] Error processing {artist.artist_name}: {artist_error}")
                 continue
 
         # Update complete
         similar_artists_update_state['status'] = 'completed'
         similar_artists_update_state['current_artist'] = None
 
-        print(f"[Similar Artists] Update complete! Processed {len(artist_profiles)} artists")
+        logger.info(f"[Similar Artists] Update complete! Processed {len(artist_profiles)} artists")
 
     except Exception as e:
-        print(f"[Similar Artists] Critical error: {e}")
+        logger.error(f"[Similar Artists] Critical error: {e}")
         import traceback
         traceback.print_exc()
 
@@ -41864,7 +41844,7 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
     global watchlist_auto_scanning, watchlist_auto_scanning_timestamp, watchlist_scan_state
 
     scope_label = f"profile {profile_id}" if profile_id else "all profiles"
-    print(f"[Auto-Watchlist] Timer triggered - starting automatic watchlist scan ({scope_label})...")
+    logger.info(f"[Auto-Watchlist] Timer triggered - starting automatic watchlist scan ({scope_label})...")
 
     _ew_state = {}
 
@@ -41872,20 +41852,20 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
         # CRITICAL FIX: Use smart stuck detection BEFORE acquiring lock
         # This prevents deadlock and handles stuck flags (2-hour timeout)
         if is_watchlist_actually_scanning():
-            print("[Auto-Watchlist] Already scanning (verified with stuck detection), skipping.")
+            logger.info("[Auto-Watchlist] Already scanning (verified with stuck detection), skipping.")
             return
 
         with watchlist_timer_lock:
             # Re-check inside lock to handle race conditions
             if watchlist_auto_scanning:
-                print("[Auto-Watchlist] Already scanning (race condition check), skipping.")
+                logger.info("[Auto-Watchlist] Already scanning (race condition check), skipping.")
                 return
 
             # Set flag and timestamp
             import time
             watchlist_auto_scanning = True
             watchlist_auto_scanning_timestamp = time.time()
-            print(f"[Auto-Watchlist] Flag set at timestamp {watchlist_auto_scanning_timestamp}")
+            logger.info(f"[Auto-Watchlist] Flag set at timestamp {watchlist_auto_scanning_timestamp}")
 
         # Use app context for database operations
         with app.app_context():
@@ -41904,23 +41884,23 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
 
             watchlist_count = sum(database.get_watchlist_count(profile_id=p['id']) for p in scan_profiles)
             profile_label = f"profile {profile_id}" if profile_id else f"{len(scan_profiles)} profiles"
-            print(f"[Auto-Watchlist] Watchlist count check: {watchlist_count} artists found ({profile_label})")
+            logger.info(f"[Auto-Watchlist] Watchlist count check: {watchlist_count} artists found ({profile_label})")
 
             if watchlist_count == 0:
-                print("ℹ️ [Auto-Watchlist] No artists in watchlist for auto-scanning.")
+                logger.warning("ℹ️ [Auto-Watchlist] No artists in watchlist for auto-scanning.")
                 with watchlist_timer_lock:
                     watchlist_auto_scanning = False
                     watchlist_auto_scanning_timestamp = 0
                 return
 
             if not spotify_client or not spotify_client.is_authenticated():
-                print("ℹ️ [Auto-Watchlist] Spotify client not available or not authenticated.")
+                logger.info("ℹ️ [Auto-Watchlist] Spotify client not available or not authenticated.")
                 with watchlist_timer_lock:
                     watchlist_auto_scanning = False
                     watchlist_auto_scanning_timestamp = 0
                 return
 
-            print(f"[Auto-Watchlist] Found {watchlist_count} artists in watchlist, starting automatic scan...")
+            logger.info(f"[Auto-Watchlist] Found {watchlist_count} artists in watchlist, starting automatic scan...")
             _update_automation_progress(automation_id, progress=5, phase='Loading watchlist',
                                          log_line=f'{watchlist_count} artists ({profile_label})', log_type='info')
 
@@ -41935,9 +41915,9 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
                 try:
                     filled = scanner.backfill_watchlist_artist_images(p['id'])
                     if filled:
-                        print(f"Backfilled {filled} watchlist artist images for profile {p['id']}")
+                        logger.info(f"Backfilled {filled} watchlist artist images for profile {p['id']}")
                 except Exception as img_err:
-                    print(f"Image backfill error for profile {p['id']}: {img_err}")
+                    logger.error(f"Image backfill error for profile {p['id']}: {img_err}")
 
             # Initialize detailed progress tracking (same as manual scan)
             watchlist_scan_state = {
@@ -42058,20 +42038,20 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
                     'tracks_added_to_wishlist': total_added_to_wishlist
                 }
 
-                print(f"Automatic watchlist scan completed: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
-                print(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
+                logger.info(f"Automatic watchlist scan completed: {len(successful_scans)}/{len(scan_results)} artists scanned successfully")
+                logger.info(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
                 _update_automation_progress(automation_id, progress=95, phase='Scan complete',
                                              log_line=f'Scanned {len(successful_scans)} artists — {total_new_tracks} new tracks, {total_added_to_wishlist} added to wishlist',
                                              log_type='success' if total_new_tracks > 0 else 'info')
             else:
                 total_new_tracks = watchlist_scan_state.get('summary', {}).get('new_tracks_found', 0)
                 total_added_to_wishlist = watchlist_scan_state.get('summary', {}).get('tracks_added_to_wishlist', 0)
-                print(f"Automatic watchlist scan cancelled — skipping post-scan steps")
+                logger.warning(f"Automatic watchlist scan cancelled — skipping post-scan steps")
 
             # Post-scan steps — skip if cancelled
             if not was_cancelled:
                 # Populate discovery pool from similar artists (per-profile)
-                print("Starting discovery pool population...")
+                logger.info("Starting discovery pool population...")
                 watchlist_scan_state['current_phase'] = 'populating_discovery_pool'
                 _update_automation_progress(automation_id, progress=96, phase='Populating discovery pool',
                                              log_line='Building discovery pool from similar artists...', log_type='info')
@@ -42093,16 +42073,16 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
 
                     for p in all_profiles:
                         scanner.populate_discovery_pool(profile_id=p['id'], progress_callback=_discovery_progress)
-                    print("Discovery pool population complete")
+                    logger.info("Discovery pool population complete")
                 except Exception as discovery_error:
-                    print(f"Error populating discovery pool: {discovery_error}")
+                    logger.error(f"Error populating discovery pool: {discovery_error}")
                     import traceback
                     traceback.print_exc()
                     _update_automation_progress(automation_id,
                                                  log_line=f'Discovery pool error: {discovery_error}', log_type='error')
 
                 # Update ListenBrainz playlists cache
-                print("Starting ListenBrainz playlists update...")
+                logger.info("Starting ListenBrainz playlists update...")
                 watchlist_scan_state['current_phase'] = 'updating_listenbrainz'
                 _update_automation_progress(automation_id, progress=97, phase='Updating ListenBrainz',
                                              log_line='Fetching ListenBrainz playlists...', log_type='info')
@@ -42117,7 +42097,7 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
                             lb_result = lb_manager.update_all_playlists()
                             if lb_result.get('success'):
                                 summary = lb_result.get('summary', {})
-                                print(f"ListenBrainz update complete for profile {lb_prof['id']}: {summary}")
+                                logger.info(f"ListenBrainz update complete for profile {lb_prof['id']}: {summary}")
                                 _update_automation_progress(automation_id,
                                                              log_line=f'ListenBrainz (profile {lb_prof["id"]}): playlists updated', log_type='success')
                     else:
@@ -42125,22 +42105,22 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
                         lb_result = lb_manager.update_all_playlists()
                         if lb_result.get('success'):
                             summary = lb_result.get('summary', {})
-                            print(f"ListenBrainz update complete (global): {summary}")
+                            logger.info(f"ListenBrainz update complete (global): {summary}")
                             _update_automation_progress(automation_id,
                                                          log_line=f'ListenBrainz: playlists updated', log_type='success')
                         else:
-                            print(f"ListenBrainz update had issues: {lb_result.get('error', 'Unknown error')}")
+                            logger.error(f"ListenBrainz update had issues: {lb_result.get('error', 'Unknown error')}")
                             _update_automation_progress(automation_id,
                                                          log_line=f'ListenBrainz: {lb_result.get("error", "Unknown error")}', log_type='error')
                 except Exception as lb_error:
-                    print(f"Error updating ListenBrainz: {lb_error}")
+                    logger.error(f"Error updating ListenBrainz: {lb_error}")
                     import traceback
                     traceback.print_exc()
                     _update_automation_progress(automation_id,
                                                  log_line=f'ListenBrainz error: {lb_error}', log_type='error')
 
                 # Update current seasonal playlist (weekly refresh)
-                print("Starting seasonal content update...")
+                logger.info("Starting seasonal content update...")
                 watchlist_scan_state['current_phase'] = 'updating_seasonal'
                 _update_automation_progress(automation_id, progress=98, phase='Updating seasonal content',
                                              log_line='Checking seasonal playlists...', log_type='info')
@@ -42152,54 +42132,54 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
                     current_season = seasonal_service.get_current_season()
                     if current_season:
                         if seasonal_service.should_populate_seasonal_content(current_season, days_threshold=7):
-                            print(f"Updating {current_season} seasonal content...")
+                            logger.info(f"Updating {current_season} seasonal content...")
                             _update_automation_progress(automation_id,
                                                          log_line=f'Updating {current_season} seasonal content...', log_type='info')
                             seasonal_service.populate_seasonal_content(current_season)
                             seasonal_service.curate_seasonal_playlist(current_season)
-                            print(f"{current_season.capitalize()} seasonal content updated")
+                            logger.info(f"{current_season.capitalize()} seasonal content updated")
                             _update_automation_progress(automation_id,
                                                          log_line=f'{current_season.capitalize()} seasonal content updated', log_type='success')
                         else:
-                            print(f"{current_season.capitalize()} seasonal content recently updated, skipping")
+                            logger.info(f"{current_season.capitalize()} seasonal content recently updated, skipping")
                             _update_automation_progress(automation_id,
                                                          log_line=f'{current_season.capitalize()} seasonal content up to date', log_type='info')
                     else:
-                        print("ℹ️ No active season at this time")
+                        logger.warning("ℹ️ No active season at this time")
                         _update_automation_progress(automation_id,
                                                      log_line='No active season', log_type='info')
                 except Exception as seasonal_error:
-                    print(f"Error updating seasonal content: {seasonal_error}")
+                    logger.error(f"Error updating seasonal content: {seasonal_error}")
                     import traceback
                     traceback.print_exc()
                     _update_automation_progress(automation_id,
                                                  log_line=f'Seasonal error: {seasonal_error}', log_type='error')
 
                 # Generate Last.fm radio playlists (weekly refresh)
-                print("Starting Last.fm radio generation...")
+                logger.info("Starting Last.fm radio generation...")
                 watchlist_scan_state['current_phase'] = 'generating_lastfm_radio'
                 _update_automation_progress(automation_id, progress=99, phase='Generating Last.fm radio',
                                              log_line='Building Last.fm radio playlists...', log_type='info')
                 try:
                     scanner._generate_lastfm_radio_playlists()
-                    print("Last.fm radio generation complete")
+                    logger.info("Last.fm radio generation complete")
                     _update_automation_progress(automation_id,
                                                  log_line='Last.fm radio playlists updated', log_type='success')
                 except Exception as lastfm_error:
-                    print(f"Error generating Last.fm radio playlists: {lastfm_error}")
+                    logger.error(f"Error generating Last.fm radio playlists: {lastfm_error}")
                     _update_automation_progress(automation_id,
                                                  log_line=f'Last.fm radio error: {lastfm_error}', log_type='error')
 
                 # Sync Spotify library cache
-                print("Syncing Spotify library cache...")
+                logger.info("Syncing Spotify library cache...")
                 try:
                     for p in all_profiles:
                         scanner.sync_spotify_library_cache(profile_id=p['id'])
-                    print("Spotify library cache sync complete")
+                    logger.info("Spotify library cache sync complete")
                     _update_automation_progress(automation_id,
                                                  log_line='Spotify library cache synced', log_type='info')
                 except Exception as lib_error:
-                    print(f"Error syncing Spotify library: {lib_error}")
+                    logger.error(f"Error syncing Spotify library: {lib_error}")
                     _update_automation_progress(automation_id,
                                                  log_line=f'Library cache error: {lib_error}', log_type='error')
 
@@ -42218,7 +42198,7 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
                     pass
 
     except Exception as e:
-        print(f"Error in automatic watchlist scan: {e}")
+        logger.error(f"Error in automatic watchlist scan: {e}")
         import traceback
         traceback.print_exc()
         _update_automation_progress(automation_id, log_line=f'Error: {str(e)}', log_type='error')
@@ -42242,7 +42222,7 @@ def _process_watchlist_scan_automatically(automation_id=None, profile_id=None):
             watchlist_auto_scanning = False
             watchlist_auto_scanning_timestamp = 0
 
-    print("Automatic watchlist scanning complete")
+    logger.info("Automatic watchlist scanning complete")
 
 # --- Metadata Updater System ---
 
@@ -42291,7 +42271,7 @@ def get_discover_hero():
 
         # Determine active source
         active_source = _get_active_discovery_source()
-        print(f"Discover hero using source: {active_source}")
+        logger.info(f"Discover hero using source: {active_source}")
 
         # Import fallback client for non-Spotify lookups
         itunes_client = _get_metadata_fallback_client()
@@ -42299,12 +42279,12 @@ def get_discover_hero():
         # Get top similar artists (excluding watchlist, cycled by last_featured)
         # Fetch more than needed since strict source filtering may drop many
         pid = get_current_profile_id()
-        print(f"[Discover Hero] Profile ID: {pid}, Active source: {active_source}")
+        logger.info(f"[Discover Hero] Profile ID: {pid}, Active source: {active_source}")
         similar_artists = database.get_top_similar_artists(limit=200, profile_id=pid, require_source=active_source)
 
         # FALLBACK: If no similar artists exist, use watchlist artists for Hero section
         if not similar_artists:
-            print("[Discover Hero] No similar artists found, falling back to watchlist artists")
+            logger.warning("[Discover Hero] No similar artists found, falling back to watchlist artists")
             watchlist_artists = database.get_watchlist_artists(profile_id=pid)
 
             if not watchlist_artists:
@@ -42343,7 +42323,7 @@ def get_discover_hero():
 
                 hero_artists.append(artist_data)
 
-            print(f"[Discover Hero] Returning {len(hero_artists)} watchlist artists as fallback")
+            logger.warning(f"[Discover Hero] Returning {len(hero_artists)} watchlist artists as fallback")
             return jsonify({"success": True, "artists": hero_artists, "source": active_source, "fallback": "watchlist"})
 
         # Artists are already filtered by source in SQL — no post-filter needed
@@ -42351,7 +42331,7 @@ def get_discover_hero():
 
         # FALLBACK: If no valid artists for fallback source, try to resolve IDs on-the-fly
         if active_source in ('itunes', 'deezer') and not valid_artists:
-            print(f"[{active_source} Fallback] No artists with {active_source} IDs found, attempting on-the-fly resolution for {len(similar_artists)} artists")
+            logger.warning(f"[{active_source} Fallback] No artists with {active_source} IDs found, attempting on-the-fly resolution for {len(similar_artists)} artists")
             resolved_count = 0
             for artist in similar_artists:
                 existing_id = getattr(artist, f'similar_artist_{active_source}_id', None) or (artist.similar_artist_itunes_id if active_source == 'itunes' else None)
@@ -42372,15 +42352,15 @@ def get_discover_hero():
                             artist.similar_artist_itunes_id = resolved_id
                         valid_artists.append(artist)
                         resolved_count += 1
-                        print(f"  [Resolved] {artist.similar_artist_name} -> {active_source} ID: {resolved_id}")
+                        logger.info(f"  [Resolved] {artist.similar_artist_name} -> {active_source} ID: {resolved_id}")
                 except Exception as resolve_err:
-                    print(f"  [Failed] Could not resolve {active_source} ID for {artist.similar_artist_name}: {resolve_err}")
+                    logger.error(f"  [Failed] Could not resolve {active_source} ID for {artist.similar_artist_name}: {resolve_err}")
                 # Stop after 10 successful resolutions to avoid rate limiting
                 if len(valid_artists) >= 10:
                     break
-            print(f"[{active_source} Fallback] Resolved {resolved_count} artists with IDs")
+            logger.warning(f"[{active_source} Fallback] Resolved {resolved_count} artists with IDs")
 
-        print(f"[Discover Hero] Found {len(valid_artists)} valid artists for source: {active_source}")
+        logger.info(f"[Discover Hero] Found {len(valid_artists)} valid artists for source: {active_source}")
 
         # Filter out blacklisted artists
         blacklisted = database.get_discovery_blacklist_names()
@@ -42448,7 +42428,7 @@ def get_discover_hero():
                                     artist_data.get('genres'), artist_data.get('popularity')
                                 )
                 except Exception as img_err:
-                    print(f"Could not fetch artist image: {img_err}")
+                    logger.error(f"Could not fetch artist image: {img_err}")
 
             hero_artists.append(artist_data)
 
@@ -42459,7 +42439,7 @@ def get_discover_hero():
         return jsonify({"success": True, "artists": hero_artists, "source": active_source})
 
     except Exception as e:
-        print(f"Error getting discover hero: {e}")
+        logger.error(f"Error getting discover hero: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -42504,7 +42484,7 @@ def get_discover_similar_artists():
                 artist_data["popularity"] = artist.popularity
             result_artists.append(artist_data)
 
-        print(f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for {active_source}")
+        logger.info(f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for {active_source}")
 
         return jsonify({
             "success": True,
@@ -42514,7 +42494,7 @@ def get_discover_similar_artists():
         })
 
     except Exception as e:
-        print(f"Error getting similar artists: {e}")
+        logger.error(f"Error getting similar artists: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -42588,7 +42568,7 @@ def enrich_similar_artists():
                 except Exception as e:
                     from core.spotify_client import _detect_and_set_rate_limit
                     _detect_and_set_rate_limit(e, 'enrich_similar_artists')
-                    print(f"Error enriching Spotify batch: {e}")
+                    logger.error(f"Error enriching Spotify batch: {e}")
             else:
                 fallback_client = _get_metadata_fallback_client()
                 fallback_source = _get_metadata_fallback_source()
@@ -42615,12 +42595,12 @@ def enrich_similar_artists():
         cached_count = len(enriched) - len([aid for aid in uncached_ids if aid in enriched])
         api_count = len([aid for aid in uncached_ids if aid in enriched])
         if uncached_ids:
-            print(f"[Enrich] {cached_count} from cache, {api_count} from API ({len(uncached_ids) - api_count} missed)")
+            logger.warning(f"[Enrich] {cached_count} from cache, {api_count} from API ({len(uncached_ids) - api_count} missed)")
 
         return jsonify({"success": True, "artists": enriched})
 
     except Exception as e:
-        print(f"Error enriching similar artists: {e}")
+        logger.error(f"Error enriching similar artists: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -42703,7 +42683,7 @@ def get_spotify_library():
         })
 
     except Exception as e:
-        print(f"Error getting Spotify library: {e}")
+        logger.error(f"Error getting Spotify library: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -42721,9 +42701,9 @@ def refresh_spotify_library():
                     database.set_metadata('spotify_library_last_sync', '')
                     database.set_metadata('spotify_library_last_full_sync', '')
                     scanner.sync_spotify_library_cache(profile_id=get_current_profile_id())
-                    print("Manual Spotify library refresh complete")
+                    logger.info("Manual Spotify library refresh complete")
             except Exception as e:
-                print(f"Error in manual Spotify library refresh: {e}")
+                logger.error(f"Error in manual Spotify library refresh: {e}")
 
         import threading
         thread = threading.Thread(target=_run_sync, daemon=True)
@@ -42732,7 +42712,7 @@ def refresh_spotify_library():
         return jsonify({"success": True, "message": "Spotify library refresh started"})
 
     except Exception as e:
-        print(f"Error starting Spotify library refresh: {e}")
+        logger.error(f"Error starting Spotify library refresh: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -42790,7 +42770,7 @@ def get_discover_recent_releases():
         return jsonify({"success": True, "albums": albums, "source": active_source})
 
     except Exception as e:
-        print(f"Error getting recent releases: {e}")
+        logger.error(f"Error getting recent releases: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -42856,7 +42836,7 @@ def get_discover_release_radar():
         return jsonify({"success": True, "tracks": [], "source": active_source})
 
     except Exception as e:
-        print(f"Error getting release radar: {e}")
+        logger.error(f"Error getting release radar: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -43169,7 +43149,7 @@ def get_discover_weekly():
         return jsonify({"success": True, "tracks": [], "source": active_source})
 
     except Exception as e:
-        print(f"Error getting discovery weekly: {e}")
+        logger.error(f"Error getting discovery weekly: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -43185,16 +43165,16 @@ def refresh_discover_data():
         database = get_database()
         scanner = WatchlistScanner(spotify_client, database)
 
-        print("[Discover Refresh] Starting forced refresh of discover data...")
+        logger.info("[Discover Refresh] Starting forced refresh of discover data...")
 
         refresh_pid = get_current_profile_id()
 
         # Cache recent albums from watchlist and similar artists
-        print("[Discover Refresh] Caching recent albums...")
+        logger.info("[Discover Refresh] Caching recent albums...")
         scanner.cache_discovery_recent_albums(profile_id=refresh_pid)
 
         # Curate playlists
-        print("[Discover Refresh] Curating discovery playlists...")
+        logger.info("[Discover Refresh] Curating discovery playlists...")
         scanner.curate_discovery_playlists(profile_id=refresh_pid)
 
         # Get counts for response
@@ -43204,7 +43184,7 @@ def refresh_discover_data():
         release_radar = database.get_curated_playlist(f'release_radar_{active_source}', profile_id=pid) or []
         discovery_weekly = database.get_curated_playlist(f'discovery_weekly_{active_source}', profile_id=pid) or []
 
-        print(f"[Discover Refresh] Complete! Recent albums: {len(recent_albums)}, Release Radar: {len(release_radar)} tracks, Discovery Weekly: {len(discovery_weekly)} tracks")
+        logger.info(f"[Discover Refresh] Complete! Recent albums: {len(recent_albums)}, Release Radar: {len(release_radar)} tracks, Discovery Weekly: {len(discovery_weekly)} tracks")
 
         return jsonify({
             "success": True,
@@ -43216,7 +43196,7 @@ def refresh_discover_data():
         })
 
     except Exception as e:
-        print(f"Error refreshing discover data: {e}")
+        logger.error(f"Error refreshing discover data: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -43287,7 +43267,7 @@ def diagnose_discover_data():
         })
 
     except Exception as e:
-        print(f"Error diagnosing discover data: {e}")
+        logger.error(f"Error diagnosing discover data: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -43332,7 +43312,7 @@ def get_current_seasonal_content():
         })
 
     except Exception as e:
-        print(f"Error getting current seasonal content: {e}")
+        logger.error(f"Error getting current seasonal content: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/seasonal/<season_key>/albums', methods=['GET'])
@@ -43361,7 +43341,7 @@ def get_seasonal_albums(season_key):
         })
 
     except Exception as e:
-        print(f"Error getting seasonal albums: {e}")
+        logger.error(f"Error getting seasonal albums: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/seasonal/<season_key>/playlist', methods=['GET'])
@@ -43459,7 +43439,7 @@ def get_seasonal_playlist(season_key):
         })
 
     except Exception as e:
-        print(f"Error getting seasonal playlist: {e}")
+        logger.error(f"Error getting seasonal playlist: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -43479,14 +43459,14 @@ def refresh_seasonal_content():
             try:
                 current_season = seasonal_service.get_current_season()
                 if current_season:
-                    print(f"Force-refreshing seasonal content for: {current_season}")
+                    logger.info(f"Force-refreshing seasonal content for: {current_season}")
                     seasonal_service.populate_seasonal_content(current_season)
                     seasonal_service.curate_seasonal_playlist(current_season)
-                    print(f"Seasonal content refreshed for: {current_season}")
+                    logger.info(f"Seasonal content refreshed for: {current_season}")
                 else:
-                    print("ℹ️ No active season to refresh")
+                    logger.warning("ℹ️ No active season to refresh")
             except Exception as e:
-                print(f"Error in background seasonal population: {e}")
+                logger.error(f"Error in background seasonal population: {e}")
 
         thread = threading.Thread(target=populate_all, daemon=True)
         thread.start()
@@ -43494,7 +43474,7 @@ def refresh_seasonal_content():
         return jsonify({"success": True, "message": "Seasonal content refresh started"})
 
     except Exception as e:
-        print(f"Error refreshing seasonal content: {e}")
+        logger.error(f"Error refreshing seasonal content: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ========================================
@@ -43518,7 +43498,7 @@ def get_recently_added_playlist():
         })
 
     except Exception as e:
-        print(f"Error getting recently added playlist: {e}")
+        logger.error(f"Error getting recently added playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/personalized/top-tracks', methods=['GET'])
@@ -43538,7 +43518,7 @@ def get_top_tracks_playlist():
         })
 
     except Exception as e:
-        print(f"Error getting top tracks playlist: {e}")
+        logger.error(f"Error getting top tracks playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/personalized/forgotten-favorites', methods=['GET'])
@@ -43558,7 +43538,7 @@ def get_forgotten_favorites_playlist():
         })
 
     except Exception as e:
-        print(f"Error getting forgotten favorites playlist: {e}")
+        logger.error(f"Error getting forgotten favorites playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/personalized/decade/<int:decade>', methods=['GET'])
@@ -43579,7 +43559,7 @@ def get_decade_playlist(decade):
         })
 
     except Exception as e:
-        print(f"Error getting decade playlist: {e}")
+        logger.error(f"Error getting decade playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/personalized/popular-picks', methods=['GET'])
@@ -43599,7 +43579,7 @@ def get_popular_picks_playlist():
         })
 
     except Exception as e:
-        print(f"Error getting popular picks playlist: {e}")
+        logger.error(f"Error getting popular picks playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/personalized/hidden-gems', methods=['GET'])
@@ -43619,7 +43599,7 @@ def get_hidden_gems_playlist():
         })
 
     except Exception as e:
-        print(f"Error getting hidden gems playlist: {e}")
+        logger.error(f"Error getting hidden gems playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/personalized/daily-mixes', methods=['GET'])
@@ -43639,7 +43619,7 @@ def get_daily_mixes():
         })
 
     except Exception as e:
-        print(f"Error getting daily mixes: {e}")
+        logger.error(f"Error getting daily mixes: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -43662,7 +43642,7 @@ def get_discovery_shuffle():
         })
 
     except Exception as e:
-        print(f"Error getting discovery shuffle playlist: {e}")
+        logger.error(f"Error getting discovery shuffle playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/personalized/familiar-favorites', methods=['GET'])
@@ -43683,7 +43663,7 @@ def get_familiar_favorites():
         })
 
     except Exception as e:
-        print(f"Error getting familiar favorites playlist: {e}")
+        logger.error(f"Error getting familiar favorites playlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/artist-blacklist', methods=['GET'])
@@ -43827,7 +43807,7 @@ def refresh_your_artists():
         if request.args.get('clear', '').lower() == 'true':
             database = get_database()
             cleared = database.clear_liked_artists(profile_id)
-            print(f"[Your Artists] Cleared {cleared} entries before refresh")
+            logger.info(f"[Your Artists] Cleared {cleared} entries before refresh")
         _trigger_your_artists_refresh(profile_id)
         return jsonify({"success": True, "message": "Refresh started"})
     except Exception as e:
@@ -43908,9 +43888,9 @@ def _fetch_and_match_liked_artists(profile_id: int):
     # 1. Fetch from Spotify (followed artists)
     try:
         if 'spotify' not in enabled_sources:
-            print("[Your Artists] Spotify skipped (disabled in sources config)")
+            logger.warning("[Your Artists] Spotify skipped (disabled in sources config)")
         elif spotify_client and spotify_client.is_spotify_authenticated():
-            print("[Your Artists] Fetching followed artists from Spotify...")
+            logger.info("[Your Artists] Fetching followed artists from Spotify...")
             artists = spotify_client.get_followed_artists()
             for a in artists:
                 database.upsert_liked_artist(
@@ -43920,18 +43900,18 @@ def _fetch_and_match_liked_artists(profile_id: int):
                     profile_id=profile_id
                 )
             fetched += len(artists)
-            print(f"[Your Artists] Fetched {len(artists)} from Spotify")
+            logger.info(f"[Your Artists] Fetched {len(artists)} from Spotify")
     except Exception as e:
         logger.error(f"[Your Artists] Spotify fetch error: {e}")
 
     # 2. Fetch from Tidal (favorite artists)
     try:
         if 'tidal' not in enabled_sources:
-            print("[Your Artists] Tidal skipped (disabled in sources config)")
+            logger.warning("[Your Artists] Tidal skipped (disabled in sources config)")
         elif tidal_client and hasattr(tidal_client, 'get_favorite_artists'):
             tidal_auth = tidal_client._ensure_valid_token() if hasattr(tidal_client, '_ensure_valid_token') else False
             if tidal_auth:
-                print("[Your Artists] Fetching favorite artists from Tidal...")
+                logger.info("[Your Artists] Fetching favorite artists from Tidal...")
                 artists = tidal_client.get_favorite_artists(limit=200)
                 for a in artists:
                     database.upsert_liked_artist(
@@ -43939,26 +43919,26 @@ def _fetch_and_match_liked_artists(profile_id: int):
                         image_url=a.get('image_url'), profile_id=profile_id
                     )
                 fetched += len(artists)
-                print(f"[Your Artists] Fetched {len(artists)} from Tidal")
+                logger.info(f"[Your Artists] Fetched {len(artists)} from Tidal")
     except Exception as e:
         logger.error(f"[Your Artists] Tidal fetch error: {e}")
 
     # 3. Fetch from Last.fm (top artists)
     try:
         if 'lastfm' not in enabled_sources:
-            print("[Your Artists] Last.fm skipped (disabled in sources config)")
+            logger.warning("[Your Artists] Last.fm skipped (disabled in sources config)")
         else:
             lastfm_key = config_manager.get('lastfm.api_key', '')
             lastfm_secret = config_manager.get('lastfm.api_secret', '')
             lastfm_session = config_manager.get('lastfm.session_key', '')
-            print(f"[Your Artists] Last.fm credentials: key={'yes' if lastfm_key else 'NO'}, secret={'yes' if lastfm_secret else 'NO'}, session={'yes' if lastfm_session else 'NO'}")
+            logger.info(f"[Your Artists] Last.fm credentials: key={'yes' if lastfm_key else 'NO'}, secret={'yes' if lastfm_secret else 'NO'}, session={'yes' if lastfm_session else 'NO'}")
             if lastfm_key and lastfm_secret and lastfm_session:
                 from core.lastfm_client import LastFMClient
                 lfm = LastFMClient(api_key=lastfm_key, api_secret=lastfm_secret, session_key=lastfm_session)
                 username = lfm.get_authenticated_username()
-                print(f"[Your Artists] Last.fm username resolved: {username or 'NONE'}")
+                logger.info(f"[Your Artists] Last.fm username resolved: {username or 'NONE'}")
                 if username:
-                    print(f"[Your Artists] Fetching top artists from Last.fm ({username})...")
+                    logger.info(f"[Your Artists] Fetching top artists from Last.fm ({username})...")
                     artists = lfm.get_user_top_artists(username, period='overall', limit=200)
                     for a in artists:
                         database.upsert_liked_artist(
@@ -43966,23 +43946,23 @@ def _fetch_and_match_liked_artists(profile_id: int):
                             image_url=a.get('image_url'), profile_id=profile_id
                         )
                     fetched += len(artists)
-                    print(f"[Your Artists] Fetched {len(artists)} from Last.fm")
+                    logger.info(f"[Your Artists] Fetched {len(artists)} from Last.fm")
     except Exception as e:
         logger.error(f"[Your Artists] Last.fm fetch error: {e}")
 
     # 4. Fetch from Deezer (favorite artists — OAuth or ARL)
     try:
         if 'deezer' not in enabled_sources:
-            print("[Your Artists] Deezer skipped (disabled in sources config)")
+            logger.warning("[Your Artists] Deezer skipped (disabled in sources config)")
         else:
             deezer_cl = _get_deezer_client()
             artists = []
             if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
-                print("[Your Artists] Fetching favorite artists from Deezer (OAuth)...")
+                logger.info("[Your Artists] Fetching favorite artists from Deezer (OAuth)...")
                 artists = deezer_cl.get_user_favorite_artists(limit=200)
             elif (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
                   and soulseek_client.deezer_dl.is_authenticated()):
-                print("[Your Artists] Fetching favorite artists from Deezer (ARL)...")
+                logger.info("[Your Artists] Fetching favorite artists from Deezer (ARL)...")
                 artists = soulseek_client.deezer_dl.get_user_favorite_artists(limit=200)
             for a in artists:
                 database.upsert_liked_artist(
@@ -43992,11 +43972,11 @@ def _fetch_and_match_liked_artists(profile_id: int):
                 )
             fetched += len(artists)
             if artists:
-                print(f"[Your Artists] Fetched {len(artists)} from Deezer")
+                logger.info(f"[Your Artists] Fetched {len(artists)} from Deezer")
     except Exception as e:
         logger.error(f"[Your Artists] Deezer fetch error: {e}")
 
-    print(f"[Your Artists] Total fetched: {fetched}")
+    logger.info(f"[Your Artists] Total fetched: {fetched}")
 
     # 5. Match pending artists to active source
     _match_liked_artists_to_all_sources(database, profile_id)
@@ -44199,7 +44179,7 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
             matched += 1
 
     database.sync_liked_artists_watchlist_flags(profile_id)
-    print(f"[Your Artists] Matched {matched}/{len(pending)} artists to {len(search_clients)} sources ({api_calls} API calls)")
+    logger.info(f"[Your Artists] Matched {matched}/{len(pending)} artists to {len(search_clients)} sources ({api_calls} API calls)")
 
     # Image backfill: fetch images for matched artists that have IDs but no image
     _backfill_liked_artist_images(database, profile_id, search_clients)
@@ -44223,7 +44203,7 @@ def _backfill_liked_artist_images(database, profile_id: int, search_clients: dic
         if not rows:
             return
 
-        print(f"[Your Artists] Backfilling images for {len(rows)} artists...")
+        logger.info(f"[Your Artists] Backfilling images for {len(rows)} artists...")
         filled = 0
 
         for row in rows:
@@ -44259,7 +44239,7 @@ def _backfill_liked_artist_images(database, profile_id: int, search_clients: dic
 
         conn.commit()
         if filled:
-            print(f"[Your Artists] Backfilled {filled}/{len(rows)} artist images")
+            logger.info(f"[Your Artists] Backfilled {filled}/{len(rows)} artist images")
     except Exception as e:
         logger.debug(f"[Your Artists] Image backfill error: {e}")
 
@@ -44361,7 +44341,7 @@ def refresh_your_albums():
         if request.args.get('clear', '').lower() == 'true':
             database = get_database()
             cleared = database.clear_liked_albums(profile_id)
-            print(f"[Your Albums] Cleared {cleared} entries before refresh")
+            logger.info(f"[Your Albums] Cleared {cleared} entries before refresh")
         _trigger_your_albums_refresh(profile_id)
         return jsonify({"success": True, "message": "Refresh started"})
     except Exception as e:
@@ -44436,9 +44416,9 @@ def _fetch_liked_albums(profile_id: int):
     # 1. Fetch from Spotify (saved albums)
     try:
         if 'spotify' not in enabled_sources:
-            print("[Your Albums] Spotify skipped (disabled in sources config)")
+            logger.warning("[Your Albums] Spotify skipped (disabled in sources config)")
         elif spotify_client and spotify_client.is_spotify_authenticated():
-            print("[Your Albums] Fetching saved albums from Spotify...")
+            logger.info("[Your Albums] Fetching saved albums from Spotify...")
             albums = spotify_client.get_saved_albums()
             for a in albums:
                 database.upsert_liked_album(
@@ -44449,18 +44429,18 @@ def _fetch_liked_albums(profile_id: int):
                     total_tracks=a.get('total_tracks', 0), profile_id=profile_id
                 )
             fetched += len(albums)
-            print(f"[Your Albums] Fetched {len(albums)} from Spotify")
+            logger.info(f"[Your Albums] Fetched {len(albums)} from Spotify")
     except Exception as e:
         logger.error(f"[Your Albums] Spotify fetch error: {e}")
 
     # 2. Fetch from Tidal (favorite albums)
     try:
         if 'tidal' not in enabled_sources:
-            print("[Your Albums] Tidal skipped (disabled in sources config)")
+            logger.warning("[Your Albums] Tidal skipped (disabled in sources config)")
         elif tidal_client and hasattr(tidal_client, 'get_favorite_albums'):
             tidal_auth = tidal_client._ensure_valid_token() if hasattr(tidal_client, '_ensure_valid_token') else False
             if tidal_auth:
-                print("[Your Albums] Fetching favorite albums from Tidal...")
+                logger.info("[Your Albums] Fetching favorite albums from Tidal...")
                 albums = tidal_client.get_favorite_albums(limit=500)
                 for a in albums:
                     database.upsert_liked_album(
@@ -44471,23 +44451,23 @@ def _fetch_liked_albums(profile_id: int):
                         total_tracks=a.get('total_tracks', 0), profile_id=profile_id
                     )
                 fetched += len(albums)
-                print(f"[Your Albums] Fetched {len(albums)} from Tidal")
+                logger.info(f"[Your Albums] Fetched {len(albums)} from Tidal")
     except Exception as e:
         logger.error(f"[Your Albums] Tidal fetch error: {e}")
 
     # 3. Fetch from Deezer (favorite albums — OAuth or ARL)
     try:
         if 'deezer' not in enabled_sources:
-            print("[Your Albums] Deezer skipped (disabled in sources config)")
+            logger.warning("[Your Albums] Deezer skipped (disabled in sources config)")
         else:
             deezer_cl = _get_deezer_client()
             albums = []
             if deezer_cl and hasattr(deezer_cl, 'is_user_authenticated') and deezer_cl.is_user_authenticated():
-                print("[Your Albums] Fetching favorite albums from Deezer (OAuth)...")
+                logger.info("[Your Albums] Fetching favorite albums from Deezer (OAuth)...")
                 albums = deezer_cl.get_user_favorite_albums(limit=500)
             elif (hasattr(soulseek_client, 'deezer_dl') and soulseek_client.deezer_dl
                   and soulseek_client.deezer_dl.is_authenticated()):
-                print("[Your Albums] Fetching favorite albums from Deezer (ARL)...")
+                logger.info("[Your Albums] Fetching favorite albums from Deezer (ARL)...")
                 albums = soulseek_client.deezer_dl.get_user_favorite_albums(limit=500)
             for a in albums:
                 database.upsert_liked_album(
@@ -44499,11 +44479,11 @@ def _fetch_liked_albums(profile_id: int):
                 )
             fetched += len(albums)
             if albums:
-                print(f"[Your Albums] Fetched {len(albums)} from Deezer")
+                logger.info(f"[Your Albums] Fetched {len(albums)} from Deezer")
     except Exception as e:
         logger.error(f"[Your Albums] Deezer fetch error: {e}")
 
-    print(f"[Your Albums] Total fetched: {fetched}")
+    logger.info(f"[Your Albums] Total fetched: {fetched}")
 
 
 @app.route('/api/discover/your-artists/info/<artist_id>', methods=['GET'])
@@ -45188,11 +45168,11 @@ def get_artist_map_genres():
         _img_count = sum(1 for n in nodes if n.get('image_url'))
         _deezer_count = sum(1 for n in nodes if n.get('image_url', '').startswith('https://api.deezer'))
         _none_count = sum(1 for n in nodes if not n.get('image_url'))
-        print(f"[Genre Map] {len(nodes)} artists, {len(sorted_genres)} genres")
-        print(f"[Genre Map] Images: {_img_count} have URLs, {_deezer_count} Deezer fallback, {_none_count} missing")
+        logger.info(f"[Genre Map] {len(nodes)} artists, {len(sorted_genres)} genres")
+        logger.warning(f"[Genre Map] Images: {_img_count} have URLs, {_deezer_count} Deezer fallback, {_none_count} missing")
         if _none_count > 0:
             samples = [n['name'] for n in nodes if not n.get('image_url')][:5]
-            print(f"[Genre Map] Missing image samples: {samples}")
+            logger.warning(f"[Genre Map] Missing image samples: {samples}")
 
         result = {
             'success': True,
@@ -45315,7 +45295,7 @@ def get_artist_map_explore():
                             center_image = ia.image_url if hasattr(ia, 'image_url') else ''
                             artist_found = True
             except Exception as e:
-                print(f"[Artist Explorer] API validation failed for '{artist_name}': {e}")
+                logger.debug(f"[Artist Explorer] API validation failed for '{artist_name}': {e}")
 
         if not artist_found:
             return jsonify({"success": False, "error": f"Artist '{artist_name}' not found"}), 404
@@ -45378,7 +45358,7 @@ def get_artist_map_explore():
         # If no similar artists in DB, fetch from MusicMap on-the-fly
         if not ring1_artists:
             try:
-                print(f"[Artist Explorer] No stored similar artists for '{center_name}', fetching from MusicMap...")
+                logger.debug(f"[Artist Explorer] No stored similar artists for '{center_name}', fetching from MusicMap...")
                 from core.watchlist_scanner import WatchlistScanner
                 scanner = WatchlistScanner(spotify_client=spotify_client) if spotify_client else None
                 if scanner:
@@ -45425,10 +45405,10 @@ def get_artist_map_explore():
                                 ORDER BY similarity_rank ASC
                             """, (source_artist_id, profile_id))
                             ring1_artists = cursor.fetchall()
-                        print(f"[Artist Explorer] Fetched {len(ring1_artists)} similar artists from MusicMap for '{center_name}'")
+                        logger.debug(f"[Artist Explorer] Fetched {len(ring1_artists)} similar artists from MusicMap for '{center_name}'")
                         _artmap_cache_invalidate(profile_id)  # New similar artists added
             except Exception as e:
-                print(f"[Artist Explorer] MusicMap fetch failed for '{center_name}': {e}")
+                logger.debug(f"[Artist Explorer] MusicMap fetch failed for '{center_name}': {e}")
 
         # Deduplicate ring 1
         for r in ring1_artists:
@@ -45578,7 +45558,7 @@ def get_artist_map_explore():
                 if alb:
                     n['image_url'] = alb['image_url']
 
-        print(f"[Artist Explorer] Center: {center_name}, Ring 1: {sum(1 for n in nodes if n.get('ring')==1)}, Ring 2: {sum(1 for n in nodes if n.get('ring')==2)}, Edges: {len(edges)}")
+        logger.info(f"[Artist Explorer] Center: {center_name}, Ring 1: {sum(1 for n in nodes if n.get('ring')==1)}, Ring 2: {sum(1 for n in nodes if n.get('ring')==2)}, Edges: {len(edges)}")
 
         return jsonify({
             'success': True,
@@ -45652,7 +45632,7 @@ def search_artists_for_playlist():
         })
 
     except Exception as e:
-        print(f"Error searching for artists: {e}")
+        logger.error(f"Error searching for artists: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/build-playlist/generate', methods=['POST'])
@@ -45685,7 +45665,7 @@ def generate_custom_playlist():
         })
 
     except Exception as e:
-        print(f"Error generating custom playlist: {e}")
+        logger.error(f"Error generating custom playlist: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -45727,7 +45707,7 @@ def get_available_decades():
             })
 
     except Exception as e:
-        print(f"Error getting available decades: {e}")
+        logger.error(f"Error getting available decades: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/discover/decade/<int:decade>', methods=['GET'])
@@ -45770,7 +45750,7 @@ def get_discover_decade_playlist(decade):
         })
 
     except Exception as e:
-        print(f"Error getting decade playlist: {e}")
+        logger.error(f"Error getting decade playlist: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -45792,7 +45772,7 @@ def get_available_genres():
         })
 
     except Exception as e:
-        print(f"Error getting available genres: {e}")
+        logger.error(f"Error getting available genres: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -45837,7 +45817,7 @@ def get_discover_genre_playlist(genre_name):
         })
 
     except Exception as e:
-        print(f"Error getting genre playlist: {e}")
+        logger.error(f"Error getting genre playlist: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -45868,7 +45848,7 @@ def _get_lb_discover_playlists(playlist_type):
                 "count": 0,
                 "username": None
             })
-        print(f"Cache empty for profile {lb_manager.profile_id}, populating ListenBrainz playlists...")
+        logger.warning(f"Cache empty for profile {lb_manager.profile_id}, populating ListenBrainz playlists...")
         lb_manager.update_all_playlists()
 
     playlists = lb_manager.get_cached_playlists(playlist_type)
@@ -45899,7 +45879,7 @@ def get_listenbrainz_created_for():
     try:
         return _get_lb_discover_playlists('created_for')
     except Exception as e:
-        print(f"Error getting cached ListenBrainz created-for playlists: {e}")
+        logger.error(f"Error getting cached ListenBrainz created-for playlists: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -45910,7 +45890,7 @@ def get_listenbrainz_user_playlists():
     try:
         return _get_lb_discover_playlists('user')
     except Exception as e:
-        print(f"Error getting cached ListenBrainz user playlists: {e}")
+        logger.error(f"Error getting cached ListenBrainz user playlists: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -45921,7 +45901,7 @@ def get_listenbrainz_collaborative():
     try:
         return _get_lb_discover_playlists('collaborative')
     except Exception as e:
-        print(f"Error getting cached ListenBrainz collaborative playlists: {e}")
+        logger.error(f"Error getting cached ListenBrainz collaborative playlists: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -45936,7 +45916,7 @@ def get_listenbrainz_playlist_tracks(playlist_mbid):
         if not tracks:
             # Cache miss or stale entry with no tracks — try fetching from LB API
             if lb_manager.client.is_authenticated():
-                print(f"Cache miss for playlist {playlist_mbid}, fetching from ListenBrainz...")
+                logger.debug(f"Cache miss for playlist {playlist_mbid}, fetching from ListenBrainz...")
                 # Remove stale playlist row (if any) so _update_playlist doesn't
                 # skip due to matching track_count with 0 actual tracks
                 existing_type = lb_manager.get_playlist_type(playlist_mbid) or 'created_for'
@@ -45959,7 +45939,7 @@ def get_listenbrainz_playlist_tracks(playlist_mbid):
         })
 
     except Exception as e:
-        print(f"Error getting cached ListenBrainz playlist tracks: {e}")
+        logger.error(f"Error getting cached ListenBrainz playlist tracks: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -45976,7 +45956,7 @@ def refresh_listenbrainz():
         return jsonify(result)
 
     except Exception as e:
-        print(f"Error refreshing ListenBrainz: {e}")
+        logger.error(f"Error refreshing ListenBrainz: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -46034,7 +46014,7 @@ def lastfm_search_tracks():
         return jsonify({"success": True, "results": results})
 
     except Exception as e:
-        print(f"Error searching Last.fm tracks: {e}")
+        logger.error(f"Error searching Last.fm tracks: {e}")
         return jsonify({"success": False, "error": str(e), "results": []}), 500
 
 
@@ -46114,7 +46094,7 @@ def lastfm_radio_generate():
                 state['spotify_total'] = len(similar)
                 state['last_accessed'] = time.time()
 
-        print(f"Last.fm Radio generated: '{title}' ({len(similar)} tracks) → {playlist_mbid}")
+        logger.info(f"Last.fm Radio generated: '{title}' ({len(similar)} tracks) → {playlist_mbid}")
         return jsonify({
             "success": True,
             "playlist_mbid": playlist_mbid,
@@ -46123,7 +46103,7 @@ def lastfm_radio_generate():
         })
 
     except Exception as e:
-        print(f"Error generating Last.fm radio: {e}")
+        logger.error(f"Error generating Last.fm radio: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -46154,7 +46134,7 @@ def get_listenbrainz_lastfm_radio():
         ]
         return jsonify({"success": True, "playlists": formatted, "count": len(formatted), "username": username, "source": source})
     except Exception as e:
-        print(f"Error getting Last.fm radio playlists: {e}")
+        logger.error(f"Error getting Last.fm radio playlists: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -46202,11 +46182,11 @@ def get_all_listenbrainz_playlists():
             }
             playlists.append(playlist_info)
 
-        print(f"Returning {len(playlists)} stored ListenBrainz playlists for profile {profile_id}")
+        logger.info(f"Returning {len(playlists)} stored ListenBrainz playlists for profile {profile_id}")
         return jsonify({"playlists": playlists})
 
     except Exception as e:
-        print(f"Error getting ListenBrainz playlists: {e}")
+        logger.error(f"Error getting ListenBrainz playlists: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/listenbrainz/state/<playlist_mbid>', methods=['GET'])
@@ -46241,7 +46221,7 @@ def get_listenbrainz_playlist_state(playlist_mbid):
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error getting ListenBrainz playlist state: {e}")
+        logger.error(f"Error getting ListenBrainz playlist state: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/listenbrainz/reset/<playlist_mbid>', methods=['POST'])
@@ -46270,11 +46250,11 @@ def reset_listenbrainz_playlist(playlist_mbid):
         state['discovery_future'] = None
         state['last_accessed'] = time.time()
 
-        print(f"Reset ListenBrainz playlist to fresh: {state['playlist']['title']}")
+        logger.info(f"Reset ListenBrainz playlist to fresh: {state['playlist']['title']}")
         return jsonify({"success": True, "phase": "fresh"})
 
     except Exception as e:
-        print(f"Error resetting ListenBrainz playlist: {e}")
+        logger.error(f"Error resetting ListenBrainz playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/listenbrainz/remove/<playlist_mbid>', methods=['POST'])
@@ -46294,11 +46274,11 @@ def remove_listenbrainz_playlist(playlist_mbid):
         # Remove from state
         del listenbrainz_playlist_states[state_key]
 
-        print(f"Removed ListenBrainz playlist from state: {playlist_mbid}")
+        logger.info(f"Removed ListenBrainz playlist from state: {playlist_mbid}")
         return jsonify({"success": True})
 
     except Exception as e:
-        print(f"Error removing ListenBrainz playlist: {e}")
+        logger.error(f"Error removing ListenBrainz playlist: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/listenbrainz/discovery/start/<playlist_mbid>', methods=['POST'])
@@ -46327,7 +46307,7 @@ def start_listenbrainz_discovery(playlist_mbid):
                 'created_at': time.time(),
                 'last_accessed': time.time()
             }
-            print(f"Created new ListenBrainz playlist state: {playlist_data.get('name', 'Unknown')}")
+            logger.info(f"Created new ListenBrainz playlist state: {playlist_data.get('name', 'Unknown')}")
         else:
             # State already exists, update it
             state = listenbrainz_playlist_states[state_key]
@@ -46353,11 +46333,11 @@ def start_listenbrainz_discovery(playlist_mbid):
         future = listenbrainz_discovery_executor.submit(_run_listenbrainz_discovery_worker, state_key)
         state['discovery_future'] = future
 
-        print(f"Started Spotify discovery for ListenBrainz playlist: {playlist_name}")
+        logger.info(f"Started Spotify discovery for ListenBrainz playlist: {playlist_name}")
         return jsonify({"success": True, "message": "Discovery started"})
 
     except Exception as e:
-        print(f"Error starting ListenBrainz discovery: {e}")
+        logger.error(f"Error starting ListenBrainz discovery: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -46386,7 +46366,7 @@ def get_listenbrainz_discovery_status(playlist_mbid):
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error getting ListenBrainz discovery status: {e}")
+        logger.error(f"Error getting ListenBrainz discovery status: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/listenbrainz/update-phase/<playlist_mbid>', methods=['POST'])
@@ -46425,7 +46405,7 @@ def update_listenbrainz_phase(playlist_mbid):
         })
 
     except Exception as e:
-        print(f"Error updating ListenBrainz playlist phase: {e}")
+        logger.error(f"Error updating ListenBrainz playlist phase: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/listenbrainz/discovery/update_match', methods=['POST'])
@@ -46483,13 +46463,13 @@ def update_listenbrainz_discovery_match():
 
             result['manual_match'] = True
 
-            print(f"Updated ListenBrainz match for track {track_index}: {result['status']}")
+            logger.info(f"Updated ListenBrainz match for track {track_index}: {result['status']}")
             return jsonify({'success': True})
         else:
             return jsonify({'error': 'Invalid track index'}), 400
 
     except Exception as e:
-        print(f"Error updating ListenBrainz discovery match: {e}")
+        logger.error(f"Error updating ListenBrainz discovery match: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -46527,7 +46507,7 @@ def convert_listenbrainz_results_to_spotify_tracks(discovery_results):
             }
             spotify_tracks.append(track)
 
-    print(f"Converted {len(spotify_tracks)} ListenBrainz matches to Spotify tracks for sync")
+    logger.info(f"Converted {len(spotify_tracks)} ListenBrainz matches to Spotify tracks for sync")
     return spotify_tracks
 
 @app.route('/api/wing-it/sync', methods=['POST'])
@@ -46638,11 +46618,11 @@ def start_listenbrainz_sync(playlist_mbid):
         future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['playlist_name'], spotify_tracks, None, get_current_profile_id())
         active_sync_workers[sync_playlist_id] = future
 
-        print(f"Started ListenBrainz sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
+        logger.info(f"Started ListenBrainz sync for: {playlist_name} ({len(spotify_tracks)} tracks)")
         return jsonify({"success": True, "sync_playlist_id": sync_playlist_id})
 
     except Exception as e:
-        print(f"Error starting ListenBrainz sync: {e}")
+        logger.error(f"Error starting ListenBrainz sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/listenbrainz/sync/status/<playlist_mbid>', methods=['GET'])
@@ -46687,7 +46667,7 @@ def get_listenbrainz_sync_status(playlist_mbid):
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error getting ListenBrainz sync status: {e}")
+        logger.error(f"Error getting ListenBrainz sync status: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/listenbrainz/sync/cancel/<playlist_mbid>', methods=['POST'])
@@ -46719,7 +46699,7 @@ def cancel_listenbrainz_sync(playlist_mbid):
         return jsonify({"success": True, "message": "ListenBrainz sync cancelled"})
 
     except Exception as e:
-        print(f"Error cancelling ListenBrainz sync: {e}")
+        logger.error(f"Error cancelling ListenBrainz sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -46744,7 +46724,7 @@ def _old_get_listenbrainz_playlist_tracks_DEPRECATED(playlist_mbid):
 
         # Convert to our standard format - prepare tracks first without cover art
         tracks = []
-        print(f"Processing {len(jspf_tracks)} tracks from playlist")
+        logger.info(f"Processing {len(jspf_tracks)} tracks from playlist")
 
         # First pass: extract all track data without cover art
         track_data_list = []
@@ -46762,8 +46742,8 @@ def _old_get_listenbrainz_playlist_tracks_DEPRECATED(playlist_mbid):
             mb_data = extension.get('https://musicbrainz.org/doc/jspf#track', {})
 
             if idx == 0:
-                print(f"Sample track extension data: {extension}")
-                print(f"Sample mb_data keys: {mb_data.keys() if mb_data else 'None'}")
+                logger.debug(f"Sample track extension data: {extension}")
+                logger.debug(f"Sample mb_data keys: {mb_data.keys() if mb_data else 'None'}")
 
             # Extract release MBID for cover art
             release_mbid = None
@@ -46777,7 +46757,7 @@ def _old_get_listenbrainz_playlist_tracks_DEPRECATED(playlist_mbid):
                     release_mbid = mb_data['release_mbid']
 
             if idx == 0:
-                print(f"🆔 First track release_mbid: {release_mbid}")
+                logger.debug(f"🆔 First track release_mbid: {release_mbid}")
 
             track_data = {
                 'track_name': track.get('title', 'Unknown Track'),
@@ -46823,7 +46803,7 @@ def _old_get_listenbrainz_playlist_tracks_DEPRECATED(playlist_mbid):
 
             return None
 
-        print(f"Fetching cover art for {len(track_data_list)} tracks in parallel...")
+        logger.info(f"Fetching cover art for {len(track_data_list)} tracks in parallel...")
         start_time = time.time()
 
         # Fetch up to 10 covers at a time
@@ -46842,7 +46822,7 @@ def _old_get_listenbrainz_playlist_tracks_DEPRECATED(playlist_mbid):
 
         elapsed = time.time() - start_time
         covers_found = sum(1 for t in track_data_list if t.get('album_cover_url'))
-        print(f"Fetched {covers_found}/{len(track_data_list)} covers in {elapsed:.2f}s")
+        logger.info(f"Fetched {covers_found}/{len(track_data_list)} covers in {elapsed:.2f}s")
 
         tracks = track_data_list
 
@@ -46853,7 +46833,7 @@ def _old_get_listenbrainz_playlist_tracks_DEPRECATED(playlist_mbid):
         })
 
     except Exception as e:
-        print(f"Error getting ListenBrainz playlist tracks: {e}")
+        logger.error(f"Error getting ListenBrainz playlist tracks: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -46893,19 +46873,19 @@ def start_metadata_update():
                 return jsonify({"success": False, "error": "Plex client not available"}), 400
             
             # DEBUG: Check Plex connection details
-            print(f"[DEBUG] Active server: {active_server}")
-            print(f"[DEBUG] Plex client: {media_client}")
+            logger.debug(f"[DEBUG] Active server: {active_server}")
+            logger.debug(f"[DEBUG] Plex client: {media_client}")
             if hasattr(media_client, 'server') and media_client.server:
-                print(f"[DEBUG] Plex server URL: {getattr(media_client.server, '_baseurl', 'NO_URL')}")
-                print(f"[DEBUG] Plex server name: {getattr(media_client.server, 'friendlyName', 'NO_NAME')}")
+                logger.debug(f"[DEBUG] Plex server URL: {getattr(media_client.server, '_baseurl', 'NO_URL')}")
+                logger.debug(f"[DEBUG] Plex server name: {getattr(media_client.server, 'friendlyName', 'NO_NAME')}")
                 # Check available libraries
                 try:
                     sections = media_client.server.library.sections()
-                    print(f"[DEBUG] Available Plex libraries: {[(s.title, s.type) for s in sections]}")
+                    logger.debug(f"[DEBUG] Available Plex libraries: {[(s.title, s.type) for s in sections]}")
                 except Exception as e:
-                    print(f"[DEBUG] Error getting Plex libraries: {e}")
+                    logger.debug(f"[DEBUG] Error getting Plex libraries: {e}")
             else:
-                print(f"[DEBUG] Plex server is NOT connected!")
+                logger.debug(f"[DEBUG] Plex server is NOT connected!")
         
         # Check Spotify client - EXACTLY like dashboard.py
         if not spotify_client:
@@ -46941,7 +46921,7 @@ def start_metadata_update():
                 metadata_update_runtime_worker = metadata_worker
                 metadata_worker.run()
             except Exception as e:
-                print(f"Error in metadata update worker: {e}")
+                logger.error(f"Error in metadata update worker: {e}")
                 metadata_update_state['status'] = 'error'
                 metadata_update_state['error'] = str(e)
                 add_activity_item("", "Metadata Error", str(e), "Now")
@@ -46955,7 +46935,7 @@ def start_metadata_update():
         return jsonify({"success": True})
         
     except Exception as e:
-        print(f"Error starting metadata update: {e}")
+        logger.error(f"Error starting metadata update: {e}")
         metadata_update_state['status'] = 'error'
         metadata_update_state['error'] = str(e)
         return jsonify({"success": False, "error": str(e)}), 500
@@ -46974,7 +46954,7 @@ def stop_metadata_update():
         return jsonify({"success": True})
         
     except Exception as e:
-        print(f"Error stopping metadata update: {e}")
+        logger.error(f"Error stopping metadata update: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/metadata/status', methods=['GET'])
@@ -46993,7 +46973,7 @@ def get_metadata_update_status():
         return jsonify({"success": True, "status": state_copy})
         
     except Exception as e:
-        print(f"Error getting metadata update status: {e}")
+        logger.error(f"Error getting metadata update status: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/active-media-server', methods=['GET'])
@@ -47003,7 +46983,7 @@ def get_active_media_server():
         active_server = config_manager.get_active_media_server()
         return jsonify({"success": True, "active_server": active_server})
     except Exception as e:
-        print(f"Error getting active media server: {e}")
+        logger.error(f"Error getting active media server: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ================================= #
@@ -48553,21 +48533,21 @@ def start_beatport_discovery(url_hash):
 
         # Get chart data from request body
         data = request.get_json() or {}
-        print(f"Raw request data: {data}")
+        logger.info(f"Raw request data: {data}")
 
         chart_data = data.get('chart_data')
-        print(f"Chart data extracted: {chart_data is not None}")
+        logger.debug(f"Chart data extracted: {chart_data is not None}")
 
         # Debug logging
         if chart_data:
-            print(f"Chart data keys: {list(chart_data.keys()) if isinstance(chart_data, dict) else 'Not a dict'}")
-            print(f"Chart name: {chart_data.get('name') if isinstance(chart_data, dict) else 'N/A'}")
+            logger.debug(f"Chart data keys: {list(chart_data.keys()) if isinstance(chart_data, dict) else 'Not a dict'}")
+            logger.debug(f"Chart name: {chart_data.get('name') if isinstance(chart_data, dict) else 'N/A'}")
             if isinstance(chart_data, dict) and 'tracks' in chart_data:
-                print(f"Number of tracks: {len(chart_data['tracks'])}")
+                logger.debug(f"Number of tracks: {len(chart_data['tracks'])}")
                 if chart_data['tracks']:
-                    print(f"First track: {chart_data['tracks'][0]}")
+                    logger.debug(f"First track: {chart_data['tracks'][0]}")
         else:
-            print("No chart data received")
+            logger.warning("No chart data received")
 
         if not chart_data or not chart_data.get('tracks'):
             return jsonify({"error": "Chart data with tracks is required"}), 400
@@ -48607,7 +48587,7 @@ def start_beatport_discovery(url_hash):
         future = beatport_discovery_executor.submit(_run_beatport_discovery_worker, url_hash)
         state['discovery_future'] = future
 
-        print(f"Started Spotify discovery for Beatport chart: {chart_name}")
+        logger.info(f"Started Spotify discovery for Beatport chart: {chart_name}")
         return jsonify({"success": True, "message": "Discovery started", "status": "discovering"})
 
     except Exception as e:
@@ -48741,7 +48721,7 @@ def _run_beatport_discovery_worker(url_hash):
         if not use_spotify:
             itunes_client_instance = _get_metadata_fallback_client()
 
-        print(f"Starting {discovery_source.upper()} discovery for {len(tracks)} Beatport tracks...")
+        logger.info(f"Starting {discovery_source.upper()} discovery for {len(tracks)} Beatport tracks...")
 
         # Store discovery source in state for frontend
         state['discovery_source'] = discovery_source
@@ -48751,7 +48731,7 @@ def _run_beatport_discovery_worker(url_hash):
             try:
                 # Check for cancellation
                 if state.get('phase') != 'discovering':
-                    print(f"Beatport discovery cancelled (phase changed to '{state.get('phase')}')")
+                    logger.warning(f"Beatport discovery cancelled (phase changed to '{state.get('phase')}')")
                     return
 
                 # Update progress
@@ -48770,7 +48750,7 @@ def _run_beatport_discovery_worker(url_hash):
                 else:
                     track_artist = clean_beatport_text(str(track_artists))
 
-                print(f"Searching {discovery_source.upper()} for: '{track_artist}' - '{track_title}'")
+                logger.info(f"Searching {discovery_source.upper()} for: '{track_artist}' - '{track_title}'")
 
                 # Check discovery cache first
                 cache_key = _get_discovery_cache_key(track_title, track_artist)
@@ -48778,7 +48758,7 @@ def _run_beatport_discovery_worker(url_hash):
                     cache_db = get_database()
                     cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
                     if cached_match and _validate_discovery_cache_artist(track_artist, cached_match):
-                        print(f"CACHE HIT [{i+1}/{len(tracks)}]: {track_artist} - {track_title}")
+                        logger.debug(f"CACHE HIT [{i+1}/{len(tracks)}]: {track_artist} - {track_title}")
                         # Convert artists from ['str'] to [{'name': 'str'}] for Beatport frontend format
                         beatport_artists = cached_match.get('artists', [])
                         if beatport_artists and isinstance(beatport_artists[0], str):
@@ -48798,7 +48778,7 @@ def _run_beatport_discovery_worker(url_hash):
                         state['discovery_results'].append(result_entry)
                         continue
                 except Exception as cache_err:
-                    print(f"Cache lookup error: {cache_err}")
+                    logger.error(f"Cache lookup error: {cache_err}")
 
                 # Use matching engine for track matching
                 found_track = None
@@ -48814,9 +48794,9 @@ def _run_beatport_discovery_worker(url_hash):
                         'album': None
                     })()
                     search_queries = matching_engine.generate_download_queries(temp_track)
-                    print(f"Generated {len(search_queries)} search queries using matching engine")
+                    logger.info(f"Generated {len(search_queries)} search queries using matching engine")
                 except Exception as e:
-                    print(f"Matching engine failed for Beatport, falling back to basic queries: {e}")
+                    logger.error(f"Matching engine failed for Beatport, falling back to basic queries: {e}")
                     if use_spotify:
                         search_queries = [
                             f"{track_artist} {track_title}",
@@ -48832,7 +48812,7 @@ def _run_beatport_discovery_worker(url_hash):
 
                 for query_idx, search_query in enumerate(search_queries):
                     try:
-                        print(f"Query {query_idx + 1}/{len(search_queries)}: {search_query} ({discovery_source.upper()})")
+                        logger.debug(f"Query {query_idx + 1}/{len(search_queries)}: {search_query} ({discovery_source.upper()})")
 
                         search_results = None
 
@@ -48857,19 +48837,19 @@ def _run_beatport_discovery_worker(url_hash):
                                 best_raw_track = _cache.get_entity('spotify', 'track', match.id)
                             else:
                                 best_raw_track = None
-                            print(f"New best Beatport match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                            logger.info(f"New best Beatport match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                         if best_confidence >= 0.9:
-                            print(f"High confidence match found ({best_confidence:.3f}), stopping search")
+                            logger.info(f"High confidence match found ({best_confidence:.3f}), stopping search")
                             break
 
                     except Exception as e:
-                        print(f"Error in {discovery_source.upper()} search for query '{search_query}': {e}")
+                        logger.debug(f"Error in {discovery_source.upper()} search for query '{search_query}': {e}")
                         continue
 
                 # Strategy 4: Extended search with higher limit (last resort)
                 if not found_track:
-                    print(f"Beatport Strategy 4: Extended search with limit=50")
+                    logger.info(f"Beatport Strategy 4: Extended search with limit=50")
                     query = f"{track_artist} {track_title}"
                     if use_spotify:
                         extended_results = spotify_client.search_tracks(query, limit=50)
@@ -48882,12 +48862,12 @@ def _run_beatport_discovery_worker(url_hash):
                         if match and confidence >= min_confidence:
                             found_track = match
                             best_confidence = confidence
-                            print(f"Strategy 4 Beatport match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
+                            logger.info(f"Strategy 4 Beatport match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
 
                 if found_track:
-                    print(f"Final Beatport match: {found_track.artists[0]} - {found_track.name} (confidence: {best_confidence:.3f})")
+                    logger.info(f"Final Beatport match: {found_track.artists[0]} - {found_track.name} (confidence: {best_confidence:.3f})")
                 else:
-                    print(f"No suitable match found (best confidence was {best_confidence:.3f}, required {min_confidence:.3f})")
+                    logger.warning(f"No suitable match found (best confidence was {best_confidence:.3f}, required {min_confidence:.3f})")
 
                 # Create result entry
                 result_entry = {
@@ -48906,7 +48886,7 @@ def _run_beatport_discovery_worker(url_hash):
                     if use_spotify:
                         # SPOTIFY result formatting
                         # Debug: show available attributes
-                        print(f"Spotify track attributes: {dir(found_track)}")
+                        logger.debug(f"Spotify track attributes: {dir(found_track)}")
 
                         # Format artists correctly for frontend compatibility
                         formatted_artists = []
@@ -48983,9 +48963,9 @@ def _run_beatport_discovery_worker(url_hash):
                                 cache_key[0], cache_key[1], discovery_source, best_confidence,
                                 cache_data, track_title, track_artist
                             )
-                            print(f"CACHE SAVED: {track_artist} - {track_title} (confidence: {best_confidence:.3f})")
+                            logger.info(f"CACHE SAVED: {track_artist} - {track_title} (confidence: {best_confidence:.3f})")
                         except Exception as cache_err:
-                            print(f"Cache save error: {cache_err}")
+                            logger.error(f"Cache save error: {cache_err}")
 
                 # Auto Wing It fallback for unmatched tracks
                 if result_entry.get('status_class') == 'not-found':
@@ -49010,7 +48990,7 @@ def _run_beatport_discovery_worker(url_hash):
                 time.sleep(0.1)
 
             except Exception as e:
-                print(f"Error processing Beatport track {i}: {e}")
+                logger.error(f"Error processing Beatport track {i}: {e}")
                 # Add error result
                 state['discovery_results'].append({
                     'index': i,  # Add index for frontend table row identification
@@ -49035,13 +49015,13 @@ def _run_beatport_discovery_worker(url_hash):
         add_activity_item("", f"Beatport Discovery Complete ({source_label})",
                          f"'{chart_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
 
-        print(f"Beatport discovery complete ({source_label}): {state['spotify_matches']}/{len(tracks)} tracks found")
+        logger.info(f"Beatport discovery complete ({source_label}): {state['spotify_matches']}/{len(tracks)} tracks found")
 
         # Sync discovery results back to mirrored playlist
         _sync_discovery_results_to_mirrored('beatport', url_hash, state.get('discovery_results', []), discovery_source, profile_id=state.get('_profile_id', 1))
 
     except Exception as e:
-        print(f"Error in Beatport discovery worker: {e}")
+        logger.error(f"Error in Beatport discovery worker: {e}")
         if url_hash in beatport_chart_states:
             beatport_chart_states[url_hash]['status'] = 'error'
             beatport_chart_states[url_hash]['phase'] = 'fresh'
@@ -49052,19 +49032,19 @@ def _run_beatport_discovery_worker(url_hash):
 def start_beatport_sync(url_hash):
     """Start sync process for a Beatport chart using discovered Spotify tracks"""
     try:
-        print(f"Beatport sync start requested for: {url_hash}")
+        logger.info(f"Beatport sync start requested for: {url_hash}")
 
         if url_hash not in beatport_chart_states:
-            print(f"Beatport chart not found: {url_hash}")
+            logger.warning(f"Beatport chart not found: {url_hash}")
             return jsonify({"error": "Beatport chart not found"}), 404
 
         state = beatport_chart_states[url_hash]
         state['last_accessed'] = time.time()  # Update access time
 
-        print(f"Beatport chart state: phase={state.get('phase')}, has_discovery_results={len(state.get('discovery_results', []))}")
+        logger.info(f"Beatport chart state: phase={state.get('phase')}, has_discovery_results={len(state.get('discovery_results', []))}")
 
         if state['phase'] not in ['discovered', 'sync_complete', 'download_complete']:
-            print(f"Beatport chart not ready for sync: {state['phase']}")
+            logger.info(f"Beatport chart not ready for sync: {state['phase']}")
             return jsonify({"error": "Beatport chart not ready for sync"}), 400
 
         # Convert discovery results to Spotify tracks format
@@ -49098,11 +49078,11 @@ def start_beatport_sync(url_hash):
         future = sync_executor.submit(_run_sync_task, sync_playlist_id, sync_data['name'], spotify_tracks, None, get_current_profile_id())
         state['sync_future'] = future
 
-        print(f"Started Beatport sync for chart: {state['chart']['name']}")
+        logger.info(f"Started Beatport sync for chart: {state['chart']['name']}")
         return jsonify({"success": True, "sync_id": sync_playlist_id})
 
     except Exception as e:
-        print(f"Error starting Beatport sync: {e}")
+        logger.error(f"Error starting Beatport sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/beatport/sync/status/<url_hash>', methods=['GET'])
@@ -49146,7 +49126,7 @@ def get_beatport_sync_status(url_hash):
         return jsonify(response)
 
     except Exception as e:
-        print(f"Error getting Beatport sync status: {e}")
+        logger.error(f"Error getting Beatport sync status: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/beatport/sync/cancel/<url_hash>', methods=['POST'])
@@ -49174,11 +49154,11 @@ def cancel_beatport_sync(url_hash):
         state['sync_playlist_id'] = None
         state['sync_progress'] = {}
 
-        print(f"Cancelled Beatport sync for: {url_hash}")
+        logger.warning(f"Cancelled Beatport sync for: {url_hash}")
         return jsonify({"success": True})
 
     except Exception as e:
-        print(f"Error cancelling Beatport sync: {e}")
+        logger.error(f"Error cancelling Beatport sync: {e}")
         return jsonify({"error": str(e)}), 500
 
 # ===================================================================
@@ -49839,13 +49819,13 @@ def retry_failed_mirrored_discovery(playlist_id):
                             'discovery_attempted': False,
                         })
         except Exception as db_err:
-            print(f"Error clearing discovery_attempted in DB: {db_err}")
+            logger.error(f"Error clearing discovery_attempted in DB: {db_err}")
 
         # Submit worker
         future = youtube_discovery_executor.submit(_run_youtube_discovery_worker, url_hash)
         state['discovery_future'] = future
 
-        print(f"Retrying failed discovery for {url_hash}: {retry_count} tracks to retry, {already_found} already found")
+        logger.error(f"Retrying failed discovery for {url_hash}: {retry_count} tracks to retry, {already_found} already found")
         return jsonify({
             "success": True,
             "retry_count": retry_count,
@@ -50337,7 +50317,7 @@ class WebMetadataUpdateWorker:
                     pass
                 
                 all_artists = self.media_client.get_all_artists()
-                print(f"[DEBUG] Raw artists returned: {[getattr(a, 'title', 'NO_TITLE') for a in (all_artists or [])]}")
+                logger.debug(f"[DEBUG] Raw artists returned: {[getattr(a, 'title', 'NO_TITLE') for a in (all_artists or [])]}")
                 if not all_artists:
                     metadata_update_state['status'] = 'error'
                     metadata_update_state['error'] = f"No artists found in {self.server_type.title()} library"
@@ -50424,7 +50404,7 @@ class WebMetadataUpdateWorker:
             add_activity_item("", "Metadata Complete", summary, "Now")
             
         except Exception as e:
-            print(f"Metadata update failed: {e}")
+            logger.error(f"Metadata update failed: {e}")
             metadata_update_state['status'] = 'error'
             metadata_update_state['error'] = str(e)
             add_activity_item("", "Metadata Error", str(e), "Now")
@@ -50440,7 +50420,7 @@ class WebMetadataUpdateWorker:
             return self.media_client.needs_update_by_age(artist, self.refresh_interval_days)
             
         except Exception as e:
-            print(f"Error checking artist {getattr(artist, 'title', 'Unknown')}: {e}")
+            logger.error(f"Error checking artist {getattr(artist, 'title', 'Unknown')}: {e}")
             return True  # Process if we can't determine status
     
     def _check_db_artist(self, artist_name):
@@ -50527,9 +50507,9 @@ class WebMetadataUpdateWorker:
                         if raw and 'name' in raw:
                             spotify_artist = SpotifyArtistDC.from_spotify_artist(raw)
                             highest_score = 1.0
-                            print(f"Metadata updater: direct Spotify lookup for '{artist_name}' via cached ID {db_spotify_id}")
+                            logger.debug(f"Metadata updater: direct Spotify lookup for '{artist_name}' via cached ID {db_spotify_id}")
                     except Exception as e:
-                        print(f"Direct Spotify lookup failed for {db_spotify_id}: {e}")
+                        logger.debug(f"Direct Spotify lookup failed for {db_spotify_id}: {e}")
                         spotify_artist = None
 
                 # Fall back to search if direct lookup didn't work
@@ -50600,7 +50580,7 @@ class WebMetadataUpdateWorker:
                 if albums_updated > 0:
                     changes_made.append(f"{albums_updated} album art")
             elif self.server_type != "plex":
-                print(f"Skipping album artwork updates for Jellyfin artist: {artist.title}")
+                logger.info(f"Skipping album artwork updates for Jellyfin artist: {artist.title}")
 
             if changes_made:
                 biography_updated = self.media_client.update_artist_biography(artist)
@@ -50636,15 +50616,15 @@ class WebMetadataUpdateWorker:
         try:
             # Check if artist already has a good photo (skip check for Jellyfin)
             if self.server_type != "jellyfin" and self.artist_has_valid_photo(artist):
-                print(f"Skipping {artist.title}: already has valid photo ({getattr(artist, 'thumb', 'None')})")
+                logger.info(f"Skipping {artist.title}: already has valid photo ({getattr(artist, 'thumb', 'None')})")
                 return False
 
             # Get the image URL from Spotify
             if not spotify_artist.image_url:
-                print(f"Skipping {artist.title}: no Spotify image URL available")
+                logger.warning(f"Skipping {artist.title}: no Spotify image URL available")
                 return False
 
-            print(f"Processing {artist.title}: downloading from Spotify...")
+            logger.info(f"Processing {artist.title}: downloading from Spotify...")
                 
             image_url = spotify_artist.image_url
             
@@ -50656,7 +50636,7 @@ class WebMetadataUpdateWorker:
             if self.server_type == "jellyfin":
                 # For Jellyfin, use raw image data to preserve original format
                 image_data = response.content
-                print(f"Using raw image data for Jellyfin ({len(image_data)} bytes)")
+                logger.info(f"Using raw image data for Jellyfin ({len(image_data)} bytes)")
             else:
                 # For other servers, validate and convert
                 image_data = self.validate_and_convert_image(response.content)
@@ -50667,7 +50647,7 @@ class WebMetadataUpdateWorker:
             return self.media_client.update_artist_poster(artist, image_data)
             
         except Exception as e:
-            print(f"Error updating photo for {getattr(artist, 'title', 'Unknown')}: {e}")
+            logger.error(f"Error updating photo for {getattr(artist, 'title', 'Unknown')}: {e}")
             return False
     
     def update_artist_genres(self, artist, spotify_artist):
@@ -50711,7 +50691,7 @@ class WebMetadataUpdateWorker:
                 return False
             
         except Exception as e:
-            print(f"Error updating genres for {getattr(artist, 'title', 'Unknown')}: {e}")
+            logger.error(f"Error updating genres for {getattr(artist, 'title', 'Unknown')}: {e}")
             return False
     
     def update_album_artwork(self, artist, spotify_artist):
@@ -50725,11 +50705,11 @@ class WebMetadataUpdateWorker:
             try:
                 albums = list(artist.albums())
             except Exception:
-                print(f"Could not access albums for artist '{artist.title}'")
+                logger.error(f"Could not access albums for artist '{artist.title}'")
                 return 0
 
             if not albums:
-                print(f"No albums found for artist '{artist.title}'")
+                logger.warning(f"No albums found for artist '{artist.title}'")
                 return 0
 
             import time
@@ -50772,13 +50752,13 @@ class WebMetadataUpdateWorker:
                             updated_count += 1
 
                 except Exception as e:
-                    print(f"Error processing album '{getattr(album, 'title', 'Unknown')}': {e}")
+                    logger.error(f"Error processing album '{getattr(album, 'title', 'Unknown')}': {e}")
                     continue
 
             return updated_count
 
         except Exception as e:
-            print(f"Error updating album artwork for artist '{getattr(artist, 'title', 'Unknown')}': {e}")
+            logger.error(f"Error updating album artwork for artist '{getattr(artist, 'title', 'Unknown')}': {e}")
             return 0
     
     def album_has_valid_artwork(self, album):
@@ -50826,7 +50806,7 @@ class WebMetadataUpdateWorker:
             return success
             
         except Exception as e:
-            print(f"Error downloading/uploading artwork for album '{getattr(album, 'title', 'Unknown')}': {e}")
+            logger.error(f"Error downloading/uploading artwork for album '{getattr(album, 'title', 'Unknown')}': {e}")
             return False
     
     def artist_has_valid_photo(self, artist):
@@ -50901,7 +50881,7 @@ class WebMetadataUpdateWorker:
                 jellyfin_token = jellyfin_config.get('api_key', '')
 
                 if not jellyfin_base_url or not jellyfin_token:
-                    print("Jellyfin configuration missing for image upload")
+                    logger.warning("Jellyfin configuration missing for image upload")
                     return False
 
                 upload_url = f"{jellyfin_base_url.rstrip('/')}/Items/{artist.ratingKey}/Images/Primary"
@@ -50916,7 +50896,7 @@ class WebMetadataUpdateWorker:
 
             # Navidrome: Currently not supported (Subsonic API doesn't support image uploads)
             elif self.server_type == "navidrome":
-                print("ℹ️ Navidrome does not support artist image uploads via Subsonic API")
+                logger.info("ℹ️ Navidrome does not support artist image uploads via Subsonic API")
                 return False
 
             else:
@@ -50924,7 +50904,7 @@ class WebMetadataUpdateWorker:
                 return False
             
         except Exception as e:
-            print(f"Error uploading poster: {e}")
+            logger.error(f"Error uploading poster: {e}")
             return False
 
 # --- Docker Helper Functions ---
@@ -51078,33 +51058,33 @@ def start_oauth_callback_servers():
         _env_val = os.environ.get('SOULSYNC_SPOTIFY_CALLBACK_PORT')
         spotify_port = int(_env_val) if _env_val else 8888
         if _env_val:
-            print(f"[OAuth] SOULSYNC_SPOTIFY_CALLBACK_PORT={_env_val!r} — binding Spotify callback server on port {spotify_port}")
+            logger.info(f"[OAuth] SOULSYNC_SPOTIFY_CALLBACK_PORT={_env_val!r} — binding Spotify callback server on port {spotify_port}")
         else:
-            print(f"[OAuth] SOULSYNC_SPOTIFY_CALLBACK_PORT not set — using default port {spotify_port}")
+            logger.info(f"[OAuth] SOULSYNC_SPOTIFY_CALLBACK_PORT not set — using default port {spotify_port}")
         try:
             bind_addr = ('0.0.0.0', spotify_port)
             spotify_server = HTTPServer(bind_addr, SpotifyCallbackHandler)
             _oauth_logger.info(f"Spotify OAuth callback server listening on {bind_addr[0]}:{bind_addr[1]}")
-            print(f"Started Spotify OAuth callback server on {bind_addr[0]}:{bind_addr[1]}")
+            logger.info(f"Started Spotify OAuth callback server on {bind_addr[0]}:{bind_addr[1]}")
             spotify_server.serve_forever()
         except OSError as e:
             _oauth_logger.error(f"Failed to start Spotify callback server on port {spotify_port}: {e} — port may already be in use")
-            print(f"Failed to start Spotify callback server on port {spotify_port}: {e}")
+            logger.error(f"Failed to start Spotify callback server on port {spotify_port}: {e}")
         except Exception as e:
             _oauth_logger.error(f"Failed to start Spotify callback server: {e}")
-            print(f"Failed to start Spotify callback server: {e}")
+            logger.error(f"Failed to start Spotify callback server: {e}")
     
     # Tidal callback server  
     class TidalCallbackHandler(BaseHTTPRequestHandler):
         def do_GET(self):
-            print("TIDAL CALLBACK SERVER RECEIVED REQUEST ")
+            logger.info("TIDAL CALLBACK SERVER RECEIVED REQUEST ")
             parsed_url = urllib.parse.urlparse(self.path)
             query_params = urllib.parse.parse_qs(parsed_url.query)
-            print(f"Callback path: {self.path}")
+            logger.info(f"Callback path: {self.path}")
             
             if 'code' in query_params:
                 auth_code = query_params['code'][0]
-                print(f"Received Tidal authorization code: {auth_code[:10]}...")
+                logger.info(f"Received Tidal authorization code: {auth_code[:10]}...")
                 
                 # Exchange the authorization code for tokens
                 try:
@@ -51119,7 +51099,7 @@ def start_oauth_callback_servers():
                         temp_client.code_verifier = tidal_oauth_state["code_verifier"]
                         temp_client.code_challenge = tidal_oauth_state["code_challenge"]
                     
-                    print(f"Restored PKCE - verifier: {temp_client.code_verifier[:20] if temp_client.code_verifier else 'None'}... challenge: {temp_client.code_challenge[:20] if temp_client.code_challenge else 'None'}...")
+                    logger.info(f"Restored PKCE - verifier: {temp_client.code_verifier[:20] if temp_client.code_verifier else 'None'}... challenge: {temp_client.code_challenge[:20] if temp_client.code_challenge else 'None'}...")
                     
                     success = temp_client.fetch_token_from_code(auth_code)
                     
@@ -51139,7 +51119,7 @@ def start_oauth_callback_servers():
                         raise Exception("Failed to exchange authorization code for tokens")
                         
                 except Exception as e:
-                    print(f"Tidal token processing error: {e}")
+                    logger.error(f"Tidal token processing error: {e}")
                     add_activity_item("", "Tidal Auth Failed", f"Token processing failed: {str(e)}", "Now")
                     self.send_response(400)
                     self.send_header('Content-type', 'text/html')
@@ -51147,7 +51127,7 @@ def start_oauth_callback_servers():
                     self.wfile.write(f'<h1>Tidal Authentication Failed</h1><p>{str(e)}</p>'.encode())
             else:
                 error = query_params.get('error', ['Unknown error'])[0]
-                print(f"Tidal OAuth error: {error}")
+                logger.error(f"Tidal OAuth error: {error}")
                 add_activity_item("", "Tidal Auth Failed", f"OAuth error: {error}", "Now")
                 self.send_response(400)
                 self.send_header('Content-type', 'text/html')
@@ -51161,18 +51141,18 @@ def start_oauth_callback_servers():
         _env_val = os.environ.get('SOULSYNC_TIDAL_CALLBACK_PORT')
         tidal_port = int(_env_val) if _env_val else 8889
         if _env_val:
-            print(f"[OAuth] SOULSYNC_TIDAL_CALLBACK_PORT={_env_val!r} — binding Tidal callback server on port {tidal_port}")
+            logger.info(f"[OAuth] SOULSYNC_TIDAL_CALLBACK_PORT={_env_val!r} — binding Tidal callback server on port {tidal_port}")
         else:
-            print(f"[OAuth] SOULSYNC_TIDAL_CALLBACK_PORT not set — using default port {tidal_port}")
+            logger.info(f"[OAuth] SOULSYNC_TIDAL_CALLBACK_PORT not set — using default port {tidal_port}")
         try:
             tidal_server = HTTPServer(('0.0.0.0', tidal_port), TidalCallbackHandler)
-            print(f"Started Tidal OAuth callback server on port {tidal_port}")
-            print(f"Tidal server listening on all interfaces, port {tidal_port}")
+            logger.info(f"Started Tidal OAuth callback server on port {tidal_port}")
+            logger.info(f"Tidal server listening on all interfaces, port {tidal_port}")
             tidal_server.serve_forever()
         except Exception as e:
-            print(f"Failed to start Tidal callback server: {e}")
+            logger.error(f"Failed to start Tidal callback server: {e}")
             import traceback
-            print(f"Full error: {traceback.format_exc()}")
+            logger.error(f"Full error: {traceback.format_exc()}")
     
     # Start both servers in background threads
     spotify_thread = threading.Thread(target=run_spotify_server, daemon=True)
@@ -51181,7 +51161,7 @@ def start_oauth_callback_servers():
     spotify_thread.start()
     tidal_thread.start()
     
-    print("OAuth callback servers started")
+    logger.info("OAuth callback servers started")
 
 # ================================================================================================
 # MUSICBRAINZ ENRICHMENT - PHASE 5 WEB UI INTEGRATION
@@ -51202,11 +51182,11 @@ try:
     mb_worker.start()
     if config_manager.get('musicbrainz_enrichment_paused', False):
         mb_worker.pause()
-        print("MusicBrainz enrichment worker initialized (paused — restored from config)")
+        logger.warning("MusicBrainz enrichment worker initialized (paused — restored from config)")
     else:
-        print("MusicBrainz enrichment worker initialized and started")
+        logger.info("MusicBrainz enrichment worker initialized and started")
 except Exception as e:
-    print(f"MusicBrainz worker initialization failed: {e}")
+    logger.error(f"MusicBrainz worker initialization failed: {e}")
     mb_worker = None
 
 # --- MusicBrainz API Endpoints ---
@@ -51279,11 +51259,11 @@ try:
     audiodb_worker.start()
     if config_manager.get('audiodb_enrichment_paused', False):
         audiodb_worker.pause()
-        print("AudioDB enrichment worker initialized (paused — restored from config)")
+        logger.warning("AudioDB enrichment worker initialized (paused — restored from config)")
     else:
-        print("AudioDB enrichment worker initialized and started")
+        logger.info("AudioDB enrichment worker initialized and started")
 except Exception as e:
-    print(f"AudioDB worker initialization failed: {e}")
+    logger.error(f"AudioDB worker initialization failed: {e}")
     audiodb_worker = None
 
 # --- AudioDB API Endpoints ---
@@ -51352,11 +51332,11 @@ try:
     discogs_worker.start()
     if config_manager.get('discogs_enrichment_paused', False):
         discogs_worker.pause()
-        print("Discogs enrichment worker initialized (paused — restored from config)")
+        logger.warning("Discogs enrichment worker initialized (paused — restored from config)")
     else:
-        print("Discogs enrichment worker initialized and started")
+        logger.info("Discogs enrichment worker initialized and started")
 except Exception as e:
-    print(f"Discogs worker initialization failed: {e}")
+    logger.error(f"Discogs worker initialization failed: {e}")
     discogs_worker = None
 
 # --- Discogs API Endpoints ---
@@ -51414,11 +51394,11 @@ try:
     deezer_worker.start()
     if config_manager.get('deezer_enrichment_paused', False):
         deezer_worker.pause()
-        print("Deezer enrichment worker initialized (paused — restored from config)")
+        logger.warning("Deezer enrichment worker initialized (paused — restored from config)")
     else:
-        print("Deezer enrichment worker initialized and started")
+        logger.info("Deezer enrichment worker initialized and started")
 except Exception as e:
-    print(f"Deezer worker initialization failed: {e}")
+    logger.error(f"Deezer worker initialization failed: {e}")
     deezer_worker = None
 
 # --- Deezer API Endpoints ---
@@ -51492,11 +51472,11 @@ try:
         spotify_enrichment_worker.paused = True  # Set BEFORE start() to prevent race condition
     spotify_enrichment_worker.start()
     if spotify_enrichment_worker.paused:
-        print("Spotify enrichment worker initialized (paused — restored from config)")
+        logger.warning("Spotify enrichment worker initialized (paused — restored from config)")
     else:
-        print("Spotify enrichment worker initialized and started")
+        logger.info("Spotify enrichment worker initialized and started")
 except Exception as e:
-    print(f"Spotify enrichment worker initialization failed: {e}")
+    logger.error(f"Spotify enrichment worker initialization failed: {e}")
     spotify_enrichment_worker = None
 
 # --- API Rate Monitor Endpoints ---
@@ -51591,11 +51571,11 @@ try:
     itunes_enrichment_worker.start()
     if config_manager.get('itunes_enrichment_paused', False):
         itunes_enrichment_worker.pause()
-        print("iTunes enrichment worker initialized (paused — restored from config)")
+        logger.warning("iTunes enrichment worker initialized (paused — restored from config)")
     else:
-        print("iTunes enrichment worker initialized and started")
+        logger.info("iTunes enrichment worker initialized and started")
 except Exception as e:
-    print(f"iTunes enrichment worker initialization failed: {e}")
+    logger.error(f"iTunes enrichment worker initialization failed: {e}")
     itunes_enrichment_worker = None
 
 # --- iTunes API Endpoints ---
@@ -51667,11 +51647,11 @@ try:
     lastfm_worker.start()
     if config_manager.get('lastfm_enrichment_paused', False):
         lastfm_worker.pause()
-        print("Last.fm enrichment worker initialized (paused — restored from config)")
+        logger.warning("Last.fm enrichment worker initialized (paused — restored from config)")
     else:
-        print("Last.fm enrichment worker initialized and started")
+        logger.info("Last.fm enrichment worker initialized and started")
 except Exception as e:
-    print(f"Last.fm worker initialization failed: {e}")
+    logger.error(f"Last.fm worker initialization failed: {e}")
     lastfm_worker = None
 
 # --- Last.fm API Endpoints ---
@@ -51810,11 +51790,11 @@ try:
         genius_worker.paused = True
     genius_worker.start()
     if genius_worker.paused:
-        print("Genius enrichment worker initialized (paused — restored from config)")
+        logger.warning("Genius enrichment worker initialized (paused — restored from config)")
     else:
-        print("Genius enrichment worker initialized and started")
+        logger.info("Genius enrichment worker initialized and started")
 except Exception as e:
-    print(f"Genius worker initialization failed: {e}")
+    logger.error(f"Genius worker initialization failed: {e}")
     genius_worker = None
 
 # --- Genius API Endpoints ---
@@ -51887,11 +51867,11 @@ try:
     tidal_enrichment_worker.start()
     if config_manager.get('tidal_enrichment_paused', False):
         tidal_enrichment_worker.pause()
-        print("Tidal enrichment worker initialized (paused — restored from config)")
+        logger.warning("Tidal enrichment worker initialized (paused — restored from config)")
     else:
-        print("Tidal enrichment worker initialized and started")
+        logger.info("Tidal enrichment worker initialized and started")
 except Exception as e:
-    print(f"Tidal worker initialization failed: {e}")
+    logger.error(f"Tidal worker initialization failed: {e}")
     tidal_enrichment_worker = None
 
 # --- Tidal Enrichment API Endpoints ---
@@ -51961,11 +51941,11 @@ try:
     qobuz_enrichment_worker.start()
     if config_manager.get('qobuz_enrichment_paused', False):
         qobuz_enrichment_worker.pause()
-        print("Qobuz enrichment worker initialized (paused — restored from config)")
+        logger.warning("Qobuz enrichment worker initialized (paused — restored from config)")
     else:
-        print("Qobuz enrichment worker initialized and started")
+        logger.info("Qobuz enrichment worker initialized and started")
 except Exception as e:
-    print(f"Qobuz worker initialization failed: {e}")
+    logger.error(f"Qobuz worker initialization failed: {e}")
     qobuz_enrichment_worker = None
 
 # --- Qobuz Enrichment API Endpoints ---
@@ -52039,13 +52019,13 @@ try:
     hydrabase_worker = HydrabaseWorker(get_ws_and_lock=_get_hydrabase_ws_and_lock)
     hydrabase_worker.start()
     hydrabase_client = HydrabaseClient(get_ws_and_lock=_get_hydrabase_ws_and_lock)
-    print("Hydrabase P2P mirror worker and metadata client initialized")
+    logger.info("Hydrabase P2P mirror worker and metadata client initialized")
     # Update API blueprint references
     if hasattr(app, 'soulsync'):
         app.soulsync['hydrabase_client'] = hydrabase_client
         app.soulsync['hydrabase_worker'] = hydrabase_worker
 except Exception as e:
-    print(f"Hydrabase initialization failed: {e}")
+    logger.error(f"Hydrabase initialization failed: {e}")
     hydrabase_worker = None
     hydrabase_client = None
 
@@ -52062,9 +52042,9 @@ try:
         _hydrabase_ws = _auto_ws
         # Don't auto-enable dev mode — user must explicitly activate dev mode
         # Auto-connect just establishes the WebSocket for fallback/search tab use
-        print(f"Hydrabase auto-connected to {_hydra_cfg['url']}")
+        logger.info(f"Hydrabase auto-connected to {_hydra_cfg['url']}")
 except Exception as e:
-    print(f"Hydrabase auto-reconnect failed: {e}")
+    logger.error(f"Hydrabase auto-reconnect failed: {e}")
 
 # --- Hydrabase Worker API Endpoints ---
 
@@ -52136,9 +52116,9 @@ try:
     soulid_db = MusicDatabase()
     soulid_worker = SoulIDWorker(database=soulid_db)
     soulid_worker.start()
-    print("SoulID worker initialized and started")
+    logger.info("SoulID worker initialized and started")
 except Exception as e:
-    print(f"SoulID worker initialization failed: {e}")
+    logger.error(f"SoulID worker initialization failed: {e}")
     soulid_worker = None
 
 @app.route('/api/soulid/status', methods=['GET'])
@@ -52170,9 +52150,9 @@ try:
         navidrome_client=navidrome_client,
     )
     listening_stats_worker.start()
-    print("Listening stats worker initialized and started")
+    logger.info("Listening stats worker initialized and started")
 except Exception as e:
-    print(f"Listening stats worker initialization failed: {e}")
+    logger.error(f"Listening stats worker initialization failed: {e}")
     listening_stats_worker = None
 
 # --- Stats API Endpoints ---
@@ -52463,13 +52443,13 @@ def listening_stats_sync():
         import threading
         def _do_sync():
             try:
-                print("[Stats Sync] Starting manual poll...")
+                logger.info("[Stats Sync] Starting manual poll...")
                 listening_stats_worker._poll()
                 listening_stats_worker.stats['polls_completed'] += 1
                 listening_stats_worker.stats['last_poll'] = time.strftime('%Y-%m-%d %H:%M:%S')
-                print("[Stats Sync] Manual poll completed")
+                logger.info("[Stats Sync] Manual poll completed")
             except Exception as e:
-                print(f"[Stats Sync] Manual poll failed: {e}")
+                logger.error(f"[Stats Sync] Manual poll failed: {e}")
                 import traceback
                 traceback.print_exc()
                 logger.error(f"Manual stats sync failed: {e}")
@@ -52559,9 +52539,9 @@ try:
     repair_worker._progress_lock_ref = repair_job_progress_lock
     repair_worker._progress_states_ref = repair_job_progress_states
     repair_worker.start()
-    print("Repair worker initialized and started")
+    logger.info("Repair worker initialized and started")
 except Exception as e:
-    print(f"Repair worker initialization failed: {e}")
+    logger.error(f"Repair worker initialization failed: {e}")
     repair_worker = None
 
 # --- Repair Worker API Endpoints ---
@@ -53862,11 +53842,11 @@ try:
     )
     if config_manager.get('auto_import.enabled', False):
         auto_import_worker.start()
-        print("Auto-import worker started")
+        logger.info("Auto-import worker started")
     else:
-        print("Auto-import worker initialized (disabled)")
+        logger.warning("Auto-import worker initialized (disabled)")
 except Exception as _ai_err:
-    print(f"Auto-import worker init failed: {_ai_err}")
+    logger.error(f"Auto-import worker init failed: {_ai_err}")
 
 
 @app.route('/api/auto-import/status', methods=['GET'])
@@ -54093,13 +54073,13 @@ def _hydrabase_reconnect_loop():
                     )
                     _hydrabase_ws = ws
                 _consecutive_failures = 0
-                print(f"[Hydrabase] Auto-reconnected to {hydra_cfg['url']}")
+                logger.info(f"[Hydrabase] Auto-reconnected to {hydra_cfg['url']}")
             except Exception as e:
                 _consecutive_failures += 1
                 if _consecutive_failures <= 3:
-                    print(f"[Hydrabase] Reconnect attempt failed ({_consecutive_failures}): {e}")
+                    logger.error(f"[Hydrabase] Reconnect attempt failed ({_consecutive_failures}): {e}")
                 elif _consecutive_failures == 4:
-                    print(f"[Hydrabase] Reconnect failing repeatedly — suppressing further logs until success")
+                    logger.error(f"[Hydrabase] Reconnect failing repeatedly — suppressing further logs until success")
         except Exception:
             pass  # Don't crash the monitor loop
 
@@ -54708,36 +54688,36 @@ def start_runtime_services():
         if _runtime_started:
             return
 
-        print("Starting SoulSync runtime services...")
+        logger.info("Starting SoulSync runtime services...")
 
         # Dump SOULSYNC_* env vars for diagnostics (helps debug Docker/Unraid env issues)
         _soulsync_env = {k: v for k, v in os.environ.items() if k.startswith('SOULSYNC_')}
         if _soulsync_env:
-            print(f"[Startup] SOULSYNC environment variables: {_soulsync_env}")
+            logger.info(f"[Startup] SOULSYNC environment variables: {_soulsync_env}")
         else:
-            print("[Startup] No SOULSYNC_* environment variables detected")
+            logger.warning("[Startup] No SOULSYNC_* environment variables detected")
 
         # Start OAuth callback servers
-        print("Starting OAuth callback servers...")
+        logger.info("Starting OAuth callback servers...")
         start_oauth_callback_servers()
 
         # Startup diagnostics: Check and recover stuck flags
-        print("Running startup diagnostics...")
+        logger.info("Running startup diagnostics...")
         stuck_flags_recovered = check_and_recover_stuck_flags()
         if stuck_flags_recovered:
-            print("Recovered stuck flags from previous session")
+            logger.warning("Recovered stuck flags from previous session")
         else:
-            print("No stuck flags detected - system healthy")
+            logger.warning("No stuck flags detected - system healthy")
 
         # Start simple background monitor when server starts
-        print("Starting simple background monitor...")
+        logger.info("Starting simple background monitor...")
         start_simple_background_monitor()
-        print("Simple background monitor started (includes automatic search cleanup)")
+        logger.info("Simple background monitor started (includes automatic search cleanup)")
 
         # Wishlist/watchlist timers are now managed by AutomationEngine system automations
 
         # Pre-build import suggestions cache in background
-        print("Pre-building import suggestions cache...")
+        logger.info("Pre-building import suggestions cache...")
         start_import_suggestions_cache()
 
         # Initialize app start time for uptime tracking
@@ -54747,26 +54727,26 @@ def start_runtime_services():
         _register_automation_handlers()
         if automation_engine:
             try:
-                print("Starting automation engine...")
+                logger.info("Starting automation engine...")
                 automation_engine.start()
-                print("Automation engine started")
+                logger.info("Automation engine started")
                 try:
                     automation_engine.emit('app_started', {})
                 except Exception:
                     pass
             except AttributeError as e:
-                print(f"Automation engine failed to start: {e}")
-                print("   If using Docker, check that your volume mount is /app/data (not /app/database)")
+                logger.error(f"Automation engine failed to start: {e}")
+                logger.info("   If using Docker, check that your volume mount is /app/data (not /app/database)")
                 logger.error(f"Automation engine start error (possible stale Docker volume): {e}")
             except Exception as e:
-                print(f"Automation engine failed to start: {e}")
+                logger.error(f"Automation engine failed to start: {e}")
                 logger.error(f"Automation engine start error: {e}")
 
         # Add startup activity
         add_activity_item("", "System Started", "SoulSync Web UI Server initialized", "Now")
 
         # Start WebSocket background emitters
-        print("Starting WebSocket background emitters...")
+        logger.info("Starting WebSocket background emitters...")
         # Phase 1: Global pollers
         socketio.start_background_task(_emit_service_status_loop)
         socketio.start_background_task(_emit_watchlist_count_loop)
@@ -54794,7 +54774,7 @@ def start_runtime_services():
         socketio.start_background_task(_emit_rate_monitor_loop)
         # Live log tail — streams new log lines to the log viewer
         socketio.start_background_task(_emit_live_log_loop)
-        print("WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor + live logs)")
+        logger.info("WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor + live logs)")
 
         _runtime_started = True
 
@@ -54802,8 +54782,8 @@ def start_runtime_services():
 # Direct execution: python web_server.py (dev/Windows fallback)
 # Production should use: gunicorn -c gunicorn.conf.py wsgi:application
 if _DIRECT_RUN:
-    print("Starting SoulSync Web UI Server...")
-    print("Open your browser and navigate to http://127.0.0.1:8008")
-    print("Tip: For production, use gunicorn -c gunicorn.conf.py wsgi:application")
+    logger.info("Starting SoulSync Web UI Server...")
+    logger.info("Open your browser and navigate to http://127.0.0.1:8008")
+    logger.info("Tip: For production, use gunicorn -c gunicorn.conf.py wsgi:application")
     start_runtime_services()
     socketio.run(app, host='0.0.0.0', port=8008, debug=False, allow_unsafe_werkzeug=True)
