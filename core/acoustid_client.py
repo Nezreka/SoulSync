@@ -44,7 +44,7 @@ _acoustid_file_handler.setFormatter(logging.Formatter(
     datefmt='%Y-%m-%d %H:%M:%S'
 ))
 logger.addHandler(_acoustid_file_handler)
-logging.getLogger("newmusic.acoustid_verification").addHandler(_acoustid_file_handler)
+logging.getLogger("soulsync.acoustid_verification").addHandler(_acoustid_file_handler)
 
 # Check if pyacoustid is available
 try:
