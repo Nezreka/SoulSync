@@ -11492,223 +11492,50 @@ def get_artist_discography(artist_id):
         logger.exception("Error fetching artist discography for %s", artist_id)
         return jsonify({"error": str(e)}), 500
 
-def _resolve_db_album_id(album_id, artist_id=None):
-    """Resolve a database album ID to a real external album ID.
-
-    When the artist detail page falls back to owned_releases, the album cards
-    carry a database ID. This helper looks up stored external IDs first, then
-    falls back to a search by album title + artist name using the primary
-    metadata source (with fallback to other sources).
-    """
-    try:
-        database = get_database()
-        with database._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT a.title, a.spotify_album_id, a.itunes_album_id, a.discogs_id,
-                       a.deezer_album_id, ar.name as artist_name
-                FROM albums a
-                JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.id = ?
-            """, (album_id,))
-            row = cursor.fetchone()
-            if not row:
-                return None
-
-            # Prefer stored external IDs — match the active primary source first
-            fallback = _get_metadata_fallback_source()
-            id_priority = {
-                'spotify': [('spotify_album_id', None), ('deezer_album_id', None), ('itunes_album_id', None), ('discogs_id', None)],
-                'deezer': [('deezer_album_id', None), ('spotify_album_id', None), ('itunes_album_id', None), ('discogs_id', None)],
-                'itunes': [('itunes_album_id', None), ('spotify_album_id', None), ('deezer_album_id', None), ('discogs_id', None)],
-                'discogs': [('discogs_id', None), ('spotify_album_id', None), ('deezer_album_id', None), ('itunes_album_id', None)],
-            }
-            for col, _ in id_priority.get(fallback, id_priority['spotify']):
-                val = row[col] if col in row.keys() else None
-                if val:
-                    return val
-
-            # No stored external ID — search by name using primary source with fallback
-            album_title = row['title']
-            artist_name = row['artist_name']
-            query = f"{artist_name} {album_title}"
-            logger.debug("Searching for album by name: %s", query)
-
-            from core.metadata_service import get_source_priority, get_client_for_source
-            for source in get_source_priority(fallback):
-                try:
-                    client = get_client_for_source(source)
-                    if not client:
-                        continue
-                    results = client.search_albums(query, limit=5)
-                    if results:
-                        for album in results:
-                            if album.name.lower().strip() == album_title.lower().strip():
-                                logger.debug("Found exact album match via %s: %s (id=%s)", source, album.name, album.id)
-                                return album.id
-                        logger.debug("No exact match via %s, using best result: %s (id=%s)", source, results[0].name, results[0].id)
-                        return results[0].id
-                except Exception as e:
-                    logger.debug("Album search via %s failed: %s", source, e)
-                    continue
-
-    except Exception as e:
-        logger.debug("Error resolving DB album ID %s: %s", album_id, e)
-    return None
-
-
-@app.route('/api/artist/<artist_id>/album/<album_id>/tracks', methods=['GET'])
-def get_artist_album_tracks(artist_id, album_id):
+@app.route('/api/album/<album_id>/tracks', methods=['GET'])
+def get_album_tracks(album_id):
     """Get tracks for specific album formatted for download missing tracks modal"""
     try:
-        # Try Hydrabase first when active and album name provided
-        if _is_hydrabase_active():
-            album_name = request.args.get('name', '')
-            album_artist = request.args.get('artist', '')
-            try:
-                hydra_tracks = hydrabase_client.get_album_tracks(album_id, limit=50)
-                if hydra_tracks:
-                    album_info = {
-                        'id': album_id,
-                        'name': album_name or hydra_tracks[0].album or '',
-                        'image_url': None,
-                        'images': [],
-                        'release_date': '',
-                        'album_type': 'album',
-                        'total_tracks': len(hydra_tracks)
-                    }
-                    formatted_tracks = []
-                    for t in hydra_tracks:
-                        artist_list = t.artists if isinstance(t.artists, list) else [t.artists] if t.artists else []
-                        formatted_tracks.append({
-                            'id': t.id,
-                            'name': t.name,
-                            'artists': [a if isinstance(a, str) else a for a in artist_list],
-                            'duration_ms': t.duration_ms,
-                            'track_number': t.track_number or 0,
-                            'disc_number': t.disc_number or 1,
-                            'explicit': False,
-                            'preview_url': t.preview_url,
-                            'external_urls': t.external_urls or {},
-                            'uri': '',
-                            'album': album_info
-                        })
-                    logger.info("Hydrabase returned %s tracks for album %s", len(formatted_tracks), album_info['name'])
-                    return jsonify({
-                        'success': True,
-                        'album': album_info,
-                        'tracks': formatted_tracks
-                    })
-            except Exception as e:
-                logger.warning(f"Hydrabase album_tracks failed for '{album_id}', falling back to Spotify: {e}")
+        album_name = request.args.get('name', '').strip()
+        artist_name = request.args.get('artist', '').strip()
+        source_override = request.args.get('source', '').strip().lower()
+        if source_override == 'hydrabase':
+            plugin = request.args.get('plugin', '').strip().lower()
+            if plugin in ('itunes', 'deezer'):
+                source_override = plugin
+            elif album_id.isdigit():
+                source_override = 'itunes'
+            else:
+                source_override = 'spotify'
 
-        # Source override: when user navigated from a specific search tab
-        source_override = request.args.get('source', '')
-        client = None
-        if source_override == 'itunes':
-            client = _get_itunes_client()
-        elif source_override == 'hydrabase':
-            plugin = request.args.get('plugin', '').lower()
-            if plugin == 'deezer':
-                client = _get_deezer_client()
-            elif plugin == 'itunes' or album_id.isdigit():
-                client = _get_itunes_client()
-        elif source_override == 'deezer':
-            client = _get_deezer_client()
-        elif source_override == 'discogs':
-            client = _get_discogs_client()
+        from core.metadata_service import get_artist_album_tracks as _get_artist_album_tracks
 
-        # No source override — use the primary metadata source
-        if not client:
-            try:
-                client = _get_metadata_fallback_client()
-            except Exception:
-                pass
-        # Fall back to Spotify if available
-        if not client and spotify_client and spotify_client.is_authenticated():
-            client = spotify_client
-        if not client:
-            return jsonify({"error": "No metadata source available. Configure Spotify, Deezer, or iTunes in Settings."}), 401
-
-        logger.debug(
-            "Fetching tracks for album %s by artist %s (source=%s)",
+        result = _get_artist_album_tracks(
             album_id,
-            artist_id,
-            source_override or 'auto',
+            artist_name=artist_name,
+            album_name=album_name,
+            source_override=source_override or None,
         )
 
-        # Get album information first
-        album_data = client.get_album(album_id)
-        resolved_album_id = album_id
+        if not result.get('success'):
+            return jsonify({"error": result.get('error', 'Album not found')}), result.get('status_code', 404)
 
-        # If direct lookup failed, the album_id might be a database ID — resolve it
-        if not album_data:
-            resolved_album_id = _resolve_db_album_id(album_id, artist_id)
-            if resolved_album_id and resolved_album_id != album_id:
-                logger.debug("Resolved DB album ID %s -> external ID %s", album_id, resolved_album_id)
-                album_data = client.get_album(resolved_album_id)
-
-        if not album_data:
-            return jsonify({"error": "Album not found"}), 404
-
-        # Get album tracks
-        tracks_data = client.get_album_tracks(resolved_album_id)
-        if not tracks_data or 'items' not in tracks_data or len(tracks_data['items']) == 0:
-            return jsonify({"error": "No tracks found for album — it may be region-restricted or unavailable on this metadata source"}), 404
-        
-        # Handle both dict and object responses from spotify_client.get_album()
-        if isinstance(album_data, dict):
-            album_info = {
-                'id': album_data.get('id'),
-                'name': album_data.get('name'),
-                'image_url': album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None,
-                'images': album_data.get('images', []),  # Include images array for wishlist cover art
-                'release_date': album_data.get('release_date'),
-                'album_type': album_data.get('album_type'),
-                'total_tracks': album_data.get('total_tracks')
-            }
-        else:
-            # Handle Album object case
-            album_info = {
-                'id': album_data.id,
-                'name': album_data.name,
-                'image_url': album_data.image_url,
-                'images': album_data.images if hasattr(album_data, 'images') else [],  # Include images array for wishlist cover art
-                'release_date': album_data.release_date,
-                'album_type': album_data.album_type,
-                'total_tracks': album_data.total_tracks
-            }
-        
-        # Format tracks for download missing tracks modal compatibility
-        formatted_tracks = []
-        for track_item in tracks_data['items']:
-            # Create track object compatible with download missing tracks modal
-            formatted_track = {
-                'id': track_item['id'],
-                'name': track_item['name'],
-                'artists': [artist['name'] for artist in track_item['artists']],
-                'duration_ms': track_item['duration_ms'],
-                'track_number': track_item['track_number'],
-                'disc_number': track_item.get('disc_number', 1),
-                'explicit': track_item.get('explicit', False),
-                'preview_url': track_item.get('preview_url'),
-                'external_urls': track_item.get('external_urls', {}),
-                'uri': track_item['uri'],
-                # Add album context for virtual playlist
-                'album': album_info
-            }
-            formatted_tracks.append(formatted_track)
-        
-        logger.info("Successfully formatted %s tracks for album %s", len(formatted_tracks), album_info['name'])
-        
+        logger.info(
+            "Successfully formatted %s tracks for album %s",
+            len(result.get('tracks', [])),
+            result.get('album', {}).get('name', album_name or album_id),
+        )
         return jsonify({
             'success': True,
-            'album': album_info,
-            'tracks': formatted_tracks
+            'album': result['album'],
+            'tracks': result['tracks'],
+            'source': result.get('source'),
+            'source_priority': result.get('source_priority', []),
+            'resolved_album_id': result.get('resolved_album_id'),
         })
-        
+
     except Exception as e:
-        logger.exception("Error fetching album tracks for artist %s album %s", artist_id, album_id)
+        logger.exception("Error fetching album tracks for album %s", album_id)
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/artist/<artist_id>/download-discography', methods=['POST'])
@@ -33216,7 +33043,7 @@ def get_playlist_tracks(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/spotify/album/<album_id>', methods=['GET'])
-def get_album_tracks(album_id):
+def get_spotify_album_tracks(album_id):
     """Fetches full track details for a specific album."""
     use_hydrabase = _is_hydrabase_active()
 

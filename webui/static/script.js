@@ -10407,7 +10407,7 @@ async function rehydrateArtistAlbumModal(virtualPlaylistId, playlistName, batchI
 
         // Fetch the album tracks to get proper artist and album data
         try {
-            const response = await fetch(`/api/artist/${artistId}/album/${albumId}/tracks`);
+            const response = await fetch(`/api/album/${albumId}/tracks`);
             const data = await response.json();
 
             if (!data.success || !data.album || !data.tracks) {
@@ -21602,7 +21602,7 @@ async function confirmMatch() {
                 const artistId = currentMatchingData.selectedArtist.id;
                 const albumId = currentMatchingData.selectedAlbum.id;
                 const _aat3 = new URLSearchParams({ name: currentMatchingData.selectedAlbum.name || '', artist: currentMatchingData.selectedArtist.name || '' });
-                const tracksResponse = await fetch(`/api/artist/${artistId}/album/${albumId}/tracks?${_aat3}`);
+                const tracksResponse = await fetch(`/api/album/${albumId}/tracks?${_aat3}`);
 
                 if (!tracksResponse.ok) {
                     throw new Error(`Failed to fetch Spotify tracks: ${tracksResponse.status}`);
@@ -37514,7 +37514,7 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
         if (artistsPageState.pluginOverride) {
             _aat1.set('plugin', artistsPageState.pluginOverride);
         }
-        const response = await fetch(`/api/artist/${artist.id}/album/${album.id}/tracks?${_aat1}`);
+        const response = await fetch(`/api/album/${album.id}/tracks?${_aat1}`);
 
         if (!response.ok) {
             if (response.status === 401) {
@@ -45299,7 +45299,7 @@ function createReleaseCard(release) {
 
             // Load tracks for the album (pass name/artist for Hydrabase support)
             const _aat2 = new URLSearchParams({ name: albumData.name || '', artist: currentArtist.name || '' });
-            const response = await fetch(`/api/artist/${currentArtist.id}/album/${albumData.id}/tracks?${_aat2}`);
+            const response = await fetch(`/api/album/${albumData.id}/tracks?${_aat2}`);
             if (!response.ok) {
                 throw new Error(`Failed to load album tracks: ${response.status}`);
             }
