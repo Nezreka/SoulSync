@@ -432,7 +432,6 @@ def test_get_artist_detail_discography_classifies_release_types(monkeypatch):
     assert [ep["id"] for ep in result["eps"]] == ["ep-1"]
     assert [single["id"] for single in result["singles"]] == ["single-1"]
     assert result["albums"][0]["title"] == "Album One"
-    assert result["albums"][0]["spotify_id"] == "album-1"
     assert result["albums"][0]["owned"] is None
     assert result["albums"][0]["track_completion"] == "checking"
 
@@ -480,3 +479,45 @@ def test_get_artist_detail_discography_dedups_variant_releases(monkeypatch):
     assert [album["id"] for album in result["albums"]] == ["album-standard"]
     assert result["albums"][0]["title"] == "Variant Album"
     assert result["albums"][0]["track_count"] == 10
+
+
+def test_get_artist_discography_keeps_provider_artist_ids(monkeypatch):
+    class _SpotifyArtistIdClient(_FakeSourceClient):
+        def get_artist_albums(self, artist_id, **kwargs):
+            self.album_calls.append((artist_id, dict(kwargs)))
+            return [
+                types.SimpleNamespace(
+                    id="spotify-release-1",
+                    name="Spotify Album",
+                    release_date="2024-01-01",
+                    album_type="album",
+                    image_url="https://img.example/spotify-release-1.jpg",
+                    total_tracks=9,
+                    external_urls={"spotify": "https://example/spotify-release-1"},
+                    artist_ids=["7wzRaLHNSWIG8ZHK2hQljt"],
+                )
+            ]
+
+    spotify = _SpotifyArtistIdClient()
+    clients = {"spotify": spotify}
+
+    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "spotify")
+    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary])
+    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: clients.get(source))
+
+    result = metadata_service.get_artist_discography("364555966", "Amarok", MetadataLookupOptions())
+
+    assert result["source"] == "spotify"
+    assert [album["id"] for album in result["albums"]] == ["spotify-release-1"]
+    assert spotify.album_calls == [
+        (
+            "364555966",
+            {
+                "album_type": "album,single",
+                "limit": 50,
+                "allow_fallback": False,
+                "skip_cache": False,
+                "max_pages": 0,
+            },
+        ),
+    ]
