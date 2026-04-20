@@ -11602,12 +11602,9 @@ def get_artist_album_tracks(artist_id, album_id):
             except Exception as e:
                 logger.warning(f"Hydrabase album_tracks failed for '{album_id}', falling back to Spotify: {e}")
 
-        if not spotify_client or not spotify_client.is_authenticated():
-            return jsonify({"error": "Spotify not authenticated"}), 401
-
         # Source override: when user navigated from a specific search tab
         source_override = request.args.get('source', '')
-        client = spotify_client
+        client = None
         if source_override == 'itunes':
             client = _get_itunes_client()
         elif source_override == 'hydrabase':
@@ -11620,6 +11617,18 @@ def get_artist_album_tracks(artist_id, album_id):
             client = _get_deezer_client()
         elif source_override == 'discogs':
             client = _get_discogs_client()
+
+        # No source override — use the primary metadata source
+        if not client:
+            try:
+                client = _get_metadata_fallback_client()
+            except Exception:
+                pass
+        # Fall back to Spotify if available
+        if not client and spotify_client and spotify_client.is_authenticated():
+            client = spotify_client
+        if not client:
+            return jsonify({"error": "No metadata source available. Configure Spotify, Deezer, or iTunes in Settings."}), 401
 
         logger.debug(
             "Fetching tracks for album %s by artist %s (source=%s)",
@@ -22626,6 +22635,7 @@ def get_version_info():
                     "• Fix library page crash on All filter — non-string soul_id broke card rendering",
                     "• Auto Wing It fallback for failed discovery — unmatched tracks download via Soulseek with raw metadata",
                     "• Lidarr download source now production-ready — full orchestrator integration",
+                    "• Fix album track lookup hardcoded to Spotify — now uses configured primary source",
                     "• Fix M3U showing all tracks as missing — regenerate with real paths after post-processing",
                     "• Fix AcoustID retag not writing corrected tags to audio file",
                     "• Fix wishlist albums cycle stuck at 1 concurrent worker instead of configured value",
