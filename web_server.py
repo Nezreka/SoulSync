@@ -22529,6 +22529,7 @@ def get_version_info():
                     "• Reject Qobuz 30-second sample/preview downloads",
                     "• Fix library page crash on All filter — non-string soul_id broke card rendering",
                     "• Auto Wing It fallback for failed discovery — unmatched tracks download via Soulseek with raw metadata",
+                    "• Fix AcoustID retag not writing corrected tags to audio file",
                     "• Fix wishlist albums cycle stuck at 1 concurrent worker instead of configured value",
                     "• Fix downloads badge dropping to 300 after opening Downloads page",
                     "• Fix server playlist Find & Add inserting at wrong position on Plex",
