@@ -5207,6 +5207,91 @@ def fix_navidrome_urls():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
+def _regenerate_batch_m3u(batch, tracks):
+    """Regenerate M3U file for a completed batch using real library DB paths.
+    Called from batch completion handler after all post-processing is done."""
+    try:
+        from difflib import SequenceMatcher
+        try:
+            from unidecode import unidecode as _unidecode
+        except ImportError:
+            _unidecode = lambda x: x
+
+        def _norm(text):
+            return _unidecode(text).lower().strip() if text else ''
+
+        playlist_name = batch.get('playlist_name', 'Playlist')
+        db = get_database()
+        active_server = config_manager.get_active_media_server()
+        raw_base = config_manager.get('m3u_export.entry_base_path', '') or ''
+        entry_base_path = raw_base.rstrip('/\\')
+
+        # Resolve file paths from library DB
+        from collections import defaultdict
+        artist_groups = defaultdict(list)
+        for idx, t in enumerate(tracks):
+            artist_groups[t.get('artist', '') or ''].append((idx, t))
+
+        file_path_map = {}
+        for artist, group in artist_groups.items():
+            if not artist:
+                for idx, _ in group:
+                    file_path_map[idx] = None
+                continue
+            db_tracks = db.search_tracks(artist=artist, limit=500, server_source=active_server)
+            if not db_tracks:
+                for idx, _ in group:
+                    file_path_map[idx] = None
+                continue
+            db_entries = [(_norm(t.title), t) for t in db_tracks]
+            for idx, track in group:
+                name = track.get('name', '')
+                if not name:
+                    file_path_map[idx] = None
+                    continue
+                s_norm = _norm(name)
+                matched = None
+                for db_n, db_t in db_entries:
+                    if s_norm == db_n or SequenceMatcher(None, s_norm, db_n).ratio() >= 0.7:
+                        matched = db_t
+                        break
+                file_path_map[idx] = matched.file_path if matched else None
+
+        # Build M3U content
+        import datetime as _dt
+        lines = ['#EXTM3U', f'#PLAYLIST:{playlist_name}',
+                 f'#GENERATED:{_dt.datetime.utcnow().isoformat()}Z', '']
+        found = 0
+        for idx, track in enumerate(tracks):
+            dur_s = int((track.get('duration_ms', 0) or 0) / 1000)
+            artist = track.get('artist', 'Unknown')
+            name = track.get('name', 'Unknown')
+            lines.append(f'#EXTINF:{dur_s},{artist} - {name}')
+            fp = file_path_map.get(idx)
+            if fp:
+                path = f'{entry_base_path}/{fp}' if entry_base_path else fp
+                lines.append(path)
+                found += 1
+            else:
+                lines.append(f'# MISSING: {artist} - {name}')
+            lines.append('')
+
+        if found == 0:
+            return  # Don't overwrite with an all-missing M3U
+
+        m3u_content = '\n'.join(lines)
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        m3u_folder = _compute_m3u_folder(transfer_dir, 'playlist', playlist_name, '', '', '')
+        os.makedirs(m3u_folder, exist_ok=True)
+        safe_fn = _sanitize_filename(playlist_name)
+        m3u_path = os.path.join(m3u_folder, f'{safe_fn}.m3u')
+        with open(m3u_path, 'w', encoding='utf-8') as f:
+            f.write(m3u_content)
+        print(f"[M3U] Regenerated M3U on batch complete: {m3u_path} ({found}/{len(tracks)} resolved)")
+    except Exception as e:
+        print(f"[M3U] Error in _regenerate_batch_m3u: {e}")
+
+
 @app.route('/api/save-playlist-m3u', methods=['POST'])
 def save_playlist_m3u():
     """Save M3U playlist file to the relevant download folder"""
@@ -22529,6 +22614,7 @@ def get_version_info():
                     "• Reject Qobuz 30-second sample/preview downloads",
                     "• Fix library page crash on All filter — non-string soul_id broke card rendering",
                     "• Auto Wing It fallback for failed discovery — unmatched tracks download via Soulseek with raw metadata",
+                    "• Fix M3U showing all tracks as missing — regenerate with real paths after post-processing",
                     "• Fix AcoustID retag not writing corrected tags to audio file",
                     "• Fix wishlist albums cycle stuck at 1 concurrent worker instead of configured value",
                     "• Fix downloads badge dropping to 300 after opening Downloads page",
@@ -28262,6 +28348,29 @@ def _on_download_completed(batch_id, task_id, success=True):
 
                 print(f"[Batch Manager] Batch {batch_id} complete - stopping monitor")
                 download_monitor.stop_monitoring(batch_id)
+
+                # M3U REGENERATION: Regenerate M3U with real library paths now that
+                # all post-processing (tagging, moving, DB writes) is complete.
+                # The frontend M3U save may fire too early — this ensures paths resolve.
+                if config_manager.get('m3u_export.enabled', False):
+                    try:
+                        m3u_tracks = []
+                        for tid in queue:
+                            if tid in download_tasks and download_tasks[tid].get('status') == 'completed':
+                                ti = download_tasks[tid].get('track_info', {})
+                                artists = ti.get('artists', [])
+                                artist_str = artists[0] if isinstance(artists, list) and artists else ''
+                                if isinstance(artist_str, dict):
+                                    artist_str = artist_str.get('name', '')
+                                m3u_tracks.append({
+                                    'name': ti.get('name', ''),
+                                    'artist': artist_str,
+                                    'duration_ms': ti.get('duration_ms', 0),
+                                })
+                        if m3u_tracks:
+                            _regenerate_batch_m3u(batch, m3u_tracks)
+                    except Exception as m3u_err:
+                        print(f"[M3U] Error regenerating M3U on batch complete: {m3u_err}")
 
                 # REPAIR: Scan all album folders from this batch for track number issues
                 if repair_worker:
