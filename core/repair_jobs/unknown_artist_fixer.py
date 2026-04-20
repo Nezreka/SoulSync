@@ -92,7 +92,7 @@ class UnknownArtistFixerJob(RepairJob):
                        ar.id as artist_id, ar.name as artist_name,
                        al.id as album_id, al.title as album_title, al.year,
                        al.thumb_url as album_thumb,
-                       t.spotify_track_id, t.itunes_track_id, t.deezer_track_id
+                       t.spotify_track_id, t.itunes_track_id, t.deezer_id
                 FROM tracks t
                 JOIN artists ar ON ar.id = t.artist_id
                 JOIN albums al ON al.id = t.album_id
@@ -337,7 +337,7 @@ class UnknownArtistFixerJob(RepairJob):
     def _iter_source_track_ids(self, track: dict, primary_source: str):
         source_fields = {
             'spotify': 'spotify_track_id',
-            'deezer': 'deezer_track_id',
+            'deezer': 'deezer_id',
             'itunes': 'itunes_track_id',
         }
         ordered_sources = [source for source in self._iter_source_priority(primary_source, _TRACK_ID_SOURCES) if source in source_fields]
