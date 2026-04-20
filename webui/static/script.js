@@ -65539,6 +65539,7 @@ async function loadRepairFindings() {
             duplicate_tracks: 'Keep Best',
             incomplete_album: 'Auto-Fill',
             missing_lossy_copy: 'Convert',
+            acoustid_mismatch: 'Fix',
         };
 
         container.innerHTML = items.map(f => {
@@ -66096,6 +66097,11 @@ async function fixRepairFinding(id, findingType) {
         fixAction = await _promptDeadFileAction();
         if (!fixAction) return;
     }
+    // AcoustID mismatch: retag, redownload, or delete
+    if (findingType === 'acoustid_mismatch') {
+        fixAction = await _promptAcoustidAction();
+        if (!fixAction) return;
+    }
 
     const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
     const fixBtn = card ? card.querySelector('.repair-finding-btn.fix') : null;
@@ -66197,6 +66203,46 @@ function _promptDeadFileAction() {
     });
 }
 
+function _promptAcoustidAction() {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'display:flex;align-items:center;justify-content:center;z-index:10000;';
+        overlay.innerHTML = `
+            <div style="background:#1e1e2e;border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:28px;max-width:460px;width:90%;text-align:center;">
+                <div style="font-size:1.1em;font-weight:600;color:#fff;margin-bottom:8px;">AcoustID Mismatch</div>
+                <div style="font-size:0.88em;color:rgba(255,255,255,0.6);margin-bottom:20px;">
+                    The audio fingerprint doesn't match the expected track. Choose how to fix it.
+                </div>
+                <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+                    <button id="_acid-retag" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(102,126,234,0.4);background:rgba(102,126,234,0.15);color:#667eea;font-weight:600;cursor:pointer;font-family:inherit;">
+                        Retag
+                    </button>
+                    <button id="_acid-redownload" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(29,185,84,0.4);background:rgba(29,185,84,0.15);color:#1db954;font-weight:600;cursor:pointer;font-family:inherit;">
+                        Re-download
+                    </button>
+                    <button id="_acid-delete" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.1);color:#ef4444;font-weight:500;cursor:pointer;font-family:inherit;">
+                        Delete
+                    </button>
+                </div>
+                <div style="margin-top:12px;font-size:0.78em;color:rgba(255,255,255,0.35);line-height:1.4;">
+                    Retag = update metadata to match actual audio &bull; Re-download = add correct track to wishlist &amp; delete wrong file &bull; Delete = remove file and DB entry
+                </div>
+                <button id="_acid-cancel" style="margin-top:12px;padding:6px 16px;border:none;background:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:0.82em;font-family:inherit;">
+                    Cancel
+                </button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('#_acid-retag').onclick = () => { overlay.remove(); resolve('retag'); };
+        overlay.querySelector('#_acid-redownload').onclick = () => { overlay.remove(); resolve('redownload'); };
+        overlay.querySelector('#_acid-delete').onclick = () => { overlay.remove(); resolve('delete'); };
+        overlay.querySelector('#_acid-cancel').onclick = () => { overlay.remove(); resolve(null); };
+        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+    });
+}
+
 async function resolveRepairFinding(id) {
     try {
         await fetch(`/api/repair/findings/${id}/resolve`, { method: 'POST' });
@@ -66272,6 +66318,17 @@ async function bulkFixFindings() {
         if (!deadFixAction) return;
     }
 
+    // If any selected findings are AcoustID mismatches, prompt for action
+    const selectedAcoustidCards = ids.filter(id => {
+        const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
+        return card && card.dataset.jobId === 'acoustid_scanner';
+    });
+    let acoustidFixAction = null;
+    if (selectedAcoustidCards.length > 0) {
+        acoustidFixAction = await _promptAcoustidAction();
+        if (!acoustidFixAction) return;
+    }
+
     let fixed = 0, failed = 0, lastError = '';
     showToast(`Fixing ${ids.length} findings...`, 'info');
 
@@ -66281,9 +66338,11 @@ async function bulkFixFindings() {
             const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
             const isOrphan = card && card.dataset.jobId === 'orphan_file_detector';
             const isDead = card && card.dataset.jobId === 'dead_file_cleaner';
+            const isAcoustid = card && card.dataset.jobId === 'acoustid_scanner';
             let body = {};
             if (isOrphan && orphanFixAction) body = { fix_action: orphanFixAction };
             else if (isDead && deadFixAction) body = { fix_action: deadFixAction };
+            else if (isAcoustid && acoustidFixAction) body = { fix_action: acoustidFixAction };
 
             const response = await fetch(`/api/repair/findings/${id}/fix`, {
                 method: 'POST',
