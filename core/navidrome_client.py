@@ -155,6 +155,7 @@ class NavidromeClient:
         self._artist_cache = {}
         self._album_cache = {}
         self._track_cache = {}
+        self._folder_album_ids: Optional[set] = None  # Album IDs in selected music folder
 
         # Progress callback for UI updates
         self._progress_callback = None
@@ -173,6 +174,7 @@ class NavidromeClient:
         self._artist_cache.clear()
         self._album_cache.clear()
         self._track_cache.clear()
+        self._folder_album_ids = None
         logger.info("Navidrome client config reset — will reconnect with new settings")
 
     def get_music_folders(self) -> list:
@@ -199,6 +201,7 @@ class NavidromeClient:
             for folder in folders:
                 if folder['title'] == folder_name:
                     self.music_folder_id = folder['key']
+                    self._folder_album_ids = None  # Invalidate album filter cache
                     logger.info(f"Set music folder to: {folder_name} (ID: {self.music_folder_id})")
                     from database.music_database import MusicDatabase
                     db = MusicDatabase()
@@ -207,6 +210,7 @@ class NavidromeClient:
             # If folder_name is empty, clear the selection
             if not folder_name:
                 self.music_folder_id = None
+                self._folder_album_ids = None  # Invalidate album filter cache
                 from database.music_database import MusicDatabase
                 db = MusicDatabase()
                 db.set_preference('navidrome_music_folder', '')
@@ -486,7 +490,10 @@ class NavidromeClient:
             if self._progress_callback:
                 self._progress_callback(f"Fetching albums for artist {artist_name}...")
 
-            response = self._make_request('getArtist', {'id': artist_id})
+            params = {'id': artist_id}
+            if self.music_folder_id:
+                params['musicFolderId'] = self.music_folder_id
+            response = self._make_request('getArtist', params)
             if not response:
                 return []
 
@@ -500,6 +507,16 @@ class NavidromeClient:
             for album_data in album_list:
                 albums.append(NavidromeAlbum(album_data, self))
 
+            # Filter to selected music folder if Navidrome didn't handle musicFolderId
+            # on getArtist (not all Subsonic implementations support it on this endpoint)
+            if self.music_folder_id and albums:
+                folder_ids = self._get_folder_album_ids()
+                if folder_ids is not None:
+                    before = len(albums)
+                    albums = [a for a in albums if a.ratingKey in folder_ids]
+                    if len(albums) < before:
+                        logger.debug(f"Filtered {before - len(albums)} albums outside selected music folder for artist {artist_id}")
+
             # Cache the result
             self._album_cache[artist_id] = albums
 
@@ -508,6 +525,44 @@ class NavidromeClient:
         except Exception as e:
             logger.error(f"Error getting albums for artist {artist_id}: {e}")
             return []
+
+    def _get_folder_album_ids(self) -> Optional[set]:
+        """Get set of album IDs belonging to the selected music folder.
+        Uses getAlbumList2 with musicFolderId to build the set, cached for reuse."""
+        if self._folder_album_ids is not None:
+            return self._folder_album_ids
+        if not self.music_folder_id:
+            return None
+        try:
+            album_ids = set()
+            offset = 0
+            page_size = 500
+            while True:
+                params = {
+                    'type': 'alphabeticalByArtist',
+                    'size': page_size,
+                    'offset': offset,
+                    'musicFolderId': self.music_folder_id
+                }
+                response = self._make_request('getAlbumList2', params)
+                if not response:
+                    break
+                album_list = response.get('albumList2', {}).get('album', [])
+                if not album_list:
+                    break
+                for a in album_list:
+                    aid = a.get('id', '')
+                    if aid:
+                        album_ids.add(aid)
+                if len(album_list) < page_size:
+                    break
+                offset += page_size
+            self._folder_album_ids = album_ids
+            logger.info(f"Built music folder album index: {len(album_ids)} albums in selected folder")
+            return album_ids
+        except Exception as e:
+            logger.warning(f"Could not build music folder album index: {e}")
+            return None
 
     def get_recently_added_albums(self, limit: int = 400) -> List[NavidromeAlbum]:
         """Get recently added albums from Navidrome using getAlbumList2 sorted by newest"""
