@@ -22529,6 +22529,7 @@ def get_version_info():
                     "• Reject Qobuz 30-second sample/preview downloads",
                     "• Fix library page crash on All filter — non-string soul_id broke card rendering",
                     "• Auto Wing It fallback for failed discovery — unmatched tracks download via Soulseek with raw metadata",
+                    "• Fix server playlist Find & Add inserting at wrong position on Plex",
                     "• Smarter Fix modal results — standard album versions sorted above live/remix/cover/soundtrack variants",
                     "• Unmatch discovery tracks — red ✕ button to remove bad matches from playlist discovery",
                     "• Customizable music video naming — path template with $artist, $title, $year variables",
@@ -32434,6 +32435,22 @@ def server_playlist_add_track(playlist_id):
             logger.info(f"[ServerPlaylist] Adding track: '{new_item.title}' (ratingKey={new_item.ratingKey}) to playlist '{playlist_name}'")
 
             raw_playlist.addItems([new_item])
+
+            # Move to correct position if specified (addItems always appends to end)
+            if position is not None:
+                try:
+                    raw_playlist.reload()
+                    items = list(raw_playlist.items())
+                    pos = max(0, min(int(position), len(items) - 1))
+                    if pos == 0:
+                        raw_playlist.moveItem(items[-1])  # Move to first position
+                    elif pos < len(items) - 1:
+                        raw_playlist.moveItem(items[-1], after=items[pos - 1])
+                    # else: already at end, no move needed
+                    logger.info(f"[ServerPlaylist] Moved track to position {pos}")
+                except Exception as move_err:
+                    logger.warning(f"[ServerPlaylist] Could not reposition track: {move_err}")
+
             new_id = str(raw_playlist.ratingKey)
             logger.info(f"[ServerPlaylist] Added track to playlist, playlist ID: {new_id}")
             return jsonify({"success": True, "message": "Track added", "new_playlist_id": new_id})
