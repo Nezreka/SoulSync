@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Reports basic system info — useful for debugging Docker setups."""
+import logging
 import os
 import platform
 import shutil
 
-print(f"Platform: {platform.system()} {platform.release()}")
-print(f"Python: {platform.python_version()}")
-print(f"Working Dir: {os.getcwd()}")
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+logger = logging.getLogger("system_info")
+
+logger.info(f"Platform: {platform.system()} {platform.release()}")
+logger.info(f"Python: {platform.python_version()}")
+logger.info(f"Working Dir: {os.getcwd()}")
 
 # Disk usage for common SoulSync paths
 for path in ['/app/downloads', '/app/Transfer', '/app/data', './downloads', './Transfer']:
@@ -14,4 +20,4 @@ for path in ['/app/downloads', '/app/Transfer', '/app/data', './downloads', './T
         usage = shutil.disk_usage(path)
         free_gb = usage.free / (1024**3)
         total_gb = usage.total / (1024**3)
-        print(f"Disk {path}: {free_gb:.1f} GB free / {total_gb:.1f} GB total")
+        logger.info(f"Disk {path}: {free_gb:.1f} GB free / {total_gb:.1f} GB total")
