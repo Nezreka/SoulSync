@@ -45052,8 +45052,8 @@ function createReleaseCard(release) {
     const card = document.createElement("div");
     const isChecking = release.owned === null;
     card.className = `release-card${isChecking ? " checking" : (release.owned ? "" : " missing")}`;
-    card.setAttribute("data-release-id", release.id || "");
-    card.setAttribute("data-spotify-id", release.spotify_id || "");
+    const releaseId = release.id || "";
+    card.setAttribute("data-release-id", releaseId);
     // Store mutable reference so stream updates propagate to click handler
     card._releaseData = release;
 
@@ -45243,7 +45243,7 @@ function createReleaseCard(release) {
         try {
             // Convert release object to album format expected by our function
             const albumData = {
-                id: rel.spotify_id || rel.id,
+                id: rel.id,
                 name: rel.title,
                 image_url: rel.image_url,
                 release_date: rel.year ? `${rel.year}-01-01` : '',
@@ -45415,7 +45415,8 @@ async function checkLibraryCompletion(artistName, discography) {
 }
 
 function updateLibraryReleaseCard(data) {
-    const card = document.querySelector(`[data-spotify-id="${data.spotify_id}"]`);
+    const releaseId = data.id || "";
+    const card = document.querySelector(`[data-release-id="${releaseId}"]`);
     if (!card) return;
 
     const isOwned = data.status !== 'missing' && data.status !== 'error';

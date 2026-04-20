@@ -11924,7 +11924,7 @@ def library_completion_stream():
                 try:
                     # Map Library field names to helper field names
                     mapped = {
-                        'id': item.get('spotify_id', ''),
+                        'id': item['id'],
                         'name': item['title'],
                         'total_tracks': item.get('track_count', 0),
                         'album_type': item.get('album_type', 'album')
@@ -11935,12 +11935,12 @@ def library_completion_stream():
                     else:
                         result = check_album_completion(db, mapped, artist_name, source_override=source_override)
 
-                    result['spotify_id'] = item.get('spotify_id', '')
+                    result['id'] = item['id']
                     result['category'] = category
                     result['type'] = 'completion'
                     yield f"data: {json.dumps(result)}\n\n"
                 except Exception as e:
-                    yield f"data: {json.dumps({'type': 'completion', 'category': category, 'spotify_id': item.get('spotify_id', ''), 'status': 'error', 'owned_tracks': 0, 'expected_tracks': item.get('track_count', 0), 'completion_percentage': 0, 'confidence': 0.0, 'error': str(e)})}\n\n"
+                    yield f"data: {json.dumps({'type': 'completion', 'category': category, 'id': item['id'], 'status': 'error', 'owned_tracks': 0, 'expected_tracks': item.get('track_count', 0), 'completion_percentage': 0, 'confidence': 0.0, 'error': str(e)})}\n\n"
 
                 time.sleep(0.05)  # 50ms between items for visible streaming
 
