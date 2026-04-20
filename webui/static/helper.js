@@ -3602,6 +3602,7 @@ const WHATS_NEW = {
     '2.33': [
         // --- April 19, 2026 ---
         { date: 'April 19, 2026' },
+        { title: 'Fix Wishlist Albums Cycle Stuck at 1 Concurrent', desc: 'Auto-wishlist processing during the "albums" cycle was limited to 1 concurrent download even with higher configured settings. The max_concurrent=1 restriction is only needed for Soulseek folder-based album grabs, not individual wishlist track downloads. Albums cycle now uses the configured concurrency like singles' },
         { title: 'Fix Downloads Badge Dropping to 300', desc: 'Downloads nav badge showed the correct count from WebSocket but dropped to max 300 after opening the Downloads page because it recounted from a truncated local array. Badge now stays accurate from the server-side count' },
         { title: 'Fix Server Playlist Find & Add Position', desc: 'When using "Find & add" on server playlists with Plex, the track was always appended to the end instead of inserted at the correct position. Now moves the track to the right slot after adding' },
         { title: 'Smarter Fix Modal Search Results', desc: 'The discovery Fix modal now sorts search results to prioritize standard album versions over live recordings, remixes, covers, soundtracks, remasters, and deluxe editions. Previously the first result was often a live or remix version instead of the original studio track' },

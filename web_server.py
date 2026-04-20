@@ -22529,6 +22529,7 @@ def get_version_info():
                     "• Reject Qobuz 30-second sample/preview downloads",
                     "• Fix library page crash on All filter — non-string soul_id broke card rendering",
                     "• Auto Wing It fallback for failed discovery — unmatched tracks download via Soulseek with raw metadata",
+                    "• Fix wishlist albums cycle stuck at 1 concurrent worker instead of configured value",
                     "• Fix downloads badge dropping to 300 after opening Downloads page",
                     "• Fix server playlist Find & Add inserting at wrong position on Plex",
                     "• Smarter Fix modal results — standard album versions sorted above live/remix/cover/soundtrack variants",
@@ -24222,7 +24223,7 @@ def _process_wishlist_automatically(automation_id=None):
                     'playlist_name': playlist_name,
                     'queue': [],
                     'active_count': 0,
-                    'max_concurrent': _get_batch_max_concurrent(is_album=(current_cycle == 'albums')),
+                    'max_concurrent': _get_batch_max_concurrent(),  # Wishlist always does single-track downloads, not folder grabs
                     'queue_index': 0,
                     'analysis_total': len(wishlist_tracks),
                     'analysis_processed': 0,
@@ -25428,7 +25429,7 @@ def start_wishlist_missing_downloads():
                 'playlist_name': playlist_name,
                 'queue': task_queue,
                 'active_count': 0,
-                'max_concurrent': _get_batch_max_concurrent(is_album=(category == 'albums')),
+                'max_concurrent': _get_batch_max_concurrent(),  # Wishlist always does single-track downloads, not folder grabs
                 'queue_index': 0,
                 'analysis_total': len(wishlist_tracks),
                 'analysis_processed': 0,
