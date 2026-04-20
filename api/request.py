@@ -23,6 +23,16 @@ _requests_lock = threading.Lock()
 # Max age before auto-cleanup
 _MAX_REQUEST_AGE = timedelta(hours=1)
 
+# How often the background cleanup timer runs. Short enough to keep memory
+# bounded during idle periods, long enough that slow-polling external clients
+# still see their request for close to the TTL.
+_CLEANUP_INTERVAL_SECONDS = 300  # 5 minutes
+
+# Guards for the singleton background cleanup thread.
+_cleanup_thread: "threading.Thread | None" = None
+_cleanup_stop_event = threading.Event()
+_cleanup_thread_lock = threading.Lock()
+
 
 def _cleanup_old_requests():
     """Remove requests older than 1 hour to prevent unbounded growth."""
@@ -32,6 +42,57 @@ def _cleanup_old_requests():
                    if r.get('created_at', datetime.now()) < cutoff]
         for rid in expired:
             del _pending_requests[rid]
+    return len(expired) if expired else 0
+
+
+def _cleanup_loop():
+    """Background thread: periodically evict expired requests."""
+    while not _cleanup_stop_event.is_set():
+        # wait() returns True if the event was set (shutdown), False on timeout
+        if _cleanup_stop_event.wait(timeout=_CLEANUP_INTERVAL_SECONDS):
+            return
+        try:
+            removed = _cleanup_old_requests()
+            if removed:
+                logger.debug(f"Request cleanup: evicted {removed} stale entries")
+        except Exception as e:
+            logger.warning(f"Request cleanup loop error: {e}")
+
+
+def start_cleanup_thread() -> bool:
+    """Start the background cleanup timer once per process.
+
+    Returns True if a new thread was started, False if one was already
+    running. Safe to call multiple times; callers in multi-worker setups
+    should still gate on worker identity if they want exactly one thread
+    across the entire deployment.
+    """
+    global _cleanup_thread
+    with _cleanup_thread_lock:
+        if _cleanup_thread is not None and _cleanup_thread.is_alive():
+            return False
+        _cleanup_stop_event.clear()
+        _cleanup_thread = threading.Thread(
+            target=_cleanup_loop,
+            name="api-request-cleanup",
+            daemon=True,
+        )
+        _cleanup_thread.start()
+        logger.info("Started api/request cleanup timer (interval=%ss)" % _CLEANUP_INTERVAL_SECONDS)
+        return True
+
+
+def stop_cleanup_thread(timeout: float = 2.0) -> None:
+    """Signal the cleanup thread to exit. Used in tests and shutdown paths."""
+    global _cleanup_thread
+    with _cleanup_thread_lock:
+        thread = _cleanup_thread
+        _cleanup_stop_event.set()
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=timeout)
+    with _cleanup_thread_lock:
+        _cleanup_thread = None
+        _cleanup_stop_event.clear()
 
 
 def _run_search_and_download(request_id, query, notify_url):

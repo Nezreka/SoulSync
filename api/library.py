@@ -186,15 +186,8 @@ def register_routes(bp):
 
         try:
             db = get_database()
-            tracks = db.search_tracks(title=title, artist=artist, limit=limit)
-            if not tracks:
-                return api_success({"tracks": []})
-
-            # Re-query by IDs to get full row data
-            track_ids = [t.id for t in tracks]
-            full_tracks = db.api_get_tracks_by_ids(track_ids)
-
-            return api_success({"tracks": [serialize_track(t, fields) for t in full_tracks]})
+            tracks = db.api_search_tracks(title=title, artist=artist, limit=limit)
+            return api_success({"tracks": [serialize_track(t, fields) for t in tracks]})
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 

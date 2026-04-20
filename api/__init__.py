@@ -43,6 +43,7 @@ def create_api_blueprint():
     from .listenbrainz import register_routes as reg_listenbrainz
     from .cache import register_routes as reg_cache
     from .request import register_routes as reg_request
+    from .request import start_cleanup_thread as _start_request_cleanup
 
     # ---- rate-limit only /api/v1 routes (not the whole app) ----
     limiter.limit("60 per minute")(bp)
@@ -61,6 +62,11 @@ def create_api_blueprint():
     reg_listenbrainz(bp)
     reg_cache(bp)
     reg_request(bp)
+
+    # Start the periodic cleanup timer for in-memory request tracking so
+    # idle periods don't leave stale entries in memory. Idempotent across
+    # calls; safe with multi-blueprint registration.
+    _start_request_cleanup()
 
     # ---- error handlers (scoped to this Blueprint) ----
     @bp.errorhandler(400)
