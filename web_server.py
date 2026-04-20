@@ -37,7 +37,24 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-SOULSYNC_VERSION = "2.35"
+_SOULSYNC_BASE_VERSION = "2.35"
+
+def _build_version_string():
+    """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
+    sha = os.environ.get('SOULSYNC_COMMIT_SHA', '').strip()
+    if not sha:
+        try:
+            import subprocess
+            result = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(__file__) or '.')
+            if result.returncode == 0:
+                sha = result.stdout.strip()
+        except Exception:
+            pass
+    if sha:
+        return f"{_SOULSYNC_BASE_VERSION}+{sha[:7]}"
+    return _SOULSYNC_BASE_VERSION
+
+SOULSYNC_VERSION = _build_version_string()
 
 # Dedicated source reuse logger — writes alongside app.log in the configured log directory
 import logging as _logging
@@ -25925,7 +25942,10 @@ def restore_backup_endpoint(filename):
                 pass
 
         version_warning = None
-        if backup_version and backup_version != SOULSYNC_VERSION:
+        # Compare base versions only (strip +commit suffix) to avoid false mismatches
+        _backup_base = backup_version.split('+')[0] if backup_version else None
+        _current_base = SOULSYNC_VERSION.split('+')[0]
+        if _backup_base and _backup_base != _current_base:
             # Allow restore but warn — the caller must pass force=true to confirm
             force = request.json.get('force', False) if request.is_json else False
             if not force:
