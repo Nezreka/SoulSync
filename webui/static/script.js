@@ -20427,12 +20427,16 @@ async function addModalTracksToWishlist(playlistId) {
                     trackAlbumType = 'album';
                 }
 
-                // Resolve artist per-track: prefer track's own artists over process-level
+                // Resolve artist: for album downloads, use the album-level artist to keep
+                // all tracks grouped under one artist in the wishlist. Per-track artists
+                // (like individual vocalists on a soundtrack) should NOT split the album.
                 let trackArtist;
-                if (formattedArtists.length > 0 && formattedArtists[0].name && formattedArtists[0].name !== 'Unknown Artist') {
-                    trackArtist = formattedArtists[0];
-                } else if (processArtist && processArtist.name) {
+                if (processArtist && processArtist.name) {
+                    // Album context exists — use album artist to keep tracks grouped
                     trackArtist = processArtist;
+                } else if (formattedArtists.length > 0 && formattedArtists[0].name && formattedArtists[0].name !== 'Unknown Artist') {
+                    // No album context (playlist/single) — use track's own artist
+                    trackArtist = formattedArtists[0];
                 } else {
                     trackArtist = { name: 'Unknown Artist', id: null };
                 }
