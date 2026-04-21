@@ -293,6 +293,9 @@ class ApiCallTracker:
         try:
             if not os.path.exists(_PERSIST_PATH):
                 return
+            if os.path.getsize(_PERSIST_PATH) == 0:
+                logger.info(f"[ApiCallTracker] History file is empty, starting fresh: {_PERSIST_PATH}")
+                return
             with open(_PERSIST_PATH, 'r') as f:
                 raw = json.load(f)
             saved_ts = raw.get('ts', 0)
@@ -311,6 +314,8 @@ class ApiCallTracker:
                     if e.get('ts', 0) >= cutoff:
                         self._events.append(e)
             logger.info(f"[ApiCallTracker] Restored history for {len(history)} services, {len(events)} events")
+        except json.JSONDecodeError as e:
+            logger.warning(f"[ApiCallTracker] History file is not valid JSON, starting fresh: {_PERSIST_PATH} ({e})")
         except Exception as e:
             logger.error(f"[ApiCallTracker] Failed to load history: {e}")
 
