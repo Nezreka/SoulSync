@@ -32,8 +32,8 @@ CHROMAPRINT_VERSION = "1.5.1"
 # Set up dedicated AcoustID logger with its own file
 logger = get_logger("acoustid_client")
 
-# Add dedicated file handler for AcoustID logs
-_acoustid_log_path = Path(__file__).parent.parent / "logs" / "acoustid.log"
+# Add dedicated file handler for AcoustID logs alongside the configured app log
+_acoustid_log_path = Path(config_manager.get('logging.path', 'logs/app.log')).parent / "acoustid.log"
 _acoustid_log_path.parent.mkdir(parents=True, exist_ok=True)
 _acoustid_file_handler = logging.handlers.RotatingFileHandler(
     _acoustid_log_path, encoding='utf-8', maxBytes=5*1024*1024, backupCount=2
