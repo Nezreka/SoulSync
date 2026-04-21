@@ -2,6 +2,7 @@
 # Runtime web dependencies + test runner
 
 -r requirements.txt
+ruff
 
 # Test runner
 pytest>=9.0.0
