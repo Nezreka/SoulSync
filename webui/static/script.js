@@ -6436,14 +6436,19 @@ function updateMediaServerFields() {
 let _plexPinAuthRequestId = null;
 let _plexPinAuthPollInterval = null;
 
-function showPlexConfiguration() {
+function showPlexConfiguration(disableFields = false) {
     stopPlexPinAuthPolling();
     const plexConfig = document.getElementById('plex-configuration');
     const plexSetup = document.getElementById('plex-setup');
     const plexPinAuthFlow = document.getElementById('plex-pin-auth-flow');
+    const plexUrl = document.getElementById('plex-url');
+    const plexToken = document.getElementById('plex-token');
+
     if (plexConfig) plexConfig.style.display = '';
     if (plexSetup) plexSetup.style.display = 'none';
     if (plexPinAuthFlow) plexPinAuthFlow.style.display = 'none';
+    if (plexUrl) plexUrl.disabled = disableFields;
+    if (plexToken) plexToken.disabled = disableFields;
 }
 
 async function startPlexPinAuth() {
@@ -6517,10 +6522,11 @@ async function pollPlexPinAuthStatus() {
             document.getElementById('plex-url').value = result.found_url || '';
             document.getElementById('plex-token').value = result.token || '';
             if (typeof saveSettings === 'function') {
-                saveSettings(true);
+                await saveSettings(true);
             }
             showToast('Plex successfully linked', 'success');
-            showPlexConfiguration();
+            showPlexConfiguration(true);
+            await testConnection('plex');
             return;
         }
 
@@ -6573,6 +6579,12 @@ function clearPlexConfiguration() {
     if (plexViewConfigButton) plexViewConfigButton.style.display = 'none';
     if (plexLinkToPlexButton) plexLinkToPlexButton.style.display = '';
     if (plexManualConfigButton) plexManualConfigButton.style.display = '';
+
+    try {
+        await fetch('/api/plex/clear-library', { method: 'POST' });
+    } catch (e) {
+        console.warn('Failed to clear Plex library preference:', e);
+    }
 
     if (typeof saveSettings === 'function') {
         saveSettings(true);
