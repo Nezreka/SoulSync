@@ -3600,6 +3600,10 @@ function closeHelperSearch() {
 
 const WHATS_NEW = {
     '2.35': [
+        // --- April 21, 2026 ---
+        { date: 'April 21, 2026' },
+        { title: 'Fix Reorganize All Ignoring Album Type', desc: 'Reorganize All was sending every album — EPs, singles, and compilations — into the "Albums" folder because the $albumtype template variable silently defaulted to "Album". The variable is now resolved from the album\'s record_type (with track-count fallback) so ${albumtype}s produces the expected Albums/Singles/EPs/Compilations split', page: 'library' },
+
         // --- April 20, 2026 ---
         { date: 'April 20, 2026' },
         { title: 'Discography Backfill Maintenance Job', desc: 'New library maintenance job that scans each artist in your library, fetches their full discography from metadata sources, and creates findings for any missing tracks. Review findings and click "Add to Wishlist" to queue them for download. Respects content filters (live/remix/acoustic/compilation) and release type filters. Opt-in, disabled by default', page: 'library' },
