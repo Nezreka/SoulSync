@@ -7383,6 +7383,8 @@ def clear_plex_library_preference():
         from database.music_database import MusicDatabase
         db = MusicDatabase()
         db.set_preference('plex_music_library', '')
+        if plex_client:
+            plex_client.music_library = None
         return jsonify({"success": True, "message": "Plex library preference cleared."})
     except Exception as e:
         logger.error(f"Error clearing Plex library preference: {e}")

@@ -4322,10 +4322,16 @@
                                         <div class="form-group">
                                             <label>Plex Server URL:</label>
                                             <input type="url" id="plex-url" placeholder="http://localhost:32400">
+                                            <div class="form-actions" id="plex-url-actions" style="justify-content:flex-end; width: 100%; flex-basis: 100%; margin-top: 8px;">
+                                                <button id="plex-autodetect-button" class="detect-button" onclick="autoDetectPlex()">Auto-detect</button>
+                                            </div>
                                         </div>
                                         <div class="form-group">
                                             <label>Plex Token:</label>
                                             <input type="password" id="plex-token" placeholder="X-Plex-Token">
+                                            <div class="form-actions" id="plex-token-actions" style="justify-content:flex-end; width: 100%; flex-basis: 100%; margin-top: 8px;">
+                                                <button id="plex-connect-button" class="test-button" onclick="testConnection('plex')">Connect</button>
+                                            </div>
                                         </div>
                                         <div class="form-group" id="plex-library-selector-container" style="display: none;">
                                             <label>Music Library:</label>
@@ -4337,8 +4343,6 @@
                                             </small>
                                         </div>
                                         <div class="form-actions">
-                                            <button class="detect-button" onclick="autoDetectPlex()">Auto-detect</button>
-                                            <button class="test-button" onclick="testConnection('plex')">Test</button>
                                             <button class="detect-button" onclick="clearPlexConfiguration()">Clear Configuration</button>
                                         </div>
                                     </div>
