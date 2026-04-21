@@ -4343,9 +4343,26 @@
                                         </div>
                                     </div>
                                     <div id="plex-setup">
-                                        <div class="form-actions">
-                                            <button id="plex-configure-button" class="detect-button configure-button">Configure</button>
+                                        <div id="plex-setup-buttons" class="form-actions">
+                                            <button id="plex-link-to-plex-button" class="detect-button" onclick="startPlexPinAuth()">Link to Plex (OAuth)</button>
+                                            <button id="plex-manual-config-button" class="detect-button" onclick="showPlexConfiguration()">Manually Configure Plex</button>
                                             <button id="plex-view-config-button" class="detect-button view-config-button" onclick="showPlexConfiguration()">View Configuration</button>
+                                        </div>
+                                        <div id="plex-pin-auth-flow" style="display: none; padding: 16px; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; margin-top: 12px;">
+                                            <div class="form-group">
+                                                <label>Plex PIN Code</label>
+                                                <div id="plex-pin-code" style="font-size: 1.4em; font-weight: 700; margin-top: 8px;"></div>
+                                            </div>
+                                            <div class="form-group">
+                                                <div id="plex-pin-instructions" class="setting-help-text" style="margin-bottom: 8px;">
+                                                    Go to <strong>https://plex.tv/link</strong> and enter the code shown above.
+                                                </div>
+                                                <div id="plex-pin-status" class="setting-help-text" style="color: #ccc;"></div>
+                                            </div>
+                                            <div class="form-actions" style="gap: 10px;">
+                                                <button class="detect-button" id="plex-pin-refresh-button" onclick="restartPlexPinAuth()">Generate New Code</button>
+                                                <button class="test-button" onclick="cancelPlexPinAuth()">Cancel</button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
