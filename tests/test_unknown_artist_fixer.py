@@ -110,7 +110,7 @@ def test_unknown_artist_fixer_uses_primary_source_track_id_first(monkeypatch):
         "title": "Unknown Title",
         "album_title": "Unknown Album",
         "spotify_track_id": "sp-1",
-        "deezer_track_id": "dz-1",
+        "deezer_id": "dz-1",
         "itunes_track_id": "",
     }
 
@@ -176,7 +176,7 @@ def test_unknown_artist_fixer_searches_primary_source_first(monkeypatch):
         "title": "Matching Title",
         "album_title": "Matching Album",
         "spotify_track_id": "",
-        "deezer_track_id": "",
+        "deezer_id": "",
         "itunes_track_id": "",
     }
 
@@ -229,7 +229,7 @@ def test_unknown_artist_fixer_supports_hydrabase_title_search(monkeypatch):
         "title": "Hydra Match",
         "album_title": "Hydra Album",
         "spotify_track_id": "",
-        "deezer_track_id": "",
+        "deezer_id": "",
         "itunes_track_id": "",
     }
 

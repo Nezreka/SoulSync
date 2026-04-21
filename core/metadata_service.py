@@ -10,6 +10,7 @@ auth checks, or source-fallback behavior.
 import threading
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any, Literal
+import requests
 from core.spotify_client import SpotifyClient
 from core.itunes_client import iTunesClient
 from utils.logging_config import get_logger
@@ -1032,8 +1033,15 @@ def check_album_completion(
     artist_name: str,
     source_override: Optional[str] = None,
     source_chain: Optional[List[str]] = None,
+    candidate_albums: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
-    """Check completion status for a single album."""
+    """Check completion status for a single album.
+
+    When `candidate_albums` is provided, the DB matcher skips per-album SQL
+    searches and scores every pre-fetched candidate in-memory. Intended for
+    callers iterating a discography that have already loaded the artist's
+    full library once via `db.get_candidate_albums_for_artist(...)`.
+    """
     try:
         source_chain = source_chain or _get_completion_source_chain(source_override)
         album_name = album_data.get('name', '')
@@ -1045,7 +1053,7 @@ def check_album_completion(
         if total_tracks == 0 and album_id:
             logger.debug("No track count found for '%s' (%s)", album_name, album_id)
 
-        print(f"Checking album: '{album_name}' ({total_tracks} tracks)")
+        logger.debug(f"Checking album: '{album_name}' ({total_tracks} tracks)")
 
         formats = []
         # Check if album exists in database with completeness info
@@ -1057,10 +1065,11 @@ def check_album_completion(
                 artist=artist_name,
                 expected_track_count=total_tracks if total_tracks > 0 else None,
                 confidence_threshold=0.7,
-                server_source=active_server
+                server_source=active_server,
+                candidate_albums=candidate_albums
             )
         except Exception as db_error:
-            print(f"Database error for album '{album_name}': {db_error}")
+            logger.error(f"Database error for album '{album_name}': {db_error}")
             return {
                 "id": album_id,
                 "name": album_name,
@@ -1088,7 +1097,14 @@ def check_album_completion(
         else:
             status = "missing"
 
-        print(f"  Result: {owned_tracks}/{expected_tracks or total_tracks} tracks ({completion_percentage:.1f}%) - {status}")
+        logger.debug(
+            "Album completion result: owned=%s expected=%s total=%s completion=%.1f status=%s",
+            owned_tracks,
+            expected_tracks or total_tracks,
+            total_tracks,
+            completion_percentage,
+            status,
+        )
 
         return {
             "id": album_id,
@@ -1103,7 +1119,7 @@ def check_album_completion(
         }
 
     except Exception as e:
-        print(f"Error checking album completion for '{album_data.get('name', 'Unknown')}': {e}")
+        logger.error(f"Error checking album completion for '{album_data.get('name', 'Unknown')}': {e}")
         return {
             "id": album_data.get('id', ''),
             "name": album_data.get('name', 'Unknown'),
@@ -1123,8 +1139,16 @@ def check_single_completion(
     artist_name: str,
     source_override: Optional[str] = None,
     source_chain: Optional[List[str]] = None,
+    candidate_albums: Optional[List[Any]] = None,
+    candidate_tracks: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
-    """Check completion status for a single/EP."""
+    """Check completion status for a single/EP.
+
+    `candidate_albums` applies to the EP branch (treated as an album lookup).
+    `candidate_tracks` applies to the true-single branch (track-level lookup).
+    Both are optional; None on either preserves the legacy per-item SQL path
+    for that branch.
+    """
     try:
         source_chain = source_chain or _get_completion_source_chain(source_override)
         single_name = single_data.get('name', '')
@@ -1137,7 +1161,12 @@ def check_single_completion(
         if total_tracks == 0:
             total_tracks = _resolve_completion_track_total(single_data, source_chain) or 1
 
-        print(f"Checking {album_type}: '{single_name}' ({total_tracks} tracks)")
+        logger.debug(
+            "Checking %s: name=%r tracks=%s",
+            album_type,
+            single_name,
+            total_tracks,
+        )
 
         if album_type == 'ep' or total_tracks > 1:
             try:
@@ -1148,10 +1177,11 @@ def check_single_completion(
                     artist=artist_name,
                     expected_track_count=total_tracks,
                     confidence_threshold=0.7,
-                    server_source=active_server
+                    server_source=active_server,
+                    candidate_albums=candidate_albums
                 )
             except Exception as db_error:
-                print(f"Database error for EP '{single_name}': {db_error}")
+                logger.error(f"Database error for EP '{single_name}': {db_error}")
                 owned_tracks, expected_tracks, confidence = 0, total_tracks, 0.0
                 db_album = None
 
@@ -1167,7 +1197,14 @@ def check_single_completion(
             else:
                 status = "missing"
 
-            print(f"  EP Result: {owned_tracks}/{expected_tracks or total_tracks} tracks ({completion_percentage:.1f}%) - {status}")
+            logger.debug(
+                "EP completion result: owned=%s expected=%s total=%s completion=%.1f status=%s",
+                owned_tracks,
+                expected_tracks or total_tracks,
+                total_tracks,
+                completion_percentage,
+                status,
+            )
 
             return {
                 "id": single_id,
@@ -1189,10 +1226,11 @@ def check_single_completion(
                     title=single_name,
                     artist=artist_name,
                     confidence_threshold=0.7,
-                    server_source=active_server
+                    server_source=active_server,
+                    candidate_tracks=candidate_tracks
                 )
             except Exception as db_error:
-                print(f"Database error for single '{single_name}': {db_error}")
+                logger.error(f"Database error for single '{single_name}': {db_error}")
                 db_track, confidence = None, 0.0
 
             owned_tracks = 1 if db_track else 0
@@ -1208,7 +1246,12 @@ def check_single_completion(
                 elif ext:
                     formats = [ext]
 
-            print(f"  Single Result: {owned_tracks}/1 tracks ({completion_percentage:.1f}%) - {status}")
+            logger.debug(
+                "Single completion result: owned=%s expected=1 completion=%.1f status=%s",
+                owned_tracks,
+                completion_percentage,
+                status,
+            )
 
             return {
                 "id": single_id,
@@ -1224,7 +1267,7 @@ def check_single_completion(
             }
 
     except Exception as e:
-        print(f"Error checking single/EP completion for '{single_data.get('name', 'Unknown')}': {e}")
+        logger.error(f"Error checking single/EP completion for '{single_data.get('name', 'Unknown')}': {e}")
         return {
             "id": single_data.get('id', ''),
             "name": single_data.get('name', 'Unknown'),
@@ -1258,12 +1301,35 @@ def iter_artist_discography_completion_events(
     total_items = len(albums) + len(singles)
     processed_count = 0
 
+    # Pre-fetch the artist's library albums AND tracks ONCE so per-item matching
+    # runs in-memory. Same batching trick as the library completion-stream endpoint.
+    import time as _time_metadata
+    candidate_albums = None
+    candidate_tracks = None
+    try:
+        from config.settings import config_manager as _cm_metadata
+        _active_server = _cm_metadata.get_active_media_server()
+        _t0 = _time_metadata.perf_counter()
+        candidate_albums = db.get_candidate_albums_for_artist(resolved_artist_name, server_source=_active_server)
+        _t1 = _time_metadata.perf_counter()
+        print(f"[artist-completion-stream] Pre-fetched {len(candidate_albums) if candidate_albums is not None else 0} library albums for '{resolved_artist_name}' in {(_t1 - _t0) * 1000:.0f}ms")
+        if candidate_albums:
+            _t2 = _time_metadata.perf_counter()
+            candidate_tracks = db.get_candidate_tracks_for_albums([a.id for a in candidate_albums])
+            _t3 = _time_metadata.perf_counter()
+            print(f"[artist-completion-stream] Pre-fetched {len(candidate_tracks) if candidate_tracks is not None else 0} library tracks in {(_t3 - _t2) * 1000:.0f}ms")
+    except Exception as _pre_err:
+        print(f"[artist-completion-stream] Failed to pre-fetch candidates for '{resolved_artist_name}': {_pre_err}")
+        candidate_albums = None
+        candidate_tracks = None
+
     yield {
         'type': 'start',
         'total_items': total_items,
         'artist_name': resolved_artist_name,
     }
 
+    _loop_start = _time_metadata.perf_counter()
     for album in albums:
         try:
             completion_data = check_album_completion(
@@ -1272,6 +1338,7 @@ def iter_artist_discography_completion_events(
                 resolved_artist_name,
                 source_override=source_override,
                 source_chain=source_chain,
+                candidate_albums=candidate_albums,
             )
             completion_data['type'] = 'album_completion'
             completion_data['container_type'] = 'albums'
@@ -1295,6 +1362,8 @@ def iter_artist_discography_completion_events(
                 resolved_artist_name,
                 source_override=source_override,
                 source_chain=source_chain,
+                candidate_albums=candidate_albums,
+                candidate_tracks=candidate_tracks,
             )
             completion_data['type'] = 'single_completion'
             completion_data['container_type'] = 'singles'
@@ -1309,6 +1378,9 @@ def iter_artist_discography_completion_events(
                 'name': single.get('name', 'Unknown'),
                 'error': str(e),
             }
+
+    _loop_elapsed = _time_metadata.perf_counter() - _loop_start
+    print(f"[artist-completion-stream] Processed {total_items} items for '{resolved_artist_name}' in {_loop_elapsed * 1000:.0f}ms")
 
     yield {
         'type': 'complete',
@@ -1342,6 +1414,397 @@ def check_artist_discography_completion(
         'albums': albums_completion,
         'singles': singles_completion,
     }
+
+
+def _fetch_musicmap_similar_artist_names(artist_name: str) -> List[str]:
+    """Fetch similar artist names from MusicMap."""
+    if not (artist_name or '').strip():
+        raise ValueError('Artist name is required')
+
+    from bs4 import BeautifulSoup
+    from urllib.parse import quote_plus
+
+    url_artist = quote_plus(artist_name.strip())
+    musicmap_url = f'https://www.music-map.com/{url_artist}'
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+    }
+
+    logger.debug("Fetching MusicMap: %s", musicmap_url)
+    response = requests.get(musicmap_url, headers=headers, timeout=10)
+    response.raise_for_status()
+
+    soup = BeautifulSoup(response.text, 'html.parser')
+    gnod_map = soup.find(id='gnodMap')
+    if not gnod_map:
+        raise ValueError('Could not find artist map on MusicMap')
+
+    searched_artist_lower = _normalize_artist_name(artist_name)
+    similar_artist_names: List[str] = []
+    seen_names = set()
+
+    for anchor in gnod_map.find_all('a'):
+        artist_text = anchor.get_text(strip=True)
+        normalized_name = _normalize_artist_name(artist_text)
+        if not normalized_name or normalized_name == searched_artist_lower or normalized_name in seen_names:
+            continue
+        seen_names.add(normalized_name)
+        similar_artist_names.append(artist_text)
+
+    logger.debug("Found %s similar artists from MusicMap", len(similar_artist_names))
+    return similar_artist_names
+
+
+def _extract_artist_image_url(artist_data: Any) -> Optional[str]:
+    if not artist_data:
+        return None
+
+    images = _extract_lookup_value(artist_data, 'images', default=[]) or []
+    if not isinstance(images, list):
+        try:
+            images = list(images)
+        except TypeError:
+            images = []
+
+    if images:
+        first_image = images[0]
+        image_url = _extract_lookup_value(first_image, 'url')
+        if image_url:
+            return image_url
+
+    return _extract_lookup_value(
+        artist_data,
+        'image_url',
+        'thumb_url',
+        'cover_image',
+        'picture_xl',
+        'picture_big',
+        'picture_medium',
+    )
+
+
+def _build_similar_artist_payload(artist_data: Any, source: str) -> Optional[Dict[str, Any]]:
+    artist_id = _extract_lookup_value(artist_data, 'id', 'artist_id', 'spotify_id', 'itunes_id', 'deezer_id')
+    if not artist_id:
+        return None
+
+    if isinstance(artist_data, dict):
+        name = artist_data.get('name') or artist_data.get('artist_name') or artist_data.get('title')
+        genres = artist_data.get('genres') or []
+        popularity = artist_data.get('popularity') or artist_data.get('rank') or 0
+    else:
+        name = (
+            getattr(artist_data, 'name', None)
+            or getattr(artist_data, 'artist_name', None)
+            or getattr(artist_data, 'title', None)
+        )
+        genres = getattr(artist_data, 'genres', None) or []
+        popularity = getattr(artist_data, 'popularity', None) or getattr(artist_data, 'rank', None) or 0
+
+    if isinstance(genres, str):
+        genres = [genres]
+    elif not isinstance(genres, list):
+        try:
+            genres = list(genres)
+        except TypeError:
+            genres = []
+
+    try:
+        popularity = int(popularity or 0)
+    except Exception:
+        popularity = 0
+
+    return {
+        'id': str(artist_id),
+        'name': str(name or artist_id),
+        'image_url': _extract_artist_image_url(artist_data),
+        'genres': genres,
+        'popularity': popularity,
+        'source': source,
+    }
+
+
+def _resolve_musicmap_artist_source_ids(artist_name: str, source_chain: List[str]) -> Dict[str, Optional[str]]:
+    searched_source_ids: Dict[str, Optional[str]] = {}
+
+    for source in source_chain:
+        client = get_client_for_source(source)
+        if not client:
+            searched_source_ids[source] = None
+            continue
+
+        search_results = _search_artists_for_source(source, client, artist_name, limit=1)
+        searched_source_ids[source] = _extract_lookup_value(search_results[0], 'id', 'artist_id') if search_results else None
+
+    return searched_source_ids
+
+
+def _match_musicmap_similar_artist(
+    candidate_name: str,
+    source_chain: List[str],
+    searched_artist_name: str,
+    searched_source_ids: Dict[str, Optional[str]],
+) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+    target_name = _normalize_artist_name(candidate_name)
+    searched_name = _normalize_artist_name(searched_artist_name)
+
+    for source in source_chain:
+        client = get_client_for_source(source)
+        if not client:
+            continue
+
+        search_results = _search_artists_for_source(source, client, candidate_name, limit=1)
+        if not search_results:
+            continue
+
+        matched_artist = _pick_best_artist_match(search_results, candidate_name)
+        if not matched_artist:
+            continue
+
+        matched_name = _normalize_artist_name(
+            _extract_lookup_value(matched_artist, 'name', 'artist_name', 'title')
+        )
+        if matched_name and matched_name == searched_name:
+            continue
+
+        matched_id = _extract_lookup_value(matched_artist, 'id', 'artist_id')
+        if not matched_id:
+            continue
+
+        if str(matched_id) == str(searched_source_ids.get(source) or ''):
+            continue
+
+        payload = _build_similar_artist_payload(matched_artist, source)
+        if not payload:
+            continue
+
+        if source == 'itunes' and not payload.get('image_url') and hasattr(client, 'get_artist'):
+            try:
+                full_artist = client.get_artist(str(matched_id))
+                image_url = _extract_artist_image_url(full_artist)
+                if image_url:
+                    payload['image_url'] = image_url
+                elif hasattr(client, '_get_artist_image_from_albums'):
+                    album_image_url = client._get_artist_image_from_albums(str(matched_id))
+                    if album_image_url:
+                        payload['image_url'] = album_image_url
+            except Exception as exc:
+                logger.debug("Could not enrich iTunes image for %s: %s", matched_id, exc)
+
+        if target_name and _normalize_artist_name(payload['name']) == searched_name:
+            continue
+
+        return source, payload
+
+    return None, None
+
+
+def iter_musicmap_similar_artist_events(
+    artist_name: str,
+    limit: int = 20,
+    source_override: Optional[str] = None,
+):
+    """Yield MusicMap similar-artist events using source priority."""
+    try:
+        source_chain = _get_source_chain_for_lookup(
+            MetadataLookupOptions(source_override=source_override, allow_fallback=True)
+        )
+        available_sources = [source for source in source_chain if get_client_for_source(source)]
+        if not available_sources:
+            yield {
+                'type': 'error',
+                'error': 'No metadata providers available for similar artist matching',
+                'status_code': 503,
+            }
+            return
+
+        similar_artist_names = _fetch_musicmap_similar_artist_names(artist_name)
+        searched_source_ids = _resolve_musicmap_artist_source_ids(artist_name, source_chain)
+
+        yield {
+            'type': 'start',
+            'artist_name': artist_name,
+            'total_found': len(similar_artist_names),
+            'source_priority': source_chain,
+        }
+
+        matched_count = 0
+        seen_names = set()
+        seen_ids = set()
+
+        for candidate_name in similar_artist_names[:limit]:
+            normalized_candidate = _normalize_artist_name(candidate_name)
+            if not normalized_candidate or normalized_candidate in seen_names:
+                continue
+
+            source, payload = _match_musicmap_similar_artist(
+                candidate_name,
+                source_chain,
+                artist_name,
+                searched_source_ids,
+            )
+            if not payload:
+                continue
+
+            payload_id = str(payload.get('id') or '')
+            if payload_id in seen_ids:
+                continue
+
+            seen_names.add(normalized_candidate)
+            seen_ids.add(payload_id)
+            matched_count += 1
+
+            yield {
+                'type': 'artist',
+                'artist': payload,
+                'source': source,
+            }
+
+        yield {
+            'type': 'complete',
+            'complete': True,
+            'total': matched_count,
+            'total_found': len(similar_artist_names),
+            'artist_name': artist_name,
+            'source_priority': source_chain,
+        }
+
+    except requests.exceptions.RequestException as exc:
+        logger.debug("Error fetching MusicMap for %s: %s", artist_name, exc)
+        yield {
+            'type': 'error',
+            'error': f'Failed to fetch from MusicMap: {exc}',
+            'status_code': 502,
+        }
+    except ValueError as exc:
+        status_code = 404 if 'Could not find artist map on MusicMap' in str(exc) else 400
+        yield {
+            'type': 'error',
+            'error': str(exc),
+            'status_code': status_code,
+        }
+    except Exception as exc:
+        logger.error("Error streaming similar artists for %s: %s", artist_name, exc)
+        yield {
+            'type': 'error',
+            'error': str(exc),
+            'status_code': 500,
+        }
+
+
+def get_musicmap_similar_artists(
+    artist_name: str,
+    limit: int = 20,
+    source_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return matched MusicMap similar artists as a single payload."""
+    artists: List[Dict[str, Any]] = []
+    total_found = 0
+    error_message = None
+    status_code = 500
+    source_priority: List[str] = []
+
+    for event in iter_musicmap_similar_artist_events(
+        artist_name,
+        limit=limit,
+        source_override=source_override,
+    ):
+        if event.get('type') == 'start':
+            total_found = event.get('total_found', 0)
+            source_priority = event.get('source_priority', [])
+        elif event.get('type') == 'artist' and event.get('artist'):
+            artists.append(event['artist'])
+        elif event.get('type') == 'complete':
+            total_found = event.get('total_found', total_found)
+            source_priority = event.get('source_priority', source_priority)
+        elif event.get('type') == 'error':
+            error_message = event.get('error', 'Unknown error')
+            status_code = int(event.get('status_code') or status_code or 500)
+            break
+
+    if error_message:
+        return {
+            'success': False,
+            'error': error_message,
+            'status_code': status_code,
+            'artist': artist_name,
+            'similar_artists': [],
+            'total_found': total_found,
+            'total_matched': 0,
+            'source_priority': source_priority,
+        }
+
+    return {
+        'success': True,
+        'artist': artist_name,
+        'similar_artists': artists,
+        'total_found': total_found,
+        'total_matched': len(artists),
+        'source_priority': source_priority,
+    }
+
+
+def _get_artist_image_from_source(source: str, artist_id: str) -> Optional[str]:
+    client = get_client_for_source(source)
+    if not client:
+        return None
+
+    try:
+        if source == 'spotify':
+            artist_data = client.get_artist(artist_id, allow_fallback=False)
+        else:
+            artist_data = client.get_artist(artist_id)
+    except Exception as exc:
+        logger.debug("Could not fetch artist image for %s on %s: %s", artist_id, source, exc)
+        artist_data = None
+
+    image_url = _extract_artist_image_url(artist_data)
+    if image_url:
+        return image_url
+
+    if hasattr(client, '_get_artist_image_from_albums'):
+        try:
+            return client._get_artist_image_from_albums(artist_id)
+        except Exception as exc:
+            logger.debug("Could not fetch artist album art for %s on %s: %s", artist_id, source, exc)
+
+    return None
+
+
+def get_artist_image_url(
+    artist_id: str,
+    source_override: Optional[str] = None,
+    plugin: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve an artist image URL using the configured source priority."""
+    if not artist_id:
+        return None
+
+    if artist_id.startswith('soul_'):
+        return None
+
+    source_override = (source_override or '').strip().lower()
+    plugin = (plugin or '').strip().lower()
+
+    if source_override == 'hydrabase':
+        if plugin in ('deezer', 'itunes'):
+            return _get_artist_image_from_source(plugin, artist_id)
+        if artist_id.isdigit():
+            return _get_artist_image_from_source('itunes', artist_id)
+        return None
+
+    if source_override:
+        return _get_artist_image_from_source(source_override, artist_id)
+
+    for source in get_source_priority(get_primary_source()):
+        image_url = _get_artist_image_from_source(source, artist_id)
+        if image_url:
+            return image_url
+
+    return None
 
 
 def get_deezer_client():

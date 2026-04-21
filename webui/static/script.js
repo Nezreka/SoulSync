@@ -5703,17 +5703,19 @@ function validateFileOrganizationTemplates() {
             errors.push('Album template cannot have consecutive slashes //');
         }
         // Check for likely typos of valid variables (case-insensitive to catch $Album, $ARTIST, etc.)
-        const albumVarPattern = /\$[a-zA-Z]+/g;
+        const albumVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
         const foundVars = albumPath.match(albumVarPattern) || [];
         foundVars.forEach(v => {
-            const lowerVar = v.toLowerCase();
+            // Normalize ${var} to $var for validation
+            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
+            const lowerVar = normalized.toLowerCase();
             // Check if lowercase version exists in valid vars
             const isValid = validVars.album.some(validVar => validVar.toLowerCase() === lowerVar);
             if (!isValid) {
-                errors.push(`Invalid variable "${v}" in album template. Valid: ${validVars.album.join(', ')}`);
-            } else if (v !== lowerVar && validVars.album.includes(lowerVar)) {
+                errors.push(`Invalid variable "${normalized}" in album template. Valid: ${validVars.album.join(', ')}`);
+            } else if (normalized !== lowerVar && validVars.album.includes(lowerVar)) {
                 // Variable is valid but has wrong case
-                errors.push(`Variable "${v}" should be lowercase: "${lowerVar}"`);
+                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
             }
         });
     }
@@ -5730,15 +5732,16 @@ function validateFileOrganizationTemplates() {
         if (singlePath.includes('//')) {
             errors.push('Single template cannot have consecutive slashes //');
         }
-        const singleVarPattern = /\$[a-zA-Z]+/g;
+        const singleVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
         const foundVars = singlePath.match(singleVarPattern) || [];
         foundVars.forEach(v => {
-            const lowerVar = v.toLowerCase();
+            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
+            const lowerVar = normalized.toLowerCase();
             const isValid = validVars.single.some(validVar => validVar.toLowerCase() === lowerVar);
             if (!isValid) {
-                errors.push(`Invalid variable "${v}" in single template. Valid: ${validVars.single.join(', ')}`);
-            } else if (v !== lowerVar && validVars.single.includes(lowerVar)) {
-                errors.push(`Variable "${v}" should be lowercase: "${lowerVar}"`);
+                errors.push(`Invalid variable "${normalized}" in single template. Valid: ${validVars.single.join(', ')}`);
+            } else if (normalized !== lowerVar && validVars.single.includes(lowerVar)) {
+                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
             }
         });
     }
@@ -5757,15 +5760,16 @@ function validateFileOrganizationTemplates() {
         if (playlistPath.includes('//')) {
             errors.push('Playlist template cannot have consecutive slashes //');
         }
-        const playlistVarPattern = /\$[a-zA-Z]+/g;
+        const playlistVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
         const foundVars = playlistPath.match(playlistVarPattern) || [];
         foundVars.forEach(v => {
-            const lowerVar = v.toLowerCase();
+            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
+            const lowerVar = normalized.toLowerCase();
             const isValid = validVars.playlist.some(validVar => validVar.toLowerCase() === lowerVar);
             if (!isValid) {
-                errors.push(`Invalid variable "${v}" in playlist template. Valid: ${validVars.playlist.join(', ')}`);
-            } else if (v !== lowerVar && validVars.playlist.includes(lowerVar)) {
-                errors.push(`Variable "${v}" should be lowercase: "${lowerVar}"`);
+                errors.push(`Invalid variable "${normalized}" in playlist template. Valid: ${validVars.playlist.join(', ')}`);
+            } else if (normalized !== lowerVar && validVars.playlist.includes(lowerVar)) {
+                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
             }
         });
     }
@@ -6229,6 +6233,9 @@ async function loadSettingsData() {
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
+        document.getElementById('artist-separator').value = settings.metadata_enhancement?.tags?.artist_separator || ', ';
+        document.getElementById('write-multi-artist').checked = settings.metadata_enhancement?.tags?.write_multi_artist || false;
+        document.getElementById('feat-in-title').checked = settings.metadata_enhancement?.tags?.feat_in_title || false;
         document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
 
         // Populate Playlist Sync settings
@@ -7868,7 +7875,10 @@ async function saveSettings(quiet = false) {
             lrclib_enabled: document.getElementById('lrclib-enabled').checked,
             tags: {
                 quality_tag: _getTagConfig('metadata_enhancement.tags.quality_tag'),
-                genre_merge: _getTagConfig('metadata_enhancement.tags.genre_merge')
+                genre_merge: _getTagConfig('metadata_enhancement.tags.genre_merge'),
+                artist_separator: document.getElementById('artist-separator').value,
+                write_multi_artist: document.getElementById('write-multi-artist').checked,
+                feat_in_title: document.getElementById('feat-in-title').checked
             }
         },
         musicbrainz: {
@@ -17493,11 +17503,31 @@ function renderQueue(containerId, downloads, isActiveQueue) {
             `;
         }
 
+        // Enrich with metadata from backend context (artist, album, artwork)
+        const meta = item._meta || {};
+        const sourceLabels = { youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', lidarr: 'Lidarr' };
+        const sourceBadge = sourceLabels[item.username] || item.username;
+
         html += `
             <div class="download-item" data-id="${item.id}">
-                <div class="download-item__header">
+                <div class="download-item__art">
+                    ${meta.artwork_url
+                        ? `<img src="${meta.artwork_url}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'download-item__art-placeholder\\'>&#9835;</div>'">`
+                        : '<div class="download-item__art-placeholder">&#9835;</div>'}
+                </div>
+                <div class="download-item__info">
                     <div class="download-item__title" title="${title}">${title}</div>
-                    <div class="download-item__uploader" title="from ${item.username}">from ${item.username}</div>
+                    ${meta.artist || meta.album ? `
+                        <div class="download-item__meta">
+                            ${meta.artist ? `<span>${escapeHtml(meta.artist)}</span>` : ''}
+                            ${meta.artist && meta.album ? '<span class="download-item__sep">&middot;</span>' : ''}
+                            ${meta.album ? `<span class="download-item__album">${escapeHtml(meta.album)}</span>` : ''}
+                        </div>
+                    ` : ''}
+                    <div class="download-item__badges">
+                        <span class="download-item__source">${sourceBadge}</span>
+                        ${meta.quality ? `<span class="download-item__quality">${escapeHtml(meta.quality)}</span>` : ''}
+                    </div>
                 </div>
                 <div class="download-item__content">
                     ${actionButtonHTML}
@@ -36516,10 +36546,20 @@ async function lazyLoadSimilarArtistImages(container) {
 
         await Promise.all(batch.map(async (bubble) => {
             const artistId = bubble.getAttribute('data-artist-id');
+            const artistSource = bubble.getAttribute('data-artist-source') || '';
+            const artistPlugin = bubble.getAttribute('data-artist-plugin') || '';
             if (!artistId) return;
 
             try {
-                const response = await fetch(`/api/artist/${artistId}/image`);
+                const params = new URLSearchParams();
+                if (artistSource) params.set('source', artistSource);
+                if (artistPlugin) params.set('plugin', artistPlugin);
+
+                const imageUrl = params.toString()
+                    ? `/api/artist/${encodeURIComponent(artistId)}/image?${params.toString()}`
+                    : `/api/artist/${encodeURIComponent(artistId)}/image`;
+
+                const response = await fetch(imageUrl);
                 const data = await response.json();
 
                 if (data.success && data.image_url) {
@@ -36600,6 +36640,10 @@ function createSimilarArtistBubble(artist) {
     const bubble = document.createElement('div');
     bubble.className = 'similar-artist-bubble';
     bubble.setAttribute('data-artist-id', artist.id);
+    bubble.setAttribute('data-artist-source', artist.source || '');
+    if (artist.plugin) {
+        bubble.setAttribute('data-artist-plugin', artist.plugin);
+    }
 
     // Track if image needs lazy loading
     const hasImage = artist.image_url && artist.image_url.trim() !== '';
@@ -36651,7 +36695,10 @@ function createSimilarArtistBubble(artist) {
     bubble.addEventListener('click', () => {
         console.log(`🎵 Clicked similar artist: ${artist.name} (ID: ${artist.id})`);
         // Navigate to this artist's detail page (same as clicking from search results)
-        selectArtistForDetail(artist);
+        selectArtistForDetail(
+            artist,
+            artist.source ? { source: artist.source, plugin: artist.plugin } : {}
+        );
     });
 
     return bubble;
@@ -46662,6 +46709,13 @@ function renderArtistMetaPanel(artist) {
     };
     headerRight.appendChild(syncBtn);
 
+    const reorgAllBtn = document.createElement('button');
+    reorgAllBtn.className = 'enhanced-sync-btn';
+    reorgAllBtn.innerHTML = '&#128193; Reorganize All';
+    reorgAllBtn.title = 'Reorganize all albums for this artist using path template';
+    reorgAllBtn.onclick = () => _showReorganizeAllModal();
+    headerRight.appendChild(reorgAllBtn);
+
     header.appendChild(headerRight);
 
     panel.appendChild(header);
@@ -49979,7 +50033,11 @@ async function showReorganizeModal(albumId) {
     }
 
     title.textContent = `Reorganize: ${albumData ? albumData.title : 'Album'}`;
-    if (applyBtn) applyBtn.disabled = true;
+    if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.textContent = 'Apply';
+        applyBtn.onclick = () => executeReorganize();
+    }
 
     // Build modal content
     const variables = [
@@ -50213,6 +50271,164 @@ function _pollReorganizeStatus() {
     }
 
     _reorganizePollTimer = setTimeout(poll, 600);
+}
+
+// ── Reorganize All Albums for Artist ──
+
+let _reorganizeAllRunning = false;
+
+async function _showReorganizeAllModal() {
+    if (!artistDetailPageState.enhancedData) {
+        showToast('No album data loaded', 'error');
+        return;
+    }
+    const albums = artistDetailPageState.enhancedData.albums || [];
+    const artistName = artistDetailPageState.enhancedData.artist.name || 'Artist';
+
+    if (albums.length === 0) {
+        showToast('No albums to reorganize', 'error');
+        return;
+    }
+
+    const overlay = document.getElementById('reorganize-overlay');
+    const body = document.getElementById('reorganize-modal-body');
+    const title = document.getElementById('reorganize-modal-title');
+    const applyBtn = document.getElementById('reorganize-apply-btn');
+    if (!overlay || !body) return;
+
+    title.textContent = `Reorganize All Albums — ${artistName}`;
+
+    // Load saved template
+    let savedTemplate = '$albumartist/$albumartist - $album/$track - $title';
+    try {
+        const settingsResp = await fetch('/api/settings');
+        if (settingsResp.ok) {
+            const settings = await settingsResp.json();
+            savedTemplate = settings.file_organization?.templates?.album_path || savedTemplate;
+        }
+    } catch (_) { }
+
+    let html = '<div class="reorganize-content">';
+
+    // Template input
+    html += '<div class="reorganize-template-section">';
+    html += '<label class="reorganize-label">Path Template</label>';
+    html += '<div class="reorganize-template-hint">This template will be applied to all albums below. Use <code>/</code> to separate folders.</div>';
+    html += `<input type="text" id="reorganize-template-input" class="reorganize-template-input" value="${savedTemplate.replace(/"/g, '&quot;')}" placeholder="$albumartist/$album/$track - $title" spellcheck="false">`;
+    html += '</div>';
+
+    // Album list
+    html += '<div style="margin-top:14px;">';
+    html += `<label class="reorganize-label">${albums.length} album${albums.length !== 1 ? 's' : ''} will be reorganized:</label>`;
+    html += '<div style="max-height:200px;overflow-y:auto;margin-top:6px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:6px 10px;">';
+    albums.forEach((a, i) => {
+        const trackCount = a.tracks ? a.tracks.length : '?';
+        html += `<div style="padding:4px 0;font-size:0.88em;color:rgba(255,255,255,0.7);border-bottom:${i < albums.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none'};">`;
+        html += `${escapeHtml(a.title)} <span style="color:rgba(255,255,255,0.3);">(${trackCount} tracks)</span>`;
+        html += '</div>';
+    });
+    html += '</div></div>';
+
+    html += '</div>';
+    body.innerHTML = html;
+
+    // Wire apply button for bulk mode
+    if (applyBtn) {
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Reorganize All';
+        applyBtn.onclick = () => _executeReorganizeAll();
+    }
+
+    overlay.classList.remove('hidden');
+}
+
+async function _executeReorganizeAll() {
+    if (_reorganizeAllRunning) return;
+
+    const templateInput = document.getElementById('reorganize-template-input');
+    const template = templateInput ? templateInput.value.trim() : '';
+    if (!template) {
+        showToast('Template cannot be empty', 'error');
+        return;
+    }
+
+    const albums = artistDetailPageState.enhancedData.albums || [];
+    const total = albums.length;
+    const artistName = artistDetailPageState.enhancedData.artist?.name || 'this artist';
+
+    const confirmed = await showConfirmDialog({
+        title: 'Reorganize All Albums',
+        message: `This will reorganize ${total} album${total !== 1 ? 's' : ''} for ${artistName} using the template:\n\n${template}\n\nFiles will be moved and renamed. This cannot be undone.`,
+        confirmText: 'Reorganize All',
+        destructive: false,
+    });
+    if (!confirmed) return;
+
+    _reorganizeAllRunning = true;
+    const applyBtn = document.getElementById('reorganize-apply-btn');
+    if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Working...'; }
+
+    // Close modal
+    const overlay = document.getElementById('reorganize-overlay');
+    if (overlay) overlay.classList.add('hidden');
+
+    let succeeded = 0, failed = 0;
+
+    for (let i = 0; i < total; i++) {
+        const album = albums[i];
+        showToast(`Reorganizing album ${i + 1}/${total}: ${album.title}`, 'info');
+
+        try {
+            const resp = await fetch(`/api/library/album/${album.id}/reorganize`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ template }),
+            });
+            const result = await resp.json();
+            if (!result.success) {
+                showToast(`Failed: ${album.title} — ${result.error || 'unknown error'}`, 'error');
+                failed++;
+                continue;
+            }
+
+            // Wait for this album to finish
+            await _waitForReorganizeComplete();
+            succeeded++;
+        } catch (err) {
+            showToast(`Error: ${album.title} — ${err.message}`, 'error');
+            failed++;
+        }
+    }
+
+    let msg = `Reorganized ${succeeded} of ${total} album${total !== 1 ? 's' : ''}`;
+    if (failed > 0) msg += ` (${failed} failed)`;
+    showToast(msg, failed > 0 ? 'warning' : 'success');
+
+    _reorganizeAllRunning = false;
+    if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = 'Reorganize All'; }
+
+    // Refresh enhanced view
+    if (artistDetailPageState.currentArtistId && artistDetailPageState.enhancedView) {
+        loadEnhancedViewData(artistDetailPageState.currentArtistId);
+    }
+}
+
+function _waitForReorganizeComplete() {
+    return new Promise(resolve => {
+        const poll = setInterval(async () => {
+            try {
+                const resp = await fetch('/api/library/album/reorganize/status');
+                const state = await resp.json();
+                if (state.status === 'done' || state.status === 'idle') {
+                    clearInterval(poll);
+                    resolve();
+                }
+            } catch {
+                clearInterval(poll);
+                resolve();
+            }
+        }, 800);
+    });
 }
 
 async function playLibraryTrack(track, albumTitle, artistName) {
@@ -65780,6 +65996,7 @@ async function loadRepairFindings() {
             incomplete_album: 'Auto-Fill',
             missing_lossy_copy: 'Convert',
             acoustid_mismatch: 'Fix',
+            missing_discography_track: 'Add to Wishlist',
         };
 
         container.innerHTML = items.map(f => {

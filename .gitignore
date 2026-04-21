@@ -25,3 +25,5 @@ bin/
 
 # Development compose/config files
 *.dev.yml
+# Any hidden folders
+**/.*/

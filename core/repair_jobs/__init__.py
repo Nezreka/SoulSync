@@ -43,6 +43,7 @@ _JOB_MODULES = [
     'core.repair_jobs.album_tag_consistency',
     'core.repair_jobs.live_commentary_cleaner',
     'core.repair_jobs.unknown_artist_fixer',
+    'core.repair_jobs.discography_backfill',
 ]
 
 

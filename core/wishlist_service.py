@@ -311,15 +311,17 @@ class WishlistService:
     def _spotify_track_object_to_dict(self, spotify_track) -> Dict[str, Any]:
         """Convert a Spotify track object or TrackResult object to a dictionary"""
         try:
-            # Add debug logging to see what we're dealing with
-            logger.info(f"DEBUG: Converting track object to dict. Type: {type(spotify_track)}")
-            logger.info(f"DEBUG: Has 'title' attribute: {hasattr(spotify_track, 'title')}")
-            logger.info(f"DEBUG: Has 'artist' attribute: {hasattr(spotify_track, 'artist')}")
-            logger.info(f"DEBUG: Has 'id' attribute: {hasattr(spotify_track, 'id')}")
+            logger.debug(
+                "Converting track object to dict: type=%s has_title=%s has_artist=%s has_id=%s",
+                type(spotify_track),
+                hasattr(spotify_track, 'title'),
+                hasattr(spotify_track, 'artist'),
+                hasattr(spotify_track, 'id'),
+            )
             
             # Check if this is a TrackResult object (has title/artist but no id)
             if hasattr(spotify_track, 'title') and hasattr(spotify_track, 'artist') and not hasattr(spotify_track, 'id'):
-                logger.info("DEBUG: Detected TrackResult object, converting...")
+                logger.debug("Detected TrackResult object, converting")
                 # Handle TrackResult objects - these don't have Spotify IDs
                 album_name = getattr(spotify_track, 'album', '') or getattr(spotify_track, 'title', 'Unknown Album')
                 result = {
@@ -333,19 +335,23 @@ class WishlistService:
                     'popularity': 0,
                     'source': 'trackresult'
                 }
-                logger.info(f"DEBUG: TrackResult converted successfully: {result['name']} by {result['artists'][0]['name']}")
+                logger.debug(
+                    "TrackResult converted successfully: name=%s artist=%s",
+                    result['name'],
+                    result['artists'][0]['name'],
+                )
                 return result
             
             # Handle regular Spotify Track objects
-            logger.info("DEBUG: Processing as Spotify Track object")
+            logger.debug("Processing as Spotify Track object")
             
             # Handle artists list carefully to avoid TrackResult serialization issues
             artists_list = []
             raw_artists = getattr(spotify_track, 'artists', [])
-            logger.info(f"DEBUG: Raw artists: {raw_artists}, type: {type(raw_artists)}")
+            logger.debug("Raw artists: %r (type=%s)", raw_artists, type(raw_artists))
             
             for artist in raw_artists:
-                logger.info(f"DEBUG: Processing artist: {artist}, type: {type(artist)}")
+                logger.debug("Processing artist: %r (type=%s)", artist, type(artist))
                 if hasattr(artist, 'name'):
                     artists_list.append({'name': artist.name})
                 elif isinstance(artist, str):
@@ -375,16 +381,20 @@ class WishlistService:
                 'disc_number': getattr(spotify_track, 'disc_number', 1)
             }
             
-            logger.info(f"DEBUG: Spotify Track converted: {result['name']} by {[a['name'] for a in result['artists']]}")
+            logger.debug(
+                "Spotify Track converted: name=%s artists=%s",
+                result['name'],
+                [a['name'] for a in result['artists']],
+            )
             
             # Test JSON serialization before returning to catch any remaining issues
             try:
                 import json
                 json.dumps(result)
-                logger.info("DEBUG: Conversion result is JSON serializable")
+                logger.debug("Conversion result is JSON serializable")
             except Exception as json_error:
-                logger.error(f"DEBUG: Conversion result is NOT JSON serializable: {json_error}")
-                logger.error(f"DEBUG: Result content: {result}")
+                logger.error("Conversion result is NOT JSON serializable: %s", json_error)
+                logger.error("Conversion result content: %r", result)
                 # Return a safe fallback
                 return {
                     'id': f"fallback_{hash(str(spotify_track))}",

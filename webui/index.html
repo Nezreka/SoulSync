@@ -5098,28 +5098,28 @@
                                     <input type="text" id="template-album-path"
                                         placeholder="$albumartist/$albumartist - $album/$track - $title">
                                     <small class="settings-hint">Variables: $albumartist, $artist, $artistletter, $album, $albumtype,
-                                        $title, $track, $disc (01), $discnum (1), $year, $quality (filename only)</small>
+                                        $title, $track, $disc (01), $discnum (1), $year, $quality (filename only). Use ${var} to append text: ${albumtype}s → Albums</small>
                                 </div>
 
                                 <div class="form-group">
                                     <label>Single Path Template:</label>
                                     <input type="text" id="template-single-path"
                                         placeholder="$artist/$artist - $title/$title">
-                                    <small class="settings-hint">Variables: $albumartist, $artist, $artistletter, $title, $track (01), $album, $albumtype, $year, $quality (filename only)</small>
+                                    <small class="settings-hint">Variables: $albumartist, $artist, $artistletter, $title, $track (01), $album, $albumtype, $year, $quality (filename only). Use ${var} to append text: ${albumtype}s → Singles</small>
                                 </div>
 
                                 <div class="form-group">
                                     <label>Playlist Path Template:</label>
                                     <input type="text" id="template-playlist-path"
                                         placeholder="$playlist/$artist - $title">
-                                    <small class="settings-hint">Variables: $playlist, $albumartist, $artist, $artistletter, $title, $year, $quality (filename only)</small>
+                                    <small class="settings-hint">Variables: $playlist, $albumartist, $artist, $artistletter, $title, $year, $quality (filename only). Use ${var} to append text</small>
                                 </div>
 
                                 <div class="form-group">
                                     <label>Music Video Path Template:</label>
                                     <input type="text" id="template-video-path"
                                         placeholder="$artist/$title-video">
-                                    <small class="settings-hint">Variables: $artist, $artistletter, $title, $year. Default: $artist/$title-video → Artist/Title-video.mp4</small>
+                                    <small class="settings-hint">Variables: $artist, $artistletter, $title, $year. Use ${var} to append text. Default: $artist/$title-video</small>
                                 </div>
 
                                 <div class="form-group">
@@ -5140,6 +5140,30 @@
                                     <small class="settings-hint">How $albumartist resolves for albums with multiple artists.
                                         "First Listed" uses only the primary artist for folder names (e.g., "Larry June" instead of "Larry June, Curren$y & The Alchemist").
                                         Full artist list is always preserved in file metadata tags.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Artist Tag Separator:</label>
+                                    <select id="artist-separator" class="form-select">
+                                        <option value=", ">, (comma)</option>
+                                        <option value="; ">; (semicolon)</option>
+                                        <option value=" / ">/ (slash)</option>
+                                    </select>
+                                    <small class="settings-hint">Separator between multiple artists in the ARTIST tag</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="write-multi-artist">
+                                        <span>Write multi-value ARTISTS tag</span>
+                                    </label>
+                                    <small class="settings-hint">Write each artist as a separate tag value for Navidrome/Jellyfin multi-artist support</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="feat-in-title">
+                                        <span>Move featured artists to title</span>
+                                    </label>
+                                    <small class="settings-hint">Keep only primary artist in ARTIST tag, append others as (feat. ...) in title</small>
                                 </div>
 
                                 <div class="form-group">

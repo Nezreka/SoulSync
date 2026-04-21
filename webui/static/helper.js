@@ -3599,7 +3599,33 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
-    '2.34': [
+    '2.35': [
+        // --- April 21, 2026 ---
+        { date: 'April 21, 2026' },
+        { title: 'Massively Faster Artist Detail Page Loads', desc: 'Artist discography completion checks used to fire hundreds of SQL queries per page load — 15+ fuzzy title/artist searches per album times 30 albums per artist. Now pre-fetches the artist\'s library albums and tracks ONCE upfront, then matches everything in-memory. Same matching logic and accuracy, roughly 100x fewer SQL round-trips. Applies to both the Library artist page and the Artists search page', page: 'library' },
+        { title: 'Fix Reorganize All Ignoring Album Type', desc: 'Reorganize All was sending every album — EPs, singles, and compilations — into the "Albums" folder because the $albumtype template variable silently defaulted to "Album". The variable is now resolved from the album\'s record_type (with track-count fallback) so ${albumtype}s produces the expected Albums/Singles/EPs/Compilations split', page: 'library' },
+
+        // --- April 20, 2026 ---
+        { date: 'April 20, 2026' },
+        { title: 'Discography Backfill Maintenance Job', desc: 'New library maintenance job that scans each artist in your library, fetches their full discography from metadata sources, and creates findings for any missing tracks. Review findings and click "Add to Wishlist" to queue them for download. Respects content filters (live/remix/acoustic/compilation) and release type filters. Opt-in, disabled by default', page: 'library' },
+        { title: 'Multi-Artist Tagging Options', desc: 'Three new settings: configurable artist separator (comma/semicolon/slash), multi-value ARTISTS tag for Navidrome/Jellyfin multi-artist linking, and "Move featured artists to title" mode. All opt-in with defaults matching current behavior', page: 'settings' },
+        { title: 'Reorganize All Albums for Artist', desc: 'New "Reorganize All" button in the enhanced library artist header. Processes all albums for an artist sequentially using the configured path template. Shows progress per album, continues on error', page: 'library' },
+        { title: 'Enriched Downloads Page Cards', desc: 'Download cards now show album artwork thumbnail, artist name, album name, source badge, and quality badge — all pulled from existing metadata context. No extra API calls', page: 'downloads' },
+        { title: 'Template Variable Delimiter Syntax', desc: 'Use ${var} syntax to append literal text to template variables: ${albumtype}s produces "Albums", "Singles", "EPs". Both $var and ${var} syntaxes work. Updated validation and hint text for all templates', page: 'settings' },
+        { title: 'AcoustID Fix Action Prompt', desc: 'AcoustID mismatch findings now show a 3-option fix prompt (Retag/Re-download/Delete) instead of silently defaulting to retag. Works for both individual and bulk fix', page: 'library' },
+        { title: 'Fix Sync Buttons on Undiscovered Playlists', desc: 'Sync buttons on ListenBrainz/Last.fm Radio playlists were visible before discovery due to the standalone mode handler resetting display:none on every WebSocket push. Now only restores buttons it specifically hid' },
+        { title: 'Fix Wing It Tracks Added to Wishlist During Sync', desc: 'Wing It fallback tracks with no real metadata were being added to wishlist when they failed to match on the media server during playlist sync. Now skipped by checking the wing_it_ ID prefix' },
+        { title: 'Fix iTunes Region-Restricted Albums', desc: 'iTunes API sometimes returns album metadata without song tracks for region-restricted releases. The empty result was cached permanently. Now tries fallback storefronts for actual songs, and skips caching empty results' },
+        { title: 'Fix Disc Subfolder Missing on Single-Track Downloads', desc: 'Downloading a single track from search for a multi-disc album placed it without the Disc N/ subfolder. Now resolves total_discs from the album tracklist when not already known' },
+        { title: 'Fix Allow Duplicate Tracks Setting Not Working', desc: 'The "Allow duplicate tracks across albums" setting was ignored during album download analysis. Tracks found in other albums were marked as owned and skipped. Now only checks ownership within the target album when duplicates are allowed' },
+        { title: 'Stop slskd Log Spam When Not Active', desc: 'Download monitor and transfer cache were polling slskd every second during active downloads regardless of whether Soulseek was configured. Now skips slskd API calls entirely when Soulseek is not in the active download source' },
+        { title: 'Fix AcoustID High-Confidence Skip', desc: 'AcoustID verification was letting wrong files through when the fingerprint score was high (0.95+) even with very low title/artist similarity. Now requires at least partial title or artist match before skipping verification' },
+        { title: 'Fix Navidrome Multi-Library Import', desc: 'Full database refresh was importing albums from all Navidrome music folders even when only one was selected in settings. Now filters albums to the selected music folder using a cached album ID set' },
+        { title: 'Fix Repair Worker Crash on Zero Interval', desc: 'Jobs with interval_hours set to 0 caused ZeroDivisionError in the repair worker staleness calculation. Now skips jobs with invalid intervals' },
+        { title: 'Fix Playlist Mode Missing Metadata and Cover Art', desc: 'Playlist folder mode passed null album_info to metadata enhancement, causing the entire function to crash silently. All metadata was wiped from the file. Now normalizes null to empty dict and falls back to spotify_album context for cover art' },
+        { title: 'Fix Unknown Artist Fixer Column Name', desc: 'The unknown_artist_fixer repair job crashed with "no such column: t.deezer_track_id". The tracks table uses deezer_id, not deezer_track_id' },
+        { title: 'Fix Auto-Import Using Wrong Artist from Tags', desc: 'Auto-import trusted embedded file tags for artist names even when the parent folder clearly indicated the correct artist. Mixtapes tagged with DJ names (e.g. "Slim" instead of "2Pac") got organized under the wrong artist. Now uses parent folder structure as artist override when folder depth indicates an Artist/Album layout' },
+
         // --- April 19, 2026 ---
         { date: 'April 19, 2026' },
         { title: 'Fix Wishlist Albums Cycle Stuck at 1 Concurrent', desc: 'Auto-wishlist processing during the "albums" cycle was limited to 1 concurrent download even with higher configured settings. The max_concurrent=1 restriction is only needed for Soulseek folder-based album grabs, not individual wishlist track downloads. Albums cycle now uses the configured concurrency like singles' },
@@ -3744,12 +3770,12 @@ const WHATS_NEW = {
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '2.34';
+    return btn ? btn.textContent.trim().replace('v', '') : '2.35';
 }
 
 function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
-    return versions[0] || '2.34';
+    return versions[0] || '2.35';
 }
 
 function openWhatsNew() {

@@ -845,11 +845,32 @@ class RepairWorker:
             'unwanted_content': self._fix_unwanted_content,
             'unknown_artist': self._fix_unknown_artist,
             'acoustid_mismatch': self._fix_acoustid_mismatch,
+            'missing_discography_track': self._fix_discography_backfill,
         }
         handler = handlers.get(finding_type)
         if not handler:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
         return handler(entity_type, entity_id, file_path, details)
+
+    def _fix_discography_backfill(self, entity_type, entity_id, file_path, details):
+        """Add missing discography track to wishlist."""
+        track_data = details.get('track_data')
+        if not track_data:
+            return {'success': False, 'error': 'No track data in finding'}
+        try:
+            success = self.db.add_to_wishlist(
+                spotify_track_data=track_data,
+                failure_reason='Discography backfill — missing from library',
+                source_type='repair',
+                source_info={'job': 'discography_backfill', 'artist': details.get('artist_name', '')}
+            )
+            track_name = track_data.get('name', '?')
+            if success:
+                return {'success': True, 'action': 'added_to_wishlist',
+                        'message': f"Added '{track_name}' to wishlist"}
+            return {'success': False, 'error': f"Could not add '{track_name}' to wishlist (may already exist)"}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
 
     def _fix_dead_file(self, entity_type, entity_id, file_path, details):
         """Fix a dead file reference. Action depends on details['_fix_action']:
