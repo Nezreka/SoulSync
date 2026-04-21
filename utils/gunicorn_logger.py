@@ -35,6 +35,10 @@ class FilteredGunicornLogger(GunicornLogger):
         ".eot",
     )
 
+    _HEALTHCHECK_USER_AGENTS = (
+        "curl/",
+    )
+
     def _should_skip_access_log(self, environ) -> bool:
         path = environ.get("PATH_INFO") or ""
         if not path:
@@ -48,6 +52,11 @@ class FilteredGunicornLogger(GunicornLogger):
             for prefix in self._STATIC_PREFIXES
         ):
             return True
+
+        if lower_path == "/":
+            user_agent = (environ.get("HTTP_USER_AGENT") or "").lower()
+            if any(token in user_agent for token in self._HEALTHCHECK_USER_AGENTS):
+                return True
 
         return any(lower_path.endswith(suffix) for suffix in self._STATIC_SUFFIXES)
 
