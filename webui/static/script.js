@@ -6028,12 +6028,20 @@ async function loadSettingsData() {
         document.getElementById('plex-token').value = settings.plex?.token || '';
         const hasPlexConfig = Boolean(settings.plex?.base_url || settings.plex?.token);
         const plexViewConfigButton = document.getElementById('plex-view-config-button');
-        const plexConfigureButton = document.getElementById('plex-configure-button');
+        const plexLinkToPlexButton = document.getElementById('plex-link-to-plex-button');
+        const plexManualConfigButton = document.getElementById('plex-manual-config-button');
+        const plexPinAuthFlow = document.getElementById('plex-pin-auth-flow');
         if (plexViewConfigButton) {
             plexViewConfigButton.style.display = hasPlexConfig ? '' : 'none';
         }
-        if (plexConfigureButton) {
-            plexConfigureButton.style.display = hasPlexConfig ? 'none' : '';
+        if (plexLinkToPlexButton) {
+            plexLinkToPlexButton.style.display = hasPlexConfig ? 'none' : '';
+        }
+        if (plexManualConfigButton) {
+            plexManualConfigButton.style.display = hasPlexConfig ? 'none' : '';
+        }
+        if (plexPinAuthFlow) {
+            plexPinAuthFlow.style.display = 'none';
         }
 
         // Populate Jellyfin settings
@@ -6425,27 +6433,146 @@ function updateMediaServerFields() {
     }
 }
 
+let _plexPinAuthRequestId = null;
+let _plexPinAuthPollInterval = null;
+
 function showPlexConfiguration() {
+    stopPlexPinAuthPolling();
     const plexConfig = document.getElementById('plex-configuration');
     const plexSetup = document.getElementById('plex-setup');
+    const plexPinAuthFlow = document.getElementById('plex-pin-auth-flow');
     if (plexConfig) plexConfig.style.display = '';
     if (plexSetup) plexSetup.style.display = 'none';
+    if (plexPinAuthFlow) plexPinAuthFlow.style.display = 'none';
+}
+
+async function startPlexPinAuth() {
+    const setupButtons = document.getElementById('plex-setup-buttons');
+    const authFlow = document.getElementById('plex-pin-auth-flow');
+    const statusEl = document.getElementById('plex-pin-status');
+    if (setupButtons) setupButtons.style.display = 'none';
+    if (authFlow) authFlow.style.display = '';
+    if (statusEl) statusEl.textContent = 'Starting Plex authorization...';
+
+    try {
+        showLoadingOverlay('Starting Plex authorization...');
+        const response = await fetch('/api/plex/pin/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await response.json();
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to start Plex PIN flow');
+        }
+
+        _plexPinAuthRequestId = result.request_id;
+        const pinCodeEl = document.getElementById('plex-pin-code');
+        if (pinCodeEl) pinCodeEl.textContent = result.code || '';
+        if (statusEl) {
+            statusEl.textContent = result.expires_in
+                ? `Enter this code at plex.tv/link. Code expires in ${result.expires_in} seconds.`
+                : 'Enter this code at plex.tv/link. Waiting for authorization...';
+        }
+
+        startPlexPinAuthPolling();
+    } catch (error) {
+        console.error('Plex PIN auth start failed:', error);
+        showToast(error.message || 'Failed to start Plex authorization', 'error');
+        cancelPlexPinAuth();
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+function startPlexPinAuthPolling() {
+    stopPlexPinAuthPolling();
+    if (!_plexPinAuthRequestId) return;
+    _plexPinAuthPollInterval = setInterval(pollPlexPinAuthStatus, 5000);
+    pollPlexPinAuthStatus();
+}
+
+function stopPlexPinAuthPolling() {
+    if (_plexPinAuthPollInterval) {
+        clearInterval(_plexPinAuthPollInterval);
+        _plexPinAuthPollInterval = null;
+    }
+}
+
+async function pollPlexPinAuthStatus() {
+    if (!_plexPinAuthRequestId) return;
+    try {
+        const response = await fetch(`/api/plex/pin/status?request_id=${encodeURIComponent(_plexPinAuthRequestId)}`);
+        const result = await response.json();
+        const statusEl = document.getElementById('plex-pin-status');
+
+        if (!result.success && result.expired) {
+            if (statusEl) statusEl.textContent = 'PIN code expired. Generate a new code to continue.';
+            stopPlexPinAuthPolling();
+            return;
+        }
+
+        if (result.success) {
+            stopPlexPinAuthPolling();
+            if (statusEl) statusEl.textContent = 'Authorization complete! Saving Plex configuration...';
+            document.getElementById('plex-url').value = result.found_url || '';
+            document.getElementById('plex-token').value = result.token || '';
+            if (typeof saveSettings === 'function') {
+                saveSettings(true);
+            }
+            showToast('Plex successfully linked', 'success');
+            showPlexConfiguration();
+            return;
+        }
+
+        if (result.status) {
+            if (statusEl) statusEl.textContent = result.status;
+            return;
+        }
+
+        if (result.error) {
+            if (statusEl) statusEl.textContent = result.error;
+            return;
+        }
+    } catch (error) {
+        console.error('Error polling Plex PIN status:', error);
+        const statusEl = document.getElementById('plex-pin-status');
+        if (statusEl) statusEl.textContent = 'Unable to contact Plex auth status. Retrying...';
+    }
+}
+
+function cancelPlexPinAuth() {
+    stopPlexPinAuthPolling();
+    _plexPinAuthRequestId = null;
+    const setupButtons = document.getElementById('plex-setup-buttons');
+    const authFlow = document.getElementById('plex-pin-auth-flow');
+    if (setupButtons) setupButtons.style.display = '';
+    if (authFlow) authFlow.style.display = 'none';
+}
+
+function restartPlexPinAuth() {
+    cancelPlexPinAuth();
+    startPlexPinAuth();
 }
 
 function clearPlexConfiguration() {
+    cancelPlexPinAuth();
     const plexUrl = document.getElementById('plex-url');
     const plexToken = document.getElementById('plex-token');
     const plexConfig = document.getElementById('plex-configuration');
     const plexSetup = document.getElementById('plex-setup');
+    const plexSetupButtons = document.getElementById('plex-setup-buttons');
     const plexViewConfigButton = document.getElementById('plex-view-config-button');
-    const plexConfigureButton = document.getElementById('plex-configure-button');
+    const plexLinkToPlexButton = document.getElementById('plex-link-to-plex-button');
+    const plexManualConfigButton = document.getElementById('plex-manual-config-button');
 
     if (plexUrl) plexUrl.value = '';
     if (plexToken) plexToken.value = '';
     if (plexConfig) plexConfig.style.display = 'none';
     if (plexSetup) plexSetup.style.display = '';
+    if (plexSetupButtons) plexSetupButtons.style.display = '';
     if (plexViewConfigButton) plexViewConfigButton.style.display = 'none';
-    if (plexConfigureButton) plexConfigureButton.style.display = '';
+    if (plexLinkToPlexButton) plexLinkToPlexButton.style.display = '';
+    if (plexManualConfigButton) plexManualConfigButton.style.display = '';
 
     if (typeof saveSettings === 'function') {
         saveSettings(true);
@@ -19805,6 +19932,10 @@ window.testConnection = testConnection;
 window.autoDetectPlex = autoDetectPlex;
 window.autoDetectJellyfin = autoDetectJellyfin;
 window.autoDetectSlskd = autoDetectSlskd;
+window.startPlexPinAuth = startPlexPinAuth;
+window.cancelPlexPinAuth = cancelPlexPinAuth;
+window.restartPlexPinAuth = restartPlexPinAuth;
+window.showPlexConfiguration = showPlexConfiguration;
 window.toggleServer = toggleServer;
 window.authenticateSpotify = authenticateSpotify;
 window.authenticateTidal = authenticateTidal;
