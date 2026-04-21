@@ -46453,7 +46453,7 @@ function renderArtistMetaPanel(artist) {
     headerRight.appendChild(syncBtn);
 
     const reorgAllBtn = document.createElement('button');
-    reorgAllBtn.className = 'enhanced-action-btn';
+    reorgAllBtn.className = 'enhanced-sync-btn';
     reorgAllBtn.innerHTML = '&#128193; Reorganize All';
     reorgAllBtn.title = 'Reorganize all albums for this artist using path template';
     reorgAllBtn.onclick = () => _showReorganizeAllModal();
@@ -50087,18 +50087,27 @@ async function _showReorganizeAllModal() {
 
 async function _executeReorganizeAll() {
     if (_reorganizeAllRunning) return;
-    _reorganizeAllRunning = true;
 
     const templateInput = document.getElementById('reorganize-template-input');
     const template = templateInput ? templateInput.value.trim() : '';
     if (!template) {
         showToast('Template cannot be empty', 'error');
-        _reorganizeAllRunning = false;
         return;
     }
 
     const albums = artistDetailPageState.enhancedData.albums || [];
     const total = albums.length;
+    const artistName = artistDetailPageState.enhancedData.artist?.name || 'this artist';
+
+    const confirmed = await showConfirmDialog({
+        title: 'Reorganize All Albums',
+        message: `This will reorganize ${total} album${total !== 1 ? 's' : ''} for ${artistName} using the template:\n\n${template}\n\nFiles will be moved and renamed. This cannot be undone.`,
+        confirmText: 'Reorganize All',
+        destructive: false,
+    });
+    if (!confirmed) return;
+
+    _reorganizeAllRunning = true;
     const applyBtn = document.getElementById('reorganize-apply-btn');
     if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Working...'; }
 
