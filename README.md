@@ -213,6 +213,43 @@ docker-compose up -d
 # Access at http://localhost:8008
 ```
 
+### Release Channels
+
+SoulSync publishes two Docker image tracks so you can choose your level of stability.
+
+**Stable — `:latest`** (recommended for most users). Hand-promoted from the `dev` branch to `main` when a batch of changes is ready for release. Published to Docker Hub. Your `docker-compose.yml` pulls this by default — no changes needed.
+
+```bash
+docker pull boulderbadgedad/soulsync:latest
+```
+
+**Nightly — `:dev`**. Rebuilt every night from the `dev` branch (and on every push to dev). Published to GitHub Container Registry. Gets new features and bug fixes before they reach `:latest`, at the cost of occasional instability as changes settle. Good for early adopters, contributors validating their own merges, and anyone helping shake out bugs on Discord before a stable release.
+
+To switch, edit `docker-compose.yml`:
+
+```yaml
+image: ghcr.io/nezreka/soulsync:dev
+```
+
+Then run `docker-compose pull && docker-compose up -d`.
+
+Pinned dev builds are also published as `ghcr.io/nezreka/soulsync:dev-YYYYMMDD-<sha>` if you want to stick with an exact known-good snapshot.
+
+**Version-tagged releases** (e.g. `:2.3`, `:2.4`) are permanent tags published on both registries when a stable release is promoted:
+
+```bash
+docker pull boulderbadgedad/soulsync:2.4
+# or
+docker pull ghcr.io/nezreka/soulsync:2.4
+```
+
+| You are... | Use |
+|---|---|
+| A typical user who wants things to work | `:latest` |
+| Pinning to a specific version for stability | `:2.3`, `:2.4`, etc. |
+| An early adopter who wants new features early and is OK reporting bugs | `:dev` |
+| A contributor testing post-merge behavior | `:dev` or a pinned dev build |
+
 ### Unraid
 
 SoulSync is available as an Unraid template. Install from Community Applications or manually add the template from:
@@ -221,6 +258,8 @@ https://raw.githubusercontent.com/Nezreka/SoulSync/main/templates/soulsync.xml
 ```
 
 PUID/PGID are exposed in the template — set them to match your Unraid permissions (default: 99/100 for nobody/users).
+
+The template points at `boulderbadgedad/soulsync:latest` (stable) by default. To use the nightly `:dev` channel on Unraid, edit the container's **Repository** field to `ghcr.io/nezreka/soulsync:dev` after installing from the template.
 
 ### Python (No Docker)
 
@@ -343,3 +382,39 @@ Open SoulSync at `http://localhost:8008` and go to Settings.
 - **Album Consistency** — pre-flight MusicBrainz release lookup before album downloads
 - **Automation Engine** — event-driven workflows with signal chains and pipeline deployment
 - **SoulID System** — deterministic cross-instance artist/album/track identifiers via track-verified API lookup
+
+---
+
+## Contributing
+
+### Branch workflow
+
+SoulSync uses a `dev` → `main` flow:
+
+- **`main`** — release branch. `:latest` images auto-build from this. Only receives merges from `dev`.
+- **`dev`** — integration branch. Nightly `:dev` images build from here. PRs land here first for validation before being promoted to `main`.
+- **Feature branches** — branched from `dev`. PRs target `dev`.
+
+### Opening a PR
+
+1. Fork and clone the repo
+2. Branch off `dev`: `git checkout -b fix/your-change dev`
+3. Make your changes and commit
+4. Push and open a PR against **`dev`** (not `main`)
+5. CI (`build-and-test.yml`) runs ruff lint + compile + pytest on your branch — wait for green
+6. A maintainer reviews and merges
+
+### Running locally
+
+```bash
+pip install -r requirements-dev.txt
+python -m ruff check .       # must be 0 errors
+python -m pytest             # all tests must pass
+gunicorn -c gunicorn.dev.conf.py wsgi:application
+```
+
+Ruff config lives in `pyproject.toml`. The ruleset is intentionally lenient — it catches real bugs (undefined names, import shadowing, closure-in-loop) without style nits.
+
+### Reporting bugs / requesting features
+
+Open an issue on GitHub. For user-side support, the Discord community is the fastest place to ask.
