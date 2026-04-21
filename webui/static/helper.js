@@ -3602,6 +3602,7 @@ const WHATS_NEW = {
     '2.35': [
         // --- April 21, 2026 ---
         { date: 'April 21, 2026' },
+        { title: 'Massively Faster Artist Detail Page Loads', desc: 'Artist discography completion checks used to fire hundreds of SQL queries per page load — 15+ fuzzy title/artist searches per album times 30 albums per artist. Now pre-fetches the artist\'s library albums and tracks ONCE upfront, then matches everything in-memory. Same matching logic and accuracy, roughly 100x fewer SQL round-trips. Applies to both the Library artist page and the Artists search page', page: 'library' },
         { title: 'Fix Reorganize All Ignoring Album Type', desc: 'Reorganize All was sending every album — EPs, singles, and compilations — into the "Albums" folder because the $albumtype template variable silently defaulted to "Album". The variable is now resolved from the album\'s record_type (with track-count fallback) so ${albumtype}s produces the expected Albums/Singles/EPs/Compilations split', page: 'library' },
 
         // --- April 20, 2026 ---

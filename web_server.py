@@ -11803,8 +11803,35 @@ def library_completion_stream():
                 for item in data.get(cat, []):
                     all_items.append((cat, item))
 
+            # Pre-fetch the artist's library albums AND tracks ONCE so per-item
+            # matching runs in-memory instead of firing per-item SQL searches.
+            # Turns N*K queries into 2 broad fetches + N track-count lookups.
+            from config.settings import config_manager as _cm_cs
+            _active_server = _cm_cs.get_active_media_server()
+            candidate_albums = None
+            candidate_tracks = None
+            _t0 = time.perf_counter()
+            try:
+                candidate_albums = db.get_candidate_albums_for_artist(artist_name, server_source=_active_server)
+            except Exception as _cand_err:
+                print(f"[completion-stream] Failed to pre-fetch album candidates for '{artist_name}': {_cand_err}")
+                candidate_albums = None
+            _t1 = time.perf_counter()
+            print(f"[completion-stream] Pre-fetched {len(candidate_albums) if candidate_albums is not None else 0} library albums for '{artist_name}' in {(_t1 - _t0) * 1000:.0f}ms")
+
+            if candidate_albums:
+                _t2 = time.perf_counter()
+                try:
+                    candidate_tracks = db.get_candidate_tracks_for_albums([a.id for a in candidate_albums])
+                except Exception as _tr_err:
+                    print(f"[completion-stream] Failed to pre-fetch track candidates for '{artist_name}': {_tr_err}")
+                    candidate_tracks = None
+                _t3 = time.perf_counter()
+                print(f"[completion-stream] Pre-fetched {len(candidate_tracks) if candidate_tracks is not None else 0} library tracks in {(_t3 - _t2) * 1000:.0f}ms")
+
             yield f"data: {json.dumps({'type': 'start', 'total_items': len(all_items)})}\n\n"
 
+            _loop_start = time.perf_counter()
             for i, (category, item) in enumerate(all_items):
                 try:
                     # Map Library field names to helper field names
@@ -11816,9 +11843,9 @@ def library_completion_stream():
                     }
 
                     if category == 'singles':
-                        result = check_single_completion(db, mapped, artist_name, source_override=source_override)
+                        result = check_single_completion(db, mapped, artist_name, source_override=source_override, candidate_albums=candidate_albums, candidate_tracks=candidate_tracks)
                     else:
-                        result = check_album_completion(db, mapped, artist_name, source_override=source_override)
+                        result = check_album_completion(db, mapped, artist_name, source_override=source_override, candidate_albums=candidate_albums)
 
                     result['id'] = item['id']
                     result['category'] = category
@@ -11828,6 +11855,10 @@ def library_completion_stream():
                     yield f"data: {json.dumps({'type': 'completion', 'category': category, 'id': item['id'], 'status': 'error', 'owned_tracks': 0, 'expected_tracks': item.get('track_count', 0), 'completion_percentage': 0, 'confidence': 0.0, 'error': str(e)})}\n\n"
 
                 time.sleep(0.05)  # 50ms between items for visible streaming
+
+            _loop_elapsed = time.perf_counter() - _loop_start
+            _sleep_floor = 0.05 * len(all_items)
+            print(f"[completion-stream] Processed {len(all_items)} items for '{artist_name}' in {_loop_elapsed * 1000:.0f}ms (sleep floor: {_sleep_floor * 1000:.0f}ms)")
 
             yield f"data: {json.dumps({'type': 'complete', 'processed_count': len(all_items)})}\n\n"
 
