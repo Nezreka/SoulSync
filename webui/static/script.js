@@ -19758,6 +19758,8 @@ async function selectDiscoveryFixTrack(track) {
             state = listenbrainzPlaylistStates[identifier];
         } else if (platform === 'mirrored') {
             state = youtubePlaylistStates[identifier];
+        } else if (platform === 'spotify_public') {
+            state = youtubePlaylistStates[identifier];
         }
 
         // Support both camelCase and snake_case
@@ -19770,7 +19772,12 @@ async function selectDiscoveryFixTrack(track) {
             result.status = '✅ Found';
             result.status_class = 'found';
             result.spotify_track = track.name;
-            result.spotify_artist = Array.isArray(track.artists) ? track.artists.join(', ') : track.artists;
+            result.spotify_artist = Array.isArray(track.artists)
+                ? track.artists
+                    .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                    .filter(Boolean)
+                    .join(', ') || '-'
+                : (track.artists || '-');
             result.spotify_album = track.album;
             result.spotify_id = track.id;
             result.duration = formatDuration(track.duration_ms);
@@ -27238,7 +27245,14 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
                         status: isWingIt ? '🎯 Wing It' : (isFound ? '✅ Found' : '❌ Not Found'),
                         status_class: isWingIt ? 'wing-it' : (isFound ? 'found' : 'not-found'),
                         spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
-                        spotify_artist: r.spotify_data && r.spotify_data.artists ? (Array.isArray(r.spotify_data.artists) ? r.spotify_data.artists.join(', ') : r.spotify_data.artists) : (r.spotify_artist || '-'),
+                        spotify_artist: r.spotify_data && r.spotify_data.artists
+                            ? (Array.isArray(r.spotify_data.artists)
+                                ? (r.spotify_data.artists
+                                    .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                                    .filter(Boolean)
+                                    .join(', ') || '-')
+                                : r.spotify_data.artists)
+                            : (r.spotify_artist || '-'),
                         spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) : (r.spotify_album || '-'),
                         spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match,
                         wing_it_fallback: isWingIt
@@ -27301,8 +27315,14 @@ function startTidalDiscoveryPolling(fakeUrlHash, playlistId) {
                         status: isFound ? '✅ Found' : '❌ Not Found',
                         status_class: isFound ? 'found' : 'not-found',
                         spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
-                        spotify_artist: result.spotify_data && result.spotify_data.artists ?
-                            (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                        spotify_artist: result.spotify_data && result.spotify_data.artists
+                            ? (Array.isArray(result.spotify_data.artists)
+                                ? (result.spotify_data.artists
+                                    .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                                    .filter(Boolean)
+                                    .join(', ') || '-')
+                                : result.spotify_data.artists)
+                            : (result.spotify_artist || '-'),
                         spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
                         spotify_data: result.spotify_data, // Pass through
                         spotify_id: result.spotify_id, // Pass through
@@ -28693,7 +28713,14 @@ function startDeezerDiscoveryPolling(fakeUrlHash, playlistId) {
                         status: isWingIt ? '🎯 Wing It' : (isFound ? '✅ Found' : '❌ Not Found'),
                         status_class: isWingIt ? 'wing-it' : (isFound ? 'found' : 'not-found'),
                         spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
-                        spotify_artist: r.spotify_data && r.spotify_data.artists ? (Array.isArray(r.spotify_data.artists) ? r.spotify_data.artists.join(', ') : r.spotify_data.artists) : (r.spotify_artist || '-'),
+                        spotify_artist: r.spotify_data && r.spotify_data.artists
+                            ? (Array.isArray(r.spotify_data.artists)
+                                ? (r.spotify_data.artists
+                                    .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                                    .filter(Boolean)
+                                    .join(', ') || '-')
+                                : r.spotify_data.artists)
+                            : (r.spotify_artist || '-'),
                         spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) : (r.spotify_album || '-'),
                         spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match,
                         wing_it_fallback: isWingIt
@@ -28755,8 +28782,14 @@ function startDeezerDiscoveryPolling(fakeUrlHash, playlistId) {
                         status: isFound ? '✅ Found' : '❌ Not Found',
                         status_class: isFound ? 'found' : 'not-found',
                         spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
-                        spotify_artist: result.spotify_data && result.spotify_data.artists ?
-                            (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                        spotify_artist: result.spotify_data && result.spotify_data.artists
+                            ? (Array.isArray(result.spotify_data.artists)
+                                ? (result.spotify_data.artists
+                                    .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                                    .filter(Boolean)
+                                    .join(', ') || '-')
+                                : result.spotify_data.artists)
+                            : (result.spotify_artist || '-'),
                         spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
                         spotify_data: result.spotify_data,
                         spotify_id: result.spotify_id,
@@ -32586,7 +32619,14 @@ function startSpotifyPublicDiscoveryPolling(fakeUrlHash, urlHash) {
                         status: isWingIt ? '🎯 Wing It' : (isFound ? '✅ Found' : '❌ Not Found'),
                         status_class: isWingIt ? 'wing-it' : (isFound ? 'found' : 'not-found'),
                         spotify_track: r.spotify_data ? r.spotify_data.name : (r.spotify_track || '-'),
-                        spotify_artist: r.spotify_data && r.spotify_data.artists ? (Array.isArray(r.spotify_data.artists) ? r.spotify_data.artists.join(', ') : r.spotify_data.artists) : (r.spotify_artist || '-'),
+                        spotify_artist: r.spotify_data && r.spotify_data.artists
+                            ? (Array.isArray(r.spotify_data.artists)
+                                ? (r.spotify_data.artists
+                                    .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                                    .filter(Boolean)
+                                    .join(', ') || '-')
+                                : r.spotify_data.artists)
+                            : (r.spotify_artist || '-'),
                         spotify_album: r.spotify_data ? (typeof r.spotify_data.album === 'object' ? r.spotify_data.album.name : r.spotify_data.album) : (r.spotify_album || '-'),
                         spotify_data: r.spotify_data, spotify_id: r.spotify_id, manual_match: r.manual_match,
                         wing_it_fallback: isWingIt
@@ -32648,8 +32688,14 @@ function startSpotifyPublicDiscoveryPolling(fakeUrlHash, urlHash) {
                         status: isFound ? '✅ Found' : '❌ Not Found',
                         status_class: isFound ? 'found' : 'not-found',
                         spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
-                        spotify_artist: result.spotify_data && result.spotify_data.artists ?
-                            (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                        spotify_artist: result.spotify_data && result.spotify_data.artists
+                            ? (Array.isArray(result.spotify_data.artists)
+                                ? (result.spotify_data.artists
+                                    .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                                    .filter(Boolean)
+                                    .join(', ') || '-')
+                                : result.spotify_data.artists)
+                            : (result.spotify_artist || '-'),
                         spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
                         spotify_data: result.spotify_data,
                         spotify_id: result.spotify_id,
