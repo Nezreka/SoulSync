@@ -51619,6 +51619,9 @@ def spotify_enrichment_pause():
 
         spotify_enrichment_worker.pause()
         config_manager.set('spotify_enrichment_paused', True)
+        # Drop any auto-pause marker so the post-download resume loop won't
+        # override this explicit user pause.
+        _download_auto_paused.discard('spotify-enrichment')
         logger.info("Spotify enrichment worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
@@ -51778,6 +51781,9 @@ def lastfm_enrichment_pause():
 
         lastfm_worker.pause()
         config_manager.set('lastfm_enrichment_paused', True)
+        # Drop any auto-pause marker so the post-download resume loop won't
+        # override this explicit user pause.
+        _download_auto_paused.discard('lastfm-enrichment')
         logger.info("Last.fm worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
@@ -51921,6 +51927,9 @@ def genius_enrichment_pause():
 
         genius_worker.pause()
         config_manager.set('genius_enrichment_paused', True)
+        # Drop any auto-pause marker so the post-download resume loop won't
+        # override this explicit user pause.
+        _download_auto_paused.discard('genius-enrichment')
         logger.info("Genius worker paused via UI")
         return jsonify({'status': 'paused'}), 200
     except Exception as e:
@@ -54425,9 +54434,17 @@ def _emit_enrichment_status_loop():
                     _download_auto_paused.add(name)
                     logger.debug(f"Auto-paused {name} during active downloads")
                 elif not downloading and name in _download_auto_paused:
-                    w.paused = False
+                    # Don't override an explicit user pause. If config says the worker
+                    # was paused via the UI, leave it paused and just drop the auto-pause
+                    # marker so the next auto-pause/resume cycle behaves normally.
+                    config_key = f"{name.replace('-', '_')}_paused"
+                    user_paused = config_manager.get(config_key, False)
                     _download_auto_paused.discard(name)
-                    logger.debug(f"Auto-resumed {name} after downloads finished")
+                    if not user_paused:
+                        w.paused = False
+                        logger.debug(f"Auto-resumed {name} after downloads finished")
+                    else:
+                        logger.debug(f"Downloads finished but {name} remains paused by user")
         except Exception as e:
             logger.debug(f"Error in download-yield check: {e}")
 
