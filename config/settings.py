@@ -11,6 +11,8 @@ from utils.logging_config import get_logger
 logger = get_logger("config")
 
 class ConfigManager:
+    _VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+
     def __init__(self, config_path: str = "config/config.json"):
         # Determine strict absolute path to settings.py directory to help resolve config.json
         # This handles cases where CWD is different (e.g. running from /Users vs /Users/project)
@@ -307,6 +309,39 @@ class ConfigManager:
             if conn:
                 conn.close()
 
+    def _load_stored_log_level(self) -> Optional[str]:
+        """Load the persisted UI log level preference, if one exists."""
+        conn = None
+        try:
+            self._ensure_database_exists()
+            conn = sqlite3.connect(str(self.database_path), timeout=30.0)
+            conn.execute("PRAGMA journal_mode=WAL")
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM metadata WHERE key = 'log_level'")
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                return None
+
+            level = str(row[0]).upper()
+            if level not in self._VALID_LOG_LEVELS:
+                logger.warning(f"Ignoring invalid stored log level: {row[0]}")
+                return None
+            return level
+        except Exception as e:
+            logger.warning(f"Could not load stored log level from database: {e}")
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def _apply_stored_log_level(self, config_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Overlay any persisted UI log level onto the loaded config."""
+        stored_level = self._load_stored_log_level()
+        if stored_level:
+            config_data.setdefault("logging", {})["level"] = stored_level
+            logger.info(f"Using stored logging level from database: {stored_level}")
+        return config_data
+
     def _save_to_database(self, config_data: Dict[str, Any]) -> bool:
         """Save configuration to database, encrypting sensitive values."""
         conn = None
@@ -519,7 +554,7 @@ class ConfigManager:
 
         if config_data:
             # Configuration exists in database
-            self.config_data = config_data
+            self.config_data = self._apply_stored_log_level(config_data)
             # Ensure sensitive values are encrypted at rest (one-time migration)
             self._migrate_encrypt_if_needed()
             return
@@ -533,11 +568,11 @@ class ConfigManager:
             logger.info("Migrating configuration from config.json to database...")
             if self._save_to_database(config_data):
                 logger.info("Configuration migrated successfully to database.")
-                self.config_data = config_data
+                self.config_data = self._apply_stored_log_level(config_data)
                 return
             else:
                 logger.warning("Migration failed - using file-based config temporarily.")
-                self.config_data = config_data
+                self.config_data = self._apply_stored_log_level(config_data)
                 return
 
         # No config.json either - use defaults
@@ -550,7 +585,7 @@ class ConfigManager:
         else:
             logger.warning("Could not save defaults to database - using in-memory config")
 
-        self.config_data = config_data
+        self.config_data = self._apply_stored_log_level(config_data)
 
     def _save_config(self):
         """Save configuration to database with retry on lock."""
