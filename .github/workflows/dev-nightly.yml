@@ -26,6 +26,9 @@ jobs:
         with:
           ref: dev
 
+      - name: Set lowercase owner
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
       - name: Check for recent commits (scheduled only)
         if: github.event_name == 'schedule'
         id: recent
@@ -72,7 +75,7 @@ jobs:
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
-          username: ${{ github.repository_owner }}
+          username: ${{ env.OWNER }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate build tag
@@ -95,6 +98,6 @@ jobs:
           build-args: |
             COMMIT_SHA=${{ github.sha }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/soulsync:dev
-            ghcr.io/${{ github.repository_owner }}/soulsync:dev-${{ steps.tag.outputs.date }}-${{ steps.tag.outputs.short_sha }}
-            ${{ github.event_name == 'schedule' && format('ghcr.io/{0}/soulsync:nightly', github.repository_owner) || '' }}
+            ghcr.io/${{ env.OWNER }}/soulsync:dev
+            ghcr.io/${{ env.OWNER }}/soulsync:dev-${{ steps.tag.outputs.date }}-${{ steps.tag.outputs.short_sha }}
+            ${{ github.event_name == 'schedule' && format('ghcr.io/{0}/soulsync:nightly', env.OWNER) || '' }}
