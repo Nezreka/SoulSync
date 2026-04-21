@@ -68,10 +68,10 @@ def analyze_track(file_path: str) -> Tuple[float, float]:
             text=True,
             timeout=120
         )
-    except FileNotFoundError:
-        raise FileNotFoundError("ffmpeg not found on PATH")
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("ffmpeg timed out analyzing track")
+    except FileNotFoundError as exc:
+        raise FileNotFoundError("ffmpeg not found on PATH") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("ffmpeg timed out analyzing track") from exc
 
     stderr = result.stderr
 

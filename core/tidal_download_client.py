@@ -675,7 +675,7 @@ class TidalDownloadClient:
         download_statuses = []
 
         with self._download_lock:
-            for download_id, info in self.active_downloads.items():
+            for _download_id, info in self.active_downloads.items():
                 status = DownloadStatus(
                     id=info['id'],
                     filename=info['filename'],

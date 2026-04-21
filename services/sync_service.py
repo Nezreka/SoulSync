@@ -294,7 +294,7 @@ class PlaylistSyncService:
             # Use active media server for playlist sync
             media_client, server_type = self._get_active_media_client()
             if not media_client:
-                logger.error(f"No active media client available for playlist sync")
+                logger.error("No active media client available for playlist sync")
                 sync_success = False
             else:
                 logger.info(f"Syncing playlist '{playlist.name}' to {server_type.upper()} server")
@@ -615,7 +615,7 @@ class PlaylistSyncService:
         try:
             media_client, server_type = self._get_active_media_client()
             if not media_client:
-                logger.error(f"No active media client available")
+                logger.error("No active media client available")
                 return []
 
             if hasattr(media_client, 'search_tracks'):
@@ -714,7 +714,7 @@ class PlaylistSyncService:
 
             media_client, server_type = self._get_active_media_client()
             if not media_client:
-                return {"error": f"No active media client available"}
+                return {"error": "No active media client available"}
 
             media_playlists = media_client.get_all_playlists() if hasattr(media_client, 'get_all_playlists') else []
             media_stats = media_client.get_library_stats() if hasattr(media_client, 'get_library_stats') else {}

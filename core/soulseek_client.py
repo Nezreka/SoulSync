@@ -369,7 +369,7 @@ class SoulseekClient:
                         logger.debug(f"API request returned 404 (Not Found) for {url}")
                     elif response.status == 401:
                         if not getattr(self, '_last_401_logged', False):
-                            logger.warning(f"slskd authentication failed (401) — check API key. Suppressing further 401 errors.")
+                            logger.warning("slskd authentication failed (401) — check API key. Suppressing further 401 errors.")
                             self._last_401_logged = True
                         logger.debug(f"API request 401 for {url}")
                     else:
@@ -823,7 +823,7 @@ class SoulseekClient:
                         logger.debug(f"No ID in response, using filename as fallback: {response}")
                         return filename
                 else:
-                    logger.debug(f"Web interface endpoint returned no response")
+                    logger.debug("Web interface endpoint returned no response")
                     
             except Exception as e:
                 logger.debug(f"Web interface endpoint failed: {e}")
@@ -1044,7 +1044,7 @@ class SoulseekClient:
             # Fallback: if download_id looks like a filename (contains path separators),
             # list all transfers, find by filename, and cancel with the real transfer ID
             if '\\' in download_id or '/' in download_id:
-                logger.debug(f"Download ID looks like a filename, trying filename-based lookup fallback")
+                logger.debug("Download ID looks like a filename, trying filename-based lookup fallback")
                 try:
                     downloads = await self.get_all_downloads()
                     target_basename = os.path.basename(download_id.replace('\\', '/'))
@@ -1056,7 +1056,7 @@ class SoulseekClient:
                             logger.debug(f"Found matching transfer with real ID, trying: {fallback_endpoint}")
                             response = await self._make_request('DELETE', fallback_endpoint)
                             if response is not None:
-                                logger.info(f"Successfully cancelled download via filename fallback")
+                                logger.info("Successfully cancelled download via filename fallback")
                                 return True
                 except Exception as fallback_error:
                     logger.debug(f"Filename fallback failed: {fallback_error}")
@@ -1646,10 +1646,10 @@ class SoulseekClient:
                     logger.info(f"Quality Filter: Bit depth 24-bit preference — {len(hi_res)}/{len(quality_buckets['flac'])} FLAC candidates are hi-res")
                     quality_buckets['flac'] = hi_res
                 elif not bit_depth_fallback:
-                    logger.info(f"Quality Filter: No 24-bit FLAC found and fallback disabled — rejecting all FLAC")
+                    logger.info("Quality Filter: No 24-bit FLAC found and fallback disabled — rejecting all FLAC")
                     quality_buckets['flac'] = []
                 else:
-                    logger.info(f"Quality Filter: No 24-bit FLAC found — falling back to 16-bit")
+                    logger.info("Quality Filter: No 24-bit FLAC found — falling back to 16-bit")
 
             elif bit_depth_pref == '16':
                 lo_res = [c for c in quality_buckets['flac']
@@ -1658,10 +1658,10 @@ class SoulseekClient:
                     logger.info(f"Quality Filter: Bit depth 16-bit preference — {len(lo_res)}/{len(quality_buckets['flac'])} FLAC candidates are standard")
                     quality_buckets['flac'] = lo_res
                 elif not bit_depth_fallback:
-                    logger.info(f"Quality Filter: No 16-bit FLAC found and fallback disabled — rejecting all FLAC")
+                    logger.info("Quality Filter: No 16-bit FLAC found and fallback disabled — rejecting all FLAC")
                     quality_buckets['flac'] = []
                 else:
-                    logger.info(f"Quality Filter: No 16-bit FLAC found — falling back to 24-bit")
+                    logger.info("Quality Filter: No 16-bit FLAC found — falling back to 24-bit")
 
         # Debug logging
         for quality, bucket in quality_buckets.items():
@@ -1688,16 +1688,16 @@ class SoulseekClient:
 
         # If no enabled qualities matched, check if fallback is enabled
         if profile.get('fallback_enabled', True):
-            logger.warning(f"Quality Filter: No enabled qualities matched, falling back to density-filtered candidates")
+            logger.warning("Quality Filter: No enabled qualities matched, falling back to density-filtered candidates")
             if density_filtered_all:
                 density_filtered_all.sort(key=lambda x: (x.quality_score, self._calculate_effective_kbps(x.size, x.duration) or 0), reverse=True)
                 logger.info(f"Quality Filter: Returning {len(density_filtered_all)} fallback candidates (bitrate-filtered, any quality)")
                 return density_filtered_all
             else:
-                logger.warning(f"Quality Filter: All candidates failed bitrate checks, returning empty (respecting constraints)")
+                logger.warning("Quality Filter: All candidates failed bitrate checks, returning empty (respecting constraints)")
                 return []
         else:
-            logger.warning(f"Quality Filter: No enabled qualities matched and fallback is disabled, returning empty")
+            logger.warning("Quality Filter: No enabled qualities matched and fallback is disabled, returning empty")
             return []
     
     async def get_session_info(self) -> Optional[Dict[str, Any]]:

@@ -1117,7 +1117,7 @@ class WatchlistScanner:
                     albums = discography_result.albums
                     source_artist_id = discography_result.artist_id
                     artist_image_url = discography_result.image_url or self.get_artist_image_url(artist) or ''
-                    album_fetcher = lambda album_id, album_name='': self._get_album_data_for_source(source, album_id, album_name)
+                    album_fetcher = lambda album_id, album_name='', source=source: self._get_album_data_for_source(source, album_id, album_name)
 
                 absolute_index = artist_index_offset + i + 1
                 if scan_state is not None:
@@ -1379,7 +1379,7 @@ class WatchlistScanner:
                 rescan_cutoff = self._get_rescan_cutoff()
                 if rescan_cutoff == 'all':
                     if self._rescan_cutoff_log_marker != 'all':
-                        logger.info(f"Lookback period changed to 'all' — returning full discography")
+                        logger.info("Lookback period changed to 'all' — returning full discography")
                         self._rescan_cutoff_log_marker = 'all'
                     cutoff_timestamp = None
                     needs_full_discog = True
@@ -1605,7 +1605,7 @@ class WatchlistScanner:
             if hasattr(self, '_metadata_service') and self._metadata_service:
                 results = self._metadata_service.itunes.search_artists(artist_name, limit=5)
             else:
-                logger.warning(f"Cannot match to iTunes - MetadataService not available")
+                logger.warning("Cannot match to iTunes - MetadataService not available")
                 return None
 
             return self._best_artist_match(results, artist_name)
@@ -2856,11 +2856,11 @@ class WatchlistScanner:
 
                         cache_callback = None
                         if source == 'spotify':
-                            cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'spotify', found_id)
+                            cache_callback = lambda found_id, watchlist_id=artist.id, artist=artist: self._cache_watchlist_artist_source_id(artist, 'spotify', found_id)
                         elif source == 'itunes':
-                            cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'itunes', found_id)
+                            cache_callback = lambda found_id, watchlist_id=artist.id, artist=artist: self._cache_watchlist_artist_source_id(artist, 'itunes', found_id)
                         elif source == 'deezer':
-                            cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'deezer', found_id)
+                            cache_callback = lambda found_id, watchlist_id=artist.id, artist=artist: self._cache_watchlist_artist_source_id(artist, 'deezer', found_id)
 
                         artist_id = self._resolve_artist_id_for_source(
                             source,
@@ -3100,11 +3100,11 @@ class WatchlistScanner:
                     stored_id = getattr(artist, source_attr, None) if source_attr else None
                     cache_callback = None
                     if source == 'spotify':
-                        cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'spotify', found_id)
+                        cache_callback = lambda found_id, watchlist_id=artist.id, artist=artist: self._cache_watchlist_artist_source_id(artist, 'spotify', found_id)
                     elif source == 'itunes':
-                        cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'itunes', found_id)
+                        cache_callback = lambda found_id, watchlist_id=artist.id, artist=artist: self._cache_watchlist_artist_source_id(artist, 'itunes', found_id)
                     elif source == 'deezer':
-                        cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'deezer', found_id)
+                        cache_callback = lambda found_id, watchlist_id=artist.id, artist=artist: self._cache_watchlist_artist_source_id(artist, 'deezer', found_id)
 
                     artist_id = self._resolve_artist_id_for_source(
                         source,
@@ -3428,7 +3428,7 @@ class WatchlistScanner:
 
                     # Balance by artist - max 6 tracks per artist
                     balanced_track_data = []
-                    for artist, tracks in artist_track_data.items():
+                    for _artist, tracks in artist_track_data.items():
                         sorted_tracks = sorted(tracks, key=lambda t: t['score'], reverse=True)
                         balanced_track_data.extend(sorted_tracks[:6])
 

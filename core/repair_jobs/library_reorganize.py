@@ -345,7 +345,7 @@ class LibraryReorganizeJob(RepairJob):
         # API fallback: find (artist, album) pairs still missing year, batch-lookup
         if needs_year and db_album_years is not None:
             missing_pairs = set()
-            for fpath, tags in file_tags.items():
+            for _fpath, tags in file_tags.items():
                 year = tags.get('year', '')
                 if year:
                     continue

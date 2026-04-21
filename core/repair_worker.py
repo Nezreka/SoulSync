@@ -483,7 +483,7 @@ class RepairWorker:
         best_job_id = None
         best_staleness = -1
 
-        for job_id, job in self._jobs.items():
+        for job_id, _job in self._jobs.items():
             config = self.get_job_config(job_id)
             if not config['enabled']:
                 continue
@@ -1047,7 +1047,7 @@ class RepairWorker:
                 self._cleanup_empty_parents(resolved)
 
                 return {'success': True, 'action': 'moved_to_staging',
-                        'message': f'Moved to staging folder for import'}
+                        'message': 'Moved to staging folder for import'}
 
             elif fix_action == 'delete':
                 os.remove(resolved)

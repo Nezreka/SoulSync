@@ -282,7 +282,7 @@ class TrackNumberRepairJob(RepairJob):
         album_name = None
         artist_name = None
 
-        for fpath, fname, _ in file_track_data:
+        for fpath, _fname, _ in file_track_data:
             if 'spotify' not in source_album_ids or 'itunes' not in source_album_ids:
                 aid, source = _read_album_id_from_file(fpath)
                 if aid and source in ('spotify', 'itunes') and source not in source_album_ids:

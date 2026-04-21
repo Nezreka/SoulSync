@@ -997,9 +997,9 @@ class NavidromeClient:
                 
                 # We only need to backup once, even if duplicates exist
                 if self.copy_playlist(playlist_name, backup_name):
-                    logger.info(f"Backup created successfully")
+                    logger.info("Backup created successfully")
                 else:
-                    logger.warning(f"Failed to create backup, continuing with sync")
+                    logger.warning("Failed to create backup, continuing with sync")
 
             # STRATEGY: Update the first match, delete the rest
             if existing_playlists:
