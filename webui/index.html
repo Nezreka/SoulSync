@@ -5113,6 +5113,30 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Artist Tag Separator:</label>
+                                    <select id="artist-separator" class="form-select">
+                                        <option value=", ">, (comma)</option>
+                                        <option value="; ">; (semicolon)</option>
+                                        <option value=" / ">/ (slash)</option>
+                                    </select>
+                                    <small class="settings-hint">Separator between multiple artists in the ARTIST tag</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="write-multi-artist">
+                                        <span>Write multi-value ARTISTS tag</span>
+                                    </label>
+                                    <small class="settings-hint">Write each artist as a separate tag value for Navidrome/Jellyfin multi-artist support</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="feat-in-title">
+                                        <span>Move featured artists to title</span>
+                                    </label>
+                                    <small class="settings-hint">Keep only primary artist in ARTIST tag, append others as (feat. ...) in title</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="allow-duplicate-tracks" checked>
                                         Allow duplicate tracks across albums

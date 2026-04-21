@@ -18827,12 +18827,18 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
             # ── Write standard tags using format-specific API ──
             track_num_str = f"{metadata.get('track_number', 1)}/{metadata.get('total_tracks', 1)}"
 
+            _write_multi = config_manager.get('metadata_enhancement.tags.write_multi_artist', False)
+            _artists_list = metadata.get('_artists_list', [])
+
             if isinstance(audio_file.tags, ID3):
                 # MP3: write ID3 frames directly
                 if metadata.get('title'):
                     audio_file.tags.add(TIT2(encoding=3, text=[metadata['title']]))
                 if metadata.get('artist'):
                     audio_file.tags.add(TPE1(encoding=3, text=[metadata['artist']]))
+                    # Multi-value: write each artist as separate TPE1 text value
+                    if _write_multi and len(_artists_list) > 1:
+                        audio_file.tags.add(TPE1(encoding=3, text=_artists_list))
                 if metadata.get('album_artist'):
                     audio_file.tags.add(TPE2(encoding=3, text=[metadata['album_artist']]))
                 if metadata.get('album'):
@@ -18851,6 +18857,9 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
                     audio_file['title'] = [metadata['title']]
                 if metadata.get('artist'):
                     audio_file['artist'] = [metadata['artist']]
+                    # Multi-value: write ARTISTS tag with individual values
+                    if _write_multi and len(_artists_list) > 1:
+                        audio_file['artists'] = _artists_list
                 if metadata.get('album_artist'):
                     audio_file['albumartist'] = [metadata['album_artist']]
                 if metadata.get('album'):
@@ -18868,7 +18877,11 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
                 if metadata.get('title'):
                     audio_file['\xa9nam'] = [metadata['title']]
                 if metadata.get('artist'):
-                    audio_file['\xa9ART'] = [metadata['artist']]
+                    # Multi-value: write each artist as separate list entry
+                    if _write_multi and len(_artists_list) > 1:
+                        audio_file['\xa9ART'] = _artists_list
+                    else:
+                        audio_file['\xa9ART'] = [metadata['artist']]
                 if metadata.get('album_artist'):
                     audio_file['aART'] = [metadata['album_artist']]
                 if metadata.get('album'):
@@ -19011,7 +19024,6 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
     # Handle multiple artists from Spotify data
     original_search = context.get("original_search_result", {})
     if 'artists' in original_search and isinstance(original_search['artists'], list) and len(original_search['artists']) > 0:
-        # Join all artists with semicolon separator (standard format)
         all_artists = []
         for a in original_search['artists']:
             if isinstance(a, dict) and 'name' in a:
@@ -19020,11 +19032,28 @@ def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> 
                 all_artists.append(a)
             else:
                 all_artists.append(str(a))
-        metadata['artist'] = ', '.join(all_artists)
+
+        # Configurable artist separator (default: comma-space)
+        _artist_sep = config_manager.get('metadata_enhancement.tags.artist_separator', ', ') or ', '
+        _feat_in_title = config_manager.get('metadata_enhancement.tags.feat_in_title', False)
+
+        # Featured artist in title mode: keep only primary artist, append rest to title
+        if _feat_in_title and len(all_artists) > 1:
+            metadata['artist'] = all_artists[0]
+            _feat_str = ', '.join(all_artists[1:])
+            _title = metadata.get('title', '')
+            if _title and not re.search(r'\b(feat\.?|ft\.?|featuring)\b', _title, re.IGNORECASE):
+                metadata['title'] = f"{_title} (feat. {_feat_str})"
+        else:
+            metadata['artist'] = _artist_sep.join(all_artists)
+
+        # Store raw artist list for multi-value tag writing
+        metadata['_artists_list'] = all_artists
         print(f"Metadata: Using all artists: '{metadata['artist']}'")
     else:
         # Fallback to single artist
         metadata['artist'] = artist.get('name', '')
+        metadata['_artists_list'] = [metadata['artist']] if metadata['artist'] else []
         print(f"Metadata: Using primary artist: '{metadata['artist']}'")
 
     # Resolve album_artist for consistent tagging across all tracks in an album.
