@@ -46452,6 +46452,13 @@ function renderArtistMetaPanel(artist) {
     };
     headerRight.appendChild(syncBtn);
 
+    const reorgAllBtn = document.createElement('button');
+    reorgAllBtn.className = 'enhanced-action-btn';
+    reorgAllBtn.innerHTML = '&#128193; Reorganize All';
+    reorgAllBtn.title = 'Reorganize all albums for this artist using path template';
+    reorgAllBtn.onclick = () => _showReorganizeAllModal();
+    headerRight.appendChild(reorgAllBtn);
+
     header.appendChild(headerRight);
 
     panel.appendChild(header);
@@ -49769,7 +49776,11 @@ async function showReorganizeModal(albumId) {
     }
 
     title.textContent = `Reorganize: ${albumData ? albumData.title : 'Album'}`;
-    if (applyBtn) applyBtn.disabled = true;
+    if (applyBtn) {
+        applyBtn.disabled = true;
+        applyBtn.textContent = 'Apply';
+        applyBtn.onclick = () => executeReorganize();
+    }
 
     // Build modal content
     const variables = [
@@ -50003,6 +50014,155 @@ function _pollReorganizeStatus() {
     }
 
     _reorganizePollTimer = setTimeout(poll, 600);
+}
+
+// ── Reorganize All Albums for Artist ──
+
+let _reorganizeAllRunning = false;
+
+async function _showReorganizeAllModal() {
+    if (!artistDetailPageState.enhancedData) {
+        showToast('No album data loaded', 'error');
+        return;
+    }
+    const albums = artistDetailPageState.enhancedData.albums || [];
+    const artistName = artistDetailPageState.enhancedData.artist.name || 'Artist';
+
+    if (albums.length === 0) {
+        showToast('No albums to reorganize', 'error');
+        return;
+    }
+
+    const overlay = document.getElementById('reorganize-overlay');
+    const body = document.getElementById('reorganize-modal-body');
+    const title = document.getElementById('reorganize-modal-title');
+    const applyBtn = document.getElementById('reorganize-apply-btn');
+    if (!overlay || !body) return;
+
+    title.textContent = `Reorganize All Albums — ${artistName}`;
+
+    // Load saved template
+    let savedTemplate = '$albumartist/$albumartist - $album/$track - $title';
+    try {
+        const settingsResp = await fetch('/api/settings');
+        if (settingsResp.ok) {
+            const settings = await settingsResp.json();
+            savedTemplate = settings.file_organization?.templates?.album_path || savedTemplate;
+        }
+    } catch (_) { }
+
+    let html = '<div class="reorganize-content">';
+
+    // Template input
+    html += '<div class="reorganize-template-section">';
+    html += '<label class="reorganize-label">Path Template</label>';
+    html += '<div class="reorganize-template-hint">This template will be applied to all albums below. Use <code>/</code> to separate folders.</div>';
+    html += `<input type="text" id="reorganize-template-input" class="reorganize-template-input" value="${savedTemplate.replace(/"/g, '&quot;')}" placeholder="$albumartist/$album/$track - $title" spellcheck="false">`;
+    html += '</div>';
+
+    // Album list
+    html += '<div style="margin-top:14px;">';
+    html += `<label class="reorganize-label">${albums.length} album${albums.length !== 1 ? 's' : ''} will be reorganized:</label>`;
+    html += '<div style="max-height:200px;overflow-y:auto;margin-top:6px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:6px 10px;">';
+    albums.forEach((a, i) => {
+        const trackCount = a.tracks ? a.tracks.length : '?';
+        html += `<div style="padding:4px 0;font-size:0.88em;color:rgba(255,255,255,0.7);border-bottom:${i < albums.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none'};">`;
+        html += `${escapeHtml(a.title)} <span style="color:rgba(255,255,255,0.3);">(${trackCount} tracks)</span>`;
+        html += '</div>';
+    });
+    html += '</div></div>';
+
+    html += '</div>';
+    body.innerHTML = html;
+
+    // Wire apply button for bulk mode
+    if (applyBtn) {
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Reorganize All';
+        applyBtn.onclick = () => _executeReorganizeAll();
+    }
+
+    overlay.classList.remove('hidden');
+}
+
+async function _executeReorganizeAll() {
+    if (_reorganizeAllRunning) return;
+    _reorganizeAllRunning = true;
+
+    const templateInput = document.getElementById('reorganize-template-input');
+    const template = templateInput ? templateInput.value.trim() : '';
+    if (!template) {
+        showToast('Template cannot be empty', 'error');
+        _reorganizeAllRunning = false;
+        return;
+    }
+
+    const albums = artistDetailPageState.enhancedData.albums || [];
+    const total = albums.length;
+    const applyBtn = document.getElementById('reorganize-apply-btn');
+    if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Working...'; }
+
+    // Close modal
+    const overlay = document.getElementById('reorganize-overlay');
+    if (overlay) overlay.classList.add('hidden');
+
+    let succeeded = 0, failed = 0;
+
+    for (let i = 0; i < total; i++) {
+        const album = albums[i];
+        showToast(`Reorganizing album ${i + 1}/${total}: ${album.title}`, 'info');
+
+        try {
+            const resp = await fetch(`/api/library/album/${album.id}/reorganize`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ template }),
+            });
+            const result = await resp.json();
+            if (!result.success) {
+                showToast(`Failed: ${album.title} — ${result.error || 'unknown error'}`, 'error');
+                failed++;
+                continue;
+            }
+
+            // Wait for this album to finish
+            await _waitForReorganizeComplete();
+            succeeded++;
+        } catch (err) {
+            showToast(`Error: ${album.title} — ${err.message}`, 'error');
+            failed++;
+        }
+    }
+
+    let msg = `Reorganized ${succeeded} of ${total} album${total !== 1 ? 's' : ''}`;
+    if (failed > 0) msg += ` (${failed} failed)`;
+    showToast(msg, failed > 0 ? 'warning' : 'success');
+
+    _reorganizeAllRunning = false;
+    if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = 'Reorganize All'; }
+
+    // Refresh enhanced view
+    if (artistDetailPageState.currentArtistId && artistDetailPageState.enhancedView) {
+        loadEnhancedViewData(artistDetailPageState.currentArtistId);
+    }
+}
+
+function _waitForReorganizeComplete() {
+    return new Promise(resolve => {
+        const poll = setInterval(async () => {
+            try {
+                const resp = await fetch('/api/library/album/reorganize/status');
+                const state = await resp.json();
+                if (state.status === 'done' || state.status === 'idle') {
+                    clearInterval(poll);
+                    resolve();
+                }
+            } catch {
+                clearInterval(poll);
+                resolve();
+            }
+        }, 800);
+    });
 }
 
 async function playLibraryTrack(track, albumTitle, artistName) {
