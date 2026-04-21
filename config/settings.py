@@ -334,8 +334,27 @@ class ConfigManager:
             if conn:
                 conn.close()
 
-    def _apply_stored_log_level(self, config_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Overlay any persisted UI log level onto the loaded config."""
+    def _load_env_log_level(self) -> Optional[str]:
+        """Load the log level override from the environment, if one exists."""
+        raw_level = os.environ.get("SOULSYNC_LOG_LEVEL")
+        if not raw_level:
+            return None
+
+        level = raw_level.upper()
+        if level not in self._VALID_LOG_LEVELS:
+            logger.warning(f"Ignoring invalid SOULSYNC_LOG_LEVEL value: {raw_level}")
+            return None
+
+        return level
+
+    def _apply_log_level_overrides(self, config_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Overlay env and persisted log level preferences onto the loaded config."""
+        env_level = self._load_env_log_level()
+        if env_level:
+            config_data.setdefault("logging", {})["level"] = env_level
+            logger.info(f"Using log level from SOULSYNC_LOG_LEVEL: {env_level}")
+            return config_data
+
         stored_level = self._load_stored_log_level()
         if stored_level:
             config_data.setdefault("logging", {})["level"] = stored_level
@@ -554,7 +573,7 @@ class ConfigManager:
 
         if config_data:
             # Configuration exists in database
-            self.config_data = self._apply_stored_log_level(config_data)
+            self.config_data = self._apply_log_level_overrides(config_data)
             # Ensure sensitive values are encrypted at rest (one-time migration)
             self._migrate_encrypt_if_needed()
             return
@@ -568,11 +587,11 @@ class ConfigManager:
             logger.info("Migrating configuration from config.json to database...")
             if self._save_to_database(config_data):
                 logger.info("Configuration migrated successfully to database.")
-                self.config_data = self._apply_stored_log_level(config_data)
+                self.config_data = self._apply_log_level_overrides(config_data)
                 return
             else:
                 logger.warning("Migration failed - using file-based config temporarily.")
-                self.config_data = self._apply_stored_log_level(config_data)
+                self.config_data = self._apply_log_level_overrides(config_data)
                 return
 
         # No config.json either - use defaults
@@ -585,7 +604,7 @@ class ConfigManager:
         else:
             logger.warning("Could not save defaults to database - using in-memory config")
 
-        self.config_data = self._apply_stored_log_level(config_data)
+        self.config_data = self._apply_log_level_overrides(config_data)
 
     def _save_config(self):
         """Save configuration to database with retry on lock."""
