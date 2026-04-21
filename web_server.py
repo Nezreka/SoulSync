@@ -4384,6 +4384,70 @@ def _find_downloaded_file(download_path, track_data):
 # --- Refactored Logic from GUI Threads ---
 # This logic is extracted from the database update worker to be used directly by Flask.
 
+
+# ── Settings Connection Status Registry ──
+# Maps each service shown in Settings → Connections to its config requirements.
+# Used by _is_service_configured() to drive the green/yellow header gradient.
+#
+# Registry entry shapes:
+#   {'required': [keys]}           — green if all keys populated in config_manager.get(service)
+#   {'always': True}               — always green (no credentials required, e.g. default-storefront iTunes)
+#   {'custom': callable}           — callable(service_name) -> bool, for services with non-field checks (e.g. token file)
+#   {'any_of': [[keys_a], [keys_b]]} — green if any one group's keys are all populated (e.g. Qobuz: email+password OR token)
+SERVICE_CONFIG_REGISTRY = {
+    'spotify':      {'required': ['client_id', 'client_secret']},
+    'itunes':       {'always': True},   # default storefront works anon
+    'deezer':       {'always': True},   # anon search works, premium ARL is optional
+    'discogs':      {'required': ['token']},
+    'tidal':        {'custom': lambda _svc: _tidal_has_auth_token()},
+    'qobuz':        {'any_of': [['email', 'password'], ['token'], ['user_auth_token']]},
+    'lastfm':       {'required': ['api_key']},
+    'genius':       {'required': ['access_token']},
+    'acoustid':     {'required': ['api_key']},
+    'listenbrainz': {'required': ['token']},
+    'hydrabase':    {'required': ['url', 'api_key']},
+}
+
+
+def _tidal_has_auth_token() -> bool:
+    """Check if Tidal has a cached OAuth token. Tidal uses a token file, not config fields."""
+    try:
+        return bool(tidal_client and tidal_client.is_authenticated())
+    except Exception:
+        return False
+
+
+def _is_service_configured(service: str) -> bool:
+    """Return True if the user has provided the required credentials for this service.
+    Drives the green/yellow header gradient on the Connections tab.
+    """
+    entry = SERVICE_CONFIG_REGISTRY.get(service)
+    if not entry:
+        return False
+
+    if entry.get('always'):
+        return True
+
+    if 'custom' in entry:
+        try:
+            return bool(entry['custom'](service))
+        except Exception:
+            return False
+
+    service_config = config_manager.get(service, {}) or {}
+
+    if 'required' in entry:
+        return all(bool(service_config.get(key)) for key in entry['required'])
+
+    if 'any_of' in entry:
+        for key_group in entry['any_of']:
+            if all(bool(service_config.get(key)) for key in key_group):
+                return True
+        return False
+
+    return False
+
+
 def run_service_test(service, test_config):
     """
     Performs the actual connection test for a given service.
@@ -4653,6 +4717,65 @@ def run_service_test(service, test_config):
                 return False, f"Lidarr returned HTTP {resp.status_code}"
             except Exception as e:
                 return False, f"Lidarr connection error: {str(e)}"
+        elif service == "itunes":
+            # Public API — just confirm we can reach it with a cheap search
+            try:
+                storefront = config_manager.get('itunes.storefront', 'US') or 'US'
+                resp = requests.get(
+                    'https://itunes.apple.com/search',
+                    params={'term': 'beatles', 'limit': 1, 'country': storefront, 'media': 'music'},
+                    timeout=5,
+                )
+                if resp.ok and resp.json().get('resultCount', 0) >= 0:
+                    return True, f"iTunes Search API reachable (storefront: {storefront})"
+                return False, f"iTunes returned HTTP {resp.status_code}"
+            except Exception as e:
+                return False, f"iTunes connection error: {str(e)}"
+        elif service == "deezer":
+            # Public API — anon search works without credentials
+            try:
+                resp = requests.get(
+                    'https://api.deezer.com/search/artist',
+                    params={'q': 'beatles', 'limit': 1},
+                    timeout=5,
+                )
+                if resp.ok and isinstance(resp.json(), dict):
+                    return True, "Deezer Public API reachable"
+                return False, f"Deezer returned HTTP {resp.status_code}"
+            except Exception as e:
+                return False, f"Deezer connection error: {str(e)}"
+        elif service == "discogs":
+            token = test_config.get('token', '') or config_manager.get('discogs.token', '')
+            if not token:
+                return False, "Missing Discogs personal token."
+            try:
+                resp = requests.get(
+                    'https://api.discogs.com/database/search',
+                    params={'q': 'beatles', 'per_page': 1},
+                    headers={'Authorization': f'Discogs token={token}', 'User-Agent': 'SoulSync/1.0'},
+                    timeout=10,
+                )
+                if resp.ok:
+                    return True, "Discogs API reachable with provided token"
+                if resp.status_code == 401:
+                    return False, "Discogs token rejected (HTTP 401)"
+                return False, f"Discogs returned HTTP {resp.status_code}"
+            except Exception as e:
+                return False, f"Discogs connection error: {str(e)}"
+        elif service == "qobuz":
+            try:
+                if qobuz_enrichment_worker and qobuz_enrichment_worker.client and qobuz_enrichment_worker.client.is_authenticated():
+                    return True, "Qobuz client authenticated"
+                return False, "Qobuz not authenticated. Provide email/password or user auth token."
+            except Exception as e:
+                return False, f"Qobuz connection error: {str(e)}"
+        elif service == "hydrabase":
+            try:
+                if hydrabase_client and hydrabase_client.is_connected():
+                    return True, "Hydrabase connected"
+                return False, "Hydrabase not connected. Configure URL + API key and click Connect."
+            except Exception as e:
+                return False, f"Hydrabase connection error: {str(e)}"
         return False, "Unknown service."
     except AttributeError as e:
         # This specifically catches the error you reported for Jellyfin
@@ -7208,6 +7331,120 @@ def test_connection_endpoint():
         add_activity_item("", "Connection Test", f"{service.title()} connection failed", "Now")
 
     return jsonify({"success": success, "error": "" if success else message, "message": message if success else ""})
+
+
+@app.route('/api/settings/config-status', methods=['GET'])
+def settings_config_status_endpoint():
+    """Return per-service config state for the Settings → Connections page.
+    Drives the green/yellow header gradient. No API calls — just config reads.
+    """
+    try:
+        return jsonify({
+            service: {'configured': _is_service_configured(service)}
+            for service in SERVICE_CONFIG_REGISTRY
+        })
+    except Exception as e:
+        logger.error(f"config-status error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Per-service verify cache ──
+# Stores the last verify result per service for 5 minutes to prevent
+# hammering external APIs when the user rapidly expands/collapses cards.
+_settings_verify_cache = {}    # service -> {'success': bool, 'message': str, 'error': str, 'ts': float}
+_settings_verify_cache_lock = threading.Lock()
+_SETTINGS_VERIFY_TTL_SECONDS = 300
+
+
+def _get_cached_verify_result(service: str):
+    with _settings_verify_cache_lock:
+        entry = _settings_verify_cache.get(service)
+        if entry and (time.time() - entry['ts']) < _SETTINGS_VERIFY_TTL_SECONDS:
+            return entry
+        return None
+
+
+def _store_verify_result(service: str, success: bool, message: str):
+    with _settings_verify_cache_lock:
+        _settings_verify_cache[service] = {
+            'success': bool(success),
+            'message': message or '',
+            'error': '' if success else (message or 'Unknown error'),
+            'ts': time.time(),
+        }
+
+
+def _run_single_verify(service: str):
+    """Run verify for one service, reading its current saved config. Returns cached
+    result if recent, else executes run_service_test and caches the outcome.
+    """
+    if service not in SERVICE_CONFIG_REGISTRY:
+        return {'success': False, 'error': f'Unknown service: {service}', 'cached': False}
+
+    cached = _get_cached_verify_result(service)
+    if cached:
+        return {
+            'success': cached['success'],
+            'error': cached.get('error', ''),
+            'message': cached.get('message', ''),
+            'cached': True,
+        }
+
+    try:
+        saved_config = config_manager.get(service, {}) or {}
+        success, message = run_service_test(service, saved_config)
+        _store_verify_result(service, success, message)
+        return {
+            'success': bool(success),
+            'error': '' if success else (message or 'Verification failed'),
+            'message': message or '',
+            'cached': False,
+        }
+    except Exception as e:
+        logger.error(f"verify error for {service}: {e}")
+        _store_verify_result(service, False, str(e))
+        return {'success': False, 'error': str(e), 'cached': False}
+
+
+@app.route('/api/settings/verify', methods=['POST'])
+def settings_verify_endpoint():
+    """Run connection verification for one or more services.
+
+    Body:  {"services": ["spotify", "deezer"]}  — which services to check
+    Query: ?force=true                           — bust cache and re-run
+    Returns {service: {success, error, message, cached}} per requested service.
+    Concurrency capped at 3 to avoid rate-limiting ourselves on Expand All.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        services = data.get('services') or []
+        if isinstance(services, str):
+            services = [services]
+        if not services:
+            return jsonify({'error': 'No services specified'}), 400
+
+        force = (request.args.get('force') or '').strip().lower() in ('1', 'true', 'yes')
+        if force:
+            with _settings_verify_cache_lock:
+                for svc in services:
+                    _settings_verify_cache.pop(svc, None)
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        results = {}
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {pool.submit(_run_single_verify, svc): svc for svc in services}
+            for fut in as_completed(futures):
+                svc = futures[fut]
+                try:
+                    results[svc] = fut.result()
+                except Exception as e:
+                    results[svc] = {'success': False, 'error': str(e), 'cached': False}
+
+        return jsonify(results)
+    except Exception as e:
+        logger.error(f"settings/verify error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/test-dashboard-connection', methods=['POST'])
 def test_dashboard_connection_endpoint():

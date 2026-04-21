@@ -5808,17 +5808,195 @@ function switchSettingsTab(tab) {
     } else {
         _logViewerStop();
     }
+    // Refresh the green/yellow header gradient when arriving on Connections
+    if (tab === 'connections') {
+        try { applyServiceStatusGradients(); } catch (e) { }
+    }
+}
+
+// ── Settings → Connections: per-service status gradient + verify wiring ──
+// Gradient shows green when the user has filled in credentials, yellow when empty.
+// It's based purely on config presence (cheap, no API calls). The verify layer —
+// which runs on expand / Expand All — surfaces whether those credentials actually
+// work, via an inline warning bar inside the expanded panel.
+
+let _stgServiceStatusState = {};  // service -> {configured: bool}
+let _stgServiceVerifyInFlight = {};  // service -> true while a verify call is running
+
+async function applyServiceStatusGradients() {
+    try {
+        const resp = await fetch('/api/settings/config-status');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        _stgServiceStatusState = data || {};
+        document.querySelectorAll('#settings-page .stg-service[data-service]').forEach(card => {
+            const service = card.getAttribute('data-service');
+            const header = card.querySelector('.stg-service-header');
+            if (!service || !header) return;
+            const configured = !!(data[service] && data[service].configured);
+            header.classList.toggle('status-configured', configured);
+            header.classList.toggle('status-missing', !configured);
+            // Ensure the header has a spinner placeholder for the verify-checking state
+            if (!header.querySelector('.stg-service-verify-spinner')) {
+                const spinner = document.createElement('span');
+                spinner.className = 'stg-service-verify-spinner';
+                // Insert before the chevron on the right
+                const chevron = header.querySelector('.stg-service-chevron');
+                if (chevron) header.insertBefore(spinner, chevron);
+                else header.appendChild(spinner);
+            }
+        });
+    } catch (e) {
+        console.warn('[Settings Status] Failed to apply gradients:', e);
+    }
+}
+
+function _stgSetCheckingState(service, isChecking) {
+    const card = document.querySelector(`#settings-page .stg-service[data-service="${service}"]`);
+    if (!card) return;
+    const header = card.querySelector('.stg-service-header');
+    const body = card.querySelector('.stg-service-body');
+    if (header) {
+        header.classList.toggle('status-checking', !!isChecking);
+        // Lazy-create the spinner element so it's there even if
+        // applyServiceStatusGradients() hasn't run yet.
+        if (!header.querySelector('.stg-service-verify-spinner')) {
+            const spinner = document.createElement('span');
+            spinner.className = 'stg-service-verify-spinner';
+            const chevron = header.querySelector('.stg-service-chevron');
+            if (chevron) header.insertBefore(spinner, chevron);
+            else header.appendChild(spinner);
+        }
+    }
+    if (!body) return;
+    const existing = body.querySelector('.stg-service-verify-status');
+    if (isChecking) {
+        if (!existing) {
+            const status = document.createElement('div');
+            status.className = 'stg-service-verify-status';
+            status.textContent = 'Testing connection…';
+            body.insertBefore(status, body.firstChild);
+        }
+    } else if (existing) {
+        existing.remove();
+    }
+}
+
+function _stgShowVerifyWarning(service, message) {
+    const card = document.querySelector(`#settings-page .stg-service[data-service="${service}"]`);
+    if (!card) return;
+    const body = card.querySelector('.stg-service-body');
+    if (!body) return;
+    const existing = body.querySelector('.stg-service-warning');
+    if (existing) existing.remove();
+    const warning = document.createElement('div');
+    warning.className = 'stg-service-warning';
+    warning.innerHTML = `
+        <span class="stg-service-warning-icon">&#9888;</span>
+        <span class="stg-service-warning-text"></span>
+    `;
+    warning.querySelector('.stg-service-warning-text').textContent =
+        message || 'Connection test failed.';
+    body.insertBefore(warning, body.firstChild);
+}
+
+function _stgClearVerifyWarning(service) {
+    const card = document.querySelector(`#settings-page .stg-service[data-service="${service}"]`);
+    if (!card) return;
+    const existing = card.querySelector('.stg-service-warning');
+    if (existing) existing.remove();
+}
+
+async function _stgRefreshAfterSave() {
+    // Called after a successful settings save. Cheap gradient refresh always,
+    // plus re-verify any cards the user currently has expanded (so they see
+    // immediate feedback on credentials they just edited). Collapsed cards
+    // keep their cached verify result until the user expands them.
+    try {
+        await applyServiceStatusGradients();
+        const expandedServices = Array.from(
+            document.querySelectorAll('#settings-page .stg-service.expanded[data-service]')
+        )
+            .map(card => card.getAttribute('data-service'))
+            .filter(Boolean);
+        if (expandedServices.length > 0) {
+            _stgVerifyServices(expandedServices, { force: true });
+        }
+    } catch (e) {
+        console.warn('[Settings Status] Post-save refresh failed:', e);
+    }
+}
+
+async function _stgVerifyServices(services, { force = false } = {}) {
+    if (!services || !services.length) return {};
+    // Mark all as checking immediately so the user sees spinners/status lines
+    services.forEach(svc => {
+        _stgServiceVerifyInFlight[svc] = true;
+        _stgSetCheckingState(svc, true);
+        _stgClearVerifyWarning(svc);
+    });
+    try {
+        const url = '/api/settings/verify' + (force ? '?force=true' : '');
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ services })
+        });
+        const data = await resp.json();
+        services.forEach(svc => {
+            _stgServiceVerifyInFlight[svc] = false;
+            _stgSetCheckingState(svc, false);
+            const result = data[svc];
+            if (result && result.success === false) {
+                _stgShowVerifyWarning(svc, result.error || result.message || '');
+            }
+        });
+        return data;
+    } catch (e) {
+        console.warn('[Settings Verify] Network error:', e);
+        services.forEach(svc => {
+            _stgServiceVerifyInFlight[svc] = false;
+            _stgSetCheckingState(svc, false);
+            _stgShowVerifyWarning(svc, 'Unable to reach the verification endpoint.');
+        });
+        return {};
+    }
 }
 
 function toggleStgService(el) {
     const service = el.closest('.stg-service');
-    if (service) service.classList.toggle('expanded');
+    if (service) {
+        const wasExpanded = service.classList.contains('expanded');
+        service.classList.toggle('expanded');
+        // Fire verify when expanding a single card (not on collapse). The backend
+        // caches per service for 5 min, so rapid expand/collapse won't re-ping.
+        if (!wasExpanded) {
+            const serviceName = service.getAttribute('data-service');
+            if (serviceName && !_stgServiceVerifyInFlight[serviceName]) {
+                _stgVerifyServices([serviceName]);
+            }
+        }
+    }
 }
 function toggleAllServiceAccordions(btn) {
     const services = document.querySelectorAll('#settings-page .stg-service');
     const allExpanded = Array.from(services).every(s => s.classList.contains('expanded'));
-    services.forEach(s => s.classList.toggle('expanded', !allExpanded));
+    const willExpand = !allExpanded;
+    services.forEach(s => s.classList.toggle('expanded', willExpand));
     btn.textContent = allExpanded ? 'Expand All' : 'Collapse All';
+
+    // On Expand All, fire a single batched verify for every service that has a
+    // data-service attribute. Backend caps concurrency at 3 to avoid rate limits.
+    // Skipped on Collapse All.
+    if (willExpand) {
+        const serviceNames = Array.from(services)
+            .map(s => s.getAttribute('data-service'))
+            .filter(Boolean)
+            .filter(name => !_stgServiceVerifyInFlight[name]);
+        if (serviceNames.length > 0) {
+            _stgVerifyServices(serviceNames);
+        }
+    }
 }
 
 // ── Hybrid source priority list (drag-and-drop) ──
@@ -7773,12 +7951,15 @@ async function saveSettings(quiet = false) {
         if (result.success && qualityProfileSaved && lookbackSaved) {
             showToast(quiet ? 'Settings auto-saved' : 'Settings saved successfully', 'success');
             _forceServiceStatusRefresh();
+            _stgRefreshAfterSave();
         } else if (result.success && qualityProfileSaved && !lookbackSaved) {
             showToast('Settings saved, but discovery lookback period failed to save', 'warning');
             _forceServiceStatusRefresh();
+            _stgRefreshAfterSave();
         } else if (result.success && !qualityProfileSaved) {
             showToast('Settings saved, but quality profile failed to save', 'warning');
             _forceServiceStatusRefresh();
+            _stgRefreshAfterSave();
         } else {
             showToast(`Failed to save settings: ${result.error}`, 'error', 'set-services');
         }
