@@ -1052,7 +1052,7 @@ def check_album_completion(
         if total_tracks == 0 and album_id:
             logger.debug("No track count found for '%s' (%s)", album_name, album_id)
 
-        print(f"Checking album: '{album_name}' ({total_tracks} tracks)")
+        logger.debug(f"Checking album: '{album_name}' ({total_tracks} tracks)")
 
         formats = []
         # Check if album exists in database with completeness info
@@ -1068,7 +1068,7 @@ def check_album_completion(
                 candidate_albums=candidate_albums
             )
         except Exception as db_error:
-            print(f"Database error for album '{album_name}': {db_error}")
+            logger.error(f"Database error for album '{album_name}': {db_error}")
             return {
                 "id": album_id,
                 "name": album_name,
@@ -1096,7 +1096,14 @@ def check_album_completion(
         else:
             status = "missing"
 
-        print(f"  Result: {owned_tracks}/{expected_tracks or total_tracks} tracks ({completion_percentage:.1f}%) - {status}")
+        logger.debug(
+            "Album completion result: owned=%s expected=%s total=%s completion=%.1f status=%s",
+            owned_tracks,
+            expected_tracks or total_tracks,
+            total_tracks,
+            completion_percentage,
+            status,
+        )
 
         return {
             "id": album_id,
@@ -1111,7 +1118,7 @@ def check_album_completion(
         }
 
     except Exception as e:
-        print(f"Error checking album completion for '{album_data.get('name', 'Unknown')}': {e}")
+        logger.error(f"Error checking album completion for '{album_data.get('name', 'Unknown')}': {e}")
         return {
             "id": album_data.get('id', ''),
             "name": album_data.get('name', 'Unknown'),
@@ -1153,7 +1160,12 @@ def check_single_completion(
         if total_tracks == 0:
             total_tracks = _resolve_completion_track_total(single_data, source_chain) or 1
 
-        print(f"Checking {album_type}: '{single_name}' ({total_tracks} tracks)")
+        logger.debug(
+            "Checking %s: name=%r tracks=%s",
+            album_type,
+            single_name,
+            total_tracks,
+        )
 
         if album_type == 'ep' or total_tracks > 1:
             try:
@@ -1168,7 +1180,7 @@ def check_single_completion(
                     candidate_albums=candidate_albums
                 )
             except Exception as db_error:
-                print(f"Database error for EP '{single_name}': {db_error}")
+                logger.error(f"Database error for EP '{single_name}': {db_error}")
                 owned_tracks, expected_tracks, confidence = 0, total_tracks, 0.0
                 db_album = None
 
@@ -1184,7 +1196,14 @@ def check_single_completion(
             else:
                 status = "missing"
 
-            print(f"  EP Result: {owned_tracks}/{expected_tracks or total_tracks} tracks ({completion_percentage:.1f}%) - {status}")
+            logger.debug(
+                "EP completion result: owned=%s expected=%s total=%s completion=%.1f status=%s",
+                owned_tracks,
+                expected_tracks or total_tracks,
+                total_tracks,
+                completion_percentage,
+                status,
+            )
 
             return {
                 "id": single_id,
@@ -1210,7 +1229,7 @@ def check_single_completion(
                     candidate_tracks=candidate_tracks
                 )
             except Exception as db_error:
-                print(f"Database error for single '{single_name}': {db_error}")
+                logger.error(f"Database error for single '{single_name}': {db_error}")
                 db_track, confidence = None, 0.0
 
             owned_tracks = 1 if db_track else 0
@@ -1226,7 +1245,12 @@ def check_single_completion(
                 elif ext:
                     formats = [ext]
 
-            print(f"  Single Result: {owned_tracks}/1 tracks ({completion_percentage:.1f}%) - {status}")
+            logger.debug(
+                "Single completion result: owned=%s expected=1 completion=%.1f status=%s",
+                owned_tracks,
+                completion_percentage,
+                status,
+            )
 
             return {
                 "id": single_id,
@@ -1242,7 +1266,7 @@ def check_single_completion(
             }
 
     except Exception as e:
-        print(f"Error checking single/EP completion for '{single_data.get('name', 'Unknown')}': {e}")
+        logger.error(f"Error checking single/EP completion for '{single_data.get('name', 'Unknown')}': {e}")
         return {
             "id": single_data.get('id', ''),
             "name": single_data.get('name', 'Unknown'),

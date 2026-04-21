@@ -937,7 +937,7 @@ class PlexClient:
     def is_library_scanning(self, library_name: str = "Music") -> bool:
         """Check if Plex library is currently scanning"""
         if not self.ensure_connection():
-            logger.debug(f"DEBUG: Not connected to Plex, cannot check scan status")
+            logger.debug("Not connected to Plex, cannot check scan status")
             return False
             
         try:
@@ -946,31 +946,31 @@ class PlexClient:
             # Check if library has a scanning attribute or is refreshing
             # The Plex API exposes this through the library's refreshing property
             refreshing = hasattr(library, 'refreshing') and library.refreshing
-            logger.debug(f"DEBUG: Library.refreshing = {refreshing}")
+            logger.debug("Library.refreshing = %s", refreshing)
             
             if refreshing:
-                logger.debug(f"DEBUG: Library is refreshing")
+                logger.debug("Library is refreshing")
                 return True
             
             # Alternative method: Check server activities for scanning
             try:
                 activities = self.server.activities()
-                logger.debug(f"DEBUG: Found {len(activities)} server activities")
+                logger.debug("Found %s server activities", len(activities))
                 
                 for activity in activities:
                     # Look for library scan activities
                     activity_type = getattr(activity, 'type', 'unknown')
                     activity_title = getattr(activity, 'title', 'unknown')
-                    logger.debug(f"DEBUG: Activity - type: {activity_type}, title: {activity_title}")
+                    logger.debug("Activity - type=%s title=%s", activity_type, activity_title)
                     
                     if (activity_type in ['library.scan', 'library.refresh'] and
                         library_name.lower() in activity_title.lower()):
-                        logger.debug(f"DEBUG: Found matching scan activity: {activity_title}")
+                        logger.debug("Found matching scan activity: %s", activity_title)
                         return True
             except Exception as activities_error:
                 logger.debug(f"Could not check server activities: {activities_error}")
             
-            logger.debug(f"DEBUG: No scan activity detected")
+            logger.debug("No scan activity detected")
             return False
             
         except Exception as e:

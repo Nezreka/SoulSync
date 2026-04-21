@@ -455,11 +455,23 @@ class SoulIDWorker:
                             matching.normalize_string(db_name)
                         )
                         if score >= self.album_match_threshold:
-                            logger.debug(f"  {source_name}: matched '{artist.name}' via album '{api_name}' ↔ '{db_name}' (score={score:.2f})")
+                            logger.debug(
+                                "%s matched artist=%r via album api=%r db=%r score=%.2f",
+                                source_name,
+                                artist.name,
+                                api_name,
+                                db_name,
+                                score,
+                            )
                             return discog
 
             except Exception as e:
-                logger.debug(f"  {source_name}: discography fetch failed for '{artist.name}': {e}")
+                logger.debug(
+                    "%s discography fetch failed for artist=%r: %s",
+                    source_name,
+                    artist.name,
+                    e,
+                )
                 continue
 
         return None
