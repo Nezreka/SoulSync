@@ -6209,6 +6209,9 @@ async function loadSettingsData() {
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
+        document.getElementById('artist-separator').value = settings.metadata_enhancement?.tags?.artist_separator || ', ';
+        document.getElementById('write-multi-artist').checked = settings.metadata_enhancement?.tags?.write_multi_artist || false;
+        document.getElementById('feat-in-title').checked = settings.metadata_enhancement?.tags?.feat_in_title || false;
         document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
 
         // Populate Playlist Sync settings
@@ -7636,7 +7639,10 @@ async function saveSettings(quiet = false) {
             lrclib_enabled: document.getElementById('lrclib-enabled').checked,
             tags: {
                 quality_tag: _getTagConfig('metadata_enhancement.tags.quality_tag'),
-                genre_merge: _getTagConfig('metadata_enhancement.tags.genre_merge')
+                genre_merge: _getTagConfig('metadata_enhancement.tags.genre_merge'),
+                artist_separator: document.getElementById('artist-separator').value,
+                write_multi_artist: document.getElementById('write-multi-artist').checked,
+                feat_in_title: document.getElementById('feat-in-title').checked
             }
         },
         musicbrainz: {
