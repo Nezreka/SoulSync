@@ -968,6 +968,34 @@ class AutoImportWorker:
         artist_name = identification.get('artist_name', 'Unknown')
         album_name = identification.get('album_name', 'Unknown')
         image_url = identification.get('image_url', '')
+
+        # Parent folder artist override: if the staging folder structure is
+        # Artist/Albums/AlbumName or Artist/AlbumName, use the parent folder
+        # as the artist name when the tag-extracted artist looks wrong.
+        # This handles mixtapes/compilations where embedded tags have DJ names.
+        try:
+            staging_root = self._resolve_staging_path() or self.staging_path
+            rel_path = os.path.relpath(candidate.path, staging_root)
+            parts = [p for p in rel_path.replace('\\', '/').split('/') if p]
+
+            # parts[0] = artist folder, parts[1] = album or category subfolder, etc.
+            # Only attempt override if there's at least 2 levels (artist/album)
+            folder_artist = None
+            if len(parts) >= 2:
+                _category_names = {'albums', 'singles', 'eps', 'compilations', 'mixtapes',
+                                   'discography', 'music', 'downloads'}
+                if len(parts) >= 3 and parts[1].lower() in _category_names:
+                    # Artist/Albums/AlbumFolder → parts[0] is artist
+                    folder_artist = parts[0]
+                elif parts[0].lower() not in _category_names:
+                    # Artist/AlbumFolder → parts[0] is artist
+                    folder_artist = parts[0]
+
+            if folder_artist and folder_artist.lower() != artist_name.lower():
+                logger.info(f"[Auto-Import] Parent folder artist '{folder_artist}' differs from tag artist '{artist_name}' — using folder artist")
+                artist_name = folder_artist
+        except Exception:
+            pass
         release_date = identification.get('release_date', '') or album_data.get('release_date', '')
 
         # Compute total discs
