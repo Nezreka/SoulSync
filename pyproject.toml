@@ -1,0 +1,18 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 160
+
+[tool.ruff.lint]
+# Start lenient — catch real bugs, not style nits
+# E: pycodestyle errors, F: pyflakes, UP: pyupgrade, B: bugbear
+select = ["F", "E9", "W6", "B"]
+# Ignore rules that will flag too much in an existing codebase
+ignore = [
+    "F401",   # unused imports (too noisy initially)
+    "F841",   # unused variables
+    "E501",   # line length (handled by line-length setting)
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests can use assert, magic values, etc.
+"tests/**" = ["B", "F"]
