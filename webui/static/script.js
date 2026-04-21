@@ -5987,6 +5987,25 @@ function updateLossyBitrateOptions() {
     }
 }
 
+function updatePlexConfigurationButtons() {
+    const plexUrl = document.getElementById('plex-url');
+    const plexToken = document.getElementById('plex-token');
+    const hasPlexConfig = Boolean((plexUrl?.value || '').trim() || (plexToken?.value || '').trim());
+    const plexViewConfigButton = document.getElementById('plex-view-config-button');
+    const plexLinkToPlexButton = document.getElementById('plex-link-to-plex-button');
+    const plexManualConfigButton = document.getElementById('plex-manual-config-button');
+    const plexUrlActions = document.getElementById('plex-url-actions');
+    const plexTokenActions = document.getElementById('plex-token-actions');
+    const plexPinAuthFlow = document.getElementById('plex-pin-auth-flow');
+
+    if (plexViewConfigButton) plexViewConfigButton.style.display = hasPlexConfig ? '' : 'none';
+    if (plexLinkToPlexButton) plexLinkToPlexButton.style.display = hasPlexConfig ? 'none' : '';
+    if (plexManualConfigButton) plexManualConfigButton.style.display = hasPlexConfig ? 'none' : '';
+    if (plexUrlActions) plexUrlActions.style.display = hasPlexConfig ? 'none' : 'flex';
+    if (plexTokenActions) plexTokenActions.style.display = hasPlexConfig ? 'none' : 'flex';
+    if (plexPinAuthFlow) plexPinAuthFlow.style.display = 'none';
+}
+
 async function loadSettingsData() {
     try {
         const response = await fetch(API.settings);
@@ -6024,25 +6043,13 @@ async function loadSettingsData() {
         });
 
         // Populate Plex settings
-        document.getElementById('plex-url').value = settings.plex?.base_url || '';
-        document.getElementById('plex-token').value = settings.plex?.token || '';
-        const hasPlexConfig = Boolean(settings.plex?.base_url || settings.plex?.token);
-        const plexViewConfigButton = document.getElementById('plex-view-config-button');
-        const plexLinkToPlexButton = document.getElementById('plex-link-to-plex-button');
-        const plexManualConfigButton = document.getElementById('plex-manual-config-button');
-        const plexPinAuthFlow = document.getElementById('plex-pin-auth-flow');
-        if (plexViewConfigButton) {
-            plexViewConfigButton.style.display = hasPlexConfig ? '' : 'none';
-        }
-        if (plexLinkToPlexButton) {
-            plexLinkToPlexButton.style.display = hasPlexConfig ? 'none' : '';
-        }
-        if (plexManualConfigButton) {
-            plexManualConfigButton.style.display = hasPlexConfig ? 'none' : '';
-        }
-        if (plexPinAuthFlow) {
-            plexPinAuthFlow.style.display = 'none';
-        }
+        const plexUrlInput = document.getElementById('plex-url');
+        const plexTokenInput = document.getElementById('plex-token');
+        if (plexUrlInput) plexUrlInput.value = settings.plex?.base_url || '';
+        if (plexTokenInput) plexTokenInput.value = settings.plex?.token || '';
+        if (plexUrlInput) plexUrlInput.addEventListener('input', updatePlexConfigurationButtons);
+        if (plexTokenInput) plexTokenInput.addEventListener('input', updatePlexConfigurationButtons);
+        updatePlexConfigurationButtons();
 
         // Populate Jellyfin settings
         document.getElementById('jellyfin-url').value = settings.jellyfin?.base_url || '';
@@ -6443,12 +6450,17 @@ function showPlexConfiguration(disableFields = false) {
     const plexPinAuthFlow = document.getElementById('plex-pin-auth-flow');
     const plexUrl = document.getElementById('plex-url');
     const plexToken = document.getElementById('plex-token');
+    const plexLibraryContainer = document.getElementById('plex-library-selector-container');
 
     if (plexConfig) plexConfig.style.display = '';
     if (plexSetup) plexSetup.style.display = 'none';
     if (plexPinAuthFlow) plexPinAuthFlow.style.display = 'none';
     if (plexUrl) plexUrl.disabled = disableFields;
     if (plexToken) plexToken.disabled = disableFields;
+    if (plexLibraryContainer && !disableFields) {
+        plexLibraryContainer.style.display = 'none';
+    }
+    updatePlexConfigurationButtons();
 }
 
 async function startPlexPinAuth() {
@@ -6560,7 +6572,7 @@ function restartPlexPinAuth() {
     startPlexPinAuth();
 }
 
-function clearPlexConfiguration() {
+async function clearPlexConfiguration() {
     cancelPlexPinAuth();
     const plexUrl = document.getElementById('plex-url');
     const plexToken = document.getElementById('plex-token');
@@ -6579,6 +6591,17 @@ function clearPlexConfiguration() {
     if (plexViewConfigButton) plexViewConfigButton.style.display = 'none';
     if (plexLinkToPlexButton) plexLinkToPlexButton.style.display = '';
     if (plexManualConfigButton) plexManualConfigButton.style.display = '';
+
+    const plexLibraryContainer = document.getElementById('plex-library-selector-container');
+    const plexLibrarySelect = document.getElementById('plex-music-library');
+    if (plexLibrarySelect) {
+        plexLibrarySelect.innerHTML = '<option value="">Select a music library</option>';
+    }
+    if (plexLibraryContainer) {
+        plexLibraryContainer.style.display = 'none';
+    }
+
+    updatePlexConfigurationButtons();
 
     try {
         await fetch('/api/plex/clear-library', { method: 'POST' });
