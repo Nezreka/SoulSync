@@ -16,7 +16,7 @@ from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 from mutagen.oggvorbis import OggVorbis
 from mutagen.apev2 import APEv2, APENoHeaderError
 
-logger = logging.getLogger("newmusic.tag_writer")
+logger = logging.getLogger("tag_writer")
 
 # Supported extensions
 SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}

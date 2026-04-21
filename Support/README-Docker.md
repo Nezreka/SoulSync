@@ -63,6 +63,7 @@ environment:
   - FLASK_ENV=production              # Flask environment
   - PYTHONPATH=/app                   # Python path
   - SOULSYNC_CONFIG_PATH=/app/config/config.json  # Config file location
+  - SOULSYNC_LOG_LEVEL=INFO           # Optional startup log level override, takes precedence over the UI-configured log level
   - TZ=America/New_York               # Timezone
 ```
 
