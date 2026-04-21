@@ -5703,17 +5703,19 @@ function validateFileOrganizationTemplates() {
             errors.push('Album template cannot have consecutive slashes //');
         }
         // Check for likely typos of valid variables (case-insensitive to catch $Album, $ARTIST, etc.)
-        const albumVarPattern = /\$[a-zA-Z]+/g;
+        const albumVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
         const foundVars = albumPath.match(albumVarPattern) || [];
         foundVars.forEach(v => {
-            const lowerVar = v.toLowerCase();
+            // Normalize ${var} to $var for validation
+            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
+            const lowerVar = normalized.toLowerCase();
             // Check if lowercase version exists in valid vars
             const isValid = validVars.album.some(validVar => validVar.toLowerCase() === lowerVar);
             if (!isValid) {
-                errors.push(`Invalid variable "${v}" in album template. Valid: ${validVars.album.join(', ')}`);
-            } else if (v !== lowerVar && validVars.album.includes(lowerVar)) {
+                errors.push(`Invalid variable "${normalized}" in album template. Valid: ${validVars.album.join(', ')}`);
+            } else if (normalized !== lowerVar && validVars.album.includes(lowerVar)) {
                 // Variable is valid but has wrong case
-                errors.push(`Variable "${v}" should be lowercase: "${lowerVar}"`);
+                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
             }
         });
     }
@@ -5730,15 +5732,16 @@ function validateFileOrganizationTemplates() {
         if (singlePath.includes('//')) {
             errors.push('Single template cannot have consecutive slashes //');
         }
-        const singleVarPattern = /\$[a-zA-Z]+/g;
+        const singleVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
         const foundVars = singlePath.match(singleVarPattern) || [];
         foundVars.forEach(v => {
-            const lowerVar = v.toLowerCase();
+            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
+            const lowerVar = normalized.toLowerCase();
             const isValid = validVars.single.some(validVar => validVar.toLowerCase() === lowerVar);
             if (!isValid) {
-                errors.push(`Invalid variable "${v}" in single template. Valid: ${validVars.single.join(', ')}`);
-            } else if (v !== lowerVar && validVars.single.includes(lowerVar)) {
-                errors.push(`Variable "${v}" should be lowercase: "${lowerVar}"`);
+                errors.push(`Invalid variable "${normalized}" in single template. Valid: ${validVars.single.join(', ')}`);
+            } else if (normalized !== lowerVar && validVars.single.includes(lowerVar)) {
+                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
             }
         });
     }
@@ -5757,15 +5760,16 @@ function validateFileOrganizationTemplates() {
         if (playlistPath.includes('//')) {
             errors.push('Playlist template cannot have consecutive slashes //');
         }
-        const playlistVarPattern = /\$[a-zA-Z]+/g;
+        const playlistVarPattern = /\$\{([a-zA-Z]+)\}|\$([a-zA-Z]+)/g;
         const foundVars = playlistPath.match(playlistVarPattern) || [];
         foundVars.forEach(v => {
-            const lowerVar = v.toLowerCase();
+            const normalized = v.startsWith('${') ? '$' + v.slice(2, -1) : v;
+            const lowerVar = normalized.toLowerCase();
             const isValid = validVars.playlist.some(validVar => validVar.toLowerCase() === lowerVar);
             if (!isValid) {
-                errors.push(`Invalid variable "${v}" in playlist template. Valid: ${validVars.playlist.join(', ')}`);
-            } else if (v !== lowerVar && validVars.playlist.includes(lowerVar)) {
-                errors.push(`Variable "${v}" should be lowercase: "${lowerVar}"`);
+                errors.push(`Invalid variable "${normalized}" in playlist template. Valid: ${validVars.playlist.join(', ')}`);
+            } else if (normalized !== lowerVar && validVars.playlist.includes(lowerVar)) {
+                errors.push(`Variable "${normalized}" should be lowercase: "${lowerVar}"`);
             }
         });
     }
