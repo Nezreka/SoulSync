@@ -55,6 +55,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
+          python -m ruff check --output-format=github .
           python -m compileall api core database services scripts web_server.py wsgi.py beatport_unified_scraper.py
           python -m pytest
 
@@ -74,6 +75,13 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Generate build tag
+        if: steps.recent.outputs.skip != 'true'
+        id: tag
+        run: |
+          echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push to GHCR
         if: steps.recent.outputs.skip != 'true'
         uses: docker/build-push-action@v7
@@ -88,5 +96,5 @@ jobs:
             COMMIT_SHA=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/soulsync:dev
-            ${{ github.event_name == 'schedule' && format('ghcr.io/{0}/soulsync:nightly', github.repository_owner) || '' }}
+            ghcr.io/${{ github.repository_owner }}/soulsync:dev-${{ steps.tag.outputs.date }}-${{ steps.tag.outputs.short_sha }}
             ${{ github.event_name == 'schedule' && format('ghcr.io/{0}/soulsync:nightly', github.repository_owner) || '' }}
