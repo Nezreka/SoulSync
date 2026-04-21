@@ -19429,6 +19429,8 @@ function openDiscoveryFixModal(platform, identifier, trackIndex) {
         state = youtubePlaylistStates[identifier]; // Deezer uses YouTube state infrastructure
     } else if (platform === 'mirrored') {
         state = youtubePlaylistStates[identifier]; // Mirrored playlists use YouTube state infrastructure
+    } else if (platform === 'spotify_public') {
+        state = youtubePlaylistStates[identifier]; // Spotify public playlists use YouTube state infrastructure
     }
 
     // Support both camelCase and snake_case for discovery results
@@ -27121,7 +27123,13 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
                 status_class: isFound ? 'found' : 'not-found',
                 spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
                 spotify_artist: result.spotify_data && result.spotify_data.artists ?
-                    (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                    (Array.isArray(result.spotify_data.artists)
+                        ? result.spotify_data.artists
+                            .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                            .filter(Boolean)
+                            .join(', ') || '-'
+                        : result.spotify_data.artists)
+                    : (result.spotify_artist || '-'),
                 spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
                 spotify_data: result.spotify_data, // Pass through spotify_data
                 spotify_id: result.spotify_id, // Pass through spotify_id
@@ -28582,7 +28590,13 @@ async function openDeezerDiscoveryModal(playlistId, playlistData) {
                 status_class: isFound ? 'found' : 'not-found',
                 spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
                 spotify_artist: result.spotify_data && result.spotify_data.artists ?
-                    (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                    (Array.isArray(result.spotify_data.artists)
+                        ? result.spotify_data.artists
+                            .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                            .filter(Boolean)
+                            .join(', ') || '-'
+                        : result.spotify_data.artists)
+                    : (result.spotify_artist || '-'),
                 spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
                 spotify_data: result.spotify_data,
                 spotify_id: result.spotify_id,
@@ -32461,7 +32475,13 @@ async function openSpotifyPublicDiscoveryModal(urlHash, playlistData) {
                 status_class: isFound ? 'found' : 'not-found',
                 spotify_track: result.spotify_data ? result.spotify_data.name : (result.spotify_track || '-'),
                 spotify_artist: result.spotify_data && result.spotify_data.artists ?
-                    (Array.isArray(result.spotify_data.artists) ? result.spotify_data.artists.join(', ') : result.spotify_data.artists) : (result.spotify_artist || '-'),
+                    (Array.isArray(result.spotify_data.artists)
+                        ? result.spotify_data.artists
+                            .map(a => (typeof a === 'object' && a !== null) ? (a.name || '') : a)
+                            .filter(Boolean)
+                            .join(', ') || '-'
+                        : result.spotify_data.artists)
+                    : (result.spotify_artist || '-'),
                 spotify_album: result.spotify_data ? (typeof result.spotify_data.album === 'object' ? result.spotify_data.album.name : result.spotify_data.album) : (result.spotify_album || '-'),
                 spotify_data: result.spotify_data,
                 spotify_id: result.spotify_id,

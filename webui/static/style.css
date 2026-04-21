@@ -14808,16 +14808,17 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .youtube-discovery-modal .discovery-table th {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(17, 17, 20, 0.96);
     color: #ffffff;
     font-weight: 600;
     padding: 12px 8px;
     text-align: left;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.18);
     font-size: 14px;
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 5;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
