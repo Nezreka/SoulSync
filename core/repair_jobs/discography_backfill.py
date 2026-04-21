@@ -1,0 +1,387 @@
+"""Discography Backfill Job — finds missing albums/tracks for library artists."""
+
+from core.metadata_service import (
+    get_album_tracks_for_source,
+    get_artist_discography,
+    get_primary_source,
+    MetadataLookupOptions,
+)
+from core.repair_jobs import register_job
+from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.watchlist_scanner import (
+    is_acoustic_version,
+    is_compilation_album,
+    is_instrumental_version,
+    is_live_version,
+    is_remix_version,
+)
+from utils.logging_config import get_logger
+
+logger = get_logger("repair_job.discography_backfill")
+
+
+@register_job
+class DiscographyBackfillJob(RepairJob):
+    job_id = 'discography_backfill'
+    display_name = 'Discography Backfill'
+    description = 'Finds missing albums and tracks for artists in your library'
+    help_text = (
+        'Scans each artist in your library, fetches their full discography from '
+        'the configured metadata source, and adds any tracks you don\'t already '
+        'own to the wishlist for automatic download.\n\n'
+        'Respects content filters: live versions, remixes, acoustic versions, '
+        'instrumentals, and compilations are excluded by default.\n\n'
+        'Settings:\n'
+        '- Include Albums/EPs/Singles: Which release types to check\n'
+        '- Include Live/Remixes/Acoustic/Compilations/Instrumentals: Content type filters\n'
+        '- Max Artists Per Run: Limit how many artists to process per scan (default: 50)'
+    )
+    icon = 'repair-icon-backfill'
+    default_enabled = False
+    default_interval_hours = 168  # Weekly
+    default_settings = {
+        'include_albums': True,
+        'include_eps': True,
+        'include_singles': False,
+        'include_live': False,
+        'include_remixes': False,
+        'include_acoustic': False,
+        'include_compilations': False,
+        'include_instrumentals': False,
+        'max_artists_per_run': 50,
+    }
+    auto_fix = False
+
+    def scan(self, context: JobContext) -> JobResult:
+        result = JobResult()
+        settings = self._get_settings(context)
+
+        max_artists = settings.get('max_artists_per_run', 50)
+
+        # Fetch all library artists with their metadata source IDs
+        artists = self._get_library_artists(context)
+        if not artists:
+            logger.info("No artists in library to scan")
+            return result
+
+        total = min(len(artists), max_artists)
+        if context.update_progress:
+            context.update_progress(0, total)
+        if context.report_progress:
+            context.report_progress(
+                phase=f'Scanning discography for {total} artists...',
+                total=total,
+            )
+
+        logger.info("Discography backfill: scanning %d artists (of %d total)", total, len(artists))
+        primary_source = get_primary_source()
+
+        for i, artist in enumerate(artists[:max_artists]):
+            if context.check_stop():
+                return result
+            if i % 5 == 0 and context.wait_if_paused():
+                return result
+
+            artist_id = artist['id']
+            artist_name = artist['name']
+
+            if context.report_progress:
+                context.report_progress(
+                    scanned=i + 1, total=total,
+                    phase=f'Scanning {i + 1} / {total}',
+                    log_line=f'Fetching discography: {artist_name}',
+                    log_type='info',
+                )
+
+            try:
+                missing_count = self._scan_artist(context, artist, settings, primary_source, result)
+                if missing_count > 0:
+                    logger.info("Found %d missing tracks for %s", missing_count, artist_name)
+            except Exception as e:
+                logger.warning("Error scanning discography for %s: %s", artist_name, e)
+                result.errors += 1
+
+            if context.update_progress and (i + 1) % 3 == 0:
+                context.update_progress(i + 1, total)
+
+            # Rate limit between artists
+            if context.sleep_or_stop(1.0):
+                return result
+
+        if context.update_progress:
+            context.update_progress(total, total)
+
+        logger.info(
+            "Discography backfill complete: %d artists scanned, %d missing tracks found, %d errors",
+            result.scanned, result.findings_created, result.errors,
+        )
+        return result
+
+    def _scan_artist(self, context, artist, settings, primary_source, result):
+        """Scan one artist's discography and create findings for missing tracks."""
+        artist_name = artist['name']
+        result.scanned += 1
+
+        # Build source ID map for more accurate lookups
+        source_ids = {}
+        if artist.get('spotify_artist_id'):
+            source_ids['spotify'] = artist['spotify_artist_id']
+        if artist.get('itunes_artist_id'):
+            source_ids['itunes'] = artist['itunes_artist_id']
+        if artist.get('deezer_artist_id'):
+            source_ids['deezer'] = artist['deezer_artist_id']
+
+        # Fetch full discography
+        discography = get_artist_discography(
+            artist_id=str(artist['id']),
+            artist_name=artist_name,
+            options=MetadataLookupOptions(
+                allow_fallback=True,
+                skip_cache=False,
+                artist_source_ids=source_ids if source_ids else None,
+            ),
+        )
+
+        if not discography:
+            result.skipped += 1
+            return 0
+
+        source = discography.get('source', primary_source)
+        albums = discography.get('albums', [])
+        singles = discography.get('singles', [])
+        missing_count = 0
+        active_server = None
+        if context.config_manager:
+            active_server = context.config_manager.get_active_media_server()
+
+        # Process albums and singles
+        for release in albums + singles:
+            if context.check_stop():
+                return missing_count
+
+            release_name = release.get('name', '')
+            release_id = release.get('id', '')
+            total_tracks = release.get('total_tracks', 0) or 0
+            album_type = release.get('album_type', 'album')
+            release_image = release.get('image_url', '')
+
+            # Filter by release type
+            if not self._should_include_release(total_tracks, album_type, settings):
+                continue
+
+            # Filter compilation albums
+            if not settings.get('include_compilations', False):
+                if is_compilation_album(release_name):
+                    continue
+
+            # Fetch tracks for this release
+            try:
+                tracks_data = get_album_tracks_for_source(source, str(release_id))
+            except Exception:
+                tracks_data = None
+
+            if not tracks_data:
+                continue
+
+            # Extract track items
+            items = []
+            if isinstance(tracks_data, dict):
+                items = tracks_data.get('items', [])
+            elif isinstance(tracks_data, list):
+                items = tracks_data
+
+            if not items:
+                continue
+
+            for track_item in items:
+                if context.check_stop():
+                    return missing_count
+
+                track_name = track_item.get('name', '')
+                if not track_name:
+                    continue
+
+                # Extract artist name from track
+                track_artists = track_item.get('artists', [])
+                if track_artists:
+                    first_artist = track_artists[0]
+                    if isinstance(first_artist, dict):
+                        track_artist = first_artist.get('name', artist_name)
+                    else:
+                        track_artist = str(first_artist)
+                else:
+                    track_artist = artist_name
+
+                # Content type filters
+                if not settings.get('include_live', False):
+                    if is_live_version(track_name, release_name):
+                        continue
+                if not settings.get('include_remixes', False):
+                    if is_remix_version(track_name, release_name):
+                        continue
+                if not settings.get('include_acoustic', False):
+                    if is_acoustic_version(track_name, release_name):
+                        continue
+                if not settings.get('include_instrumentals', False):
+                    if is_instrumental_version(track_name, release_name):
+                        continue
+
+                # Check if track already exists in library
+                db_track, confidence = context.db.check_track_exists(
+                    track_name, track_artist,
+                    confidence_threshold=0.7,
+                    server_source=active_server,
+                    album=release_name,
+                )
+                if db_track and confidence >= 0.7:
+                    continue  # Already owned
+
+                # Check if already in wishlist
+                try:
+                    track_id = track_item.get('id', '')
+                    if track_id and self._is_in_wishlist(context.db, track_id):
+                        continue
+                except Exception:
+                    pass
+
+                # Build track data for wishlist
+                track_data = {
+                    'id': track_item.get('id', f'backfill_{hash(f"{track_artist}_{track_name}") % 100000}'),
+                    'name': track_name,
+                    'artists': [{'name': track_artist}],
+                    'album': {
+                        'name': release_name,
+                        'id': str(release_id),
+                        'images': [{'url': release_image}] if release_image else [],
+                        'album_type': album_type,
+                        'release_date': release.get('release_date', ''),
+                    },
+                    'duration_ms': track_item.get('duration_ms', 0),
+                    'track_number': track_item.get('track_number', 0),
+                    'disc_number': track_item.get('disc_number', 1),
+                }
+
+                # Create finding
+                if context.create_finding:
+                    try:
+                        context.create_finding(
+                            job_id=self.job_id,
+                            finding_type='missing_discography_track',
+                            severity='info',
+                            entity_type='track',
+                            entity_id=str(track_data['id']),
+                            file_path=None,
+                            title=f'Missing: {track_name}',
+                            description=(
+                                f'"{track_name}" by {track_artist} from '
+                                f'"{release_name}" is not in your library.'
+                            ),
+                            details={
+                                'track_data': track_data,
+                                'artist_name': artist_name,
+                                'album_name': release_name,
+                                'album_image_url': release_image,
+                                'source': source,
+                            },
+                        )
+                        result.findings_created += 1
+                        missing_count += 1
+                    except Exception as e:
+                        logger.debug("Error creating finding for %s: %s", track_name, e)
+                        result.errors += 1
+
+        return missing_count
+
+    @staticmethod
+    def _should_include_release(total_tracks, album_type, settings):
+        """Check if a release should be included based on type settings."""
+        # Use album_type from metadata source when available
+        normalized = (album_type or '').lower()
+        if normalized == 'compilation':
+            return settings.get('include_compilations', False)
+        if normalized in ('single',):
+            return settings.get('include_singles', False)
+        if normalized in ('ep',):
+            return settings.get('include_eps', True)
+        # Fall back to track count heuristic
+        if total_tracks >= 7:
+            return settings.get('include_albums', True)
+        elif total_tracks >= 4:
+            return settings.get('include_eps', True)
+        elif total_tracks >= 1:
+            return settings.get('include_singles', False)
+        return settings.get('include_albums', True)
+
+    @staticmethod
+    def _is_in_wishlist(db, track_id):
+        """Check if a track ID is already in the wishlist."""
+        conn = db._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COUNT(*) FROM wishlist_tracks WHERE spotify_track_id = ?",
+                (str(track_id),),
+            )
+            return cursor.fetchone()[0] > 0
+        finally:
+            conn.close()
+
+    def _get_library_artists(self, context):
+        """Get all artists from the library database with source IDs."""
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            cursor = conn.cursor()
+
+            # Check which columns exist
+            cursor.execute("PRAGMA table_info(artists)")
+            columns = {col[1] for col in cursor.fetchall()}
+
+            select = ["id", "name"]
+            if 'spotify_artist_id' in columns:
+                select.append("spotify_artist_id")
+            if 'itunes_artist_id' in columns:
+                select.append("itunes_artist_id")
+            if 'deezer_artist_id' in columns:
+                select.append("deezer_artist_id")
+
+            cursor.execute(f"""
+                SELECT {', '.join(select)}
+                FROM artists
+                WHERE name IS NOT NULL AND name != '' AND name != 'Unknown Artist'
+                ORDER BY name
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error("Error fetching library artists: %s", e, exc_info=True)
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def _get_settings(self, context: JobContext) -> dict:
+        if not context.config_manager:
+            return self.default_settings.copy()
+        cfg = context.config_manager.get(f'repair.jobs.{self.job_id}.settings', {})
+        merged = self.default_settings.copy()
+        merged.update(cfg)
+        return merged
+
+    def estimate_scope(self, context: JobContext) -> int:
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM artists
+                WHERE name IS NOT NULL AND name != '' AND name != 'Unknown Artist'
+            """)
+            row = cursor.fetchone()
+            settings = self._get_settings(context)
+            max_artists = settings.get('max_artists_per_run', 50)
+            return min(row[0] if row else 0, max_artists)
+        except Exception:
+            return 0
+        finally:
+            if conn:
+                conn.close()

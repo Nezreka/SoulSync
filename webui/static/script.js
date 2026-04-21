@@ -65544,6 +65544,7 @@ async function loadRepairFindings() {
             incomplete_album: 'Auto-Fill',
             missing_lossy_copy: 'Convert',
             acoustid_mismatch: 'Fix',
+            missing_discography_track: 'Add to Wishlist',
         };
 
         container.innerHTML = items.map(f => {
