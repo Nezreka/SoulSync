@@ -12,6 +12,11 @@ import threading
 import time
 from collections import deque, defaultdict
 
+from utils.logging_config import get_logger
+
+
+logger = get_logger("api_call_tracker")
+
 
 # Known rate limits per service (calls/minute)
 RATE_LIMITS = {
@@ -281,12 +286,15 @@ class ApiCallTracker:
             with open(_PERSIST_PATH, 'w') as f:
                 json.dump({'ts': now, 'history': data, 'events': events}, f)
         except Exception as e:
-            print(f"[ApiCallTracker] Failed to save history: {e}")
+            logger.error(f"[ApiCallTracker] Failed to save history: {e}")
 
     def _load(self):
         """Restore 24h minute history from disk. Called on init."""
         try:
             if not os.path.exists(_PERSIST_PATH):
+                return
+            if os.path.getsize(_PERSIST_PATH) == 0:
+                logger.info(f"[ApiCallTracker] History file is empty, starting fresh: {_PERSIST_PATH}")
                 return
             with open(_PERSIST_PATH, 'r') as f:
                 raw = json.load(f)
@@ -305,9 +313,11 @@ class ApiCallTracker:
                 for e in events:
                     if e.get('ts', 0) >= cutoff:
                         self._events.append(e)
-            print(f"[ApiCallTracker] Restored history for {len(history)} services, {len(events)} events")
+            logger.info(f"[ApiCallTracker] Restored history for {len(history)} services, {len(events)} events")
+        except json.JSONDecodeError as e:
+            logger.warning(f"[ApiCallTracker] History file is not valid JSON, starting fresh: {_PERSIST_PATH} ({e})")
         except Exception as e:
-            print(f"[ApiCallTracker] Failed to load history: {e}")
+            logger.error(f"[ApiCallTracker] Failed to load history: {e}")
 
 
 # Singleton instance

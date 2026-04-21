@@ -6874,6 +6874,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin: 6px 0;
     padding: 12px;
     transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .download-item:hover {
@@ -6881,6 +6884,35 @@ body.helper-mode-active #dashboard-activity-feed:hover {
             rgba(50, 50, 55, 0.98),
             rgba(40, 40, 45, 1.0));
     border-color: rgba(var(--accent-rgb), 0.6);
+}
+
+.download-item__art {
+    width: 44px;
+    height: 44px;
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.download-item__art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.download-item__art-placeholder {
+    width: 100%;
+    height: 100%;
+    background: rgba(255,255,255,0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.25);
+    font-size: 18px;
+    border-radius: 6px;
+}
+
+.download-item__info {
+    flex: 1;
+    min-width: 0;
 }
 
 .download-item__header {
@@ -6894,10 +6926,43 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-size: 13px;
     font-weight: 600;
     color: #ffffff;
-    max-width: 200px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.download-item__meta {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    font-size: 0.82em;
+    color: rgba(255,255,255,0.5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+}
+.download-item__sep {
+    margin: 0 5px;
+    opacity: 0.4;
+}
+.download-item__album {
+    opacity: 0.7;
+}
+
+.download-item__badges {
+    display: flex;
+    gap: 6px;
+    margin-top: 3px;
+}
+.download-item__source,
+.download-item__quality {
+    font-size: 0.7em;
+    padding: 1px 7px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.07);
+    color: rgba(255,255,255,0.45);
+    font-weight: 500;
 }
 
 .download-item__uploader {
@@ -6912,6 +6977,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     justify-content: center;
     flex-direction: row;
     gap: 15px;
+    flex-shrink: 0;
 }
 
 /* Progress Bar Styles */

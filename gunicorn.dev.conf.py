@@ -13,7 +13,10 @@ timeout = 120
 # Don't let local reloads wait too long for shutdown.
 graceful_timeout = 1
 
-# Logging goes to stdout/stderr so the shell launcher can collect it.
+# Logging goes to stdout/stderr and is filtered by the custom logger class.
 accesslog = "-"
 errorlog = "-"
+# Mimic process log format
+access_log_format = '%(h)s - - "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"'
 loglevel = "info"
+logger_class = "utils.gunicorn_logger.FilteredGunicornLogger"
