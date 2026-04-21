@@ -138,7 +138,7 @@ def register_routes(bp):
         try:
             # Forward to the internal sync endpoint
             import requests as http_requests
-            internal_url = f"http://127.0.0.1:8008/api/sync/start"
+            internal_url = "http://127.0.0.1:8008/api/sync/start"
             resp = http_requests.post(internal_url, json={
                 "playlist_id": playlist_id,
                 "playlist_name": playlist_name,
