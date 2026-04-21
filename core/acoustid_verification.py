@@ -17,7 +17,7 @@ from utils.logging_config import get_logger
 from core.acoustid_client import AcoustIDClient
 from core.musicbrainz_client import MusicBrainzClient
 
-logger = get_logger("acoustid_verification")
+logger = get_logger("acoustid.verification")
 
 # Thresholds
 MIN_ACOUSTID_SCORE = 0.80       # Minimum AcoustID fingerprint score to trust

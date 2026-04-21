@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 import os
 import shutil
+import logging
 import logging.handlers
 
 from utils.logging_config import get_logger
@@ -29,22 +30,23 @@ from config.settings import config_manager
 FPCALC_BIN_DIR = Path(__file__).parent.parent / "bin"
 CHROMAPRINT_VERSION = "1.5.1"
 
-# Set up dedicated AcoustID logger with its own file
-logger = get_logger("acoustid_client")
-
-# Add dedicated file handler for AcoustID logs alongside the configured app log
+_acoustid_logger = logging.getLogger("soulsync.acoustid")
+_acoustid_logger.setLevel(logging.DEBUG)
 _acoustid_log_path = Path(config_manager.get('logging.path', 'logs/app.log')).parent / "acoustid.log"
 _acoustid_log_path.parent.mkdir(parents=True, exist_ok=True)
-_acoustid_file_handler = logging.handlers.RotatingFileHandler(
-    _acoustid_log_path, encoding='utf-8', maxBytes=5*1024*1024, backupCount=2
-)
-_acoustid_file_handler.setLevel(logging.DEBUG)
-_acoustid_file_handler.setFormatter(logging.Formatter(
-    fmt='%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-))
-logger.addHandler(_acoustid_file_handler)
-logging.getLogger("soulsync.acoustid_verification").addHandler(_acoustid_file_handler)
+if not _acoustid_logger.handlers:
+    _acoustid_file_handler = logging.handlers.RotatingFileHandler(
+        _acoustid_log_path, encoding='utf-8', maxBytes=5*1024*1024, backupCount=2
+    )
+    _acoustid_file_handler.setLevel(logging.DEBUG)
+    _acoustid_file_handler.setFormatter(logging.Formatter(
+        fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+    _acoustid_logger.addHandler(_acoustid_file_handler)
+    _acoustid_logger.propagate = False
+
+logger = get_logger("acoustid.client")
 
 # Check if pyacoustid is available
 try:

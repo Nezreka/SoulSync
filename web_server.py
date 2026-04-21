@@ -6396,8 +6396,8 @@ def get_log_tail():
 
     log_map = {
         'app': Path(_log_path),
-        'post_processing': _log_dir / 'post_processing.log',
         'acoustid': _log_dir / 'acoustid.log',
+        'post_processing': _log_dir / 'post_processing.log',
         'source_reuse': _log_dir / 'source_reuse.log',
     }
     log_path = log_map.get(log_source, log_map['app'])
@@ -54425,8 +54425,8 @@ def _emit_live_log_loop():
     _active_source = 'app'
     log_map = {
         'app': Path(_log_path),
-        'post_processing': _log_dir / 'post_processing.log',
         'acoustid': _log_dir / 'acoustid.log',
+        'post_processing': _log_dir / 'post_processing.log',
         'source_reuse': _log_dir / 'source_reuse.log',
     }
     while not globals().get('IS_SHUTTING_DOWN', False):
