@@ -36306,10 +36306,20 @@ async function lazyLoadSimilarArtistImages(container) {
 
         await Promise.all(batch.map(async (bubble) => {
             const artistId = bubble.getAttribute('data-artist-id');
+            const artistSource = bubble.getAttribute('data-artist-source') || '';
+            const artistPlugin = bubble.getAttribute('data-artist-plugin') || '';
             if (!artistId) return;
 
             try {
-                const response = await fetch(`/api/artist/${artistId}/image`);
+                const params = new URLSearchParams();
+                if (artistSource) params.set('source', artistSource);
+                if (artistPlugin) params.set('plugin', artistPlugin);
+
+                const imageUrl = params.toString()
+                    ? `/api/artist/${encodeURIComponent(artistId)}/image?${params.toString()}`
+                    : `/api/artist/${encodeURIComponent(artistId)}/image`;
+
+                const response = await fetch(imageUrl);
                 const data = await response.json();
 
                 if (data.success && data.image_url) {
@@ -36390,6 +36400,10 @@ function createSimilarArtistBubble(artist) {
     const bubble = document.createElement('div');
     bubble.className = 'similar-artist-bubble';
     bubble.setAttribute('data-artist-id', artist.id);
+    bubble.setAttribute('data-artist-source', artist.source || '');
+    if (artist.plugin) {
+        bubble.setAttribute('data-artist-plugin', artist.plugin);
+    }
 
     // Track if image needs lazy loading
     const hasImage = artist.image_url && artist.image_url.trim() !== '';
@@ -36441,7 +36455,10 @@ function createSimilarArtistBubble(artist) {
     bubble.addEventListener('click', () => {
         console.log(`🎵 Clicked similar artist: ${artist.name} (ID: ${artist.id})`);
         // Navigate to this artist's detail page (same as clicking from search results)
-        selectArtistForDetail(artist);
+        selectArtistForDetail(
+            artist,
+            artist.source ? { source: artist.source, plugin: artist.plugin } : {}
+        );
     });
 
     return bubble;
