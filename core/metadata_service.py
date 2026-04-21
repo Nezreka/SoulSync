@@ -1747,6 +1747,66 @@ def get_musicmap_similar_artists(
     }
 
 
+def _get_artist_image_from_source(source: str, artist_id: str) -> Optional[str]:
+    client = get_client_for_source(source)
+    if not client:
+        return None
+
+    try:
+        if source == 'spotify':
+            artist_data = client.get_artist(artist_id, allow_fallback=False)
+        else:
+            artist_data = client.get_artist(artist_id)
+    except Exception as exc:
+        logger.debug("Could not fetch artist image for %s on %s: %s", artist_id, source, exc)
+        artist_data = None
+
+    image_url = _extract_artist_image_url(artist_data)
+    if image_url:
+        return image_url
+
+    if hasattr(client, '_get_artist_image_from_albums'):
+        try:
+            return client._get_artist_image_from_albums(artist_id)
+        except Exception as exc:
+            logger.debug("Could not fetch artist album art for %s on %s: %s", artist_id, source, exc)
+
+    return None
+
+
+def get_artist_image_url(
+    artist_id: str,
+    source_override: Optional[str] = None,
+    plugin: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve an artist image URL using the configured source priority."""
+    if not artist_id:
+        return None
+
+    if artist_id.startswith('soul_'):
+        return None
+
+    source_override = (source_override or '').strip().lower()
+    plugin = (plugin or '').strip().lower()
+
+    if source_override == 'hydrabase':
+        if plugin in ('deezer', 'itunes'):
+            return _get_artist_image_from_source(plugin, artist_id)
+        if artist_id.isdigit():
+            return _get_artist_image_from_source('itunes', artist_id)
+        return None
+
+    if source_override:
+        return _get_artist_image_from_source(source_override, artist_id)
+
+    for source in get_source_priority(get_primary_source()):
+        image_url = _get_artist_image_from_source(source, artist_id)
+        if image_url:
+            return image_url
+
+    return None
+
+
 def get_deezer_client():
     """Get cached Deezer client.
 

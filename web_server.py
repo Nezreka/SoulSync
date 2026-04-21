@@ -11067,57 +11067,18 @@ def get_similar_artists(artist_name):
 
 @app.route('/api/artist/<artist_id>/image', methods=['GET'])
 def get_artist_image(artist_id):
-    """Get artist image URL - used for lazy loading in search results.
-
-    For iTunes, this fetches the artist's first album artwork as a fallback.
-    For Spotify, returns the artist's image directly.
-    """
+    """Get an artist image URL using source-aware metadata resolution."""
     try:
-        # Soul IDs from Hydrabase can't be looked up on Spotify/iTunes
-        if artist_id.startswith('soul_'):
-            return jsonify({"success": True, "image_url": None})
+        from core.metadata_service import get_artist_image_url as _get_artist_image_url
 
-        # Source override from multi-source search tabs
-        source_override = request.args.get('source', '')
-
-        if source_override == 'itunes':
-            client = _get_itunes_client()
-            image_url = client._get_artist_image_from_albums(artist_id)
-            return jsonify({"success": True, "image_url": image_url})
-        elif source_override == 'deezer':
-            client = _get_deezer_client()
-            image_url = client._get_artist_image_from_albums(artist_id)
-            return jsonify({"success": True, "image_url": image_url})
-        elif source_override == 'discogs':
-            client = _get_discogs_client()
-            image_url = client._get_artist_image_from_albums(artist_id)
-            return jsonify({"success": True, "image_url": image_url})
-        elif source_override == 'hydrabase':
-            # Route to the plugin that sourced the data
-            plugin = request.args.get('plugin', '').lower()
-            if plugin == 'deezer':
-                client = _get_deezer_client()
-                image_url = client._get_artist_image_from_albums(artist_id)
-            elif plugin == 'itunes' or artist_id.isdigit():
-                client = _get_itunes_client()
-                image_url = client._get_artist_image_from_albums(artist_id)
-            else:
-                image_url = None
-            return jsonify({"success": True, "image_url": image_url})
-        elif spotify_client and spotify_client.is_spotify_authenticated() and source_override != 'itunes':
-            # Use Spotify directly
-            from core.api_call_tracker import api_call_tracker
-            api_call_tracker.record_call('spotify', endpoint='artist')
-            artist_data = spotify_client.sp.artist(artist_id)
-            if artist_data and artist_data.get('images'):
-                image_url = artist_data['images'][0]['url'] if artist_data['images'] else None
-                return jsonify({"success": True, "image_url": image_url})
-            return jsonify({"success": True, "image_url": None})
-        else:
-            # Use fallback source - fetch album art
-            fallback = _get_metadata_fallback_client()
-            image_url = fallback._get_artist_image_from_albums(artist_id)
-            return jsonify({"success": True, "image_url": image_url})
+        source_override = request.args.get('source', '').strip().lower() or None
+        plugin = request.args.get('plugin', '').strip().lower() or None
+        image_url = _get_artist_image_url(
+            artist_id,
+            source_override=source_override,
+            plugin=plugin,
+        )
+        return jsonify({"success": True, "image_url": image_url})
     except Exception as e:
         logger.error(f"Error fetching artist image: {e}")
         return jsonify({"success": False, "image_url": None, "error": str(e)})
