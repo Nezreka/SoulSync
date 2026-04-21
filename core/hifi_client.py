@@ -668,7 +668,7 @@ class HiFiClient:
         """Get all active downloads (Soulseek-compatible)."""
         statuses = []
         with self._download_lock:
-            for dl_id, info in self.active_downloads.items():
+            for _dl_id, info in self.active_downloads.items():
                 statuses.append(DownloadStatus(
                     id=info['id'],
                     filename=info['filename'],

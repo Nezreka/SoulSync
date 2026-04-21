@@ -800,7 +800,7 @@ class TidalClient:
             )
 
             if response.status_code == 429:
-                raise Exception(f"Rate limited (429) on search_artist")
+                raise Exception("Rate limited (429) on search_artist")
             if response.status_code == 200:
                 data = response.json()
                 # JSON:API format: included artists in 'artists' or nested in relationships
@@ -859,7 +859,7 @@ class TidalClient:
             )
 
             if response.status_code == 429:
-                raise Exception(f"Rate limited (429) on search_album")
+                raise Exception("Rate limited (429) on search_album")
             if response.status_code == 200:
                 data = response.json()
                 items = []
@@ -925,7 +925,7 @@ class TidalClient:
             )
 
             if response.status_code == 429:
-                raise Exception(f"Rate limited (429) on search_track")
+                raise Exception("Rate limited (429) on search_track")
             if response.status_code == 200:
                 data = response.json()
                 items = []
@@ -984,7 +984,7 @@ class TidalClient:
             )
 
             if response.status_code == 429:
-                raise Exception(f"Rate limited (429) on get_artist")
+                raise Exception("Rate limited (429) on get_artist")
             if response.status_code == 200:
                 data = response.json()
                 # Handle JSON:API format
@@ -1018,7 +1018,7 @@ class TidalClient:
             )
 
             if response.status_code == 429:
-                raise Exception(f"Rate limited (429) on get_album")
+                raise Exception("Rate limited (429) on get_album")
             if response.status_code == 200:
                 data = response.json()
                 if 'data' in data and 'attributes' in data.get('data', {}):
@@ -1051,7 +1051,7 @@ class TidalClient:
             )
 
             if response.status_code == 429:
-                raise Exception(f"Rate limited (429) on get_track")
+                raise Exception("Rate limited (429) on get_track")
             if response.status_code == 200:
                 data = response.json()
                 if 'data' in data and 'attributes' in data.get('data', {}):
@@ -1132,7 +1132,7 @@ class TidalClient:
                         break
 
                 if not tracks_page or not tracks_page.get("data"):
-                    logger.info(f"No more tracks found, stopping pagination")
+                    logger.info("No more tracks found, stopping pagination")
                     break
 
                 # Reset failure counter on success

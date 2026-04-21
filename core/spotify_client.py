@@ -318,7 +318,7 @@ def rate_limited(func):
                         # If Retry-After is long, activate global ban instead of sleeping
                         if delay and delay > _LONG_RATE_LIMIT_THRESHOLD:
                             _set_global_rate_limit(delay, func.__name__, has_real_header=True)
-                            raise SpotifyRateLimitError(delay, func.__name__)
+                            raise SpotifyRateLimitError(delay, func.__name__) from e
 
                         if delay:
                             delay = delay + 1

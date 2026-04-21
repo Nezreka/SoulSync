@@ -111,7 +111,7 @@ class DuplicateDetectorJob(RepairJob):
         if context.report_progress:
             context.report_progress(phase=f'Comparing {total} tracks...', total=total)
 
-        for bucket_key, bucket_tracks in buckets.items():
+        for _bucket_key, bucket_tracks in buckets.items():
             if context.check_stop():
                 return result
 

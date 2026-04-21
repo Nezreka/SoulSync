@@ -163,7 +163,6 @@ class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
     def __init__(self, database_path: str = None):
-        import os
         # Use env var if path is None OR if it's the default path
         # This ensures Docker containers use the correct mounted volume location
         if database_path is None or database_path == "database/music_library.db":
@@ -1204,7 +1203,7 @@ class MusicDatabase:
                 cursor.execute(f"INSERT OR IGNORE INTO discovery_recent_albums_new ({cols_str}) SELECT {cols_str} FROM discovery_recent_albums")
                 cursor.execute("DROP TABLE discovery_recent_albums")
                 cursor.execute("ALTER TABLE discovery_recent_albums_new RENAME TO discovery_recent_albums")
-                conn.commit()
+                cursor.connection.commit()
                 logger.info("Successfully migrated discovery_recent_albums table for iTunes support")
 
             # Migration: Add UNIQUE constraint to similar_artists table
@@ -3526,7 +3525,6 @@ class MusicDatabase:
 
     def get_db_storage_stats(self):
         """Get database storage breakdown by table."""
-        import os
         conn = None
         try:
             # Total file size
@@ -3989,7 +3987,7 @@ class MusicDatabase:
                 conn.commit()
                 return cursor.rowcount > 0
         except sqlite3.IntegrityError:
-            logger.warning(f"Profile update failed (duplicate name?)")
+            logger.warning("Profile update failed (duplicate name?)")
             return False
         except Exception as e:
             logger.error(f"Error updating profile {profile_id}: {e}")
@@ -5547,7 +5545,7 @@ class MusicDatabase:
             u_words = uncensored.lower().split()
             if len(c_words) == len(u_words):
                 all_match = True
-                for cw, uw in zip(c_words, u_words):
+                for cw, uw in zip(c_words, u_words, strict=False):
                     if '*' in cw:
                         # Strip asterisks to get the visible prefix/suffix
                         # "b*****t" → prefix "b", suffix "t"
@@ -5675,7 +5673,6 @@ class MusicDatabase:
 
     def _get_album_formats(self, cursor, sibling_ids: list) -> List[str]:
         """Get distinct format strings for tracks in the given album IDs."""
-        import os
         try:
             placeholders = ','.join('?' for _ in sibling_ids)
             cursor.execute(f"""
@@ -6178,7 +6175,7 @@ class MusicDatabase:
             # Debug logging for Unicode normalization
             if search_title != search_title_norm or search_artist != search_artist_norm or \
                db_track.title != db_title_norm or db_track.artist_name != db_artist_norm:
-                logger.debug(f"Unicode normalization:")
+                logger.debug("Unicode normalization:")
                 logger.debug(f"   Search: '{search_title}' → '{search_title_norm}' | '{search_artist}' → '{search_artist_norm}'")
                 logger.debug(f"   Database: '{db_track.title}' → '{db_title_norm}' | '{db_track.artist_name}' → '{db_artist_norm}'")
             
@@ -10026,7 +10023,7 @@ class MusicDatabase:
                 ORDER BY g.artist_name ASC, g.created_at DESC
             """)
             columns = [desc[0] for desc in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+            return [dict(zip(columns, row, strict=False)) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Error getting retag groups: {e}")
             return []
@@ -10042,7 +10039,7 @@ class MusicDatabase:
                 ORDER BY disc_number ASC, track_number ASC
             """, (group_id,))
             columns = [desc[0] for desc in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+            return [dict(zip(columns, row, strict=False)) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Error getting retag tracks: {e}")
             return []
@@ -11165,7 +11162,7 @@ class MusicDatabase:
                     LIMIT ? OFFSET ?
                 """, (automation_id, limit, offset))
                 cols = [d[0] for d in cursor.description]
-                rows = [dict(zip(cols, row)) for row in cursor.fetchall()]
+                rows = [dict(zip(cols, row, strict=False)) for row in cursor.fetchall()]
                 return {'history': rows, 'total': total}
         except Exception as e:
             logger.error(f"Error getting automation run history for {automation_id}: {e}")
@@ -11534,7 +11531,6 @@ def get_database(database_path: str = None) -> MusicDatabase:
         database_path: Path to database file. If None or default path, uses DATABASE_PATH env var
                       or defaults to "database/music_library.db". Custom paths are used as-is.
     """
-    import os
     # Use env var if path is None OR if it's the default path
     # This ensures Docker containers use the correct mounted volume location
     if database_path is None or database_path == "database/music_library.db":
@@ -11553,7 +11549,7 @@ def close_database():
     
     with _database_lock:
         # Close all database instances
-        for thread_id, db_instance in list(_database_instances.items()):
+        for _thread_id, db_instance in list(_database_instances.items()):
             try:
                 db_instance.close()
             except Exception as e:

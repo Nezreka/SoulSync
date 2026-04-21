@@ -260,7 +260,7 @@ class SoulSyncClient:
         file_entries = []  # (file_path, tags)
         scanned = 0
 
-        for root, dirs, files in os.walk(self._transfer_path):
+        for root, _dirs, files in os.walk(self._transfer_path):
             for filename in files:
                 ext = os.path.splitext(filename)[1].lower()
                 if ext not in AUDIO_EXTENSIONS:
