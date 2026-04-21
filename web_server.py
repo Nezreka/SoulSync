@@ -10119,6 +10119,24 @@ def get_download_status():
             print(f"Could not fetch YouTube/Tidal downloads for status: {streaming_error}")
             traceback.print_exc()
 
+        # Enrich transfers with metadata from download context (artist, album, artwork)
+        with matched_context_lock:
+            for transfer in all_transfers:
+                ctx_key = _make_context_key(transfer.get('username', ''), transfer.get('filename', ''))
+                ctx = matched_downloads_context.get(ctx_key)
+                if ctx:
+                    _sp_artist = ctx.get('spotify_artist') or {}
+                    _sp_album = ctx.get('spotify_album') or {}
+                    _sp_track = ctx.get('track_info') or {}
+                    _sp_images = _sp_album.get('images') or []
+                    transfer['_meta'] = {
+                        'artist': _sp_artist.get('name', ''),
+                        'album': _sp_album.get('name', ''),
+                        'artwork_url': _sp_images[0].get('url', '') if _sp_images and isinstance(_sp_images[0], dict) else '',
+                        'track_number': _sp_track.get('track_number'),
+                        'quality': ctx.get('_audio_quality', ''),
+                    }
+
         return jsonify({"transfers": all_transfers})
 
     except Exception as e:

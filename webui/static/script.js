@@ -17261,11 +17261,31 @@ function renderQueue(containerId, downloads, isActiveQueue) {
             `;
         }
 
+        // Enrich with metadata from backend context (artist, album, artwork)
+        const meta = item._meta || {};
+        const sourceLabels = { youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', lidarr: 'Lidarr' };
+        const sourceBadge = sourceLabels[item.username] || item.username;
+
         html += `
             <div class="download-item" data-id="${item.id}">
-                <div class="download-item__header">
+                <div class="download-item__art">
+                    ${meta.artwork_url
+                        ? `<img src="${meta.artwork_url}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'download-item__art-placeholder\\'>&#9835;</div>'">`
+                        : '<div class="download-item__art-placeholder">&#9835;</div>'}
+                </div>
+                <div class="download-item__info">
                     <div class="download-item__title" title="${title}">${title}</div>
-                    <div class="download-item__uploader" title="from ${item.username}">from ${item.username}</div>
+                    ${meta.artist || meta.album ? `
+                        <div class="download-item__meta">
+                            ${meta.artist ? `<span>${escapeHtml(meta.artist)}</span>` : ''}
+                            ${meta.artist && meta.album ? '<span class="download-item__sep">&middot;</span>' : ''}
+                            ${meta.album ? `<span class="download-item__album">${escapeHtml(meta.album)}</span>` : ''}
+                        </div>
+                    ` : ''}
+                    <div class="download-item__badges">
+                        <span class="download-item__source">${sourceBadge}</span>
+                        ${meta.quality ? `<span class="download-item__quality">${escapeHtml(meta.quality)}</span>` : ''}
+                    </div>
                 </div>
                 <div class="download-item__content">
                     ${actionButtonHTML}
