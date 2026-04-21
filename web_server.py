@@ -33,31 +33,31 @@ from config.settings import config_manager
 # Setup logging early to avoid any import-time logs from being swallowed
 _log_level = config_manager.get('logging.level', 'INFO')
 _log_path = config_manager.get('logging.path', 'logs/app.log')
+_log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
 SOULSYNC_VERSION = "2.35"
 
-# Dedicated source reuse logger — writes to logs/source_reuse.log
+# Dedicated source reuse logger — writes alongside app.log in the configured log directory
 import logging as _logging
 import logging.handlers as _logging_handlers
 source_reuse_logger = _logging.getLogger("source_reuse")
 source_reuse_logger.setLevel(_logging.DEBUG)
 if not source_reuse_logger.handlers:
-    os.makedirs("logs", exist_ok=True)
     _sr_handler = _logging_handlers.RotatingFileHandler(
-        "logs/source_reuse.log", encoding="utf-8", maxBytes=5*1024*1024, backupCount=2
+        _log_dir / "source_reuse.log", encoding="utf-8", maxBytes=5*1024*1024, backupCount=2
     )
     _sr_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     source_reuse_logger.addHandler(_sr_handler)
     source_reuse_logger.propagate = False
 
-# Dedicated post-processing logger (failures only) — writes to logs/post_processing.log
+# Dedicated post-processing logger (failures only) — writes alongside app.log in the configured log directory
 pp_logger = _logging.getLogger("post_processing")
 pp_logger.setLevel(_logging.DEBUG)
 if not pp_logger.handlers:
     _pp_handler = _logging_handlers.RotatingFileHandler(
-        "logs/post_processing.log", encoding="utf-8", maxBytes=5*1024*1024, backupCount=2
+        _log_dir / "post_processing.log", encoding="utf-8", maxBytes=5*1024*1024, backupCount=2
     )
     _pp_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     pp_logger.addHandler(_pp_handler)
@@ -5853,10 +5853,10 @@ def get_debug_info():
 
     # Log lines
     log_map = {
-        'app': os.path.join('logs', 'app.log'),
-        'acoustid': os.path.join('logs', 'acoustid.log'),
-        'post_processing': os.path.join('logs', 'post_processing.log'),
-        'source_reuse': os.path.join('logs', 'source_reuse.log'),
+        'app': Path(_log_path),
+        'acoustid': _log_dir / 'acoustid.log',
+        'post_processing': _log_dir / 'post_processing.log',
+        'source_reuse': _log_dir / 'source_reuse.log',
     }
     log_path = log_map.get(log_source, log_map['app'])
     info['log_source'] = log_source
@@ -6395,10 +6395,10 @@ def get_log_tail():
     level_filter = request.args.get('level', '').upper()  # DEBUG, INFO, WARNING, ERROR or empty
 
     log_map = {
-        'app': os.path.join('logs', 'app.log'),
-        'post_processing': os.path.join('logs', 'post_processing.log'),
-        'acoustid': os.path.join('logs', 'acoustid.log'),
-        'source_reuse': os.path.join('logs', 'source_reuse.log'),
+        'app': Path(_log_path),
+        'post_processing': _log_dir / 'post_processing.log',
+        'acoustid': _log_dir / 'acoustid.log',
+        'source_reuse': _log_dir / 'source_reuse.log',
     }
     log_path = log_map.get(log_source, log_map['app'])
 
@@ -54424,10 +54424,10 @@ def _emit_live_log_loop():
     _last_pos = {}  # {source: file_position}
     _active_source = 'app'
     log_map = {
-        'app': os.path.join('logs', 'app.log'),
-        'post_processing': os.path.join('logs', 'post_processing.log'),
-        'acoustid': os.path.join('logs', 'acoustid.log'),
-        'source_reuse': os.path.join('logs', 'source_reuse.log'),
+        'app': Path(_log_path),
+        'post_processing': _log_dir / 'post_processing.log',
+        'acoustid': _log_dir / 'acoustid.log',
+        'source_reuse': _log_dir / 'source_reuse.log',
     }
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(0.5)
