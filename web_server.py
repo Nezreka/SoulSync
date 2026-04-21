@@ -18498,6 +18498,25 @@ def _apply_path_template(template: str, context: dict) -> str:
                         album_artist_value = resolved
                 except Exception:
                     pass
+    # Support ${var} delimited syntax (e.g. ${albumtype}s → Albums)
+    # Must run before $var replacements to prevent partial matching
+    _bracket_map = {
+        'albumartist': album_artist_value,
+        'albumtype': clean_context.get('albumtype', 'Album'),
+        'playlist': clean_context.get('playlist_name', ''),
+        'artistletter': (clean_context.get('artist', 'U') or 'U')[0].upper(),
+        'artist': clean_context.get('artist', 'Unknown Artist'),
+        'album': clean_context.get('album', 'Unknown Album'),
+        'title': clean_context.get('title', 'Unknown Track'),
+        'track': f"{clean_context.get('track_number', 1):02d}",
+        'disc': str(clean_context.get('disc_number', 1)),
+        'discnum': str(clean_context.get('disc_number', 1)),
+        'year': str(clean_context.get('year', '')),
+        'quality': clean_context.get('quality', ''),
+    }
+    for var_name, val in _bracket_map.items():
+        result = result.replace('${' + var_name + '}', val)
+
     result = result.replace('$albumartist', album_artist_value)
     result = result.replace('$albumtype', clean_context.get('albumtype', 'Album'))
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
