@@ -4318,26 +4318,35 @@
 
                                 <!-- Plex Settings -->
                                 <div class="server-config-container" id="plex-container">
-                                    <div class="form-group">
-                                        <label>Plex Server URL:</label>
-                                        <input type="url" id="plex-url" placeholder="http://localhost:32400">
+                                    <div id="plex-configuration">
+                                        <div class="form-group">
+                                            <label>Plex Server URL:</label>
+                                            <input type="url" id="plex-url" placeholder="http://localhost:32400">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Plex Token:</label>
+                                            <input type="password" id="plex-token" placeholder="X-Plex-Token">
+                                        </div>
+                                        <div class="form-group" id="plex-library-selector-container" style="display: none;">
+                                            <label>Music Library:</label>
+                                            <select id="plex-music-library" onchange="selectPlexLibrary()">
+                                                <option value="">Loading...</option>
+                                            </select>
+                                            <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">
+                                                Select which music library to use (doesn't affect config file)
+                                            </small>
+                                        </div>
+                                        <div class="form-actions">
+                                            <button class="detect-button" onclick="autoDetectPlex()">Auto-detect</button>
+                                            <button class="test-button" onclick="testConnection('plex')">Test</button>
+                                            <button class="detect-button" onclick="clearPlexConfiguration()">Clear Configuration</button>
+                                        </div>
                                     </div>
-                                    <div class="form-group">
-                                        <label>Plex Token:</label>
-                                        <input type="password" id="plex-token" placeholder="X-Plex-Token">
-                                    </div>
-                                    <div class="form-group" id="plex-library-selector-container" style="display: none;">
-                                        <label>Music Library:</label>
-                                        <select id="plex-music-library" onchange="selectPlexLibrary()">
-                                            <option value="">Loading...</option>
-                                        </select>
-                                        <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">
-                                            Select which music library to use (doesn't affect config file)
-                                        </small>
-                                    </div>
-                                    <div class="form-actions">
-                                        <button class="detect-button" onclick="autoDetectPlex()">Auto-detect</button>
-                                        <button class="test-button" onclick="testConnection('plex')">Test</button>
+                                    <div id="plex-setup">
+                                        <div class="form-actions">
+                                            <button id="plex-configure-button" class="detect-button configure-button">Configure</button>
+                                            <button id="plex-view-config-button" class="detect-button view-config-button" onclick="showPlexConfiguration()">View Configuration</button>
+                                        </div>
                                     </div>
                                 </div>
 

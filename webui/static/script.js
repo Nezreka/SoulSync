@@ -6026,6 +6026,15 @@ async function loadSettingsData() {
         // Populate Plex settings
         document.getElementById('plex-url').value = settings.plex?.base_url || '';
         document.getElementById('plex-token').value = settings.plex?.token || '';
+        const hasPlexConfig = Boolean(settings.plex?.base_url || settings.plex?.token);
+        const plexViewConfigButton = document.getElementById('plex-view-config-button');
+        const plexConfigureButton = document.getElementById('plex-configure-button');
+        if (plexViewConfigButton) {
+            plexViewConfigButton.style.display = hasPlexConfig ? '' : 'none';
+        }
+        if (plexConfigureButton) {
+            plexConfigureButton.style.display = hasPlexConfig ? 'none' : '';
+        }
 
         // Populate Jellyfin settings
         document.getElementById('jellyfin-url').value = settings.jellyfin?.base_url || '';
@@ -6416,6 +6425,36 @@ function updateMediaServerFields() {
     }
 }
 
+function showPlexConfiguration() {
+    const plexConfig = document.getElementById('plex-configuration');
+    const plexSetup = document.getElementById('plex-setup');
+    if (plexConfig) plexConfig.style.display = '';
+    if (plexSetup) plexSetup.style.display = 'none';
+}
+
+function clearPlexConfiguration() {
+    const plexUrl = document.getElementById('plex-url');
+    const plexToken = document.getElementById('plex-token');
+    const plexConfig = document.getElementById('plex-configuration');
+    const plexSetup = document.getElementById('plex-setup');
+    const plexViewConfigButton = document.getElementById('plex-view-config-button');
+    const plexConfigureButton = document.getElementById('plex-configure-button');
+
+    if (plexUrl) plexUrl.value = '';
+    if (plexToken) plexToken.value = '';
+    if (plexConfig) plexConfig.style.display = 'none';
+    if (plexSetup) plexSetup.style.display = '';
+    if (plexViewConfigButton) plexViewConfigButton.style.display = 'none';
+    if (plexConfigureButton) plexConfigureButton.style.display = '';
+
+    if (typeof saveSettings === 'function') {
+        saveSettings(true);
+    }
+    if (typeof showToast === 'function') {
+        showToast('Plex configuration cleared', 'success');
+    }
+}
+
 function toggleServer(serverType) {
     // Update toggle buttons
     document.getElementById('plex-toggle').classList.remove('active');
@@ -6429,6 +6468,12 @@ function toggleServer(serverType) {
     document.getElementById('jellyfin-container').classList.toggle('hidden', serverType !== 'jellyfin');
     document.getElementById('navidrome-container').classList.toggle('hidden', serverType !== 'navidrome');
     document.getElementById('soulsync-container')?.classList.toggle('hidden', serverType !== 'soulsync');
+
+    // Show Plex setup when Plex is selected; otherwise hide both Plex panels
+    const plexConfig = document.getElementById('plex-configuration');
+    const plexSetup = document.getElementById('plex-setup');
+    if (plexConfig) plexConfig.style.display = serverType === 'plex' ? 'none' : '';
+    if (plexSetup) plexSetup.style.display = serverType === 'plex' ? '' : 'none';
 
     // Load Plex music libraries when switching to Plex
     if (serverType === 'plex') {
