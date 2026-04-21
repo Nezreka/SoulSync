@@ -8206,14 +8206,9 @@ def get_beatport_hero_tracks():
         # SMART FILTERING - Remove duplicates and invalid tracks
         valid_tracks = []
         seen_urls = set()
-
-        logger.debug(f"Processing {len(tracks)} raw tracks from scraper (SMART FILTERING)...")
+        filtered_reasons = collections.Counter()
 
         for i, track in enumerate(tracks):
-            logger.debug(f"   Track {i+1}: {track.get('title', 'NO_TITLE')} - {track.get('artist', 'NO_ARTIST')}")
-            logger.debug(f"      URL: {track.get('url', 'NO_URL')}")
-            logger.debug(f"      Image: {'YES' if track.get('image_url') else 'NO'}")
-
             # Extract and clean basic data
             title = track.get('title', '').strip()
             artist = track.get('artist', '').strip()
@@ -8258,7 +8253,7 @@ def get_beatport_hero_tracks():
                 skip_reasons.append("Duplicate URL")
 
             if not is_valid:
-                logger.debug(f"      Track {i+1} filtered out: {', '.join(skip_reasons)}")
+                filtered_reasons.update(skip_reasons)
                 continue
 
             # Mark URL as seen for deduplication
@@ -8301,7 +8296,16 @@ def get_beatport_hero_tracks():
                     break
 
             valid_tracks.append(track_data)
-            logger.debug(f"      Track {i+1} added: {title} - {artist}")
+
+        sample_titles = [f"{t['title']} - {t['artist']}" for t in valid_tracks[:3]]
+        logger.debug(
+            "Beatport smart filter summary: raw=%s valid=%s filtered=%s reasons=%s sample=%s",
+            len(tracks),
+            len(valid_tracks),
+            len(tracks) - len(valid_tracks),
+            dict(filtered_reasons),
+            sample_titles,
+        )
 
         logger.info(f"Retrieved {len(valid_tracks)} valid unique Beatport tracks (SMART FILTERING)")
 
@@ -16257,10 +16261,14 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
                         "has_full_spotify_metadata": True  # Flag for robust processing
                     }
 
-                logger.info(f"Queued matched track: '{spotify_track['name']}' (track #{spotify_track['track_number']})")
+                logger.info(
+                    "Queued matched track: title=%r track_number=%s",
+                    spotify_track['name'],
+                    spotify_track['track_number'],
+                )
                 started_count += 1
             else:
-                logger.error(f"Failed to queue track: {filename}")
+                logger.error("Failed to queue track: filename=%s", filename)
 
         except Exception as e:
             logger.error(f"Error processing matched track: {e}")
@@ -16399,10 +16407,14 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
                         "original_search_result": enhanced_context, # Contains corrected data + clean title
                         "is_album_download": True
                     }
-                logger.info(f"  + Queued track: {filename} (Matched to: '{corrected_meta.get('title')}')")
+                logger.info(
+                    "Queued track: filename=%s matched_title=%r",
+                    filename,
+                    corrected_meta.get('title'),
+                )
                 started_count += 1
             else:
-                logger.error(f"  - Failed to queue track: {filename}")
+                logger.error("Failed to queue track: filename=%s", filename)
 
         except Exception as e:
             logger.error(f"Error processing track in album batch: {track_data.get('filename')}: {e}")
@@ -16804,35 +16816,44 @@ def _detect_album_info_web(context: dict, artist: dict) -> dict:
     try:
         # Log available data for debugging (GUI PARITY)
         original_search = context.get("original_search_result", {})
-        logger.info(f"\n[Album Detection] Starting for track: '{original_search.get('title', 'Unknown')}'")
-        logger.info(f"[Data Available]:")
-        logger.info(f"   - Clean Spotify title: '{original_search.get('spotify_clean_title', 'None')}'")
-        logger.info(f"   - Clean Spotify album: '{original_search.get('spotify_clean_album', 'None')}'")
-        logger.info(f"   - Filename album: '{original_search.get('album', 'None')}'")
-        logger.info(f"   - Artist: '{artist.get('name', 'Unknown')}'")
-        logger.info(f"   - Context has clean data: {context.get('has_clean_spotify_data', False)}")
-        logger.info(f"   - Is album download: {context.get('is_album_download', False)}")
+        logger.info(
+            "[Album Detection] start: track=%r clean_spotify_title=%r clean_spotify_album=%r "
+            "filename_album=%r artist=%r clean_data=%s album_download=%s",
+            original_search.get('title', 'Unknown'),
+            original_search.get('spotify_clean_title', 'None'),
+            original_search.get('spotify_clean_album', 'None'),
+            original_search.get('album', 'None'),
+            artist.get('name', 'Unknown'),
+            context.get('has_clean_spotify_data', False),
+            context.get('is_album_download', False),
+        )
         spotify_album_context = context.get("spotify_album")
         is_album_download = context.get("is_album_download", False)
         artist_name = artist['name']
         
-        logger.info(f"Album detection for '{original_search.get('title', 'Unknown')}' by '{artist_name}':")
-        logger.info(f"    Has album attr: {bool(original_search.get('album'))}")
-        if original_search.get('album'):
-            logger.info(f"    Album value: '{original_search.get('album')}'")
+        logger.info(
+            "[Album Detection] track=%r artist=%r has_album_attr=%s album=%r",
+            original_search.get('title', 'Unknown'),
+            artist_name,
+            bool(original_search.get('album')),
+            original_search.get('album'),
+        )
 
         # --- THIS IS THE CRITICAL FIX ---
         # If this is part of a matched album download, we TRUST the context data completely.
         # This is the exact logic from downloads.py.
         if is_album_download and spotify_album_context:
-            logger.info("Matched Album context found. Prioritizing pre-matched Spotify data.")
-            
             # We exclusively use the track number and title that were matched
             # *before* the download started. We do not try to re-parse the filename.
             track_number = original_search.get('track_number', 1)
             clean_track_name = original_search.get('title', 'Unknown Track')
 
-            logger.info(f"   -> Using pre-matched Track #{track_number} and Title '{clean_track_name}'")
+            logger.info(
+                "[Album Detection] using matched context: track_number=%s title=%r album=%r",
+                track_number,
+                clean_track_name,
+                spotify_album_context['name'],
+            )
 
             return {
                 'is_album': True,
@@ -21333,11 +21354,12 @@ def _post_process_matched_download(context_key, context, file_path):
             clean_track_name = original_search.get('spotify_clean_title', 'Unknown Track')
             clean_album_name = original_search.get('spotify_clean_album', 'Unknown Album')
             
-            # DEBUG: Check what's in original_search
-            logger.debug("Path 1 - Clean Spotify data path:")
-            logger.info(f"   original_search keys: {list(original_search.keys())}")
-            logger.info(f"   track_number in original_search: {'track_number' in original_search}")
-            logger.info(f"   track_number value: {original_search.get('track_number', 'NOT_FOUND')}")
+            logger.debug(
+                "Path 1 - Clean Spotify data path: keys=%s has_track_number=%s track_number=%s",
+                list(original_search.keys()),
+                'track_number' in original_search,
+                original_search.get('track_number', 'NOT_FOUND'),
+            )
             
             album_info = {
                 'is_album': True,
@@ -21358,12 +21380,13 @@ def _post_process_matched_download(context_key, context, file_path):
             spotify_album = context.get("spotify_album", {})
             clean_track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
             
-            # DEBUG: Check what's in original_search for path 2
-            logger.debug("Path 2 - Enhanced fallback album context path:")
-            logger.info(f"   original_search keys: {list(original_search.keys())}")
-            logger.info(f"   track_number in original_search: {'track_number' in original_search}")
-            logger.info(f"   track_number value: {original_search.get('track_number', 'NOT_FOUND')}")
-            logger.info(f"   spotify_album name: {spotify_album.get('name', 'NOT_FOUND')}")
+            logger.debug(
+                "Path 2 - Enhanced fallback album context path: keys=%s has_track_number=%s track_number=%s spotify_album=%s",
+                list(original_search.keys()),
+                'track_number' in original_search,
+                original_search.get('track_number', 'NOT_FOUND'),
+                spotify_album.get('name', 'NOT_FOUND'),
+            )
             
             # ENHANCEMENT: Use spotify_clean_album if available for consistency 
             album_name = (original_search.get('spotify_clean_album') or 
@@ -21391,8 +21414,11 @@ def _post_process_matched_download(context_key, context, file_path):
         # Explicit album downloads already have the correct Spotify album name —
         # re-grouping would mangle names like "(Reworked and Remastered)" into "(Deluxe Edition)".
         if album_info and album_info['is_album'] and not is_album_download:
-            logger.info(f"\nSMART ALBUM GROUPING for track: '{album_info.get('clean_track_name', 'Unknown')}'")
-            logger.info(f"   Original album: '{album_info.get('album_name', 'None')}'")
+            logger.info(
+                "SMART ALBUM GROUPING for track=%r original_album=%r",
+                album_info.get('clean_track_name', 'Unknown'),
+                album_info.get('album_name', 'None'),
+            )
 
             # Get original album name from context if available
             original_album = None
@@ -21403,11 +21429,12 @@ def _post_process_matched_download(context_key, context, file_path):
             consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album)
             album_info['album_name'] = consistent_album_name
 
-            logger.info(f"   Final album name: '{consistent_album_name}'")
-            logger.info(f"Album grouping complete!\n")
+            logger.info("Album grouping complete: final_album=%r", consistent_album_name)
         elif album_info and album_info['is_album'] and is_album_download:
-            logger.info(f"\nEXPLICIT ALBUM DOWNLOAD - preserving Spotify album name: '{album_info.get('album_name', 'None')}'")
-            logger.info(f"   Skipping smart grouping (not needed for explicit album downloads)\n")
+            logger.info(
+                "EXPLICIT ALBUM DOWNLOAD - preserving Spotify album name=%r; skipping smart grouping",
+                album_info.get('album_name', 'None'),
+            )
 
         # 1. Get transfer path (directory creation handled by _build_final_path_for_track)
         file_ext = os.path.splitext(file_path)[1]
@@ -21443,17 +21470,21 @@ def _post_process_matched_download(context_key, context, file_path):
             final_track_name_sanitized = _sanitize_filename(clean_track_name)
             track_number = album_info['track_number']
             
-            # DEBUG: Check final track_number values
-            logger.debug("Final track_number processing:")
-            logger.info(f"   album_info source: {album_info.get('source', 'unknown')}")
-            logger.info(f"   album_info track_number: {album_info.get('track_number', 'NOT_FOUND')}")
-            logger.info(f"   track_number variable: {track_number}")
+            logger.debug(
+                "Final track_number processing: source=%s album_info_track_number=%s track_number=%s",
+                album_info.get('source', 'unknown'),
+                album_info.get('track_number', 'NOT_FOUND'),
+                track_number,
+            )
             
             # Fix: Handle None track_number
             if track_number is None:
-                logger.info(f"Track number is None, extracting from filename: {os.path.basename(file_path)}")
                 track_number = _extract_track_number_from_filename(file_path)
-                logger.info(f"   -> Extracted track number: {track_number}")
+                logger.info(
+                    "Track number was None; extracted from filename=%r -> %s",
+                    os.path.basename(file_path),
+                    track_number,
+                )
             
             # Ensure track_number is valid
             if not isinstance(track_number, int) or track_number < 1:
@@ -29288,9 +29319,12 @@ def _run_post_processing_worker(task_id, batch_id):
                             
                             # If no track number in context, extract from filename 
                             if track_number == 1 and found_file:
-                                logger.warning(f"[Verification] No track_number in context, extracting from filename: {os.path.basename(found_file)}")
                                 track_number = _extract_track_number_from_filename(found_file)
-                                logger.info(f"   -> Extracted track number: {track_number}")
+                                logger.warning(
+                                    "[Verification] missing track_number; extracted from filename=%r -> %s",
+                                    os.path.basename(found_file),
+                                    track_number,
+                                )
                             
                             # Ensure track_number is valid
                             if not isinstance(track_number, int) or track_number < 1:
@@ -32990,24 +33024,37 @@ def get_spotify_playlists():
             # Handle snapshot_id safely - may not exist in core Playlist class
             playlist_snapshot = getattr(p, 'snapshot_id', '')
 
-            logger.info(f"Processing playlist: {p.name} (ID: {p.id})")
-            logger.info(f"   - Playlist snapshot: '{playlist_snapshot}'")
-            logger.info(f"   - Status info: {status_info}")
-
             if 'last_synced' in status_info:
                 stored_snapshot = status_info.get('snapshot_id')
                 last_sync_time = datetime.fromisoformat(status_info['last_synced']).strftime('%b %d, %H:%M')
-                logger.info(f"   - Stored snapshot: '{stored_snapshot}'")
-                logger.info(f"   - Snapshots match: {playlist_snapshot == stored_snapshot}")
-
                 if playlist_snapshot != stored_snapshot:
                     sync_status = f"Last Sync: {last_sync_time}"
-                    logger.info(f"   - Result: Needs Sync (showing: {sync_status})")
+                    logger.info(
+                        "Playlist sync status: name=%s id=%s snapshot=%r stored_snapshot=%r result=Needs Sync display=%s",
+                        p.name,
+                        p.id,
+                        playlist_snapshot,
+                        stored_snapshot,
+                        sync_status,
+                    )
                 else:
                     sync_status = f"Synced: {last_sync_time}"
-                    logger.info(f"   - Result: {sync_status}")
+                    logger.info(
+                        "Playlist sync status: name=%s id=%s snapshot=%r stored_snapshot=%r result=Synced display=%s",
+                        p.name,
+                        p.id,
+                        playlist_snapshot,
+                        stored_snapshot,
+                        sync_status,
+                    )
             else:
-                logger.warning(f"   - No last_synced found - Never Synced")
+                logger.warning(
+                    "Playlist sync status: name=%s id=%s snapshot=%r result=Never Synced display=%s",
+                    p.name,
+                    p.id,
+                    playlist_snapshot,
+                    sync_status,
+                )
 
             playlist_data.append({
                 "id": p.id, "name": p.name, "owner": p.owner,
@@ -46872,18 +46919,19 @@ def start_metadata_update():
                 add_activity_item("", "Metadata Update", "Plex client not available", "Now")
                 return jsonify({"success": False, "error": "Plex client not available"}), 400
             
-            # DEBUG: Check Plex connection details
-            logger.debug(f"Active server: {active_server}")
-            logger.debug(f"Plex client: {media_client}")
+            logger.debug("Plex connection details: active_server=%s client=%s", active_server, media_client)
             if hasattr(media_client, 'server') and media_client.server:
-                logger.debug(f"Plex server URL: {getattr(media_client.server, '_baseurl', 'NO_URL')}")
-                logger.debug(f"Plex server name: {getattr(media_client.server, 'friendlyName', 'NO_NAME')}")
+                logger.debug(
+                    "Plex server details: url=%s name=%s",
+                    getattr(media_client.server, '_baseurl', 'NO_URL'),
+                    getattr(media_client.server, 'friendlyName', 'NO_NAME'),
+                )
                 # Check available libraries
                 try:
                     sections = media_client.server.library.sections()
-                    logger.debug(f"Available Plex libraries: {[(s.title, s.type) for s in sections]}")
+                    logger.debug("Available Plex libraries: %s", [(s.title, s.type) for s in sections])
                 except Exception as e:
-                    logger.debug(f"Error getting Plex libraries: {e}")
+                    logger.debug("Error getting Plex libraries: %s", e)
             else:
                 logger.debug("Plex server is NOT connected!")
         

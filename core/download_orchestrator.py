@@ -61,10 +61,12 @@ class DownloadOrchestrator:
 
         logger.info(f"Download Orchestrator initialized - Mode: {self.mode}")
         if self.mode == 'hybrid':
-            if self.hybrid_order:
-                logger.info(f"   Source priority: {' → '.join(self.hybrid_order)}")
-            else:
-                logger.info(f"   Primary: {self.hybrid_primary}, Fallback: {self.hybrid_secondary}")
+            logger.info(
+                "Hybrid source order: order=%s primary=%s secondary=%s",
+                " → ".join(self.hybrid_order) if self.hybrid_order else "default",
+                self.hybrid_primary,
+                self.hybrid_secondary,
+            )
 
     def _safe_init(self, name, cls):
         """Initialize a download client, returning None on failure instead of crashing."""
@@ -154,8 +156,10 @@ class DownloadOrchestrator:
                     except Exception:
                         results[source] = False
 
-            status_parts = [f"{s}: {'' if ok else ''}" for s, ok in results.items()]
-            logger.info(f"   {' | '.join(status_parts)}")
+            logger.info(
+                "Hybrid connection check: %s",
+                " | ".join(f"{source}={'ok' if ok else 'fail'}" for source, ok in results.items()),
+            )
 
             return any(results.values())
 
