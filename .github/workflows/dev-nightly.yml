@@ -58,23 +58,6 @@ jobs:
           python -m compileall api core database services scripts web_server.py wsgi.py beatport_unified_scraper.py
           python -m pytest
 
-      - name: Generate version tag
-        if: steps.recent.outputs.skip != 'true'
-        id: version
-        run: |
-          # Read base version from web_server.py
-          BASE=$(python -c "
-          import re
-          with open('web_server.py') as f:
-              m = re.search(r'_SOULSYNC_BASE_VERSION\s*=\s*\"(.+?)\"', f.read())
-              print(m.group(1) if m else 'dev')
-          ")
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          DATE=$(date -u +%Y%m%d)
-          TAG="${BASE}-dev.${DATE}.${SHORT_SHA}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Image tag: $TAG"
-
       - name: Set up QEMU
         if: steps.recent.outputs.skip != 'true'
         uses: docker/setup-qemu-action@v4
@@ -105,4 +88,5 @@ jobs:
             COMMIT_SHA=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/soulsync:dev
-            ghcr.io/${{ github.repository_owner }}/soulsync:${{ steps.version.outputs.tag }}
+            ${{ github.event_name == 'schedule' && format('ghcr.io/{0}/soulsync:nightly', github.repository_owner) || '' }}
+            ${{ github.event_name == 'schedule' && format('ghcr.io/{0}/soulsync:nightly', github.repository_owner) || '' }}

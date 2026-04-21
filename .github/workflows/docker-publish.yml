@@ -17,6 +17,10 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+      packages: write
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -33,6 +37,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
@@ -46,7 +57,9 @@ jobs:
             COMMIT_SHA=${{ github.sha }}
           tags: |
             boulderbadgedad/soulsync:latest
+            ghcr.io/${{ github.repository_owner }}/soulsync:latest
             ${{ inputs.version_tag && format('boulderbadgedad/soulsync:{0}', inputs.version_tag) || '' }}
+            ${{ inputs.version_tag && format('ghcr.io/{0}/soulsync:{1}', github.repository_owner, inputs.version_tag) || '' }}
 
       - name: Announce release to Discord
         if: success() && inputs.version_tag
