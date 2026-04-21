@@ -1088,7 +1088,14 @@ def check_album_completion(
         else:
             status = "missing"
 
-        logger.debug(f"  Result: {owned_tracks}/{expected_tracks or total_tracks} tracks ({completion_percentage:.1f}%) - {status}")
+        logger.debug(
+            "Album completion result: owned=%s expected=%s total=%s completion=%.1f status=%s",
+            owned_tracks,
+            expected_tracks or total_tracks,
+            total_tracks,
+            completion_percentage,
+            status,
+        )
 
         return {
             "id": album_id,
@@ -1137,7 +1144,12 @@ def check_single_completion(
         if total_tracks == 0:
             total_tracks = _resolve_completion_track_total(single_data, source_chain) or 1
 
-        logger.debug(f"Checking {album_type}: '{single_name}' ({total_tracks} tracks)")
+        logger.debug(
+            "Checking %s: name=%r tracks=%s",
+            album_type,
+            single_name,
+            total_tracks,
+        )
 
         if album_type == 'ep' or total_tracks > 1:
             try:
@@ -1167,7 +1179,14 @@ def check_single_completion(
             else:
                 status = "missing"
 
-            logger.debug(f"  EP Result: {owned_tracks}/{expected_tracks or total_tracks} tracks ({completion_percentage:.1f}%) - {status}")
+            logger.debug(
+                "EP completion result: owned=%s expected=%s total=%s completion=%.1f status=%s",
+                owned_tracks,
+                expected_tracks or total_tracks,
+                total_tracks,
+                completion_percentage,
+                status,
+            )
 
             return {
                 "id": single_id,
@@ -1208,7 +1227,12 @@ def check_single_completion(
                 elif ext:
                     formats = [ext]
 
-            logger.debug(f"  Single Result: {owned_tracks}/1 tracks ({completion_percentage:.1f}%) - {status}")
+            logger.debug(
+                "Single completion result: owned=%s expected=1 completion=%.1f status=%s",
+                owned_tracks,
+                completion_percentage,
+                status,
+            )
 
             return {
                 "id": single_id,

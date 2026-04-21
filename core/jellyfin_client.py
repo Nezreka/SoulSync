@@ -1633,14 +1633,14 @@ class JellyfinClient:
     def is_library_scanning(self, library_name: str = "Music") -> bool:
         """Check if Jellyfin library is currently scanning"""
         if not self.ensure_connection():
-            logger.debug("DEBUG: Not connected to Jellyfin, cannot check scan status")
+            logger.debug("Not connected to Jellyfin, cannot check scan status")
             return False
             
         try:
             # Check scheduled tasks for library scan activities
             response = self._make_request('/ScheduledTasks')
             if not response:
-                logger.debug("DEBUG: Could not get scheduled tasks")
+                logger.debug("Could not get scheduled tasks")
                 return False
                 
             for task in response:
@@ -1650,10 +1650,14 @@ class JellyfinClient:
                 # Look for library scan related tasks that are running
                 if ('scan' in task_name or 'refresh' in task_name or 'library' in task_name):
                     if task_state in ['Running', 'Cancelling']:
-                        logger.debug(f"DEBUG: Found running scan task: {task.get('Name')} (State: {task_state})")
+                        logger.debug(
+                            "Found running scan task: name=%s state=%s",
+                            task.get('Name'),
+                            task_state,
+                        )
                         return True
                         
-            logger.debug("DEBUG: No active scan tasks detected")
+            logger.debug("No active scan tasks detected")
             return False
             
         except Exception as e:

@@ -930,10 +930,16 @@ class DatabaseUpdateWorker:
                     if (db_track.title != current_title or 
                         db_track.artist_name != current_artist or 
                         db_track.album_title != current_album):
-                        logger.debug(f"Metadata change detected for track ID {track_id}:")
-                        logger.debug(f"  Title: '{db_track.title}' → '{current_title}'")
-                        logger.debug(f"  Artist: '{db_track.artist_name}' → '{current_artist}'")
-                        logger.debug(f"  Album: '{db_track.album_title}' → '{current_album}'")
+                        logger.debug(
+                            "Metadata change detected for track %s: title=%r→%r artist=%r→%r album=%r→%r",
+                            track_id,
+                            db_track.title,
+                            current_title,
+                            db_track.artist_name,
+                            current_artist,
+                            db_track.album_title,
+                            current_album,
+                        )
                         changes_detected += 1
                         
                 except Exception as e:
