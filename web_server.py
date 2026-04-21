@@ -11019,295 +11019,42 @@ def debug_library_photos():
 
 @app.route('/api/artist/similar/<path:artist_name>/stream')
 def get_similar_artists_stream(artist_name):
-    """
-    Stream similar artists from MusicMap and match them to Spotify one by one
+    """Stream MusicMap similar artists using source-priority metadata matching."""
+    from core.metadata_service import iter_musicmap_similar_artist_events
 
-    Args:
-        artist_name: The artist name to find similar artists for
-
-    Returns:
-        Server-Sent Events stream with each matched artist
-    """
     def generate():
-        try:
-            logger.info(f"Streaming similar artists for: {artist_name}")
-
-            # Import required libraries
-            from bs4 import BeautifulSoup
-
-            # Construct MusicMap URL
-            url_artist = artist_name.lower().replace(' ', '+')
-            musicmap_url = f'https://www.music-map.com/{url_artist}'
-
-            logger.debug(f"Fetching MusicMap: {musicmap_url}")
-
-            # Set headers to mimic a browser
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-            }
-
-            # Fetch MusicMap page
-            response = requests.get(musicmap_url, headers=headers, timeout=10)
-            response.raise_for_status()
-
-            # Parse HTML
-            soup = BeautifulSoup(response.text, 'html.parser')
-            gnod_map = soup.find(id='gnodMap')
-
-            if not gnod_map:
-                yield f"data: {json.dumps({'error': 'Could not find artist map on MusicMap'})}\n\n"
-                return
-
-            # Extract similar artist names
-            all_anchors = gnod_map.find_all('a')
-            searched_artist_lower = artist_name.lower().strip()
-
-            similar_artist_names = []
-            for anchor in all_anchors:
-                artist_text = anchor.get_text(strip=True)
-
-                # Skip if this is the searched artist
-                if artist_text.lower() == searched_artist_lower:
-                    continue
-
-                similar_artist_names.append(artist_text)
-
-            logger.debug(f"Found {len(similar_artist_names)} similar artists from MusicMap")
-
-            # Determine metadata source
-            use_hydrabase = _is_hydrabase_active()
-
-            if not use_hydrabase:
-                if not spotify_client or not spotify_client.is_authenticated():
-                    yield f"data: {json.dumps({'error': 'Spotify not authenticated'})}\n\n"
-                    return
-
-            # Get the searched artist's ID to exclude them
-            searched_artist_id = None
-            try:
-                if use_hydrabase:
-                    searched_results = hydrabase_client.search_artists(artist_name, limit=1)
-                else:
-                    searched_results = spotify_client.search_artists(artist_name, limit=1)
-                if searched_results and len(searched_results) > 0:
-                    searched_artist_id = searched_results[0].id
-                    logger.info(f"Searched artist ID: {searched_artist_id}")
-            except Exception as e:
-                logger.error(f"Could not get searched artist ID: {e}")
-
-            # Match each artist one by one and stream results
-            max_artists = 20
-            matched_count = 0
-            seen_artist_ids = set()  # Track seen artist IDs to prevent duplicates
-
-            for artist_name_to_match in similar_artist_names[:max_artists]:
-                try:
-                    logger.info(f"Matching: {artist_name_to_match}")
-
-                    # Search for the artist via active metadata source
-                    if use_hydrabase:
-                        results = hydrabase_client.search_artists(artist_name_to_match, limit=1)
-                    else:
-                        results = spotify_client.search_artists(artist_name_to_match, limit=1)
-
-                    if results and len(results) > 0:
-                        spotify_artist = results[0]
-
-                        # Skip if this is the searched artist
-                        if spotify_artist.id == searched_artist_id:
-                            logger.info(f"Skipping searched artist: {spotify_artist.name}")
-                            continue
-
-                        # Skip if we've already seen this artist ID (deduplication)
-                        if spotify_artist.id in seen_artist_ids:
-                            logger.warning(f"Skipping duplicate artist: {spotify_artist.name}")
-                            continue
-
-                        seen_artist_ids.add(spotify_artist.id)
-
-                        artist_data = {
-                            'id': spotify_artist.id,
-                            'name': spotify_artist.name,
-                            'image_url': spotify_artist.image_url if hasattr(spotify_artist, 'image_url') else None,
-                            'genres': spotify_artist.genres if hasattr(spotify_artist, 'genres') else [],
-                            'popularity': spotify_artist.popularity if hasattr(spotify_artist, 'popularity') else 0
-                        }
-
-                        # Stream this matched artist immediately
-                        yield f"data: {json.dumps({'artist': artist_data})}\n\n"
-                        matched_count += 1
-
-                        logger.info(f"Matched and streamed: {spotify_artist.name}")
-                    else:
-                        logger.warning(f"No Spotify match found for: {artist_name_to_match}")
-
-                except Exception as match_error:
-                    logger.error(f"Error matching {artist_name_to_match}: {match_error}")
-                    continue
-
-            # Send completion message
-            yield f"data: {json.dumps({'complete': True, 'total': matched_count})}\n\n"
-            logger.info(f"Streaming complete: {matched_count} artists matched")
-
-        except requests.exceptions.RequestException as e:
-            logger.debug(f"Error fetching MusicMap: {e}")
-            yield f"data: {json.dumps({'error': f'Failed to fetch from MusicMap: {str(e)}'})}\n\n"
-
-        except Exception as e:
-            logger.error(f"Error streaming similar artists: {e}")
-            import traceback
-            traceback.print_exc()
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        logger.info(f"Streaming similar artists for: {artist_name}")
+        for event in iter_musicmap_similar_artist_events(artist_name, limit=20):
+            yield f"data: {json.dumps(event)}\n\n"
+            if event.get('artist'):
+                time.sleep(0.1)
 
     return Response(generate(), mimetype='text/event-stream')
 
 @app.route('/api/artist/similar/<path:artist_name>')
 def get_similar_artists(artist_name):
-    """
-    Get similar artists from MusicMap and match them to Spotify (legacy batch endpoint)
+    """Get MusicMap similar artists using source-priority metadata matching."""
+    from core.metadata_service import get_musicmap_similar_artists
 
-    Args:
-        artist_name: The artist name to find similar artists for
-
-    Returns:
-        JSON with similar artists matched to Spotify data
-    """
     try:
         logger.info(f"Getting similar artists for: {artist_name}")
-
-        # Import required libraries
-        from bs4 import BeautifulSoup
-
-        # Construct MusicMap URL
-        url_artist = artist_name.lower().replace(' ', '+')
-        musicmap_url = f'https://www.music-map.com/{url_artist}'
-
-        logger.debug(f"Fetching MusicMap: {musicmap_url}")
-
-        # Set headers to mimic a browser
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-        }
-
-        # Fetch MusicMap page
-        response = requests.get(musicmap_url, headers=headers, timeout=10)
-        response.raise_for_status()
-
-        # Parse HTML
-        soup = BeautifulSoup(response.text, 'html.parser')
-        gnod_map = soup.find(id='gnodMap')
-
-        if not gnod_map:
+        result = get_musicmap_similar_artists(artist_name, limit=20)
+        if not result.get('success'):
+            error = result.get('error', 'Failed to fetch similar artists')
+            status_code = int(result.get('status_code') or 500)
             return jsonify({
                 "success": False,
-                "error": "Could not find artist map on MusicMap"
-            }), 404
-
-        # Extract similar artist names
-        all_anchors = gnod_map.find_all('a')
-        searched_artist_lower = artist_name.lower().strip()
-
-        similar_artist_names = []
-        for anchor in all_anchors:
-            artist_text = anchor.get_text(strip=True)
-
-            # Skip if this is the searched artist
-            if artist_text.lower() == searched_artist_lower:
-                continue
-
-            similar_artist_names.append(artist_text)
-
-        logger.debug(f"Found {len(similar_artist_names)} similar artists from MusicMap")
-
-        # Determine metadata source
-        use_hydrabase = _is_hydrabase_active()
-
-        if not use_hydrabase:
-            if not spotify_client or not spotify_client.is_authenticated():
-                return jsonify({
-                    "success": False,
-                    "error": "Spotify not authenticated"
-                }), 401
-
-        # Get the searched artist's ID to exclude them
-        searched_artist_id = None
-        try:
-            if use_hydrabase:
-                searched_results = hydrabase_client.search_artists(artist_name, limit=1)
-            else:
-                searched_results = spotify_client.search_artists(artist_name, limit=1)
-            if searched_results and len(searched_results) > 0:
-                searched_artist_id = searched_results[0].id
-                logger.info(f"Searched artist ID: {searched_artist_id}")
-        except Exception as e:
-            logger.error(f"Could not get searched artist ID: {e}")
-
-        # Match each artist (limit to first 20 for performance)
-        matched_artists = []
-        max_artists = 20
-        seen_artist_ids = set()  # Track seen artist IDs to prevent duplicates
-
-        for artist_name_to_match in similar_artist_names[:max_artists]:
-            try:
-                logger.info(f"Matching: {artist_name_to_match}")
-
-                # Search for the artist via active metadata source
-                if use_hydrabase:
-                    results = hydrabase_client.search_artists(artist_name_to_match, limit=1)
-                else:
-                    results = spotify_client.search_artists(artist_name_to_match, limit=1)
-
-                if results and len(results) > 0:
-                    spotify_artist = results[0]
-
-                    # Skip if this is the searched artist
-                    if spotify_artist.id == searched_artist_id:
-                        logger.info(f"Skipping searched artist: {spotify_artist.name}")
-                        continue
-
-                    # Skip if we've already seen this artist ID (deduplication)
-                    if spotify_artist.id in seen_artist_ids:
-                        logger.warning(f"Skipping duplicate artist: {spotify_artist.name}")
-                        continue
-
-                    seen_artist_ids.add(spotify_artist.id)
-
-                    matched_artists.append({
-                        'id': spotify_artist.id,
-                        'name': spotify_artist.name,
-                        'image_url': spotify_artist.image_url if hasattr(spotify_artist, 'image_url') else None,
-                        'genres': spotify_artist.genres if hasattr(spotify_artist, 'genres') else [],
-                        'popularity': spotify_artist.popularity if hasattr(spotify_artist, 'popularity') else 0
-                    })
-
-                    logger.info(f"Matched: {spotify_artist.name}")
-                else:
-                    logger.warning(f"No Spotify match found for: {artist_name_to_match}")
-
-            except Exception as match_error:
-                logger.error(f"Error matching {artist_name_to_match}: {match_error}")
-                continue
-
-        logger.info(f"Successfully matched {len(matched_artists)} artists to Spotify")
+                "error": error
+            }), status_code
 
         return jsonify({
             "success": True,
             "artist": artist_name,
-            "similar_artists": matched_artists,
-            "total_found": len(similar_artist_names),
-            "total_matched": len(matched_artists)
+            "similar_artists": result.get('similar_artists', []),
+            "total_found": result.get('total_found', 0),
+            "total_matched": result.get('total_matched', 0),
+            "source_priority": result.get('source_priority', []),
         })
-
-    except requests.exceptions.RequestException as e:
-        logger.debug(f"Error fetching MusicMap: {e}")
-        return jsonify({
-            "success": False,
-            "error": f"Failed to fetch from MusicMap: {str(e)}"
-        }), 500
 
     except Exception as e:
         logger.error(f"Error getting similar artists: {e}")
