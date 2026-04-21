@@ -279,7 +279,7 @@ class BeatportUnifiedScraper:
                                         _beatport_log(f"   Filtered out: '{name}' (appears to be a section title)")
                         else:
                             # Fallback: try the old method if no <li> elements found
-                            _beatport_log(f"No <li> elements found, trying direct <a> search...")
+                            _beatport_log("No <li> elements found, trying direct <a> search...")
                             genre_links = menu.find_all('a', href=re.compile(r'/genre/[^/]+/\d+'))
 
                             if genre_links:
@@ -492,7 +492,7 @@ class BeatportUnifiedScraper:
         dj_chart_links = soup.find_all('a', href=re.compile(r'/chart/'))
         individual_dj_charts = []
 
-        for i, chart_link in enumerate(dj_chart_links[:10]):  # Show first 10
+        for _i, chart_link in enumerate(dj_chart_links[:10]):  # Show first 10
             href = chart_link.get('href', '')
             text = chart_link.get_text(strip=True)
             if text and href:
@@ -596,7 +596,7 @@ class BeatportUnifiedScraper:
                 _beatport_log(f"   Found hero image (fallback): {fallback_src}")
                 return fallback_src
 
-            _beatport_log(f"   No suitable images found on page")
+            _beatport_log("   No suitable images found on page")
             return None
 
         except Exception as e:
@@ -745,7 +745,7 @@ class BeatportUnifiedScraper:
 
         _beatport_log(f"   Found {len(track_links)} track links on {list_name}")
 
-        for i, link in enumerate(track_links[:limit]):
+        for _i, link in enumerate(track_links[:limit]):
             if len(tracks) >= limit:
                 break
 
@@ -760,7 +760,7 @@ class BeatportUnifiedScraper:
 
                 # Method 1: Look for common artist element patterns
                 parent = link.parent
-                for level in range(5):  # Check up to 5 parent levels
+                for _level in range(5):  # Check up to 5 parent levels
                     if parent:
                         # Try multiple artist class patterns that Beatport commonly uses
                         artist_selectors = [
@@ -921,7 +921,7 @@ class BeatportUnifiedScraper:
 
         # Convert to our standard format
         converted_tracks = []
-        for i, track_data in enumerate(release_tracks):
+        for _i, track_data in enumerate(release_tracks):
             track = self.convert_release_json_to_track_format(track_data, release_url, len(converted_tracks) + 1)
             if track:
                 converted_tracks.append(track)
@@ -1518,7 +1518,7 @@ class BeatportUnifiedScraper:
                     if len(tracks) > 3:
                         _beatport_log(f"      ... and {len(tracks) - 3} more tracks")
                 else:
-                    _beatport_log(f"   No tracks found")
+                    _beatport_log("   No tracks found")
 
             except Exception as e:
                 _beatport_log(f"   Error processing release: {e}")
@@ -1528,8 +1528,8 @@ class BeatportUnifiedScraper:
             if i < len(release_urls):
                 time.sleep(0.5)
 
-        _beatport_log(f"\n" + "=" * 60)
-        _beatport_log(f"SCRAPING COMPLETE")
+        _beatport_log("\n" + "=" * 60)
+        _beatport_log("SCRAPING COMPLETE")
         _beatport_log(f"   Total releases processed: {len(release_urls)}")
         _beatport_log(f"   Total tracks extracted: {len(all_tracks)}")
 
