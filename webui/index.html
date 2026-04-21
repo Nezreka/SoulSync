@@ -4343,13 +4343,13 @@
                                             </small>
                                         </div>
                                         <div class="form-actions">
-                                            <button class="detect-button" onclick="clearPlexConfiguration()">Clear Configuration</button>
+                                            <button id="plex-config-action-button" class="detect-button" onclick="clearPlexConfiguration()">Clear Configuration</button>
                                         </div>
                                     </div>
                                     <div id="plex-setup">
                                         <div id="plex-setup-buttons" class="form-actions">
                                             <button id="plex-link-to-plex-button" class="detect-button" onclick="startPlexPinAuth()">Link to Plex (OAuth)</button>
-                                            <button id="plex-manual-config-button" class="detect-button" onclick="showPlexConfiguration()">Manually Configure Plex</button>
+                                            <button id="plex-manual-config-button" class="detect-button" onclick="showPlexConfiguration(false, true)">Manually Configure Plex</button>
                                             <button id="plex-view-config-button" class="detect-button view-config-button" onclick="showPlexConfiguration()">View Configuration</button>
                                         </div>
                                         <div id="plex-pin-auth-flow" style="display: none; padding: 16px; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; margin-top: 12px;">

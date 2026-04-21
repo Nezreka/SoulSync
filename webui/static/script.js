@@ -6443,7 +6443,7 @@ function updateMediaServerFields() {
 let _plexPinAuthRequestId = null;
 let _plexPinAuthPollInterval = null;
 
-function showPlexConfiguration(disableFields = false) {
+function showPlexConfiguration(disableFields = false, isManualConfig = false) {
     stopPlexPinAuthPolling();
     const plexConfig = document.getElementById('plex-configuration');
     const plexSetup = document.getElementById('plex-setup');
@@ -6457,10 +6457,39 @@ function showPlexConfiguration(disableFields = false) {
     if (plexPinAuthFlow) plexPinAuthFlow.style.display = 'none';
     if (plexUrl) plexUrl.disabled = disableFields;
     if (plexToken) plexToken.disabled = disableFields;
-    if (plexLibraryContainer && !disableFields) {
+    if (plexLibraryContainer && isManualConfig) {
         plexLibraryContainer.style.display = 'none';
     }
+    setPlexConfigActionButton(isManualConfig);
     updatePlexConfigurationButtons();
+}
+
+function showPlexSetup() {
+    const plexConfig = document.getElementById('plex-configuration');
+    const plexSetup = document.getElementById('plex-setup');
+    const plexPinAuthFlow = document.getElementById('plex-pin-auth-flow');
+    const plexLibraryContainer = document.getElementById('plex-library-selector-container');
+
+    if (plexConfig) plexConfig.style.display = 'none';
+    if (plexSetup) plexSetup.style.display = '';
+    if (plexPinAuthFlow) plexPinAuthFlow.style.display = 'none';
+    if (plexLibraryContainer) plexLibraryContainer.style.display = 'none';
+    setPlexConfigActionButton(false);
+}
+
+function setPlexConfigActionButton(isManualConfig) {
+    const actionButton = document.getElementById('plex-config-action-button');
+    if (!actionButton) return;
+
+    if (isManualConfig) {
+        actionButton.textContent = 'Cancel';
+        actionButton.onclick = showPlexSetup;
+        actionButton.title = 'Cancel manual Plex configuration';
+    } else {
+        actionButton.textContent = 'Clear Configuration';
+        actionButton.onclick = clearPlexConfiguration;
+        actionButton.title = 'Clear saved Plex configuration';
+    }
 }
 
 async function startPlexPinAuth() {
