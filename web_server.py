@@ -7377,6 +7377,18 @@ def get_plex_pin_status():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/plex/clear-library', methods=['POST'])
+def clear_plex_library_preference():
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        db.set_preference('plex_music_library', '')
+        return jsonify({"success": True, "message": "Plex library preference cleared."})
+    except Exception as e:
+        logger.error(f"Error clearing Plex library preference: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/plex/music-libraries', methods=['GET'])
 def get_plex_music_libraries():
     """Get list of all available music libraries from Plex"""
