@@ -1032,8 +1032,15 @@ def check_album_completion(
     artist_name: str,
     source_override: Optional[str] = None,
     source_chain: Optional[List[str]] = None,
+    candidate_albums: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
-    """Check completion status for a single album."""
+    """Check completion status for a single album.
+
+    When `candidate_albums` is provided, the DB matcher skips per-album SQL
+    searches and scores every pre-fetched candidate in-memory. Intended for
+    callers iterating a discography that have already loaded the artist's
+    full library once via `db.get_candidate_albums_for_artist(...)`.
+    """
     try:
         source_chain = source_chain or _get_completion_source_chain(source_override)
         album_name = album_data.get('name', '')
@@ -1057,7 +1064,8 @@ def check_album_completion(
                 artist=artist_name,
                 expected_track_count=total_tracks if total_tracks > 0 else None,
                 confidence_threshold=0.7,
-                server_source=active_server
+                server_source=active_server,
+                candidate_albums=candidate_albums
             )
         except Exception as db_error:
             print(f"Database error for album '{album_name}': {db_error}")
@@ -1123,8 +1131,16 @@ def check_single_completion(
     artist_name: str,
     source_override: Optional[str] = None,
     source_chain: Optional[List[str]] = None,
+    candidate_albums: Optional[List[Any]] = None,
+    candidate_tracks: Optional[List[Any]] = None,
 ) -> Dict[str, Any]:
-    """Check completion status for a single/EP."""
+    """Check completion status for a single/EP.
+
+    `candidate_albums` applies to the EP branch (treated as an album lookup).
+    `candidate_tracks` applies to the true-single branch (track-level lookup).
+    Both are optional; None on either preserves the legacy per-item SQL path
+    for that branch.
+    """
     try:
         source_chain = source_chain or _get_completion_source_chain(source_override)
         single_name = single_data.get('name', '')
@@ -1148,7 +1164,8 @@ def check_single_completion(
                     artist=artist_name,
                     expected_track_count=total_tracks,
                     confidence_threshold=0.7,
-                    server_source=active_server
+                    server_source=active_server,
+                    candidate_albums=candidate_albums
                 )
             except Exception as db_error:
                 print(f"Database error for EP '{single_name}': {db_error}")
@@ -1189,7 +1206,8 @@ def check_single_completion(
                     title=single_name,
                     artist=artist_name,
                     confidence_threshold=0.7,
-                    server_source=active_server
+                    server_source=active_server,
+                    candidate_tracks=candidate_tracks
                 )
             except Exception as db_error:
                 print(f"Database error for single '{single_name}': {db_error}")
@@ -1258,12 +1276,35 @@ def iter_artist_discography_completion_events(
     total_items = len(albums) + len(singles)
     processed_count = 0
 
+    # Pre-fetch the artist's library albums AND tracks ONCE so per-item matching
+    # runs in-memory. Same batching trick as the library completion-stream endpoint.
+    import time as _time_metadata
+    candidate_albums = None
+    candidate_tracks = None
+    try:
+        from config.settings import config_manager as _cm_metadata
+        _active_server = _cm_metadata.get_active_media_server()
+        _t0 = _time_metadata.perf_counter()
+        candidate_albums = db.get_candidate_albums_for_artist(resolved_artist_name, server_source=_active_server)
+        _t1 = _time_metadata.perf_counter()
+        print(f"[artist-completion-stream] Pre-fetched {len(candidate_albums) if candidate_albums is not None else 0} library albums for '{resolved_artist_name}' in {(_t1 - _t0) * 1000:.0f}ms")
+        if candidate_albums:
+            _t2 = _time_metadata.perf_counter()
+            candidate_tracks = db.get_candidate_tracks_for_albums([a.id for a in candidate_albums])
+            _t3 = _time_metadata.perf_counter()
+            print(f"[artist-completion-stream] Pre-fetched {len(candidate_tracks) if candidate_tracks is not None else 0} library tracks in {(_t3 - _t2) * 1000:.0f}ms")
+    except Exception as _pre_err:
+        print(f"[artist-completion-stream] Failed to pre-fetch candidates for '{resolved_artist_name}': {_pre_err}")
+        candidate_albums = None
+        candidate_tracks = None
+
     yield {
         'type': 'start',
         'total_items': total_items,
         'artist_name': resolved_artist_name,
     }
 
+    _loop_start = _time_metadata.perf_counter()
     for album in albums:
         try:
             completion_data = check_album_completion(
@@ -1272,6 +1313,7 @@ def iter_artist_discography_completion_events(
                 resolved_artist_name,
                 source_override=source_override,
                 source_chain=source_chain,
+                candidate_albums=candidate_albums,
             )
             completion_data['type'] = 'album_completion'
             completion_data['container_type'] = 'albums'
@@ -1295,6 +1337,8 @@ def iter_artist_discography_completion_events(
                 resolved_artist_name,
                 source_override=source_override,
                 source_chain=source_chain,
+                candidate_albums=candidate_albums,
+                candidate_tracks=candidate_tracks,
             )
             completion_data['type'] = 'single_completion'
             completion_data['container_type'] = 'singles'
@@ -1309,6 +1353,9 @@ def iter_artist_discography_completion_events(
                 'name': single.get('name', 'Unknown'),
                 'error': str(e),
             }
+
+    _loop_elapsed = _time_metadata.perf_counter() - _loop_start
+    print(f"[artist-completion-stream] Processed {total_items} items for '{resolved_artist_name}' in {_loop_elapsed * 1000:.0f}ms")
 
     yield {
         'type': 'complete',

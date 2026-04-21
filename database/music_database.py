@@ -5371,48 +5371,63 @@ class MusicDatabase:
             return list(set(variations))
 
     
-    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None) -> Tuple[Optional[DatabaseTrack], float]:
+    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
 
         Args:
             album: Optional album name — enables album-aware matching for multi-artist albums
+            candidate_tracks: Optional pre-fetched list of tracks to match against in-memory,
+                              skipping the per-variation SQL loop. Intended for callers iterating
+                              a discography that already fetched the artist's tracks once via
+                              get_candidate_tracks_for_albums. None preserves original behavior.
 
         Returns (track, confidence) tuple where confidence is 0.0-1.0
         """
         try:
-            # Generate title variations for better matching (similar to album approach)
-            title_variations = self._generate_track_title_variations(title)
-            
-            logger.debug(f"Enhanced track matching for '{title}' by '{artist}': trying {len(title_variations)} variations")
-            for i, var in enumerate(title_variations):
-                logger.debug(f"  {i+1}. '{var}'")
-            
             best_match = None
             best_confidence = 0.0
-            
-            # Try each title variation
-            for title_variation in title_variations:
-                # Search for potential matches with this variation
-                potential_matches = []
-                artist_variations = self._get_artist_variations(artist)
-                for artist_variation in artist_variations:
-                    potential_matches.extend(self.search_tracks(title=title_variation, artist=artist_variation, limit=20, server_source=server_source))
-                
-                if not potential_matches:
-                    continue
-                
-                logger.debug(f"Found {len(potential_matches)} tracks for variation '{title_variation}'")
-                
-                # Score each potential match
-                for track in potential_matches:
+
+            if candidate_tracks is not None:
+                # BATCHED PATH — score every pre-fetched track in-memory.
+                # _calculate_track_confidence already handles title normalization,
+                # so no need for the per-variation SQL widening.
+                logger.debug(f"Enhanced track matching for '{title}' by '{artist}': batched against {len(candidate_tracks)} candidates")
+                for track in candidate_tracks:
                     confidence = self._calculate_track_confidence(title, artist, track)
-                    logger.debug(f"  '{track.title}' confidence: {confidence:.3f}")
-                    
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = track
-            
+            else:
+                # LEGACY PATH — generate title variations and fire SQL per variation.
+                title_variations = self._generate_track_title_variations(title)
+
+                logger.debug(f"Enhanced track matching for '{title}' by '{artist}': trying {len(title_variations)} variations")
+                for i, var in enumerate(title_variations):
+                    logger.debug(f"  {i+1}. '{var}'")
+
+                # Try each title variation
+                for title_variation in title_variations:
+                    # Search for potential matches with this variation
+                    potential_matches = []
+                    artist_variations = self._get_artist_variations(artist)
+                    for artist_variation in artist_variations:
+                        potential_matches.extend(self.search_tracks(title=title_variation, artist=artist_variation, limit=20, server_source=server_source))
+
+                    if not potential_matches:
+                        continue
+
+                    logger.debug(f"Found {len(potential_matches)} tracks for variation '{title_variation}'")
+
+                    # Score each potential match
+                    for track in potential_matches:
+                        confidence = self._calculate_track_confidence(title, artist, track)
+                        logger.debug(f"  '{track.title}' confidence: {confidence:.3f}")
+
+                        if confidence > best_confidence:
+                            best_confidence = confidence
+                            best_match = track
+
             # Return match only if it meets threshold
             if best_match and best_confidence >= confidence_threshold:
                 logger.debug(f"Enhanced track match found: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
@@ -5686,15 +5701,84 @@ class MusicDatabase:
             logger.error(f"Error getting album formats: {e}")
             return []
     
-    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
+    def get_candidate_albums_for_artist(self, artist: str, server_source: Optional[str] = None, limit: int = 200) -> List[DatabaseAlbum]:
+        """
+        Fetch every library album for an artist, merged across artist-name variations
+        and deduplicated by album ID. Intended to be called once per artist page load
+        so subsequent per-album matching can run in-memory against this list without
+        re-hitting SQL for each discography item.
+        """
+        candidates: List[DatabaseAlbum] = []
+        try:
+            seen_ids = set()
+            for artist_var in self._get_artist_variations(artist):
+                found = self.search_albums(title="", artist=artist_var, limit=limit, server_source=server_source)
+                for album in found:
+                    if album.id not in seen_ids:
+                        candidates.append(album)
+                        seen_ids.add(album.id)
+            return candidates
+        except Exception as e:
+            logger.error(f"Error fetching candidate albums for artist '{artist}': {e}")
+            return candidates
+
+    def get_candidate_tracks_for_albums(self, album_ids: List) -> List[DatabaseTrack]:
+        """
+        Fetch every track belonging to the given set of album IDs in a single query.
+        Used for batched track-level completion checks (true singles on discography).
+        Returns DatabaseTrack objects with artist_name/album_title/server_source attrs
+        attached, matching the shape produced by search_tracks.
+        """
+        if not album_ids:
+            return []
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            placeholders = ','.join('?' for _ in album_ids)
+            cursor.execute(f"""
+                SELECT t.*, a.name as artist_name, al.title as album_title, al.thumb_url as album_thumb_url
+                FROM tracks t
+                JOIN artists a ON a.id = t.artist_id
+                JOIN albums al ON al.id = t.album_id
+                WHERE t.album_id IN ({placeholders})
+            """, list(album_ids))
+            rows = cursor.fetchall()
+            tracks: List[DatabaseTrack] = []
+            for row in rows:
+                track = DatabaseTrack(
+                    id=row['id'],
+                    album_id=row['album_id'],
+                    artist_id=row['artist_id'],
+                    title=row['title'],
+                    track_number=row['track_number'],
+                    duration=row['duration'],
+                    file_path=row['file_path'],
+                    bitrate=row['bitrate'],
+                )
+                # Attach joined fields the same way search_tracks does
+                track.artist_name = row['artist_name']
+                track.album_title = row['album_title']
+                track.album_thumb_url = row['album_thumb_url'] if 'album_thumb_url' in row.keys() else ''
+                track.server_source = row['server_source'] if 'server_source' in row.keys() else ''
+                tracks.append(track)
+            return tracks
+        except Exception as e:
+            logger.error(f"Error fetching candidate tracks for {len(album_ids)} album IDs: {e}")
+            return []
+
+    def check_album_exists_with_completeness(self, title: str, artist: str, expected_track_count: Optional[int] = None, confidence_threshold: float = 0.8, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None) -> Tuple[Optional[DatabaseAlbum], float, int, int, bool, List[str]]:
         """
         Check if an album exists in the database with completeness information.
         Enhanced to handle edition matching (standard <-> deluxe variants).
         Returns (album, confidence, owned_tracks, expected_tracks, is_complete, formats)
+
+        When `candidate_albums` is provided (via get_candidate_albums_for_artist),
+        the matcher runs in-memory against that list instead of firing per-album
+        SQL searches. `None` preserves the original search-every-time behavior.
         """
         try:
             # Try enhanced edition-aware matching first with expected track count for Smart Edition Matching
-            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source)
+            album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums)
 
             if not album:
                 return None, 0.0, 0, 0, False, []
@@ -5708,88 +5792,108 @@ class MusicDatabase:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False, []
     
-    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None) -> Tuple[Optional[DatabaseAlbum], float]:
+    def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
         Matches standard albums with deluxe/platinum/special editions and vice versa.
+
+        When `candidate_albums` is provided, the artist-level SQL searches are
+        skipped and matching runs in-memory against that list — used by callers
+        that already fetched the artist's full library via
+        get_candidate_albums_for_artist, so a discography of N items doesn't
+        trigger N*K SQL queries. The title-only cross-artist fallback for
+        collaborative albums is preserved in both paths.
         """
         try:
-            # Generate album title variations for edition matching
-            title_variations = self._generate_album_title_variations(title)
-            
-            logger.debug(f"Edition matching for '{title}' by '{artist}': trying {len(title_variations)} variations")
-            for i, var in enumerate(title_variations):
-                logger.debug(f"  {i+1}. '{var}'")
-            
             best_match = None
             best_confidence = 0.0
-            
-            for variation in title_variations:
-                # Search for this variation
-                albums = []
-                artist_variations = self._get_artist_variations(artist)
-                for artist_variation in artist_variations:
-                    found = self.search_albums(title=variation, artist=artist_variation, limit=10, server_source=server_source)
-                    # Deduplicate by ID
-                    existing_ids = {a.id for a in albums}
-                    for album in found:
-                        if album.id not in existing_ids:
-                            albums.append(album)
-                            existing_ids.add(album.id)
-                
-                if albums:
-                    logger.debug(f"Found {len(albums)} albums for variation '{variation}'")
-                
-                if not albums:
-                    continue
-                
-                # Score each potential match with Smart Edition Matching
-                for album in albums:
+
+            if candidate_albums is not None:
+                # BATCHED PATH — score every pre-fetched candidate in-memory.
+                # _calculate_album_confidence handles title normalization and
+                # expected-track-count edition matching, so we don't need the
+                # per-variation SQL widening that the legacy path does.
+                logger.debug(f"Edition matching for '{title}' by '{artist}': batched against {len(candidate_albums)} candidates")
+                for album in candidate_albums:
                     confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
-                    logger.debug(f"  '{album.title}' confidence: {confidence:.3f}")
-                    
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = album
-            
-            # Return match only if it meets threshold
-            if best_match and best_confidence >= confidence_threshold:
-                logger.debug(f"Edition match found: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
-                return best_match, best_confidence
-            
-            # Fallback: Check ALL albums by this artist (resolves SQL accent sensitivity issues #101)
-            # If we haven't found a match yet, fetch broader list from artist and double check
-            if best_confidence < confidence_threshold:
-                logger.debug(f"specific title search failed, trying broad artist search fallback for '{artist}'")
-                try:
-                    # Get ALL albums by this artist (limit 100 to be safe)
-                    # This bypasses SQL 'LIKE' limitations for diacritics (e.g. 'ă' vs 'a')
-                    # And relies on Python-side normalization in _calculate_album_confidence
-                    artist_albums = []
+            else:
+                # LEGACY PATH — generate title variations and fire SQL per variation.
+                title_variations = self._generate_album_title_variations(title)
+
+                logger.debug(f"Edition matching for '{title}' by '{artist}': trying {len(title_variations)} variations")
+                for i, var in enumerate(title_variations):
+                    logger.debug(f"  {i+1}. '{var}'")
+
+                for variation in title_variations:
+                    # Search for this variation
+                    albums = []
                     artist_variations = self._get_artist_variations(artist)
-                    for artist_var in artist_variations:
-                        found_albums = self.search_albums(title="", artist=artist_var, limit=100, server_source=server_source)
-                        # Deduplicate
-                        existing_ids = {a.id for a in artist_albums}
-                        for album in found_albums:
+                    for artist_variation in artist_variations:
+                        found = self.search_albums(title=variation, artist=artist_variation, limit=10, server_source=server_source)
+                        # Deduplicate by ID
+                        existing_ids = {a.id for a in albums}
+                        for album in found:
                             if album.id not in existing_ids:
-                                artist_albums.append(album)
+                                albums.append(album)
                                 existing_ids.add(album.id)
-                    
-                    if artist_albums:
-                        logger.debug(f"  Found {len(artist_albums)} total albums for artist fallback")
-                    
-                    for album in artist_albums:
+
+                    if albums:
+                        logger.debug(f"Found {len(albums)} albums for variation '{variation}'")
+
+                    if not albums:
+                        continue
+
+                    # Score each potential match with Smart Edition Matching
+                    for album in albums:
                         confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                        logger.debug(f"  '{album.title}' confidence: {confidence:.3f}")
+
                         if confidence > best_confidence:
                             best_confidence = confidence
                             best_match = album
-                            logger.debug(f"  Fallback match: '{album.title}' confidence: {confidence:.3f}")
-                except Exception as fallback_error:
-                     logger.warning(f"Fallback artist search failed: {fallback_error}")
+
+                # Return match only if it meets threshold
+                if best_match and best_confidence >= confidence_threshold:
+                    logger.debug(f"Edition match found: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
+                    return best_match, best_confidence
+
+                # Fallback: Check ALL albums by this artist (resolves SQL accent sensitivity issues #101)
+                # Only runs in the legacy path — batched callers have already
+                # fetched this broader list via get_candidate_albums_for_artist.
+                if best_confidence < confidence_threshold:
+                    logger.debug(f"specific title search failed, trying broad artist search fallback for '{artist}'")
+                    try:
+                        # Get ALL albums by this artist (limit 100 to be safe)
+                        # This bypasses SQL 'LIKE' limitations for diacritics (e.g. 'ă' vs 'a')
+                        # And relies on Python-side normalization in _calculate_album_confidence
+                        artist_albums = []
+                        artist_variations = self._get_artist_variations(artist)
+                        for artist_var in artist_variations:
+                            found_albums = self.search_albums(title="", artist=artist_var, limit=100, server_source=server_source)
+                            # Deduplicate
+                            existing_ids = {a.id for a in artist_albums}
+                            for album in found_albums:
+                                if album.id not in existing_ids:
+                                    artist_albums.append(album)
+                                    existing_ids.add(album.id)
+
+                        if artist_albums:
+                            logger.debug(f"  Found {len(artist_albums)} total albums for artist fallback")
+
+                        for album in artist_albums:
+                            confidence = self._calculate_album_confidence(title, artist, album, expected_track_count)
+                            if confidence > best_confidence:
+                                best_confidence = confidence
+                                best_match = album
+                                logger.debug(f"  Fallback match: '{album.title}' confidence: {confidence:.3f}")
+                    except Exception as fallback_error:
+                         logger.warning(f"Fallback artist search failed: {fallback_error}")
 
             if best_match and best_confidence >= confidence_threshold:
-                 logger.debug(f"Fallback match succeeded: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
+                 logger.debug(f"Match succeeded: '{title}' -> '{best_match.title}' (confidence: {best_confidence:.3f})")
                  return best_match, best_confidence
 
             # Multi-artist fallback: search by title only (any artist)
