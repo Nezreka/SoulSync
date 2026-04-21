@@ -36,7 +36,7 @@ _log_path = config_manager.get('logging.path', 'logs/app.log')
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-SOULSYNC_VERSION = "2.34"
+SOULSYNC_VERSION = "2.35"
 
 # Dedicated source reuse logger — writes to logs/source_reuse.log
 import logging as _logging
@@ -22475,16 +22475,54 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
-                "title": "MusicBrainz Search Tab",
-                "description": "Find tracks and albums on MusicBrainz's community database — covers obscure music that Spotify/Deezer/iTunes miss",
+                "title": "Discography Backfill",
+                "description": "New maintenance job that fills gaps in your library — scans each artist's full discography and finds what you're missing",
                 "features": [
-                    "• New tab in Enhanced Search and Global Search alongside existing sources",
-                    "• Searches recordings, releases, and artists on MusicBrainz",
-                    "• Cover art from Cover Art Archive (free, linked by release ID)",
-                    "• Click results to open download modal with full tracklist — same flow as other sources",
-                    "• Smart query parsing splits 'Artist Title' into structured artist + title search",
-                    "• Deduplicates album results (keeps best version with date and art)",
-                    "• Always available — public API, no authentication needed",
+                    "• Scans each artist in your library against metadata source discographies",
+                    "• Creates findings for missing tracks — review and click 'Add to Wishlist' to queue downloads",
+                    "• Respects all content filters (live, remix, acoustic, compilation, instrumental)",
+                    "• Release type filters (album, EP, single) with configurable defaults",
+                    "• Opt-in, disabled by default — runs weekly, processes up to 50 artists per run",
+                    "• Rate-limited to avoid hammering metadata APIs",
+                ],
+            },
+            {
+                "title": "Multi-Artist Tagging",
+                "description": "Enhanced control over how multiple artists are written to audio file tags",
+                "features": [
+                    "• Configurable artist separator: comma, semicolon, or slash",
+                    "• Multi-value ARTISTS tag for Navidrome/Jellyfin multi-artist linking",
+                    "• 'Move featured artists to title' mode — primary artist in ARTIST tag, others as (feat. ...) in title",
+                    "• All opt-in with defaults matching current behavior",
+                ],
+            },
+            {
+                "title": "Enriched Downloads Page",
+                "description": "Download cards now show rich metadata instead of just filenames",
+                "features": [
+                    "• Album artwork thumbnail on each download card",
+                    "• Artist name, album name, and source badge",
+                    "• Quality badge appears after post-processing",
+                    "• Falls back gracefully for transfers without metadata context",
+                ],
+            },
+            {
+                "title": "Template Variable Delimiters",
+                "description": "Use ${var} syntax to append literal text to template variables",
+                "features": [
+                    "• ${albumtype}s produces 'Albums', 'Singles', 'EPs'",
+                    "• Both $var and ${var} syntaxes work in all templates",
+                    "• Validation updated to accept delimited variables",
+                ],
+            },
+            {
+                "title": "Reorganize All Albums",
+                "description": "Bulk reorganize all albums for an artist from the enhanced library view",
+                "features": [
+                    "• New 'Reorganize All' button in the artist header",
+                    "• Processes albums sequentially with progress toasts",
+                    "• Continues on error — one failed album doesn't block the rest",
+                    "• Uses the same template and endpoint as per-album reorganize",
                 ],
             },
             {
