@@ -13272,6 +13272,10 @@ def reorganize_album_preview(album_id):
                 'disc_number': disc_number,
                 'year': year_val,
                 'quality': quality,
+                'albumtype': _get_album_type_display(
+                    album_data.get('record_type'),
+                    album_data.get('track_count') or len(tracks)
+                ),
             }
 
             # Build new path using the template
@@ -13426,6 +13430,10 @@ def reorganize_album_files(album_id):
                         'disc_number': disc_number,
                         'year': year_val,
                         'quality': quality,
+                        'albumtype': _get_album_type_display(
+                            album_data.get('record_type'),
+                            album_data.get('track_count') or len(tracks)
+                        ),
                     }
 
                     folder_path, filename = _get_file_path_from_template_raw(template, context)
@@ -18471,6 +18479,47 @@ def _create_lossy_copy(final_path):
     except Exception as e:
         print(f"[Lossy Copy] Conversion error: {e}")
     return None
+
+def _get_album_type_display(raw_type, track_count) -> str:
+    """
+    Return the display form of an album's type for the $albumtype template variable.
+
+    Mirrors the inference used in the download pipeline so reorganize output
+    matches initial placement. Values: 'Album', 'Single', 'EP', 'Compilation'.
+    """
+    raw = (raw_type or '').strip().lower()
+    try:
+        tc = int(track_count or 0)
+    except (TypeError, ValueError):
+        tc = 0
+
+    # Deezer's raw API returns 'compile' (only mapped to 'compilation' in the
+    # Album dataclass path); the Deezer enrichment worker writes the raw value,
+    # so both need to match here.
+    if raw in ('compilation', 'compile'):
+        return 'Compilation'
+    if raw == 'album':
+        return 'Album'
+    if raw in ('single', 'ep'):
+        # Match download-pipeline logic: Spotify labels both singles and EPs
+        # as 'single', so final classification is by track count. Applying the
+        # same rule to explicit 'ep' keeps reorganize consistent with where
+        # the files were first placed.
+        if tc <= 3:
+            return 'Single'
+        if tc <= 6:
+            return 'EP'
+        return 'Album'
+
+    # Unknown/missing — infer from track count
+    if tc <= 0:
+        return 'Album'
+    if tc <= 3:
+        return 'Single'
+    if tc <= 6:
+        return 'EP'
+    return 'Album'
+
 
 def _apply_path_template(template: str, context: dict) -> str:
     """
