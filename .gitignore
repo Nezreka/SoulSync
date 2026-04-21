@@ -22,3 +22,6 @@ logs/*.log.*
 
 # Auto-downloaded binaries
 bin/
+
+# Development compose/config files
+*.dev.yml
