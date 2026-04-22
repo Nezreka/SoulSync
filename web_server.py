@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.36"
+_SOULSYNC_BASE_VERSION = "2.37"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22526,6 +22526,16 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "Watchlist Content Filters Fixed",
+                "description": "Global Override settings and live-version detection now behave the way the UI implies",
+                "features": [
+                    "• Scheduled auto-watchlist now honors Watchlist → Global Override (was bypassing it and using per-artist defaults)",
+                    "• 'Live' detection tightened — no more false positives on titles like 'What We Live For' or 'Live Forever'",
+                    "• Same fix applies to the Library Maintenance Live/Commentary Cleaner",
+                    "• Still catches (Live), - Live, Live at/from/in/on/version/session/recording, Unplugged, In Concert",
+                ],
+            },
             {
                 "title": "Discography Backfill",
                 "description": "New maintenance job that fills gaps in your library — scans each artist's full discography and finds what you're missing",

@@ -11,13 +11,18 @@ logger = get_logger("repair_job.live_commentary_cleaner")
 
 # Keywords that indicate unwanted content types
 # Each tuple: (keyword, content_type_label)
+#
+# Live patterns require clear recording context — the bare `\blive\b` was
+# too loose and falsely flagged verb uses like "What We Live For" by
+# American Authors or "Live Forever" by Oasis.
 _CONTENT_PATTERNS = [
     # Live
-    (r'\blive\b', 'live'),
-    (r'\blive at\b', 'live'),
-    (r'\blive from\b', 'live'),
-    (r'\blive in\b', 'live'),
+    (r'[\(\[]live\b', 'live'),                       # (Live), [Live at ...]
+    (r'-\s*live\b', 'live'),                         # Song - Live
+    (r'\blive (at|from|in|on|version|session|recording|performance|album|show|tour|concert|edit|cut|take)\b', 'live'),
     (r'\bin concert\b', 'live'),
+    (r'\bconcert\b', 'live'),
+    (r'\bon stage\b', 'live'),
     (r'\bunplugged\b', 'live'),
     # Commentary
     (r'\bcommentary\b', 'commentary'),
