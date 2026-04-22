@@ -2122,6 +2122,7 @@ function importFileSubmit() {
 // ── Mirrored Playlists ────────────────────────────────────────────────
 
 let mirroredPlaylistsLoaded = false;
+let discoverSyncPlaylistsLoaded = false;
 
 /**
  * Fire-and-forget helper: send parsed playlist data to be mirrored on the backend.
