@@ -3599,6 +3599,11 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
+    '2.41': [
+        // --- April 22, 2026 (late night) ---
+        { date: 'April 22, 2026 (late night)' },
+        { title: 'Shared Enhanced-Search Fetch Helper', desc: 'Internal refactor — the Search page dropdown and the global search widget now route through one shared enhancedSearchFetch helper in search.js, so both callers hit /api/enhanced-search through a single chokepoint. Zero UX change, but it means the upcoming source picker (Phase 3) only needs wiring in one place instead of two. Also lets both surfaces accept the source parameter added in 2.40 (Phase 2 of the Search/Artists unification project)', page: 'downloads' },
+    ],
     '2.40': [
         // --- April 22, 2026 (late) ---
         { date: 'April 22, 2026 (late)' },

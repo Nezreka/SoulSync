@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.40"
+_SOULSYNC_BASE_VERSION = "2.41"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22809,6 +22809,16 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "Shared Enhanced-Search Fetch Helper",
+                "description": "Internal refactor — the Search page and the global search widget now route through one shared fetch helper, so future source-picker work only needs wiring in one place",
+                "features": [
+                    "• New enhancedSearchFetch(query, { source, signal }) in search.js",
+                    "• Both callers (Search page dropdown + global widget) deduplicated — single /api/enhanced-search chokepoint",
+                    "• Accepts the source param added in 2.40, letting future UI wire a picker without touching both callers",
+                    "• Zero UX change — pure plumbing (Phase 2 of the Search/Artists unification project)",
+                ],
+            },
             {
                 "title": "Explicit Source Selection on Enhanced Search",
                 "description": "The /api/enhanced-search endpoint now accepts an optional `source` parameter so callers can target a single metadata source instead of always fanning out across every provider",

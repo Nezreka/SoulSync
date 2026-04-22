@@ -5492,13 +5492,7 @@ async function _gsPerformSearch(query) {
     results.classList.add('visible');
 
     try {
-        const res = await fetch('/api/enhanced-search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query }),
-            signal: _gsState.abortCtrl.signal,
-        });
-        const data = await res.json();
+        const data = await enhancedSearchFetch(query, { signal: _gsState.abortCtrl.signal });
         _gsState.data = data;
         _gsState.activeSource = data.primary_source || 'spotify';
         _gsState.sources = {};

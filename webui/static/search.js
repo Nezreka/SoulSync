@@ -1,6 +1,22 @@
 // SEARCH FUNCTIONALITY
 // ===============================
 
+// Shared enhanced-search fetch used by the Search page and the global widget.
+// Pass source to restrict results to a single metadata provider; omit or pass
+// null/'auto' to let the backend fan out across all configured sources.
+async function enhancedSearchFetch(query, { source = null, signal = null } = {}) {
+    const body = { query };
+    if (source && source !== 'auto') body.source = source;
+    const res = await fetch('/api/enhanced-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: signal || undefined,
+    });
+    if (!res.ok) throw new Error(`Enhanced search failed: ${res.status}`);
+    return res.json();
+}
+
 function initializeSearch() {
     // --- FIX: Corrected the element IDs to match the HTML ---
     const searchInput = document.getElementById('downloads-search-input');
@@ -225,16 +241,7 @@ function initializeSearchModeToggle() {
         _enhancedSearchData = { db_artists: [], primary_source: null, sources: {}, searchId, query };
 
         try {
-            const response = await fetch('/api/enhanced-search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query }),
-                signal: abortController.signal
-            });
-
-            if (!response.ok) throw new Error('Search failed');
-
-            const data = await response.json();
+            const data = await enhancedSearchFetch(query, { signal: abortController.signal });
             console.log('Enhanced results:', data);
 
             // Store multi-source state
