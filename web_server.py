@@ -13375,20 +13375,29 @@ def reorganize_album_preview(album_id):
 
         transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
 
+        # Pre-scan disc numbers so every track's template context carries the
+        # same total_discs. Needed by $cdnum (smart CD label) so the template
+        # can decide whether to emit "CDxx" or stay empty for single-disc.
+        track_disc_numbers = {}
+        for _t in tracks:
+            _rp = _resolve_library_file_path(_t.get('file_path')) if _t.get('file_path') else None
+            _dn = 1
+            if _rp:
+                try:
+                    from core.tag_writer import read_file_tags
+                    _dn = read_file_tags(_rp).get('disc_number') or 1
+                except Exception:
+                    _dn = 1
+            track_disc_numbers[_t.get('id')] = int(_dn)
+        total_discs = max(track_disc_numbers.values(), default=1) if track_disc_numbers else 1
+
         preview_items = []
         for track in tracks:
             file_path = track.get('file_path')
             resolved = _resolve_library_file_path(file_path) if file_path else None
 
-            # Read disc_number from file tags if available
-            disc_number = 1
-            if resolved:
-                try:
-                    from core.tag_writer import read_file_tags
-                    file_tags = read_file_tags(resolved)
-                    disc_number = file_tags.get('disc_number') or 1
-                except Exception:
-                    pass
+            # Reuse the disc number captured in the pre-scan (avoids re-reading tags)
+            disc_number = track_disc_numbers.get(track.get('id'), 1)
 
             # Get file extension from current path
             file_ext = os.path.splitext(resolved or file_path or '.mp3')[1]
@@ -13405,6 +13414,7 @@ def reorganize_album_preview(album_id):
                 'title': track.get('title') or 'Unknown Track',
                 'track_number': track.get('track_number') or 1,
                 'disc_number': disc_number,
+                'total_discs': total_discs,
                 'year': year_val,
                 'quality': quality,
                 'albumtype': _get_album_type_display(
@@ -13536,6 +13546,22 @@ def reorganize_album_files(album_id):
                 bg_db = get_database()
                 bg_conn = bg_db._get_connection()
 
+                # Pre-scan disc numbers for every track so total_discs is the
+                # same for all template contexts in this album. Needed by the
+                # $cdnum template variable to decide multi-disc vs single-disc.
+                track_disc_numbers = {}
+                for _t in tracks:
+                    _rp = _resolve_library_file_path(_t.get('file_path')) if _t.get('file_path') else None
+                    _dn = 1
+                    if _rp:
+                        try:
+                            from core.tag_writer import read_file_tags
+                            _dn = read_file_tags(_rp).get('disc_number') or 1
+                        except Exception:
+                            _dn = 1
+                    track_disc_numbers[_t.get('id')] = int(_dn)
+                total_discs = max(track_disc_numbers.values(), default=1) if track_disc_numbers else 1
+
                 # Pre-compute all destination paths to detect collisions
                 dest_paths = {}  # normalized_new_path -> track_id
                 for track in tracks:
@@ -13544,13 +13570,8 @@ def reorganize_album_files(album_id):
                     if not resolved:
                         continue
 
-                    disc_number = 1
-                    try:
-                        from core.tag_writer import read_file_tags
-                        file_tags = read_file_tags(resolved)
-                        disc_number = file_tags.get('disc_number') or 1
-                    except Exception:
-                        pass
+                    # Reuse the disc number from the pre-scan pass above
+                    disc_number = track_disc_numbers.get(track.get('id'), 1)
 
                     file_ext = os.path.splitext(resolved)[1]
                     quality = _get_audio_quality_string(resolved)
@@ -13563,6 +13584,7 @@ def reorganize_album_files(album_id):
                         'title': track.get('title') or 'Unknown Track',
                         'track_number': track.get('track_number') or 1,
                         'disc_number': disc_number,
+                        'total_discs': total_discs,
                         'year': year_val,
                         'quality': quality,
                         'albumtype': _get_album_type_display(
@@ -18109,6 +18131,10 @@ def _build_final_path_for_track(context, spotify_artist, album_info, file_ext):
 
         disc_label = config_manager.get('file_organization.disc_label', 'Disc')
 
+        # total_discs was resolved above — pass it into the template context so
+        # $cdnum can emit "CDxx" only for real multi-disc albums.
+        template_context['total_discs'] = total_discs
+
         folder_path, filename_base = _get_file_path_from_template(template_context, 'album_path')
         if folder_path and filename_base:
             if total_discs > 1 and not user_controls_disc:
@@ -18717,6 +18743,14 @@ def _apply_path_template(template: str, context: dict) -> str:
                         album_artist_value = resolved
                 except Exception:
                     pass
+    # $cdnum — smart CD label for multi-disc filenames. Produces "CD01" /
+    # "CD02" etc. when the album has 2+ discs, empty string otherwise.
+    # Empty output collapses gracefully via the trailing double-dash cleanup
+    # regex, so single-disc albums don't end up with "CD01" in every name.
+    _total_discs = int(clean_context.get('total_discs', 1) or 1)
+    _disc_number = int(clean_context.get('disc_number', 1) or 1)
+    cdnum_value = f"CD{_disc_number:02d}" if _total_discs > 1 else ''
+
     # Support ${var} delimited syntax (e.g. ${albumtype}s → Albums)
     # Must run before $var replacements to prevent partial matching
     _bracket_map = {
@@ -18728,6 +18762,7 @@ def _apply_path_template(template: str, context: dict) -> str:
         'album': clean_context.get('album', 'Unknown Album'),
         'title': clean_context.get('title', 'Unknown Track'),
         'track': f"{clean_context.get('track_number', 1):02d}",
+        'cdnum': cdnum_value,
         'disc': str(clean_context.get('disc_number', 1)),
         'discnum': str(clean_context.get('disc_number', 1)),
         'year': str(clean_context.get('year', '')),
@@ -18745,6 +18780,10 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$artist', clean_context.get('artist', 'Unknown Artist'))
     result = result.replace('$album', clean_context.get('album', 'Unknown Album'))
     result = result.replace('$title', clean_context.get('title', 'Unknown Track'))
+    # $cdnum must replace before $track to avoid conflict with variables that
+    # start with "$c" — no such variable exists today but this ordering
+    # mirrors the "longest first" rule used throughout this function.
+    result = result.replace('$cdnum', cdnum_value)
     result = result.replace('$track', f"{clean_context.get('track_number', 1):02d}")
     result = result.replace('$year', str(clean_context.get('year', '')))  # Empty string instead of 'Unknown'
 
@@ -18830,6 +18869,9 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
         filename_base = re.sub(r'\s*\(\s*\)', '', filename_base)
         filename_base = re.sub(r'\s*\{\s*\}', '', filename_base)
         filename_base = re.sub(r'\s*-\s*$', '', filename_base)
+        # Leading dash cleanup — lets $cdnum (and other optional vars) sit at
+        # the start of the filename without leaving a stray "- " when empty.
+        filename_base = re.sub(r'^\s*-\s*', '', filename_base)
         filename_base = re.sub(r'\s+', ' ', filename_base).strip()
 
         # Sanitize each folder component
@@ -18849,6 +18891,7 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
         full_path = re.sub(r'\s*\(\s*\)', '', full_path)
         full_path = re.sub(r'\s*\{\s*\}', '', full_path)
         full_path = re.sub(r'\s*-\s*$', '', full_path)
+        full_path = re.sub(r'^\s*-\s*', '', full_path)
         full_path = re.sub(r'\s+', ' ', full_path).strip()
         return '', _sanitize_filename(full_path)
 
