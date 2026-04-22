@@ -3599,6 +3599,11 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
+    '2.45': [
+        // --- April 23, 2026 (night) ---
+        { date: 'April 23, 2026 (night)' },
+        { title: 'Artist Links Everywhere Go to the Same Page', desc: 'Clicking an artist result in Search, Discover, the API Monitor, or anywhere else now lands on the standalone artist detail page that Library already uses — instead of swapping into the Artists page\'s inline detail view. One artist detail page, not two: less navigation surprise, a stable /artist-detail URL for deep links, and source context (Spotify/iTunes/Deezer/etc.) now carries cleanly into the destination so non-Spotify albums load from the right provider. Removed the navigate-then-setTimeout dance at 9 callsites. Artists sidebar entry and its inline search still work for now — next phase retires that page entirely. Phase 4a of the Search/Artists unification project', page: 'library' },
+    ],
     '2.44': [
         // --- April 23, 2026 (evening) ---
         { date: 'April 23, 2026 (evening)' },

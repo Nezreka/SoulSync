@@ -340,18 +340,7 @@ function initializeSearchModeToggle() {
                     const sourceOverride = _activeSearchSource;
                     console.log(`🎵 Opening artist detail: ${artist.name} (ID: ${artist.id}, source: ${sourceOverride})`);
                     hideDropdown();
-
-                    // Navigate to Artists page
-                    navigateToPage('artists');
-
-                    // Small delay to let the page load
-                    await new Promise(resolve => setTimeout(resolve, 100));
-
-                    // Load the artist details with source context
-                    await selectArtistForDetail(artist, {
-                        source: sourceOverride,
-                        plugin: artist.external_urls?.hydrabase_plugin,
-                    });
+                    navigateToArtistDetail(artist.id, artist.name, sourceOverride || null);
                 }
             })
         );

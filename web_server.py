@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.44"
+_SOULSYNC_BASE_VERSION = "2.45"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22809,6 +22809,17 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "Artist Links Everywhere Go to the Same Page",
+                "description": "Clicking an artist result in Search, Discover, the API Monitor, or anywhere else now lands on the standalone artist detail page Library already uses — instead of swapping into the Artists page's inline detail view",
+                "features": [
+                    "• One artist detail page, not two — less navigation surprise and a stable URL (/artist-detail) for deep links",
+                    "• Source context (Spotify/iTunes/Deezer/etc.) now carries cleanly into the destination so non-Spotify albums load from the right provider",
+                    "• Removed the navigate-then-setTimeout dance at 9 callsites (api-monitor, discover, downloads, search, library recommendations)",
+                    "• Artists sidebar entry and its inline search still work for now — next phase retires that page entirely",
+                    "• Phase 4a of the Search/Artists unification project",
+                ],
+            },
             {
                 "title": "Remove Embedded Download Manager from Search Page",
                 "description": "The Search page used to carry a second copy of the Download Manager (active + finished queues, clear/cancel-all buttons) that was hidden by default and duplicated the dedicated Downloads page. That duplicate is gone",
