@@ -56399,6 +56399,40 @@ body.reduce-effects *::after {
     border-color: rgba(255, 255, 255, 0.12);
 }
 
+/* Cancel All button — appears in the header only when at least one batch has
+   active or queued work. Same shape as clear-btn, red themed. */
+.adl-cancel-all-btn {
+    padding: 5px 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    background: rgba(239, 68, 68, 0.12);
+    color: rgba(252, 165, 165, 0.95);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.adl-cancel-all-btn:hover {
+    background: rgba(239, 68, 68, 0.22);
+    border-color: rgba(239, 68, 68, 0.6);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.25);
+}
+
+.adl-cancel-all-btn:active {
+    transform: scale(0.97);
+}
+
+.adl-cancel-all-btn.adl-cancel-all-pending,
+.adl-cancel-all-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 .adl-list {
     display: flex;
     flex-direction: column;
@@ -56456,6 +56490,73 @@ body.reduce-effects *::after {
 /* Failed row subtle red */
 .adl-row.adl-row-failed {
     border-color: rgba(239, 68, 68, 0.1);
+}
+
+/* ── Per-row cancel button ──
+   Fancy reveal on hover: fades in + slides/scales from the right edge with
+   a soft red glow. Only rendered on active/queued rows (set in JS). Terminal
+   rows have nothing to cancel.
+*/
+.adl-row-cancel {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    margin-left: 8px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.85), rgba(220, 38, 38, 0.9));
+    border: 1px solid rgba(239, 68, 68, 0.55);
+    color: #fff;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.25), 0 2px 6px rgba(0, 0, 0, 0.25);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(8px) scale(0.72);
+    transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.adl-row-cancel svg {
+    display: block;
+}
+
+.adl-row:hover .adl-row-cancel,
+.adl-row:focus-within .adl-row-cancel {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0) scale(1);
+}
+
+.adl-row-cancel:hover {
+    background: linear-gradient(135deg, rgba(248, 113, 113, 0.95), rgba(239, 68, 68, 1));
+    border-color: rgba(248, 113, 113, 0.85);
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
+    transform: translateX(0) scale(1.12);
+}
+
+.adl-row-cancel:active {
+    transform: translateX(0) scale(0.95);
+    transition: transform 0.08s ease;
+}
+
+/* Pending state — cancel request in flight; dim the button and disable */
+.adl-row-cancel-pending,
+.adl-row-cancel-pending:hover {
+    opacity: 0.5 !important;
+    pointer-events: none !important;
+    transform: translateX(0) scale(1) !important;
+    box-shadow: none !important;
+}
+
+/* Touch devices: no hover, keep the cancel button visible so it's reachable. */
+@media (hover: none) {
+    .adl-row-cancel {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateX(0) scale(1);
+    }
 }
 
 .adl-row-art {

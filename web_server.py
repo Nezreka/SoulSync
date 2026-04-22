@@ -31261,6 +31261,10 @@ def get_all_downloads_unified():
                     'batch_id': batch_id,
                     'batch_name': batch.get('playlist_name') or batch.get('album_name') or '',
                     'batch_source': batch.get('source_page') or batch.get('initiated_from') or '',
+                    # playlist_id is needed by per-row cancel (cancel_task_v2
+                    # takes playlist_id + track_index). Surfacing it here so
+                    # the frontend doesn't need a second lookup.
+                    'playlist_id': batch.get('playlist_id', ''),
                     'track_index': task.get('track_index', 0),
                     'batch_total': len(batch.get('queue', [])),
                     'timestamp': task.get('status_change_time', 0),
@@ -31665,90 +31669,32 @@ def cancel_task_v2():
             logger.info(f"[Atomic Cancel] Download ID looks like filename: {download_id and ('/' in str(download_id) or backslash in str(download_id))}")
             
             if download_id and username:
-                # Always try to cancel in slskd - doesn't matter what status it was
-                # If it's not there or already done, the DELETE request will just fail harmlessly
+                # Route through the DownloadOrchestrator's dispatch (same code
+                # path /api/downloads/cancel uses). It picks the right client by
+                # username: youtube/tidal/qobuz/hifi/deezer_dl/lidarr go to
+                # their streaming clients, anything else goes to Soulseek.
+                #
+                # Replaces an older block that assumed soulseek_client was a
+                # raw SoulseekClient and accessed .base_url / ._make_request
+                # directly — crashed with AttributeError on the orchestrator
+                # and silently left streaming downloads running in background.
                 try:
-                        logger.info("[Atomic Cancel] Attempting to cancel Soulseek download:")
-                        logger.info(f"   Username: {username}")  
-                        logger.info(f"   Download ID: {download_id}")
-                        logger.info(f"   Base URL: {soulseek_client.base_url}")
-                        logger.info(f"   Expected URL: {soulseek_client.base_url}/transfers/downloads/{username}/{download_id}?remove=true")
-                        
-                        # CRITICAL: Must use REAL download ID from slskd, not filename
-                        success = False
-                        real_download_id = None
-                        
-                        # Step 1: Always search for real download ID first
-                        logger.info("[Atomic Cancel] Searching slskd transfers for real download ID")
-                        try:
-                            all_transfers = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
-                            if all_transfers:
-                                # Look through transfers to find matching download
-                                for user_data in all_transfers:
-                                    if user_data.get('username') == username:
-                                        for directory in user_data.get('directories', []):
-                                            for file_data in directory.get('files', []):
-                                                file_filename = file_data.get('filename', '')
-                                                # Match by filename (our download_id might be filename)
-                                                if (file_filename == download_id or 
-                                                    __import__('os').path.basename(file_filename) == __import__('os').path.basename(str(download_id))):
-                                                    real_download_id = file_data.get('id')
-                                                    logger.info(f"[Atomic Cancel] Found real download ID: {real_download_id} for file: {file_filename}")
-                                                    break
-                                            if real_download_id:
-                                                break
-                                    if real_download_id:
-                                        break
-                        except Exception as search_error:
-                            logger.error(f"[Atomic Cancel] Error searching transfers: {search_error}")
-                        
-                        # Step 2: Try cancellation with real ID if found
-                        if real_download_id:
-                            logger.info(f"[Atomic Cancel] Attempting cancel with real ID: {real_download_id}")
-                            try:
-                                # Use EXACT format from slskd web UI: DELETE /api/v0/transfers/downloads/{username}/{download_id}?remove=false
-                                endpoint = f'transfers/downloads/{username}/{real_download_id}?remove=true'
-                                logger.info(f"[Atomic Cancel] Using slskd web UI format: {endpoint}")
-                                
-                                response = run_async(soulseek_client._make_request('DELETE', endpoint))
-                                if response is not None:
-                                    logger.warning(f"[Atomic Cancel] Successfully cancelled with slskd web UI format: {real_download_id}")
-                                    success = True
-                                else:
-                                    logger.error("[Atomic Cancel] Web UI format failed, trying alternative formats")
-                                    
-                                    # Fallback: Try without remove parameter
-                                    endpoint2 = f'transfers/downloads/{username}/{real_download_id}'
-                                    response2 = run_async(soulseek_client._make_request('DELETE', endpoint2))
-                                    if response2 is not None:
-                                        logger.warning(f"[Atomic Cancel] Successfully cancelled without remove param: {real_download_id}")
-                                        success = True
-                                    else:
-                                        # Final fallback: Try simple format (sync.py style)
-                                        endpoint3 = f'transfers/downloads/{real_download_id}'
-                                        response3 = run_async(soulseek_client._make_request('DELETE', endpoint3))
-                                        if response3 is not None:
-                                            logger.warning(f"[Atomic Cancel] Successfully cancelled with simple format: {real_download_id}")
-                                            success = True
-                                        else:
-                                            logger.error(f"[Atomic Cancel] All DELETE formats failed for real ID: {real_download_id}")
-                            except Exception as cancel_error:
-                                logger.error(f"[Atomic Cancel] Exception cancelling real ID {real_download_id}: {cancel_error}")
-                        else:
-                            logger.error("[Atomic Cancel] Could not find real download ID in slskd transfers")
-                            logger.warning("[Atomic Cancel] This might be a pending download not yet in slskd - relying on status='cancelled' to prevent it")
-                            # For pending downloads, the status='cancelled' will prevent them from starting
-                            success = True  # Consider this success since pending downloads are prevented
-                        
-                        if not success:
-                            logger.error("[Atomic Cancel] Failed to cancel download in slskd API")
+                    logger.info(f"[Atomic Cancel] Dispatching cancel to orchestrator: username={username} download_id={download_id}")
+                    cancel_success = run_async(
+                        soulseek_client.cancel_download(download_id, username, remove=True)
+                    )
+                    if cancel_success:
+                        logger.info(f"[Atomic Cancel] Orchestrator cancelled download: {download_id}")
+                    else:
+                        # Non-fatal: task is already marked cancelled in the DB.
+                        # Streaming workers also poll status='cancelled' and bail.
+                        logger.warning(f"[Atomic Cancel] Orchestrator could not cancel {download_id} (likely already finished or not yet started)")
                 except Exception as e:
-                    logger.error(f"[Atomic Cancel] Exception cancelling Soulseek download {download_id}: {e}")
-                    # Print more details about the error
+                    logger.error(f"[Atomic Cancel] Exception cancelling download {download_id}: {e}")
                     import traceback
                     logger.error(f"[Atomic Cancel] Cancel error traceback: {traceback.format_exc()}")
             else:
-                logger.warning("ℹ️ [Atomic Cancel] No download_id or username available - skipping slskd cancel")
+                logger.warning("ℹ️ [Atomic Cancel] No download_id or username available - skipping cancel dispatch")
         
         # Add to wishlist (non-blocking, best effort)
         try:

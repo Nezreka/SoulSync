@@ -77196,6 +77196,15 @@ function _adlRender() {
     const clearBtn = document.getElementById('adl-clear-btn');
     if (clearBtn) clearBtn.style.display = completedN > 0 ? '' : 'none';
 
+    // Show/hide cancel-all button — only visible when there's something to cancel
+    const cancelAllBtn = document.getElementById('adl-cancel-all-btn');
+    if (cancelAllBtn) {
+        const hasRunningWork = _adlData.some(d =>
+            [...activeStatuses, ...queuedStatuses].includes(d.status)
+        );
+        cancelAllBtn.style.display = hasRunningWork ? '' : 'none';
+    }
+
     // Batch filter indicator banner
     let existingBanner = document.getElementById('adl-batch-filter-banner');
     if (_adlFilterBatchId) {
@@ -77270,6 +77279,15 @@ function _adlRender() {
                 ? `<div class="adl-row-batch-color" style="background:rgba(var(--batch-color-${colorIdx}),0.6)"></div>`
                 : '';
 
+            // Per-row cancel only makes sense for in-flight tasks. Terminal
+            // states (completed/failed/cancelled) have nothing to cancel.
+            const isCancellable = statusClass === 'active' || statusClass === 'queued';
+            const cancelBtnHtml = isCancellable && dl.playlist_id && dl.track_index !== undefined
+                ? `<button class="adl-row-cancel" onclick="event.stopPropagation(); adlCancelRow(this, '${_adlEsc(dl.playlist_id)}', ${dl.track_index})" title="Cancel this download" aria-label="Cancel download">
+                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                   </button>`
+                : '';
+
             html += `<div class="adl-row adl-row-${statusClass}" data-task-id="${dl.task_id}" data-batch-id="${dl.batch_id || ''}">
                 ${colorBar}
                 ${artHtml}
@@ -77283,6 +77301,7 @@ function _adlRender() {
                     <span class="adl-status-dot ${statusClass}"></span>
                     ${statusLabel}
                 </div>
+                ${cancelBtnHtml}
             </div>`;
         }
     }
@@ -77558,6 +77577,50 @@ function _adlFilterByBatch(batchId) {
     _adlRenderBatchPanel();
 }
 
+async function adlCancelRow(btnEl, playlistId, trackIndex) {
+    // Per-row cancel on the Downloads page. Uses the same atomic cancel
+    // endpoint the modal cancel buttons use, so worker slots free properly.
+    if (!playlistId || trackIndex === undefined || trackIndex === null) {
+        showToast('Cannot cancel — missing task coordinates', 'error');
+        return;
+    }
+    // Lock the button so rapid clicks don't fire duplicate requests
+    if (btnEl) {
+        if (btnEl.dataset.cancelling === '1') return;
+        btnEl.dataset.cancelling = '1';
+        btnEl.classList.add('adl-row-cancel-pending');
+    }
+    try {
+        const resp = await fetch('/api/downloads/cancel_task_v2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist_id: playlistId,
+                track_index: trackIndex
+            })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            const name = data.task_info && data.task_info.track_name ? data.task_info.track_name : 'Track';
+            showToast(`Cancelled "${name}"`, 'info');
+            _adlFetch();
+        } else {
+            showToast(data.error || 'Cancel failed', 'error');
+            if (btnEl) {
+                btnEl.dataset.cancelling = '0';
+                btnEl.classList.remove('adl-row-cancel-pending');
+            }
+        }
+    } catch (e) {
+        console.error('ADL row cancel error:', e);
+        showToast('Cancel request failed', 'error');
+        if (btnEl) {
+            btnEl.dataset.cancelling = '0';
+            btnEl.classList.remove('adl-row-cancel-pending');
+        }
+    }
+}
+
 async function _adlCancelBatch(batchId) {
     const batch = _adlBatches.find(b => b.batch_id === batchId);
     const batchName = batch ? batch.batch_name : 'this batch';
@@ -77580,6 +77643,70 @@ async function _adlCancelBatch(batchId) {
     } catch (e) {
         showToast('Failed to cancel batch', 'error');
     }
+}
+
+async function adlCancelAll() {
+    // Cancel every batch with active/queued work — equivalent to clicking
+    // "Cancel All" inside each running download modal. Uses the same
+    // /api/playlists/<batch_id>/cancel_batch endpoint the per-batch card
+    // cancel uses, so worker slots free atomically.
+    const runningBatches = _adlBatches.filter(b => (b.active || 0) > 0 || (b.queued || 0) > 0);
+    if (runningBatches.length === 0) {
+        showToast('No active batches to cancel', 'info');
+        return;
+    }
+
+    const totalTasks = runningBatches.reduce((sum, b) => sum + (b.active || 0) + (b.queued || 0), 0);
+    const batchWord = runningBatches.length === 1 ? 'batch' : 'batches';
+    const taskWord = totalTasks === 1 ? 'task' : 'tasks';
+    const confirmed = await showConfirmDialog({
+        title: 'Cancel All Downloads',
+        message: `Cancel ${totalTasks} ${taskWord} across ${runningBatches.length} ${batchWord}? Active and queued downloads will be stopped and added to the wishlist.`,
+        confirmText: 'Cancel All',
+        destructive: true
+    });
+    if (!confirmed) return;
+
+    const btn = document.getElementById('adl-cancel-all-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.classList.add('adl-cancel-all-pending');
+    }
+
+    let cancelled = 0;
+    let failed = 0;
+    // Sequential so we don't hammer the backend — cancel_batch takes a lock
+    // internally and parallel calls would mostly serialize anyway.
+    for (const batch of runningBatches) {
+        try {
+            const resp = await fetch(`/api/playlists/${batch.batch_id}/cancel_batch`, { method: 'POST' });
+            const data = await resp.json();
+            if (data.success) {
+                cancelled += (data.cancelled_tasks || 0);
+            } else {
+                failed += 1;
+                console.warn(`cancel_batch failed for ${batch.batch_id}:`, data.error);
+            }
+        } catch (e) {
+            failed += 1;
+            console.warn(`cancel_batch exception for ${batch.batch_id}:`, e);
+        }
+    }
+
+    if (btn) {
+        btn.disabled = false;
+        btn.classList.remove('adl-cancel-all-pending');
+    }
+
+    if (cancelled > 0 && failed === 0) {
+        showToast(`Cancelled ${cancelled} downloads`, 'success');
+    } else if (cancelled > 0 && failed > 0) {
+        showToast(`Cancelled ${cancelled} downloads (${failed} batches failed)`, 'info');
+    } else {
+        showToast('Failed to cancel any downloads', 'error');
+    }
+
+    _adlFetch();
 }
 
 // ---- Batch History ----
@@ -77664,5 +77791,7 @@ window._adlToggleBatch = _adlToggleBatch;
 window._adlOpenBatchModal = _adlOpenBatchModal;
 window._adlFilterByBatch = _adlFilterByBatch;
 window._adlCancelBatch = _adlCancelBatch;
+window.adlCancelRow = adlCancelRow;
+window.adlCancelAll = adlCancelAll;
 window.adlToggleBatchHistory = adlToggleBatchHistory;
 window.adlToggleBatchPanel = adlToggleBatchPanel;
