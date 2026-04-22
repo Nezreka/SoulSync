@@ -3599,6 +3599,11 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
+    '2.38': [
+        // --- April 21, 2026 (late) ---
+        { date: 'April 21, 2026 (late)' },
+        { title: 'Fix Manual Discovery Fixes Lost After Restart (Non-Spotify Users)', desc: 'When you clicked Fix on a discovery track and picked a manual match, the cache save hardcoded the provider as "spotify" regardless of your configured primary metadata source. On re-scan, the worker queried the cache with your actual primary (Deezer, iTunes, Discogs, Hydrabase) and missed the fix entirely. All 5 save sites (Tidal / Deezer / Spotify Public / YouTube / Discovery Pool) now use the active primary source, matching what the automatic workers already do', page: 'sync' },
+    ],
     '2.37': [
         // --- April 21, 2026 (evening) ---
         { date: 'April 21, 2026 (evening)' },
@@ -3786,12 +3791,12 @@ const WHATS_NEW = {
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '2.37';
+    return btn ? btn.textContent.trim().replace('v', '') : '2.38';
 }
 
 function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
-    return versions[0] || '2.37';
+    return versions[0] || '2.38';
 }
 
 function openWhatsNew() {
