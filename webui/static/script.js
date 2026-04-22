@@ -67,6 +67,95 @@ let deezerArlPlaylistsLoaded = false;
 
 // --- Beatport Chart State Management (Similar to YouTube/Tidal) ---
 let beatportChartStates = {}; // Key: chart_hash, Value: chart state with phases
+let beatportContentState = {
+    loaded: false,
+    loadingPromise: null,
+    abortController: null
+};
+
+function getBeatportContentSignal() {
+    return beatportContentState.abortController ? beatportContentState.abortController.signal : null;
+}
+
+function throwIfBeatportLoadAborted() {
+    if (beatportContentState.abortController && beatportContentState.abortController.signal.aborted) {
+        throw new DOMException('Beatport load aborted', 'AbortError');
+    }
+}
+
+function stopBeatportDiscoveryAndSyncPolling() {
+    Object.entries(activeYouTubePollers).forEach(([identifier, poller]) => {
+        const isBeatportChart = !!youtubePlaylistStates[identifier]?.is_beatport_playlist ||
+            !!beatportChartStates[identifier];
+        if (isBeatportChart) {
+            clearInterval(poller);
+            delete activeYouTubePollers[identifier];
+        }
+    });
+
+    Object.entries(_discoveryProgressCallbacks).forEach(([identifier]) => {
+        const isBeatportChart = !!youtubePlaylistStates[identifier]?.is_beatport_playlist ||
+            !!beatportChartStates[identifier];
+        if (isBeatportChart) {
+            if (socketConnected) socket.emit('discovery:unsubscribe', { ids: [identifier] });
+            delete _discoveryProgressCallbacks[identifier];
+        }
+    });
+
+    Object.entries(_syncProgressCallbacks).forEach(([syncPlaylistId]) => {
+        const beatportState = Object.values(youtubePlaylistStates).find(state =>
+            state && state.is_beatport_playlist && state.syncPlaylistId === syncPlaylistId
+        );
+        if (beatportState) {
+            if (socketConnected) socket.emit('sync:unsubscribe', { playlist_ids: [syncPlaylistId] });
+            delete _syncProgressCallbacks[syncPlaylistId];
+        }
+    });
+}
+
+function resetBeatportSliderInitFlags() {
+    const rebuildSlider = document.getElementById('beatport-rebuild-slider');
+    if (rebuildSlider) rebuildSlider.dataset.initialized = 'false';
+
+    const releasesSlider = document.getElementById('beatport-releases-slider');
+    if (releasesSlider) releasesSlider.dataset.initialized = 'false';
+    beatportReleasesSliderState.isInitialized = false;
+
+    beatportHypePicksSliderState.isInitialized = false;
+
+    const chartsSlider = document.getElementById('beatport-charts-slider');
+    if (chartsSlider) chartsSlider.dataset.initialized = 'false';
+    beatportChartsSliderState.isInitialized = false;
+
+    const djSlider = document.getElementById('beatport-dj-slider');
+    if (djSlider) djSlider.dataset.initialized = 'false';
+    beatportDJSliderState.isInitialized = false;
+}
+
+function cleanupBeatportContent() {
+    const wasLoaded = beatportContentState.loaded || !!beatportContentState.loadingPromise;
+    if (!wasLoaded) return;
+
+    console.log('🧹 Cleaning up Beatport content...');
+
+    if (beatportContentState.abortController) {
+        beatportContentState.abortController.abort();
+        beatportContentState.abortController = null;
+    }
+
+    stopBeatportDiscoveryAndSyncPolling();
+    cleanupBeatportRebuildSlider();
+    cleanupBeatportReleasesSlider();
+    cleanupBeatportHypePicksSlider();
+    cleanupBeatportChartsSlider();
+    cleanupBeatportDJSlider();
+    resetBeatportSliderInitFlags();
+
+    beatportContentState.loadingPromise = null;
+    beatportContentState.loaded = false;
+
+    console.log('✅ Beatport content cleaned up');
+}
 
 // --- ListenBrainz Playlist State Management (Similar to YouTube/Tidal/Beatport) ---
 let listenbrainzPlaylistStates = {}; // Key: playlist_mbid, Value: playlist state with phases
@@ -2706,19 +2795,6 @@ function initApp() {
     initializeWatchlist();
     initializeDownloadManagerToggle();
 
-    // Initialize Beatport rebuild slider if it's the active tab by default
-    const activeRebuildTab = document.querySelector('.beatport-tab-button.active[data-beatport-tab="rebuild"]');
-    if (activeRebuildTab) {
-        console.log('🔄 Initializing default active rebuild tab...');
-        initializeBeatportRebuildSlider();
-        loadBeatportTop10Lists();
-        loadBeatportTop10Releases();
-        initializeBeatportReleasesSlider();
-        initializeBeatportHypePicksSlider();
-        initializeBeatportChartsSlider();
-        initializeBeatportDJSlider();
-    }
-
 
     // Initialize WebSocket connection (falls back to HTTP polling if unavailable)
     initializeWebSocket();
@@ -3022,6 +3098,9 @@ async function loadPageData(pageId) {
         if (watchlistCountdownInterval) { clearInterval(watchlistCountdownInterval); watchlistCountdownInterval = null; }
         if (wishlistCountdownInterval) { clearInterval(wishlistCountdownInterval); wishlistCountdownInterval = null; }
         if (typeof _stopNebulaLivePolling === 'function') _stopNebulaLivePolling();
+        if (pageId !== 'sync') {
+            cleanupBeatportContent();
+        }
         switch (pageId) {
             case 'dashboard':
                 await loadDashboardData();
@@ -10700,9 +10779,6 @@ async function loadInitialData() {
         // Load discover download state
         await hydrateDiscoverDownloadsFromSnapshot();
 
-        // Load Beatport bubble state
-        await hydrateBeatportBubblesFromSnapshot();
-
         // Navigate to user's home page (or dashboard for admin)
         const homePage = getProfileHomePage();
         const urlPage = _getPageFromPath();
@@ -10769,14 +10845,62 @@ async function loadSyncData() {
     // Load YouTube playlists from backend (always refresh to get latest state)
     await loadYouTubePlaylistsFromBackend();
 
-    // Load Beatport charts from backend (always refresh to get latest state)
-    await loadBeatportChartsFromBackend();
-
     // Render saved URL histories for YouTube, Deezer, Spotify Link tabs
     initUrlHistories();
+}
 
-    // Refresh Beatport download bubbles (navigation trigger, like showArtistDownloadsSection in artists page)
-    showBeatportDownloadsSection();
+async function ensureBeatportContentLoaded() {
+    if (beatportContentState.loaded) {
+        showBeatportDownloadsSection();
+        return true;
+    }
+
+    if (beatportContentState.loadingPromise) {
+        return beatportContentState.loadingPromise;
+    }
+
+    beatportContentState.abortController = new AbortController();
+    beatportContentState.loadingPromise = (async () => {
+        try {
+            console.log('🎧 Lazy-loading Beatport content...');
+
+            await hydrateBeatportBubblesFromSnapshot();
+            throwIfBeatportLoadAborted();
+            await loadBeatportChartsFromBackend();
+            throwIfBeatportLoadAborted();
+
+            initializeBeatportRebuildSlider();
+            initializeBeatportReleasesSlider();
+            initializeBeatportHypePicksSlider();
+            initializeBeatportChartsSlider();
+            initializeBeatportDJSlider();
+            throwIfBeatportLoadAborted();
+            await Promise.all([
+                loadBeatportTop10Lists(),
+                loadBeatportTop10Releases()
+            ]);
+            throwIfBeatportLoadAborted();
+            showBeatportDownloadsSection();
+
+            beatportContentState.loaded = true;
+            console.log('✅ Beatport content loaded');
+            return true;
+        } catch (error) {
+            if (error && error.name === 'AbortError') {
+                console.log('⏹ Beatport content load aborted');
+                return false;
+            }
+            console.error('❌ Error loading Beatport content:', error);
+            return false;
+        } finally {
+            beatportContentState.loadingPromise = null;
+            if (beatportContentState.abortController && beatportContentState.abortController.signal.aborted) {
+                beatportContentState.abortController = null;
+            }
+        }
+    })();
+
+    return beatportContentState.loadingPromise;
 }
 
 async function checkForActiveProcesses() {
@@ -11538,7 +11662,8 @@ async function loadBeatportChartsFromBackend() {
     try {
         console.log('📋 Loading Beatport charts from backend...');
 
-        const response = await fetch('/api/beatport/charts');
+        const signal = getBeatportContentSignal();
+        const response = await fetch('/api/beatport/charts', signal ? { signal } : undefined);
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.error || 'Failed to fetch Beatport charts');
@@ -11578,7 +11703,7 @@ async function loadBeatportChartsFromBackend() {
             if (chartInfo.phase !== 'fresh') {
                 try {
                     console.log(`🔍 Fetching full state for: ${chartInfo.name}`);
-                    const stateResponse = await fetch(`/api/beatport/charts/status/${chartHash}`);
+                    const stateResponse = await fetch(`/api/beatport/charts/status/${chartHash}`, signal ? { signal } : undefined);
                     if (stateResponse.ok) {
                         const fullState = await stateResponse.json();
                         console.log(`📋 Retrieved full state with ${fullState.discovery_results?.length || 0} discovery results`);
@@ -11628,6 +11753,7 @@ async function loadBeatportChartsFromBackend() {
                         console.warn(`⚠️ Could not fetch full state for: ${chartInfo.name}`);
                     }
                 } catch (error) {
+                    if (error && error.name === 'AbortError') throw error;
                     console.warn(`⚠️ Error fetching full state for ${chartInfo.name}:`, error.message);
                 }
             }
@@ -11709,17 +11835,20 @@ async function loadBeatportChartsFromBackend() {
                         }
                     }
                 } catch (error) {
+                    if (error && error.name === 'AbortError') throw error;
                     console.warn(`⚠️ Error setting up download process for Beatport chart "${chartInfo.name}":`, error.message);
                 }
             }
         }
 
+        throwIfBeatportLoadAborted();
         console.log(`✅ Successfully loaded and rehydrated ${charts.length} Beatport charts`);
 
         // Start polling for any charts that are still in discovering phase
         for (const chartInfo of charts) {
             if (chartInfo.phase === 'discovering') {
                 console.log(`🔄 [Backend Loading] Auto-starting polling for discovering chart: ${chartInfo.name}`);
+                throwIfBeatportLoadAborted();
                 startBeatportDiscoveryPolling(chartInfo.hash);
             }
         }
@@ -11728,6 +11857,10 @@ async function loadBeatportChartsFromBackend() {
         updateBeatportClearButtonState();
 
     } catch (error) {
+        if (error && error.name === 'AbortError') {
+            console.log('⏹ Beatport chart hydration aborted');
+            return;
+        }
         console.error('❌ Error loading Beatport charts from backend:', error);
         showToast(`Error loading Beatport charts: ${error.message}`, 'error');
     }
@@ -11901,7 +12034,8 @@ async function rehydrateBeatportChart(chartInfo, userRequested = false) {
         // Get full state from backend including discovery results
         let fullState;
         try {
-            const stateResponse = await fetch(`/api/beatport/charts/status/${chartHash}`);
+            const signal = getBeatportContentSignal();
+            const stateResponse = await fetch(`/api/beatport/charts/status/${chartHash}`, signal ? { signal } : undefined);
             if (stateResponse.ok) {
                 fullState = await stateResponse.json();
                 console.log(`📋 [Rehydration] Retrieved full backend state with ${fullState.discovery_results?.length || 0} discovery results`);
@@ -11909,6 +12043,7 @@ async function rehydrateBeatportChart(chartInfo, userRequested = false) {
                 console.warn(`⚠️ [Rehydration] Could not fetch full state, using basic info`);
             }
         } catch (error) {
+            if (error && error.name === 'AbortError') return;
             console.warn(`⚠️ [Rehydration] Error fetching full state:`, error.message);
         }
 
@@ -29609,6 +29744,8 @@ function initializeSyncPage() {
     tabButtons.forEach(button => {
         button.addEventListener('click', () => {
             const tabId = button.dataset.tab;
+            const previousActiveTab = document.querySelector('.sync-tab-button.active');
+            const previousTabId = previousActiveTab ? previousActiveTab.dataset.tab : null;
 
             // Update button active state
             tabButtons.forEach(btn => btn.classList.remove('active'));
@@ -29652,12 +29789,22 @@ function initializeSyncPage() {
                 loadServerPlaylists();
             }
 
-            // Refresh Beatport download bubbles when switching to the Beatport tab
+            if (previousTabId === 'beatport' && tabId !== 'beatport') {
+                cleanupBeatportContent();
+            }
+
+            // Lazily load Beatport content the first time the Beatport tab is opened
             if (tabId === 'beatport') {
-                showBeatportDownloadsSection();
+                ensureBeatportContentLoaded();
             }
         });
     });
+
+    // If the Beatport tab is already active when Sync initializes, load it now.
+    const activeBeatportTab = document.querySelector('.sync-tab-button.active[data-tab="beatport"]');
+    if (activeBeatportTab) {
+        ensureBeatportContentLoaded();
+    }
 
     // Logic for the Spotify refresh button
     const refreshBtn = document.getElementById('spotify-refresh-btn');
@@ -29727,16 +29874,9 @@ function initializeSyncPage() {
             });
             document.getElementById(`beatport-${tabId}-content`).classList.add('active');
 
-            // Initialize rebuild slider if rebuild tab is selected
+            // Initialize rebuild content lazily when the rebuild tab is selected
             if (tabId === 'rebuild') {
-                initializeBeatportRebuildSlider();
-                loadBeatportTop10Lists();
-                loadBeatportTop10Releases();
-                initializeBeatportReleasesSlider();
-                initializeBeatportHypePicksSlider();
-                initializeBeatportChartsSlider();
-                initializeBeatportDJSlider();
-                showBeatportDownloadsSection();
+                ensureBeatportContentLoaded();
             }
         });
     });
@@ -39962,7 +40102,8 @@ async function hydrateBeatportBubblesFromSnapshot() {
     try {
         console.log('🔄 Loading Beatport bubble snapshot from backend...');
 
-        const response = await fetch('/api/beatport_bubbles/hydrate');
+        const signal = getBeatportContentSignal();
+        const response = await fetch('/api/beatport_bubbles/hydrate', signal ? { signal } : undefined);
         const data = await response.json();
 
         if (!data.success) {
@@ -39998,6 +40139,10 @@ async function hydrateBeatportBubblesFromSnapshot() {
         updateBeatportDownloadsSection();
         console.log(`✅ Hydrated ${Object.keys(beatportDownloadBubbles).length} Beatport download bubbles`);
     } catch (error) {
+        if (error && error.name === 'AbortError') {
+            console.log('⏹ Beatport bubble hydration aborted');
+            return;
+        }
         console.error('❌ Error hydrating Beatport bubbles:', error);
     }
 }
@@ -51033,7 +51178,8 @@ async function loadBeatportHeroTracks() {
     console.log('🎯 Loading real Beatport hero tracks...');
 
     try {
-        const response = await fetch('/api/beatport/hero-tracks');
+        const signal = getBeatportContentSignal();
+        const response = await fetch('/api/beatport/hero-tracks', signal ? { signal } : undefined);
         const data = await response.json();
 
         if (data.success && data.tracks && data.tracks.length > 0) {
@@ -51044,6 +51190,7 @@ async function loadBeatportHeroTracks() {
             setupBeatportSliderWithPlaceholders();
         }
     } catch (error) {
+        if (error && error.name === 'AbortError') return;
         console.error('❌ Error loading Beatport tracks:', error);
         setupBeatportSliderWithPlaceholders();
     }
@@ -51368,7 +51515,8 @@ async function loadBeatportNewReleases() {
     try {
         console.log('📡 Fetching new releases data...');
 
-        const response = await fetch('/api/beatport/new-releases');
+        const signal = getBeatportContentSignal();
+        const response = await fetch('/api/beatport/new-releases', signal ? { signal } : undefined);
         const data = await response.json();
 
         if (data.success && data.releases && data.releases.length > 0) {
@@ -51381,6 +51529,7 @@ async function loadBeatportNewReleases() {
             return false;
         }
     } catch (error) {
+        if (error && error.name === 'AbortError') return false;
         console.error('Error loading new releases:', error);
         showBeatportReleasesError('Failed to load releases');
         return false;
@@ -51704,7 +51853,8 @@ async function loadBeatportHypePicks() {
     try {
         console.log('🔥 Fetching hype picks data...');
 
-        const response = await fetch('/api/beatport/hype-picks');
+        const signal = getBeatportContentSignal();
+        const response = await fetch('/api/beatport/hype-picks', signal ? { signal } : undefined);
         const data = await response.json();
 
         if (data.success && data.releases && data.releases.length > 0) {
@@ -51717,6 +51867,7 @@ async function loadBeatportHypePicks() {
             return false;
         }
     } catch (error) {
+        if (error && error.name === 'AbortError') return false;
         console.error('Error loading hype picks:', error);
         showBeatportHypePicksError('Failed to load hype picks');
         return false;
@@ -52042,7 +52193,8 @@ function initializeBeatportChartsSlider() {
 async function loadBeatportFeaturedCharts() {
     try {
         console.log('📊 Loading featured charts data...');
-        const response = await fetch('/api/beatport/featured-charts');
+        const signal = getBeatportContentSignal();
+        const response = await fetch('/api/beatport/featured-charts', signal ? { signal } : undefined);
         const data = await response.json();
 
         if (data.success && data.charts && data.charts.length > 0) {
@@ -52054,6 +52206,7 @@ async function loadBeatportFeaturedCharts() {
             return false;
         }
     } catch (error) {
+        if (error && error.name === 'AbortError') return false;
         console.error('❌ Error loading featured charts:', error);
         return false;
     }
@@ -52336,7 +52489,8 @@ function initializeBeatportDJSlider() {
 async function loadBeatportDJCharts() {
     try {
         console.log('🎧 Loading DJ charts data...');
-        const response = await fetch('/api/beatport/dj-charts');
+        const signal = getBeatportContentSignal();
+        const response = await fetch('/api/beatport/dj-charts', signal ? { signal } : undefined);
         const data = await response.json();
 
         if (data.success && data.charts && data.charts.length > 0) {
@@ -52348,6 +52502,7 @@ async function loadBeatportDJCharts() {
             return false;
         }
     } catch (error) {
+        if (error && error.name === 'AbortError') return false;
         console.error('❌ Error loading DJ charts:', error);
         return false;
     }
@@ -52577,7 +52732,8 @@ function cleanupBeatportDJSlider() {
 async function loadBeatportTop10Lists() {
     try {
         console.log('🏆 Loading top 10 lists data...');
-        const response = await fetch('/api/beatport/homepage/top-10-lists');
+        const signal = getBeatportContentSignal();
+        const response = await fetch('/api/beatport/homepage/top-10-lists', signal ? { signal } : undefined);
         const data = await response.json();
 
         if (data.success) {
@@ -52593,6 +52749,7 @@ async function loadBeatportTop10Lists() {
             return false;
         }
     } catch (error) {
+        if (error && error.name === 'AbortError') return false;
         console.error('Error loading top 10 lists:', error);
         showTop10ListsError('Failed to load top 10 lists');
         return false;
@@ -52727,7 +52884,8 @@ function showTop10ListsError(errorMessage) {
 async function loadBeatportTop10Releases() {
     try {
         console.log('💿 Loading top 10 releases data...');
-        const response = await fetch('/api/beatport/homepage/top-10-releases-cards');
+        const signal = getBeatportContentSignal();
+        const response = await fetch('/api/beatport/homepage/top-10-releases-cards', signal ? { signal } : undefined);
         const data = await response.json();
 
         if (data.success) {
@@ -52740,6 +52898,7 @@ async function loadBeatportTop10Releases() {
             return false;
         }
     } catch (error) {
+        if (error && error.name === 'AbortError') return false;
         console.error('Error loading top 10 releases:', error);
         showTop10ReleasesError('Failed to load top 10 releases');
         return false;
