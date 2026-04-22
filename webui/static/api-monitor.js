@@ -2385,9 +2385,16 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
                 source = spotify_artist_id ? 'spotify' : discogs_artist_id ? 'discogs' : deezer_artist_id ? 'deezer' : 'itunes';
             }
             if (discogId) {
-                // Close detail overlay and navigate to the standalone artist detail page
+                // Watchlist discogId is a metadata-source id (Spotify/Deezer/iTunes),
+                // not a library PK — route through the Artists page inline view.
                 closeWatchlistArtistDetailView();
-                navigateToArtistDetail(discogId, artistName, source);
+                navigateToPage('artists');
+                setTimeout(() => {
+                    selectArtistForDetail(
+                        { id: discogId, name: artistName, image_url: artist.image_url || '' },
+                        { source: source }
+                    );
+                }, 200);
             }
         });
 

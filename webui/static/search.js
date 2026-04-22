@@ -340,7 +340,17 @@ function initializeSearchModeToggle() {
                     const sourceOverride = _activeSearchSource;
                     console.log(`🎵 Opening artist detail: ${artist.name} (ID: ${artist.id}, source: ${sourceOverride})`);
                     hideDropdown();
-                    navigateToArtistDetail(artist.id, artist.name, sourceOverride || null);
+
+                    // Source artists are NOT library entries — their id is a Deezer/
+                    // Spotify/iTunes id, not a library PK. Route to the Artists page's
+                    // inline selectArtistForDetail which fetches discography from the
+                    // source directly, not the library's /api/artist-detail endpoint.
+                    navigateToPage('artists');
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    await selectArtistForDetail(artist, {
+                        source: sourceOverride,
+                        plugin: artist.external_urls?.hydrabase_plugin,
+                    });
                 }
             })
         );

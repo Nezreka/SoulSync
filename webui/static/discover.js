@@ -739,7 +739,14 @@ async function checkRecommendedWatchlistStatuses(artists) {
 
 async function viewRecommendedArtistDiscography(artistId, artistName) {
     closeRecommendedArtistsModal();
-    navigateToArtistDetail(artistId, artistName);
+
+    const artist = { id: artistId, name: artistName };
+
+    // Recommended artists come from the metadata source — route through the
+    // Artists page's inline view so the source-provided id resolves correctly.
+    navigateToPage('artists');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await selectArtistForDetail(artist);
 }
 
 async function checkAllHeroWatchlistStatus() {
@@ -821,8 +828,21 @@ async function viewDiscoverHeroDiscography() {
         return;
     }
 
+    const artist = {
+        id: artistId,
+        name: artistName,
+        image_url: discoverHeroArtists[discoverHeroIndex]?.image_url || '',
+        genres: discoverHeroArtists[discoverHeroIndex]?.genres || [],
+        popularity: discoverHeroArtists[discoverHeroIndex]?.popularity || 0
+    };
+
     console.log(`🎵 Navigating to artist detail for: ${artistName}`);
-    navigateToArtistDetail(artistId, artistName);
+
+    // Hero artists are source-provided recommendations — route through the
+    // Artists page's inline view so the source id resolves correctly.
+    navigateToPage('artists');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await selectArtistForDetail(artist);
 }
 
 function showDiscoverHeroEmpty() {
@@ -4613,9 +4633,9 @@ function _renderYourArtistCard(artist) {
     const watchlistClass = artist.on_watchlist ? 'active' : '';
     const hasId = artist.active_source_id && artist.active_source_id !== '';
 
-    // Navigate to standalone artist detail page (name click)
+    // Navigate to Artists page (name click) — source artist id, needs inline view
     const navAction = hasId
-        ? `event.stopPropagation(); navigateToArtistDetail('${escapeForInlineJs(artist.active_source_id)}', '${escapeForInlineJs(artist.artist_name)}')`
+        ? `event.stopPropagation(); navigateToPage('artists'); setTimeout(() => selectArtistForDetail({id:'${escapeForInlineJs(artist.active_source_id)}', name:'${escapeForInlineJs(artist.artist_name)}', image_url:'${escapeForInlineJs(img)}'}), 200)`
         : '';
 
     // Open info modal (card body click) — pass pool ID so we can look up all data
@@ -4794,7 +4814,7 @@ async function openYourArtistInfoModal(poolId) {
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     <span>Explore</span>
                 </button>
-                <button class="ya-header-btn ya-viewall-btn" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove(); navigateToArtistDetail('${escapeForInlineJs(artistId)}', '${escapeForInlineJs(artistName)}', '${escapeForInlineJs(pool.active_source || '')}' || null)">
+                <button class="ya-header-btn ya-viewall-btn" onclick="document.getElementById('ya-info-modal-overlay')?.remove(); document.getElementById('your-artists-modal-overlay')?.remove(); navigateToPage('artists'); setTimeout(() => selectArtistForDetail({id:'${escapeForInlineJs(artistId)}', name:'${escapeForInlineJs(artistName)}', image_url:'${escapeForInlineJs(imageUrl)}'}, {source:'${escapeForInlineJs(pool.active_source || '')}'}), 200)">
                     <span>View Discography</span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
                 </button>
@@ -6694,7 +6714,7 @@ function _artMapSetupInteraction(canvas) {
             <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); ${hasId ? `openYourArtistInfoModal_direct(${JSON.stringify(node).replace(/"/g, '&quot;')})` : ''}">
                 <span>&#9432;</span> Artist Info
             </div>
-            <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); navigateToArtistDetail('${escapeForInlineJs(bestId)}', '${escapeForInlineJs(node.name)}', '${bestSource}' || null)">
+            <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); navigateToPage('artists'); setTimeout(() => selectArtistForDetail({id:'${escapeForInlineJs(bestId)}',name:'${escapeForInlineJs(node.name)}',image_url:'${escapeForInlineJs(node.image_url || '')}'},{source:'${bestSource}'}), 200)">
                 <span>&#128191;</span> View Discography
             </div>
             <div class="artmap-ctx-item" onclick="_artMapHideContextMenu(); toggleYourArtistWatchlist(0,'${escapeForInlineJs(node.name)}','${escapeForInlineJs(bestId)}','${bestSource}',null)">
@@ -7382,7 +7402,7 @@ async function openGenreDeepDive(genre) {
                 // Always open on Artists page with discography — pass source for correct routing
                 const imgUrl = _esc(a.image_url || '');
                 const artSource = _esc(a.source || '');
-                const clickAction = `onclick="document.getElementById('genre-deep-dive-modal').remove();navigateToArtistDetail('${_esc(a.entity_id)}','${_esc(a.name)}','${artSource}' || null)"`;
+                const clickAction = `onclick="document.getElementById('genre-deep-dive-modal').remove();navigateToPage('artists');setTimeout(()=>selectArtistForDetail({id:'${_esc(a.entity_id)}',name:'${_esc(a.name)}',image_url:'${imgUrl}'},{source:'${artSource}'}),300)"`;
                 const srcClass = (a.source || '').toLowerCase();
                 return `<div class="genre-dive-artist" ${clickAction}>
                             <div class="genre-dive-artist-img" style="${a.image_url ? `background-image:url('${_esc(a.image_url)}')` : ''}">

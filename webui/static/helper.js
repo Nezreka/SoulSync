@@ -3547,6 +3547,11 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
+    '2.48': [
+        // --- April 24, 2026 (fix) ---
+        { date: 'April 24, 2026 (fix)' },
+        { title: 'Fix 404 When Clicking Source Artists in Search', desc: 'Phase 4a mistakenly routed every artist click — including source artists from Spotify/Deezer/iTunes/etc. — to the library artist detail page, which only knows how to look up local DB primary keys. Source artist IDs (like Deezer\'s 525046) 404\'d out. Library artists continue to land on the standalone /artist-detail page. Source artists now route back to the Artists page\'s inline view, which fetches discography via /api/artist/<id>/discography with source context — the endpoint that actually knows how to handle non-library IDs. Fix applied to 7 Phase 4a migration points: Search results, global widget, Discover "Your Artists" cards, Discover hero recommendations, artist-map context menu, genre-deep-dive, watchlist discography, download-missing modal, recommended artists modal', page: 'search' },
+    ],
     '2.47': [
         // --- April 24, 2026 ---
         { date: 'April 24, 2026' },
