@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.47"
+_SOULSYNC_BASE_VERSION = "2.48"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22809,6 +22809,16 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "Fix 404 When Clicking Source Artists in Search",
+                "description": "Phase 4a mistakenly routed every artist click — including source artists from Spotify/Deezer/iTunes/etc. — to the library artist detail page, which only knows how to look up local DB primary keys. Source artist IDs (like Deezer's 525046) 404'd out",
+                "features": [
+                    "• Library artists (db_artists section) continue to go to the standalone /artist-detail page — same as before, still works",
+                    "• Source artists (Spotify/Deezer/iTunes/Discogs/Hydrabase/MusicBrainz sections) now route back to the Artists page's inline view, which fetches discography via /api/artist/<id>/discography with source context — the endpoint that actually knows how to handle non-library IDs",
+                    "• Applied to all 7 Phase 4a migration points: Search results, global widget, Discover 'Your Artists' cards, Discover hero recommendations, Discover artist-map context menu, Discover genre-deep-dive, watchlist discography, download-missing modal, recommended artists modal",
+                    "• Phase 4a's 'one artist page for everything' goal remains deferred until /api/artist-detail gains source-aware fallback behavior",
+                ],
+            },
             {
                 "title": "Interactive Help Annotations Updated for Unified Search",
                 "description": "The click-for-help annotations and the 'Your First Download' guided tour were rewritten for the new Search page. Stale annotations pointing at removed elements (toggle buttons, side-panel queues) were deleted; the tour now walks users through the source picker instead of the old mode toggle",
