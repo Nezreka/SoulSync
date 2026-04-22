@@ -639,6 +639,7 @@ let artistDetailPageState = {
     isInitialized: false,
     currentArtistId: null,
     currentArtistName: null,
+    currentArtistSource: null,
     enhancedView: false,
     enhancedData: null,
     expandedAlbums: new Set(),
@@ -671,6 +672,7 @@ function navigateToArtistDetail(artistId, artistName) {
     // Store current artist info and reset enhanced view state
     artistDetailPageState.currentArtistId = artistId;
     artistDetailPageState.currentArtistName = artistName;
+    artistDetailPageState.currentArtistSource = null;
     artistDetailPageState.enhancedData = null;
     artistDetailPageState.expandedAlbums = new Set();
     artistDetailPageState.selectedTracks = new Set();
@@ -787,6 +789,9 @@ async function loadArtistDetailData(artistId, artistName) {
 
         // Populate the page with data (which updates the hero section and sets textContent)
         populateArtistDetailPage(data);
+
+        // Keep the resolved metadata source for album-track lookups.
+        artistDetailPageState.currentArtistSource = data.discography?.source || data.artist?.source || null;
 
         // Update header with artist name and MusicBrainz link LAST to avoid overwrite
         updateArtistDetailPageHeaderWithData(data.artist);
@@ -1504,7 +1509,8 @@ function createReleaseCard(release) {
             const currentArtist = artistDetailPageState.currentArtistName ? {
                 id: artistDetailPageState.currentArtistId,
                 name: artistDetailPageState.currentArtistName,
-                image_url: getArtistImageFromPage() || '' // Get artist image from page
+                image_url: getArtistImageFromPage() || '', // Get artist image from page
+                source: artistDetailPageState.currentArtistSource || null
             } : null;
 
             if (!currentArtist) {
@@ -1515,6 +1521,9 @@ function createReleaseCard(release) {
 
             // Load tracks for the album (pass name/artist for Hydrabase support)
             const _aat2 = new URLSearchParams({ name: albumData.name || '', artist: currentArtist.name || '' });
+            if (currentArtist.source) {
+                _aat2.set('source', currentArtist.source);
+            }
             const response = await fetch(`/api/album/${albumData.id}/tracks?${_aat2}`);
             if (!response.ok) {
                 throw new Error(`Failed to load album tracks: ${response.status}`);
@@ -1997,8 +2006,10 @@ async function openDiscographyModal() {
                 discography = { albums: data.albums || [], singles: data.singles || [] };
                 if (discography.albums.length > 0 || discography.singles.length > 0) {
                     artistsPageState.artistDiscography = discography;
+                    artistsPageState.sourceOverride = data.source || artistsPageState.sourceOverride || null;
                     // Use metadata source ID for the modal (needed for download API calls)
                     if (metadataArtistId) artist.id = metadataArtistId;
+                    artist.source = data.source || null;
                     artistsPageState.selectedArtist = artist;
                 } else {
                     discography = null;
@@ -6650,4 +6661,3 @@ async function updateLibraryWatchlistButtonStatus(artistId) {
 }
 
 // =================================
-

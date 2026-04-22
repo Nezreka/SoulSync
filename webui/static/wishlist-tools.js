@@ -2389,6 +2389,10 @@ async function confirmMatch() {
                 const artistId = currentMatchingData.selectedArtist.id;
                 const albumId = currentMatchingData.selectedAlbum.id;
                 const _aat3 = new URLSearchParams({ name: currentMatchingData.selectedAlbum.name || '', artist: currentMatchingData.selectedArtist.name || '' });
+                const albumSource = currentMatchingData.selectedAlbum?.source || currentMatchingData.selectedArtist?.source || null;
+                if (albumSource) {
+                    _aat3.set('source', albumSource);
+                }
                 const tracksResponse = await fetch(`/api/album/${albumId}/tracks?${_aat3}`);
 
                 if (!tracksResponse.ok) {
@@ -7167,4 +7171,3 @@ function updateDbProgressUI(state) {
 }
 
 // ===================================================================
-
