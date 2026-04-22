@@ -500,7 +500,7 @@ async function selectArtistForDetail(artist, options = {}) {
     // Update state
     artistsPageState.selectedArtist = artist;
     artistsPageState.currentView = 'detail';
-    artistsPageState.sourceOverride = options.source || null;
+    artistsPageState.sourceOverride = options.source || artist.source || null;
     artistsPageState.pluginOverride = options.plugin || null;
 
     // Show detail state
@@ -510,7 +510,7 @@ async function selectArtistForDetail(artist, options = {}) {
     updateArtistDetailHeader(artist);
 
     // Load discography (pass artist name for cross-source fallback)
-    await loadArtistDiscography(artist.id, artist.name, options.source, options.plugin);
+    await loadArtistDiscography(artist.id, artist.name, artistsPageState.sourceOverride, options.plugin);
 }
 
 /**
@@ -528,6 +528,13 @@ async function loadArtistDiscography(artistId, artistName = null, sourceOverride
     if (artistsPageState.cache.discography[cacheKey]) {
         console.log('📦 Using cached discography');
         const cachedDiscography = artistsPageState.cache.discography[cacheKey];
+        if (artistsPageState.selectedArtist) {
+            artistsPageState.selectedArtist = {
+                ...artistsPageState.selectedArtist,
+                source: cachedDiscography.source || sourceOverride || artistsPageState.selectedArtist.source || null,
+            };
+        }
+        artistsPageState.sourceOverride = cachedDiscography.source || sourceOverride || artistsPageState.sourceOverride || null;
         displayArtistDiscography(cachedDiscography);
 
         // Load similar artists in parallel (don't wait) — always uses primary source
@@ -573,6 +580,16 @@ async function loadArtistDiscography(artistId, artistName = null, sourceOverride
             singles: data.singles || [],
             source: data.source || sourceOverride || null,
         };
+
+        // Keep the resolved metadata source on the selected artist so album clicks
+        // can pass it through to /api/album/<id>/tracks.
+        if (artistsPageState.selectedArtist) {
+            artistsPageState.selectedArtist = {
+                ...artistsPageState.selectedArtist,
+                source: discography.source,
+            };
+        }
+        artistsPageState.sourceOverride = discography.source || artistsPageState.sourceOverride || null;
 
         // Update selected artist with full details from backend (includes MusicBrainz ID)
         if (data.artist) {
@@ -2127,8 +2144,9 @@ async function createArtistAlbumVirtualPlaylist(album, albumType) {
 
         // Fetch album tracks from backend (pass name/artist for Hydrabase support)
         const _aat1 = new URLSearchParams({ name: album.name || '', artist: artist.name || '' });
-        if (artistsPageState.sourceOverride) {
-            _aat1.set('source', artistsPageState.sourceOverride);
+        const albumSource = artistsPageState.sourceOverride || album.source || artist.source || artistsPageState.artistDiscography?.source || null;
+        if (albumSource) {
+            _aat1.set('source', albumSource);
         }
         if (artistsPageState.pluginOverride) {
             _aat1.set('plugin', artistsPageState.pluginOverride);
@@ -2227,7 +2245,8 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
         // Additional metadata for artist albums
         artist: artist,
         album: album,
-        albumType: album.album_type
+        albumType: album.album_type,
+        source: artist?.source || album?.source || artistsPageState.artistDiscography?.source || null
     };
 
     // Generate hero section — 'artist_album' for releases, 'playlist' for charts/compilations
@@ -4608,4 +4627,3 @@ function renderEnrichmentCards(enrichment) {
 }
 
 // ===============================
-
