@@ -33508,7 +33508,8 @@ def search_spotify_tracks():
             'name': t.name,
             'artists': t.artists,
             'album': t.album,
-            'duration_ms': t.duration_ms
+            'duration_ms': t.duration_ms,
+            'image_url': getattr(t, 'image_url', None),
         } for t in tracks]
 
         return jsonify({'tracks': tracks_dict})
@@ -34369,14 +34370,13 @@ def update_tidal_discovery_match():
         else:
             result['duration'] = '0:00'
 
-        # IMPORTANT: Also set spotify_data for sync/download compatibility
-        result['spotify_data'] = {
-            'id': spotify_track['id'],
-            'name': spotify_track['name'],
-            'artists': spotify_track['artists'],
-            'album': spotify_track['album'],
-            'duration_ms': spotify_track.get('duration_ms', 0)
-        }
+        # IMPORTANT: Also set spotify_data for sync/download compatibility.
+        # Manual match from the fix modal — build a rich spotify_data (album
+        # as dict with image info) matching the normal discovery shape, and
+        # explicitly clear any prior wing-it flag since the user picked a
+        # real metadata match.
+        result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
+        result['wing_it_fallback'] = False
 
         result['manual_match'] = True  # Flag for tracking
 
@@ -36038,14 +36038,13 @@ def update_deezer_discovery_match():
         else:
             result['duration'] = '0:00'
 
-        # IMPORTANT: Also set spotify_data for sync/download compatibility
-        result['spotify_data'] = {
-            'id': spotify_track['id'],
-            'name': spotify_track['name'],
-            'artists': spotify_track['artists'],
-            'album': spotify_track['album'],
-            'duration_ms': spotify_track.get('duration_ms', 0)
-        }
+        # IMPORTANT: Also set spotify_data for sync/download compatibility.
+        # Manual match from the fix modal — build a rich spotify_data (album
+        # as dict with image info) matching the normal discovery shape, and
+        # explicitly clear any prior wing-it flag since the user picked a
+        # real metadata match.
+        result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
+        result['wing_it_fallback'] = False
 
         result['manual_match'] = True
 
@@ -36888,14 +36887,13 @@ def update_spotify_public_discovery_match():
         else:
             result['duration'] = '0:00'
 
-        # IMPORTANT: Also set spotify_data for sync/download compatibility
-        result['spotify_data'] = {
-            'id': spotify_track['id'],
-            'name': spotify_track['name'],
-            'artists': spotify_track['artists'],
-            'album': spotify_track['album'],
-            'duration_ms': spotify_track.get('duration_ms', 0)
-        }
+        # IMPORTANT: Also set spotify_data for sync/download compatibility.
+        # Manual match from the fix modal — build a rich spotify_data (album
+        # as dict with image info) matching the normal discovery shape, and
+        # explicitly clear any prior wing-it flag since the user picked a
+        # real metadata match.
+        result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
+        result['wing_it_fallback'] = False
 
         result['manual_match'] = True
 
@@ -37838,14 +37836,13 @@ def update_youtube_discovery_match():
         else:
             result['duration'] = '0:00'
 
-        # IMPORTANT: Also set spotify_data for sync/download compatibility
-        result['spotify_data'] = {
-            'id': spotify_track['id'],
-            'name': spotify_track['name'],
-            'artists': spotify_track['artists'],
-            'album': spotify_track['album'],
-            'duration_ms': spotify_track.get('duration_ms', 0)
-        }
+        # IMPORTANT: Also set spotify_data for sync/download compatibility.
+        # Manual match from the fix modal — build a rich spotify_data (album
+        # as dict with image info) matching the normal discovery shape, and
+        # explicitly clear any prior wing-it flag since the user picked a
+        # real metadata match.
+        result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
+        result['wing_it_fallback'] = False
 
         result['manual_match'] = True  # Flag for tracking
 
@@ -37931,6 +37928,46 @@ def _build_discovery_wing_it_stub(track_name, artist_name, duration_ms=0, image_
         'duration_ms': duration_ms,
         'image_url': image_url,
         'source': 'wing_it_fallback',
+    }
+
+
+def _build_fix_modal_spotify_data(spotify_track):
+    """Build a rich spotify_data dict from the fix-modal POST payload so manual
+    matches carry the same shape as normal discovery results.
+
+    Key points:
+    - album is always a dict (normal discovery has it this way; legacy fix-modal
+      produced a bare string which broke cover art lookup downstream)
+    - image_url is carried both at top level and inside album.images for parity
+      with Spotify API responses
+    - handles both legacy string albums (most search endpoints return this) and
+      newer object albums
+    """
+    if not isinstance(spotify_track, dict):
+        spotify_track = {}
+
+    image_url = spotify_track.get('image_url') or ''
+    album_raw = spotify_track.get('album', '')
+
+    if isinstance(album_raw, dict):
+        album_obj = dict(album_raw)
+        if image_url and not album_obj.get('image_url'):
+            album_obj['image_url'] = image_url
+        if image_url and not album_obj.get('images'):
+            album_obj['images'] = [{'url': image_url}]
+    else:
+        album_obj = {'name': album_raw or ''}
+        if image_url:
+            album_obj['image_url'] = image_url
+            album_obj['images'] = [{'url': image_url}]
+
+    return {
+        'id': spotify_track.get('id', ''),
+        'name': spotify_track.get('name', ''),
+        'artists': spotify_track.get('artists', []),
+        'album': album_obj,
+        'duration_ms': spotify_track.get('duration_ms', 0),
+        'image_url': image_url,
     }
 
 
@@ -46543,17 +46580,16 @@ def update_listenbrainz_discovery_match():
             result['spotify_id'] = spotify_track.get('id', '') if spotify_track else ''
 
             if spotify_track:
-                # Store spotify_data in the same format as other platforms
-                result['spotify_data'] = {
-                    'id': spotify_track.get('id', ''),
-                    'name': spotify_track.get('name', ''),
-                    'artists': artists if isinstance(artists, list) else [artists],
-                    'album': result['spotify_album'],
-                    'duration_ms': spotify_track.get('duration_ms', 0)
-                }
+                # Store spotify_data in the same format as other platforms.
+                # Manual match from the fix modal — build a rich spotify_data
+                # (album as dict with image info) matching the normal discovery
+                # shape, and explicitly clear any prior wing-it flag since the
+                # user picked a real metadata match.
+                result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
             else:
                 result['spotify_data'] = None
 
+            result['wing_it_fallback'] = False
             result['manual_match'] = True
 
             logger.info(f"Updated ListenBrainz match for track {track_index}: {result['status']}")
@@ -48757,14 +48793,13 @@ def update_beatport_discovery_match():
         else:
             result['duration'] = '0:00'
 
-        # IMPORTANT: Also set spotify_data for sync/download compatibility
-        result['spotify_data'] = {
-            'id': spotify_track['id'],
-            'name': spotify_track['name'],
-            'artists': spotify_track['artists'],
-            'album': spotify_track['album'],
-            'duration_ms': spotify_track.get('duration_ms', 0)
-        }
+        # IMPORTANT: Also set spotify_data for sync/download compatibility.
+        # Manual match from the fix modal — build a rich spotify_data (album
+        # as dict with image info) matching the normal discovery shape, and
+        # explicitly clear any prior wing-it flag since the user picked a
+        # real metadata match.
+        result['spotify_data'] = _build_fix_modal_spotify_data(spotify_track)
+        result['wing_it_fallback'] = False
 
         result['manual_match'] = True  # Flag for tracking
 

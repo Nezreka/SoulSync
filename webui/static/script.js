@@ -19714,7 +19714,8 @@ async function selectDiscoveryFixTrack(track) {
                 name: track.name,
                 artists: track.artists,
                 album: track.album,
-                duration_ms: track.duration_ms
+                duration_ms: track.duration_ms,
+                image_url: track.image_url || null
             }
         };
 
@@ -19782,14 +19783,33 @@ async function selectDiscoveryFixTrack(track) {
             result.spotify_id = track.id;
             result.duration = formatDuration(track.duration_ms);
             result.manual_match = true;
+            // User picked a real metadata match — no longer a wing-it track
+            result.wing_it_fallback = false;
 
-            // IMPORTANT: Also set spotify_data for download/sync compatibility
+            // IMPORTANT: Also set spotify_data for download/sync compatibility.
+            // Build album as a dict (not a bare string) so the download
+            // pipeline can find cover art via album.image_url / album.images.
+            // This matches the shape that normal discovery produces.
+            const _fixImageUrl = track.image_url || '';
+            let _fixAlbumObj;
+            if (track.album && typeof track.album === 'object') {
+                _fixAlbumObj = { ...track.album };
+                if (_fixImageUrl && !_fixAlbumObj.image_url) _fixAlbumObj.image_url = _fixImageUrl;
+                if (_fixImageUrl && !_fixAlbumObj.images) _fixAlbumObj.images = [{ url: _fixImageUrl }];
+            } else {
+                _fixAlbumObj = { name: track.album || '' };
+                if (_fixImageUrl) {
+                    _fixAlbumObj.image_url = _fixImageUrl;
+                    _fixAlbumObj.images = [{ url: _fixImageUrl }];
+                }
+            }
             result.spotify_data = {
                 id: track.id,
                 name: track.name,
                 artists: track.artists,
-                album: track.album,
-                duration_ms: track.duration_ms
+                album: _fixAlbumObj,
+                duration_ms: track.duration_ms,
+                image_url: _fixImageUrl
             };
 
             // Increment match count if this was previously not_found or error
