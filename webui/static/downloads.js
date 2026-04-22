@@ -634,16 +634,7 @@ function _navigateToArtistFromModal(artistId, artistName, imageUrl, source, play
     if (!artistName) return;
     // Close the download modal
     if (playlistId) closeDownloadMissingModal(playlistId);
-    // Navigate to Artists page and load discography
-    navigateToPage('artists');
-    setTimeout(() => {
-        // If we have an artist ID, use it directly
-        // If not, search by name — selectArtistForDetail handles both
-        selectArtistForDetail(
-            { id: artistId || artistName, name: artistName, image_url: imageUrl || '' },
-            source ? { source: source } : undefined
-        );
-    }, 200);
+    navigateToArtistDetail(artistId || artistName, artistName, source || null);
 }
 
 async function closeDownloadMissingModal(playlistId) {
@@ -5434,18 +5425,8 @@ function _gsSwitchSource(src) {
 
 function _gsClickArtist(id, name, isLibrary) {
     _gsDeactivate();
-    if (isLibrary) {
-        // Same as enhanced search: navigateToArtistDetail
-        navigateToArtistDetail(id, name);
-    } else {
-        // Same as enhanced search: navigate to Artists page + selectArtistForDetail
-        navigateToPage('artists');
-        setTimeout(() => {
-            selectArtistForDetail({ id, name, image_url: '' }, {
-                source: _gsState.activeSource || '',
-            });
-        }, 150);
-    }
+    const source = isLibrary ? null : (_gsState.activeSource || null);
+    navigateToArtistDetail(id, name, source);
 }
 
 async function _gsClickAlbum(albumId, albumName, artistName, imageUrl, source) {

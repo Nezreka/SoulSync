@@ -655,8 +655,8 @@ let discographyFilterState = {
     ownership: 'all'  // 'all', 'owned', 'missing'
 };
 
-function navigateToArtistDetail(artistId, artistName) {
-    console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId})`);
+function navigateToArtistDetail(artistId, artistName, sourceOverride = null) {
+    console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId}${sourceOverride ? `, source: ${sourceOverride}` : ''})`);
 
     // Abort any in-progress completion stream
     if (artistDetailPageState.completionController) {
@@ -672,7 +672,7 @@ function navigateToArtistDetail(artistId, artistName) {
     // Store current artist info and reset enhanced view state
     artistDetailPageState.currentArtistId = artistId;
     artistDetailPageState.currentArtistName = artistName;
-    artistDetailPageState.currentArtistSource = null;
+    artistDetailPageState.currentArtistSource = sourceOverride || null;
     artistDetailPageState.enhancedData = null;
     artistDetailPageState.expandedAlbums = new Set();
     artistDetailPageState.selectedTracks = new Set();
