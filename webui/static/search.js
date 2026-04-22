@@ -1330,9 +1330,9 @@ function initializeSearchModeToggle() {
             dropdown.classList.remove('hidden');
             updateToggleButtonState();
         }
-        // Hide the page header + search mode toggle to reclaim space
-        const header = document.querySelector('#downloads-page .downloads-header');
-        const modeToggle = document.querySelector('.search-mode-toggle-container');
+        // Hide the page header + source picker to reclaim space
+        const header = document.querySelector('#search-page .downloads-header');
+        const modeToggle = document.querySelector('.search-source-picker-container');
         const slskdPlaceholder = document.querySelector('#enhanced-search-section .search-results-container');
         if (header) header.classList.add('enh-results-active-hide');
         if (modeToggle) modeToggle.classList.add('enh-results-active-hide');
@@ -1346,8 +1346,8 @@ function initializeSearchModeToggle() {
             updateToggleButtonState();
         }
         // Restore hidden elements
-        const header = document.querySelector('#downloads-page .downloads-header');
-        const modeToggle = document.querySelector('.search-mode-toggle-container');
+        const header = document.querySelector('#search-page .downloads-header');
+        const modeToggle = document.querySelector('.search-source-picker-container');
         const slskdPlaceholder = document.querySelector('#enhanced-search-section .search-results-container');
         if (header) header.classList.remove('enh-results-active-hide');
         if (modeToggle) modeToggle.classList.remove('enh-results-active-hide');

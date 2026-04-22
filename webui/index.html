@@ -98,7 +98,7 @@
                             <option value="">Default (Discover)</option>
                             <option value="dashboard">Dashboard</option>
                             <option value="sync">Sync</option>
-                            <option value="downloads">Search</option>
+                            <option value="search">Search</option>
                             <option value="discover">Discover</option>
                             <option value="artists">Artists</option>
                             <option value="automations">Automations</option>
@@ -113,7 +113,7 @@
                         <div id="new-profile-allowed-pages" class="profile-page-checkboxes">
                             <label><input type="checkbox" value="dashboard" checked> Dashboard</label>
                             <label><input type="checkbox" value="sync" checked> Sync</label>
-                            <label><input type="checkbox" value="downloads" checked> Search</label>
+                            <label><input type="checkbox" value="search" checked> Search</label>
                             <label><input type="checkbox" value="discover" checked> Discover</label>
                             <label><input type="checkbox" value="artists" checked> Artists</label>
                             <label><input type="checkbox" value="automations" checked> Automations</label>
@@ -196,7 +196,7 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></span>
                     <span class="nav-text">Sync</span>
                 </button>
-                <button class="nav-button" data-page="downloads">
+                <button class="nav-button" data-page="search">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><polyline points="8 11 11 14 14 11"/></svg></span>
                     <span class="nav-text">Search</span>
                 </button>
@@ -1843,7 +1843,7 @@
             </div>
 
             <!-- Downloads Page -->
-            <div class="page" id="downloads-page">
+            <div class="page" id="search-page">
                 <!-- 
                 This top-level container replicates the QSplitter from downloads.py,
                 creating the two-panel layout for the page.

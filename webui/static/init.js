@@ -189,7 +189,9 @@ let currentProfile = null;
 
 function getProfileHomePage() {
     if (!currentProfile) return 'dashboard';
-    if (currentProfile.home_page) return currentProfile.home_page;
+    // Legacy profiles stored the Search page as 'downloads'.
+    const home = currentProfile.home_page === 'downloads' ? 'search' : currentProfile.home_page;
+    if (home) return home;
     return currentProfile.is_admin ? 'dashboard' : 'discover';
 }
 
@@ -206,7 +208,11 @@ function isPageAllowed(pageId) {
     if (pageId === 'settings') return currentProfile.is_admin;
     const ap = currentProfile.allowed_pages;
     if (!ap) return true; // null = all pages
-    return ap.includes(pageId);
+    if (ap.includes(pageId)) return true;
+    // Legacy compat: the Search page used to be saved as 'downloads'.
+    if (pageId === 'search' && ap.includes('downloads')) return true;
+    if (pageId === 'downloads' && ap.includes('search')) return true;
+    return false;
 }
 
 function canDownload() {
@@ -1993,7 +1999,7 @@ function initializeNavigation() {
 }
 
 const _DEEPLINK_VALID_PAGES = new Set([
-    'dashboard', 'sync', 'downloads', 'discover', 'artists', 'automations',
+    'dashboard', 'sync', 'search', 'downloads', 'discover', 'artists', 'automations',
     'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
     'hydrabase', 'tools'
@@ -2141,6 +2147,9 @@ function initializeDownloadManagerToggle() {
 }
 
 function navigateToPage(pageId, options = {}) {
+    // Backwards-compat alias — the Search page used to live under id 'downloads'.
+    if (pageId === 'downloads') pageId = 'search';
+
     if (pageId === currentPage) return;
 
     // Permission guard — redirect to home page if not allowed
@@ -2179,7 +2188,7 @@ function navigateToPage(pageId, options = {}) {
         }
     }
 
-    // Show/hide global search bar (hide on downloads page where enhanced search exists)
+    // Show/hide global search bar (hide on search page where the unified search lives)
     if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
 
     // Show/hide discover download sidebar based on page
@@ -2236,7 +2245,7 @@ async function loadPageData(pageId) {
                 initializeSyncPage();
                 await loadSyncData();
                 break;
-            case 'downloads':
+            case 'search':
                 initializeSearch();
                 initializeSearchModeToggle();
                 initializeFilters();
