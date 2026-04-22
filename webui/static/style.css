@@ -7022,11 +7022,32 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-weight: 600;
     padding: 12px 12px !important;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: opacity 0.15s ease, background 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
     align-self: flex-start;
     width: fit-content !important;
     height: fit-content !important;
+    /* Reveal on hover only — keeps the card clean until the user actually
+       wants to act. Space is reserved (opacity + pointer-events, not display)
+       so the layout doesn't jump when the button shows. */
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(4px);
+}
 
+.download-item:hover .download-item__cancel-btn,
+.download-item:focus-within .download-item__cancel-btn {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+}
+
+/* Touch devices have no hover — keep cancel visible so it's reachable. */
+@media (hover: none) {
+    .download-item__cancel-btn {
+        opacity: 1;
+        pointer-events: auto;
+        transform: none;
+    }
 }
 
 .download-item__cancel-btn:hover {
