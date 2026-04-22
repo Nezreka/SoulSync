@@ -40,11 +40,12 @@ function initializeArtistsPage() {
             // Otherwise the user reached this detail view from elsewhere (Search,
             // Discover, watchlist, etc.). The Artists page is no longer a sidebar
             // entry, so there's nothing useful to fall back to here — let the
-            // browser take them back to wherever they came from.
+            // browser take them back to wherever they came from, or drop them on
+            // Search (the go-forward way to find another artist).
             if (window.history.length > 1) {
                 window.history.back();
             } else {
-                navigateToPage('dashboard');
+                navigateToPage('search');
             }
         });
     }
