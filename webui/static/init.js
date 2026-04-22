@@ -2010,7 +2010,7 @@ function _getPageFromPath() {
     const basePage = path.split('/')[0];
     if (!_DEEPLINK_VALID_PAGES.has(basePage)) return 'dashboard';
     // Context-dependent pages fall back to a sensible parent
-    if (basePage === 'artist-detail') return 'artists';
+    if (basePage === 'artist-detail') return 'library';
     if (basePage === 'playlist-explorer') return 'library';
     return basePage;
 }
@@ -2115,8 +2115,10 @@ function initializeWatchlist() {
 }
 
 function navigateToPage(pageId, options = {}) {
-    // Backwards-compat alias — the Search page used to live under id 'downloads'.
-    if (pageId === 'downloads') pageId = 'search';
+    // Backwards-compat aliases — the Search page used to live under id
+    // 'downloads', and the Artists page was retired and folded into Search.
+    // Legacy bookmarks to /downloads or /artists all land on /search.
+    if (pageId === 'downloads' || pageId === 'artists') pageId = 'search';
 
     if (pageId === currentPage) return;
 
@@ -2218,15 +2220,7 @@ async function loadPageData(pageId) {
                 initializeSearchModeToggle();
                 initializeFilters();
                 break;
-            case 'artists':
-                // Only fully initialize if not already initialized
-                if (!artistsPageState.isInitialized) {
-                    initializeArtistsPage();
-                } else {
-                    // Just restore state if already initialized
-                    restoreArtistsPageState();
-                }
-                break;
+            // 'artists' page retired — aliased to 'search' at the top of navigateToPage
             case 'active-downloads':
                 loadActiveDownloadsPage();
                 break;
