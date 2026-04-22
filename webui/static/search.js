@@ -56,41 +56,38 @@ function initializeSearchModeToggle() {
         return;
     }
 
-    const toggleContainer = document.querySelector('.search-mode-toggle');
-    const modeBtns = document.querySelectorAll('.search-mode-btn');
+    const sourceSelect = document.getElementById('search-source-select');
     const basicSection = document.getElementById('basic-search-section');
     const enhancedSection = document.getElementById('enhanced-search-section');
 
-    if (!toggleContainer || !modeBtns.length || !basicSection || !enhancedSection) {
-        console.warn('Search mode toggle elements not found');
+    if (!sourceSelect || !basicSection || !enhancedSection) {
+        console.warn('Search source picker elements not found');
         return;
     }
 
     searchModeToggleInitialized = true;
-    console.log('✅ Initializing search mode toggle (first time only)');
+    console.log('✅ Initializing search source picker (first time only)');
 
-    modeBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const mode = btn.dataset.mode;
+    // Current source selection — 'auto' (fan-out) by default. Soulseek routes
+    // to the raw-file basic search; everything else routes to enhanced.
+    let currentSearchSource = sourceSelect.value || 'auto';
 
-            // Update button active states
-            modeBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+    const applySourceSelection = (value) => {
+        currentSearchSource = value;
+        if (value === 'soulseek') {
+            basicSection.classList.add('active');
+            enhancedSection.classList.remove('active');
+        } else {
+            basicSection.classList.remove('active');
+            enhancedSection.classList.add('active');
+        }
+    };
 
-            // Update toggle slider position
-            toggleContainer.setAttribute('data-active', mode);
+    applySourceSelection(currentSearchSource);
 
-            // Toggle sections
-            if (mode === 'basic') {
-                basicSection.classList.add('active');
-                enhancedSection.classList.remove('active');
-                console.log('Switched to basic search mode');
-            } else {
-                basicSection.classList.remove('active');
-                enhancedSection.classList.add('active');
-                console.log('Switched to enhanced search mode');
-            }
-        });
+    sourceSelect.addEventListener('change', (e) => {
+        applySourceSelection(e.target.value);
+        console.log('Search source →', currentSearchSource);
     });
 
     // Initialize enhanced search
@@ -221,7 +218,14 @@ function initializeSearchModeToggle() {
         showDropdown();
         const loadingText = document.getElementById('enhanced-loading-text');
         if (loadingText) {
-            loadingText.textContent = `Searching across ${currentMusicSourceName} and your library...`;
+            const _sourceLabelMap = {
+                spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer',
+                discogs: 'Discogs', hydrabase: 'Hydrabase', musicbrainz: 'MusicBrainz',
+            };
+            const _sourceName = currentSearchSource && currentSearchSource !== 'auto'
+                ? (_sourceLabelMap[currentSearchSource] || currentSearchSource)
+                : currentMusicSourceName;
+            loadingText.textContent = `Searching across ${_sourceName} and your library...`;
         }
         loadingState.classList.remove('hidden');
         emptyState.classList.add('hidden');
@@ -241,7 +245,10 @@ function initializeSearchModeToggle() {
         _enhancedSearchData = { db_artists: [], primary_source: null, sources: {}, searchId, query };
 
         try {
-            const data = await enhancedSearchFetch(query, { signal: abortController.signal });
+            const data = await enhancedSearchFetch(query, {
+                source: currentSearchSource,
+                signal: abortController.signal,
+            });
             console.log('Enhanced results:', data);
 
             // Store multi-source state

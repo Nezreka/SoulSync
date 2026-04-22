@@ -32832,10 +32832,76 @@ div.artist-hero-badge {
 }
 
 /* ========================================= */
-/* SEARCH MODE TOGGLE SYSTEM */
+/* ========================================= */
+/* SEARCH SOURCE PICKER (replaces Enhanced/Basic toggle) */
 /* ========================================= */
 
-/* Toggle Container */
+.search-source-picker-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    margin: 20px 0;
+}
+
+.search-source-picker-label {
+    color: rgba(255, 255, 255, 0.7);
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.search-source-picker-wrapper {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.search-source-picker-select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: rgba(30, 30, 30, 0.8);
+    border: 1px solid rgba(64, 64, 64, 0.4);
+    border-radius: 10px;
+    color: #ffffff;
+    padding: 10px 40px 10px 16px;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    min-width: 220px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.search-source-picker-select:hover {
+    border-color: rgba(138, 43, 226, 0.6);
+}
+
+.search-source-picker-select:focus {
+    outline: none;
+    border-color: rgba(138, 43, 226, 0.9);
+    box-shadow: 0 2px 10px rgba(138, 43, 226, 0.35);
+}
+
+.search-source-picker-select option {
+    background: #1e1e1e;
+    color: #ffffff;
+}
+
+.search-source-picker-caret {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+}
+
+/* Legacy toggle (kept for any other references, but unused by the Search page) */
 .search-mode-toggle-container {
     display: flex;
     justify-content: center;
