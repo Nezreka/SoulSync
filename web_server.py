@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.39"
+_SOULSYNC_BASE_VERSION = "2.40"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -2803,8 +2803,11 @@ _ENHANCED_SEARCH_CACHE_TTL = 600
 _ENHANCED_SEARCH_CACHE_MAX_ENTRIES = 100
 
 
-def _get_enhanced_search_cache_key(query):
-    """Build a cache key that follows the current metadata/search configuration."""
+def _get_enhanced_search_cache_key(query, requested_source=None):
+    """Build a cache key that follows the current metadata/search configuration.
+
+    When an explicit `requested_source` is provided (single-source search), it is
+    included in the key so that results for different sources don't collide."""
     normalized_query = (query or '').strip().lower()
 
     try:
@@ -2822,7 +2825,45 @@ def _get_enhanced_search_cache_key(query):
     except Exception:
         hydrabase_active = False
 
-    return (normalized_query, active_server, fallback_source, hydrabase_active)
+    source_tag = (requested_source or '').strip().lower() or 'auto'
+    return (normalized_query, active_server, fallback_source, hydrabase_active, source_tag)
+
+
+ENHANCED_SEARCH_VALID_SOURCES = (
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz',
+)
+
+
+def _resolve_enhanced_search_client(source_name):
+    """Return (client, is_available) for a single requested metadata source.
+
+    Mirrors the client-resolution logic used by the /source/<source> endpoint so
+    that the `source` param on the main endpoint behaves consistently."""
+    if source_name == 'spotify':
+        if spotify_client and spotify_client.is_spotify_authenticated():
+            return spotify_client, True
+        return None, False
+    if source_name == 'itunes':
+        return _get_itunes_client(), True
+    if source_name == 'deezer':
+        return _get_deezer_client(), True
+    if source_name == 'discogs':
+        token = config_manager.get('discogs.token', '')
+        if not token:
+            return None, False
+        return _get_discogs_client(token), True
+    if source_name == 'hydrabase':
+        if hydrabase_client and hydrabase_client.is_connected():
+            return hydrabase_client, True
+        return None, False
+    if source_name == 'musicbrainz':
+        try:
+            from core.musicbrainz_search import MusicBrainzSearchClient
+            return MusicBrainzSearchClient(), True
+        except Exception as e:
+            logger.warning(f"MusicBrainz search client init failed: {e}")
+            return None, False
+    return None, False
 
 
 def _get_cached_enhanced_search_response(cache_key):
@@ -9215,10 +9256,22 @@ def enhanced_search():
     Fires parallel queries against all available sources (Spotify, iTunes, Deezer)
     and returns results keyed by source, plus backward-compatible top-level keys
     mapped from the primary source.
+
+    Optional JSON body param `source` (one of: auto, spotify, itunes, deezer,
+    discogs, hydrabase, musicbrainz). When set to a specific source, the endpoint
+    bypasses the primary-source fan-out and returns just that source's results
+    (plus the usual db_artists). `auto` and omitted behave identically — current
+    multi-source fan-out.
     """
     data = request.get_json()
     query = data.get('query', '').strip()
-    cache_key = _get_enhanced_search_cache_key(query)
+    requested_source = (data.get('source') or '').strip().lower()
+    if requested_source == 'auto':
+        requested_source = ''
+    if requested_source and requested_source not in ENHANCED_SEARCH_VALID_SOURCES:
+        return jsonify({"error": f"Unknown source: {requested_source}"}), 400
+
+    cache_key = _get_enhanced_search_cache_key(query, requested_source)
 
     empty_source = {"artists": [], "albums": [], "tracks": [], "available": False}
 
@@ -9238,7 +9291,10 @@ def enhanced_search():
         logger.info(f"Enhanced search cache hit for: '{query}'")
         return jsonify(cached_response)
 
-    logger.info(f"Enhanced search initiated for: '{query}'")
+    logger.info(
+        f"Enhanced search initiated for: '{query}' "
+        f"(source={requested_source or 'auto'})"
+    )
 
     try:
         # Search local database for artists (always)
@@ -9260,16 +9316,58 @@ def enhanced_search():
         # Very short queries are usually broad enough that remote metadata searches
         # just add latency without improving the result quality much. Keep them local.
         if len(query) < 3:
-            fb_source = _get_metadata_fallback_source()
+            short_source = requested_source or _get_metadata_fallback_source()
             response_data = {
                 "db_artists": db_artists,
                 "spotify_artists": [],
                 "spotify_albums": [],
                 "spotify_tracks": [],
-                "metadata_source": fb_source,
-                "primary_source": fb_source,
+                "metadata_source": short_source,
+                "primary_source": short_source,
                 "alternate_sources": [],
                 "sources": {},
+            }
+            _set_cached_enhanced_search_response(cache_key, response_data)
+            return jsonify(response_data)
+
+        # Explicit single-source search — bypass primary-source fan-out entirely.
+        if requested_source:
+            client, available = _resolve_enhanced_search_client(requested_source)
+            if not client:
+                response_data = {
+                    "db_artists": db_artists,
+                    "spotify_artists": [],
+                    "spotify_albums": [],
+                    "spotify_tracks": [],
+                    "metadata_source": requested_source,
+                    "primary_source": requested_source,
+                    "alternate_sources": [],
+                    "source_available": False,
+                }
+                _set_cached_enhanced_search_response(cache_key, response_data)
+                return jsonify(response_data)
+
+            try:
+                source_results = _enhanced_search_source(query, client, requested_source)
+            except Exception as e:
+                logger.warning(f"Single-source search ({requested_source}) failed: {e}")
+                source_results = {"artists": [], "albums": [], "tracks": [], "available": False}
+
+            logger.info(
+                f"Enhanced search [source={requested_source}] results: "
+                f"{len(db_artists)} DB, {len(source_results['artists'])} artists, "
+                f"{len(source_results['albums'])} albums, {len(source_results['tracks'])} tracks"
+            )
+
+            response_data = {
+                "db_artists": db_artists,
+                "spotify_artists": source_results["artists"],
+                "spotify_albums": source_results["albums"],
+                "spotify_tracks": source_results["tracks"],
+                "metadata_source": requested_source,
+                "primary_source": requested_source,
+                "alternate_sources": [],
+                "source_available": True,
             }
             _set_cached_enhanced_search_response(cache_key, response_data)
             return jsonify(response_data)
@@ -22711,6 +22809,18 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "Explicit Source Selection on Enhanced Search",
+                "description": "The /api/enhanced-search endpoint now accepts an optional `source` parameter so callers can target a single metadata source instead of always fanning out across every provider",
+                "features": [
+                    "• Accepts one of: auto, spotify, itunes, deezer, discogs, hydrabase, musicbrainz (omitted or 'auto' preserves the existing multi-source behavior)",
+                    "• When a specific source is chosen, only that provider is queried — no more surprise Spotify calls from flows that didn't need Spotify",
+                    "• Foundation for upcoming unified Search page with a source picker (Phase 1 of the Search/Artists unification project)",
+                    "• db_artists (local library results) still returned in every mode so library matches keep surfacing",
+                    "• Cache keys now include the requested source — single-source and multi-source searches no longer share cached entries",
+                    "• Validates source names and returns 400 on unknown values",
+                ],
+            },
             {
                 "title": "Fix Wrong-Artist Tracks Silently Downloading",
                 "description": "A critical bug where searching for a track could silently download a completely different artist's song with the same name",

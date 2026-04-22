@@ -3599,6 +3599,11 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
+    '2.40': [
+        // --- April 22, 2026 (late) ---
+        { date: 'April 22, 2026 (late)' },
+        { title: 'Explicit Source Selection on Enhanced Search', desc: 'The /api/enhanced-search endpoint now accepts an optional `source` parameter (spotify, itunes, deezer, discogs, hydrabase, musicbrainz) so callers can target a single metadata source instead of fanning out across every provider. Omitted or `auto` preserves the existing multi-source behavior — nothing breaks. This is the foundation for the upcoming unified Search page with a source picker (Phase 1 of the Search/Artists unification project). db_artists (local library matches) still returned in every mode. Cache keys now isolate per-source so single-source and multi-source results don\'t collide', page: 'downloads' },
+    ],
     '2.39': [
         // --- April 22, 2026 ---
         { date: 'April 22, 2026' },
