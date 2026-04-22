@@ -81,6 +81,7 @@ if not pp_logger.handlers:
     pp_logger.propagate = False
 from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack, _is_globally_rate_limited as _spotify_rate_limited
 from core.plex_client import PlexClient
+from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
 from core.soulseek_client import SoulseekClient
@@ -188,6 +189,10 @@ app.secret_key = _init_flask_secret_key()
 
 # --- WebSocket (Socket.IO) Setup ---
 socketio = SocketIO(app, async_mode='threading', cors_allowed_origins='*')
+
+# Plex PIN auth requests stored in memory for polling
+_plex_pin_requests = {}
+_plex_pin_requests_lock = threading.Lock()
 
 # --- Profile Context (before_request hook) ---
 @app.before_request
@@ -7274,6 +7279,131 @@ def detect_media_server_endpoint():
     else:
         add_activity_item("", "Auto-Detect Failed", f"No {server_type} server found", "Now")
         return jsonify({"success": False, "error": f"No {server_type} server found on common local addresses."})
+
+@app.route('/api/plex/pin/start', methods=['POST'])
+def start_plex_pin_auth():
+    try:
+        pinlogin = MyPlexPinLogin(oauth=False)
+    except Exception as e:
+        logger.error(f'Failed to start Plex PIN auth: {e}')
+        return jsonify({"success": False, "error": str(e)}), 500
+
+    pin_code = getattr(pinlogin, 'pin', None)
+    if not pin_code:
+        return jsonify({"success": False, "error": 'Failed to generate Plex PIN code.'}), 500
+
+    request_id = str(uuid.uuid4())
+    with _plex_pin_requests_lock:
+        _plex_pin_requests[request_id] = {
+            'pinlogin': pinlogin,
+            'created_at': time.time(),
+            'expires_at': getattr(pinlogin, 'expires_at', None)
+        }
+
+    expires_in = None
+    expires_at = getattr(pinlogin, 'expires_at', None)
+    if expires_at:
+        try:
+            expires_in = int((expires_at - datetime.now(timezone.utc)).total_seconds())
+        except Exception:
+            expires_in = None
+
+    return jsonify({
+        "success": True,
+        "request_id": request_id,
+        "code": str(pin_code),
+        "auth_url": "https://plex.tv/link",
+        "expires_in": expires_in
+    })
+
+
+@app.route('/api/plex/pin/status', methods=['GET'])
+def get_plex_pin_status():
+    request_id = request.args.get('request_id')
+    if not request_id:
+        return jsonify({"success": False, "error": 'request_id is required'}), 400
+
+    with _plex_pin_requests_lock:
+        entry = _plex_pin_requests.get(request_id)
+
+    if not entry:
+        return jsonify({"success": False, "error": 'Invalid or expired PIN request id.'}), 400
+
+    pinlogin = entry.get('pinlogin')
+    if not pinlogin:
+        return jsonify({"success": False, "error": 'Invalid PIN login state.'}), 500
+
+    try:
+        if getattr(pinlogin, 'expired', False):
+            with _plex_pin_requests_lock:
+                _plex_pin_requests.pop(request_id, None)
+            return jsonify({"success": False, "expired": True, "error": 'PIN code expired.'})
+
+        if pinlogin.checkLogin():
+            token = getattr(pinlogin, 'token', None)
+            if not token:
+                raise ValueError('Plex token was not returned after authorization.')
+
+            try:
+                account = MyPlexAccount(token=token)
+                resources = account.resources()
+            except Exception as e:
+                logger.error(f'Failed to fetch Plex account resources: {e}')
+                return jsonify({"success": False, "error": f'Plex authorization succeeded but failed to resolve server resources: {e}'}), 500
+
+            server_resources = [r for r in resources if 'server' in (getattr(r, 'provides', '') or '').lower()]
+            if not server_resources:
+                return jsonify({"success": False, "error": 'No Plex server resources found for this account.'}), 500
+
+            local_conn = None
+            relay_conn = None
+            for resource in server_resources:
+                for conn in getattr(resource, 'connections', []) or []:
+                    if getattr(conn, 'local', False):
+                        local_conn = conn
+                        break
+                    if getattr(conn, 'relay', False) and relay_conn is None:
+                        relay_conn = conn
+                if local_conn:
+                    break
+
+            chosen_conn = local_conn or relay_conn
+            if not chosen_conn:
+                chosen_conn = getattr(server_resources[0], 'connections', [None])[0]
+
+            found_url = getattr(chosen_conn, 'uri', None) if chosen_conn else None
+            with _plex_pin_requests_lock:
+                _plex_pin_requests.pop(request_id, None)
+
+            if not found_url:
+                return jsonify({"success": False, "error": 'Plex authorized, but no usable server connection URI was found.'}), 500
+
+            return jsonify({
+                "success": True,
+                "found_url": found_url,
+                "token": token,
+                "status": 'Plex authorization complete.'
+            })
+
+        return jsonify({"success": False, "status": 'Waiting for Plex authorization. Enter the PIN on plex.tv/link.'})
+    except Exception as e:
+        logger.error(f'Error checking Plex PIN status: {e}')
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/plex/clear-library', methods=['POST'])
+def clear_plex_library_preference():
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        db.set_preference('plex_music_library', '')
+        if plex_client:
+            plex_client.music_library = None
+        return jsonify({"success": True, "message": "Plex library preference cleared."})
+    except Exception as e:
+        logger.error(f"Error clearing Plex library preference: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/plex/music-libraries', methods=['GET'])
 def get_plex_music_libraries():
