@@ -3602,6 +3602,7 @@ const WHATS_NEW = {
     '2.36': [
         // --- April 21, 2026 ---
         { date: 'April 21, 2026' },
+        { title: 'Fix Metadata Cache Bar Duplicating on Findings Dashboard', desc: 'The "Metadata Cache · View Details" bar under the findings chips could stack into 2–6 copies if the dashboard refreshed while a cache-health fetch was still in flight. Each resolved fetch appended its own section. Now each fetch clears any existing bar before appending', page: 'library' },
         { title: 'Fix Discography Backfill Stalling When Repair Worker Paused', desc: 'Force-running a job via "Run Now" stalled forever when the master repair worker was paused. The job entered the scan function, logged its starting banner, then blocked on the first wait_if_paused check. Force-run now bypasses the master-pause — scheduled runs still respect it', page: 'library' },
         { title: 'Discography Backfill: 3-Option Fix Dialog', desc: 'Clicking Fix on a missing-track finding now prompts "Add to Wishlist", "Just Clear Finding", or "Cancel" instead of silently adding to wishlist. Bulk Fix shows the same prompt once for all selected backfill findings', page: 'library' },
         { title: 'Discography Backfill: Auto-Add to Wishlist Setting', desc: 'New opt-in setting in the Discography Backfill job config. When enabled, missing tracks are pushed straight to the wishlist during the scan AND a finding is created for the log. Default is off — you review and click Fix', page: 'library' },
