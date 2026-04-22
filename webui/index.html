@@ -2667,6 +2667,27 @@
                             </div>
                         </div>
 
+                        <!-- Similar Artists Section (works for both library and source artists).
+                             Uses its own scoped IDs because the inline Artists page has a section
+                             with the same base IDs and both elements live in the DOM at once. -->
+                        <div class="similar-artists-section" id="ad-similar-artists-section">
+                            <div class="similar-artists-header">
+                                <h3 class="similar-artists-title">Similar Artists</h3>
+                                <p class="similar-artists-subtitle">Discover artists with a similar sound</p>
+                            </div>
+                            <div class="similar-artists-loading hidden" id="ad-similar-artists-loading">
+                                <div class="loading-spinner-small"></div>
+                                <span>Finding similar artists...</span>
+                            </div>
+                            <div class="similar-artists-error hidden" id="ad-similar-artists-error">
+                                <span class="error-icon">⚠️</span>
+                                <span class="error-text">Unable to load similar artists</span>
+                            </div>
+                            <div class="similar-artists-bubbles-container" id="ad-similar-artists-bubbles-container">
+                                <!-- Artist bubble cards will be populated here -->
+                            </div>
+                        </div>
+
                         <!-- Enhanced Library Management View -->
                         <div class="enhanced-view-container hidden" id="enhanced-view-container">
                             <!-- Populated dynamically by renderEnhancedView() -->

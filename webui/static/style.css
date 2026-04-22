@@ -59377,3 +59377,39 @@ body.reduce-effects *::after {
         font-size: 18px;
     }
 }
+
+
+/* =========================================================================
+   Source-artist visibility rules
+   =========================================================================
+   When the artist-detail page is rendering a source artist (Spotify / Deezer /
+   iTunes / etc. — not in the local library), hide library-only UI. The body
+   data-artist-source attribute is set by library.js populateArtistDetailPage
+   before rendering.
+*/
+
+/* Library-only: status filter (owned/missing only makes sense when you own things) */
+body[data-artist-source="source"] #artist-detail-page .filter-group:has(.filter-label:only-child),
+body[data-artist-source="source"] #artist-detail-page .discography-filter-btn[data-filter="ownership"] {
+    display: none !important;
+}
+
+/* Library-only: Enhanced view toggle + container (per-track editing requires owned tracks) */
+body[data-artist-source="source"] #artist-detail-page .enhanced-view-toggle-btn,
+body[data-artist-source="source"] #artist-detail-page #enhanced-view-container {
+    display: none !important;
+}
+
+/* Library-only: completion bars, enrichment coverage, Top Tracks sidebar, Radio / Enhance Quality buttons */
+body[data-artist-source="source"] #artist-detail-page .collection-overview,
+body[data-artist-source="source"] #artist-detail-page .artist-enrichment-coverage,
+body[data-artist-source="source"] #artist-detail-page #artist-hero-sidebar,
+body[data-artist-source="source"] #artist-detail-page #library-artist-radio-btn,
+body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-btn {
+    display: none !important;
+}
+
+/* Library-only: section-stats "0 owned / 0 missing" counts don't apply */
+body[data-artist-source="source"] #artist-detail-page .section-stats {
+    display: none !important;
+}
