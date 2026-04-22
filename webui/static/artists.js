@@ -31,12 +31,20 @@ function initializeArtistsPage() {
 
     if (detailBackButton) {
         detailBackButton.addEventListener('click', () => {
-            // If there are no search results (user navigated directly to artist),
-            // go straight to the main search view instead of showing an empty results page
-            if (!artistsPageState.searchResults || artistsPageState.searchResults.length === 0) {
-                showArtistsSearchState();
-            } else {
+            // If the user searched within the Artists page, back returns to the
+            // results list so they can pick a different artist.
+            if (artistsPageState.searchResults && artistsPageState.searchResults.length > 0) {
                 showArtistsResultsState();
+                return;
+            }
+            // Otherwise the user reached this detail view from elsewhere (Search,
+            // Discover, watchlist, etc.). The Artists page is no longer a sidebar
+            // entry, so there's nothing useful to fall back to here — let the
+            // browser take them back to wherever they came from.
+            if (window.history.length > 1) {
+                window.history.back();
+            } else {
+                navigateToPage('dashboard');
             }
         });
     }

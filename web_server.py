@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.48"
+_SOULSYNC_BASE_VERSION = "2.39"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22809,106 +22809,6 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
-            {
-                "title": "Fix 404 When Clicking Source Artists in Search",
-                "description": "Phase 4a mistakenly routed every artist click — including source artists from Spotify/Deezer/iTunes/etc. — to the library artist detail page, which only knows how to look up local DB primary keys. Source artist IDs (like Deezer's 525046) 404'd out",
-                "features": [
-                    "• Library artists (db_artists section) continue to go to the standalone /artist-detail page — same as before, still works",
-                    "• Source artists (Spotify/Deezer/iTunes/Discogs/Hydrabase/MusicBrainz sections) now route back to the Artists page's inline view, which fetches discography via /api/artist/<id>/discography with source context — the endpoint that actually knows how to handle non-library IDs",
-                    "• Applied to all 7 Phase 4a migration points: Search results, global widget, Discover 'Your Artists' cards, Discover hero recommendations, Discover artist-map context menu, Discover genre-deep-dive, watchlist discography, download-missing modal, recommended artists modal",
-                    "• Phase 4a's 'one artist page for everything' goal remains deferred until /api/artist-detail gains source-aware fallback behavior",
-                ],
-            },
-            {
-                "title": "Interactive Help Annotations Updated for Unified Search",
-                "description": "The click-for-help annotations and the 'Your First Download' guided tour were rewritten for the new Search page. Stale annotations pointing at removed elements (toggle buttons, side-panel queues) were deleted; the tour now walks users through the source picker instead of the old mode toggle",
-                "features": [
-                    "• Retired the 'Browse Artists' tour since Artists is no longer a sidebar page",
-                    "• First-download tour now runs on /search and opens the source picker as its first step",
-                    "• PAGE_TOUR_MAP accepts both 'search' and the legacy 'downloads' id so old bookmarks still match a tour",
-                    "• Removed 6 broken selector annotations (#toggle-download-manager-btn, .search-mode-toggle, .downloads-side-panel, #active-queue, #finished-queue, .controls-panel*)",
-                    "• Phase 4c of the Search/Artists unification project — pure docs cleanup",
-                ],
-            },
-            {
-                "title": "Artists Sidebar Entry Retired — Use Search Instead",
-                "description": "Cin flagged that 'Artists' in the sidebar read like a library section but was actually a dedicated artist-search page, duplicating what the unified Search already does. The sidebar entry is gone; the same flow now runs through Search",
-                "features": [
-                    "• Sidebar → Search → type an artist's name → click their result → land on the artist detail page (same page Library links to)",
-                    "• 'Browse Artists' button on the empty Watchlist page now opens Search instead of the retired Artists page",
-                    "• 'View artist from Wishlist' button now opens Search pre-filled with the artist's name",
-                    "• Removed 'Artists' from the profile Home Page and Page Access options so new profiles don't point to a missing sidebar entry",
-                    "• Deep link to /artists still resolves so old bookmarks work; the page and its inline search just aren't promoted anywhere",
-                    "• Phase 4b of the Search/Artists unification project",
-                ],
-            },
-            {
-                "title": "Artist Links Everywhere Go to the Same Page",
-                "description": "Clicking an artist result in Search, Discover, the API Monitor, or anywhere else now lands on the standalone artist detail page Library already uses — instead of swapping into the Artists page's inline detail view",
-                "features": [
-                    "• One artist detail page, not two — less navigation surprise and a stable URL (/artist-detail) for deep links",
-                    "• Source context (Spotify/iTunes/Deezer/etc.) now carries cleanly into the destination so non-Spotify albums load from the right provider",
-                    "• Removed the navigate-then-setTimeout dance at 9 callsites (api-monitor, discover, downloads, search, library recommendations)",
-                    "• Artists sidebar entry and its inline search still work for now — next phase retires that page entirely",
-                    "• Phase 4a of the Search/Artists unification project",
-                ],
-            },
-            {
-                "title": "Remove Embedded Download Manager from Search Page",
-                "description": "The Search page used to carry a second copy of the Download Manager (active + finished queues, clear/cancel-all buttons) that was hidden by default and duplicated the dedicated Downloads page. That duplicate is gone",
-                "features": [
-                    "• Toggle button, side-panel HTML, and its 1-second polling loop removed — Downloads page is now the single downloads UI",
-                    "• About 330 lines of dead code gone across downloads.js and init.js",
-                    "• CSS grid for the Search page collapsed to a single-column layout now that the right panel is gone",
-                    "• Phase 3c of the Search/Artists unification project",
-                ],
-            },
-            {
-                "title": "Search Page Renamed to /search",
-                "description": "The Search page's internal id is now 'search' instead of 'downloads', which no longer conflicts with the real Downloads page. URL /downloads still works for bookmarks and external links",
-                "features": [
-                    "• Sidebar label unchanged (still reads 'Search') — no visual change",
-                    "• URL now /search; /downloads stays as an alias so no existing link breaks",
-                    "• DOM id renamed to #search-page; all internal references follow",
-                    "• Profile ACL stored as 'search' going forward; existing profiles with 'downloads' in allowed_pages still resolve through a legacy-compat check",
-                    "• Phase 3b of the Search/Artists unification project",
-                ],
-            },
-            {
-                "title": "Search Source Picker — Pick Where You're Searching",
-                "description": "The Search page's Enhanced/Basic toggle is replaced by a single 'Search from' dropdown so you can explicitly pick which source to query instead of fanning out to every provider",
-                "features": [
-                    "• Choose from: All sources (Auto), Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, or Soulseek (raw files)",
-                    "• Auto keeps today's multi-source fan-out behavior — no change if you want the current results",
-                    "• Picking a specific source hits only that provider — no more surprise Spotify rate-limit hits from flows that didn't need Spotify",
-                    "• 'Soulseek' routes to the raw-file search (what 'Basic' used to do) — one picker now covers both modes",
-                    "• Loading text shows the selected source (e.g., 'Searching across Apple Music and your library...')",
-                    "• Phase 3 of the Search/Artists unification project — builds on the shared fetch helper from 2.41",
-                ],
-                "usage_note": "Sidebar → Search → pick a source in the 'Search from' dropdown above the search bar."
-            },
-            {
-                "title": "Shared Enhanced-Search Fetch Helper",
-                "description": "Internal refactor — the Search page and the global search widget now route through one shared fetch helper, so future source-picker work only needs wiring in one place",
-                "features": [
-                    "• New enhancedSearchFetch(query, { source, signal }) in search.js",
-                    "• Both callers (Search page dropdown + global widget) deduplicated — single /api/enhanced-search chokepoint",
-                    "• Accepts the source param added in 2.40, letting future UI wire a picker without touching both callers",
-                    "• Zero UX change — pure plumbing (Phase 2 of the Search/Artists unification project)",
-                ],
-            },
-            {
-                "title": "Explicit Source Selection on Enhanced Search",
-                "description": "The /api/enhanced-search endpoint now accepts an optional `source` parameter so callers can target a single metadata source instead of always fanning out across every provider",
-                "features": [
-                    "• Accepts one of: auto, spotify, itunes, deezer, discogs, hydrabase, musicbrainz (omitted or 'auto' preserves the existing multi-source behavior)",
-                    "• When a specific source is chosen, only that provider is queried — no more surprise Spotify calls from flows that didn't need Spotify",
-                    "• Foundation for upcoming unified Search page with a source picker (Phase 1 of the Search/Artists unification project)",
-                    "• db_artists (local library results) still returned in every mode so library matches keep surfacing",
-                    "• Cache keys now include the requested source — single-source and multi-source searches no longer share cached entries",
-                    "• Validates source names and returns 400 on unknown values",
-                ],
-            },
             {
                 "title": "Fix Wrong-Artist Tracks Silently Downloading",
                 "description": "A critical bug where searching for a track could silently download a completely different artist's song with the same name",
