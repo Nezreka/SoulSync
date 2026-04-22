@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.46"
+_SOULSYNC_BASE_VERSION = "2.47"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22809,6 +22809,17 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "Interactive Help Annotations Updated for Unified Search",
+                "description": "The click-for-help annotations and the 'Your First Download' guided tour were rewritten for the new Search page. Stale annotations pointing at removed elements (toggle buttons, side-panel queues) were deleted; the tour now walks users through the source picker instead of the old mode toggle",
+                "features": [
+                    "• Retired the 'Browse Artists' tour since Artists is no longer a sidebar page",
+                    "• First-download tour now runs on /search and opens the source picker as its first step",
+                    "• PAGE_TOUR_MAP accepts both 'search' and the legacy 'downloads' id so old bookmarks still match a tour",
+                    "• Removed 6 broken selector annotations (#toggle-download-manager-btn, .search-mode-toggle, .downloads-side-panel, #active-queue, #finished-queue, .controls-panel*)",
+                    "• Phase 4c of the Search/Artists unification project — pure docs cleanup",
+                ],
+            },
             {
                 "title": "Artists Sidebar Entry Retired — Use Search Instead",
                 "description": "Cin flagged that 'Artists' in the sidebar read like a library section but was actually a dedicated artist-search page, duplicating what the unified Search already does. The sidebar entry is gone; the same flow now runs through Search",

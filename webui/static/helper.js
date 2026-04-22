@@ -917,17 +917,13 @@ const HELPER_CONTENT = {
         description: 'Search for music across your configured metadata sources and download from Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer.',
         docsId: 'search'
     },
-    '#toggle-download-manager-btn': {
-        title: 'Toggle Download Manager',
-        description: 'Show or hide the download manager panel on the right side. The panel shows active downloads, finished downloads, and queue management.',
-        docsId: 'search-manager'
-    },
-    '.search-mode-toggle': {
-        title: 'Search Mode',
-        description: 'Switch between Enhanced Search (categorized metadata results with album art) and Basic Search (raw Soulseek results with detailed file info and filters).',
+    '.search-source-picker-container': {
+        title: 'Search From',
+        description: 'Pick which metadata source to search. "All sources (Auto)" keeps the multi-source fan-out behavior; any specific source hits only that provider. "Soulseek (raw files)" switches to raw P2P file search with quality filters.',
         tips: [
-            'Enhanced: shows Artists, Albums, Singles, Tracks from your metadata source',
-            'Basic: shows raw Soulseek P2P results with format, bitrate, size, uploader info'
+            'Auto: searches your configured primary source plus library matches',
+            'Spotify / Apple Music / Deezer / Discogs / Hydrabase / MusicBrainz: metadata-only results for that provider',
+            'Soulseek: raw file results with format, bitrate, size, uploader — same as the old Basic Search'
         ],
         docsId: 'search-enhanced'
     },
@@ -955,7 +951,7 @@ const HELPER_CONTENT = {
     },
     '#enh-spotify-artists-section': {
         title: 'Artists',
-        description: 'Artists from your metadata source matching the search. Click to view their full discography on the Artists page.',
+        description: 'Artists from your metadata source matching the search. Click one to open their discography.',
     },
     '#enh-albums-section': {
         title: 'Albums',
@@ -1010,33 +1006,7 @@ const HELPER_CONTENT = {
         docsId: 'search-basic'
     },
 
-    // Download Manager Side Panel
-    '.downloads-side-panel': {
-        title: 'Download Manager',
-        description: 'Shows all active and completed downloads. Manage downloads, clear completed items, or cancel active transfers.',
-        docsId: 'search-manager'
-    },
-    '.controls-panel': {
-        title: 'Download Controls',
-        description: 'Overview of active and finished download counts. Clear Completed removes finished items from the list. Clear Current cancels all active downloads.',
-        docsId: 'search-manager'
-    },
-    '.controls-panel__clear-btn': {
-        title: 'Clear Completed',
-        description: 'Remove all finished downloads from the download manager list. Doesn\'t affect the downloaded files — they\'re already in your library.',
-    },
-    '.controls-panel__cancel-all-btn': {
-        title: 'Clear Current',
-        description: 'Cancel all active downloads in progress. Files that were partially downloaded will be cleaned up.',
-    },
-    '#active-queue': {
-        title: 'Download Queue',
-        description: 'Active downloads in progress. Each item shows track name, format, download speed, progress, and a cancel button.',
-    },
-    '#finished-queue': {
-        title: 'Finished Downloads',
-        description: 'Completed downloads. Shows track name, format, file size, and final status (success or error).',
-    },
+    // (Download Manager side-panel was retired — see the dedicated Downloads page)
 
     // ─── DISCOVER PAGE ────────────────────────────────────────────────
 
@@ -2378,9 +2348,9 @@ function toggleHelperMode() {
 const PAGE_TOUR_MAP = {
     'dashboard':   'dashboard',
     'sync':        'sync-playlist',
-    'downloads':   'first-download',
+    'search':      'first-download',
+    'downloads':   'first-download',  // legacy id — the Search page used to be called 'downloads'
     'discover':    'discover',
-    'artists':     'artists-browse',
     'automations': 'automations',
     'library':     'library',
     'stats':       'stats',
@@ -2542,15 +2512,11 @@ const HELPER_TOURS = {
         description: 'Step-by-step guide to downloading your first album.',
         icon: '⬇️',
         steps: [
-            // Search page layout (top-to-bottom, elements visible on load)
-            { page: 'downloads', selector: '.search-mode-toggle', title: 'Search Modes', description: 'Two search modes: Enhanced Search (default) shows categorized results from your metadata source. Classic Search queries your download source directly for raw file results.' },
-            { page: 'downloads', selector: '.enhanced-search-input-wrapper', title: 'Search for Music', description: 'Type an artist or album name here. Results appear in categorized sections — Artists, Albums, Singles/EPs, and Tracks. Try searching for your favorite artist now!' },
-            { page: 'downloads', selector: '#toggle-download-manager-btn', title: 'Download Manager', description: 'This button toggles the download manager panel on the right side. It shows active downloads with progress bars, queued items, and completed downloads with their file paths.' },
-
-            // What results look like (describe since they appear after searching)
-            { page: 'downloads', selector: '#enh-results-container', title: 'Search Results', description: 'After searching, results appear here organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
-            { page: 'downloads', selector: '.search-mode-toggle', title: 'Downloading an Album', description: 'Click any album card to open the download modal. You\'ll see the tracklist, quality options, and a big "Download Album" button. Individual tracks have a play button to preview before downloading.' },
-            { page: 'downloads', selector: '.enhanced-search-input-wrapper', title: 'That\'s It!', description: 'Search, click, download — it\'s that simple. Albums go to your configured download path, get tagged with metadata, and sync to your media server automatically. 🎉' },
+            { page: 'search', selector: '.search-source-picker-container', title: 'Pick a Search Source', description: '"All sources (Auto)" fans out across every provider. Pick a specific one (Spotify, Apple Music, Deezer, etc.) to get results from just that catalog. "Soulseek (raw files)" is the old Basic mode — raw P2P file results with quality filters.' },
+            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Search for Music', description: 'Type an artist or album name here. Results appear in categorized sections — Artists, Albums, Singles/EPs, and Tracks. Try searching for your favorite artist now!' },
+            { page: 'search', selector: '#enh-results-container', title: 'Search Results', description: 'After searching, results appear organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
+            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Downloading an Album', description: 'Click any album card to open the download modal. You\'ll see the tracklist, quality options, and a big "Download Album" button. Individual tracks have a play button to preview before downloading.' },
+            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'That\'s It!', description: 'Search, click, download. Albums go to your configured download path, get tagged with metadata, and sync to your media server automatically. Active downloads live on the dedicated Downloads page.' },
         ]
     },
     'sync-playlist': {
@@ -2576,20 +2542,8 @@ const HELPER_TOURS = {
             { page: 'sync', selector: '.sync-sidebar', title: 'Sync Controls', description: 'The command center. Select playlists with checkboxes on the left, then click "Start Sync" here. Progress bars, match counts, and logs update in real-time. That\'s the sync flow! 🎉' },
         ]
     },
-    'artists-browse': {
-        title: 'Browse Artists',
-        description: 'Search for artists and explore their discography.',
-        icon: '🎤',
-        steps: [
-            // Artists list page (visible on load)
-            { page: 'artists', selector: '#artists-search-input', title: 'Search for an Artist', description: 'Type any artist name to search your metadata source. Results appear instantly as cards below. Click one to open their full profile and discography.' },
-
-            // Artist detail page (describe what they'll see after clicking)
-            { page: 'artists', selector: '#artists-search-input', title: 'Artist Profile', description: 'After clicking an artist, you\'ll see a rich hero section with their photo, bio, genres, listening stats from Last.fm, and links to external services like Spotify and MusicBrainz.' },
-            { page: 'artists', selector: '#artists-search-input', title: 'Discography & Downloads', description: 'Below the hero, tabs show Albums and Singles/EPs. Click any release to open the download modal. The "Similar Artists" section at the bottom shows recommendations — click any to keep exploring.' },
-            { page: 'artists', selector: '#artists-search-input', title: 'Try It Now!', description: 'Search for your favorite artist above to see their full profile. From there you can download albums, explore similar artists, and add them to your watchlist. 🎉' },
-        ]
-    },
+    // 'artists-browse' tour retired — the Artists sidebar entry was replaced by the
+    // unified Search page (see the first-download tour for the new flow).
     'automations': {
         title: 'Build an Automation',
         description: 'Create automated workflows with triggers and actions.',
@@ -3111,7 +3065,7 @@ const SETUP_STEPS = [
     { id: 'download-source', label: 'Set Up Download Source',       desc: 'Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer',  icon: '⬇️', page: 'settings', settingsTab: 'downloads' },
     { id: 'download-paths',  label: 'Configure Download Paths',     desc: 'Where music is saved and organized',                 icon: '📁', page: 'settings', settingsTab: 'downloads' },
     { id: 'first-scan',      label: 'Run First Library Scan',       desc: 'Import your existing collection from media server',  icon: '🔍', page: 'dashboard', selector: '#db-updater-card' },
-    { id: 'first-download',  label: 'Download Your First Track',    desc: 'Search for and download something',                  icon: '🎶', page: 'downloads' },
+    { id: 'first-download',  label: 'Download Your First Track',    desc: 'Search for and download something',                  icon: '🎶', page: 'search' },
     { id: 'watchlist',       label: 'Add an Artist to Watchlist',   desc: 'Monitor for new releases automatically',             icon: '👁️', page: 'library' },
     { id: 'automation',      label: 'Create an Automation',         desc: 'Schedule tasks and build workflows',                 icon: '🤖', page: 'automations' },
 ];
@@ -3218,14 +3172,8 @@ async function _checkSetupStatus() {
             results['first-download'] = Date.now();
             _markSetupComplete('first-download');
         }
-        // Also check the finished queue (if on downloads page)
-        if (!results['first-download']) {
-            const fq = document.querySelector('#finished-queue');
-            if (fq && fq.querySelector('.download-item')) {
-                results['first-download'] = Date.now();
-                _markSetupComplete('first-download');
-            }
-        }
+        // (The legacy #finished-queue side-panel was retired; the dashboard stat card
+        // above is now the single source of truth for the first-download milestone.)
     }
 
     return results;
@@ -3599,6 +3547,11 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
+    '2.47': [
+        // --- April 24, 2026 ---
+        { date: 'April 24, 2026' },
+        { title: 'Interactive Help Updated for Unified Search', desc: 'The click-for-help annotations and the "Your First Download" guided tour were rewritten for the new Search page. Stale annotations pointing at removed elements (Basic/Enhanced toggle button, side-panel queues, download-manager controls) are deleted. The first-download tour now runs on /search and opens with the source picker. PAGE_TOUR_MAP accepts both "search" and the legacy "downloads" id so old bookmarks still match a tour. Retired the standalone "Browse Artists" tour since Artists is no longer a sidebar page. Phase 4c of the Search/Artists unification project — pure docs cleanup', page: 'help' },
+    ],
     '2.46': [
         // --- April 23, 2026 (late night) ---
         { date: 'April 23, 2026 (late night)' },
