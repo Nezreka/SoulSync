@@ -49966,13 +49966,37 @@ tr.tag-diff-same {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 0;
+    padding: 7px 0;
     gap: 12px;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+}
+
+.repair-setting-row:last-child {
+    border-bottom: none;
 }
 
 .repair-setting-row label {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.5);
+}
+
+/* Section header inside a repair job settings panel — used to group related
+   toggles (e.g. "Release Types" above include_albums/eps/singles). Rendered
+   from `_section_*` sentinel keys in a job's default_settings. */
+.repair-setting-section {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.42);
+    padding: 12px 0 4px;
+    margin-top: 4px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.repair-setting-section:first-child {
+    margin-top: 0;
+    padding-top: 4px;
 }
 
 .repair-setting-input {

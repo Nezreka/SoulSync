@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.35"
+_SOULSYNC_BASE_VERSION = "2.36"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22534,8 +22534,20 @@ def get_version_info():
                     "• Creates findings for missing tracks — review and click 'Add to Wishlist' to queue downloads",
                     "• Respects all content filters (live, remix, acoustic, compilation, instrumental)",
                     "• Release type filters (album, EP, single) with configurable defaults",
+                    "• Optional 'auto-add to wishlist' setting — create findings AND push to wishlist in one pass",
+                    "• 3-option fix prompt (Add to Wishlist / Just Clear / Cancel) for manual review",
+                    "• Batched in-memory library matching — same fast path the Library pages use",
                     "• Opt-in, disabled by default — runs weekly, processes up to 50 artists per run",
                     "• Rate-limited to avoid hammering metadata APIs",
+                ],
+            },
+            {
+                "title": "Repair 'Run Now' Honored While Paused",
+                "description": "Force-running a repair job no longer stalls forever when the master repair worker is paused",
+                "features": [
+                    "• Jobs queued via 'Run Now' run to completion even if the master worker is paused",
+                    "• Fixes silent stalls where Discography Backfill logged 'scanning 50 artists' then did nothing",
+                    "• Master-pause still blocks scheduled runs — this only affects explicit user-triggered runs",
                 ],
             },
             {
