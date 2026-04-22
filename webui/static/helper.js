@@ -3599,6 +3599,11 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
+    '2.44': [
+        // --- April 23, 2026 (evening) ---
+        { date: 'April 23, 2026 (evening)' },
+        { title: 'Remove Embedded Download Manager from Search Page', desc: 'The Search page used to carry a second copy of the Download Manager (active + finished queues, clear/cancel-all buttons) that was hidden by default and duplicated the dedicated Downloads page. That duplicate is gone — toggle button, side-panel HTML, and its 1-second polling loop all removed. About 330 lines of dead code cleaned up across downloads.js and init.js. CSS grid for the Search page collapsed to single-column now that the right panel is gone. The dedicated Downloads sidebar page is now the single downloads UI. Phase 3c of the Search/Artists unification project', page: 'search' },
+    ],
     '2.43': [
         // --- April 23, 2026 (later) ---
         { date: 'April 23, 2026 (later)' },

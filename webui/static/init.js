@@ -1925,7 +1925,6 @@ function initApp() {
     initExpandedPlayer();
     initializeSyncPage();
     initializeWatchlist();
-    initializeDownloadManagerToggle();
 
 
     // Initialize WebSocket connection (falls back to HTTP polling if unavailable)
@@ -2115,37 +2114,6 @@ function initializeWatchlist() {
     console.log('Watchlist system initialized');
 }
 
-function initializeDownloadManagerToggle() {
-    const toggleButton = document.getElementById('toggle-download-manager-btn');
-    const downloadsContent = document.querySelector('.downloads-content');
-
-    if (!toggleButton || !downloadsContent) {
-        console.log('Download manager toggle not found on this page');
-        return;
-    }
-
-    // Load saved state from localStorage (hidden by default for more search space)
-    const isHidden = localStorage.getItem('downloadManagerHidden') !== 'false';
-    if (isHidden) {
-        downloadsContent.classList.add('manager-hidden');
-    }
-
-    // Add click handler
-    toggleButton.addEventListener('click', () => {
-        const isCurrentlyHidden = downloadsContent.classList.contains('manager-hidden');
-
-        if (isCurrentlyHidden) {
-            downloadsContent.classList.remove('manager-hidden');
-            localStorage.setItem('downloadManagerHidden', 'false');
-        } else {
-            downloadsContent.classList.add('manager-hidden');
-            localStorage.setItem('downloadManagerHidden', 'true');
-        }
-    });
-
-    console.log('Download manager toggle initialized');
-}
-
 function navigateToPage(pageId, options = {}) {
     // Backwards-compat alias — the Search page used to live under id 'downloads'.
     if (pageId === 'downloads') pageId = 'search';
@@ -2249,7 +2217,6 @@ async function loadPageData(pageId) {
                 initializeSearch();
                 initializeSearchModeToggle();
                 initializeFilters();
-                await loadDownloadsData();
                 break;
             case 'artists':
                 // Only fully initialize if not already initialized

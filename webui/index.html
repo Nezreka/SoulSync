@@ -1848,10 +1848,10 @@
                 This top-level container replicates the QSplitter from downloads.py,
                 creating the two-panel layout for the page.
                 -->
-                <div class="downloads-content manager-hidden">
+                <div class="downloads-content">
 
                     <!-- ======================================================= -->
-                    <!-- == LEFT PANEL: Search, Filters, and Results          == -->
+                    <!-- == Search page main panel                            == -->
                     <!-- ======================================================= -->
                     <div class="downloads-main-panel">
 
@@ -1859,13 +1859,9 @@
                         <div class="downloads-header">
                             <div class="downloads-header-content">
                                 <div class="downloads-header-text">
-                                    <h2 class="downloads-title"><img src="/static/search.png" class="page-header-icon" alt=""><span>Music Downloads</span></h2>
-                                    <p class="downloads-subtitle">Search, discover, and download high-quality music</p>
+                                    <h2 class="downloads-title"><img src="/static/search.png" class="page-header-icon" alt=""><span>Search</span></h2>
+                                    <p class="downloads-subtitle">Find artists, albums, and tracks from any metadata source</p>
                                 </div>
-                                <button id="toggle-download-manager-btn" class="toggle-manager-btn"
-                                    title="Toggle Download Manager">
-                                    <span class="toggle-icon">›</span>
-                                </button>
                             </div>
                         </div>
 
@@ -2107,44 +2103,6 @@
                         <!-- End Enhanced Search Section -->
                     </div>
 
-                    <!-- ======================================================= -->
-                    <!-- == RIGHT PANEL: Controls and Download Queue          == -->
-                    <!-- ======================================================= -->
-                    <div class="downloads-side-panel">
-
-                        <!-- Controls Panel: Replicates create_collapsible_controls_panel() -->
-                        <div class="controls-panel">
-                            <h3 class="controls-panel__header">Download Manager</h3>
-                            <div class="controls-panel__stats">
-                                <p id="active-downloads-label">• Active Downloads: 0</p>
-                                <p id="finished-downloads-label">• Finished Downloads: 0</p>
-                            </div>
-                            <div class="controls-panel__actions">
-                                <button class="controls-panel__clear-btn">🗑️ Clear Completed</button>
-                                <button class="controls-panel__cancel-all-btn">⛔ Clear Current</button>
-                            </div>
-                        </div>
-
-                        <!-- Download Queue: Replicates TabbedDownloadManager -->
-                        <div class="download-manager">
-                            <div class="download-manager__tabs">
-                                <button class="tab-btn active" data-tab="active-queue">Download Queue (0)</button>
-                                <button class="tab-btn" data-tab="finished-queue">Finished (0)</button>
-                            </div>
-                            <div class="download-manager__content">
-
-                                <!-- Active Queue -->
-                                <div class="download-queue active" id="active-queue">
-                                    <div class="download-queue__empty-message">No active downloads.</div>
-                                </div>
-
-                                <!-- Finished Queue -->
-                                <div class="download-queue" id="finished-queue">
-                                    <div class="download-queue__empty-message">No finished downloads.</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
 

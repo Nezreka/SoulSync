@@ -4255,8 +4255,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 /* Main Layout: Replicates QSplitter */
 .downloads-content {
     display: grid;
-    grid-template-columns: 1fr 370px;
-    /* Left panel is flexible, right is fixed */
+    grid-template-columns: 1fr;
     gap: 24px;
     height: 100%;
     /* Fill parent .page content area */

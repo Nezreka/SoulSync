@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.43"
+_SOULSYNC_BASE_VERSION = "2.44"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22809,6 +22809,16 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "Remove Embedded Download Manager from Search Page",
+                "description": "The Search page used to carry a second copy of the Download Manager (active + finished queues, clear/cancel-all buttons) that was hidden by default and duplicated the dedicated Downloads page. That duplicate is gone",
+                "features": [
+                    "• Toggle button, side-panel HTML, and its 1-second polling loop removed — Downloads page is now the single downloads UI",
+                    "• About 330 lines of dead code gone across downloads.js and init.js",
+                    "• CSS grid for the Search page collapsed to a single-column layout now that the right panel is gone",
+                    "• Phase 3c of the Search/Artists unification project",
+                ],
+            },
             {
                 "title": "Search Page Renamed to /search",
                 "description": "The Search page's internal id is now 'search' instead of 'downloads', which no longer conflicts with the real Downloads page. URL /downloads still works for bookmarks and external links",
