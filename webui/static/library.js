@@ -949,6 +949,11 @@ function populateArtistDetailPage(data) {
     console.log(`📀 EPs:`, discography.eps);
     console.log(`📀 Singles:`, discography.singles);
 
+    // Tag the body so CSS can hide library-only UI for source artists (e.g.
+    // the Enhanced view toggle, the Status filter, completion bars). Set
+    // BEFORE rendering so any layout-dependent code sees the right state.
+    document.body.dataset.artistSource = (artist && artist.server_source) ? 'library' : 'source';
+
     // Update hero section with image, name, and stats
     updateArtistHeroSection(artist, discography);
 
@@ -965,6 +970,13 @@ function populateArtistDetailPage(data) {
     const libraryWatchlistBtn = document.getElementById('library-artist-watchlist-btn');
     if (libraryWatchlistBtn && data.spotify_artist && data.spotify_artist.spotify_artist_id) {
         initializeLibraryWatchlistButton(data.spotify_artist.spotify_artist_id, data.spotify_artist.spotify_artist_name);
+    }
+
+    // Load Similar Artists section (works for both library + source artists via
+    // MusicMap name lookup). Fire-and-forget — the function handles its own
+    // loading state and errors.
+    if (artist && artist.name && typeof loadSimilarArtists === 'function') {
+        loadSimilarArtists(artist.name);
     }
 }
 
