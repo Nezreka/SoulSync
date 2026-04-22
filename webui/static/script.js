@@ -65048,6 +65048,16 @@ function switchRepairTab(tab) {
     else if (tab === 'history') loadRepairHistory();
 }
 
+// Turn a snake_case setting key into a human label. Handles acronym fix-ups
+// (EP, ID, URL, MB, AC, OS) that the naive Title-Case would otherwise botch.
+function _prettifyRepairSettingKey(key) {
+    const words = key.replace(/^_+/, '').split('_');
+    const acronyms = { 'eps': 'EPs', 'id': 'ID', 'url': 'URL', 'mb': 'MB',
+                       'ac': 'AC', 'os': 'OS', 'api': 'API', 'mp3': 'MP3',
+                       'flac': 'FLAC', 'cd': 'CD' };
+    return words.map(w => acronyms[w.toLowerCase()] || (w.charAt(0).toUpperCase() + w.slice(1))).join(' ');
+}
+
 async function loadRepairJobs() {
     const container = document.getElementById('repair-jobs-list');
     if (!container) return;
@@ -65124,7 +65134,13 @@ async function loadRepairJobs() {
             let settingsHtml = '';
             if (job.settings && Object.keys(job.settings).length > 0) {
                 const settingsRows = Object.entries(job.settings).map(([key, val]) => {
-                    const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    // Section header: keys starting with `_section_` render as a
+                    // group divider + title instead of a setting row. The value
+                    // is the human-readable title.
+                    if (key.startsWith('_section_')) {
+                        return `<div class="repair-setting-section">${val}</div>`;
+                    }
+                    const label = _prettifyRepairSettingKey(key);
                     const inputType = typeof val === 'boolean' ? 'checkbox' :
                         typeof val === 'number' ? 'number' : 'text';
                     const inputVal = inputType === 'checkbox' ?
@@ -65218,14 +65234,16 @@ function showRepairJobHelp(jobId) {
     let overlay = document.getElementById('repair-help-overlay');
     if (overlay) overlay.remove();
 
-    // Build settings summary
+    // Build settings summary (skip `_section_` group-header sentinels)
     let settingsHtml = '';
     if (job.settings && Object.keys(job.settings).length > 0) {
-        const rows = Object.entries(job.settings).map(([key, val]) => {
-            const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            const display = typeof val === 'boolean' ? (val ? 'Yes' : 'No') : val;
-            return `<div class="repair-help-setting"><span class="repair-help-setting-key">${label}</span><span class="repair-help-setting-val">${display}</span></div>`;
-        }).join('');
+        const rows = Object.entries(job.settings)
+            .filter(([key]) => !key.startsWith('_section_'))
+            .map(([key, val]) => {
+                const label = _prettifyRepairSettingKey(key);
+                const display = typeof val === 'boolean' ? (val ? 'Yes' : 'No') : val;
+                return `<div class="repair-help-setting"><span class="repair-help-setting-key">${label}</span><span class="repair-help-setting-val">${display}</span></div>`;
+            }).join('');
         settingsHtml = `<div class="repair-help-settings-section">
             <div class="repair-help-section-title">Current Settings</div>
             ${rows}
@@ -66441,7 +66459,45 @@ async function fixAllMatchingFindings() {
 
     // If fixing orphan files or dead files, prompt for action FIRST
     let fixAction = null;
-    if (jobId === 'dead_file_cleaner') {
+    // Discography backfill: 3-option prompt (Add to Wishlist / Just Clear / Cancel).
+    // "Just Clear" bypasses bulk-fix entirely and goes through the clear endpoint,
+    // which is why it's handled inline and returns early.
+    if (jobId === 'discography_backfill') {
+        const choice = await _promptDiscographyBackfillAction(_repairFindingsTotal);
+        if (!choice) return;
+        if (choice === 'dismiss') {
+            if (!await showConfirmDialog({
+                title: 'Clear All Discography Findings',
+                message: `Clear all ${_repairFindingsTotal} discography backfill findings without adding any to the wishlist? Tracks can be re-detected next scan.`,
+                confirmText: 'Clear All',
+                destructive: false
+            })) return;
+            showToast(`Clearing ${_repairFindingsTotal} findings...`, 'info');
+            try {
+                const resp = await fetch('/api/repair/findings/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ job_id: 'discography_backfill', status: 'pending' })
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    showToast(`Cleared ${result.deleted} findings`, 'success');
+                } else {
+                    showToast(result.error || 'Clear failed', 'error');
+                }
+            } catch (err) {
+                console.error('Error clearing findings:', err);
+                showToast('Error clearing findings', 'error');
+            }
+            _repairSelectedFindings.clear();
+            loadRepairFindingsDashboard();
+            loadRepairFindings();
+            updateRepairStatus();
+            return;
+        }
+        // 'add_to_wishlist' falls through to bulk-fix. No destructive warning —
+        // the backend handler only adds tracks to the wishlist.
+    } else if (jobId === 'dead_file_cleaner') {
         fixAction = await _promptDeadFileAction();
         if (!fixAction) return;
     } else if (jobId === 'orphan_file_detector' || _isMassOrphanFix(jobId, _repairFindingsTotal)) {
@@ -66586,6 +66642,18 @@ async function fixRepairFinding(id, findingType) {
         fixAction = await _promptAcoustidAction();
         if (!fixAction) return;
     }
+    // Discography backfill: add to wishlist or just clear the finding
+    if (findingType === 'missing_discography_track') {
+        const choice = await _promptDiscographyBackfillAction(1);
+        if (!choice) return;  // cancel
+        if (choice === 'dismiss') {
+            // User just wants to remove the finding without adding to wishlist
+            await dismissRepairFinding(id);
+            return;
+        }
+        // 'add_to_wishlist' — fall through to the fix endpoint. The handler
+        // already defaults to adding to wishlist, so no fix_action is needed.
+    }
 
     const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
     const fixBtn = card ? card.querySelector('.repair-finding-btn.fix') : null;
@@ -66727,6 +66795,46 @@ function _promptAcoustidAction() {
     });
 }
 
+function _promptDiscographyBackfillAction(count = 1) {
+    const isSingle = count <= 1;
+    const headerText = isSingle ? 'Missing Discography Track' : `Missing Discography Tracks (${count})`;
+    const bodyText = isSingle
+        ? 'Add this track to the wishlist for automatic download, or just clear the finding?'
+        : `Add all ${count} selected tracks to the wishlist for automatic download, or just clear the findings?`;
+    const addLabel = isSingle ? 'Add to Wishlist' : `Add All ${count} to Wishlist`;
+    const clearLabel = isSingle ? 'Just Clear Finding' : 'Just Clear Findings';
+
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'display:flex;align-items:center;justify-content:center;z-index:10000;';
+        overlay.innerHTML = `
+            <div style="background:#1e1e2e;border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:28px;max-width:460px;width:90%;text-align:center;">
+                <div id="_dbf-header" style="font-size:1.1em;font-weight:600;color:#fff;margin-bottom:8px;"></div>
+                <div id="_dbf-body" style="font-size:0.88em;color:rgba(255,255,255,0.6);margin-bottom:20px;"></div>
+                <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+                    <button id="_dbf-add" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(29,185,84,0.4);background:rgba(29,185,84,0.15);color:#1db954;font-weight:600;cursor:pointer;font-family:inherit;"></button>
+                    <button id="_dbf-dismiss" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(102,126,234,0.4);background:rgba(102,126,234,0.15);color:#667eea;font-weight:500;cursor:pointer;font-family:inherit;"></button>
+                </div>
+                <button id="_dbf-cancel" style="margin-top:12px;padding:6px 16px;border:none;background:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:0.82em;font-family:inherit;">
+                    Cancel
+                </button>
+            </div>
+        `;
+        // Assign text content (avoids HTML-escaping gotchas with dynamic values)
+        overlay.querySelector('#_dbf-header').textContent = headerText;
+        overlay.querySelector('#_dbf-body').textContent = bodyText;
+        overlay.querySelector('#_dbf-add').textContent = addLabel;
+        overlay.querySelector('#_dbf-dismiss').textContent = clearLabel;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('#_dbf-add').onclick = () => { overlay.remove(); resolve('add_to_wishlist'); };
+        overlay.querySelector('#_dbf-dismiss').onclick = () => { overlay.remove(); resolve('dismiss'); };
+        overlay.querySelector('#_dbf-cancel').onclick = () => { overlay.remove(); resolve(null); };
+        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+    });
+}
+
 async function resolveRepairFinding(id) {
     try {
         await fetch(`/api/repair/findings/${id}/resolve`, { method: 'POST' });
@@ -66813,6 +66921,17 @@ async function bulkFixFindings() {
         if (!acoustidFixAction) return;
     }
 
+    // If any selected findings are discography backfill, prompt once (add-to-wishlist vs clear)
+    const selectedBackfillCards = ids.filter(id => {
+        const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
+        return card && card.dataset.jobId === 'discography_backfill';
+    });
+    let backfillAction = null;
+    if (selectedBackfillCards.length > 0) {
+        backfillAction = await _promptDiscographyBackfillAction(selectedBackfillCards.length);
+        if (!backfillAction) return;
+    }
+
     let fixed = 0, failed = 0, lastError = '';
     showToast(`Fixing ${ids.length} findings...`, 'info');
 
@@ -66823,10 +66942,27 @@ async function bulkFixFindings() {
             const isOrphan = card && card.dataset.jobId === 'orphan_file_detector';
             const isDead = card && card.dataset.jobId === 'dead_file_cleaner';
             const isAcoustid = card && card.dataset.jobId === 'acoustid_scanner';
+            const isBackfill = card && card.dataset.jobId === 'discography_backfill';
+
+            // Discography backfill "Just Clear" path uses the dismiss endpoint,
+            // not the fix endpoint — so handle it inline before the fix call.
+            if (isBackfill && backfillAction === 'dismiss') {
+                try {
+                    const resp = await fetch(`/api/repair/findings/${id}/dismiss`, { method: 'POST' });
+                    if (resp.ok) fixed++;
+                    else { failed++; lastError = 'dismiss failed'; }
+                } catch {
+                    failed++;
+                }
+                continue;
+            }
+
             let body = {};
             if (isOrphan && orphanFixAction) body = { fix_action: orphanFixAction };
             else if (isDead && deadFixAction) body = { fix_action: deadFixAction };
             else if (isAcoustid && acoustidFixAction) body = { fix_action: acoustidFixAction };
+            // Discography backfill "Add to Wishlist" falls through with empty body
+            // — the fix handler already adds to wishlist by default.
 
             const response = await fetch(`/api/repair/findings/${id}/fix`, {
                 method: 'POST',

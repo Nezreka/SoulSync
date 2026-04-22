@@ -3599,9 +3599,18 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
-    '2.35': [
+    '2.36': [
         // --- April 21, 2026 ---
         { date: 'April 21, 2026' },
+        { title: 'Fix Discography Backfill Stalling When Repair Worker Paused', desc: 'Force-running a job via "Run Now" stalled forever when the master repair worker was paused. The job entered the scan function, logged its starting banner, then blocked on the first wait_if_paused check. Force-run now bypasses the master-pause — scheduled runs still respect it', page: 'library' },
+        { title: 'Discography Backfill: 3-Option Fix Dialog', desc: 'Clicking Fix on a missing-track finding now prompts "Add to Wishlist", "Just Clear Finding", or "Cancel" instead of silently adding to wishlist. Bulk Fix shows the same prompt once for all selected backfill findings', page: 'library' },
+        { title: 'Discography Backfill: Auto-Add to Wishlist Setting', desc: 'New opt-in setting in the Discography Backfill job config. When enabled, missing tracks are pushed straight to the wishlist during the scan AND a finding is created for the log. Default is off — you review and click Fix', page: 'library' },
+        { title: 'Discography Backfill: Faster Batched Matching', desc: 'Each artist scan now pre-fetches the library albums + tracks once and matches in-memory — same fast path the Library and Artists pages use. Avoids thousands of per-track SQL queries on artists with big libraries', page: 'library' },
+        { title: 'Discography Backfill: Rich Album Context per Finding', desc: 'Every finding now carries a full album dict (id, name, album_type, release_date, images, artists, total_tracks) matching the wishlist pipeline shape. No more generic "Add to Wishlist" loss of release metadata', page: 'library' },
+        { title: 'Discography Backfill: Per-Artist Progress Logs', desc: 'Scan logs now show [N/50] Scanning ArtistName for each artist processed, with found-count or "no missing tracks" afterward. Makes it obvious whether the job is actually progressing' },
+
+        // --- April 20, 2026 (part 2) ---
+        { date: 'April 20, 2026 (evening)' },
         { title: 'Massively Faster Artist Detail Page Loads', desc: 'Artist discography completion checks used to fire hundreds of SQL queries per page load — 15+ fuzzy title/artist searches per album times 30 albums per artist. Now pre-fetches the artist\'s library albums and tracks ONCE upfront, then matches everything in-memory. Same matching logic and accuracy, roughly 100x fewer SQL round-trips. Applies to both the Library artist page and the Artists search page', page: 'library' },
         { title: 'Fix Reorganize All Ignoring Album Type', desc: 'Reorganize All was sending every album — EPs, singles, and compilations — into the "Albums" folder because the $albumtype template variable silently defaulted to "Album". The variable is now resolved from the album\'s record_type (with track-count fallback) so ${albumtype}s produces the expected Albums/Singles/EPs/Compilations split', page: 'library' },
 
@@ -3770,12 +3779,12 @@ const WHATS_NEW = {
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '2.35';
+    return btn ? btn.textContent.trim().replace('v', '') : '2.36';
 }
 
 function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
-    return versions[0] || '2.35';
+    return versions[0] || '2.36';
 }
 
 function openWhatsNew() {

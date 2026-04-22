@@ -434,7 +434,7 @@ class RepairWorker:
                         forced_job = self._force_run_queue.pop(0)
 
                 if forced_job:
-                    self._run_job(forced_job)
+                    self._run_job(forced_job, forced=True)
                     if self._sleep_or_stop(2):
                         break
                     continue
@@ -518,8 +518,13 @@ class RepairWorker:
 
         return best_job_id
 
-    def _run_job(self, job_id: str):
-        """Execute a single job and record the run."""
+    def _run_job(self, job_id: str, forced: bool = False):
+        """Execute a single job and record the run.
+
+        When forced=True, the user explicitly triggered this via "Run Now" —
+        the job runs even if the master worker is paused, and wait_if_paused()
+        does not block.
+        """
         job = self._jobs.get(job_id)
         if not job:
             return
@@ -568,7 +573,7 @@ class RepairWorker:
             create_finding=self._create_finding,
             should_stop=lambda: self.should_stop,
             stop_event=self._stop_event,
-            is_paused=lambda: not self.enabled,
+            is_paused=(lambda: False) if forced else (lambda: not self.enabled),
             update_progress=self._update_progress,
             report_progress=_report_progress,
         )
@@ -2691,7 +2696,8 @@ class RepairWorker:
                              'single_album_redundant', 'mbid_mismatch',
                              'album_tag_inconsistency',
                              'incomplete_album', 'path_mismatch',
-                             'missing_lossy_copy')
+                             'missing_lossy_copy',
+                             'missing_discography_track', 'acoustid_mismatch')
             placeholders = ','.join(['?'] * len(fixable_types))
             where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]
             params = list(fixable_types)
