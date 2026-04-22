@@ -128,8 +128,8 @@ class DiscographyBackfillJob(RepairJob):
             source_ids['spotify'] = artist['spotify_artist_id']
         if artist.get('itunes_artist_id'):
             source_ids['itunes'] = artist['itunes_artist_id']
-        if artist.get('deezer_artist_id'):
-            source_ids['deezer'] = artist['deezer_artist_id']
+        if artist.get('deezer_id'):
+            source_ids['deezer'] = artist['deezer_id']
 
         # Fetch full discography
         discography = get_artist_discography(
@@ -294,21 +294,29 @@ class DiscographyBackfillJob(RepairJob):
 
     @staticmethod
     def _should_include_release(total_tracks, album_type, settings):
-        """Check if a release should be included based on type settings."""
-        # Use album_type from metadata source when available
+        """Check if a release should be included based on type settings.
+
+        Spotify lumps both EPs and true singles under album_type='single', so
+        only an explicit 'album' / 'ep' / 'compilation' is trusted outright.
+        Anything else (including 'single' or missing type) falls through to a
+        track-count disambiguation matching the download pipeline:
+          - 1-3 tracks -> true single
+          - 4-6 tracks -> EP
+          - 7+ tracks -> album
+        """
         normalized = (album_type or '').lower()
         if normalized == 'compilation':
             return settings.get('include_compilations', False)
-        if normalized in ('single',):
-            return settings.get('include_singles', False)
-        if normalized in ('ep',):
+        if normalized == 'album':
+            return settings.get('include_albums', True)
+        if normalized == 'ep':
             return settings.get('include_eps', True)
-        # Fall back to track count heuristic
+        # 'single' or missing: disambiguate by track count
         if total_tracks >= 7:
             return settings.get('include_albums', True)
-        elif total_tracks >= 4:
+        if total_tracks >= 4:
             return settings.get('include_eps', True)
-        elif total_tracks >= 1:
+        if total_tracks >= 1:
             return settings.get('include_singles', False)
         return settings.get('include_albums', True)
 
@@ -342,8 +350,8 @@ class DiscographyBackfillJob(RepairJob):
                 select.append("spotify_artist_id")
             if 'itunes_artist_id' in columns:
                 select.append("itunes_artist_id")
-            if 'deezer_artist_id' in columns:
-                select.append("deezer_artist_id")
+            if 'deezer_id' in columns:
+                select.append("deezer_id")
 
             cursor.execute(f"""
                 SELECT {', '.join(select)}
