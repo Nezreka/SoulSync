@@ -129,7 +129,18 @@ async function rehydrateArtistAlbumModal(virtualPlaylistId, playlistName, batchI
 
         // Fetch the album tracks to get proper artist and album data
         try {
-            const response = await fetch(`/api/album/${albumId}/tracks`);
+            const rehydrateProcess = activeDownloadProcesses[virtualPlaylistId];
+            const albumSource = rehydrateProcess?.source || rehydrateProcess?.artist?.source || rehydrateProcess?.album?.source || null;
+            const artistName = rehydrateProcess?.artist?.name || '';
+            const params = new URLSearchParams({
+                name: playlistName || '',
+                artist: artistName
+            });
+            if (albumSource) {
+                params.set('source', albumSource);
+            }
+
+            const response = await fetch(`/api/album/${albumId}/tracks?${params}`);
             const data = await response.json();
 
             if (!data.success || !data.album || !data.tracks) {
@@ -139,12 +150,17 @@ async function rehydrateArtistAlbumModal(virtualPlaylistId, playlistName, batchI
 
             const album = data.album;
             const tracks = data.tracks;
+            const source = data.source || tracks[0]?._source || albumSource || null;
 
             // Extract artist info from the first track (all tracks should have same artist)
             const artist = {
                 id: artistId,
-                name: tracks[0].artists[0] // Use first artist name from first track
+                name: tracks[0].artists[0], // Use first artist name from first track
+                source
             };
+            if (source) {
+                album.source = source;
+            }
 
             console.log(`✅ Retrieved album data: "${album.name}" by ${artist.name} (${tracks.length} tracks)`);
 
@@ -2536,4 +2552,3 @@ function _extractM3UTracks(tracks) {
 }
 
 // ==================================================================================
-
