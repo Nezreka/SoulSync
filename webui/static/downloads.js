@@ -634,7 +634,15 @@ function _navigateToArtistFromModal(artistId, artistName, imageUrl, source, play
     if (!artistName) return;
     // Close the download modal
     if (playlistId) closeDownloadMissingModal(playlistId);
-    navigateToArtistDetail(artistId || artistName, artistName, source || null);
+    // The id from a download modal is typically a metadata-source id; route via
+    // the Artists page inline view so the source-aware discography endpoint runs.
+    navigateToPage('artists');
+    setTimeout(() => {
+        selectArtistForDetail(
+            { id: artistId || artistName, name: artistName, image_url: imageUrl || '' },
+            source ? { source: source } : undefined
+        );
+    }, 200);
 }
 
 async function closeDownloadMissingModal(playlistId) {
@@ -5425,8 +5433,19 @@ function _gsSwitchSource(src) {
 
 function _gsClickArtist(id, name, isLibrary) {
     _gsDeactivate();
-    const source = isLibrary ? null : (_gsState.activeSource || null);
-    navigateToArtistDetail(id, name, source);
+    if (isLibrary) {
+        // Library artists: id is a local DB PK — use the standalone artist-detail page.
+        navigateToArtistDetail(id, name);
+    } else {
+        // Source artists: id is a Deezer/Spotify/iTunes id — route to the Artists
+        // page's inline view which fetches discography from the source.
+        navigateToPage('artists');
+        setTimeout(() => {
+            selectArtistForDetail({ id, name, image_url: '' }, {
+                source: _gsState.activeSource || '',
+            });
+        }, 150);
+    }
 }
 
 async function _gsClickAlbum(albumId, albumName, artistName, imageUrl, source) {
