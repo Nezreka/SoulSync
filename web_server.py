@@ -10512,11 +10512,23 @@ def get_download_status():
                     _sp_artist = ctx.get('spotify_artist') or {}
                     _sp_album = ctx.get('spotify_album') or {}
                     _sp_track = ctx.get('track_info') or {}
+                    # Cover art can live in a few places depending on the
+                    # origin path: album.images[0].url (Spotify-shaped),
+                    # album.image_url (context-built / wishlist / fixes), or
+                    # track_info.image_url (some discovery flows). Try them
+                    # all so fixed-discovery tracks render their artwork.
                     _sp_images = _sp_album.get('images') or []
+                    _art_url = ''
+                    if _sp_images and isinstance(_sp_images[0], dict):
+                        _art_url = _sp_images[0].get('url', '') or ''
+                    if not _art_url:
+                        _art_url = _sp_album.get('image_url') or ''
+                    if not _art_url:
+                        _art_url = _sp_track.get('image_url') or ''
                     transfer['_meta'] = {
                         'artist': _sp_artist.get('name', ''),
                         'album': _sp_album.get('name', ''),
-                        'artwork_url': _sp_images[0].get('url', '') if _sp_images and isinstance(_sp_images[0], dict) else '',
+                        'artwork_url': _art_url,
                         'track_number': _sp_track.get('track_number'),
                         'quality': ctx.get('_audio_quality', ''),
                     }
