@@ -8000,7 +8000,24 @@
                 </div>
                 <button class="confirm-modal-close" onclick="closeRateLimitModal()">✕</button>
             </div>
-            <div class="confirm-modal-content rate-limit-modal-content">
+     !-- Split modules (was: script.js) — core.js must load first, init.js last -->
+    <script src="{{ url_for('static', filename='core.js') }}"></script>
+    <script src="{{ url_for('static', filename='media-player.js') }}"></script>
+    <script src="{{ url_for('static', filename='settings.js') }}"></script>
+    <script src="{{ url_for('static', filename='search.js') }}"></script>
+    <script src="{{ url_for('static', filename='sync-spotify.js') }}"></script>
+    <script src="{{ url_for('static', filename='downloads.js') }}"></script>
+    <script src="{{ url_for('static', filename='wishlist-tools.js') }}"></script>
+    <script src="{{ url_for('static', filename='sync-services.js') }}"></script>
+    <script src="{{ url_for('static', filename='artists.js') }}"></script>
+    <script src="{{ url_for('static', filename='api-monitor.js') }}"></script>
+    <script src="{{ url_for('static', filename='library.js') }}"></script>
+    <script src="{{ url_for('static', filename='beatport-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='discover.js') }}"></script>
+    <script src="{{ url_for('static', filename='enrichment.js') }}"></script>
+    <script src="{{ url_for('static', filename='stats-automations.js') }}"></script>
+    <script src="{{ url_for('static', filename='pages-extra.js') }}"></script>
+    <script src="{{ url_for('static', filename='inimit-modal-content">
                 <p class="rate-limit-description">Spotify has temporarily blocked API access. All Spotify features (search, enrichment, playlists) are paused until the ban expires.</p>
                 <div class="rate-limit-details">
                     <div class="rate-limit-detail-row">
