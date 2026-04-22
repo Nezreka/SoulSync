@@ -3599,6 +3599,12 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
+    '2.37': [
+        // --- April 21, 2026 (evening) ---
+        { date: 'April 21, 2026 (evening)' },
+        { title: 'Fix Auto-Watchlist Ignoring Global Override Settings', desc: 'The scheduled auto-watchlist scan (not the manual one) called scan_watchlist_artists directly, which bypassed Global Override application. So if you disabled Albums or Live under Watchlist → Global Override, full albums and live tracks still got added to the wishlist during the nightly scan. Override logic now runs inside scan_watchlist_artists so every entry point respects it', page: 'watchlist' },
+        { title: 'Fix Live Version Filter False Positives', desc: 'The \\blive\\b regex was too loose — it flagged any title with the word "live" regardless of context, so "What We Live For" by American Authors, "Live Forever" by Oasis, and similar verb uses got treated as live recordings. Tightened to require clear live-recording context: "(Live)", "- Live", "Live at/from/in/on/version/session/etc". Fixes both the watchlist/backfill track filter and the Library Maintenance Live/Commentary Cleaner', page: 'library' },
+    ],
     '2.36': [
         // --- April 21, 2026 ---
         { date: 'April 21, 2026' },
@@ -3780,12 +3786,12 @@ const WHATS_NEW = {
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '2.36';
+    return btn ? btn.textContent.trim().replace('v', '') : '2.37';
 }
 
 function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
-    return versions[0] || '2.36';
+    return versions[0] || '2.37';
 }
 
 function openWhatsNew() {

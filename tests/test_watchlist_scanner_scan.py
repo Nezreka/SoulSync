@@ -344,25 +344,53 @@ def test_backfill_similar_artists_fallback_ids_uses_provider_priority(monkeypatc
     assert [call[0] for call in itunes_client.search_calls] == ["iTunes Artist"]
 
 
-def test_scan_watchlist_profile_loads_artists_and_applies_overrides(monkeypatch):
+def test_scan_watchlist_profile_loads_artists_and_forwards_override_flag(monkeypatch):
+    # Global-override application moved from scan_watchlist_profile into
+    # scan_watchlist_artists so every entry point (including the automation
+    # auto-scan) respects it. scan_watchlist_profile now just forwards the
+    # apply_global_overrides flag through.
     artist = _build_artist()
     scanner = _build_scanner({"tracks": {"items": []}}, [artist])
 
     loaded_profiles = []
-    override_calls = []
     scan_calls = []
 
     monkeypatch.setattr(scanner.database, "get_watchlist_artists", lambda profile_id=None: loaded_profiles.append(profile_id) or [artist])
-    monkeypatch.setattr(scanner, "_apply_global_watchlist_overrides", lambda artists: override_calls.append(list(artists)))
     monkeypatch.setattr(scanner, "scan_watchlist_artists", lambda artists, **kwargs: scan_calls.append((list(artists), kwargs)) or ["ok"])
 
     result = scanner.scan_watchlist_profile(42)
 
     assert result == ["ok"]
     assert loaded_profiles == [42]
-    assert override_calls and override_calls[0][0].artist_name == "Artist One"
     assert scan_calls and scan_calls[0][0][0].artist_name == "Artist One"
     assert scan_calls[0][1]["profile_id"] == 42
+    assert scan_calls[0][1]["apply_global_overrides"] is True
+
+
+def test_scan_watchlist_artists_applies_global_overrides(monkeypatch):
+    # Regression guard: auto-watchlist automation bypassed overrides by
+    # calling scan_watchlist_artists directly. Overrides now run inside
+    # scan_watchlist_artists so every caller gets the global filter.
+    scanner = _build_scanner({"tracks": {"items": []}}, [])
+
+    override_calls = []
+    monkeypatch.setattr(scanner, "_apply_global_watchlist_overrides", lambda artists: override_calls.append(list(artists)))
+
+    # Empty artist list exits early but override must still have been invoked.
+    scanner.scan_watchlist_artists([])
+
+    assert override_calls == [[]]
+
+
+def test_scan_watchlist_artists_skips_overrides_when_flag_false(monkeypatch):
+    scanner = _build_scanner({"tracks": {"items": []}}, [])
+
+    override_calls = []
+    monkeypatch.setattr(scanner, "_apply_global_watchlist_overrides", lambda artists: override_calls.append(list(artists)))
+
+    scanner.scan_watchlist_artists([], apply_global_overrides=False)
+
+    assert override_calls == []
 
 
 def test_scan_watchlist_artists_scans_tracks_and_updates_state(monkeypatch):

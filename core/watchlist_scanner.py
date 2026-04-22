@@ -85,6 +85,11 @@ def is_live_version(track_name: str, album_name: str = "") -> bool:
     """
     Detect if a track or album is a live version.
 
+    Uses patterns that require a clear live-recording context (parenthesized
+    "(Live)", dash-suffixed "- Live", or "live" with a location/format
+    modifier). The bare `\\blive\\b` pattern was too loose — it falsely
+    flagged verb uses like "What We Live For" or "Live Forever".
+
     Args:
         track_name: Track name to check
         album_name: Album name to check (optional)
@@ -98,17 +103,18 @@ def is_live_version(track_name: str, album_name: str = "") -> bool:
     # Combine track and album names for comprehensive checking
     text_to_check = f"{track_name} {album_name}".lower()
 
-    # Live version patterns
+    # Live-recording patterns — each one requires clear context so verbs
+    # like "What We Live For" / "Live Forever" / "Living on a Prayer" don't
+    # get swept up.
     live_patterns = [
-        r'\blive\b',                    # (Live), Live at, etc.
-        r'\blive at\b',                 # Live at Madison Square Garden
-        r'\bconcert\b',                 # Concert, Live Concert
+        r'[\(\[]live\b',                # (Live), (Live at ...), [Live Version]
+        r'-\s*live\b',                  # Song - Live, Song - Live at ...
+        # "live" followed by a recording-context word
+        r'\blive (at|from|in|on|version|session|recording|performance|album|show|tour|concert|edit|cut|take)\b',
         r'\bin concert\b',              # In Concert
-        r'\bunplugged\b',               # MTV Unplugged (usually live)
-        r'\blive session\b',            # Live Session
-        r'\blive from\b',               # Live from...
-        r'\blive recording\b',          # Live Recording
+        r'\bconcert\b',                 # Concert (album name)
         r'\bon stage\b',                # On Stage
+        r'\bunplugged\b',               # MTV Unplugged
     ]
 
     for pattern in live_patterns:
@@ -939,9 +945,8 @@ class WatchlistScanner:
         if watchlist_artists is None:
             watchlist_artists = self.database.get_watchlist_artists(profile_id=profile_id)
 
-        if apply_global_overrides:
-            self._apply_global_watchlist_overrides(watchlist_artists)
-
+        # scan_watchlist_artists applies overrides itself now — pass the flag
+        # through instead of applying here (prevents double-application).
         return self.scan_watchlist_artists(
             watchlist_artists,
             profile_id=profile_id,
@@ -950,6 +955,7 @@ class WatchlistScanner:
             cancel_check=cancel_check,
             artist_index_offset=artist_index_offset,
             total_artists_override=total_artists_override,
+            apply_global_overrides=apply_global_overrides,
         )
 
     def scan_watchlist_artists(
@@ -962,8 +968,19 @@ class WatchlistScanner:
         cancel_check: Optional[Callable[[], bool]] = None,
         artist_index_offset: int = 0,
         total_artists_override: Optional[int] = None,
+        apply_global_overrides: bool = True,
     ) -> List[ScanResult]:
-        """Scan a list of watchlist artists using the shared web watchlist scan flow."""
+        """Scan a list of watchlist artists using the shared web watchlist scan flow.
+
+        apply_global_overrides: when True (default), per-artist include_*
+        flags are overwritten with the global values if
+        `watchlist.global_override_enabled` is set. This matches the
+        behaviour of `scan_watchlist_profile` so every entry point respects
+        the user's Global Override toggle.
+        """
+        if apply_global_overrides:
+            self._apply_global_watchlist_overrides(watchlist_artists)
+
         scan_results: List[ScanResult] = []
         if not watchlist_artists:
             if scan_state is not None:
