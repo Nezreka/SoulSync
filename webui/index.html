@@ -100,7 +100,6 @@
                             <option value="sync">Sync</option>
                             <option value="search">Search</option>
                             <option value="discover">Discover</option>
-                            <option value="artists">Artists</option>
                             <option value="automations">Automations</option>
                             <option value="active-downloads">Downloads</option>
                             <option value="library">Library</option>
@@ -115,7 +114,6 @@
                             <label><input type="checkbox" value="sync" checked> Sync</label>
                             <label><input type="checkbox" value="search" checked> Search</label>
                             <label><input type="checkbox" value="discover" checked> Discover</label>
-                            <label><input type="checkbox" value="artists" checked> Artists</label>
                             <label><input type="checkbox" value="automations" checked> Automations</label>
                             <label><input type="checkbox" value="active-downloads" checked> Downloads</label>
                             <label><input type="checkbox" value="library" checked> Library</label>
@@ -207,10 +205,6 @@
                 <button class="nav-button" data-page="playlist-explorer">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="12" x2="5" y2="18"/><line x1="12" y1="12" x2="19" y2="18"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="12" x2="12" y2="18"/><circle cx="12" cy="19" r="2"/></svg></span>
                     <span class="nav-text">Explorer</span>
-                </button>
-                <button class="nav-button" data-page="artists">
-                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
-                    <span class="nav-text">Artists</span>
                 </button>
                 <button class="nav-button" data-page="watchlist">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>
@@ -6941,8 +6935,8 @@
                             <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         </div>
                         <h3>Your watchlist is empty</h3>
-                        <p>Add artists from the Artists page to monitor them for new releases.</p>
-                        <button class="watchlist-action-btn watchlist-action-primary" onclick="navigateToPage('artists')">Browse Artists</button>
+                        <p>Use Search to find an artist, then add them to your watchlist from the artist page.</p>
+                        <button class="watchlist-action-btn watchlist-action-primary" onclick="navigateToPage('search')">Open Search</button>
                     </div>
                 </div>
             </div>

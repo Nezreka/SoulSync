@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.45"
+_SOULSYNC_BASE_VERSION = "2.46"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22809,6 +22809,18 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "Artists Sidebar Entry Retired — Use Search Instead",
+                "description": "Cin flagged that 'Artists' in the sidebar read like a library section but was actually a dedicated artist-search page, duplicating what the unified Search already does. The sidebar entry is gone; the same flow now runs through Search",
+                "features": [
+                    "• Sidebar → Search → type an artist's name → click their result → land on the artist detail page (same page Library links to)",
+                    "• 'Browse Artists' button on the empty Watchlist page now opens Search instead of the retired Artists page",
+                    "• 'View artist from Wishlist' button now opens Search pre-filled with the artist's name",
+                    "• Removed 'Artists' from the profile Home Page and Page Access options so new profiles don't point to a missing sidebar entry",
+                    "• Deep link to /artists still resolves so old bookmarks work; the page and its inline search just aren't promoted anywhere",
+                    "• Phase 4b of the Search/Artists unification project",
+                ],
+            },
             {
                 "title": "Artist Links Everywhere Go to the Same Page",
                 "description": "Clicking an artist result in Search, Discover, the API Monitor, or anywhere else now lands on the standalone artist detail page Library already uses — instead of swapping into the Artists page's inline detail view",
