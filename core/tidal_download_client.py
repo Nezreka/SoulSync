@@ -244,6 +244,98 @@ class TidalDownloadClient:
             logger.error(f"Tidal connection check failed: {e}")
             return False
 
+    # Words that distinguish a specific audio variant from the original track.
+    # If any of these appear in a query, the fallback-retry results must also
+    # contain them — otherwise we'd silently downgrade a "(Live)" or
+    # "(Acoustic)" search to the studio version when shortened queries match
+    # too broadly.
+    _QUALIFIER_KEYWORDS = frozenset({
+        'remix', 'mix', 'edit', 'version', 'dub', 'rmx', 'vip', 'cut',
+        'rework', 'bootleg', 'flip',
+        'live', 'concert', 'unplugged', 'acoustic', 'session',
+        'instrumental', 'karaoke', 'demo', 'bonus',
+        'extended', 'radio',
+    })
+
+    @classmethod
+    def _extract_qualifiers(cls, query: str) -> List[str]:
+        """Return the qualifier keywords that appear as whole words in the
+        query (case-insensitive). Word-boundary match prevents false hits like
+        "edit" matching "edition" or "mix" matching "remix"."""
+        if not query:
+            return []
+        found = []
+        q_lower = query.lower()
+        for kw in cls._QUALIFIER_KEYWORDS:
+            if re.search(r'\b' + re.escape(kw) + r'\b', q_lower):
+                found.append(kw)
+        return found
+
+    @staticmethod
+    def _track_name_contains_qualifiers(track_name: str, qualifiers: List[str]) -> bool:
+        """True iff the track name contains every qualifier as a whole word."""
+        if not qualifiers:
+            return True
+        if not track_name:
+            return False
+        name_lower = track_name.lower()
+        for kw in qualifiers:
+            if not re.search(r'\b' + re.escape(kw) + r'\b', name_lower):
+                return False
+        return True
+
+    @staticmethod
+    def _generate_shortened_queries(original: str) -> List[str]:
+        """Generate progressively-shorter variants of a search query.
+
+        Tidal's search engine chokes on long queries with lots of qualifiers
+        (remix credits, edit labels, bonus-disc markers). When the original
+        returns 0 results, we retry with shortened variants in order of
+        conservativeness — the first variant that returns results wins.
+
+        Variants are returned in priority order. Dedupes against the original
+        and against previously-added variants so we never issue duplicate
+        requests.
+        """
+        variants: List[str] = []
+        seen = {original.strip().lower()}
+
+        def _add(candidate: str) -> None:
+            candidate = candidate.strip()
+            if candidate and candidate.lower() not in seen:
+                variants.append(candidate)
+                seen.add(candidate.lower())
+
+        # 1. Strip a trailing parenthetical/bracketed suffix.
+        #    "Song (Radio Edit)" → "Song"
+        _add(re.sub(r'\s*[\(\[][^\)\]]*[\)\]]\s*$', '', original))
+
+        # 2. Strip ALL parentheticals/brackets (mid-string too).
+        #    "Song (feat X) [Remix]" → "Song"
+        _add(re.sub(r'\s*[\(\[][^\)\]]*[\)\]]', ' ', original))
+
+        tokens = original.split()
+
+        # 3. Drop the last token — covers trailing 1-word modifiers
+        #    (e.g. "… Remix", "… Extended").
+        if len(tokens) >= 3:
+            _add(' '.join(tokens[:-1]))
+
+        # 4. Drop the last two tokens.
+        if len(tokens) >= 4:
+            _add(' '.join(tokens[:-2]))
+
+        # 5. Drop the last three tokens — covers "fred v remix" style
+        #    3-word modifiers common in remix/bonus track names.
+        if len(tokens) >= 5:
+            _add(' '.join(tokens[:-3]))
+
+        # 6. Aggressive: keep roughly the first half (rounded up).
+        if len(tokens) >= 7:
+            _add(' '.join(tokens[:len(tokens) // 2 + 1]))
+
+        return variants
+
     async def search(self, query: str, timeout: int = None, progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """
         Search Tidal for tracks (async, Soulseek-compatible interface).
@@ -255,20 +347,116 @@ class TidalDownloadClient:
             logger.warning("Tidal not available for search (not authenticated)")
             return ([], [])
 
+        # Defensive guard — None/empty query would blow up the shortener's
+        # .strip() call. Match the original behaviour (log + empty tuple).
+        if not query or not isinstance(query, str):
+            logger.warning(f"Invalid Tidal search query: {query!r}")
+            return ([], [])
+
         logger.info(f"Searching Tidal for: {query}")
 
+        # Outer try/except preserves the original contract: any unexpected
+        # error returns ([], []) so the caller can fall back to other sources
+        # instead of crashing. Traceback is logged once, not per-attempt.
         try:
+            # Build the retry ladder: original query, then progressively-shortened
+            # variants. Capped at 5 total requests to avoid hammering Tidal on
+            # genuinely-missing tracks, while still allowing enough variants to
+            # cover multi-word trailing modifiers like remix credits.
+            queries_to_try = [query] + self._generate_shortened_queries(query)
+            queries_to_try = queries_to_try[:5]
+
+            # Qualifier-aware safety net: if the original query contains variant
+            # keywords (Live, Remix, Acoustic, Extended, etc.), fallback results
+            # MUST still contain those qualifiers in their track names. Otherwise
+            # a shortened query could silently downgrade "Song (Live)" to the
+            # studio "Song" and the caller would download the wrong variant.
+            required_qualifiers = self._extract_qualifiers(query)
+
+            tidal_tracks: list = []
+            successful_query: Optional[str] = None
+            last_error: Optional[Exception] = None
+            # Tracks whether ANY fallback attempt returned broader matches that
+            # got rejected by the qualifier filter — used to give an accurate
+            # "no qualifier-matching variant" log message at the end instead of
+            # a generic "0 results".
+            any_fallback_filtered_out = False
+
             loop = asyncio.get_event_loop()
+            for attempt_idx, attempt_query in enumerate(queries_to_try):
+                try:
+                    q_copy = attempt_query
 
-            def _search():
-                results = self.session.search(query, models=[tidalapi.media.Track], limit=50)
-                return results.get('tracks', []) if isinstance(results, dict) else []
+                    def _search(q=q_copy):
+                        results = self.session.search(q, models=[tidalapi.media.Track], limit=50)
+                        return results.get('tracks', []) if isinstance(results, dict) else []
 
-            tidal_tracks = await loop.run_in_executor(None, _search)
+                    found = await loop.run_in_executor(None, _search)
+
+                    if found:
+                        # Fallback attempts get qualifier-filtered. We trust the
+                        # original query to return only appropriate matches, but
+                        # shortened queries are more permissive and can return
+                        # wrong-variant tracks (e.g. studio when Live was asked
+                        # for). Drop any result whose title doesn't carry all
+                        # original qualifier words.
+                        is_fallback = attempt_idx > 0
+                        if is_fallback and required_qualifiers:
+                            filtered = [
+                                t for t in found
+                                if self._track_name_contains_qualifiers(getattr(t, 'name', ''), required_qualifiers)
+                            ]
+                            if filtered:
+                                tidal_tracks = filtered
+                                successful_query = attempt_query
+                                logger.info(
+                                    f"Tidal fallback kept {len(filtered)}/{len(found)} tracks "
+                                    f"after qualifier filter {required_qualifiers} for '{attempt_query}'"
+                                )
+                                break
+                            else:
+                                any_fallback_filtered_out = True
+                                logger.debug(
+                                    f"Tidal fallback '{attempt_query}' returned {len(found)} tracks "
+                                    f"but none matched original qualifiers {required_qualifiers} — "
+                                    f"trying next variant"
+                                )
+                                if attempt_idx < len(queries_to_try) - 1:
+                                    await asyncio.sleep(0.1)
+                                continue
+                        else:
+                            tidal_tracks = found
+                            successful_query = attempt_query
+                            break
+
+                    if attempt_idx < len(queries_to_try) - 1:
+                        logger.debug(f"Tidal returned 0 results for '{attempt_query}' — trying shortened variant")
+                        # Small pause so we're not hammering Tidal with rapid retries
+                        await asyncio.sleep(0.1)
+                except Exception as e:
+                    last_error = e
+                    logger.debug(f"Tidal search attempt {attempt_idx + 1} failed: {e}")
 
             if not tidal_tracks:
-                logger.warning(f"No Tidal results for: {query}")
+                if last_error is not None:
+                    import traceback
+                    tb_str = ''.join(traceback.format_exception(
+                        type(last_error), last_error, last_error.__traceback__
+                    ))
+                    logger.error(
+                        f"Tidal search failed after {len(queries_to_try)} attempts: {last_error}\n{tb_str}"
+                    )
+                elif any_fallback_filtered_out:
+                    logger.warning(
+                        f"No Tidal results for '{query}' — fallbacks found broader matches but "
+                        f"none preserved required qualifiers {required_qualifiers}"
+                    )
+                else:
+                    logger.warning(f"No Tidal results for: {query}")
                 return ([], [])
+
+            if successful_query and successful_query != query:
+                logger.info(f"Tidal fallback query succeeded: '{successful_query}' (original: '{query}')")
 
             # Get configured quality for display
             quality_key = config_manager.get('tidal_download.quality', 'lossless')
@@ -286,7 +474,11 @@ class TidalDownloadClient:
             return (track_results, [])
 
         except Exception as e:
-            logger.error(f"Tidal search failed: {e}")
+            # Unhandled error in the retry orchestration itself (not in an
+            # individual attempt, which is already caught above). Preserves
+            # the original contract of returning ([], []) on any failure so
+            # the caller's fallback chain isn't broken.
+            logger.error(f"Tidal search orchestration failed: {e}")
             import traceback
             traceback.print_exc()
             return ([], [])
