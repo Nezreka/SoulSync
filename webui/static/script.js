@@ -67,6 +67,10 @@ let deezerArlPlaylistsLoaded = false;
 
 // --- Beatport Chart State Management (Similar to YouTube/Tidal) ---
 let beatportChartStates = {}; // Key: chart_hash, Value: chart state with phases
+let beatportContentState = {
+    loaded: false,
+    loadingPromise: null
+};
 
 // --- ListenBrainz Playlist State Management (Similar to YouTube/Tidal/Beatport) ---
 let listenbrainzPlaylistStates = {}; // Key: playlist_mbid, Value: playlist state with phases
@@ -2705,19 +2709,6 @@ function initApp() {
     initializeSyncPage();
     initializeWatchlist();
     initializeDownloadManagerToggle();
-
-    // Initialize Beatport rebuild slider if it's the active tab by default
-    const activeRebuildTab = document.querySelector('.beatport-tab-button.active[data-beatport-tab="rebuild"]');
-    if (activeRebuildTab) {
-        console.log('🔄 Initializing default active rebuild tab...');
-        initializeBeatportRebuildSlider();
-        loadBeatportTop10Lists();
-        loadBeatportTop10Releases();
-        initializeBeatportReleasesSlider();
-        initializeBeatportHypePicksSlider();
-        initializeBeatportChartsSlider();
-        initializeBeatportDJSlider();
-    }
 
 
     // Initialize WebSocket connection (falls back to HTTP polling if unavailable)
@@ -10700,9 +10691,6 @@ async function loadInitialData() {
         // Load discover download state
         await hydrateDiscoverDownloadsFromSnapshot();
 
-        // Load Beatport bubble state
-        await hydrateBeatportBubblesFromSnapshot();
-
         // Navigate to user's home page (or dashboard for admin)
         const homePage = getProfileHomePage();
         const urlPage = _getPageFromPath();
@@ -10769,14 +10757,50 @@ async function loadSyncData() {
     // Load YouTube playlists from backend (always refresh to get latest state)
     await loadYouTubePlaylistsFromBackend();
 
-    // Load Beatport charts from backend (always refresh to get latest state)
-    await loadBeatportChartsFromBackend();
-
     // Render saved URL histories for YouTube, Deezer, Spotify Link tabs
     initUrlHistories();
+}
 
-    // Refresh Beatport download bubbles (navigation trigger, like showArtistDownloadsSection in artists page)
-    showBeatportDownloadsSection();
+async function ensureBeatportContentLoaded() {
+    if (beatportContentState.loaded) {
+        showBeatportDownloadsSection();
+        return true;
+    }
+
+    if (beatportContentState.loadingPromise) {
+        return beatportContentState.loadingPromise;
+    }
+
+    beatportContentState.loadingPromise = (async () => {
+        try {
+            console.log('🎧 Lazy-loading Beatport content...');
+
+            await hydrateBeatportBubblesFromSnapshot();
+            await loadBeatportChartsFromBackend();
+
+            initializeBeatportRebuildSlider();
+            initializeBeatportReleasesSlider();
+            initializeBeatportHypePicksSlider();
+            initializeBeatportChartsSlider();
+            initializeBeatportDJSlider();
+            await Promise.all([
+                loadBeatportTop10Lists(),
+                loadBeatportTop10Releases()
+            ]);
+            showBeatportDownloadsSection();
+
+            beatportContentState.loaded = true;
+            console.log('✅ Beatport content loaded');
+            return true;
+        } catch (error) {
+            console.error('❌ Error loading Beatport content:', error);
+            return false;
+        } finally {
+            beatportContentState.loadingPromise = null;
+        }
+    })();
+
+    return beatportContentState.loadingPromise;
 }
 
 async function checkForActiveProcesses() {
@@ -29652,12 +29676,18 @@ function initializeSyncPage() {
                 loadServerPlaylists();
             }
 
-            // Refresh Beatport download bubbles when switching to the Beatport tab
+            // Lazily load Beatport content the first time the Beatport tab is opened
             if (tabId === 'beatport') {
-                showBeatportDownloadsSection();
+                ensureBeatportContentLoaded();
             }
         });
     });
+
+    // If the Beatport tab is already active when Sync initializes, load it now.
+    const activeBeatportTab = document.querySelector('.sync-tab-button.active[data-tab="beatport"]');
+    if (activeBeatportTab) {
+        ensureBeatportContentLoaded();
+    }
 
     // Logic for the Spotify refresh button
     const refreshBtn = document.getElementById('spotify-refresh-btn');
@@ -29727,16 +29757,9 @@ function initializeSyncPage() {
             });
             document.getElementById(`beatport-${tabId}-content`).classList.add('active');
 
-            // Initialize rebuild slider if rebuild tab is selected
+            // Initialize rebuild content lazily when the rebuild tab is selected
             if (tabId === 'rebuild') {
-                initializeBeatportRebuildSlider();
-                loadBeatportTop10Lists();
-                loadBeatportTop10Releases();
-                initializeBeatportReleasesSlider();
-                initializeBeatportHypePicksSlider();
-                initializeBeatportChartsSlider();
-                initializeBeatportDJSlider();
-                showBeatportDownloadsSection();
+                ensureBeatportContentLoaded();
             }
         });
     });
