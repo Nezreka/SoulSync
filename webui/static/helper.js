@@ -3546,18 +3546,21 @@ function closeHelperSearch() {
 // WHAT'S NEW (Phase 6)
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Entries tagged with `unreleased: true` are accumulating under a version label
+// but won't display until the build version catches up. The Search/Artists
+// unification project stays folded here at 2.40 until the whole thing ships.
 const WHATS_NEW = {
     '2.40': [
-        // --- April 24, 2026 — Search & Artists unification ---
-        { date: 'April 24, 2026 — Search & Artists unification' },
-        { title: 'Unified Artist Detail Page', desc: 'Clicking any artist anywhere — Search results, Discover, Watchlist, Stats, Library, API monitor, Wishlist, Media player — now lands on the same standalone /artist-detail page. Before, library artists and metadata-source artists went to two different pages (one inline, one standalone). The backend /api/artist-detail endpoint now accepts an optional ?source= param and falls back to a metadata-source lookup when the local DB lookup misses, so Deezer/Spotify/iTunes/Discogs/Hydrabase/MusicBrainz artists work on the same page as library artists. Stable deep-link URL; source context carried through cleanly', page: 'library' },
-        { title: 'Artists Page Retired — artists.js Deleted', desc: 'The Artists sidebar entry was already retired earlier; this release finishes the job by deleting the inline page itself (4600-line file, 140 HTML lines). Shared helpers the rest of the app depended on (escapeHtml used 229 times, service-status polling, image-colour extraction, download-bubble infrastructure, discography completion checking, enrichment card rendering) were extracted into a new webui/static/shared-helpers.js so other modules keep working. Legacy /artists URL now aliases to /search for bookmark compatibility', page: 'library' },
-        { title: 'Search Source Picker', desc: 'The Search page\'s Enhanced/Basic toggle is replaced by a single "Search from" dropdown at the top — pick All sources (Auto), Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, or Soulseek (raw files). Auto keeps today\'s multi-source fan-out; picking a specific source hits only that provider so there are no more surprise Spotify rate-limit hits from flows that didn\'t need Spotify. "Soulseek" routes to the raw-file search (what "Basic" used to do), so one picker now covers both old modes. Loading text reflects the selected source', page: 'search' },
-        { title: 'Explicit Source Selection on /api/enhanced-search', desc: 'The enhanced-search endpoint now accepts an optional `source` body param (spotify, itunes, deezer, discogs, hydrabase, musicbrainz, auto). When a specific source is chosen, only that provider is queried and db_artists (local library matches) still come back. Cache keys isolate per-source so single-source and multi-source results don\'t collide. Omitted or `auto` preserves the old multi-source fan-out behavior unchanged — nothing breaks for existing callers', page: 'search' },
-        { title: 'Shared Enhanced-Search Fetch Helper', desc: 'Internal refactor — the Search page dropdown and the global search widget now route through one shared enhancedSearchFetch helper in search.js instead of duplicating the POST boilerplate. Zero UX change, but it means any future source-picker tweak only needs wiring in one place', page: 'search' },
-        { title: 'Search Page Renamed to /search', desc: 'The Search page\'s internal id is now "search" instead of the confusing "downloads" (which clashed with the actual Downloads page). Sidebar label unchanged. URL is now /search; /downloads still resolves so old bookmarks keep working. Profile ACL "Page Access" now saves as "search"; existing profiles with "downloads" in allowed_pages still resolve through a legacy-compat check', page: 'search' },
-        { title: 'Embedded Download Manager Removed from Search Page', desc: 'The Search page used to carry a second copy of the Download Manager (active + finished queues, clear/cancel-all buttons) that was hidden by default and duplicated the dedicated Downloads page. That duplicate is gone — toggle button, side-panel HTML, and its 1-second polling loop all removed. About 330 lines of dead code cleaned up. The dedicated Downloads sidebar page is now the single downloads UI', page: 'search' },
-        { title: 'Interactive Help Updated for Unified Search', desc: 'The click-for-help annotations and the "Your First Download" guided tour were rewritten for the new Search page. Stale annotations pointing at removed elements (Basic/Enhanced toggle button, side-panel queues, download-manager controls) are deleted. The first-download tour now runs on /search and opens with the source picker. PAGE_TOUR_MAP accepts both "search" and the legacy "downloads" id so old bookmarks still match a tour. Retired the standalone "Browse Artists" tour', page: 'help' },
+        // --- Search & Artists unification (in progress, not yet released) ---
+        { date: 'Unreleased — Search & Artists unification', unreleased: true },
+        { title: 'Search Source Picker', desc: 'The Search page\'s Enhanced/Basic toggle is replaced by a single "Search from" dropdown at the top — pick All sources (Auto), Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, or Soulseek (raw files). Auto keeps today\'s multi-source fan-out; picking a specific source hits only that provider so there are no more surprise Spotify rate-limit hits from flows that didn\'t need Spotify. "Soulseek" routes to the raw-file search (what "Basic" used to do), so one picker now covers both old modes. Loading text reflects the selected source', page: 'search', unreleased: true },
+        { title: 'Explicit Source Selection on /api/enhanced-search', desc: 'The enhanced-search endpoint now accepts an optional `source` body param (spotify, itunes, deezer, discogs, hydrabase, musicbrainz, auto). When a specific source is chosen, only that provider is queried and db_artists (local library matches) still come back. Cache keys isolate per-source so single-source and multi-source results don\'t collide. Omitted or `auto` preserves the old multi-source fan-out behavior unchanged — nothing breaks for existing callers', page: 'search', unreleased: true },
+        { title: 'Shared Enhanced-Search Fetch Helper', desc: 'Internal refactor — the Search page dropdown and the global search widget now route through one shared enhancedSearchFetch helper in search.js instead of duplicating the POST boilerplate. Zero UX change, but it means any future source-picker tweak only needs wiring in one place', page: 'search', unreleased: true },
+        { title: 'Search Page Renamed to /search', desc: 'The Search page\'s internal id is now "search" instead of the confusing "downloads" (which clashed with the actual Downloads page). Sidebar label unchanged. URL is now /search; /downloads still resolves so old bookmarks keep working. Profile ACL "Page Access" now saves as "search"; existing profiles with "downloads" in allowed_pages still resolve through a legacy-compat check', page: 'search', unreleased: true },
+        { title: 'Embedded Download Manager Removed from Search Page', desc: 'The Search page used to carry a second copy of the Download Manager (active + finished queues, clear/cancel-all buttons) that was hidden by default and duplicated the dedicated Downloads page. That duplicate is gone — toggle button, side-panel HTML, and its 1-second polling loop all removed. About 330 lines of dead code cleaned up. The dedicated Downloads sidebar page is now the single downloads UI', page: 'search', unreleased: true },
+        { title: 'Artists Sidebar Entry Retired — Use Search Instead', desc: 'Cin flagged that "Artists" in the sidebar read like a library section but was actually a dedicated artist-search page, duplicating what the unified Search already does. The sidebar entry is gone. New flow: Sidebar → Search → type artist name → click their result. "Browse Artists" on the empty Watchlist page and "View artist from Wishlist" now open Search pre-filled with the artist\'s name. Removed "Artists" from profile Home Page + Page Access options. Deep link to /artists still resolves so old bookmarks keep working — the page just isn\'t promoted anywhere', page: 'search', unreleased: true },
+        { title: 'Artist Detail Back Button Fallback', desc: 'The back button on the Artists-page inline detail view used to dump users on an empty "Search for an artist..." screen when they arrived from outside the Artists page — a dead end now that Artists isn\'t in the sidebar. If you searched inside the Artists page, back still returns to your results list. Otherwise (arriving from Search, Discover, Watchlist, etc.), back uses the browser history to land you on whichever page you came from. Falls back to the Search page only when there\'s no browser history to go back to (the natural place to find another artist)', page: 'search', unreleased: true },
+        { title: 'Interactive Help Updated for Unified Search', desc: 'The click-for-help annotations and the "Your First Download" guided tour were rewritten for the new Search page. Stale annotations pointing at removed elements (Basic/Enhanced toggle button, side-panel queues, download-manager controls) are deleted. The first-download tour now runs on /search and opens with the source picker. PAGE_TOUR_MAP accepts both "search" and the legacy "downloads" id so old bookmarks still match a tour. Retired the standalone "Browse Artists" tour', page: 'help', unreleased: true },
     ],
     '2.39': [
         // --- April 22, 2026 ---
@@ -3762,7 +3765,13 @@ function _getCurrentVersion() {
 }
 
 function _getLatestWhatsNewVersion() {
-    const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
+    // Only surface entries whose version number is <= the current build. Entries
+    // sitting at higher versions are unreleased work-in-progress and shouldn't
+    // flag as "new" in the helper badge until the build catches up.
+    const buildVer = parseFloat(_getCurrentVersion()) || 2.39;
+    const versions = Object.keys(WHATS_NEW)
+        .filter(v => (parseFloat(v) || 0) <= buildVer)
+        .sort((a, b) => parseFloat(b) - parseFloat(a));
     return versions[0] || '2.39';
 }
 
@@ -3851,8 +3860,11 @@ function _openFullChangelog() {
 }
 
 function _showOlderNotes() {
-    // Cycle to next older version in the what's new panel
-    const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
+    // Cycle to next older version in the what's new panel (skip unreleased entries)
+    const buildVer = parseFloat(_getCurrentVersion()) || 2.39;
+    const versions = Object.keys(WHATS_NEW)
+        .filter(v => (parseFloat(v) || 0) <= buildVer)
+        .sort((a, b) => parseFloat(b) - parseFloat(a));
     const panel = _helperPopover;
     if (!panel) return;
     const currentTitle = panel.querySelector('.helper-popover-title');

@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.40"
+_SOULSYNC_BASE_VERSION = "2.39"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22898,20 +22898,6 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
-            {
-                "title": "Search & Artists Unification",
-                "description": "Cin flagged that SoulSync had grown several overlapping search/browse surfaces (Enhanced vs Basic search, Artists page vs global widget vs Library detail page, sidebar label 'Search' mapping to page id 'downloads'). This release consolidates them",
-                "features": [
-                    "• One Search page in the sidebar with an explicit 'Search from' source picker — All sources (Auto), Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, or Soulseek (raw files). Picking a specific source hits only that provider so there are no more surprise Spotify rate-limit hits",
-                    "• Soulseek folded into the source picker as a selectable option — no more separate Basic/Enhanced toggle",
-                    "• Artists sidebar entry retired — same flow through unified Search. Deep link /artists still resolves (aliased to /search) so bookmarks keep working",
-                    "• One artist detail page for everything. Click an artist anywhere (Library, Search, Discover, Watchlist, Stats, Media player) and land on the same /artist-detail URL. Backend endpoint now accepts a ?source= param and falls back to metadata-source lookup when the artist isn't in the library",
-                    "• Page id renamed from 'downloads' to 'search' — matches the sidebar label and stops clashing with the real Downloads page. /downloads URL still aliases to /search",
-                    "• Embedded Download Manager panel removed from the Search page — the dedicated Downloads page is now the single downloads UI",
-                    "• artists.js (4600 lines) deleted. Shared helpers extracted to webui/static/shared-helpers.js",
-                    "• Interactive help annotations + 'Your First Download' guided tour updated for the new flow",
-                ],
-            },
             {
                 "title": "Fix Wrong-Artist Tracks Silently Downloading",
                 "description": "A critical bug where searching for a track could silently download a completely different artist's song with the same name",
