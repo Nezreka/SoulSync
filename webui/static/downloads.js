@@ -5454,10 +5454,11 @@ const _gsState = {
 function _gsUpdateVisibility() {
     const bar = document.getElementById('gsearch-bar');
     if (!bar) return;
-    // Hide on downloads page where enhanced search already exists
-    const onDownloads = typeof currentPage !== 'undefined' && currentPage === 'downloads';
-    bar.style.display = onDownloads ? 'none' : '';
-    if (onDownloads && _gsState.active) _gsDeactivate();
+    // Hide on the Search page where the unified search already exists. Accept the
+    // legacy 'downloads' id for callers that predate the page rename.
+    const onSearchPage = typeof currentPage !== 'undefined' && (currentPage === 'search' || currentPage === 'downloads');
+    bar.style.display = onSearchPage ? 'none' : '';
+    if (onSearchPage && _gsState.active) _gsDeactivate();
 }
 
 function _gsDeactivate() {
@@ -5866,8 +5867,8 @@ async function _gsClickTrack(artistName, trackName, albumName, trackId, imageUrl
         );
     } catch (e) {
         console.error('Error opening track download:', e);
-        // Fallback: navigate to enhanced search
-        navigateToPage('downloads');
+        // Fallback: navigate to the unified Search page
+        navigateToPage('search');
         setTimeout(() => {
             const input = document.getElementById('enhanced-search-input');
             if (input) { input.value = `${artistName} ${trackName}`.trim(); input.dispatchEvent(new Event('input')); }

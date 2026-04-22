@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.42"
+_SOULSYNC_BASE_VERSION = "2.43"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -320,7 +320,7 @@ def get_spotify_client_for_profile(profile_id=None):
         return spotify_client  # Fall back to global
 
 # Valid page IDs for profile permission validation
-VALID_PAGE_IDS = {'dashboard', 'sync', 'downloads', 'discover', 'artists', 'automations', 'library', 'import', 'settings', 'help'}
+VALID_PAGE_IDS = {'dashboard', 'sync', 'search', 'downloads', 'discover', 'artists', 'automations', 'library', 'import', 'settings', 'help'}
 
 def check_download_permission():
     """Check if current profile has download permission. Returns error response or None if allowed."""
@@ -22809,6 +22809,17 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "Search Page Renamed to /search",
+                "description": "The Search page's internal id is now 'search' instead of 'downloads', which no longer conflicts with the real Downloads page. URL /downloads still works for bookmarks and external links",
+                "features": [
+                    "• Sidebar label unchanged (still reads 'Search') — no visual change",
+                    "• URL now /search; /downloads stays as an alias so no existing link breaks",
+                    "• DOM id renamed to #search-page; all internal references follow",
+                    "• Profile ACL stored as 'search' going forward; existing profiles with 'downloads' in allowed_pages still resolve through a legacy-compat check",
+                    "• Phase 3b of the Search/Artists unification project",
+                ],
+            },
             {
                 "title": "Search Source Picker — Pick Where You're Searching",
                 "description": "The Search page's Enhanced/Basic toggle is replaced by a single 'Search from' dropdown so you can explicitly pick which source to query instead of fanning out to every provider",
