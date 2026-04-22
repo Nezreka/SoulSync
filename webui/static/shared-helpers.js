@@ -3110,14 +3110,20 @@ function createSimilarArtistBubble(artist) {
         bubble.appendChild(genres);
     }
 
-    // Add click handler to navigate to artist detail page
+    // Add click handler — page-aware destination. From the standalone artist-
+    // detail page, navigate to the standalone route. From the inline Artists
+    // page, swap the inline view via selectArtistForDetail.
     bubble.addEventListener('click', () => {
         console.log(`🎵 Clicked similar artist: ${artist.name} (ID: ${artist.id})`);
-        // Navigate to this artist's detail page (same as clicking from search results)
-        selectArtistForDetail(
-            artist,
-            artist.source ? { source: artist.source, plugin: artist.plugin } : {}
-        );
+        const onStandalone = !!document.querySelector('#artist-detail-page.active');
+        if (onStandalone && typeof navigateToArtistDetail === 'function') {
+            navigateToArtistDetail(artist.id, artist.name, artist.source || null);
+        } else if (typeof selectArtistForDetail === 'function') {
+            selectArtistForDetail(
+                artist,
+                artist.source ? { source: artist.source, plugin: artist.plugin } : {}
+            );
+        }
     });
 
     return bubble;
