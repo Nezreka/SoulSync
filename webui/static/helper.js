@@ -3602,6 +3602,7 @@ const WHATS_NEW = {
     '2.38': [
         // --- April 21, 2026 (late) ---
         { date: 'April 21, 2026 (late)' },
+        { title: 'Fix Missing Cover Art on Manually Fixed Discovery Tracks', desc: 'The cache matched_data built by the fix modal dropped the image_url and album.images fields when album came back as a bare string (common for Deezer/iTunes search results). Result: re-discovery used the cached match but downloads showed no artwork. Cache writes now carry image_url through to album.images + top-level matched_data, matching what the in-memory state already did. Re-fix the track to refresh its cache entry (INSERT OR REPLACE)', page: 'sync' },
         { title: 'Fix Manual Discovery Fixes Lost After Restart (Non-Spotify Users)', desc: 'When you clicked Fix on a discovery track and picked a manual match, the cache save hardcoded the provider as "spotify" regardless of your configured primary metadata source. On re-scan, the worker queried the cache with your actual primary (Deezer, iTunes, Discogs, Hydrabase) and missed the fix entirely. All 5 save sites (Tidal / Deezer / Spotify Public / YouTube / Discovery Pool) now use the active primary source, matching what the automatic workers already do', page: 'sync' },
     ],
     '2.37': [

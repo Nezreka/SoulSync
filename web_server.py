@@ -34562,8 +34562,23 @@ def update_tidal_discovery_match():
             artists_list = spotify_track['artists']
             if isinstance(artists_list, list):
                 artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
+            # Preserve cover image info so the download pipeline can find
+            # artwork when this cached match is used later. The fix modal
+            # sends image_url at the top level; search results often return
+            # album as a bare string, which previously dropped the artwork.
+            image_url = spotify_track.get('image_url') or ''
             album_raw = spotify_track.get('album', '')
-            album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
+            if isinstance(album_raw, dict):
+                album_obj = dict(album_raw)
+                if image_url and not album_obj.get('image_url'):
+                    album_obj['image_url'] = image_url
+                if image_url and not album_obj.get('images'):
+                    album_obj['images'] = [{'url': image_url}]
+            else:
+                album_obj = {'name': album_raw or ''}
+                if image_url:
+                    album_obj['image_url'] = image_url
+                    album_obj['images'] = [{'url': image_url}]
 
             matched_data = {
                 'id': spotify_track['id'],
@@ -34571,6 +34586,7 @@ def update_tidal_discovery_match():
                 'artists': artists_list,
                 'album': album_obj,
                 'duration_ms': spotify_track.get('duration_ms', 0),
+                'image_url': image_url,
                 'source': 'spotify',
             }
             cache_db = get_database()
@@ -36228,8 +36244,23 @@ def update_deezer_discovery_match():
             artists_list = spotify_track['artists']
             if isinstance(artists_list, list):
                 artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
+            # Preserve cover image info so the download pipeline can find
+            # artwork when this cached match is used later. The fix modal
+            # sends image_url at the top level; search results often return
+            # album as a bare string, which previously dropped the artwork.
+            image_url = spotify_track.get('image_url') or ''
             album_raw = spotify_track.get('album', '')
-            album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
+            if isinstance(album_raw, dict):
+                album_obj = dict(album_raw)
+                if image_url and not album_obj.get('image_url'):
+                    album_obj['image_url'] = image_url
+                if image_url and not album_obj.get('images'):
+                    album_obj['images'] = [{'url': image_url}]
+            else:
+                album_obj = {'name': album_raw or ''}
+                if image_url:
+                    album_obj['image_url'] = image_url
+                    album_obj['images'] = [{'url': image_url}]
 
             matched_data = {
                 'id': spotify_track['id'],
@@ -36237,6 +36268,7 @@ def update_deezer_discovery_match():
                 'artists': artists_list,
                 'album': album_obj,
                 'duration_ms': spotify_track.get('duration_ms', 0),
+                'image_url': image_url,
                 'source': 'spotify',
             }
             cache_db = get_database()
@@ -37077,8 +37109,23 @@ def update_spotify_public_discovery_match():
             artists_list = spotify_track['artists']
             if isinstance(artists_list, list):
                 artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
+            # Preserve cover image info so the download pipeline can find
+            # artwork when this cached match is used later. The fix modal
+            # sends image_url at the top level; search results often return
+            # album as a bare string, which previously dropped the artwork.
+            image_url = spotify_track.get('image_url') or ''
             album_raw = spotify_track.get('album', '')
-            album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
+            if isinstance(album_raw, dict):
+                album_obj = dict(album_raw)
+                if image_url and not album_obj.get('image_url'):
+                    album_obj['image_url'] = image_url
+                if image_url and not album_obj.get('images'):
+                    album_obj['images'] = [{'url': image_url}]
+            else:
+                album_obj = {'name': album_raw or ''}
+                if image_url:
+                    album_obj['image_url'] = image_url
+                    album_obj['images'] = [{'url': image_url}]
 
             matched_data = {
                 'id': spotify_track['id'],
@@ -37086,6 +37133,7 @@ def update_spotify_public_discovery_match():
                 'artists': artists_list,
                 'album': album_obj,
                 'duration_ms': spotify_track.get('duration_ms', 0),
+                'image_url': image_url,
                 'source': 'spotify',
             }
             cache_db = get_database()
@@ -38030,8 +38078,23 @@ def update_youtube_discovery_match():
             artists_list = spotify_track['artists']
             if isinstance(artists_list, list):
                 artists_list = [a if isinstance(a, str) else a.get('name', '') for a in artists_list]
+            # Preserve cover image info so the download pipeline can find
+            # artwork when this cached match is used later. The fix modal
+            # sends image_url at the top level; search results often return
+            # album as a bare string, which previously dropped the artwork.
+            image_url = spotify_track.get('image_url') or ''
             album_raw = spotify_track.get('album', '')
-            album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
+            if isinstance(album_raw, dict):
+                album_obj = dict(album_raw)
+                if image_url and not album_obj.get('image_url'):
+                    album_obj['image_url'] = image_url
+                if image_url and not album_obj.get('images'):
+                    album_obj['images'] = [{'url': image_url}]
+            else:
+                album_obj = {'name': album_raw or ''}
+                if image_url:
+                    album_obj['image_url'] = image_url
+                    album_obj['images'] = [{'url': image_url}]
 
             matched_data = {
                 'id': spotify_track['id'],
@@ -38039,6 +38102,7 @@ def update_youtube_discovery_match():
                 'artists': artists_list,
                 'album': album_obj,
                 'duration_ms': spotify_track.get('duration_ms', 0),
+                'image_url': image_url,
                 'source': 'spotify',
             }
             cache_db = get_database()
@@ -49757,11 +49821,23 @@ def fix_discovery_pool_track():
         # Build matched_data in the same format as the discovery flow
         artists = spotify_track.get('artists', [])
         album_raw = spotify_track.get('album', '')
-        album_obj = album_raw if isinstance(album_raw, dict) else {'name': album_raw or ''}
         image_url = spotify_track.get('image_url', '')
         if not image_url and isinstance(album_raw, dict):
             images = album_raw.get('images', [])
             image_url = images[0].get('url', '') if images else ''
+        # Ensure album carries the artwork too — download pipeline checks
+        # album.images / album.image_url when extracting cover art.
+        if isinstance(album_raw, dict):
+            album_obj = dict(album_raw)
+            if image_url and not album_obj.get('image_url'):
+                album_obj['image_url'] = image_url
+            if image_url and not album_obj.get('images'):
+                album_obj['images'] = [{'url': image_url}]
+        else:
+            album_obj = {'name': album_raw or ''}
+            if image_url:
+                album_obj['image_url'] = image_url
+                album_obj['images'] = [{'url': image_url}]
 
         matched_data = {
             'id': spotify_track.get('id', ''),
