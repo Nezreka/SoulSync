@@ -65523,6 +65523,11 @@ async function _loadCacheHealthStats(dashboard) {
         const healthScore = stats.junk_entities === 0 && stats.stale_mb_nulls === 0 ? 'healthy' : stats.junk_entities > 50 ? 'poor' : 'fair';
         const healthLabel = healthScore === 'healthy' ? 'Healthy' : healthScore === 'fair' ? 'Needs Cleanup' : 'Needs Attention';
 
+        // Remove any existing cache-health bar before appending — prevents
+        // stacking when multiple dashboard refreshes race and each resolved
+        // fetch appends its own section.
+        dashboard.querySelectorAll('.repair-cache-health').forEach(el => el.remove());
+
         const section = document.createElement('div');
         section.className = 'repair-cache-health';
         section.innerHTML = `
