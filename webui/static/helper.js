@@ -3599,6 +3599,11 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
+    '2.42': [
+        // --- April 23, 2026 ---
+        { date: 'April 23, 2026' },
+        { title: 'Search Source Picker — Pick Where You\'re Searching', desc: 'The Search page\'s Enhanced/Basic toggle is replaced by a single "Search from" dropdown at the top. Choose All sources (Auto — keeps today\'s multi-source fan-out), Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, or Soulseek (raw files). Picking a specific source hits only that provider — no more surprise Spotify rate-limit hits from flows that didn\'t need Spotify. "Soulseek" routes to the raw-file search (what "Basic" used to do), so one picker now covers both modes. Loading text reflects the selected source (e.g., "Searching across Apple Music..."). Phase 3 of the Search/Artists unification project', page: 'downloads' },
+    ],
     '2.41': [
         // --- April 22, 2026 (late night) ---
         { date: 'April 22, 2026 (late night)' },

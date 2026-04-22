@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.41"
+_SOULSYNC_BASE_VERSION = "2.42"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22809,6 +22809,19 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "Search Source Picker — Pick Where You're Searching",
+                "description": "The Search page's Enhanced/Basic toggle is replaced by a single 'Search from' dropdown so you can explicitly pick which source to query instead of fanning out to every provider",
+                "features": [
+                    "• Choose from: All sources (Auto), Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, or Soulseek (raw files)",
+                    "• Auto keeps today's multi-source fan-out behavior — no change if you want the current results",
+                    "• Picking a specific source hits only that provider — no more surprise Spotify rate-limit hits from flows that didn't need Spotify",
+                    "• 'Soulseek' routes to the raw-file search (what 'Basic' used to do) — one picker now covers both modes",
+                    "• Loading text shows the selected source (e.g., 'Searching across Apple Music and your library...')",
+                    "• Phase 3 of the Search/Artists unification project — builds on the shared fetch helper from 2.41",
+                ],
+                "usage_note": "Sidebar → Search → pick a source in the 'Search from' dropdown above the search bar."
+            },
             {
                 "title": "Shared Enhanced-Search Fetch Helper",
                 "description": "Internal refactor — the Search page and the global search widget now route through one shared fetch helper, so future source-picker work only needs wiring in one place",

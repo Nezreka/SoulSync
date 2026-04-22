@@ -1869,18 +1869,21 @@
                             </div>
                         </div>
 
-                        <!-- Search Mode Toggle -->
-                        <div class="search-mode-toggle-container">
-                            <div class="search-mode-toggle" data-active="enhanced">
-                                <button class="search-mode-btn active" data-mode="enhanced">
-                                    <span class="mode-icon">✨</span>
-                                    <span class="mode-label">Enhanced Search</span>
-                                </button>
-                                <button class="search-mode-btn" data-mode="basic">
-                                    <span class="mode-icon">🔍</span>
-                                    <span class="mode-label">Basic Search</span>
-                                </button>
-                                <div class="toggle-slider"></div>
+                        <!-- Search Source Picker (replaces Enhanced/Basic toggle) -->
+                        <div class="search-source-picker-container">
+                            <label for="search-source-select" class="search-source-picker-label">Search from</label>
+                            <div class="search-source-picker-wrapper">
+                                <select id="search-source-select" class="search-source-picker-select">
+                                    <option value="auto" selected>All sources (Auto)</option>
+                                    <option value="spotify">Spotify</option>
+                                    <option value="itunes">Apple Music</option>
+                                    <option value="deezer">Deezer</option>
+                                    <option value="discogs">Discogs</option>
+                                    <option value="hydrabase">Hydrabase</option>
+                                    <option value="musicbrainz">MusicBrainz</option>
+                                    <option value="soulseek">Soulseek (raw files)</option>
+                                </select>
+                                <span class="search-source-picker-caret">▾</span>
                             </div>
                         </div>
 
