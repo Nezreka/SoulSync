@@ -3599,6 +3599,11 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
+    '2.46': [
+        // --- April 23, 2026 (late night) ---
+        { date: 'April 23, 2026 (late night)' },
+        { title: 'Artists Sidebar Entry Retired — Use Search Instead', desc: 'Cin flagged that "Artists" in the sidebar read like a library section but was actually a dedicated artist-search page, duplicating what the unified Search already does. The sidebar entry is gone. New flow: Sidebar → Search → type artist name → click their result → land on the artist detail page (same page Library links to). "Browse Artists" on the empty Watchlist page and "View artist from Wishlist" now open Search pre-filled with the artist\'s name. Removed "Artists" from profile Home Page + Page Access options. Deep link to /artists still resolves so old bookmarks keep working — the page just isn\'t promoted anywhere. Phase 4b of the Search/Artists unification project', page: 'search' },
+    ],
     '2.45': [
         // --- April 23, 2026 (night) ---
         { date: 'April 23, 2026 (night)' },

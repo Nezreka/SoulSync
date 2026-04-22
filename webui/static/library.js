@@ -2021,7 +2021,7 @@ async function openDiscographyModal() {
     }
 
     if (!artist || !discography) {
-        showToast('No discography found. Try searching this artist on the Artists page instead.', 'error');
+        showToast('No discography found. Try searching this artist from the Search page instead.', 'error');
         return;
     }
 
