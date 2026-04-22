@@ -2488,6 +2488,10 @@ function _adlRenderBatchPanel() {
         const hasFailed = batch.failed > 0;
         const isTerminal = batch.phase === 'complete' || batch.phase === 'cancelled' || batch.phase === 'error';
         const isActive = batch.phase === 'downloading' && batch.active > 0;
+        const isAnalyzing = batch.phase === 'analysis';
+        const analysisTotal = batch.analysis_total || 0;
+        const analysisProcessed = batch.analysis_processed || 0;
+        const analysisPct = analysisTotal > 0 ? Math.round((analysisProcessed / analysisTotal) * 100) : 0;
 
         // Fade progress for completing batches
         let fadeStyle = '';
@@ -2511,7 +2515,7 @@ function _adlRenderBatchPanel() {
             phaseText = 'Queued';
             phaseIcon = '<span style="color:#eab308;margin-right:4px">⏳</span>';
         } else if (batch.phase === 'analysis') {
-            phaseText = 'Analyzing...';
+            phaseText = analysisTotal > 0 ? `Analyzing ${analysisProcessed}/${analysisTotal}...` : 'Analyzing...';
             phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
         } else if (batch.phase === 'downloading') {
             phaseText = `${batch.completed}/${total} tracks`;
@@ -2610,7 +2614,7 @@ function _adlRenderBatchPanel() {
                 </div>
             </div>
             <div class="adl-batch-progress">
-                <div class="adl-batch-progress-fill${hasFailed ? ' has-failed' : ''}" style="width:${pct}%"></div>
+                <div class="adl-batch-progress-fill${hasFailed ? ' has-failed' : ''}" style="width:${isAnalyzing ? analysisPct : pct}%"></div>
             </div>
             <div class="adl-batch-tracks">${tracksHtml}</div>
         </div>`;

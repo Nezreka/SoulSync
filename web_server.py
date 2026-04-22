@@ -31444,6 +31444,7 @@ def get_all_downloads_unified():
                     'phase': batch.get('phase', 'unknown'),
                     'total': len(queue),
                     'analysis_total': batch.get('analysis_total', len(queue)),
+                    'analysis_processed': batch.get('analysis_processed', 0),
                     'completed': sum(1 for s in statuses if s in ('completed', 'skipped', 'already_owned')),
                     'failed': sum(1 for s in statuses if s in ('failed', 'not_found', 'cancelled')),
                     'active': sum(1 for s in statuses if s in ('downloading', 'searching', 'post_processing')),
