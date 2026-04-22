@@ -8031,7 +8031,24 @@
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <script src="{{ url_for('static', filename='setup-wizard.js') }}"></script>
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <!-- Split modules (was: script.js) — core.js must load first, init.js last -->
+    <script src="{{ url_for('static', filename='core.js') }}"></script>
+    <script src="{{ url_for('static', filename='media-player.js') }}"></script>
+    <script src="{{ url_for('static', filename='settings.js') }}"></script>
+    <script src="{{ url_for('static', filename='search.js') }}"></script>
+    <script src="{{ url_for('static', filename='sync-spotify.js') }}"></script>
+    <script src="{{ url_for('static', filename='downloads.js') }}"></script>
+    <script src="{{ url_for('static', filename='wishlist-tools.js') }}"></script>
+    <script src="{{ url_for('static', filename='sync-services.js') }}"></script>
+    <script src="{{ url_for('static', filename='artists.js') }}"></script>
+    <script src="{{ url_for('static', filename='api-monitor.js') }}"></script>
+    <script src="{{ url_for('static', filename='library.js') }}"></script>
+    <script src="{{ url_for('static', filename='beatport-ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='discover.js') }}"></script>
+    <script src="{{ url_for('static', filename='enrichment.js') }}"></script>
+    <script src="{{ url_for('static', filename='stats-automations.js') }}"></script>
+    <script src="{{ url_for('static', filename='pages-extra.js') }}"></script>
+    <script src="{{ url_for('static', filename='init.js') }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->
     <!-- Global Search Bar — Spotlight-style search from anywhere -->
     <div class="gsearch-bar" id="gsearch-bar">
