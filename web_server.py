@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.37"
+_SOULSYNC_BASE_VERSION = "2.38"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22657,6 +22657,15 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "Manual Discovery Fixes Persist Across Restart",
+                "description": "When you manually fix a discovery match, the fix is now saved under your active metadata source instead of always 'spotify' — so Deezer/iTunes/Discogs/Hydrabase users' fixes actually survive restart and re-scan",
+                "features": [
+                    "• Affected Tidal, Deezer, Spotify Public, YouTube, and Discovery Pool manual fixes",
+                    "• Symmetric with how the auto-discovery worker saves — no more mismatch",
+                    "• Existing Spotify-primary users unaffected (the hardcoded value matched their source)",
+                ],
+            },
+            {
                 "title": "Watchlist Content Filters Fixed",
                 "description": "Global Override settings and live-version detection now behave the way the UI implies",
                 "features": [
@@ -34566,7 +34575,7 @@ def update_tidal_discovery_match():
             }
             cache_db = get_database()
             cache_db.save_discovery_cache_match(
-                cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
+                cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
                 original_name, original_artist
             )
             logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
@@ -36232,7 +36241,7 @@ def update_deezer_discovery_match():
             }
             cache_db = get_database()
             cache_db.save_discovery_cache_match(
-                cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
+                cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
                 original_name, original_artist
             )
             logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
@@ -37081,7 +37090,7 @@ def update_spotify_public_discovery_match():
             }
             cache_db = get_database()
             cache_db.save_discovery_cache_match(
-                cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
+                cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
                 original_name, original_artist
             )
             logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
@@ -38034,7 +38043,7 @@ def update_youtube_discovery_match():
             }
             cache_db = get_database()
             cache_db.save_discovery_cache_match(
-                cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
+                cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
                 original_name, original_artist
             )
             logger.info(f"Manual fix saved to discovery cache: {original_name} by {original_artist}")
@@ -49784,7 +49793,7 @@ def fix_discovery_pool_track():
             if row:
                 cache_key = _get_discovery_cache_key(row['track_name'], row['artist_name'])
                 database.save_discovery_cache_match(
-                    cache_key[0], cache_key[1], 'spotify', 1.0, matched_data,
+                    cache_key[0], cache_key[1], _get_active_discovery_source(), 1.0, matched_data,
                     row['track_name'], row['artist_name']
                 )
         except Exception:
