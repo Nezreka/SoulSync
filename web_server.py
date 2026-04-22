@@ -11316,11 +11316,93 @@ def test_artist_endpoint(artist_id):
         "message": f"Test endpoint working for artist ID: {artist_id}"
     })
 
+_SOURCE_ONLY_ARTIST_SOURCES = frozenset({
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz',
+})
+
+
+def _build_source_only_artist_detail(artist_id, artist_name, source):
+    """Synthesize an artist-detail response from a single metadata source for an
+    artist that isn't in the local library. Used when `/api/artist-detail/<id>`
+    is called with a `source` param and the library DB lookup misses."""
+    from core.metadata_service import (
+        MetadataLookupOptions,
+        get_artist_detail_discography as _get_artist_detail_discography,
+        get_artist_image_url as _get_artist_image_url,
+    )
+
+    # Resolve artist image via the same helper that powers /api/artist/<id>/image
+    image_url = None
+    try:
+        image_url = _get_artist_image_url(artist_id, source_override=source)
+    except Exception as e:
+        logger.debug(f"Artist image lookup failed for {source}:{artist_id}: {e}")
+
+    # Fetch discography from the specified source, with source_override pinned so
+    # the fallback chain starts with the caller-requested provider.
+    discography_result = _get_artist_detail_discography(
+        artist_id,
+        artist_name=artist_name or artist_id,
+        options=MetadataLookupOptions(
+            source_override=source,
+            allow_fallback=True,
+            skip_cache=False,
+            max_pages=0,
+            limit=50,
+            artist_source_ids={source: artist_id},
+        ),
+    )
+
+    if not discography_result.get('success'):
+        return jsonify({
+            "success": False,
+            "error": discography_result.get('error', 'Could not load discography'),
+            "source": source,
+        }), 404
+
+    artist_info = {
+        "id": artist_id,
+        "name": artist_name or artist_id,
+        "image_url": image_url,
+        "server_source": None,  # not in library
+        "genres": [],
+    }
+
+    logger.info(
+        f"Source-only artist-detail: {artist_info['name']} from {source} — "
+        f"albums={len(discography_result.get('albums', []))}, "
+        f"eps={len(discography_result.get('eps', []))}, "
+        f"singles={len(discography_result.get('singles', []))}"
+    )
+
+    return jsonify({
+        "success": True,
+        "artist": artist_info,
+        "discography": discography_result,
+        "enrichment_coverage": {},
+    })
+
+
 @app.route('/api/artist-detail/<artist_id>')
 def get_artist_detail(artist_id):
-    """Get artist detail data"""
+    """Get artist detail data.
+
+    For library artists, `artist_id` is the local DB primary key and the full
+    library-aware path runs (owned releases + merged source discography + per-
+    service enrichment coverage).
+
+    For source artists (Spotify/Deezer/iTunes/etc. that aren't in the library
+    yet), pass `?source=<source>&name=<artist_name>` and the endpoint synthesizes
+    a response directly from the metadata source — no owned releases, just name +
+    image + discography so the artist-detail page can still render.
+    """
     try:
-        logger.info(f"Getting artist detail for ID: {artist_id}")
+        source_param = (request.args.get('source', '') or '').strip().lower()
+        artist_name_arg = (request.args.get('name', '') or '').strip()
+        logger.info(
+            f"Getting artist detail for ID: {artist_id} "
+            f"(source={source_param or 'library'})"
+        )
 
         # Get database instance
         database = get_database()
@@ -11329,6 +11411,13 @@ def get_artist_detail(artist_id):
         db_result = database.get_artist_discography(artist_id)
 
         if not db_result.get('success'):
+            # Library lookup failed. If a metadata source was specified, fall back
+            # to a source-only response so the page can render a non-library artist.
+            if source_param in _SOURCE_ONLY_ARTIST_SOURCES:
+                return _build_source_only_artist_detail(
+                    artist_id, artist_name_arg, source_param
+                )
+
             logger.error(f"Database returned error: {db_result}")
             return jsonify({
                 "success": False,
