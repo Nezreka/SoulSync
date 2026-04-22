@@ -27,9 +27,11 @@ _ROOT = Path(__file__).resolve().parent.parent
 _STATIC = _ROOT / "webui" / "static"
 _INDEX = _ROOT / "webui" / "index.html"
 
-# The 17 modules that replaced script.js (order matters for first/last checks)
+# The 17 modules that replaced script.js + shared-helpers.js extracted from
+# artists.js (order matters for first/last checks)
 SPLIT_MODULES = [
     "core.js",
+    "shared-helpers.js",
     "media-player.js",
     "settings.js",
     "search.js",
