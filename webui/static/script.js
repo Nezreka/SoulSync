@@ -5677,7 +5677,7 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$disc', '$discnum', '$year', '$quality'],
+        album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality'],
         single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$title', '$track', '$year', '$quality'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
         video: ['$artist', '$artistletter', '$title', '$year']
@@ -50316,6 +50316,7 @@ async function showReorganizeModal(albumId) {
         { var: '$title', desc: 'Track title', example: 'Track Name' },
         { var: '$track', desc: 'Track number (zero-padded)', example: '01' },
         { var: '$disc', desc: 'Disc number (filename only)', example: '01' },
+        { var: '$cdnum', desc: 'CD label — "CD01" on multi-disc, empty otherwise', example: 'CD01' },
         { var: '$year', desc: 'Release year', example: albumData && albumData.year ? String(albumData.year) : '2024' },
         { var: '$quality', desc: 'Audio quality (filename only)', example: 'FLAC 16bit/44kHz' },
     ];
