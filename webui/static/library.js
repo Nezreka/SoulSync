@@ -764,8 +764,21 @@ async function loadArtistDetailData(artistId, artistName) {
     // Don't update header until data loads to avoid showing stale data
 
     try {
-        // Call API to get artist discography data
-        const response = await fetch(`/api/artist-detail/${artistId}`);
+        // Call API to get artist discography data. If this artist came from a
+        // metadata source (not the library), pass source + name so the backend
+        // can synthesize a response from that source instead of 404ing on the
+        // local DB lookup.
+        const params = new URLSearchParams();
+        if (artistDetailPageState.currentArtistSource) {
+            params.set('source', artistDetailPageState.currentArtistSource);
+        }
+        if (artistName) {
+            params.set('name', artistName);
+        }
+        const qs = params.toString();
+        const response = await fetch(
+            `/api/artist-detail/${encodeURIComponent(artistId)}${qs ? '?' + qs : ''}`
+        );
 
         if (!response.ok) {
             throw new Error(`Failed to load artist data: ${response.statusText}`);
