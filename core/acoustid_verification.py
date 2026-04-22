@@ -296,9 +296,14 @@ class AcoustIDVerification:
                 logger.info(f"AcoustID verification PASSED - {msg}")
                 return VerificationResult.PASS, msg
 
-            # Title matches but artist doesn't — could be a cover or collab, skip
+            # Title matches but artist doesn't — could be a cover/collab OR a
+            # genuinely different track with the same name. Distinguish the
+            # two by checking whether the expected artist appears anywhere in
+            # AcoustID's returned recordings.
             if title_sim >= TITLE_MATCH_THRESHOLD and artist_sim < ARTIST_MATCH_THRESHOLD:
-                # Check if the expected artist appears anywhere in the AcoustID results
+                # First: if the expected artist is present in ANY recording's
+                # metadata for this fingerprint, it's likely the right track
+                # (AcoustID's "best" match just picked the wrong variant).
                 for rec in recordings:
                     if _similarity(expected_artist_name, rec.get('artist', '')) >= ARTIST_MATCH_THRESHOLD:
                         msg = (
@@ -308,10 +313,30 @@ class AcoustIDVerification:
                         logger.info(f"AcoustID verification PASSED (secondary match) - {msg}")
                         return VerificationResult.PASS, msg
 
+                # Expected artist wasn't found anywhere. Decide between:
+                #   - FAIL: clear mismatch, e.g. "Tom Walker" (sim ~0.2) when
+                #     expecting "Maduk" — different song with same name
+                #   - SKIP: ambiguous, e.g. collab / alt credit / formatting
+                #     difference (sim 0.3-0.6)
+                #
+                # The 0.3 cutoff catches hard mismatches while preserving the
+                # benefit of the doubt for borderline artist formatting.
+                CLEAR_MISMATCH_THRESHOLD = 0.3
+                if artist_sim < CLEAR_MISMATCH_THRESHOLD:
+                    msg = (
+                        f"Audio mismatch: file identified as '{matched_title}' by '{matched_artist}', "
+                        f"expected '{expected_track_name}' by '{expected_artist_name}' "
+                        f"(title={title_sim:.0%}, artist={artist_sim:.0%}) — "
+                        f"expected artist not found in any AcoustID recording"
+                    )
+                    logger.warning(f"AcoustID verification FAILED (clear artist mismatch) - {msg}")
+                    return VerificationResult.FAIL, msg
+
                 msg = (
                     f"Title matches but artist unclear: "
                     f"AcoustID='{matched_title}' by '{matched_artist}', "
-                    f"expected '{expected_track_name}' by '{expected_artist_name}'"
+                    f"expected '{expected_track_name}' by '{expected_artist_name}' "
+                    f"(artist_sim={artist_sim:.0%} — ambiguous, could be cover/collab)"
                 )
                 logger.info(f"AcoustID verification SKIPPED - {msg}")
                 return VerificationResult.SKIP, msg

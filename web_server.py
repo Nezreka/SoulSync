@@ -37,7 +37,7 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.38"
+_SOULSYNC_BASE_VERSION = "2.39"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -22712,6 +22712,27 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "Fix Wrong-Artist Tracks Silently Downloading",
+                "description": "A critical bug where searching for a track could silently download a completely different artist's song with the same name",
+                "features": [
+                    "• Example: searching 'Maduk — Leave A Light On' on Tidal was downloading Tom Walker's unrelated song of the same name, then embedding Maduk's metadata into Tom Walker's audio",
+                    "• Root cause 1: candidate artist gate used `< 0.4` similarity but Maduk/Tom Walker scored exactly 0.400, slipping past the fencepost — raised to `< 0.5`",
+                    "• Root cause 2: AcoustID verification returned SKIP (accept) instead of FAIL (quarantine) when title matched but artist was clearly different — now FAILs when artist similarity is below 0.3",
+                    "• Preserves SKIP for the ambiguous 0.3–0.6 range (covers, collabs, formatting differences) so legitimate tracks aren't falsely quarantined",
+                    "• Both pre-download candidate validation AND post-download verification are now fixed — defense in depth",
+                ],
+            },
+            {
+                "title": "Tidal Search Falls Back on Long Queries",
+                "description": "Tidal's search chokes on long remix-credit queries — now retries with progressively-shortened variants when the original returns 0 results",
+                "features": [
+                    "• Example: 'maduk transformations remixed fire away fred v remix' returned 0; now falls back to shorter queries until Tidal finds the track",
+                    "• Up to 4 shortened variants tried, capped total 5 requests, 100ms between attempts",
+                    "• Qualifier-safe: Live/Remix/Acoustic/Extended searches only accept fallback results that still contain the qualifier — studio version never replaces a '(Live)' request",
+                    "• Returns empty if no variant preserves qualifiers — same outcome as before",
+                ],
+            },
+            {
                 "title": "Manual Discovery Fixes Persist Across Restart",
                 "description": "When you manually fix a discovery match, the fix is now saved under your active metadata source instead of always 'spotify' — so Deezer/iTunes/Discogs/Hydrabase users' fixes actually survive restart and re-scan",
                 "features": [
@@ -27779,7 +27800,17 @@ def get_valid_candidates(results, spotify_track, query):
                         break
                     else:
                         _best_artist = max(_best_artist, SequenceMatcher(None, _ea_norm, _cand_artist).ratio())
-                if _best_artist < 0.4 and confidence < 0.85:
+                # Raised from 0.4 → 0.5 to close a fencepost bug: SequenceMatcher
+                # returns exactly 0.400 for "maduk" vs "tom walker" (5 chars vs
+                # 10 chars with 2 coincidental char matches), which bypassed the
+                # strict `< 0.4` check and let Tom Walker through as a candidate
+                # for a Maduk track. The word-boundary containment check above
+                # already short-circuits legitimate formatting variations
+                # ("Beatles"/"The Beatles", "Maduk"/"Maduk feat. X") to sim=1.0,
+                # so falling to SequenceMatcher means the strings are genuinely
+                # different. 0.5 gives a safer buffer without blocking real
+                # matches that would have scored above 0.85 anyway.
+                if _best_artist < 0.5 and confidence < 0.85:
                     continue
 
             r.confidence = confidence
@@ -27799,7 +27830,7 @@ def get_valid_candidates(results, spotify_track, query):
                 logger.warning(f"[{source_label}] No streaming results passed validation — falling through to filename matching")
                 # YouTube artist data is unreliable, allow fallback to filename-based matching
             else:
-                logger.warning(f"[{source_label}] No streaming results passed validation (threshold: 0.60, artist gate: 0.40) — rejecting all candidates")
+                logger.warning(f"[{source_label}] No streaming results passed validation (threshold: 0.60, artist gate: 0.50) — rejecting all candidates")
                 return []  # Tidal/Qobuz/HiFi/Deezer have structured metadata; don't fall back to filename matching
 
     # Uses the existing, powerful matching engine for scoring (Soulseek P2P results)

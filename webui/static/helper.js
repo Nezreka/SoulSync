@@ -3599,6 +3599,12 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const WHATS_NEW = {
+    '2.39': [
+        // --- April 22, 2026 ---
+        { date: 'April 22, 2026' },
+        { title: 'Fix Wrong-Artist Tracks Silently Downloading from Tidal', desc: 'A user reported that searching for "Leave A Light On" by Maduk on Tidal silently downloaded Tom Walker\'s (completely different) song of the same name, embedding Maduk metadata into Tom Walker\'s audio. Two layers of defense were failing: (1) the candidate artist gate used `< 0.4` similarity and "maduk" vs "tom walker" scored exactly 0.400, slipping past the fencepost — raised to `< 0.5`. (2) AcoustID verification correctly identified the mismatch but returned SKIP (accept) instead of FAIL (quarantine) when title matched but artist was clearly different and the expected artist was absent from every recording. Now returns FAIL when artist similarity < 0.3 (clear mismatch); preserves SKIP for the ambiguous 0.3-0.6 range (covers/collabs/formatting differences)', page: 'sync' },
+        { title: 'Tidal Search Falls Back to Shortened Queries on 0 Results', desc: 'Tidal\'s search chokes on long queries with multiple qualifier words (e.g., "maduk transformations remixed fire away fred v remix" returns nothing, but dropping "fred v remix" works). Search now retries with up to 4 progressively-shortened variants when the original returns 0 results. Qualifier-safe: if the original query mentions Live/Remix/Acoustic/etc., fallback results must still contain those keywords in their track names — otherwise a shortened query could silently downgrade "(Live)" to the studio version. Returns ([], []) if no variant preserves the qualifiers, same as before', page: 'sync' },
+    ],
     '2.38': [
         // --- April 21, 2026 (late) ---
         { date: 'April 21, 2026 (late)' },
@@ -3792,12 +3798,12 @@ const WHATS_NEW = {
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '2.38';
+    return btn ? btn.textContent.trim().replace('v', '') : '2.39';
 }
 
 function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
-    return versions[0] || '2.38';
+    return versions[0] || '2.39';
 }
 
 function openWhatsNew() {
