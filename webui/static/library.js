@@ -1063,6 +1063,17 @@ function updateArtistHeaderStats(albumCount, trackCount) {
 function updateArtistHeroSection(artist, discography) {
     console.log("🖼️ Updating artist hero section");
 
+    // Blurred background image (inline-Artists hero treatment) — set whenever
+    // we have an image_url; falls back to clearing the bg if not.
+    const heroBg = document.getElementById("artist-detail-hero-bg");
+    if (heroBg) {
+        if (artist.image_url && artist.image_url.trim() !== "" && artist.image_url !== "null") {
+            heroBg.style.backgroundImage = `url('${artist.image_url}')`;
+        } else {
+            heroBg.style.backgroundImage = '';
+        }
+    }
+
     // Update artist image with detailed debugging
     const imageElement = document.getElementById("artist-detail-image");
     const fallbackElement = document.getElementById("artist-detail-image-fallback");

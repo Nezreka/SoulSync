@@ -39,7 +39,6 @@ SPLIT_MODULES = [
     "downloads.js",
     "wishlist-tools.js",
     "sync-services.js",
-    "artists.js",
     "api-monitor.js",
     "library.js",
     "beatport-ui.js",
@@ -57,7 +56,7 @@ NON_SPLIT_JS = {"setup-wizard.js", "docs.js", "helper.js", "particles.js", "work
 # In a plain <script> context the last-loaded declaration wins.  These are NOT
 # regressions from the split — they should be deduplicated in a follow-up.
 KNOWN_CROSS_FILE_DUPES = {
-    "escapeHtml",        # downloads.js, artists.js, discover.js
+    "escapeHtml",        # downloads.js, shared-helpers.js, discover.js
     "formatDuration",    # sync-spotify.js, wishlist-tools.js, sync-services.js
     "matchedDownloadTrack",    # downloads.js, wishlist-tools.js
     "matchedDownloadAlbum",    # downloads.js, wishlist-tools.js
