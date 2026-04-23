@@ -2131,14 +2131,14 @@ function navigateToPage(pageId, options = {}) {
         return;
     }
 
-    // Update navigation buttons (only if there's a nav button for this page)
+    // Update navigation buttons (only if there's a nav button for this page).
+    // Pages reachable from many surfaces (artist-detail, playlist-explorer)
+    // intentionally have no [data-page] match here — the sidebar shouldn't
+    // imply a section the user didn't actually navigate via.
     document.querySelectorAll('.nav-button').forEach(btn => {
         btn.classList.remove('active');
     });
-
-    // Handle artist-detail page specially - it should highlight the 'library' nav button
-    const navPageId = pageId === 'artist-detail' ? 'library' : pageId;
-    const navButton = document.querySelector(`[data-page="${navPageId}"]`);
+    const navButton = document.querySelector(`[data-page="${pageId}"]`);
     if (navButton) {
         navButton.classList.add('active');
     }
