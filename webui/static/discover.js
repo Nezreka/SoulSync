@@ -9123,10 +9123,10 @@ function renderDiscoverSyncCard(playlist, container, sourceLabel) {
                     <span class="discover-sync-toggle-slider"></span>
                 </label>
             </div>
-            <div class="discover-sync-toggle-wrapper" title="${isEmpty ? '' : 'Skip quality filters and download any available source'}">
-                <label class="discover-sync-toggle-label">Force DL</label>
-                <label class="discover-sync-toggle">
-                    <input type="checkbox" id="discover-force-dl-${playlist.type}" ${isEmpty ? 'disabled' : ''}>
+            <div class="discover-sync-toggle-wrapper" title="Coming soon: download any available quality for this batch, even if it's below your global quality profile. Useful for rotating discover playlists where quantity matters more than quality.">
+                <label class="discover-sync-toggle-label" style="opacity:0.5">Any Quality</label>
+                <label class="discover-sync-toggle" style="opacity:0.5;cursor:not-allowed">
+                    <input type="checkbox" id="discover-any-quality-${playlist.type}" disabled>
                     <span class="discover-sync-toggle-slider"></span>
                 </label>
             </div>
@@ -9173,15 +9173,10 @@ async function toggleDiscoverAutoUpdate(playlistType, enabled) {
 const _discoverSyncQueue = [];
 let _discoverSyncRunning = false;
 
-async function syncDiscoverPlaylistFromTab(playlistType, playlistName, forceDownload) {
-    // Read force-download toggle if not explicitly passed
-    if (forceDownload === undefined) {
-        const fdToggle = document.getElementById(`discover-force-dl-${playlistType}`);
-        forceDownload = fdToggle ? fdToggle.checked : false;
-    }
+async function syncDiscoverPlaylistFromTab(playlistType, playlistName) {
     // Serialize sync operations to avoid concurrent backend contention
     return new Promise((resolve) => {
-        _discoverSyncQueue.push({ playlistType, playlistName, forceDownload, resolve });
+        _discoverSyncQueue.push({ playlistType, playlistName, resolve });
         _processDiscoverSyncQueue();
     });
 }
@@ -9189,9 +9184,9 @@ async function syncDiscoverPlaylistFromTab(playlistType, playlistName, forceDown
 async function _processDiscoverSyncQueue() {
     if (_discoverSyncRunning || _discoverSyncQueue.length === 0) return;
     _discoverSyncRunning = true;
-    const { playlistType, playlistName, forceDownload, resolve } = _discoverSyncQueue.shift();
+    const { playlistType, playlistName, resolve } = _discoverSyncQueue.shift();
     try {
-        await _doSyncDiscoverPlaylist(playlistType, playlistName, forceDownload);
+        await _doSyncDiscoverPlaylist(playlistType, playlistName);
     } finally {
         _discoverSyncRunning = false;
         resolve();
@@ -9199,7 +9194,7 @@ async function _processDiscoverSyncQueue() {
     }
 }
 
-async function _doSyncDiscoverPlaylist(playlistType, playlistName, forceDownload) {
+async function _doSyncDiscoverPlaylist(playlistType, playlistName) {
     const btn = document.getElementById(`discover-sync-btn-${playlistType}`);
     if (btn) {
         btn.disabled = true;
@@ -9253,7 +9248,6 @@ async function _doSyncDiscoverPlaylist(playlistType, playlistName, forceDownload
             tracks: syncTracks,
             playlist_name: playlistName
         };
-        if (forceDownload) bodyPayload.force_download_all = true;
 
         const batchResponse = await fetch(`/api/playlists/${virtualPlaylistId}/start-missing-process`, {
             method: 'POST',
@@ -9263,8 +9257,7 @@ async function _doSyncDiscoverPlaylist(playlistType, playlistName, forceDownload
 
         const result = await batchResponse.json();
         if (result.success) {
-            const forceLabel = forceDownload ? ' (force download)' : '';
-            showToast(`Downloading ${playlistName}${forceLabel} (${syncTracks.length} tracks)...`, 'info');
+            showToast(`Downloading ${playlistName} (${syncTracks.length} tracks)...`, 'info');
             const card = document.getElementById(`discover-sync-card-${playlistType}`);
             if (card) {
                 const statusEl = card.querySelector('.discover-sync-status');

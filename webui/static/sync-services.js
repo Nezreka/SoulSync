@@ -2777,7 +2777,7 @@ function _applySyncTabAction() {
             }
         }
         if (action.autoSync) {
-            syncDiscoverPlaylistFromTab(action.autoSync, action.autoSyncName || action.autoSync, action.forceDownload);
+            syncDiscoverPlaylistFromTab(action.autoSync, action.autoSyncName || action.autoSync);
         }
     };
     // Small delay to let lazy tab content render
