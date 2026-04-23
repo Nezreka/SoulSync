@@ -640,7 +640,11 @@ let artistDetailPageState = {
     currentArtistId: null,
     currentArtistName: null,
     currentArtistSource: null,
-    originPage: null,  // page id captured by navigateToArtistDetail for the back button
+    // Stack of origins captured by navigateToArtistDetail for the back button.
+    // Each entry is either {type:'page', pageId} or {type:'artist', id, name, source}
+    // so chained navigation (Search → A → similar B → similar C) walks back one
+    // step at a time instead of jumping straight to Search.
+    originStack: [],
     enhancedView: false,
     enhancedData: null,
     expandedAlbums: new Set(),
@@ -672,19 +676,45 @@ const _ARTIST_DETAIL_BACK_LABELS = {
     'active-downloads': 'Back to Downloads',
 };
 
-function navigateToArtistDetail(artistId, artistName, sourceOverride = null) {
+function navigateToArtistDetail(artistId, artistName, sourceOverride = null, options = {}) {
     console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId}${sourceOverride ? `, source: ${sourceOverride}` : ''})`);
 
-    // Capture where the user is coming from BEFORE navigateToPage flips
-    // currentPage. The back button on the artist-detail page reads this so it
-    // can say "Back to Search" / "Back to Discover" / etc. instead of the
-    // hardcoded "Back to Library". Falls back to library when origin is
-    // unknown or when chaining from one artist-detail page to another.
-    let origin = (typeof currentPage === 'string' && currentPage) ? currentPage : null;
-    if (!origin || origin === 'artist-detail') {
-        origin = artistDetailPageState.originPage || 'library';
+    // Capture the current location on the origin stack BEFORE navigateToPage
+    // flips currentPage. The back button walks this stack one step at a time,
+    // so a chain like Search → A → similar B → similar C steps back through
+    // C → B → A → Search instead of jumping straight home. `skipOriginPush`
+    // lets the back button re-enter a prior artist without re-pushing.
+    if (!options.skipOriginPush) {
+        // Fresh entry (from a non-artist page) starts a new chain; any stale
+        // entries from a prior artist-detail visit are dropped.
+        if (currentPage !== 'artist-detail') {
+            artistDetailPageState.originStack = [];
+        }
+
+        let entry;
+        if (currentPage === 'artist-detail' && artistDetailPageState.currentArtistId) {
+            entry = {
+                type: 'artist',
+                id: artistDetailPageState.currentArtistId,
+                name: artistDetailPageState.currentArtistName,
+                source: artistDetailPageState.currentArtistSource,
+            };
+        } else {
+            const pageId = (typeof currentPage === 'string' && currentPage && currentPage !== 'artist-detail')
+                ? currentPage : 'library';
+            entry = { type: 'page', pageId };
+        }
+
+        // Avoid pushing a duplicate top entry on repeated clicks of the same target.
+        const top = artistDetailPageState.originStack[artistDetailPageState.originStack.length - 1];
+        const isDuplicate = top && top.type === entry.type && (
+            (entry.type === 'page' && top.pageId === entry.pageId) ||
+            (entry.type === 'artist' && String(top.id) === String(entry.id))
+        );
+        if (!isDuplicate) {
+            artistDetailPageState.originStack.push(entry);
+        }
     }
-    artistDetailPageState.originPage = origin;
 
     // Abort any in-progress completion stream
     if (artistDetailPageState.completionController) {
@@ -731,12 +761,8 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null) {
     // Navigate to artist detail page
     navigateToPage('artist-detail');
 
-    // Update back-button label for the captured origin.
-    const backBtnLabel = document.querySelector('#artist-detail-back-btn span');
-    if (backBtnLabel) {
-        const friendly = _ARTIST_DETAIL_BACK_LABELS[origin] || _ARTIST_DETAIL_BACK_LABELS.library;
-        backBtnLabel.textContent = `← ${friendly}`;
-    }
+    // Update back-button label to reflect where the next pop will land.
+    _updateArtistDetailBackButtonLabel();
 
     // Initialize if needed and load data
     if (!artistDetailPageState.isInitialized) {
@@ -747,27 +773,58 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null) {
     loadArtistDetailData(artistId, artistName);
 }
 
+function _updateArtistDetailBackButtonLabel() {
+    const backBtnLabel = document.querySelector('#artist-detail-back-btn span');
+    if (!backBtnLabel) return;
+    const stack = artistDetailPageState.originStack || [];
+    const top = stack[stack.length - 1];
+    if (!top) {
+        backBtnLabel.textContent = `← ${_ARTIST_DETAIL_BACK_LABELS.library}`;
+    } else if (top.type === 'artist') {
+        backBtnLabel.textContent = `← Back to ${top.name}`;
+    } else {
+        const friendly = _ARTIST_DETAIL_BACK_LABELS[top.pageId] || _ARTIST_DETAIL_BACK_LABELS.library;
+        backBtnLabel.textContent = `← ${friendly}`;
+    }
+}
+
 function initializeArtistDetailPage() {
     console.log("🔧 Initializing Artist Detail page...");
 
-    // Initialize back button — navigates back to whichever page initiated the
-    // current artist-detail view (Search, Discover, Watchlist, Library, etc.),
-    // captured by navigateToArtistDetail before the page swap.
+    // Initialize back button — pops the origin stack one step at a time so a
+    // chain like Search → A → B → C walks back through C → B → A → Search
+    // instead of jumping straight to the original entry page.
     const backBtn = document.getElementById("artist-detail-back-btn");
     if (backBtn) {
         backBtn.addEventListener("click", () => {
-            const dest = artistDetailPageState.originPage || 'library';
-            console.log(`🔙 Returning to ${dest}`);
-            // Abort any in-progress completion stream
+            // Abort any in-progress completion stream regardless of destination
             if (artistDetailPageState.completionController) {
                 artistDetailPageState.completionController.abort();
                 artistDetailPageState.completionController = null;
             }
-            // Clear artist detail state so we go back to the list view
+
+            const stack = artistDetailPageState.originStack || [];
+            if (stack.length > 0) {
+                const target = stack.pop();
+                if (target.type === 'artist') {
+                    // Re-enter a prior artist in the chain without re-pushing,
+                    // so the stack keeps shrinking as the user steps back.
+                    navigateToArtistDetail(target.id, target.name, target.source, { skipOriginPush: true });
+                    return;
+                }
+                // target.type === 'page' — fully exit the artist-detail chain
+                artistDetailPageState.currentArtistId = null;
+                artistDetailPageState.currentArtistName = null;
+                artistDetailPageState.originStack = [];
+                navigateToPage(target.pageId);
+                return;
+            }
+
+            // No history — default to library
             artistDetailPageState.currentArtistId = null;
             artistDetailPageState.currentArtistName = null;
-            artistDetailPageState.originPage = null;
-            navigateToPage(dest);
+            artistDetailPageState.originStack = [];
+            navigateToPage('library');
         });
     }
 
@@ -874,8 +931,11 @@ async function loadArtistDetailData(artistId, artistName) {
             }
         }
 
-        // Check if artist has tracks eligible for quality enhancement
-        checkArtistEnhanceEligibility(artistId);
+        // Check if artist has tracks eligible for quality enhancement.
+        // Use currentArtistId (not the closure arg) because the library-upgrade
+        // branch above may have rewritten it from the source ID to the library PK,
+        // and /api/library/artist/<id>/quality-analysis only works on library PKs.
+        checkArtistEnhanceEligibility(artistDetailPageState.currentArtistId);
 
     } catch (error) {
         console.error(`❌ Error loading artist detail data:`, error);

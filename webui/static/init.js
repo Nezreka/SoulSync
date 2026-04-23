@@ -187,10 +187,28 @@ function applyReduceEffects(enabled) {
 // ── Profile System ─────────────────────────────────────────────
 let currentProfile = null;
 
+// Normalize legacy allowed_pages entries so the profile edit forms (which are
+// built from the new pageLabels map containing 'search') don't drop access
+// when saving a profile that was stored before the Search page rename.
+// 'downloads' was the old Search id, 'artists' was the retired inline page.
+function _normalizeLegacyAllowedPages(pages) {
+    if (!Array.isArray(pages)) return pages;
+    const mapped = pages.map(id => (id === 'downloads' || id === 'artists') ? 'search' : id);
+    return [...new Set(mapped)];
+}
+
+function _normalizeLegacyHomePage(homePage) {
+    if (homePage === 'downloads' || homePage === 'artists') return 'search';
+    return homePage;
+}
+
 function getProfileHomePage() {
     if (!currentProfile) return 'dashboard';
-    // Legacy profiles stored the Search page as 'downloads'.
-    const home = currentProfile.home_page === 'downloads' ? 'search' : currentProfile.home_page;
+    // Legacy profiles stored the Search page as either 'downloads' (the old id
+    // before the rename) or 'artists' (the retired inline Artists page).
+    // Both fold into the unified Search page now.
+    let home = currentProfile.home_page;
+    if (home === 'downloads' || home === 'artists') home = 'search';
     if (home) return home;
     return currentProfile.is_admin ? 'dashboard' : 'discover';
 }
@@ -199,19 +217,24 @@ function isPageAllowed(pageId) {
     if (!currentProfile) return true;
     if (currentProfile.id === 1) return true;
     if (pageId === 'help' || pageId === 'issues') return true;
+    if (pageId === 'settings') return currentProfile.is_admin;
     if (pageId === 'artist-detail') {
-        // artist-detail requires library access
+        // artist-detail is reachable from both Library and Search results, so
+        // either grant unlocks it. Without this, a Search-only profile couldn't
+        // open a source artist, and a legacy artists-only profile would hit the
+        // home-redirect recursion path below.
         const ap = currentProfile.allowed_pages;
         if (!ap) return true;
-        return ap.includes('library');
+        return ap.includes('library') || ap.includes('search')
+            || ap.includes('downloads') || ap.includes('artists');
     }
-    if (pageId === 'settings') return currentProfile.is_admin;
     const ap = currentProfile.allowed_pages;
     if (!ap) return true; // null = all pages
     if (ap.includes(pageId)) return true;
-    // Legacy compat: the Search page used to be saved as 'downloads'.
-    if (pageId === 'search' && ap.includes('downloads')) return true;
-    if (pageId === 'downloads' && ap.includes('search')) return true;
+    // Legacy compat: 'downloads' (old Search id) and 'artists' (retired inline
+    // Artists page) both fold into the unified 'search' page.
+    if (pageId === 'search' && (ap.includes('downloads') || ap.includes('artists'))) return true;
+    if ((pageId === 'downloads' || pageId === 'artists') && ap.includes('search')) return true;
     return false;
 }
 
@@ -1574,9 +1597,11 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     const isAdmin = currentProfile && currentProfile.is_admin;
     const isEditingAdmin = profileSettings.is_admin;
     const editColors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#14b8a6'];
+    // 'search' replaces the legacy 'downloads'/'artists' ids; legacy values are
+    // normalized on read below so saving a legacy profile upgrades it.
     const pageLabels = {
-        dashboard: 'Dashboard', sync: 'Sync', downloads: 'Search', discover: 'Discover',
-        artists: 'Artists', automations: 'Automations', library: 'Library', stats: 'Listening Stats',
+        dashboard: 'Dashboard', sync: 'Sync', search: 'Search', discover: 'Discover',
+        automations: 'Automations', library: 'Library', stats: 'Listening Stats',
         'playlist-explorer': 'Playlist Explorer', import: 'Import', help: 'Help & Docs'
     };
 
@@ -1628,14 +1653,16 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     defaultOpt.value = '';
     defaultOpt.textContent = isEditingAdmin ? 'Default (Dashboard)' : 'Default (Discover)';
     homeSelect.appendChild(defaultOpt);
-    // Filter home page options to only allowed pages
-    const allowedSet = profileSettings.allowed_pages;
+    // Normalize legacy ids so the form shows the right options/selection for
+    // profiles saved before the Search page rename.
+    const allowedSet = _normalizeLegacyAllowedPages(profileSettings.allowed_pages);
+    const normalizedHome = _normalizeLegacyHomePage(profileSettings.home_page);
     Object.entries(pageLabels).forEach(([id, label]) => {
         if (allowedSet && !allowedSet.includes(id)) return; // Skip non-permitted
         const opt = document.createElement('option');
         opt.value = id;
         opt.textContent = label;
-        if (id === profileSettings.home_page) opt.selected = true;
+        if (id === normalizedHome) opt.selected = true;
         homeSelect.appendChild(opt);
     });
     form.appendChild(homeSelect);
@@ -1760,9 +1787,11 @@ function showSelfEditForm() {
     const existing = document.getElementById('self-edit-form');
     if (existing) existing.remove();
 
+    // 'search' replaces the legacy 'downloads'/'artists' ids; legacy values are
+    // normalized on read below so saving a legacy profile upgrades it.
     const pageLabels = {
-        dashboard: 'Dashboard', sync: 'Sync', downloads: 'Search', discover: 'Discover',
-        artists: 'Artists', automations: 'Automations', library: 'Library', stats: 'Listening Stats',
+        dashboard: 'Dashboard', sync: 'Sync', search: 'Search', discover: 'Discover',
+        automations: 'Automations', library: 'Library', stats: 'Listening Stats',
         'playlist-explorer': 'Playlist Explorer', import: 'Import', help: 'Help & Docs'
     };
 
@@ -1797,13 +1826,16 @@ function showSelfEditForm() {
     defaultOpt.value = '';
     defaultOpt.textContent = 'Default (Discover)';
     homeSelect.appendChild(defaultOpt);
-    const ap = currentProfile.allowed_pages;
+    // Normalize legacy ids so the form shows the right options/selection for
+    // profiles saved before the Search page rename.
+    const ap = _normalizeLegacyAllowedPages(currentProfile.allowed_pages);
+    const normalizedHome = _normalizeLegacyHomePage(currentProfile.home_page);
     Object.entries(pageLabels).forEach(([id, label]) => {
         if (ap && !ap.includes(id)) return;
         const opt = document.createElement('option');
         opt.value = id;
         opt.textContent = label;
-        if (id === currentProfile.home_page) opt.selected = true;
+        if (id === normalizedHome) opt.selected = true;
         homeSelect.appendChild(opt);
     });
     form.appendChild(homeSelect);
