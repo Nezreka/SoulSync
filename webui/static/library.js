@@ -640,6 +640,7 @@ let artistDetailPageState = {
     currentArtistId: null,
     currentArtistName: null,
     currentArtistSource: null,
+    originPage: null,  // page id captured by navigateToArtistDetail for the back button
     enhancedView: false,
     enhancedData: null,
     expandedAlbums: new Set(),
@@ -655,8 +656,35 @@ let discographyFilterState = {
     ownership: 'all'  // 'all', 'owned', 'missing'
 };
 
+// Friendly labels for the dynamic "← Back to X" button on the artist-detail page.
+// Page id (the value of currentPage) -> button label.
+const _ARTIST_DETAIL_BACK_LABELS = {
+    library: 'Back to Library',
+    search: 'Back to Search',
+    discover: 'Back to Discover',
+    watchlist: 'Back to Watchlist',
+    wishlist: 'Back to Wishlist',
+    stats: 'Back to Stats',
+    'playlist-explorer': 'Back to Explorer',
+    automations: 'Back to Automations',
+    dashboard: 'Back to Dashboard',
+    sync: 'Back to Sync',
+    'active-downloads': 'Back to Downloads',
+};
+
 function navigateToArtistDetail(artistId, artistName, sourceOverride = null) {
     console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId}${sourceOverride ? `, source: ${sourceOverride}` : ''})`);
+
+    // Capture where the user is coming from BEFORE navigateToPage flips
+    // currentPage. The back button on the artist-detail page reads this so it
+    // can say "Back to Search" / "Back to Discover" / etc. instead of the
+    // hardcoded "Back to Library". Falls back to library when origin is
+    // unknown or when chaining from one artist-detail page to another.
+    let origin = (typeof currentPage === 'string' && currentPage) ? currentPage : null;
+    if (!origin || origin === 'artist-detail') {
+        origin = artistDetailPageState.originPage || 'library';
+    }
+    artistDetailPageState.originPage = origin;
 
     // Abort any in-progress completion stream
     if (artistDetailPageState.completionController) {
@@ -703,6 +731,13 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null) {
     // Navigate to artist detail page
     navigateToPage('artist-detail');
 
+    // Update back-button label for the captured origin.
+    const backBtnLabel = document.querySelector('#artist-detail-back-btn span');
+    if (backBtnLabel) {
+        const friendly = _ARTIST_DETAIL_BACK_LABELS[origin] || _ARTIST_DETAIL_BACK_LABELS.library;
+        backBtnLabel.textContent = `← ${friendly}`;
+    }
+
     // Initialize if needed and load data
     if (!artistDetailPageState.isInitialized) {
         initializeArtistDetailPage();
@@ -715,11 +750,14 @@ function navigateToArtistDetail(artistId, artistName, sourceOverride = null) {
 function initializeArtistDetailPage() {
     console.log("🔧 Initializing Artist Detail page...");
 
-    // Initialize back button
+    // Initialize back button — navigates back to whichever page initiated the
+    // current artist-detail view (Search, Discover, Watchlist, Library, etc.),
+    // captured by navigateToArtistDetail before the page swap.
     const backBtn = document.getElementById("artist-detail-back-btn");
     if (backBtn) {
         backBtn.addEventListener("click", () => {
-            console.log("🔙 Returning to Library page");
+            const dest = artistDetailPageState.originPage || 'library';
+            console.log(`🔙 Returning to ${dest}`);
             // Abort any in-progress completion stream
             if (artistDetailPageState.completionController) {
                 artistDetailPageState.completionController.abort();
@@ -728,7 +766,8 @@ function initializeArtistDetailPage() {
             // Clear artist detail state so we go back to the list view
             artistDetailPageState.currentArtistId = null;
             artistDetailPageState.currentArtistName = null;
-            navigateToPage('library');
+            artistDetailPageState.originPage = null;
+            navigateToPage(dest);
         });
     }
 
