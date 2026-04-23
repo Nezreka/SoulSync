@@ -1260,145 +1260,41 @@ const HELPER_CONTENT = {
         description: 'Personalized mixes generated from your listening patterns. Each mix focuses on a different aspect of your taste — genre clusters, mood, or artist groups.',
     },
 
-    // ─── ARTISTS PAGE ─────────────────────────────────────────────────
+    // ─── ARTIST DETAIL PAGE ───────────────────────────────────────────
+    // (The standalone /artist-detail page is the unified destination for
+    // both library and metadata-source artists. The inline /artists page
+    // was retired in the unification project.)
 
-    // Search State
-    '.artists-search-state': {
-        title: 'Artist Search',
-        description: 'Search for any artist by name. Results show artist cards with images — click one to view their full discography.',
-        docsId: 'art-search'
-    },
-    '#artists-search-input': {
-        title: 'Search Input',
-        description: 'Type an artist name to search across your active metadata source. Results appear as you type with a short debounce delay.',
-        docsId: 'art-search'
-    },
-    '#artists-search-status': {
-        title: 'Search Status',
-        description: 'Shows the current search state — ready, searching, or result count.',
-    },
-
-    // Results State
-    '#artists-results-state': {
-        title: 'Search Results',
-        description: 'Artist cards matching your search. Click any artist to view their full discography with albums, singles, and EPs.',
-        docsId: 'art-search'
-    },
-    '#artists-back-button': {
-        title: 'Back to Search',
-        description: 'Return to the initial search view to start a new artist search.',
-    },
-    '#artists-cards-container': {
-        title: 'Artist Cards',
-        description: 'Each card shows an artist from your metadata source. Click to load their full discography.',
-    },
-
-    // Artist Detail — Hero
-    '#artists-hero-section': {
-        title: 'Artist Profile',
-        description: 'Rich artist profile with photo, name, genres, bio, and service links. Data comes from your metadata cache and library enrichment (Last.fm, Spotify, MusicBrainz, etc.).',
-        tips: [
-            'Service badges link to the artist on each platform',
-            'Bio comes from Last.fm enrichment if the artist is in your library',
-            'Listener and play count stats from Last.fm',
-            'Genre pills combine metadata source genres with Last.fm tags'
-        ],
-        docsId: 'art-detail'
-    },
-    '.artists-hero-name': {
-        title: 'Artist Name',
-        description: 'The artist\'s official name from your metadata source.',
-    },
-    '.artists-hero-badges': {
-        title: 'Service Badges',
-        description: 'Links to this artist on external services. Click any badge to open the artist\'s page on that platform. Badges appear for services where this artist has been enriched.',
-        tips: [
-            'Spotify, MusicBrainz, Deezer, iTunes, Last.fm, Genius, Tidal, Qobuz',
-            'Badges only appear when the artist has an ID for that service',
-            'Data comes from library enrichment workers'
-        ]
-    },
-    '.artists-hero-genres': {
-        title: 'Genres',
-        description: 'Genre tags for this artist. Combines genres from your metadata source with Last.fm tags for comprehensive coverage.',
-    },
-    '.artists-hero-bio': {
-        title: 'Artist Bio',
-        description: 'Biography from Last.fm. Click "Read more" to expand. Only available for artists in your library that have been enriched by the Last.fm worker.',
-    },
-    '.artists-hero-stats': {
-        title: 'Listener Stats',
-        description: 'Last.fm listener count and total play count. Shows how popular this artist is globally on Last.fm.',
-    },
-    '#artist-detail-watchlist-btn': {
-        title: 'Watchlist',
-        description: 'Add or remove this artist from your Watchlist. Watched artists are scanned for new releases which get added to your Wishlist for download.',
-        docsId: 'art-watchlist'
-    },
-    '#artist-detail-watchlist-settings-btn': {
-        title: 'Watchlist Settings',
-        description: 'Configure which release types to monitor for this artist — Albums, EPs, Singles, and content filters (live, remixes, acoustic, compilations).',
-        docsId: 'art-settings'
-    },
-
-    // Discography Tabs
-    '.artist-detail-tabs': {
-        title: 'Discography Tabs',
-        description: 'Switch between Albums and Singles & EPs. Each tab shows the artist\'s releases in that category.',
-        docsId: 'art-detail'
-    },
-    '#albums-tab': {
-        title: 'Albums',
-        description: 'Full-length studio albums by this artist. Click any album card to open the download modal.',
-    },
-    '#singles-tab': {
-        title: 'Singles & EPs',
-        description: 'Singles and extended plays by this artist. Includes single tracks, 2-3 track releases, and EPs.',
-    },
-
-    // Album Cards
-    '#album-cards-container': {
-        title: 'Album Grid',
-        description: 'Album cards with cover art. Click any album to open the download modal where you can select tracks, check library matches, and start downloading.',
-        tips: [
-            'Cover art fills the card with album name overlaid at the bottom',
-            'Completion badges show ownership status (Complete, Partial, Missing)',
-            'Cards check your library automatically after loading'
-        ],
-        docsId: 'art-detail'
-    },
-    '#singles-cards-container': {
-        title: 'Singles Grid',
-        description: 'Single and EP cards. Same behavior as albums — click to open the download modal.',
-    },
     '.album-card': {
         title: 'Release Card',
         description: 'An album, single, or EP from this artist. Click to open the download modal with track selection, library matching, and download controls.',
         tips: [
-            'Completion overlay shows how many tracks you own',
-            'Green = complete, Yellow = partial, Red = missing',
-            '"Checking..." means library match is in progress'
+            'Big-photo cover art fills the card with title and year overlaid at the bottom',
+            'Completion badge (top-right) shows ownership status: ✓ Owned / N/M / Missing',
+            'Library artists check ownership in the background — badge starts as "Checking…" then resolves'
         ]
     },
     '.completion-overlay': {
-        title: 'Completion Status',
-        description: 'Shows how many tracks from this release are in your library. "Complete" means you have all tracks, "Partial" shows owned/total, "Missing" means none found.',
+        title: 'Completion Badge',
+        description: 'Top-right badge showing ownership state for library artists. ✓ Owned = full match, N/M = partial (owned/total tracks), Missing = no match. Source artists don\'t show this badge.',
     },
-
-    // Similar Artists
-    '#similar-artists-section': {
+    '#ad-similar-artists-section': {
         title: 'Similar Artists',
-        description: 'Artists with a similar sound, streamed in real-time from your metadata source. Click any card to view that artist\'s discography.',
+        description: 'Artists with a similar sound, fetched from MusicMap by name. Works for both library and source artists. Click any bubble to navigate to that artist\'s detail page.',
         tips: [
-            'Cards load progressively as the server finds matches',
-            'Click a card to navigate to that artist\'s discography',
-            'Images are lazy-loaded for performance'
+            'Bubbles load progressively',
+            'Click navigates to the standalone artist-detail page'
         ],
         docsId: 'art-detail'
     },
     '.similar-artist-bubble': {
         title: 'Similar Artist',
         description: 'An artist similar to the one you\'re viewing. Click to load their discography and browse their releases.',
+    },
+    '.search-source-picker-container': {
+        title: 'Search Source',
+        description: 'Pick which metadata source the Search page queries. "All sources (Auto)" fans out across configured providers (the legacy default); pick a specific source to constrain the lookup. "Soulseek (raw files)" routes to the file-search pipeline that used to be the Basic mode.',
+        docsId: 'search'
     },
 
     // ─── AUTOMATIONS PAGE ─────────────────────────────────────────────
