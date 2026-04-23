@@ -2828,10 +2828,19 @@ function _adlRenderBatchHistory() {
     list.innerHTML = _adlBatchHistory.map(h => {
         const name = _adlEsc(h.playlist_name || 'Unknown');
         const downloaded = h.tracks_downloaded || 0;
+        const found = h.tracks_found || 0;
         const failed = h.tracks_failed || 0;
         const total = h.total_tracks || 0;
-        const statsParts = [`${downloaded}/${total}`];
-        if (failed > 0) statsParts.push(`<span style="color:#ef4444">${failed} failed</span>`);
+
+        // Build stats: "found/total  Xnew  Xfailed"
+        const statsParts = [];
+        if (found > 0 || downloaded > 0) {
+            const owned = found - downloaded;  // already in library before this sync
+            if (owned > 0) statsParts.push(`<span style="color:rgba(74,222,128,0.7)" title="Already in library">${owned}</span>`);
+            if (downloaded > 0) statsParts.push(`<span style="color:rgba(96,165,250,0.7)" title="Downloaded">${downloaded} new</span>`);
+        }
+        if (failed > 0) statsParts.push(`<span style="color:#ef4444" title="Failed">${failed} failed</span>`);
+        if (statsParts.length === 0) statsParts.push(`0/${total}`);
 
         let dateText = '';
         if (h.completed_at) {
@@ -2848,17 +2857,30 @@ function _adlRenderBatchHistory() {
             }
         }
 
-        const sourceLabel = h.source_page ? `<span class="adl-batch-card-source" style="font-size:0.6rem;padding:0 4px">${_adlEsc(h.source_page)}</span>` : '';
+        // Use source (spotify, mirrored, discover, etc.) for badge when available, fall back to source_page
+        const badgeLabel = h.source || h.source_page || '';
+        const sourceLabel = badgeLabel ? `<span class="adl-batch-card-source" style="font-size:0.6rem;padding:0 4px">${_adlEsc(badgeLabel)}</span>` : '';
 
-        // Source type color dot
-        const sourceColors = { wishlist: '168, 85, 247', sync: '59, 130, 246', album: '16, 185, 129' };
-        const dotColor = sourceColors[h.source_page] || '255, 255, 255';
+        // Source type color dot - expanded palette
+        const sourceColors = {
+            wishlist: '168, 85, 247', sync: '59, 130, 246', album: '16, 185, 129',
+            discover: '251, 191, 36', mirrored: '236, 72, 153', spotify: '30, 215, 96',
+            youtube: '255, 0, 0', tidal: '0, 255, 255', deezer: '162, 73, 255',
+            beatport: '148, 252, 19', listenbrainz: '255, 134, 0'
+        };
+        const dotColor = sourceColors[h.source] || sourceColors[h.source_page] || '255, 255, 255';
         const histDot = `<span class="adl-batch-history-dot" style="background:rgba(${dotColor}, 0.6)"></span>`;
+
+        // Optional thumbnail
+        const thumb = h.thumb_url
+            ? `<img src="${_adlEsc(h.thumb_url)}" class="adl-batch-history-thumb" loading="lazy">`
+            : '';
 
         return `<div class="adl-batch-history-item">
             ${histDot}
+            ${thumb}
             <div class="adl-batch-history-name">${name} ${sourceLabel}</div>
-            <div class="adl-batch-history-stats">${statsParts.join(' ')}</div>
+            <div class="adl-batch-history-stats">${statsParts.join(' · ')}</div>
             <div class="adl-batch-history-date">${dateText}</div>
         </div>`;
     }).join('');

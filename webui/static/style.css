@@ -57119,6 +57119,14 @@ body.reduce-effects *::after {
     border-bottom: 1px solid rgba(255, 255, 255, 0.02);
 }
 
+.adl-batch-history-thumb {
+    width: 24px;
+    height: 24px;
+    border-radius: 3px;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
 .adl-batch-history-name {
     flex: 1;
     font-size: 0.75rem;
