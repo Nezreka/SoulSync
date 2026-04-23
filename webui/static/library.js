@@ -1391,22 +1391,34 @@ function populateReleaseSection(sectionType, releases) {
         grid.appendChild(card);
     });
 
+    // Trigger lazy background-image loading on the new cards
+    if (typeof observeLazyBackgrounds === 'function') {
+        observeLazyBackgrounds(grid);
+    }
+
     console.log(`📀 Populated ${sectionType} section: ${ownedCount} owned, ${missingCount} missing`);
-    console.log(`📀 Grid element:`, grid);
-    console.log(`📀 Grid children count:`, grid.children.length);
 }
 
 function createReleaseCard(release) {
     const card = document.createElement("div");
     const isChecking = release.owned === null;
-    card.className = `release-card${isChecking ? " checking" : (release.owned ? "" : " missing")}`;
+    // .release-card keeps existing filter/state CSS + JS queries working;
+    // .album-card adopts the big-photo visual treatment from the retired
+    // inline Artists page (full-bleed image, gradient overlay, info pinned).
+    let stateCls = '';
+    if (isChecking) stateCls = ' checking';
+    else if (release.owned === false) stateCls = ' missing';
+    card.className = `release-card album-card${stateCls}`;
+
     const releaseId = release.id || "";
     card.setAttribute("data-release-id", releaseId);
+    card.setAttribute("data-album-id", releaseId);
+    card.setAttribute("data-album-name", release.title || "");
+    card.setAttribute("data-album-type", release.album_type || "album");
     // Store mutable reference so stream updates propagate to click handler
     card._releaseData = release;
 
     // Tag card for content-type filtering
-    const titleLower = (release.title || '').toLowerCase();
     const livePattern = /\b(live)\b|\(live[^)]*\)|\[live[^]]*\]/i;
     const compilationPattern = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
     const featuredPattern = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;
@@ -1417,10 +1429,90 @@ function createReleaseCard(release) {
     card.setAttribute("data-is-compilation", isCompilation ? "true" : "false");
     card.setAttribute("data-is-featured", isFeatured ? "true" : "false");
 
-    // Add MusicBrainz icon if available
-    let mbIcon = null;
+    // Background image — use data-bg-src for IntersectionObserver lazy loading
+    // (observeLazyBackgrounds is called by the caller after appending the grid).
+    const imageDiv = document.createElement("div");
+    imageDiv.className = "album-card-image";
+    if (release.image_url && release.image_url.trim() !== "") {
+        imageDiv.dataset.bgSrc = release.image_url;
+    }
+    card.appendChild(imageDiv);
+
+    // Completion overlay — top-right floating badge. For library artists this
+    // shows the ownership state; for source artists (no library data) the
+    // overlay is omitted entirely so the card just shows the artwork + title.
+    const isSourceContext = (document.body.dataset.artistSource === 'source');
+    if (!isSourceContext) {
+        const overlay = document.createElement("div");
+        let overlayCls = '';
+        let overlayLabel = '';
+
+        if (isChecking || release.track_completion === 'checking') {
+            overlayCls = 'checking';
+            overlayLabel = 'Checking...';
+        } else if (release.owned) {
+            const tc = release.track_completion;
+            if (tc && typeof tc === 'object') {
+                const ownedTracks = tc.owned_tracks || 0;
+                const totalTracks = tc.total_tracks || 0;
+                const missingTracks = tc.missing_tracks || 0;
+                if (missingTracks === 0) {
+                    overlayCls = 'completed';
+                    overlayLabel = '✓ Owned';
+                } else {
+                    const pct = totalTracks > 0 ? Math.round((ownedTracks / totalTracks) * 100) : 0;
+                    overlayCls = pct >= 75 ? 'nearly_complete' : 'partial';
+                    overlayLabel = `${ownedTracks}/${totalTracks}`;
+                }
+            } else {
+                const pct = release.track_completion || 100;
+                if (pct === 100) {
+                    overlayCls = 'completed';
+                    overlayLabel = '✓ Owned';
+                } else {
+                    overlayCls = pct >= 75 ? 'nearly_complete' : 'partial';
+                    overlayLabel = `${pct}%`;
+                }
+            }
+        } else {
+            overlayCls = 'missing';
+            overlayLabel = 'Missing';
+        }
+
+        overlay.className = `completion-overlay ${overlayCls}`;
+        overlay.innerHTML = `<span class="completion-status">${overlayLabel}</span>`;
+        card.appendChild(overlay);
+    }
+
+    // Year — extract from release_date or fall back to year field
+    let yearText = "";
+    if (release.release_date) {
+        try {
+            const yearMatch = release.release_date.match(/^(\d{4})/);
+            if (yearMatch) {
+                const ry = parseInt(yearMatch[1]);
+                if (ry && ry > 1900 && ry <= new Date().getFullYear() + 1) yearText = ry.toString();
+            } else {
+                const ry = new Date(release.release_date).getFullYear();
+                if (ry && !isNaN(ry) && ry > 1900 && ry <= new Date().getFullYear() + 1) yearText = ry.toString();
+            }
+        } catch (e) { /* fall through */ }
+    }
+    if (!yearText && release.year) yearText = release.year.toString();
+
+    // Content (bottom-pinned over gradient)
+    const content = document.createElement("div");
+    content.className = "album-card-content";
+    const _esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    content.innerHTML = `
+        <div class="album-card-name" title="${_esc(release.title)}">${_esc(release.title)}</div>
+        ${yearText ? `<div class="album-card-year">${_esc(yearText)}</div>` : ''}
+    `;
+    card.appendChild(content);
+
+    // Add MusicBrainz icon LAST so it sits above the gradient overlay
     if (release.musicbrainz_release_id) {
-        mbIcon = document.createElement("div");
+        const mbIcon = document.createElement("div");
         mbIcon.className = "mb-card-icon";
         mbIcon.title = "View on MusicBrainz";
         mbIcon.innerHTML = `<img src="${MUSICBRAINZ_LOGO_URL}" style="width: 20px; height: auto; display: block;">`;
@@ -1428,149 +1520,6 @@ function createReleaseCard(release) {
             e.stopPropagation();
             window.open(`https://musicbrainz.org/release/${release.musicbrainz_release_id}`, '_blank');
         };
-    }
-
-    // Create image
-    const imageContainer = document.createElement("div");
-    if (release.image_url && release.image_url.trim() !== "") {
-        const img = document.createElement("img");
-        img.src = release.image_url;
-        img.alt = release.title;
-        img.className = "release-image";
-        img.loading = 'lazy';
-        img.onerror = () => {
-            imageContainer.innerHTML = `<div class="release-image-fallback">💿</div>`;
-        };
-        imageContainer.appendChild(img);
-    } else {
-        imageContainer.innerHTML = `<div class="release-image-fallback">💿</div>`;
-    }
-
-    // Create title
-    const title = document.createElement("h4");
-    title.className = "release-title";
-    title.textContent = release.title;
-    title.title = release.title;
-
-    // Create year - extract from release_date (Spotify format) or fall back to year field
-    const year = document.createElement("div");
-    year.className = "release-year";
-
-    let yearText = "Unknown Year";
-
-    // DEBUG: Log the release data to see what we're working with (remove this after testing)
-    // console.log(`🔍 DEBUG: Release "${release.title}" data:`, {
-    //     title: release.title,
-    //     owned: release.owned,
-    //     year: release.year,
-    //     release_date: release.release_date,
-    //     track_completion: release.track_completion
-    // });
-
-    // First try to extract year from release_date (Spotify format: "YYYY-MM-DD")
-    if (release.release_date) {
-        try {
-            // Extract year directly from string to avoid timezone issues
-            const yearMatch = release.release_date.match(/^(\d{4})/);
-            if (yearMatch) {
-                const releaseYear = parseInt(yearMatch[1]);
-                if (releaseYear && !isNaN(releaseYear) && releaseYear > 1900 && releaseYear <= new Date().getFullYear() + 1) {
-                    yearText = releaseYear.toString();
-                }
-            } else {
-                // Fallback to Date parsing if format is different
-                const releaseYear = new Date(release.release_date).getFullYear();
-                if (releaseYear && !isNaN(releaseYear) && releaseYear > 1900 && releaseYear <= new Date().getFullYear() + 1) {
-                    yearText = releaseYear.toString();
-                }
-            }
-        } catch (e) {
-            console.warn('Error parsing release_date:', release.release_date, e);
-        }
-    }
-
-    // Fallback to direct year field if release_date parsing failed
-    if (yearText === "Unknown Year" && release.year) {
-        yearText = release.year.toString();
-    }
-
-    year.textContent = yearText;
-
-    // Create completion info
-    const completion = document.createElement("div");
-    completion.className = "release-completion";
-
-    const completionText = document.createElement("span");
-    const completionBar = document.createElement("div");
-    completionBar.className = "completion-bar";
-
-    const completionFill = document.createElement("div");
-    completionFill.className = "completion-fill";
-
-    if (release.owned === null || release.track_completion === 'checking') {
-        // Checking state - ownership not yet resolved
-        completionText.textContent = "Checking...";
-        completionText.className = "completion-text checking";
-        completionFill.className += " checking";
-        completionFill.style.width = "100%";
-    } else if (release.owned) {
-        // Handle new detailed track completion object
-        if (release.track_completion && typeof release.track_completion === 'object') {
-            const completion = release.track_completion;
-            const percentage = completion.percentage || 100;
-            const ownedTracks = completion.owned_tracks || 0;
-            const totalTracks = completion.total_tracks || 0;
-            const missingTracks = completion.missing_tracks || 0;
-
-            completionFill.style.width = `${percentage}%`;
-
-            if (missingTracks === 0) {
-                completionText.textContent = `Complete (${ownedTracks})`;
-                completionText.className = "completion-text complete";
-                completionFill.className += " complete";
-            } else {
-                completionText.textContent = `${ownedTracks}/${totalTracks} tracks`;
-                completionText.className = "completion-text partial";
-                completionFill.className += " partial";
-
-                // Add missing tracks indicator
-                completionText.title = `Missing ${missingTracks} track${missingTracks !== 1 ? 's' : ''}`;
-            }
-        } else {
-            // Fallback for legacy simple percentage
-            const percentage = release.track_completion || 100;
-            completionFill.style.width = `${percentage}%`;
-
-            if (percentage === 100) {
-                completionText.textContent = "Complete";
-                completionText.className = "completion-text complete";
-                completionFill.className += " complete";
-            } else {
-                completionText.textContent = `${percentage}%`;
-                completionText.className = "completion-text partial";
-                completionFill.className += " partial";
-            }
-        }
-    } else {
-        const totalTr = release.total_tracks || release.track_completion?.total_tracks || 0;
-        completionText.textContent = totalTr > 0 ? `Missing (${totalTr} tracks)` : "Not in library";
-        completionText.className = "completion-text missing";
-        completionFill.className += " missing";
-        completionFill.style.width = "0%";
-    }
-
-    completionBar.appendChild(completionFill);
-    completion.appendChild(completionText);
-    completion.appendChild(completionBar);
-
-    // Assemble card
-    card.appendChild(imageContainer);
-    card.appendChild(title);
-    card.appendChild(year);
-    card.appendChild(completion);
-
-    // Add MusicBrainz icon LAST to ensure it's on top
-    if (release.musicbrainz_release_id && mbIcon) { // Check if mbIcon was created
         card.appendChild(mbIcon);
     }
 
