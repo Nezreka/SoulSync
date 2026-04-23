@@ -109,9 +109,7 @@ class TestFindLibraryArtistForSource:
             **{column: source_value},
         )
 
-        result = find_library_artist_for_source(
-            db, source, source_value, artist_name=""
-        )
+        result = find_library_artist_for_source(db, source, source_value)
         assert result == f"pk-{source}"
 
     def test_unknown_source_returns_none(self, db):
@@ -121,8 +119,16 @@ class TestFindLibraryArtistForSource:
 
     def test_lookup_misses_when_source_id_unknown(self, db):
         _insert_artist(db, artist_id="pk-real", name="Real Artist", deezer_id="dz-real")
+        assert find_library_artist_for_source(db, "deezer", "dz-not-real") is None
+
+    def test_artist_name_is_optional(self, db):
+        """Callers that don't have a name handy should be able to omit it
+        without falling through to the name-fallback branch."""
+        _insert_artist(db, artist_id="pk-q", name="Some Artist", server_source="plex")
+        # No source-id match, no name passed → must return None even when
+        # active_server is set (otherwise we'd risk matching by None name).
         assert find_library_artist_for_source(
-            db, "deezer", "dz-not-real", artist_name=""
+            db, "deezer", "no-id-match", active_server="plex"
         ) is None
 
     def test_name_fallback_matches_within_active_server(self, db):

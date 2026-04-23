@@ -43,7 +43,7 @@ def find_library_artist_for_source(
     database,
     source: str,
     source_artist_id: str,
-    artist_name: str,
+    artist_name: Optional[str] = None,
     active_server: Optional[str] = None,
 ) -> Optional[str]:
     """Return the library PK of an artist matching the source-aware click.
