@@ -204,7 +204,9 @@ function initializeSearchModeToggle() {
         const dropdown = document.getElementById('enhanced-dropdown');
         if (dropdown && !dropdown.classList.contains('hidden')) {
             const isClickInside = e.target.closest('.enhanced-search-input-wrapper');
-            if (!isClickInside) {
+            // Modal sits above the dropdown; closing it shouldn't dismiss results.
+            const isClickInModal = e.target.closest('.download-missing-modal');
+            if (!isClickInside && !isClickInModal) {
                 hideDropdown();
             }
         }
@@ -922,7 +924,6 @@ function initializeSearchModeToggle() {
     async function handleEnhancedSearchAlbumClick(album) {
         console.log(`💿 Enhanced search album clicked: ${album.name} by ${album.artist}`);
 
-        hideDropdown();
         showLoadingOverlay('Loading album...');
 
         try {
@@ -1045,7 +1046,6 @@ function initializeSearchModeToggle() {
     async function streamEnhancedSearchTrack(track) {
         console.log(`▶️ Stream enhanced search track: ${track.name} by ${track.artist}`);
 
-        hideDropdown();
         showLoadingOverlay(`Searching for ${track.name}...`);
 
         try {
@@ -1103,7 +1103,6 @@ function initializeSearchModeToggle() {
     async function handleEnhancedSearchTrackClick(track) {
         console.log(`🎵 Enhanced search track clicked: ${track.name} by ${track.artist}`);
 
-        hideDropdown();
         showLoadingOverlay('Loading track...');
 
         try {
