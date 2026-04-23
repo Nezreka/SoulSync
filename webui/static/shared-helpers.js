@@ -114,6 +114,308 @@ async function fetchSourceConfiguredMap() {
     return map;
 }
 
+// Shared source-picker controller used by both the unified Search page
+// and the global search widget. Owns all the query/active-source/per-query
+// cache state, fetch dispatch (enhanced-search for standard sources, NDJSON
+// for YouTube Music Videos), configured-source discovery, fallback tracking,
+// and icon-row rendering. Each surface passes per-surface wiring — DOM
+// elements, a CSS class prefix, and callbacks — and the controller takes
+// care of the rest.
+//
+// Config:
+//   sourceRowElement        — HTMLElement where the icon row is rendered
+//   iconClassPrefix         — 'enh' or 'gsearch' (drives CSS class names)
+//   onStateChange(state)    — called whenever the surface should re-render
+//                             results (cache hit, fetch settle, query reset)
+//   onSoulseekSelected(q)   — surface decides what happens when the user
+//                             clicks the Soulseek icon (basic-section swap
+//                             on the Search page, /search handoff on the
+//                             global widget)
+//   onUnconfiguredClick(src)— override the default "open Settings" behaviour
+//
+// Returned methods:
+//   init()                  — async; reads /api/settings + /api/settings/
+//                             config-status, seeds default source, falls
+//                             forward if primary is unconfigured, draws row
+//   submitQuery(query)      — user typed a new query (clears cache on change)
+//   setActiveSource(src)    — user clicked a different source icon
+//   renderSourceRow()       — re-draws the icon row (call after state edits)
+function createSearchController({
+    sourceRowElement,
+    iconClassPrefix = 'enh',
+    onStateChange,
+    onSoulseekSelected,
+    onUnconfiguredClick,
+} = {}) {
+    const iconClass = `${iconClassPrefix}-source-icon`;
+    const glyphClass = `${iconClassPrefix}-source-icon-glyph`;
+    const labelClass = `${iconClassPrefix}-source-icon-label`;
+
+    // Per-query cache. `sources[src]` holds the result payload the last
+    // time `src` was fetched for the current query. `fallbacks[src]`
+    // records the source the backend actually served when it auto-fell-
+    // back (e.g. user clicked Spotify but got Deezer because Spotify is
+    // rate-limited). `loadingSources` drives per-icon spinners. The whole
+    // cache is cleared whenever the query string changes — we never
+    // serve stale results across queries.
+    const state = {
+        query: '',
+        activeSource: 'spotify',
+        sources: {},
+        fallbacks: {},
+        loadingSources: new Set(),
+        configuredSources: {},
+        _initialized: false,
+    };
+    // Optimistic default — replaced by the real config-status lookup on
+    // init. Prevents a flash of "all unconfigured" icons.
+    for (const src of SOURCE_ORDER) state.configuredSources[src] = true;
+
+    let abortCtrl = null;
+
+    function _notify() { if (onStateChange) onStateChange(state); }
+
+    function renderSourceRow() {
+        if (!sourceRowElement) return;
+        sourceRowElement.innerHTML = SOURCE_ORDER.map(src => {
+            const info = SOURCE_LABELS[src];
+            if (!info) return '';
+            const active = src === state.activeSource;
+            const cached = !!state.sources[src];
+            const loading = state.loadingSources.has(src);
+            const fallback = state.fallbacks[src];
+            const configured = state.configuredSources[src] !== false;
+
+            const classes = [
+                iconClass,
+                active ? 'active' : '',
+                cached ? 'cached' : '',
+                loading ? 'loading' : '',
+                fallback ? 'fallback-warning' : '',
+                configured ? '' : 'unconfigured',
+            ].filter(Boolean).join(' ');
+
+            let title;
+            if (!configured) {
+                title = `${info.text} — set up in Settings`;
+            } else if (fallback) {
+                title = `${info.text} unavailable — served from ${(SOURCE_LABELS[fallback] || {}).text || fallback}`;
+            } else {
+                title = info.text;
+            }
+
+            const glyph = loading
+                ? '⏳'
+                : (info.logo
+                    ? `<img src="${escapeHtml(info.logo)}" alt="" loading="lazy">`
+                    : info.icon);
+
+            return `
+                <button class="${classes}" data-source="${src}" role="tab"
+                        aria-selected="${active}" title="${escapeHtml(title)}">
+                    <span class="${glyphClass}">${glyph}</span>
+                    <span class="${labelClass}">${escapeHtml(info.text)}</span>
+                </button>`;
+        }).join('');
+
+        sourceRowElement.querySelectorAll(`.${iconClass}`).forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                // stopPropagation prevents surface-level outside-click handlers
+                // from dismissing the results while we re-render the icon row
+                // (which detaches the clicked button from the DOM).
+                e.stopPropagation();
+                setActiveSource(btn.dataset.source);
+            });
+        });
+    }
+
+    async function init() {
+        if (state._initialized) return;
+        state._initialized = true;
+
+        // Resolve the user's configured primary source.
+        try {
+            const resp = await fetch('/api/settings');
+            if (resp.ok) {
+                const settings = await resp.json();
+                const cfg = settings.metadata && settings.metadata.fallback_source;
+                if (cfg && SOURCE_LABELS[cfg]) state.activeSource = cfg;
+            }
+        } catch (_) { /* best-effort */ }
+        if (!SOURCE_LABELS[state.activeSource]) state.activeSource = 'spotify';
+
+        // Figure out which sources actually have credentials saved.
+        try {
+            state.configuredSources = await fetchSourceConfiguredMap();
+        } catch (_) { /* keep optimistic default */ }
+
+        // If the configured primary is itself unconfigured (Spotify saved
+        // as primary but no client_id yet), fall forward to the first
+        // configured source so the default active icon is usable.
+        if (state.configuredSources[state.activeSource] === false) {
+            const firstConfigured = SOURCE_ORDER.find(s => state.configuredSources[s] !== false);
+            if (firstConfigured) state.activeSource = firstConfigured;
+        }
+
+        renderSourceRow();
+        _notify();
+    }
+
+    function setActiveSource(src) {
+        if (!SOURCE_LABELS[src]) return;
+
+        // Unconfigured — jump to the relevant card in Settings rather than
+        // firing a search that can't succeed. Don't swap activeSource so the
+        // user's previous pick stays current when they come back.
+        if (state.configuredSources[src] === false) {
+            if (onUnconfiguredClick) onUnconfiguredClick(src);
+            else openSettingsForSource(src);
+            return;
+        }
+
+        // Clicking the already-active source is a no-op for normal sources,
+        // but for Soulseek we still re-fire the callback so the surface can
+        // re-issue the handoff (e.g. user typed and wants a fresh search).
+        if (src === state.activeSource) {
+            if (src === 'soulseek' && onSoulseekSelected) onSoulseekSelected(state.query);
+            return;
+        }
+
+        state.activeSource = src;
+        renderSourceRow();
+
+        // Soulseek — let the surface decide what to do (basic-section swap
+        // on Search page, /search handoff on global widget). We don't cache
+        // or auto-fetch soulseek results in the controller.
+        if (src === 'soulseek') {
+            if (onSoulseekSelected) onSoulseekSelected(state.query);
+            return;
+        }
+
+        if (state.sources[src]) {
+            _notify();
+        } else if (state.query) {
+            _fetchSource(src);
+        } else {
+            _notify();
+        }
+    }
+
+    async function _fetchSource(src) {
+        const query = state.query;
+        if (!query) return;
+
+        state.loadingSources.add(src);
+        renderSourceRow();
+        _notify();
+
+        if (abortCtrl) abortCtrl.abort();
+        abortCtrl = new AbortController();
+
+        try {
+            if (src === 'youtube_videos') {
+                await _fetchYouTubeVideos(query, abortCtrl.signal);
+            } else {
+                const data = await enhancedSearchFetch(query, {
+                    source: src,
+                    signal: abortCtrl.signal,
+                });
+                state.sources[src] = {
+                    artists: data.spotify_artists || [],
+                    albums: data.spotify_albums || [],
+                    tracks: data.spotify_tracks || [],
+                    videos: [],
+                    db_artists: data.db_artists || [],
+                };
+                const served = data.primary_source || data.metadata_source;
+                if (served && served !== src) state.fallbacks[src] = served;
+            }
+
+            state.loadingSources.delete(src);
+            renderSourceRow();
+            _notify();
+        } catch (err) {
+            state.loadingSources.delete(src);
+            renderSourceRow();
+            _notify();
+            if (err.name !== 'AbortError') {
+                console.debug(`Source fetch failed for ${src}:`, err);
+            }
+        }
+    }
+
+    async function _fetchYouTubeVideos(query, signal) {
+        const res = await fetch('/api/enhanced-search/source/youtube_videos', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query }),
+            signal,
+        });
+        if (!res.ok) throw new Error(`YouTube search failed: ${res.status}`);
+
+        state.sources['youtube_videos'] = {
+            artists: [], albums: [], tracks: [], videos: [], db_artists: [],
+        };
+        const cache = state.sources['youtube_videos'];
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let idx;
+            while ((idx = buffer.indexOf('\n')) !== -1) {
+                const line = buffer.slice(0, idx).trim();
+                buffer = buffer.slice(idx + 1);
+                if (!line) continue;
+                try {
+                    const chunk = JSON.parse(line);
+                    if (chunk.type === 'videos') {
+                        cache.videos = chunk.data;
+                        // Live-render if still the active source.
+                        if (state.activeSource === 'youtube_videos') _notify();
+                    }
+                } catch (_) { /* best-effort NDJSON parse */ }
+            }
+        }
+    }
+
+    function submitQuery(query) {
+        if (query !== state.query) {
+            state.query = query;
+            state.sources = {};
+            state.fallbacks = {};
+            state.loadingSources = new Set();
+            renderSourceRow();
+        }
+
+        // Soulseek — surface handles the full query handoff.
+        if (state.activeSource === 'soulseek') {
+            if (onSoulseekSelected) onSoulseekSelected(query);
+            return;
+        }
+
+        // Cache hit — instant re-render, no fetch.
+        if (state.sources[state.activeSource]) {
+            _notify();
+            return;
+        }
+
+        _fetchSource(state.activeSource);
+    }
+
+    return {
+        state,
+        init,
+        submitQuery,
+        setActiveSource,
+        renderSourceRow,
+    };
+}
+
+
 // Navigate to Settings → Connections tab and scroll to the service card that
 // matches the picker's source id. Called when a user clicks an unconfigured
 // source icon.
