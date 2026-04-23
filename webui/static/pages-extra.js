@@ -2870,16 +2870,16 @@ function _adlRenderBatchHistory() {
             youtube: '255, 0, 0', tidal: '0, 255, 255', deezer: '162, 73, 255',
             beatport: '148, 252, 19', listenbrainz: '255, 134, 0'
         };
-        const dotColor = sourceColors[h.source] || sourceColors[h.source_page] || '255, 255, 255';
-        const histDot = `<span class="adl-batch-history-dot" style="background:rgba(${dotColor}, 0.6)"></span>`;
-
-        // Optional thumbnail
-        const thumb = h.thumb_url
-            ? `<img src="${_adlEsc(h.thumb_url)}" class="adl-batch-history-thumb" loading="lazy">`
-            : '';Source = h.source || h.source_page || '';
+        const dotSource = h.source || h.source_page || '';
         const dotColor = sourceColors[dotSource] || '255, 255, 255';
         const dotTip = dotSource ? `Source: ${dotSource}` : 'Unknown source';
-        const histDot = `<span class="adl-batch-history-dot" style="background:rgba(${dotColor}, 0.6)" title="${dotTip}
+        const histDot = `<span class="adl-batch-history-dot" style="background:rgba(${dotColor}, 0.6)" title="${dotTip}"></span>`;
+
+        // Thumbnail with placeholder fallback
+        const thumb = h.thumb_url
+            ? `<img src="${_adlEsc(h.thumb_url)}" class="adl-batch-history-thumb" loading="lazy" onerror="this.classList.add('adl-batch-history-thumb-placeholder');this.removeAttribute('src')">`
+            : `<span class="adl-batch-history-thumb adl-batch-history-thumb-placeholder"></span>`;
+
         // Server push status indicator
         let pushBadge = '';
         if (h.server_push_status) {
