@@ -5479,17 +5479,23 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .gsearch-tab.active { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); border-color: rgba(var(--accent-rgb), 0.2); }
 .gsearch-tab:hover:not(.active) { background: rgba(255,255,255,0.06); }
 
-/* Source icon row (replaces post-search tabs) */
+/* Source icon row (replaces post-search tabs) — compact glassy version of
+   the Search-page row so both surfaces share the same language. */
 .gsearch-source-row {
     display: flex;
     flex-wrap: nowrap;
     overflow-x: auto;
     overflow-y: visible;
     gap: 6px;
-    padding: 10px 14px 8px;
+    padding: 10px 14px 10px;
+    margin: 8px 12px 10px;
     flex-shrink: 0;
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.015) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 .gsearch-source-row::-webkit-scrollbar { height: 4px; }
 .gsearch-source-row::-webkit-scrollbar-track { background: transparent; }
@@ -5501,62 +5507,110 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
-    min-width: 56px;
-    padding: 6px 8px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
-    color: rgba(255, 255, 255, 0.55);
+    gap: 4px;
+    min-width: 72px;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+    color: rgba(255, 255, 255, 0.6);
     cursor: pointer;
     font-family: inherit;
     font-size: 10px;
     font-weight: 600;
     white-space: nowrap;
     flex-shrink: 0;
-    transition: border-color 0.15s, background 0.15s, color 0.15s;
+    transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease,
+                color 0.18s ease, box-shadow 0.18s ease;
 }
 .gsearch-source-icon:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.04) 100%);
     color: #fff;
-    border-color: rgba(255, 255, 255, 0.14);
+    border-color: rgba(255, 255, 255, 0.18);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
 }
+.gsearch-source-icon:active { transform: translateY(0) scale(0.97); }
+
 .gsearch-source-icon-glyph {
-    font-size: 16px;
+    font-size: 20px;
     line-height: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
+    width: 22px;
+    height: 22px;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.25));
 }
 .gsearch-source-icon-glyph img {
-    width: 18px;
-    height: 18px;
+    width: 22px;
+    height: 22px;
     object-fit: contain;
     display: block;
 }
-.gsearch-source-icon-label { font-size: 10px; letter-spacing: 0.02em; }
+.gsearch-source-icon-label { font-size: 10px; letter-spacing: 0.02em; font-weight: 600; }
+.gsearch-source-icon.active .gsearch-source-icon-label { font-weight: 700; }
 
-.gsearch-source-icon[data-source="spotify"].active { background: rgba(29, 185, 84, 0.18); color: #1db954; border-color: rgba(29, 185, 84, 0.4); }
-.gsearch-source-icon[data-source="itunes"].active { background: rgba(252, 60, 68, 0.18); color: #fc3c44; border-color: rgba(252, 60, 68, 0.4); }
-.gsearch-source-icon[data-source="deezer"].active { background: rgba(162, 56, 255, 0.18); color: #a238ff; border-color: rgba(162, 56, 255, 0.4); }
-.gsearch-source-icon[data-source="discogs"].active { background: rgba(212, 165, 116, 0.18); color: #D4A574; border-color: rgba(212, 165, 116, 0.4); }
-.gsearch-source-icon[data-source="hydrabase"].active { background: rgba(0, 180, 216, 0.18); color: #00b4d8; border-color: rgba(0, 180, 216, 0.4); }
-.gsearch-source-icon[data-source="musicbrainz"].active { background: rgba(186, 51, 88, 0.18); color: #BA3358; border-color: rgba(186, 51, 88, 0.4); }
-.gsearch-source-icon[data-source="youtube_videos"].active { background: rgba(255, 0, 0, 0.18); color: #ff4444; border-color: rgba(255, 0, 0, 0.4); }
-.gsearch-source-icon[data-source="soulseek"].active { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: rgba(255, 255, 255, 0.3); }
+.gsearch-source-icon.active {
+    transform: scale(1.04);
+    border-color: currentColor;
+}
+.gsearch-source-icon[data-source="spotify"].active {
+    color: #1db954;
+    background: linear-gradient(180deg, rgba(29, 185, 84, 0.28) 0%, rgba(29, 185, 84, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(29, 185, 84, 0.35), 0 4px 16px rgba(29, 185, 84, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="itunes"].active {
+    color: #fc3c44;
+    background: linear-gradient(180deg, rgba(252, 60, 68, 0.28) 0%, rgba(252, 60, 68, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(252, 60, 68, 0.35), 0 4px 16px rgba(252, 60, 68, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="deezer"].active {
+    color: #a238ff;
+    background: linear-gradient(180deg, rgba(162, 56, 255, 0.28) 0%, rgba(162, 56, 255, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(162, 56, 255, 0.35), 0 4px 16px rgba(162, 56, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="discogs"].active {
+    color: #D4A574;
+    background: linear-gradient(180deg, rgba(212, 165, 116, 0.28) 0%, rgba(212, 165, 116, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(212, 165, 116, 0.35), 0 4px 16px rgba(212, 165, 116, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="hydrabase"].active {
+    color: #00b4d8;
+    background: linear-gradient(180deg, rgba(0, 180, 216, 0.28) 0%, rgba(0, 180, 216, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(0, 180, 216, 0.35), 0 4px 16px rgba(0, 180, 216, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="musicbrainz"].active {
+    color: #BA3358;
+    background: linear-gradient(180deg, rgba(186, 51, 88, 0.28) 0%, rgba(186, 51, 88, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(186, 51, 88, 0.35), 0 4px 16px rgba(186, 51, 88, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="youtube_videos"].active {
+    color: #ff4444;
+    background: linear-gradient(180deg, rgba(255, 0, 0, 0.28) 0%, rgba(255, 0, 0, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(255, 0, 0, 0.35), 0 4px 16px rgba(255, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="soulseek"].active {
+    color: #fff;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 100%);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.32), 0 4px 16px rgba(255, 255, 255, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
 
 .gsearch-source-icon.cached::after {
     content: '';
     position: absolute;
-    top: 4px;
-    right: 5px;
-    width: 5px;
-    height: 5px;
+    top: 5px;
+    right: 6px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: currentColor;
-    opacity: 0.75;
+    box-shadow: 0 0 4px currentColor;
+    animation: gsearch-source-cache-pulse 2.4s ease-in-out infinite;
+}
+@keyframes gsearch-source-cache-pulse {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50%      { opacity: 1;   transform: scale(1.15); }
 }
 .gsearch-source-icon.loading .gsearch-source-icon-glyph {
     animation: gsearch-source-loading-spin 1.2s linear infinite;
@@ -5566,7 +5620,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     from { transform: rotate(0); }
     to   { transform: rotate(360deg); }
 }
-.gsearch-source-icon.fallback-warning { border-color: rgba(250, 176, 5, 0.5); }
+.gsearch-source-icon.fallback-warning {
+    border-color: rgba(250, 176, 5, 0.5);
+    box-shadow: 0 0 0 1px rgba(250, 176, 5, 0.25);
+}
 
 .gsearch-fallback-banner {
     padding: 6px 14px;
@@ -33620,13 +33677,18 @@ div.artist-hero-badge {
     overflow-x: auto;
     overflow-y: visible;
     gap: 10px;
-    padding: 10px 4px 8px;
-    margin: 8px 0 12px;
+    padding: 12px 14px;
+    margin: 10px 0 14px;
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-    /* Don't compress when the parent flex container is tight (e.g. when a
-       `.search-section.active` sibling has flex-grow:1 and the viewport
-       forces a layout squeeze — would otherwise clip the icons). */
+    /* Frosted-glass panel that holds the icons together visually. */
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.015) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 10px rgba(0, 0, 0, 0.15);
+    /* Don't compress when the parent flex container is tight. */
     flex-shrink: 0;
 }
 .enh-source-row::-webkit-scrollbar { height: 6px; }
@@ -33639,70 +33701,127 @@ div.artist-hero-badge {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    min-width: 72px;
-    padding: 10px 12px;
+    gap: 6px;
+    min-width: 90px;
+    padding: 12px 14px;
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.04);
-    color: rgba(255, 255, 255, 0.6);
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+    color: rgba(255, 255, 255, 0.65);
     cursor: pointer;
-    transition: border-color 0.15s, background 0.15s, color 0.15s, transform 0.1s;
+    transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease,
+                color 0.18s ease, box-shadow 0.18s ease;
     font-family: inherit;
-    font-size: 11px;
+    font-size: 11.5px;
     font-weight: 600;
     white-space: nowrap;
     flex-shrink: 0;
 }
 .enh-source-icon:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.95);
-    border-color: rgba(255, 255, 255, 0.16);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.04) 100%);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.18);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
-.enh-source-icon:active { transform: scale(0.97); }
+.enh-source-icon:active { transform: translateY(0) scale(0.97); }
 
 .enh-source-icon-glyph {
-    font-size: 20px;
+    font-size: 26px;
     line-height: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
+    width: 30px;
+    height: 30px;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
 }
 .enh-source-icon-glyph img {
-    width: 22px;
-    height: 22px;
+    width: 30px;
+    height: 30px;
     object-fit: contain;
     display: block;
 }
 .enh-source-icon-label {
-    font-size: 11px;
+    font-size: 11.5px;
     letter-spacing: 0.02em;
+    font-weight: 600;
+}
+.enh-source-icon.active .enh-source-icon-label { font-weight: 700; }
+
+/* Active state — brand-coloured gradient + outer glow. Each source gets its
+   own palette. `transform: scale(1.03)` lifts the chip slightly above its
+   siblings. */
+.enh-source-icon.active {
+    transform: scale(1.03);
+    border-color: currentColor;
+}
+.enh-source-icon[data-source="spotify"].active {
+    color: #1db954;
+    background: linear-gradient(180deg, rgba(29, 185, 84, 0.28) 0%, rgba(29, 185, 84, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(29, 185, 84, 0.35), 0 6px 22px rgba(29, 185, 84, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="itunes"].active {
+    color: #fc3c44;
+    background: linear-gradient(180deg, rgba(252, 60, 68, 0.28) 0%, rgba(252, 60, 68, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(252, 60, 68, 0.35), 0 6px 22px rgba(252, 60, 68, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="deezer"].active {
+    color: #a238ff;
+    background: linear-gradient(180deg, rgba(162, 56, 255, 0.28) 0%, rgba(162, 56, 255, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(162, 56, 255, 0.35), 0 6px 22px rgba(162, 56, 255, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="discogs"].active {
+    color: #D4A574;
+    background: linear-gradient(180deg, rgba(212, 165, 116, 0.28) 0%, rgba(212, 165, 116, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(212, 165, 116, 0.35), 0 6px 22px rgba(212, 165, 116, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="hydrabase"].active {
+    color: #00b4d8;
+    background: linear-gradient(180deg, rgba(0, 180, 216, 0.28) 0%, rgba(0, 180, 216, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(0, 180, 216, 0.35), 0 6px 22px rgba(0, 180, 216, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="musicbrainz"].active {
+    color: #BA3358;
+    background: linear-gradient(180deg, rgba(186, 51, 88, 0.28) 0%, rgba(186, 51, 88, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(186, 51, 88, 0.35), 0 6px 22px rgba(186, 51, 88, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="youtube_videos"].active {
+    color: #ff4444;
+    background: linear-gradient(180deg, rgba(255, 0, 0, 0.28) 0%, rgba(255, 0, 0, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(255, 0, 0, 0.35), 0 6px 22px rgba(255, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="soulseek"].active {
+    color: #fff;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 100%);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.32), 0 6px 22px rgba(255, 255, 255, 0.15),
+                inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
-/* Active per-source accent — reuses the tab color palette for consistency. */
-.enh-source-icon[data-source="spotify"].active { background: rgba(29, 185, 84, 0.18); color: #1db954; border-color: rgba(29, 185, 84, 0.45); }
-.enh-source-icon[data-source="itunes"].active { background: rgba(252, 60, 68, 0.18); color: #fc3c44; border-color: rgba(252, 60, 68, 0.45); }
-.enh-source-icon[data-source="deezer"].active { background: rgba(162, 56, 255, 0.18); color: #a238ff; border-color: rgba(162, 56, 255, 0.45); }
-.enh-source-icon[data-source="discogs"].active { background: rgba(212, 165, 116, 0.18); color: #D4A574; border-color: rgba(212, 165, 116, 0.45); }
-.enh-source-icon[data-source="hydrabase"].active { background: rgba(0, 180, 216, 0.18); color: #00b4d8; border-color: rgba(0, 180, 216, 0.45); }
-.enh-source-icon[data-source="musicbrainz"].active { background: rgba(186, 51, 88, 0.18); color: #BA3358; border-color: rgba(186, 51, 88, 0.45); }
-.enh-source-icon[data-source="youtube_videos"].active { background: rgba(255, 0, 0, 0.18); color: #ff4444; border-color: rgba(255, 0, 0, 0.45); }
-.enh-source-icon[data-source="soulseek"].active { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: rgba(255, 255, 255, 0.3); }
-
-/* Cache dot — small indicator on icons that already have results for the
-   current query. Placed top-right to avoid clashing with the label. */
+/* Cache dot — brand-coloured pulse on icons that have results cached for
+   the current query. */
 .enh-source-icon.cached::after {
     content: '';
     position: absolute;
-    top: 6px;
-    right: 8px;
-    width: 6px;
-    height: 6px;
+    top: 7px;
+    right: 9px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: currentColor;
-    opacity: 0.8;
+    box-shadow: 0 0 6px currentColor;
+    animation: enh-source-cache-pulse 2.4s ease-in-out infinite;
+}
+@keyframes enh-source-cache-pulse {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50%      { opacity: 1;   transform: scale(1.15); }
 }
 
 .enh-source-icon.loading .enh-source-icon-glyph {
@@ -33716,6 +33835,7 @@ div.artist-hero-badge {
 
 .enh-source-icon.fallback-warning {
     border-color: rgba(250, 176, 5, 0.5);
+    box-shadow: 0 0 0 1px rgba(250, 176, 5, 0.25);
 }
 
 /* Rate-limit fallback banner above the enhanced results. */
