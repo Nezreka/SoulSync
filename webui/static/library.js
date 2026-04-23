@@ -803,6 +803,18 @@ async function loadArtistDetailData(artistId, artistName) {
         // Populate the page with data (which updates the hero section and sets textContent)
         populateArtistDetailPage(data);
 
+        // Library upgrade — if the backend resolved this source-artist click to
+        // an existing library record (e.g. clicking a Deezer result for an
+        // artist already in your Plex), data.artist.id is the library PK.
+        // Update currentArtistId so subsequent library-only API calls (Enhanced
+        // view, completion checks, server sync) hit the right id. Also flip
+        // the body source flag from 'source' back to 'library' so the
+        // library-only UI re-shows.
+        if (data.artist && data.artist.id && String(data.artist.id) !== String(artistDetailPageState.currentArtistId)) {
+            console.log(`📚 Library upgrade: ${artistDetailPageState.currentArtistId} → ${data.artist.id}`);
+            artistDetailPageState.currentArtistId = data.artist.id;
+        }
+
         // Keep the resolved metadata source for album-track lookups.
         artistDetailPageState.currentArtistSource = data.discography?.source || data.artist?.source || null;
 
@@ -2416,6 +2428,10 @@ function toggleEnhancedView(enabled) {
     dividers.forEach((d, i) => {
         if (i < dividers.length - 1) d.style.display = enabled ? 'none' : '';
     });
+
+    // Similar Artists is part of the standard view — hide it in Enhanced.
+    const similarSection = document.getElementById('ad-similar-artists-section');
+    if (similarSection) similarSection.style.display = enabled ? 'none' : '';
 
     if (enabled) {
         standardSections.classList.add('hidden');
