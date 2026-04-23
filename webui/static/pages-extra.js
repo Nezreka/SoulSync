@@ -2638,6 +2638,12 @@ function _adlOpenBatchModal(batchId, playlistId, batchName) {
         return;
     }
 
+    // For discover batches, use the discover-specific modal path
+    if (playlistId.startsWith('discover_') && typeof openDiscoverDownloadModal === 'function') {
+        openDiscoverDownloadModal(playlistId);
+        return;
+    }
+
     // For other batches, try to show existing modal or rehydrate
     for (const [pid, process] of Object.entries(activeDownloadProcesses)) {
         if (process.batchId === batchId && process.modalElement && document.body.contains(process.modalElement)) {
