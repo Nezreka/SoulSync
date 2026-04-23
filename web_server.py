@@ -28652,11 +28652,17 @@ def _on_download_completed(batch_id, task_id, success=True):
                     except Exception:
                         pass
 
-                # Push discover playlists to media server after downloads complete
+                # Push playlists to media server after downloads complete
                 playlist_id = batch.get('playlist_id')
-                if playlist_id and playlist_id.startswith('discover_'):
+                _push_prefixes = (
+                    'discover_', 'auto_mirror_', 'youtube_mirrored_',
+                    'youtube_', 'tidal_', 'deezer_', 'spotify_public_',
+                    'listenbrainz_', 'beatport_',
+                )
+                if playlist_id and playlist_id.startswith(_push_prefixes):
+                    database.update_sync_history_push_status(batch_id, 'pending')
                     threading.Thread(
-                        target=_push_discover_playlist_to_server,
+                        target=_push_playlist_to_server,
                         args=(batch_id, batch),
                         daemon=True
                     ).start()
@@ -31912,11 +31918,17 @@ def _check_batch_completion_v2(batch_id):
                         except Exception:
                             pass
 
-                    # Push discover playlists to media server after downloads complete
+                    # Push playlists to media server after downloads complete
                     playlist_id = batch.get('playlist_id')
-                    if playlist_id and playlist_id.startswith('discover_'):
+                    _push_prefixes = (
+                        'discover_', 'auto_mirror_', 'youtube_mirrored_',
+                        'youtube_', 'tidal_', 'deezer_', 'spotify_public_',
+                        'listenbrainz_', 'beatport_',
+                    )
+                    if playlist_id and playlist_id.startswith(_push_prefixes):
+                        database.update_sync_history_push_status(batch_id, 'pending')
                         threading.Thread(
-                            target=_push_discover_playlist_to_server,
+                            target=_push_playlist_to_server,
                             args=(batch_id, batch),
                             daemon=True
                         ).start()
@@ -32464,18 +32476,23 @@ def _record_sync_history_completion(batch_id, batch):
         traceback.print_exc()
 
 
-def _push_discover_playlist_to_server(batch_id, batch):
-    """After a discover batch completes, push the playlist to the media server.
-    Runs in a background thread. Triggers a scan, waits, then searches for tracks and creates/updates the playlist."""
+def _push_playlist_to_server(batch_id, batch):
+    """After a batch completes, push the playlist to the media server.
+    Runs in a background thread. Triggers a scan, waits, then searches for tracks and creates/updates the playlist.
+    Supports discover, mirrored, and auto-mirror playlists."""
+    database = get_database()
     try:
         playlist_id = batch.get('playlist_id', '')
         playlist_name = batch.get('playlist_name', '')
         if not playlist_name:
             return
 
+        database.update_sync_history_push_status(batch_id, 'pushing')
+
         analysis_results = batch.get('analysis_results', [])
         if not analysis_results:
-            logger.info(f"[DiscoverPush] No analysis results for {playlist_name} - skipping server push")
+            logger.info(f"[PlaylistPush] No analysis results for {playlist_name} - skipping server push")
+            database.update_sync_history_push_status(batch_id, 'skipped')
             return
 
         # Build list of tracks that should be in the playlist (found in library OR successfully downloaded)
@@ -32508,16 +32525,17 @@ def _push_discover_playlist_to_server(batch_id, batch):
                 })
 
         if not tracks_to_find:
-            logger.info(f"[DiscoverPush] No tracks to push for {playlist_name}")
+            logger.info(f"[PlaylistPush] No tracks to push for {playlist_name}")
+            database.update_sync_history_push_status(batch_id, 'skipped')
             return
 
-        logger.info(f"[DiscoverPush] {playlist_name}: {len(tracks_to_find)} tracks to push to server, triggering scan first")
+        logger.info(f"[PlaylistPush] {playlist_name}: {len(tracks_to_find)} tracks to push to server, triggering scan first")
 
         # Trigger a library scan so newly downloaded tracks are indexed
         if navidrome_client and navidrome_client.is_connected():
             navidrome_client.trigger_library_scan()
         elif hasattr(web_scan_manager, 'request_scan'):
-            web_scan_manager.request_scan(f"Discover playlist push: {playlist_name}")
+            web_scan_manager.request_scan(f"Playlist push: {playlist_name}")
 
         # Wait for scan to finish (poll every 5s, up to 90s)
         if navidrome_client and navidrome_client.is_connected():
@@ -32525,7 +32543,7 @@ def _push_discover_playlist_to_server(batch_id, batch):
                 time.sleep(5)
                 if not navidrome_client.is_library_scanning():
                     break
-            logger.info(f"[DiscoverPush] Scan complete, searching for tracks")
+            logger.info(f"[PlaylistPush] Scan complete, searching for tracks")
         else:
             time.sleep(30)
 
@@ -32540,27 +32558,34 @@ def _push_discover_playlist_to_server(batch_id, batch):
                     nav_track = getattr(best, '_original_navidrome_track', None)
                     if nav_track:
                         matched_server_tracks.append(nav_track)
-                        logger.debug(f"[DiscoverPush] Matched: '{t['title']}' by '{t['artist']}' → {best.id}")
+                        logger.debug(f"[PlaylistPush] Matched: '{t['title']}' by '{t['artist']}' → {best.id}")
                     else:
                         matched_server_tracks.append(best)
                 else:
-                    logger.info(f"[DiscoverPush] No match for: '{t['title']}' by '{t['artist']}'")
+                    logger.info(f"[PlaylistPush] No match for: '{t['title']}' by '{t['artist']}'")
 
         if not matched_server_tracks:
-            logger.warning(f"[DiscoverPush] No tracks matched on server for {playlist_name}")
+            logger.warning(f"[PlaylistPush] No tracks matched on server for {playlist_name}")
+            database.update_sync_history_push_status(batch_id, 'failed')
             return
 
-        logger.info(f"[DiscoverPush] Pushing {len(matched_server_tracks)}/{len(tracks_to_find)} tracks to '{playlist_name}' on server")
+        logger.info(f"[PlaylistPush] Pushing {len(matched_server_tracks)}/{len(tracks_to_find)} tracks to '{playlist_name}' on server")
         success = navidrome_client.update_playlist(playlist_name, matched_server_tracks)
         if success:
-            logger.info(f"[DiscoverPush] Successfully pushed '{playlist_name}' to server with {len(matched_server_tracks)} tracks")
+            logger.info(f"[PlaylistPush] Successfully pushed '{playlist_name}' to server with {len(matched_server_tracks)} tracks")
+            database.update_sync_history_push_status(batch_id, 'success')
         else:
-            logger.warning(f"[DiscoverPush] Failed to push '{playlist_name}' to server")
+            logger.warning(f"[PlaylistPush] Failed to push '{playlist_name}' to server")
+            database.update_sync_history_push_status(batch_id, 'failed')
 
     except Exception as e:
-        logger.error(f"[DiscoverPush] Error pushing playlist to server: {e}")
+        logger.error(f"[PlaylistPush] Error pushing playlist to server: {e}")
         import traceback
         traceback.print_exc()
+        try:
+            database.update_sync_history_push_status(batch_id, 'failed')
+        except Exception:
+            pass
 
 
 # ===============================
