@@ -320,7 +320,7 @@ def get_spotify_client_for_profile(profile_id=None):
         return spotify_client  # Fall back to global
 
 # Valid page IDs for profile permission validation
-VALID_PAGE_IDS = {'dashboard', 'sync', 'downloads', 'discover', 'artists', 'automations', 'library', 'import', 'settings', 'help'}
+VALID_PAGE_IDS = {'dashboard', 'sync', 'search', 'downloads', 'discover', 'artists', 'automations', 'library', 'import', 'settings', 'help'}
 
 def check_download_permission():
     """Check if current profile has download permission. Returns error response or None if allowed."""
@@ -2805,8 +2805,11 @@ _ENHANCED_SEARCH_CACHE_TTL = 600
 _ENHANCED_SEARCH_CACHE_MAX_ENTRIES = 100
 
 
-def _get_enhanced_search_cache_key(query):
-    """Build a cache key that follows the current metadata/search configuration."""
+def _get_enhanced_search_cache_key(query, requested_source=None):
+    """Build a cache key that follows the current metadata/search configuration.
+
+    When an explicit `requested_source` is provided (single-source search), it is
+    included in the key so that results for different sources don't collide."""
     normalized_query = (query or '').strip().lower()
 
     try:
@@ -2824,7 +2827,45 @@ def _get_enhanced_search_cache_key(query):
     except Exception:
         hydrabase_active = False
 
-    return (normalized_query, active_server, fallback_source, hydrabase_active)
+    source_tag = (requested_source or '').strip().lower() or 'auto'
+    return (normalized_query, active_server, fallback_source, hydrabase_active, source_tag)
+
+
+ENHANCED_SEARCH_VALID_SOURCES = (
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz',
+)
+
+
+def _resolve_enhanced_search_client(source_name):
+    """Return (client, is_available) for a single requested metadata source.
+
+    Mirrors the client-resolution logic used by the /source/<source> endpoint so
+    that the `source` param on the main endpoint behaves consistently."""
+    if source_name == 'spotify':
+        if spotify_client and spotify_client.is_spotify_authenticated():
+            return spotify_client, True
+        return None, False
+    if source_name == 'itunes':
+        return _get_itunes_client(), True
+    if source_name == 'deezer':
+        return _get_deezer_client(), True
+    if source_name == 'discogs':
+        token = config_manager.get('discogs.token', '')
+        if not token:
+            return None, False
+        return _get_discogs_client(token), True
+    if source_name == 'hydrabase':
+        if hydrabase_client and hydrabase_client.is_connected():
+            return hydrabase_client, True
+        return None, False
+    if source_name == 'musicbrainz':
+        try:
+            from core.musicbrainz_search import MusicBrainzSearchClient
+            return MusicBrainzSearchClient(), True
+        except Exception as e:
+            logger.warning(f"MusicBrainz search client init failed: {e}")
+            return None, False
+    return None, False
 
 
 def _get_cached_enhanced_search_response(cache_key):
@@ -9218,10 +9259,22 @@ def enhanced_search():
     Fires parallel queries against all available sources (Spotify, iTunes, Deezer)
     and returns results keyed by source, plus backward-compatible top-level keys
     mapped from the primary source.
+
+    Optional JSON body param `source` (one of: auto, spotify, itunes, deezer,
+    discogs, hydrabase, musicbrainz). When set to a specific source, the endpoint
+    bypasses the primary-source fan-out and returns just that source's results
+    (plus the usual db_artists). `auto` and omitted behave identically — current
+    multi-source fan-out.
     """
     data = request.get_json()
     query = data.get('query', '').strip()
-    cache_key = _get_enhanced_search_cache_key(query)
+    requested_source = (data.get('source') or '').strip().lower()
+    if requested_source == 'auto':
+        requested_source = ''
+    if requested_source and requested_source not in ENHANCED_SEARCH_VALID_SOURCES:
+        return jsonify({"error": f"Unknown source: {requested_source}"}), 400
+
+    cache_key = _get_enhanced_search_cache_key(query, requested_source)
 
     empty_source = {"artists": [], "albums": [], "tracks": [], "available": False}
 
@@ -9241,7 +9294,10 @@ def enhanced_search():
         logger.info(f"Enhanced search cache hit for: '{query}'")
         return jsonify(cached_response)
 
-    logger.info(f"Enhanced search initiated for: '{query}'")
+    logger.info(
+        f"Enhanced search initiated for: '{query}' "
+        f"(source={requested_source or 'auto'})"
+    )
 
     try:
         # Search local database for artists (always)
@@ -9263,16 +9319,58 @@ def enhanced_search():
         # Very short queries are usually broad enough that remote metadata searches
         # just add latency without improving the result quality much. Keep them local.
         if len(query) < 3:
-            fb_source = _get_metadata_fallback_source()
+            short_source = requested_source or _get_metadata_fallback_source()
             response_data = {
                 "db_artists": db_artists,
                 "spotify_artists": [],
                 "spotify_albums": [],
                 "spotify_tracks": [],
-                "metadata_source": fb_source,
-                "primary_source": fb_source,
+                "metadata_source": short_source,
+                "primary_source": short_source,
                 "alternate_sources": [],
                 "sources": {},
+            }
+            _set_cached_enhanced_search_response(cache_key, response_data)
+            return jsonify(response_data)
+
+        # Explicit single-source search — bypass primary-source fan-out entirely.
+        if requested_source:
+            client, available = _resolve_enhanced_search_client(requested_source)
+            if not client:
+                response_data = {
+                    "db_artists": db_artists,
+                    "spotify_artists": [],
+                    "spotify_albums": [],
+                    "spotify_tracks": [],
+                    "metadata_source": requested_source,
+                    "primary_source": requested_source,
+                    "alternate_sources": [],
+                    "source_available": False,
+                }
+                _set_cached_enhanced_search_response(cache_key, response_data)
+                return jsonify(response_data)
+
+            try:
+                source_results = _enhanced_search_source(query, client, requested_source)
+            except Exception as e:
+                logger.warning(f"Single-source search ({requested_source}) failed: {e}")
+                source_results = {"artists": [], "albums": [], "tracks": [], "available": False}
+
+            logger.info(
+                f"Enhanced search [source={requested_source}] results: "
+                f"{len(db_artists)} DB, {len(source_results['artists'])} artists, "
+                f"{len(source_results['albums'])} albums, {len(source_results['tracks'])} tracks"
+            )
+
+            response_data = {
+                "db_artists": db_artists,
+                "spotify_artists": source_results["artists"],
+                "spotify_albums": source_results["albums"],
+                "spotify_tracks": source_results["tracks"],
+                "metadata_source": requested_source,
+                "primary_source": requested_source,
+                "alternate_sources": [],
+                "source_available": True,
             }
             _set_cached_enhanced_search_response(cache_key, response_data)
             return jsonify(response_data)
@@ -11221,11 +11319,101 @@ def test_artist_endpoint(artist_id):
         "message": f"Test endpoint working for artist ID: {artist_id}"
     })
 
+from core.artist_source_lookup import (
+    SOURCE_ID_FIELD as _SOURCE_ID_FIELD,
+    SOURCE_ONLY_ARTIST_SOURCES as _SOURCE_ONLY_ARTIST_SOURCES,
+    find_library_artist_for_source as _core_find_library_artist_for_source,
+)
+
+
+def _find_library_artist_for_source(database, source, source_artist_id, artist_name=None):
+    """Thin wrapper that injects the active-server context for the core lookup."""
+    try:
+        active_server = config_manager.get_active_media_server()
+    except Exception:
+        active_server = None
+    return _core_find_library_artist_for_source(
+        database, source, source_artist_id, artist_name, active_server=active_server
+    )
+
+
+def _build_source_only_artist_detail(artist_id, artist_name, source):
+    """Thin wrapper around ``core.artist_source_detail.build_source_only_artist_detail``.
+
+    Builds the per-source client bag from web_server's module globals (each
+    source's module-level client + Last.fm api key), forwards to the pure
+    implementation in ``core/``, and wraps the (dict, status) return in
+    ``jsonify``.
+    """
+    from core.artist_source_detail import build_source_only_artist_detail
+
+    # Resolve the per-source clients defensively — the original inline code
+    # wrapped the whole source-side lookup in try/except so a failing
+    # client helper (e.g. Spotify auth probe during a rate-limit ban,
+    # Discogs client init error) would degrade gracefully to empty
+    # enrichment instead of 500-ing the request. Preserve that.
+    sp = None
+    dz = None
+    it = None
+    dc = None
+    try:
+        if spotify_client and spotify_client.is_spotify_authenticated():
+            sp = spotify_client
+    except Exception as e:
+        logger.debug(f"Spotify client resolution failed: {e}")
+    try:
+        dz = _get_deezer_client()
+    except Exception as e:
+        logger.debug(f"Deezer client resolution failed: {e}")
+    try:
+        it = _get_itunes_client()
+    except Exception as e:
+        logger.debug(f"iTunes client resolution failed: {e}")
+    try:
+        discogs_token = config_manager.get('discogs.token', '') or ''
+        if discogs_token:
+            dc = _get_discogs_client(discogs_token)
+    except Exception as e:
+        logger.debug(f"Discogs client resolution failed: {e}")
+
+    try:
+        lastfm_api_key = config_manager.get('lastfm.api_key', '') or None
+    except Exception:
+        lastfm_api_key = None
+
+    payload, status = build_source_only_artist_detail(
+        artist_id,
+        artist_name,
+        source,
+        spotify_client=sp,
+        deezer_client=dz,
+        itunes_client=it,
+        discogs_client=dc,
+        lastfm_api_key=lastfm_api_key,
+    )
+    return jsonify(payload), status
+
+
 @app.route('/api/artist-detail/<artist_id>')
 def get_artist_detail(artist_id):
-    """Get artist detail data"""
+    """Get artist detail data.
+
+    For library artists, `artist_id` is the local DB primary key and the full
+    library-aware path runs (owned releases + merged source discography + per-
+    service enrichment coverage).
+
+    For source artists (Spotify/Deezer/iTunes/etc. that aren't in the library
+    yet), pass `?source=<source>&name=<artist_name>` and the endpoint synthesizes
+    a response directly from the metadata source — no owned releases, just name +
+    image + discography so the artist-detail page can still render.
+    """
     try:
-        logger.info(f"Getting artist detail for ID: {artist_id}")
+        source_param = (request.args.get('source', '') or '').strip().lower()
+        artist_name_arg = (request.args.get('name', '') or '').strip()
+        logger.info(
+            f"Getting artist detail for ID: {artist_id} "
+            f"(source={source_param or 'library'})"
+        )
 
         # Get database instance
         database = get_database()
@@ -11233,7 +11421,31 @@ def get_artist_detail(artist_id):
         # Get artist discography from database
         db_result = database.get_artist_discography(artist_id)
 
+        # Library upgrade: if direct ID lookup missed AND we have a source hint,
+        # check whether the user already owns this artist in the library under
+        # a different ID (e.g. clicking a Deezer search result for an artist
+        # they have indexed in Plex). Prefer the library record so they get
+        # all their owned releases + enrichment instead of a bare source view.
+        if not db_result.get('success') and source_param in _SOURCE_ONLY_ARTIST_SOURCES:
+            library_pk = _find_library_artist_for_source(
+                database, source_param, artist_id, artist_name_arg
+            )
+            if library_pk:
+                logger.info(
+                    f"Source-id {source_param}:{artist_id} matched library artist "
+                    f"PK={library_pk} — upgrading to library response"
+                )
+                db_result = database.get_artist_discography(library_pk)
+
         if not db_result.get('success'):
+            # Library lookup still failed. If a metadata source was specified,
+            # fall back to a source-only response so the page can render a
+            # non-library artist.
+            if source_param in _SOURCE_ONLY_ARTIST_SOURCES:
+                return _build_source_only_artist_detail(
+                    artist_id, artist_name_arg, source_param
+                )
+
             logger.error(f"Database returned error: {db_result}")
             return jsonify({
                 "success": False,
@@ -42134,10 +42346,14 @@ def watchlist_artist_config(artist_id):
             try:
                 conn2 = sqlite3.connect(str(database.database_path))
                 cur2 = conn2.cursor()
+                # The library `artists` table uses `deezer_id` / `discogs_id` for
+                # those columns; only the `watchlist_artists` table uses the
+                # `_artist_id` suffix for them. Mixing them was producing a
+                # 'no such column' on every watchlist-config GET.
                 cur2.execute("""
                     SELECT banner_url, summary, style, mood, label, genres
                     FROM artists
-                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
+                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_id = ? OR discogs_id = ?
                     LIMIT 1
                 """, (artist_id, artist_id, artist_id, artist_id))
                 lib_row = cur2.fetchone()
