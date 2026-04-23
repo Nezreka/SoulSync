@@ -7859,113 +7859,14 @@ function checkForActiveDiscoverDownloads() {
 }
 
 async function startDiscoverPlaylistSync(playlistType, playlistName) {
-    console.log(`🔄 Starting sync for ${playlistName}`);
+    console.log(`🔄 Navigating to Sync → Discover tab for ${playlistName}`);
 
-    // Get tracks based on playlist type
-    let tracks = [];
-    if (playlistType === 'release_radar') {
-        tracks = discoverReleaseRadarTracks;
-    } else if (playlistType === 'discovery_weekly') {
-        tracks = discoverWeeklyTracks;
-    } else if (playlistType === 'seasonal_playlist') {
-        tracks = discoverSeasonalTracks;
-    } else if (playlistType === 'popular_picks') {
-        tracks = personalizedPopularPicks;
-    } else if (playlistType === 'hidden_gems') {
-        tracks = personalizedHiddenGems;
-    } else if (playlistType === 'discovery_shuffle') {
-        tracks = personalizedDiscoveryShuffle;
-    } else if (playlistType === 'familiar_favorites') {
-        tracks = personalizedFamiliarFavorites;
-    } else if (playlistType === 'build_playlist') {
-        tracks = buildPlaylistTracks;
-    }
-
-    if (!tracks || tracks.length === 0) {
-        showToast(`No tracks available for ${playlistName}`, 'warning');
-        return;
-    }
-
-    // Convert to format expected by sync API
-    const spotifyTracks = tracks.map(track => {
-        let spotifyTrack;
-
-        // Use track_data_json if available
-        if (track.track_data_json) {
-            spotifyTrack = track.track_data_json;
-        } else {
-            // Fallback: construct track object
-            spotifyTrack = {
-                id: track.spotify_track_id,
-                name: track.track_name,
-                artists: [{ name: track.artist_name }],
-                album: {
-                    name: track.album_name,
-                    images: track.album_cover_url ? [{ url: track.album_cover_url }] : []
-                },
-                duration_ms: track.duration_ms || 0
-            };
-        }
-
-        // Normalize artists to array of strings for sync compatibility
-        if (spotifyTrack.artists && Array.isArray(spotifyTrack.artists)) {
-            spotifyTrack.artists = spotifyTrack.artists.map(a => a.name || a);
-        }
-
-        return spotifyTrack;
+    // Navigate to the Sync page → Discover tab, highlight the card, and auto-sync
+    navigateToSyncTab('discover', {
+        highlight: `discover-sync-card-${playlistType}`,
+        autoSync: playlistType,
+        autoSyncName: playlistName,
     });
-
-    // Create virtual playlist ID
-    const virtualPlaylistId = `discover_${playlistType}`;
-
-    // Store in cache for sync function
-    playlistTrackCache[virtualPlaylistId] = spotifyTracks;
-
-    // Create virtual playlist object
-    const virtualPlaylist = {
-        id: virtualPlaylistId,
-        name: playlistName,
-        track_count: spotifyTracks.length
-    };
-
-    // Add to spotify playlists array if not already there
-    if (!spotifyPlaylists.find(p => p.id === virtualPlaylistId)) {
-        spotifyPlaylists.push(virtualPlaylist);
-    }
-
-    // Show sync status display (convert underscores to hyphens for ID)
-    const statusId = playlistType.replace(/_/g, '-') + '-sync-status';
-    const statusDisplay = document.getElementById(statusId);
-    if (statusDisplay) {
-        statusDisplay.style.display = 'block';
-    }
-
-    // Disable sync button to prevent duplicate syncs (convert underscores to hyphens for ID)
-    const buttonId = playlistType.replace(/_/g, '-') + '-sync-btn';
-    const syncButton = document.getElementById(buttonId);
-    if (syncButton) {
-        syncButton.disabled = true;
-        syncButton.style.opacity = '0.5';
-        syncButton.style.cursor = 'not-allowed';
-    }
-
-    // Start sync using existing function
-    await startPlaylistSync(virtualPlaylistId);
-
-    // Extract image URL from first track for download bar bubble
-    let imageUrl = null;
-    if (spotifyTracks && spotifyTracks.length > 0) {
-        const firstTrack = spotifyTracks[0];
-        if (firstTrack.album && firstTrack.album.images && firstTrack.album.images.length > 0) {
-            imageUrl = firstTrack.album.images[0].url;
-        }
-    }
-
-    // Add to discover download bar
-    addDiscoverDownload(virtualPlaylistId, playlistName, playlistType, imageUrl);
-
-    // Start polling for progress updates
-    startDiscoverSyncPolling(playlistType, virtualPlaylistId);
 }
 
 // Track active discover sync pollers
@@ -9131,6 +9032,13 @@ function renderDiscoverSyncCard(playlist, container, sourceLabel) {
                     <span class="discover-sync-toggle-slider"></span>
                 </label>
             </div>
+            <div class="discover-sync-toggle-wrapper" title="${isEmpty ? '' : 'Skip quality filters and download any available source'}">
+                <label class="discover-sync-toggle-label">Force DL</label>
+                <label class="discover-sync-toggle">
+                    <input type="checkbox" id="discover-force-dl-${playlist.type}" ${isEmpty ? 'disabled' : ''}>
+                    <span class="discover-sync-toggle-slider"></span>
+                </label>
+            </div>
             <button class="discover-sync-btn" id="discover-sync-btn-${playlist.type}"
                     onclick="syncDiscoverPlaylistFromTab('${playlist.type}', '${playlist.name}')"
                     ${playlist.sync_status === 'syncing' || isEmpty ? 'disabled' : ''}>
@@ -9174,10 +9082,15 @@ async function toggleDiscoverAutoUpdate(playlistType, enabled) {
 const _discoverSyncQueue = [];
 let _discoverSyncRunning = false;
 
-async function syncDiscoverPlaylistFromTab(playlistType, playlistName) {
+async function syncDiscoverPlaylistFromTab(playlistType, playlistName, forceDownload) {
+    // Read force-download toggle if not explicitly passed
+    if (forceDownload === undefined) {
+        const fdToggle = document.getElementById(`discover-force-dl-${playlistType}`);
+        forceDownload = fdToggle ? fdToggle.checked : false;
+    }
     // Serialize sync operations to avoid concurrent backend contention
     return new Promise((resolve) => {
-        _discoverSyncQueue.push({ playlistType, playlistName, resolve });
+        _discoverSyncQueue.push({ playlistType, playlistName, forceDownload, resolve });
         _processDiscoverSyncQueue();
     });
 }
@@ -9185,9 +9098,9 @@ async function syncDiscoverPlaylistFromTab(playlistType, playlistName) {
 async function _processDiscoverSyncQueue() {
     if (_discoverSyncRunning || _discoverSyncQueue.length === 0) return;
     _discoverSyncRunning = true;
-    const { playlistType, playlistName, resolve } = _discoverSyncQueue.shift();
+    const { playlistType, playlistName, forceDownload, resolve } = _discoverSyncQueue.shift();
     try {
-        await _doSyncDiscoverPlaylist(playlistType, playlistName);
+        await _doSyncDiscoverPlaylist(playlistType, playlistName, forceDownload);
     } finally {
         _discoverSyncRunning = false;
         resolve();
@@ -9195,7 +9108,7 @@ async function _processDiscoverSyncQueue() {
     }
 }
 
-async function _doSyncDiscoverPlaylist(playlistType, playlistName) {
+async function _doSyncDiscoverPlaylist(playlistType, playlistName, forceDownload) {
     const btn = document.getElementById(`discover-sync-btn-${playlistType}`);
     if (btn) {
         btn.disabled = true;
@@ -9245,19 +9158,22 @@ async function _doSyncDiscoverPlaylist(playlistType, playlistName) {
 
         // Use the download batch endpoint directly so the batch is labeled
         // as "Discover" instead of going through sync → wishlist → "Wishlist" batch.
-        // Omit force_download_all so it checks the library first and only downloads missing tracks.
+        const bodyPayload = {
+            tracks: syncTracks,
+            playlist_name: playlistName
+        };
+        if (forceDownload) bodyPayload.force_download_all = true;
+
         const batchResponse = await fetch(`/api/playlists/${virtualPlaylistId}/start-missing-process`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                tracks: syncTracks,
-                playlist_name: playlistName
-            })
+            body: JSON.stringify(bodyPayload)
         });
 
         const result = await batchResponse.json();
         if (result.success) {
-            showToast(`Downloading ${playlistName} (${syncTracks.length} tracks)...`, 'info');
+            const forceLabel = forceDownload ? ' (force download)' : '';
+            showToast(`Downloading ${playlistName}${forceLabel} (${syncTracks.length} tracks)...`, 'info');
             const card = document.getElementById(`discover-sync-card-${playlistType}`);
             if (card) {
                 const statusEl = card.querySelector('.discover-sync-status');
