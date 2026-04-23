@@ -36,6 +36,10 @@ class MetadataLookupOptions:
     max_pages: int = 0
     limit: int = 50
     artist_source_ids: Optional[Dict[str, str]] = None
+    dedup_variants: bool = True  # Collapse "Deluxe Edition" / "Remastered" etc.
+                                  # into a single canonical release card. Off
+                                  # gives the inline-Artists-page behaviour of
+                                  # showing every variant the source returns.
 
 
 # =============================================================================
@@ -633,9 +637,10 @@ def get_artist_detail_discography(
         else:
             albums.append(card)
 
-    albums = _dedup_variant_releases(albums)
-    eps = _dedup_variant_releases(eps)
-    singles = _dedup_variant_releases(singles)
+    if options is None or options.dedup_variants:
+        albums = _dedup_variant_releases(albums)
+        eps = _dedup_variant_releases(eps)
+        singles = _dedup_variant_releases(singles)
 
     albums = _sort_discography_releases(albums)
     eps = _sort_discography_releases(eps)

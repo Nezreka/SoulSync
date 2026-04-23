@@ -640,6 +640,11 @@ let artistDetailPageState = {
     currentArtistId: null,
     currentArtistName: null,
     currentArtistSource: null,
+    // Stack of origins captured by navigateToArtistDetail for the back button.
+    // Each entry is either {type:'page', pageId} or {type:'artist', id, name, source}
+    // so chained navigation (Search → A → similar B → similar C) walks back one
+    // step at a time instead of jumping straight to Search.
+    originStack: [],
     enhancedView: false,
     enhancedData: null,
     expandedAlbums: new Set(),
@@ -655,8 +660,61 @@ let discographyFilterState = {
     ownership: 'all'  // 'all', 'owned', 'missing'
 };
 
-function navigateToArtistDetail(artistId, artistName) {
-    console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId})`);
+// Friendly labels for the dynamic "← Back to X" button on the artist-detail page.
+// Page id (the value of currentPage) -> button label.
+const _ARTIST_DETAIL_BACK_LABELS = {
+    library: 'Back to Library',
+    search: 'Back to Search',
+    discover: 'Back to Discover',
+    watchlist: 'Back to Watchlist',
+    wishlist: 'Back to Wishlist',
+    stats: 'Back to Stats',
+    'playlist-explorer': 'Back to Explorer',
+    automations: 'Back to Automations',
+    dashboard: 'Back to Dashboard',
+    sync: 'Back to Sync',
+    'active-downloads': 'Back to Downloads',
+};
+
+function navigateToArtistDetail(artistId, artistName, sourceOverride = null, options = {}) {
+    console.log(`🎵 Navigating to artist detail: ${artistName} (ID: ${artistId}${sourceOverride ? `, source: ${sourceOverride}` : ''})`);
+
+    // Capture the current location on the origin stack BEFORE navigateToPage
+    // flips currentPage. The back button walks this stack one step at a time,
+    // so a chain like Search → A → similar B → similar C steps back through
+    // C → B → A → Search instead of jumping straight home. `skipOriginPush`
+    // lets the back button re-enter a prior artist without re-pushing.
+    if (!options.skipOriginPush) {
+        // Fresh entry (from a non-artist page) starts a new chain; any stale
+        // entries from a prior artist-detail visit are dropped.
+        if (currentPage !== 'artist-detail') {
+            artistDetailPageState.originStack = [];
+        }
+
+        let entry;
+        if (currentPage === 'artist-detail' && artistDetailPageState.currentArtistId) {
+            entry = {
+                type: 'artist',
+                id: artistDetailPageState.currentArtistId,
+                name: artistDetailPageState.currentArtistName,
+                source: artistDetailPageState.currentArtistSource,
+            };
+        } else {
+            const pageId = (typeof currentPage === 'string' && currentPage && currentPage !== 'artist-detail')
+                ? currentPage : 'library';
+            entry = { type: 'page', pageId };
+        }
+
+        // Avoid pushing a duplicate top entry on repeated clicks of the same target.
+        const top = artistDetailPageState.originStack[artistDetailPageState.originStack.length - 1];
+        const isDuplicate = top && top.type === entry.type && (
+            (entry.type === 'page' && top.pageId === entry.pageId) ||
+            (entry.type === 'artist' && String(top.id) === String(entry.id))
+        );
+        if (!isDuplicate) {
+            artistDetailPageState.originStack.push(entry);
+        }
+    }
 
     // Abort any in-progress completion stream
     if (artistDetailPageState.completionController) {
@@ -672,7 +730,7 @@ function navigateToArtistDetail(artistId, artistName) {
     // Store current artist info and reset enhanced view state
     artistDetailPageState.currentArtistId = artistId;
     artistDetailPageState.currentArtistName = artistName;
-    artistDetailPageState.currentArtistSource = null;
+    artistDetailPageState.currentArtistSource = sourceOverride || null;
     artistDetailPageState.enhancedData = null;
     artistDetailPageState.expandedAlbums = new Set();
     artistDetailPageState.selectedTracks = new Set();
@@ -703,6 +761,9 @@ function navigateToArtistDetail(artistId, artistName) {
     // Navigate to artist detail page
     navigateToPage('artist-detail');
 
+    // Update back-button label to reflect where the next pop will land.
+    _updateArtistDetailBackButtonLabel();
+
     // Initialize if needed and load data
     if (!artistDetailPageState.isInitialized) {
         initializeArtistDetailPage();
@@ -712,22 +773,57 @@ function navigateToArtistDetail(artistId, artistName) {
     loadArtistDetailData(artistId, artistName);
 }
 
+function _updateArtistDetailBackButtonLabel() {
+    const backBtnLabel = document.querySelector('#artist-detail-back-btn span');
+    if (!backBtnLabel) return;
+    const stack = artistDetailPageState.originStack || [];
+    const top = stack[stack.length - 1];
+    if (!top) {
+        backBtnLabel.textContent = `← ${_ARTIST_DETAIL_BACK_LABELS.library}`;
+    } else if (top.type === 'artist') {
+        backBtnLabel.textContent = `← Back to ${top.name}`;
+    } else {
+        const friendly = _ARTIST_DETAIL_BACK_LABELS[top.pageId] || _ARTIST_DETAIL_BACK_LABELS.library;
+        backBtnLabel.textContent = `← ${friendly}`;
+    }
+}
+
 function initializeArtistDetailPage() {
     console.log("🔧 Initializing Artist Detail page...");
 
-    // Initialize back button
+    // Initialize back button — pops the origin stack one step at a time so a
+    // chain like Search → A → B → C walks back through C → B → A → Search
+    // instead of jumping straight to the original entry page.
     const backBtn = document.getElementById("artist-detail-back-btn");
     if (backBtn) {
         backBtn.addEventListener("click", () => {
-            console.log("🔙 Returning to Library page");
-            // Abort any in-progress completion stream
+            // Abort any in-progress completion stream regardless of destination
             if (artistDetailPageState.completionController) {
                 artistDetailPageState.completionController.abort();
                 artistDetailPageState.completionController = null;
             }
-            // Clear artist detail state so we go back to the list view
+
+            const stack = artistDetailPageState.originStack || [];
+            if (stack.length > 0) {
+                const target = stack.pop();
+                if (target.type === 'artist') {
+                    // Re-enter a prior artist in the chain without re-pushing,
+                    // so the stack keeps shrinking as the user steps back.
+                    navigateToArtistDetail(target.id, target.name, target.source, { skipOriginPush: true });
+                    return;
+                }
+                // target.type === 'page' — fully exit the artist-detail chain
+                artistDetailPageState.currentArtistId = null;
+                artistDetailPageState.currentArtistName = null;
+                artistDetailPageState.originStack = [];
+                navigateToPage(target.pageId);
+                return;
+            }
+
+            // No history — default to library
             artistDetailPageState.currentArtistId = null;
             artistDetailPageState.currentArtistName = null;
+            artistDetailPageState.originStack = [];
             navigateToPage('library');
         });
     }
@@ -764,8 +860,21 @@ async function loadArtistDetailData(artistId, artistName) {
     // Don't update header until data loads to avoid showing stale data
 
     try {
-        // Call API to get artist discography data
-        const response = await fetch(`/api/artist-detail/${artistId}`);
+        // Call API to get artist discography data. If this artist came from a
+        // metadata source (not the library), pass source + name so the backend
+        // can synthesize a response from that source instead of 404ing on the
+        // local DB lookup.
+        const params = new URLSearchParams();
+        if (artistDetailPageState.currentArtistSource) {
+            params.set('source', artistDetailPageState.currentArtistSource);
+        }
+        if (artistName) {
+            params.set('name', artistName);
+        }
+        const qs = params.toString();
+        const response = await fetch(
+            `/api/artist-detail/${encodeURIComponent(artistId)}${qs ? '?' + qs : ''}`
+        );
 
         if (!response.ok) {
             throw new Error(`Failed to load artist data: ${response.statusText}`);
@@ -790,6 +899,18 @@ async function loadArtistDetailData(artistId, artistName) {
         // Populate the page with data (which updates the hero section and sets textContent)
         populateArtistDetailPage(data);
 
+        // Library upgrade — if the backend resolved this source-artist click to
+        // an existing library record (e.g. clicking a Deezer result for an
+        // artist already in your Plex), data.artist.id is the library PK.
+        // Update currentArtistId so subsequent library-only API calls (Enhanced
+        // view, completion checks, server sync) hit the right id. Also flip
+        // the body source flag from 'source' back to 'library' so the
+        // library-only UI re-shows.
+        if (data.artist && data.artist.id && String(data.artist.id) !== String(artistDetailPageState.currentArtistId)) {
+            console.log(`📚 Library upgrade: ${artistDetailPageState.currentArtistId} → ${data.artist.id}`);
+            artistDetailPageState.currentArtistId = data.artist.id;
+        }
+
         // Keep the resolved metadata source for album-track lookups.
         artistDetailPageState.currentArtistSource = data.discography?.source || data.artist?.source || null;
 
@@ -810,8 +931,11 @@ async function loadArtistDetailData(artistId, artistName) {
             }
         }
 
-        // Check if artist has tracks eligible for quality enhancement
-        checkArtistEnhanceEligibility(artistId);
+        // Check if artist has tracks eligible for quality enhancement.
+        // Use currentArtistId (not the closure arg) because the library-upgrade
+        // branch above may have rewritten it from the source ID to the library PK,
+        // and /api/library/artist/<id>/quality-analysis only works on library PKs.
+        checkArtistEnhanceEligibility(artistDetailPageState.currentArtistId);
 
     } catch (error) {
         console.error(`❌ Error loading artist detail data:`, error);
@@ -936,6 +1060,11 @@ function populateArtistDetailPage(data) {
     console.log(`📀 EPs:`, discography.eps);
     console.log(`📀 Singles:`, discography.singles);
 
+    // Tag the body so CSS can hide library-only UI for source artists (e.g.
+    // the Enhanced view toggle, the Status filter, completion bars). Set
+    // BEFORE rendering so any layout-dependent code sees the right state.
+    document.body.dataset.artistSource = (artist && artist.server_source) ? 'library' : 'source';
+
     // Update hero section with image, name, and stats
     updateArtistHeroSection(artist, discography);
 
@@ -948,10 +1077,25 @@ function populateArtistDetailPage(data) {
     // Populate discography sections
     populateDiscographySections(discography);
 
-    // Initialize library watchlist button if it exists (for library page)
+    // Initialize the watchlist button. Library artists that have been enriched
+    // get the canonical Spotify identity; source artists fall back to the id
+    // they came in with (Deezer/iTunes/Discogs/etc.).
     const libraryWatchlistBtn = document.getElementById('library-artist-watchlist-btn');
-    if (libraryWatchlistBtn && data.spotify_artist && data.spotify_artist.spotify_artist_id) {
-        initializeLibraryWatchlistButton(data.spotify_artist.spotify_artist_id, data.spotify_artist.spotify_artist_name);
+    if (libraryWatchlistBtn) {
+        const watchlistId = (data.spotify_artist && data.spotify_artist.spotify_artist_id)
+            || artist.id;
+        const watchlistName = (data.spotify_artist && data.spotify_artist.spotify_artist_name)
+            || artist.name;
+        if (watchlistId && watchlistName) {
+            initializeLibraryWatchlistButton(watchlistId, watchlistName);
+        }
+    }
+
+    // Load Similar Artists section (works for both library + source artists via
+    // MusicMap name lookup). Fire-and-forget — the function handles its own
+    // loading state and errors.
+    if (artist && artist.name && typeof loadSimilarArtists === 'function') {
+        loadSimilarArtists(artist.name);
     }
 }
 
@@ -1037,6 +1181,17 @@ function updateArtistHeaderStats(albumCount, trackCount) {
 
 function updateArtistHeroSection(artist, discography) {
     console.log("🖼️ Updating artist hero section");
+
+    // Blurred background image (inline-Artists hero treatment) — set whenever
+    // we have an image_url; falls back to clearing the bg if not.
+    const heroBg = document.getElementById("artist-detail-hero-bg");
+    if (heroBg) {
+        if (artist.image_url && artist.image_url.trim() !== "" && artist.image_url !== "null") {
+            heroBg.style.backgroundImage = `url('${artist.image_url}')`;
+        } else {
+            heroBg.style.backgroundImage = '';
+        }
+    }
 
     // Update artist image with detailed debugging
     const imageElement = document.getElementById("artist-detail-image");
@@ -1296,22 +1451,34 @@ function populateReleaseSection(sectionType, releases) {
         grid.appendChild(card);
     });
 
+    // Trigger lazy background-image loading on the new cards
+    if (typeof observeLazyBackgrounds === 'function') {
+        observeLazyBackgrounds(grid);
+    }
+
     console.log(`📀 Populated ${sectionType} section: ${ownedCount} owned, ${missingCount} missing`);
-    console.log(`📀 Grid element:`, grid);
-    console.log(`📀 Grid children count:`, grid.children.length);
 }
 
 function createReleaseCard(release) {
     const card = document.createElement("div");
     const isChecking = release.owned === null;
-    card.className = `release-card${isChecking ? " checking" : (release.owned ? "" : " missing")}`;
+    // .release-card keeps existing filter/state CSS + JS queries working;
+    // .album-card adopts the big-photo visual treatment from the retired
+    // inline Artists page (full-bleed image, gradient overlay, info pinned).
+    let stateCls = '';
+    if (isChecking) stateCls = ' checking';
+    else if (release.owned === false) stateCls = ' missing';
+    card.className = `release-card album-card${stateCls}`;
+
     const releaseId = release.id || "";
     card.setAttribute("data-release-id", releaseId);
+    card.setAttribute("data-album-id", releaseId);
+    card.setAttribute("data-album-name", release.title || "");
+    card.setAttribute("data-album-type", release.album_type || "album");
     // Store mutable reference so stream updates propagate to click handler
     card._releaseData = release;
 
     // Tag card for content-type filtering
-    const titleLower = (release.title || '').toLowerCase();
     const livePattern = /\b(live)\b|\(live[^)]*\)|\[live[^]]*\]/i;
     const compilationPattern = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
     const featuredPattern = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;
@@ -1322,10 +1489,90 @@ function createReleaseCard(release) {
     card.setAttribute("data-is-compilation", isCompilation ? "true" : "false");
     card.setAttribute("data-is-featured", isFeatured ? "true" : "false");
 
-    // Add MusicBrainz icon if available
-    let mbIcon = null;
+    // Background image — use data-bg-src for IntersectionObserver lazy loading
+    // (observeLazyBackgrounds is called by the caller after appending the grid).
+    const imageDiv = document.createElement("div");
+    imageDiv.className = "album-card-image";
+    if (release.image_url && release.image_url.trim() !== "") {
+        imageDiv.dataset.bgSrc = release.image_url;
+    }
+    card.appendChild(imageDiv);
+
+    // Completion overlay — top-right floating badge. For library artists this
+    // shows the ownership state; for source artists (no library data) the
+    // overlay is omitted entirely so the card just shows the artwork + title.
+    const isSourceContext = (document.body.dataset.artistSource === 'source');
+    if (!isSourceContext) {
+        const overlay = document.createElement("div");
+        let overlayCls = '';
+        let overlayLabel = '';
+
+        if (isChecking || release.track_completion === 'checking') {
+            overlayCls = 'checking';
+            overlayLabel = 'Checking...';
+        } else if (release.owned) {
+            const tc = release.track_completion;
+            if (tc && typeof tc === 'object') {
+                const ownedTracks = tc.owned_tracks || 0;
+                const totalTracks = tc.total_tracks || 0;
+                const missingTracks = tc.missing_tracks || 0;
+                if (missingTracks === 0) {
+                    overlayCls = 'completed';
+                    overlayLabel = '✓ Owned';
+                } else {
+                    const pct = totalTracks > 0 ? Math.round((ownedTracks / totalTracks) * 100) : 0;
+                    overlayCls = pct >= 75 ? 'nearly_complete' : 'partial';
+                    overlayLabel = `${ownedTracks}/${totalTracks}`;
+                }
+            } else {
+                const pct = release.track_completion || 100;
+                if (pct === 100) {
+                    overlayCls = 'completed';
+                    overlayLabel = '✓ Owned';
+                } else {
+                    overlayCls = pct >= 75 ? 'nearly_complete' : 'partial';
+                    overlayLabel = `${pct}%`;
+                }
+            }
+        } else {
+            overlayCls = 'missing';
+            overlayLabel = 'Missing';
+        }
+
+        overlay.className = `completion-overlay ${overlayCls}`;
+        overlay.innerHTML = `<span class="completion-status">${overlayLabel}</span>`;
+        card.appendChild(overlay);
+    }
+
+    // Year — extract from release_date or fall back to year field
+    let yearText = "";
+    if (release.release_date) {
+        try {
+            const yearMatch = release.release_date.match(/^(\d{4})/);
+            if (yearMatch) {
+                const ry = parseInt(yearMatch[1]);
+                if (ry && ry > 1900 && ry <= new Date().getFullYear() + 1) yearText = ry.toString();
+            } else {
+                const ry = new Date(release.release_date).getFullYear();
+                if (ry && !isNaN(ry) && ry > 1900 && ry <= new Date().getFullYear() + 1) yearText = ry.toString();
+            }
+        } catch (e) { /* fall through */ }
+    }
+    if (!yearText && release.year) yearText = release.year.toString();
+
+    // Content (bottom-pinned over gradient)
+    const content = document.createElement("div");
+    content.className = "album-card-content";
+    const _esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    content.innerHTML = `
+        <div class="album-card-name" title="${_esc(release.title)}">${_esc(release.title)}</div>
+        ${yearText ? `<div class="album-card-year">${_esc(yearText)}</div>` : ''}
+    `;
+    card.appendChild(content);
+
+    // Add MusicBrainz icon LAST so it sits above the gradient overlay
     if (release.musicbrainz_release_id) {
-        mbIcon = document.createElement("div");
+        const mbIcon = document.createElement("div");
         mbIcon.className = "mb-card-icon";
         mbIcon.title = "View on MusicBrainz";
         mbIcon.innerHTML = `<img src="${MUSICBRAINZ_LOGO_URL}" style="width: 20px; height: auto; display: block;">`;
@@ -1333,149 +1580,6 @@ function createReleaseCard(release) {
             e.stopPropagation();
             window.open(`https://musicbrainz.org/release/${release.musicbrainz_release_id}`, '_blank');
         };
-    }
-
-    // Create image
-    const imageContainer = document.createElement("div");
-    if (release.image_url && release.image_url.trim() !== "") {
-        const img = document.createElement("img");
-        img.src = release.image_url;
-        img.alt = release.title;
-        img.className = "release-image";
-        img.loading = 'lazy';
-        img.onerror = () => {
-            imageContainer.innerHTML = `<div class="release-image-fallback">💿</div>`;
-        };
-        imageContainer.appendChild(img);
-    } else {
-        imageContainer.innerHTML = `<div class="release-image-fallback">💿</div>`;
-    }
-
-    // Create title
-    const title = document.createElement("h4");
-    title.className = "release-title";
-    title.textContent = release.title;
-    title.title = release.title;
-
-    // Create year - extract from release_date (Spotify format) or fall back to year field
-    const year = document.createElement("div");
-    year.className = "release-year";
-
-    let yearText = "Unknown Year";
-
-    // DEBUG: Log the release data to see what we're working with (remove this after testing)
-    // console.log(`🔍 DEBUG: Release "${release.title}" data:`, {
-    //     title: release.title,
-    //     owned: release.owned,
-    //     year: release.year,
-    //     release_date: release.release_date,
-    //     track_completion: release.track_completion
-    // });
-
-    // First try to extract year from release_date (Spotify format: "YYYY-MM-DD")
-    if (release.release_date) {
-        try {
-            // Extract year directly from string to avoid timezone issues
-            const yearMatch = release.release_date.match(/^(\d{4})/);
-            if (yearMatch) {
-                const releaseYear = parseInt(yearMatch[1]);
-                if (releaseYear && !isNaN(releaseYear) && releaseYear > 1900 && releaseYear <= new Date().getFullYear() + 1) {
-                    yearText = releaseYear.toString();
-                }
-            } else {
-                // Fallback to Date parsing if format is different
-                const releaseYear = new Date(release.release_date).getFullYear();
-                if (releaseYear && !isNaN(releaseYear) && releaseYear > 1900 && releaseYear <= new Date().getFullYear() + 1) {
-                    yearText = releaseYear.toString();
-                }
-            }
-        } catch (e) {
-            console.warn('Error parsing release_date:', release.release_date, e);
-        }
-    }
-
-    // Fallback to direct year field if release_date parsing failed
-    if (yearText === "Unknown Year" && release.year) {
-        yearText = release.year.toString();
-    }
-
-    year.textContent = yearText;
-
-    // Create completion info
-    const completion = document.createElement("div");
-    completion.className = "release-completion";
-
-    const completionText = document.createElement("span");
-    const completionBar = document.createElement("div");
-    completionBar.className = "completion-bar";
-
-    const completionFill = document.createElement("div");
-    completionFill.className = "completion-fill";
-
-    if (release.owned === null || release.track_completion === 'checking') {
-        // Checking state - ownership not yet resolved
-        completionText.textContent = "Checking...";
-        completionText.className = "completion-text checking";
-        completionFill.className += " checking";
-        completionFill.style.width = "100%";
-    } else if (release.owned) {
-        // Handle new detailed track completion object
-        if (release.track_completion && typeof release.track_completion === 'object') {
-            const completion = release.track_completion;
-            const percentage = completion.percentage || 100;
-            const ownedTracks = completion.owned_tracks || 0;
-            const totalTracks = completion.total_tracks || 0;
-            const missingTracks = completion.missing_tracks || 0;
-
-            completionFill.style.width = `${percentage}%`;
-
-            if (missingTracks === 0) {
-                completionText.textContent = `Complete (${ownedTracks})`;
-                completionText.className = "completion-text complete";
-                completionFill.className += " complete";
-            } else {
-                completionText.textContent = `${ownedTracks}/${totalTracks} tracks`;
-                completionText.className = "completion-text partial";
-                completionFill.className += " partial";
-
-                // Add missing tracks indicator
-                completionText.title = `Missing ${missingTracks} track${missingTracks !== 1 ? 's' : ''}`;
-            }
-        } else {
-            // Fallback for legacy simple percentage
-            const percentage = release.track_completion || 100;
-            completionFill.style.width = `${percentage}%`;
-
-            if (percentage === 100) {
-                completionText.textContent = "Complete";
-                completionText.className = "completion-text complete";
-                completionFill.className += " complete";
-            } else {
-                completionText.textContent = `${percentage}%`;
-                completionText.className = "completion-text partial";
-                completionFill.className += " partial";
-            }
-        }
-    } else {
-        const totalTr = release.total_tracks || release.track_completion?.total_tracks || 0;
-        completionText.textContent = totalTr > 0 ? `Missing (${totalTr} tracks)` : "Not in library";
-        completionText.className = "completion-text missing";
-        completionFill.className += " missing";
-        completionFill.style.width = "0%";
-    }
-
-    completionBar.appendChild(completionFill);
-    completion.appendChild(completionText);
-    completion.appendChild(completionBar);
-
-    // Assemble card
-    card.appendChild(imageContainer);
-    card.appendChild(title);
-    card.appendChild(year);
-    card.appendChild(completion);
-
-    // Add MusicBrainz icon LAST to ensure it's on top
-    if (release.musicbrainz_release_id && mbIcon) { // Check if mbIcon was created
         card.appendChild(mbIcon);
     }
 
@@ -1710,37 +1814,35 @@ function updateLibraryReleaseCard(data) {
         }
     }
 
-    // Update completion text element in-place
-    const completionText = card.querySelector('.completion-text');
-    if (completionText) {
-        completionText.classList.remove('checking', 'complete', 'partial', 'missing');
+    // Update the floating completion-overlay badge (new big-photo card markup).
+    const overlay = card.querySelector('.completion-overlay');
+    const overlayStatus = overlay && overlay.querySelector('.completion-status');
+    if (overlay && overlayStatus) {
+        overlay.classList.remove('checking', 'completed', 'nearly_complete', 'partial', 'missing', 'error');
+        let badgeCls = '';
+        let badgeText = '';
+        let badgeTitle = '';
         if (isOwned) {
             if (effectiveMissing <= 0) {
-                completionText.textContent = `Complete (${data.owned_tracks})`;
-                completionText.className = 'completion-text complete';
+                badgeCls = 'completed';
+                badgeText = '✓ Owned';
+                badgeTitle = `Complete (${data.owned_tracks} tracks)`;
             } else {
-                completionText.textContent = `${data.owned_tracks}/${data.expected_tracks} tracks`;
-                completionText.className = 'completion-text partial';
-                completionText.title = `Missing ${effectiveMissing} track${effectiveMissing !== 1 ? 's' : ''}`;
+                const pct = data.completion_percentage || Math.round((data.owned_tracks / data.expected_tracks) * 100);
+                badgeCls = pct >= 75 ? 'nearly_complete' : 'partial';
+                badgeText = `${data.owned_tracks}/${data.expected_tracks}`;
+                badgeTitle = `Missing ${effectiveMissing} track${effectiveMissing !== 1 ? 's' : ''}`;
             }
         } else {
-            completionText.textContent = 'Missing';
-            completionText.className = 'completion-text missing';
+            badgeCls = 'missing';
+            badgeText = 'Missing';
+            badgeTitle = data.expected_tracks > 0
+                ? `${data.expected_tracks} track${data.expected_tracks !== 1 ? 's' : ''} not in library`
+                : 'Not in library';
         }
-    }
-
-    // Update completion fill bar in-place
-    const completionFill = card.querySelector('.completion-fill');
-    if (completionFill) {
-        completionFill.classList.remove('checking', 'complete', 'partial', 'missing');
-        if (isOwned) {
-            const pct = isComplete ? 100 : (data.completion_percentage || 100);
-            completionFill.style.width = `${pct}%`;
-            completionFill.classList.add(effectiveMissing <= 0 ? 'complete' : 'partial');
-        } else {
-            completionFill.style.width = '0%';
-            completionFill.classList.add('missing');
-        }
+        overlay.classList.add(badgeCls);
+        overlayStatus.textContent = badgeText;
+        overlay.title = badgeTitle;
     }
 
     // Display format tags on owned releases
@@ -2021,7 +2123,7 @@ async function openDiscographyModal() {
     }
 
     if (!artist || !discography) {
-        showToast('No discography found. Try searching this artist on the Artists page instead.', 'error');
+        showToast('No discography found. Try searching this artist from the Search page instead.', 'error');
         return;
     }
 
@@ -2372,6 +2474,10 @@ function toggleEnhancedView(enabled) {
     dividers.forEach((d, i) => {
         if (i < dividers.length - 1) d.style.display = enabled ? 'none' : '';
     });
+
+    // Similar Artists is part of the standard view — hide it in Enhanced.
+    const similarSection = document.getElementById('ad-similar-artists-section');
+    if (similarSection) similarSection.style.display = enabled ? 'none' : '';
 
     if (enabled) {
         standardSections.classList.add('hidden');

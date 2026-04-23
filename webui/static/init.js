@@ -187,9 +187,29 @@ function applyReduceEffects(enabled) {
 // ── Profile System ─────────────────────────────────────────────
 let currentProfile = null;
 
+// Normalize legacy allowed_pages entries so the profile edit forms (which are
+// built from the new pageLabels map containing 'search') don't drop access
+// when saving a profile that was stored before the Search page rename.
+// 'downloads' was the old Search id, 'artists' was the retired inline page.
+function _normalizeLegacyAllowedPages(pages) {
+    if (!Array.isArray(pages)) return pages;
+    const mapped = pages.map(id => (id === 'downloads' || id === 'artists') ? 'search' : id);
+    return [...new Set(mapped)];
+}
+
+function _normalizeLegacyHomePage(homePage) {
+    if (homePage === 'downloads' || homePage === 'artists') return 'search';
+    return homePage;
+}
+
 function getProfileHomePage() {
     if (!currentProfile) return 'dashboard';
-    if (currentProfile.home_page) return currentProfile.home_page;
+    // Legacy profiles stored the Search page as either 'downloads' (the old id
+    // before the rename) or 'artists' (the retired inline Artists page).
+    // Both fold into the unified Search page now.
+    let home = currentProfile.home_page;
+    if (home === 'downloads' || home === 'artists') home = 'search';
+    if (home) return home;
     return currentProfile.is_admin ? 'dashboard' : 'discover';
 }
 
@@ -197,16 +217,25 @@ function isPageAllowed(pageId) {
     if (!currentProfile) return true;
     if (currentProfile.id === 1) return true;
     if (pageId === 'help' || pageId === 'issues') return true;
+    if (pageId === 'settings') return currentProfile.is_admin;
     if (pageId === 'artist-detail') {
-        // artist-detail requires library access
+        // artist-detail is reachable from both Library and Search results, so
+        // either grant unlocks it. Without this, a Search-only profile couldn't
+        // open a source artist, and a legacy artists-only profile would hit the
+        // home-redirect recursion path below.
         const ap = currentProfile.allowed_pages;
         if (!ap) return true;
-        return ap.includes('library');
+        return ap.includes('library') || ap.includes('search')
+            || ap.includes('downloads') || ap.includes('artists');
     }
-    if (pageId === 'settings') return currentProfile.is_admin;
     const ap = currentProfile.allowed_pages;
     if (!ap) return true; // null = all pages
-    return ap.includes(pageId);
+    if (ap.includes(pageId)) return true;
+    // Legacy compat: 'downloads' (old Search id) and 'artists' (retired inline
+    // Artists page) both fold into the unified 'search' page.
+    if (pageId === 'search' && (ap.includes('downloads') || ap.includes('artists'))) return true;
+    if ((pageId === 'downloads' || pageId === 'artists') && ap.includes('search')) return true;
+    return false;
 }
 
 function canDownload() {
@@ -1568,9 +1597,11 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     const isAdmin = currentProfile && currentProfile.is_admin;
     const isEditingAdmin = profileSettings.is_admin;
     const editColors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#14b8a6'];
+    // 'search' replaces the legacy 'downloads'/'artists' ids; legacy values are
+    // normalized on read below so saving a legacy profile upgrades it.
     const pageLabels = {
-        dashboard: 'Dashboard', sync: 'Sync', downloads: 'Search', discover: 'Discover',
-        artists: 'Artists', automations: 'Automations', library: 'Library', stats: 'Listening Stats',
+        dashboard: 'Dashboard', sync: 'Sync', search: 'Search', discover: 'Discover',
+        automations: 'Automations', library: 'Library', stats: 'Listening Stats',
         'playlist-explorer': 'Playlist Explorer', import: 'Import', help: 'Help & Docs'
     };
 
@@ -1622,14 +1653,16 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     defaultOpt.value = '';
     defaultOpt.textContent = isEditingAdmin ? 'Default (Dashboard)' : 'Default (Discover)';
     homeSelect.appendChild(defaultOpt);
-    // Filter home page options to only allowed pages
-    const allowedSet = profileSettings.allowed_pages;
+    // Normalize legacy ids so the form shows the right options/selection for
+    // profiles saved before the Search page rename.
+    const allowedSet = _normalizeLegacyAllowedPages(profileSettings.allowed_pages);
+    const normalizedHome = _normalizeLegacyHomePage(profileSettings.home_page);
     Object.entries(pageLabels).forEach(([id, label]) => {
         if (allowedSet && !allowedSet.includes(id)) return; // Skip non-permitted
         const opt = document.createElement('option');
         opt.value = id;
         opt.textContent = label;
-        if (id === profileSettings.home_page) opt.selected = true;
+        if (id === normalizedHome) opt.selected = true;
         homeSelect.appendChild(opt);
     });
     form.appendChild(homeSelect);
@@ -1754,9 +1787,11 @@ function showSelfEditForm() {
     const existing = document.getElementById('self-edit-form');
     if (existing) existing.remove();
 
+    // 'search' replaces the legacy 'downloads'/'artists' ids; legacy values are
+    // normalized on read below so saving a legacy profile upgrades it.
     const pageLabels = {
-        dashboard: 'Dashboard', sync: 'Sync', downloads: 'Search', discover: 'Discover',
-        artists: 'Artists', automations: 'Automations', library: 'Library', stats: 'Listening Stats',
+        dashboard: 'Dashboard', sync: 'Sync', search: 'Search', discover: 'Discover',
+        automations: 'Automations', library: 'Library', stats: 'Listening Stats',
         'playlist-explorer': 'Playlist Explorer', import: 'Import', help: 'Help & Docs'
     };
 
@@ -1791,13 +1826,16 @@ function showSelfEditForm() {
     defaultOpt.value = '';
     defaultOpt.textContent = 'Default (Discover)';
     homeSelect.appendChild(defaultOpt);
-    const ap = currentProfile.allowed_pages;
+    // Normalize legacy ids so the form shows the right options/selection for
+    // profiles saved before the Search page rename.
+    const ap = _normalizeLegacyAllowedPages(currentProfile.allowed_pages);
+    const normalizedHome = _normalizeLegacyHomePage(currentProfile.home_page);
     Object.entries(pageLabels).forEach(([id, label]) => {
         if (ap && !ap.includes(id)) return;
         const opt = document.createElement('option');
         opt.value = id;
         opt.textContent = label;
-        if (id === currentProfile.home_page) opt.selected = true;
+        if (id === normalizedHome) opt.selected = true;
         homeSelect.appendChild(opt);
     });
     form.appendChild(homeSelect);
@@ -1919,7 +1957,6 @@ function initApp() {
     initExpandedPlayer();
     initializeSyncPage();
     initializeWatchlist();
-    initializeDownloadManagerToggle();
 
 
     // Initialize WebSocket connection (falls back to HTTP polling if unavailable)
@@ -1993,7 +2030,7 @@ function initializeNavigation() {
 }
 
 const _DEEPLINK_VALID_PAGES = new Set([
-    'dashboard', 'sync', 'downloads', 'discover', 'artists', 'automations',
+    'dashboard', 'sync', 'search', 'downloads', 'discover', 'artists', 'automations',
     'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
     'hydrabase', 'tools'
@@ -2005,7 +2042,7 @@ function _getPageFromPath() {
     const basePage = path.split('/')[0];
     if (!_DEEPLINK_VALID_PAGES.has(basePage)) return 'dashboard';
     // Context-dependent pages fall back to a sensible parent
-    if (basePage === 'artist-detail') return 'artists';
+    if (basePage === 'artist-detail') return 'library';
     if (basePage === 'playlist-explorer') return 'library';
     return basePage;
 }
@@ -2109,38 +2146,12 @@ function initializeWatchlist() {
     console.log('Watchlist system initialized');
 }
 
-function initializeDownloadManagerToggle() {
-    const toggleButton = document.getElementById('toggle-download-manager-btn');
-    const downloadsContent = document.querySelector('.downloads-content');
-
-    if (!toggleButton || !downloadsContent) {
-        console.log('Download manager toggle not found on this page');
-        return;
-    }
-
-    // Load saved state from localStorage (hidden by default for more search space)
-    const isHidden = localStorage.getItem('downloadManagerHidden') !== 'false';
-    if (isHidden) {
-        downloadsContent.classList.add('manager-hidden');
-    }
-
-    // Add click handler
-    toggleButton.addEventListener('click', () => {
-        const isCurrentlyHidden = downloadsContent.classList.contains('manager-hidden');
-
-        if (isCurrentlyHidden) {
-            downloadsContent.classList.remove('manager-hidden');
-            localStorage.setItem('downloadManagerHidden', 'false');
-        } else {
-            downloadsContent.classList.add('manager-hidden');
-            localStorage.setItem('downloadManagerHidden', 'true');
-        }
-    });
-
-    console.log('Download manager toggle initialized');
-}
-
 function navigateToPage(pageId, options = {}) {
+    // Backwards-compat aliases — both legacy ids fold into the unified Search page.
+    // 'downloads' was the Search page's old id; 'artists' was the retired inline
+    // Artists page, now replaced by clicking artists from the unified Search.
+    if (pageId === 'downloads' || pageId === 'artists') pageId = 'search';
+
     if (pageId === currentPage) return;
 
     // Permission guard — redirect to home page if not allowed
@@ -2152,14 +2163,14 @@ function navigateToPage(pageId, options = {}) {
         return;
     }
 
-    // Update navigation buttons (only if there's a nav button for this page)
+    // Update navigation buttons (only if there's a nav button for this page).
+    // Pages reachable from many surfaces (artist-detail, playlist-explorer)
+    // intentionally have no [data-page] match here — the sidebar shouldn't
+    // imply a section the user didn't actually navigate via.
     document.querySelectorAll('.nav-button').forEach(btn => {
         btn.classList.remove('active');
     });
-
-    // Handle artist-detail page specially - it should highlight the 'library' nav button
-    const navPageId = pageId === 'artist-detail' ? 'library' : pageId;
-    const navButton = document.querySelector(`[data-page="${navPageId}"]`);
+    const navButton = document.querySelector(`[data-page="${pageId}"]`);
     if (navButton) {
         navButton.classList.add('active');
     }
@@ -2179,7 +2190,7 @@ function navigateToPage(pageId, options = {}) {
         }
     }
 
-    // Show/hide global search bar (hide on downloads page where enhanced search exists)
+    // Show/hide global search bar (hide on search page where the unified search lives)
     if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
 
     // Show/hide discover download sidebar based on page
@@ -2236,21 +2247,12 @@ async function loadPageData(pageId) {
                 initializeSyncPage();
                 await loadSyncData();
                 break;
-            case 'downloads':
+            case 'search':
                 initializeSearch();
                 initializeSearchModeToggle();
                 initializeFilters();
-                await loadDownloadsData();
                 break;
-            case 'artists':
-                // Only fully initialize if not already initialized
-                if (!artistsPageState.isInitialized) {
-                    initializeArtistsPage();
-                } else {
-                    // Just restore state if already initialized
-                    restoreArtistsPageState();
-                }
-                break;
+            // 'artists' page retired — aliased to 'search' at the top of navigateToPage
             case 'active-downloads':
                 loadActiveDownloadsPage();
                 break;

@@ -68,7 +68,7 @@ class TestSpaRoutes:
     """Deep-link paths for valid client pages should serve index.html."""
 
     @pytest.mark.parametrize("page", [
-        'dashboard', 'sync', 'downloads', 'discover', 'artists',
+        'dashboard', 'sync', 'search', 'downloads', 'discover', 'artists',
         'automations', 'library', 'import', 'settings', 'help',
         'issues', 'stats', 'watchlist', 'wishlist', 'active-downloads',
         'artist-detail', 'playlist-explorer', 'hydrabase', 'tools',
