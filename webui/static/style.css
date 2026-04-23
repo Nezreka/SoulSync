@@ -56736,7 +56736,7 @@ body.reduce-effects *::after {
 
 /* ---- Batch Context Panel ---- */
 .adl-batch-panel {
-    width: 340px;
+    width: 400px;
     flex-shrink: 0;
     border-left: 1px solid rgba(255, 255, 255, 0.06);
     padding: 0 12px 0 24px;

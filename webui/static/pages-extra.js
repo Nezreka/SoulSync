@@ -2832,16 +2832,16 @@ function _adlRenderBatchHistory() {
         const failed = h.tracks_failed || 0;
         const total = h.total_tracks || 0;
 
-        // Build stats line: "X in library · X downloaded · X failed  (of N)"
+        // Build stats line: "X owned · X new · X failed · X missing"
         const statsParts = [];
         if (found > 0 || downloaded > 0) {
             const owned = found - downloaded;  // already in library before this sync
-            if (owned > 0) statsParts.push(`<span style="color:rgba(74,222,128,0.7)" title="Already in library">${owned} in library</span>`);
-            if (downloaded > 0) statsParts.push(`<span style="color:rgba(96,165,250,0.7)" title="Downloaded">${downloaded} downloaded</span>`);
+            if (owned > 0) statsParts.push(`<span style="color:rgba(74,222,128,0.7)" title="Already in library">${owned} owned</span>`);
+            if (downloaded > 0) statsParts.push(`<span style="color:rgba(96,165,250,0.7)" title="Newly downloaded">${downloaded} new</span>`);
         }
-        if (failed > 0) statsParts.push(`<span style="color:#ef4444" title="Failed">${failed} failed</span>`);
+        if (failed > 0) statsParts.push(`<span style="color:#ef4444" title="Failed to download">${failed} failed</span>`);
         const notFound = total - found - failed;
-        if (notFound > 0) statsParts.push(`<span title="Not found">${notFound} not found</span>`);
+        if (notFound > 0) statsParts.push(`<span title="Not found on any source">${notFound} missing</span>`);
         if (statsParts.length === 0) statsParts.push(`${total} tracks`);
 
         let dateText = '';
