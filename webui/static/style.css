@@ -56809,7 +56809,7 @@ body.reduce-effects *::after {
 
 /* ---- Batch Context Panel ---- */
 .adl-batch-panel {
-    width: 340px;
+    width: 400px;
     flex-shrink: 0;
     border-left: 1px solid rgba(255, 255, 255, 0.06);
     padding: 0 12px 0 24px;
@@ -57188,29 +57188,51 @@ body.reduce-effects *::after {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 0;
+    padding: 7px 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.02);
 }
 
-.adl-batch-history-name {
+.adl-batch-history-thumb {
+    width: 28px;
+    height: 28px;
+    border-radius: 3px;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.adl-batch-history-content {
     flex: 1;
+    min-width: 0;
+}
+
+.adl-batch-history-row1 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.adl-batch-history-name {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.55);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
 }
 
-.adl-batch-history-stats {
+.adl-batch-history-row2 {
     font-size: 0.68rem;
     color: rgba(255, 255, 255, 0.3);
-    flex-shrink: 0;
+    margin-top: 2px;
+    padding-left: 12px;
 }
 
 .adl-batch-history-date {
     font-size: 0.65rem;
     color: rgba(255, 255, 255, 0.2);
     flex-shrink: 0;
+    margin-left: auto;
 }
 
 /* ---- Responsive ---- */

@@ -31570,13 +31570,26 @@ def get_all_downloads_unified():
                         album = str(raw_album) if raw_album else ''
 
                     artwork = track_info.get('artwork_url') or track_info.get('image_url') or track_info.get('album_art') or ''
-                    # Try album images
+                    # Try album images (both image_url and images[] formats)
                     if not artwork:
                         raw_alb = track_info.get('album')
                         if isinstance(raw_alb, dict):
-                            images = raw_alb.get('images') or []
-                            if images and isinstance(images, list) and len(images) > 0:
-                                artwork = images[0].get('url', '') if isinstance(images[0], dict) else str(images[0])
+                            artwork = raw_alb.get('image_url') or ''
+                            if not artwork:
+                                images = raw_alb.get('images') or []
+                                if images and isinstance(images, list) and len(images) > 0:
+                                    artwork = images[0].get('url', '') if isinstance(images[0], dict) else str(images[0])
+                    # Try spotify_data nested object (wishlist tracks store metadata here)
+                    if not artwork:
+                        sp_data = track_info.get('spotify_data') or {}
+                        if isinstance(sp_data, dict):
+                            sp_album = sp_data.get('album') or {}
+                            if isinstance(sp_album, dict):
+                                artwork = sp_album.get('image_url') or ''
+                                if not artwork:
+                                    sp_imgs = sp_album.get('images') or []
+                                    if sp_imgs and isinstance(sp_imgs, list) and isinstance(sp_imgs[0], dict):
+                                        artwork = sp_imgs[0].get('url', '')
 
                 status = task.get('status', 'queued')
                 # Determine download progress percentage
@@ -31620,6 +31633,86 @@ def get_all_downloads_unified():
         # Sort: active first (by priority), then by timestamp desc within each group
         items.sort(key=lambda x: (x['priority'], -x['timestamp']))
 
+        # POST-LOCK: Enrich missing artwork from metadata cache (handles legacy
+        # wishlist tracks that were stored without image data)
+        items_needing_art = [it for it in items if not it.get('artwork') and it.get('title')]
+        if items_needing_art:
+            try:
+                database = get_database()
+                with database._get_connection() as conn:
+                    cursor = conn.cursor()
+                    # 1. Batch lookup by track name
+                    track_names = list({it['title'] for it in items_needing_art if it['title']})
+                    name_to_art = {}
+                    if track_names:
+                        placeholders = ','.join('?' for _ in track_names)
+                        cursor.execute(f"""
+                            SELECT name, image_url FROM metadata_cache_entities
+                            WHERE entity_type='track' AND name IN ({placeholders})
+                              AND image_url IS NOT NULL AND image_url != ''
+                        """, track_names)
+                        for row in cursor.fetchall():
+                            if row[0] not in name_to_art:
+                                name_to_art[row[0]] = row[1]
+                    for it in items_needing_art:
+                        cached_url = name_to_art.get(it['title'])
+                        if cached_url:
+                            it['artwork'] = cached_url
+
+                    # 2. Remaining items: look up by album name (album art is better than nothing)
+                    still_needing = [it for it in items_needing_art if not it.get('artwork') and it.get('album')]
+                    if still_needing:
+                        album_names = list({it['album'] for it in still_needing if it['album']})
+                        if album_names:
+                            placeholders = ','.join('?' for _ in album_names)
+                            cursor.execute(f"""
+                                SELECT name, image_url FROM metadata_cache_entities
+                                WHERE entity_type='album' AND name IN ({placeholders})
+                                  AND image_url IS NOT NULL AND image_url != ''
+                            """, album_names)
+                            album_to_art = {}
+                            for row in cursor.fetchall():
+                                if row[0] not in album_to_art:
+                                    album_to_art[row[0]] = row[1]
+                            for it in still_needing:
+                                cached_url = album_to_art.get(it['album'])
+                                if cached_url:
+                                    it['artwork'] = cached_url
+
+                    # 3. Last resort: check matched_downloads_context for items with active downloads
+                    final_needing = [it for it in items_needing_art if not it.get('artwork')]
+                    if final_needing:
+                        with matched_context_lock:
+                            for it in final_needing:
+                                # Find task in download_tasks to get username/filename for context lookup
+                                task_id = it.get('task_id')
+                                if not task_id:
+                                    continue
+                                with tasks_lock:
+                                    task = download_tasks.get(task_id)
+                                    if not task:
+                                        continue
+                                    t_username = task.get('username')
+                                    t_filename = task.get('filename')
+                                if t_username and t_filename:
+                                    ctx_key = _make_context_key(t_username, t_filename)
+                                    ctx = matched_downloads_context.get(ctx_key)
+                                    if ctx:
+                                        _sp_album = ctx.get('spotify_album') or {}
+                                        _sp_track = ctx.get('track_info') or {}
+                                        _sp_images = _sp_album.get('images') or []
+                                        _art = ''
+                                        if _sp_images and isinstance(_sp_images[0], dict):
+                                            _art = _sp_images[0].get('url', '') or ''
+                                        if not _art:
+                                            _art = _sp_album.get('image_url') or ''
+                                        if not _art:
+                                            _art = _sp_track.get('image_url') or ''
+                                        if _art:
+                                            it['artwork'] = _art
+            except Exception as cache_err:
+                logger.debug(f"Metadata cache artwork lookup failed: {cache_err}")
+
         # Build batch summaries for the batch context panel
         batch_summaries = []
         with tasks_lock:
@@ -31634,6 +31727,7 @@ def get_all_downloads_unified():
                     'phase': batch.get('phase', 'unknown'),
                     'total': len(queue),
                     'analysis_total': batch.get('analysis_total', len(queue)),
+                    'analysis_processed': batch.get('analysis_processed', 0),
                     'completed': sum(1 for s in statuses if s in ('completed', 'skipped', 'already_owned')),
                     'failed': sum(1 for s in statuses if s in ('failed', 'not_found', 'cancelled')),
                     'active': sum(1 for s in statuses if s in ('downloading', 'searching', 'post_processing')),
@@ -31680,9 +31774,16 @@ def clear_completed_downloads():
             for tid in task_ids_to_remove:
                 del download_tasks[tid]
                 cleared += 1
-            # Also clean up empty batches
+            # Also clean up empty batches (but not those still actively processing)
+            active_phases = {'analysis', 'downloading', 'queued'}
             empty_batches = []
             for bid, batch in download_batches.items():
+                # Never remove batches that are still actively working
+                if batch.get('phase') in active_phases:
+                    # Still prune cleared tasks from queue
+                    remaining = [t for t in batch.get('queue', []) if t in download_tasks]
+                    batch['queue'] = remaining
+                    continue
                 remaining = [t for t in batch.get('queue', []) if t in download_tasks]
                 if not remaining:
                     empty_batches.append(bid)
