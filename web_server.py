@@ -42190,10 +42190,14 @@ def watchlist_artist_config(artist_id):
             try:
                 conn2 = sqlite3.connect(str(database.database_path))
                 cur2 = conn2.cursor()
+                # The library `artists` table uses `deezer_id` / `discogs_id` for
+                # those columns; only the `watchlist_artists` table uses the
+                # `_artist_id` suffix for them. Mixing them was producing a
+                # 'no such column' on every watchlist-config GET.
                 cur2.execute("""
                     SELECT banner_url, summary, style, mood, label, genres
                     FROM artists
-                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ? OR discogs_artist_id = ?
+                    WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_id = ? OR discogs_id = ?
                     LIMIT 1
                 """, (artist_id, artist_id, artist_id, artist_id))
                 lib_row = cur2.fetchone()
