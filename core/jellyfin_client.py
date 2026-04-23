@@ -1194,7 +1194,49 @@ class JellyfinClient:
             stats['bulk_tracks_cached'] = len(self._all_tracks_cache)
             
         return stats
-    
+
+    def search_tracks(self, title: str, artist: str, limit: int = 15) -> List[JellyfinTrack]:
+        """Search for tracks by title and artist on the Jellyfin server."""
+        if not self.ensure_connection():
+            return []
+
+        try:
+            search_term = f"{artist} {title}".strip()
+            params = {
+                'ParentId': self.music_library_id,
+                'IncludeItemTypes': 'Audio',
+                'Recursive': True,
+                'SearchTerm': search_term,
+                'Fields': 'AlbumId,ArtistItems,Path,MediaSources',
+                'Limit': limit,
+            }
+
+            response = self._make_request(f'/Users/{self.user_id}/Items', params)
+            if not response:
+                return []
+
+            results = []
+            lower_title = title.lower()
+            lower_artist = artist.lower()
+            for item in response.get('Items', []):
+                track = JellyfinTrack(item, self)
+                # Basic relevance filter: title should appear in track name
+                if lower_title and lower_title not in track.title.lower():
+                    continue
+                # If artist provided, check artist names
+                if lower_artist:
+                    artist_names = [a.get('Name', '').lower() for a in item.get('ArtistItems', [])]
+                    album_artist = (item.get('AlbumArtist') or '').lower()
+                    if not any(lower_artist in n for n in artist_names) and lower_artist not in album_artist:
+                        continue
+                results.append(track)
+
+            return results[:limit]
+
+        except Exception as e:
+            logger.error(f"Error searching Jellyfin tracks for '{title}' by '{artist}': {e}")
+            return []
+
     def get_all_playlists(self) -> List[JellyfinPlaylistInfo]:
         """Get all playlists from Jellyfin server"""
         if not self.ensure_connection():
