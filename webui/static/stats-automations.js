@@ -464,6 +464,7 @@ function _renderDbStorageChart(tables, totalFileSize, method) {
 }
 
 async function playStatsTrack(title, artist, album) {
+    // 1. Try the library first — fastest and best quality if owned.
     try {
         const resp = await fetch('/api/stats/resolve-track', {
             method: 'POST',
@@ -471,22 +472,56 @@ async function playStatsTrack(title, artist, album) {
             body: JSON.stringify({ title, artist }),
         });
         const data = await resp.json();
-        if (!data.success || !data.track) {
-            showToast(data.error || 'Track not found in library', 'error');
+        if (data.success && data.track) {
+            const t = data.track;
+            playLibraryTrack({
+                id: t.id,
+                title: t.title,
+                file_path: t.file_path,
+                bitrate: t.bitrate,
+                artist_id: t.artist_id,
+                album_id: t.album_id,
+                _stats_image: t.image_url || null,
+            }, t.album_title || album || '', t.artist_name || artist || '');
             return;
         }
-        const t = data.track;
-        playLibraryTrack({
-            id: t.id,
-            title: t.title,
-            file_path: t.file_path,
-            bitrate: t.bitrate,
-            artist_id: t.artist_id,
-            album_id: t.album_id,
-            _stats_image: t.image_url || null,
-        }, t.album_title || album || '', t.artist_name || artist || '');
     } catch (e) {
+        console.debug('Library resolve failed, will try streaming fallback:', e);
+    }
+
+    // 2. Library miss — fall back to streaming via the enhanced-search streamer
+    //    (Soulseek → YouTube → other configured sources, same pipeline used by
+    //    the search results' play button).
+    if (typeof showLoadingOverlay === 'function') {
+        showLoadingOverlay(`Searching for ${title}...`);
+    }
+    try {
+        const streamResp = await fetch('/api/enhanced-search/stream-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track_name: title,
+                artist_name: artist,
+                album_name: album || '',
+                duration_ms: 0,
+            }),
+        });
+        const streamData = await streamResp.json();
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
+
+        if (streamData.success && streamData.result) {
+            if (typeof startStream === 'function') {
+                await startStream(streamData.result);
+            } else {
+                showToast('Streaming not available', 'error');
+            }
+        } else {
+            showToast(streamData.error || 'Track not found in library or any source', 'error');
+        }
+    } catch (e) {
+        if (typeof hideLoadingOverlay === 'function') hideLoadingOverlay();
         showToast('Failed to play track', 'error');
+        console.error('Stream fallback failed:', e);
     }
 }
 

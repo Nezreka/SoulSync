@@ -483,6 +483,61 @@ def test_get_artist_detail_discography_dedups_variant_releases(monkeypatch):
     assert result["albums"][0]["track_count"] == 10
 
 
+def test_get_artist_detail_discography_keeps_variants_when_dedup_disabled(monkeypatch):
+    """MetadataLookupOptions.dedup_variants=False is the source-only artist
+    detail code path — used so the standalone /artist-detail page can show
+    every release the source returns (matching the retired inline Artists
+    page behaviour)."""
+    monkeypatch.setattr(
+        metadata_service,
+        "get_artist_discography",
+        lambda artist_id, artist_name='', options=None: {
+            "albums": [
+                {
+                    "id": "album-standard",
+                    "name": "Variant Album",
+                    "album_type": "album",
+                    "image_url": "https://img.example/standard.jpg",
+                    "release_date": "2024-01-05",
+                    "total_tracks": 10,
+                },
+                {
+                    "id": "album-swedish",
+                    "name": "Variant Album (Swedish Edition)",
+                    "album_type": "album",
+                    "image_url": "https://img.example/swedish.jpg",
+                    "release_date": "2024-01-05",
+                    "total_tracks": 12,
+                },
+                {
+                    "id": "album-remaster",
+                    "name": "Variant Album (2023 Abbey Road Remaster)",
+                    "album_type": "album",
+                    "image_url": "https://img.example/remaster.jpg",
+                    "release_date": "2024-01-05",
+                    "total_tracks": 10,
+                },
+            ],
+            "singles": [],
+            "source": "deezer",
+            "source_priority": ["deezer", "spotify"],
+        },
+    )
+
+    result = metadata_service.get_artist_detail_discography(
+        "artist-1",
+        "Artist One",
+        MetadataLookupOptions(dedup_variants=False),
+    )
+
+    assert result["success"] is True
+    assert [album["id"] for album in result["albums"]] == [
+        "album-standard",
+        "album-swedish",
+        "album-remaster",
+    ]
+
+
 def test_get_artist_discography_keeps_provider_artist_ids(monkeypatch):
     class _SpotifyArtistIdClient(_FakeSourceClient):
         def get_artist_albums(self, artist_id, **kwargs):

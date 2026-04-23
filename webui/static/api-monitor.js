@@ -1231,13 +1231,16 @@ function _renderWishlistNebula(albumTracks, singleTracks, artistImageMap, curren
     field.innerHTML = html;
 }
 
-// Enhancement 8: navigate to artist detail from wishlist
+// Enhancement 8: navigate to the Search page pre-filled with this artist's name
 function _navigateToArtistFromWishlist(artistName) {
-    // Try to find the artist in the library DB by searching
-    navigateToPage('artists');
+    navigateToPage('search');
     setTimeout(() => {
-        const searchInput = document.querySelector('.artist-search-input, #artist-search');
-        if (searchInput) { searchInput.value = artistName; searchInput.dispatchEvent(new Event('input')); }
+        const searchInput = document.getElementById('enhanced-search-input');
+        if (searchInput) {
+            searchInput.value = artistName;
+            searchInput.dispatchEvent(new Event('input'));
+            searchInput.focus();
+        }
     }, 300);
 }
 
@@ -2382,16 +2385,8 @@ async function openWatchlistArtistDetailView(artistId, artistName) {
                 source = spotify_artist_id ? 'spotify' : discogs_artist_id ? 'discogs' : deezer_artist_id ? 'deezer' : 'itunes';
             }
             if (discogId) {
-                // Close detail overlay and navigate to Artists page
                 closeWatchlistArtistDetailView();
-                // Navigate to Artists page and load discography
-                navigateToPage('artists');
-                setTimeout(() => {
-                    selectArtistForDetail(
-                        { id: discogId, name: artistName, image_url: artist.image_url || '' },
-                        { source: source }
-                    );
-                }, 200);
+                navigateToArtistDetail(discogId, artistName, source);
             }
         });
 
