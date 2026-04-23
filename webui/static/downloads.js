@@ -5016,12 +5016,15 @@ function _gsClickVideo(cardEl) {
 const _gsState = {
     active: false,
     query: '',
-    data: null,
-    sources: {},
-    activeSource: null,
+    data: null,               // most recent payload {db_artists: [...]} — used as library baseline
+    activeSource: 'spotify',  // current source icon (seeded from /api/settings on init)
+    // Per-query cache for all sources. Cleared whenever `query` changes.
+    sources: {},              // src -> {artists, albums, tracks, videos, db_artists, ...}
+    fallbacks: {},            // src -> actual source served when backend fell back (rate-limit)
+    loadingSources: new Set(),
     abortCtrl: null,
-    altAbortCtrl: null,
     debounceTimer: null,
+    _defaultSourceResolved: false,
 };
 
 (function initGlobalSearch() {
@@ -5039,7 +5042,9 @@ const _gsState = {
             _gsState.active = true;
             const shortcut = document.getElementById('gsearch-shortcut');
             if (shortcut) shortcut.style.display = 'none';
-            if (_gsState.data && _gsState.query) _gsShowResults();
+            // Always redraw on focus so the source icon row is current
+            // (cache dots, active state, etc.).
+            _gsInitDefaultSource().then(() => _gsRender());
         });
 
         // No blur handler — closing is handled by click-outside and Escape only
@@ -5143,113 +5148,218 @@ function _gsShowResults() {
     if (r && r.innerHTML.trim()) r.classList.add('visible');
 }
 
+async function _gsInitDefaultSource() {
+    if (_gsState._defaultSourceResolved) return;
+    _gsState._defaultSourceResolved = true;
+    try {
+        const resp = await fetch('/api/settings');
+        if (resp.ok) {
+            const settings = await resp.json();
+            const cfg = settings.metadata && settings.metadata.fallback_source;
+            if (cfg && SOURCE_LABELS[cfg]) _gsState.activeSource = cfg;
+        }
+    } catch (_) { /* best-effort */ }
+    if (!SOURCE_LABELS[_gsState.activeSource]) _gsState.activeSource = 'spotify';
+}
+
 async function _gsPerformSearch(query) {
-    if (_gsState.abortCtrl) _gsState.abortCtrl.abort();
-    if (_gsState.altAbortCtrl) _gsState.altAbortCtrl.abort();
-    _gsState.abortCtrl = new AbortController();
-    _gsState.altAbortCtrl = new AbortController();
+    await _gsInitDefaultSource();
 
-    const results = document.getElementById('gsearch-results');
-    if (!results) return;
-
-    results.innerHTML = '<div class="gsearch-loading"><div class="server-search-spinner"></div>Searching...</div>';
-    results.classList.add('visible');
-
-    try {
-        const data = await enhancedSearchFetch(query, { signal: _gsState.abortCtrl.signal });
-        _gsState.data = data;
-        _gsState.activeSource = data.primary_source || 'spotify';
+    // Query changed? Wipe the per-query cache so we never serve stale results
+    // across different queries.
+    if (query !== _gsState.query) {
+        _gsState.query = query;
         _gsState.sources = {};
-        _gsState.sources[_gsState.activeSource] = {
-            artists: data.spotify_artists || [],
-            albums: data.spotify_albums || [],
-            tracks: data.spotify_tracks || [],
-        };
+        _gsState.fallbacks = {};
+        _gsState.loadingSources = new Set();
+    }
 
-        _gsRender(data);
+    // Render current state immediately (icon row + loading/empty message)
+    _gsRender();
 
-        // Async library ownership check — adds badges + swaps play buttons for library tracks
+    // Soulseek needs a full page to render raw file results — hand off to /search.
+    if (_gsState.activeSource === 'soulseek') {
+        _gsNavigateToSearchPage(query, 'soulseek');
+        return;
+    }
+
+    // Cache hit? No fetch needed.
+    if (_gsState.sources[_gsState.activeSource]) {
         setTimeout(() => _gsLibraryCheck(), 200);
-
-        // Fetch alternate sources — stream NDJSON so slow sources render incrementally
-        const alts = data.alternate_sources || [];
-        for (const src of alts) {
-            if (src === _gsState.activeSource) continue;
-            _gsFetchSourceStream(src, query);
-        }
-    } catch (e) {
-        if (e.name !== 'AbortError') results.innerHTML = '<div class="gsearch-empty">Search failed</div>';
+        return;
     }
+
+    await _gsFetchSource(_gsState.activeSource);
 }
 
-async function _gsFetchSourceStream(src, query) {
+async function _gsFetchSource(src) {
+    const query = _gsState.query;
+    if (!query) return;
+
+    _gsState.loadingSources.add(src);
+    _gsRender();
+
+    if (_gsState.abortCtrl) _gsState.abortCtrl.abort();
+    _gsState.abortCtrl = new AbortController();
+
     try {
-        const res = await fetch(`/api/enhanced-search/source/${src}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query }),
-            signal: _gsState.altAbortCtrl.signal,
-        });
-        if (!res.ok) return;
-
-        if (!_gsState.sources[src]) {
-            const loadingSet = src === 'youtube_videos' ? new Set(['videos']) : new Set(['artists', 'albums', 'tracks']);
-            _gsState.sources[src] = { artists: [], albums: [], tracks: [], videos: [], available: true, _loading: loadingSet };
+        if (src === 'youtube_videos') {
+            await _gsFetchYouTubeVideos(query, _gsState.abortCtrl.signal);
+        } else {
+            const data = await enhancedSearchFetch(query, {
+                source: src,
+                signal: _gsState.abortCtrl.signal,
+            });
+            _gsState.sources[src] = {
+                artists: data.spotify_artists || [],
+                albums: data.spotify_albums || [],
+                tracks: data.spotify_tracks || [],
+                videos: [],
+                db_artists: data.db_artists || [],
+            };
+            _gsState.data = data;  // baseline for library-check helper
+            const served = data.primary_source || data.metadata_source;
+            if (served && served !== src) _gsState.fallbacks[src] = served;
         }
-        const sourceData = _gsState.sources[src];
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
+        _gsState.loadingSources.delete(src);
+        _gsRender();
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-
-            let idx;
-            while ((idx = buffer.indexOf('\n')) !== -1) {
-                const line = buffer.slice(0, idx).trim();
-                buffer = buffer.slice(idx + 1);
-                if (!line) continue;
-                try {
-                    const chunk = JSON.parse(line);
-                    if (chunk.type === 'artists') { sourceData.artists = chunk.data; if (sourceData._loading) sourceData._loading.delete('artists'); }
-                    else if (chunk.type === 'albums') { sourceData.albums = chunk.data; if (sourceData._loading) sourceData._loading.delete('albums'); }
-                    else if (chunk.type === 'tracks') { sourceData.tracks = chunk.data; if (sourceData._loading) sourceData._loading.delete('tracks'); }
-                    else if (chunk.type === 'videos') { sourceData.videos = chunk.data; if (sourceData._loading) sourceData._loading.delete('videos'); }
-                    if (chunk.type === 'done') delete sourceData._loading;
-                    _gsRenderTabs();
-                    // Re-render content if this is the active source tab
-                    if (_gsState.activeSource === src && _gsState.data) {
-                        _gsRender(_gsState.data);
-                    }
-                } catch (e) { }
-            }
+        if (_gsState.activeSource === src) {
+            setTimeout(() => _gsLibraryCheck(), 200);
         }
-        _gsRenderTabs();
-    } catch (e) {
-        if (e.name !== 'AbortError') console.debug(`GS alt source ${src} failed:`, e);
+    } catch (err) {
+        _gsState.loadingSources.delete(src);
+        _gsRender();
+        if (err.name !== 'AbortError') console.debug(`GS source ${src} failed:`, err);
     }
 }
 
-function _gsRender(data) {
+async function _gsFetchYouTubeVideos(query, signal) {
+    const res = await fetch('/api/enhanced-search/source/youtube_videos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+        signal,
+    });
+    if (!res.ok) throw new Error('YouTube search failed');
+
+    _gsState.sources['youtube_videos'] = {
+        artists: [], albums: [], tracks: [], videos: [], db_artists: [],
+    };
+    const cache = _gsState.sources['youtube_videos'];
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf('\n')) !== -1) {
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (!line) continue;
+            try {
+                const chunk = JSON.parse(line);
+                if (chunk.type === 'videos') {
+                    cache.videos = chunk.data;
+                    if (_gsState.activeSource === 'youtube_videos') _gsRender();
+                }
+            } catch (_) { /* best-effort */ }
+        }
+    }
+}
+
+function _gsNavigateToSearchPage(query, src) {
+    _gsDeactivate();
+    if (typeof navigateToPage !== 'function') return;
+    navigateToPage('search');
+    // After the page mounts, mirror the query into the enhanced input so the
+    // user doesn't have to retype it. The Search page's source picker will
+    // pick up `src` via its own default-source flow.
+    setTimeout(() => {
+        const input = document.getElementById('enhanced-search-input');
+        if (input && query) {
+            input.value = query;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    }, 300);
+}
+
+function _gsSourceRowHtml() {
+    return '<div class="gsearch-source-row" id="gsearch-source-row">' + SOURCE_ORDER.map(src => {
+        const info = SOURCE_LABELS[src];
+        if (!info) return '';
+        const active = src === _gsState.activeSource;
+        const cached = !!_gsState.sources[src];
+        const loading = _gsState.loadingSources.has(src);
+        const fallback = _gsState.fallbacks[src];
+        const classes = ['gsearch-source-icon',
+            active ? 'active' : '',
+            cached ? 'cached' : '',
+            loading ? 'loading' : '',
+            fallback ? 'fallback-warning' : ''].filter(Boolean).join(' ');
+        const title = fallback
+            ? `${info.text} unavailable — served from ${(SOURCE_LABELS[fallback] || {}).text || fallback}`
+            : info.text;
+        return `<button class="${classes}" data-source="${src}" onclick="_gsSetActiveSource('${src}')" title="${_escAttr(title)}">
+            <span class="gsearch-source-icon-glyph">${loading ? '⏳' : info.icon}</span>
+            <span class="gsearch-source-icon-label">${_escToast(info.text)}</span>
+        </button>`;
+    }).join('') + '</div>';
+}
+
+function _gsFallbackBannerHtml(src) {
+    const actual = _gsState.fallbacks[src];
+    if (!actual || actual === src) return '';
+    const clicked = (SOURCE_LABELS[src] || {}).text || src;
+    const served = (SOURCE_LABELS[actual] || {}).text || actual;
+    return `<div class="gsearch-fallback-banner">${_escToast(clicked)} unavailable — showing ${_escToast(served)}.</div>`;
+}
+
+function _gsRender() {
     const results = document.getElementById('gsearch-results');
     if (!results) return;
 
-    // Music Videos tab — render video grid instead of regular results
-    if (_gsState.activeSource === 'youtube_videos') {
-        const src = _gsState.sources['youtube_videos'] || {};
-        const videos = src.videos || [];
-        const isLoading = src._loading && src._loading.size > 0;
-        let h = '';
+    const activeSrc = _gsState.activeSource;
+    const cached = _gsState.sources[activeSrc];
+    const isLoading = _gsState.loadingSources.has(activeSrc);
+    const query = _gsState.query;
+    const header = _gsSourceRowHtml() + _gsFallbackBannerHtml(activeSrc);
+
+    // No query yet — just show the icon row and an empty hint.
+    if (!query) {
+        results.innerHTML = header + '<div class="gsearch-empty">Type to search…</div>';
+        results.classList.add('visible');
+        return;
+    }
+
+    // In-flight for this source, nothing cached yet — loading state.
+    if (isLoading && !cached) {
+        const info = SOURCE_LABELS[activeSrc];
+        results.innerHTML = header
+            + `<div class="gsearch-loading"><div class="server-search-spinner"></div>Searching ${_escToast((info && info.text) || activeSrc)}...</div>`;
+        results.classList.add('visible');
+        return;
+    }
+
+    // No cache, not loading — user hasn't triggered a fetch (e.g. just switched sources).
+    if (!cached) {
+        results.innerHTML = header + '<div class="gsearch-empty">Click the source above to search.</div>';
+        results.classList.add('visible');
+        return;
+    }
+
+    // Music Videos — render video grid instead of regular sections.
+    if (activeSrc === 'youtube_videos') {
+        const videos = cached.videos || [];
+        let h = header;
         h += `<div class="gsearch-results-header"><span class="gsearch-results-title">Results</span><span class="gsearch-results-count">${videos.length} videos</span></div>`;
-        h += '<div class="gsearch-tabs" id="gsearch-tabs"></div>';
         h += '<div class="gsearch-results-body">';
-        if (isLoading) {
-            h += '<div class="gsearch-section-loading"><div class="server-search-spinner" style="width:14px;height:14px"></div> Searching YouTube...</div>';
-        } else if (videos.length === 0) {
-            h += `<div class="gsearch-empty">No music videos found for "${_escToast(_gsState.query)}"</div>`;
+        if (videos.length === 0) {
+            h += `<div class="gsearch-empty">No music videos found for "${_escToast(query)}"</div>`;
         } else {
             h += '<div class="gsearch-section-header">🎬 Music Videos</div>';
             h += '<div class="enh-video-grid">';
@@ -5270,33 +5380,29 @@ function _gsRender(data) {
         h += '</div>';
         results.innerHTML = h;
         results.classList.add('visible');
-        _gsRenderTabs();
         return;
     }
 
-    const src = _gsState.sources[_gsState.activeSource] || {};
-    const loading = src._loading || new Set();
-    const dbArtists = data?.db_artists || [];
-    const artists = src.artists || [];
-    const allAlbums = src.albums || [];
+    // Standard metadata source — render library + artists + albums + singles + tracks.
+    const dbArtists = cached.db_artists || [];
+    const artists = cached.artists || [];
+    const allAlbums = cached.albums || [];
     const albums = allAlbums.filter(a => !a.album_type || a.album_type === 'album' || a.album_type === 'compilation');
     const singles = allAlbums.filter(a => a.album_type === 'single' || a.album_type === 'ep');
-    const tracks = src.tracks || [];
+    const tracks = cached.tracks || [];
     const total = dbArtists.length + artists.length + albums.length + singles.length + tracks.length;
-    const isLoading = loading.size > 0;
 
-    if (total === 0 && !isLoading) {
-        results.innerHTML = `<div class="gsearch-empty">No results for "${_escToast(_gsState.query)}"<br><span style="font-size:10px;opacity:0.5">Try different keywords or check spelling</span></div>`;
+    if (total === 0) {
+        results.innerHTML = header
+            + `<div class="gsearch-empty">No results for "${_escToast(query)}"<br><span style="font-size:10px;opacity:0.5">Try different keywords or check spelling</span></div>`;
         results.classList.add('visible');
         return;
     }
 
-    const sourceLabels = { spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', discogs: 'Discogs', hydrabase: 'Hydrabase', youtube_videos: 'Music Videos', musicbrainz: 'MusicBrainz' };
-    const srcLabel = sourceLabels[_gsState.activeSource] || _gsState.activeSource || '';
+    const srcLabel = (SOURCE_LABELS[activeSrc] || {}).text || activeSrc || '';
 
-    let h = '';
+    let h = header;
     h += `<div class="gsearch-results-header"><span class="gsearch-results-title">Results</span><span class="gsearch-results-count">${total} items</span></div>`;
-    h += '<div class="gsearch-tabs" id="gsearch-tabs"></div>';
     h += '<div class="gsearch-results-body">';
 
     if (dbArtists.length) {
@@ -5309,11 +5415,7 @@ function _gsRender(data) {
         h += `<div class="gsearch-section-header">🎤 Artists <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-grid" id="gsearch-artists-grid">`;
         h += artists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escAttr(a.name)}', false)" ${!a.image_url ? `data-artist-id="${a.id}" data-needs-image="true"` : ''}><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div></div></div>`).join('');
         h += '</div>';
-    } else if (loading.has('artists')) {
-        h += `<div class="gsearch-section-header">🎤 Artists <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-section-loading"><div class="server-search-spinner" style="width:14px;height:14px"></div> Loading artists...</div>`;
     }
-
-    const activeSrc = _gsState.activeSource || 'spotify';
 
     if (albums.length) {
         h += `<div class="gsearch-section-header">💿 Albums <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-grid">`;
@@ -5324,10 +5426,6 @@ function _gsRender(data) {
             return `<div class="gsearch-item" onclick="_gsClickAlbum('${a.id}', '${_escAttr(a.name)}', '${_escAttr(ar)}', '${img}', '${activeSrc}')"><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy">` : '💿'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${yr ? ` · ${yr}` : ''}</div></div></div>`;
         }).join('');
         h += '</div>';
-    }
-
-    if (!albums.length && !singles.length && loading.has('albums')) {
-        h += `<div class="gsearch-section-header">💿 Albums <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-section-loading"><div class="server-search-spinner" style="width:14px;height:14px"></div> Loading albums...</div>`;
     }
 
     if (singles.length) {
@@ -5348,14 +5446,11 @@ function _gsRender(data) {
             return `<div class="gsearch-track" onclick="_gsClickTrack('${_escAttr(ar)}', '${_escAttr(t.name)}', '${_escAttr(t.album || '')}', '${_escAttr(t.id || '')}', '${_escAttr(t.image_url || '')}', ${t.duration_ms || 0})"><div class="gsearch-item-art" style="width:32px;height:32px;border-radius:6px">${t.image_url ? `<img src="${t.image_url}" loading="lazy">` : '🎵'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(t.name)}</div><div class="gsearch-item-sub">${_escToast(ar)}${t.album ? ` · ${_escToast(t.album)}` : ''}</div></div><div class="gsearch-track-dur">${dur}</div><button class="gsearch-play-btn" onclick="event.stopPropagation(); _gsPlayTrack('${_escAttr(t.name)}', '${_escAttr(ar)}', '${_escAttr(t.album || '')}')" title="Stream">▶</button></div>`;
         }).join('');
         h += '</div>';
-    } else if (loading.has('tracks')) {
-        h += `<div class="gsearch-section-header">🎵 Tracks <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-section-loading"><div class="server-search-spinner" style="width:14px;height:14px"></div> Loading tracks...</div>`;
     }
 
     h += '</div>';
     results.innerHTML = h;
     results.classList.add('visible');
-    _gsRenderTabs();
 
     // Lazy load artist images for sources that don't provide them (iTunes/Deezer)
     _gsLazyLoadArtistImages();
@@ -5383,42 +5478,31 @@ async function _gsLazyLoadArtistImages() {
     }
 }
 
-function _gsRenderTabs() {
-    const el = document.getElementById('gsearch-tabs');
-    if (!el) return;
-    const sources = Object.keys(_gsState.sources);
-    const labels = {
-        spotify: 'Spotify',
-        itunes: 'Apple Music',
-        deezer: 'Deezer',
-        discogs: 'Discogs',
-        hydrabase: 'Hydrabase',
-        youtube_videos: 'Music Videos',
-        musicbrainz: 'MusicBrainz',
-    };
-    const visibleSources = sources.filter(s => {
-        const d = _gsState.sources[s] || {};
-        const count = s === 'youtube_videos'
-            ? (d.videos?.length || 0)
-            : (d.artists?.length || 0) + (d.albums?.length || 0) + (d.tracks?.length || 0);
-        const isLoading = !!(d._loading && d._loading.size > 0);
-        return isLoading || count > 0 || s === _gsState.activeSource;
-    });
-    if (visibleSources.length < 2) { el.style.display = 'none'; return; }
-    el.style.display = 'flex';
-    el.innerHTML = visibleSources.map(s => {
-        const d = _gsState.sources[s];
-        const c = s === 'youtube_videos'
-            ? (d.videos?.length || 0)
-            : (d.artists?.length || 0) + (d.albums?.length || 0) + (d.tracks?.length || 0);
-        return `<button class="gsearch-tab${s === _gsState.activeSource ? ' active' : ''}" onclick="_gsSwitchSource('${s}')">${labels[s] || s} (${c})</button>`;
-    }).join('');
-}
-
-function _gsSwitchSource(src) {
+function _gsSetActiveSource(src) {
+    if (!SOURCE_LABELS[src]) return;
     _gsState._lastInteraction = Date.now();
+
+    // Soulseek — hand off to the Search page since its raw file results need
+    // more room than the popover provides.
+    if (src === 'soulseek') {
+        _gsNavigateToSearchPage(_gsState.query, 'soulseek');
+        return;
+    }
+
+    if (src === _gsState.activeSource) return;
     _gsState.activeSource = src;
-    _gsRender(_gsState.data);
+
+    // Cache hit — render from cached payload. Cache miss — fetch, which
+    // will re-render on completion.
+    if (_gsState.sources[src]) {
+        _gsRender();
+    } else if (_gsState.query) {
+        _gsFetchSource(src);
+    } else {
+        // No query yet — just redraw the icon row so the active state changes.
+        _gsRender();
+    }
+
     const input = document.getElementById('gsearch-input');
     if (input) input.focus();
 }
