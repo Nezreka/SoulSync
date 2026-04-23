@@ -1,5 +1,9 @@
 import sys
 import types
+from datetime import datetime, timedelta
+
+
+_RECENT_RELEASE_DATE = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
 
 
 if "spotipy" not in sys.modules:
@@ -889,7 +893,7 @@ def test_cache_discovery_recent_albums_uses_primary_source_first(monkeypatch):
         id="dz-album-1",
         name="Recent Deezer Album",
         album_type="album",
-        release_date="2026-04-01",
+        release_date=_RECENT_RELEASE_DATE,
         image_url="https://example.com/deezer-album.jpg",
     )
 
@@ -941,7 +945,7 @@ def test_cache_discovery_recent_albums_falls_back_to_spotify_when_primary_has_no
         id="sp-album-1",
         name="Spotify Recent Album",
         album_type="album",
-        release_date="2026-04-01",
+        release_date=_RECENT_RELEASE_DATE,
         image_url="https://example.com/spotify-album.jpg",
     )
     spotify_client = _FakeSourceClient(
@@ -952,7 +956,7 @@ def test_cache_discovery_recent_albums_falls_back_to_spotify_when_primary_has_no
             "id": "sp-album-1",
             "name": "Spotify Recent Album",
             "images": [{"url": "https://example.com/spotify-album.jpg"}],
-            "release_date": "2026-04-01",
+            "release_date": _RECENT_RELEASE_DATE,
             "popularity": 50,
             "tracks": {"items": [{"id": "sp-track-1", "name": "Spotify Track", "artists": [{"name": "Fallback Artist"}]}]},
             "artists": [{"id": "sp-artist"}],
@@ -992,7 +996,7 @@ def test_update_discovery_pool_incremental_uses_source_priority(monkeypatch):
     release = types.SimpleNamespace(
         id="dz-release-1",
         name="Incremental Release",
-        release_date="2026-04-16",
+        release_date=_RECENT_RELEASE_DATE,
         album_type="album",
         image_url="https://example.com/deezer-release.jpg",
     )
@@ -1005,7 +1009,7 @@ def test_update_discovery_pool_incremental_uses_source_priority(monkeypatch):
             "id": "dz-release-1",
             "name": "Incremental Release",
             "images": [{"url": "https://example.com/deezer-release.jpg"}],
-            "release_date": "2026-04-16",
+            "release_date": _RECENT_RELEASE_DATE,
             "popularity": 10,
             "tracks": {"items": [{"id": "dz-track-1", "name": "Incremental Track", "artists": [{"name": "Incremental Artist"}], "duration_ms": 180000}]},
             "artists": [{"id": "dz-artist"}],
@@ -1019,7 +1023,7 @@ def test_update_discovery_pool_incremental_uses_source_priority(monkeypatch):
             "id": "sp-release-1",
             "name": "Spotify Incremental Release",
             "images": [{"url": "https://example.com/spotify-release.jpg"}],
-            "release_date": "2026-04-16",
+            "release_date": _RECENT_RELEASE_DATE,
             "popularity": 50,
             "tracks": {"items": [{"id": "sp-track-1", "name": "Spotify Incremental Track", "artists": [{"name": "Incremental Artist"}], "duration_ms": 180000}]},
             "artists": [{"id": "sp-artist"}],
