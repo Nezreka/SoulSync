@@ -2243,6 +2243,13 @@ async function loadPageData(pageId) {
         if (typeof _stopNebulaLivePolling === 'function') _stopNebulaLivePolling();
         if (pageId !== 'sync') {
             cleanupBeatportContent();
+            // Clear any discover sync tab pollers when leaving the sync page
+            if (typeof discoverSyncPollers === 'object') {
+                for (const key of Object.keys(discoverSyncPollers)) {
+                    clearInterval(discoverSyncPollers[key]);
+                    delete discoverSyncPollers[key];
+                }
+            }
         }
         switch (pageId) {
             case 'dashboard':

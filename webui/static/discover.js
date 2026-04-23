@@ -9332,7 +9332,23 @@ function pollDiscoverSyncFromTab(playlistType, virtualPlaylistId, playlistName) 
 }
 
 function pollDiscoverBatchFromTab(playlistType, batchId, playlistName) {
+    // Clear any existing poller for this playlist type
+    if (discoverSyncPollers[playlistType]) {
+        clearInterval(discoverSyncPollers[playlistType]);
+        delete discoverSyncPollers[playlistType];
+    }
+
+    let ticks = 0;
+    const maxTicks = 600; // 30 min at 3s intervals
+
     const pollInterval = setInterval(async () => {
+        ticks++;
+        // Stall guard — stop polling after maxTicks or if the card is no longer in DOM
+        if (ticks > maxTicks || !document.getElementById(`discover-sync-card-${playlistType}`)) {
+            clearInterval(pollInterval);
+            delete discoverSyncPollers[playlistType];
+            return;
+        }
         try {
             const resp = await fetch(`/api/playlists/${batchId}/download_status`);
             if (!resp.ok) { clearInterval(pollInterval); return; }
@@ -9341,6 +9357,7 @@ function pollDiscoverBatchFromTab(playlistType, batchId, playlistName) {
 
             if (phase === 'complete' || phase === 'error' || phase === 'cancelled') {
                 clearInterval(pollInterval);
+                delete discoverSyncPollers[playlistType];
                 const btn = document.getElementById(`discover-sync-btn-${playlistType}`);
                 if (btn) { btn.disabled = false; btn.textContent = '\u27f3 Sync Now'; }
 
@@ -9387,8 +9404,12 @@ function pollDiscoverBatchFromTab(playlistType, batchId, playlistName) {
             }
         } catch (error) {
             clearInterval(pollInterval);
+            delete discoverSyncPollers[playlistType];
         }
     }, 3000);
+
+    // Register so page-leave cleanup can clear it
+    discoverSyncPollers[playlistType] = pollInterval;
 }
 
 /**
