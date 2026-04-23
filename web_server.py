@@ -11323,7 +11323,7 @@ from core.artist_source_lookup import (
 )
 
 
-def _find_library_artist_for_source(database, source, source_artist_id, artist_name):
+def _find_library_artist_for_source(database, source, source_artist_id, artist_name=None):
     """Thin wrapper that injects the active-server context for the core lookup."""
     try:
         active_server = config_manager.get_active_media_server()
