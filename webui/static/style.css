@@ -56371,6 +56371,14 @@ body.reduce-effects *::after {
     --batch-color-5: 239, 68, 68;     /* red */
     --batch-color-6: 6, 182, 212;     /* cyan */
     --batch-color-7: 168, 85, 247;    /* purple */
+    --batch-color-8: 234, 179, 8;     /* yellow */
+    --batch-color-9: 249, 115, 22;    /* orange */
+    --batch-color-10: 34, 197, 94;    /* green */
+    --batch-color-11: 99, 102, 241;   /* indigo */
+    --batch-color-12: 244, 63, 94;    /* rose */
+    --batch-color-13: 20, 184, 166;   /* teal */
+    --batch-color-14: 217, 70, 239;   /* fuchsia */
+    --batch-color-15: 56, 189, 248;   /* sky */
 }
 
 .adl-layout {
