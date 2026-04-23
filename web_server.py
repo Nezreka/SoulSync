@@ -11316,64 +11316,22 @@ def test_artist_endpoint(artist_id):
         "message": f"Test endpoint working for artist ID: {artist_id}"
     })
 
-_SOURCE_ONLY_ARTIST_SOURCES = frozenset({
-    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz',
-})
-
-
-_SOURCE_ID_FIELD = {
-    'spotify': 'spotify_artist_id',
-    'itunes': 'itunes_artist_id',
-    'deezer': 'deezer_id',
-    'discogs': 'discogs_id',
-    'hydrabase': 'soul_id',
-    'musicbrainz': 'musicbrainz_id',
-}
+from core.artist_source_lookup import (
+    SOURCE_ID_FIELD as _SOURCE_ID_FIELD,
+    SOURCE_ONLY_ARTIST_SOURCES as _SOURCE_ONLY_ARTIST_SOURCES,
+    find_library_artist_for_source as _core_find_library_artist_for_source,
+)
 
 
 def _find_library_artist_for_source(database, source, source_artist_id, artist_name):
-    """Try to upgrade a source-artist click to a library lookup.
-
-    Returns the library PK of an artist that matches either the source-specific
-    ID column (e.g. WHERE deezer_id = source_artist_id) or, as a fallback, the
-    artist name in the active server. Returns None if no match.
-    """
-    column = _SOURCE_ID_FIELD.get(source)
-    if not column:
-        return None
+    """Thin wrapper that injects the active-server context for the core lookup."""
     try:
-        with database._get_connection() as conn:
-            cursor = conn.cursor()
-            # Match by source-specific ID column. Server-source-agnostic: any
-            # library record (Plex/Jellyfin/Navidrome/SoulSync) that has the
-            # right external ID is a hit.
-            cursor.execute(
-                f"SELECT id, name FROM artists WHERE {column} = ? LIMIT 1",
-                (str(source_artist_id),)
-            )
-            row = cursor.fetchone()
-            if row:
-                return row[0]
-
-            # Fallback: case-insensitive name match within the active server only,
-            # to avoid jumping the user across server contexts unintentionally.
-            if artist_name:
-                try:
-                    active_server = config_manager.get_active_media_server()
-                except Exception:
-                    active_server = None
-                if active_server:
-                    cursor.execute(
-                        "SELECT id FROM artists "
-                        "WHERE LOWER(name) = LOWER(?) AND server_source = ? LIMIT 1",
-                        (artist_name, active_server)
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        return row[0]
-    except Exception as e:
-        logger.debug(f"Library upgrade lookup failed for {source}:{source_artist_id}: {e}")
-    return None
+        active_server = config_manager.get_active_media_server()
+    except Exception:
+        active_server = None
+    return _core_find_library_artist_for_source(
+        database, source, source_artist_id, artist_name, active_server=active_server
+    )
 
 
 def _build_source_only_artist_detail(artist_id, artist_name, source):
