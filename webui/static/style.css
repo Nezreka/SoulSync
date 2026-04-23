@@ -5479,23 +5479,22 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .gsearch-tab.active { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); border-color: rgba(var(--accent-rgb), 0.2); }
 .gsearch-tab:hover:not(.active) { background: rgba(255,255,255,0.06); }
 
-/* Source icon row (replaces post-search tabs) — compact glassy version of
-   the Search-page row so both surfaces share the same language. */
+/* Source icon row in the global widget. The popover itself is already a
+   glass panel, so this row is just a transparent flex strip — no double
+   border/background. justify-content: center keeps the chips grouped
+   instead of drifting to the left when they don't fill the popover width. */
 .gsearch-source-row {
     display: flex;
     flex-wrap: nowrap;
     overflow-x: auto;
     overflow-y: visible;
+    justify-content: center;
     gap: 6px;
-    padding: 10px 14px 10px;
-    margin: 8px 12px 10px;
+    padding: 12px 14px 8px;
     flex-shrink: 0;
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.015) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 12px;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 .gsearch-source-row::-webkit-scrollbar { height: 4px; }
 .gsearch-source-row::-webkit-scrollbar-track { background: transparent; }
