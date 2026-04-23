@@ -55,32 +55,11 @@ function initializeSearchModeToggle() {
     searchModeToggleInitialized = true;
     console.log('✅ Initializing search source picker (first time only)');
 
-    // Active source — the icon the user is currently viewing. Initialized from
-    // the user's configured primary source via /api/settings (below). No 'auto'
-    // / fan-out mode: every search targets exactly one source.
-    let currentSearchSource = 'spotify';
+    // State + fetch dispatch + icon-row rendering live in the shared
+    // `createSearchController` factory (shared-helpers.js) so this page and
+    // the global search widget share one implementation. This closure wires
+    // the controller up with Search-page-specific DOM + callbacks.
 
-    // Per-query cache. `sources[src]` holds the result payload the last time
-    // `src` was fetched for the current query. `fallbacks[src]` records the
-    // source the backend actually served when it auto-fell-back (e.g. user
-    // clicked Spotify but got Deezer because Spotify is rate-limited).
-    // `loadingSources` drives per-icon spinners. Cleared whenever the query
-    // string changes — we never serve stale results across queries.
-    let _cachedData = {
-        query: '',
-        sources: {},
-        fallbacks: {},
-        loadingSources: new Set(),
-    };
-
-    // Which sources have credentials saved. Populated asynchronously on init
-    // via /api/settings/config-status. Unconfigured sources render dimmed
-    // and clicking them redirects to Settings → Connections instead of
-    // firing a search.
-    let _configuredSources = {};
-    for (const src of SOURCE_ORDER) _configuredSources[src] = true;  // optimistic default
-
-    // Initialize enhanced search
     const enhancedInput = document.getElementById('enhanced-search-input');
     const enhancedSearchBtn = document.getElementById('enhanced-search-btn');
     const enhancedCancelBtn = document.getElementById('enhanced-cancel-btn');
@@ -90,147 +69,91 @@ function initializeSearchModeToggle() {
     const resultsContainer = document.getElementById('enhanced-results-container');
 
     let debounceTimer = null;
-    let abortController = null;
 
-    // SOURCE_LABELS + SOURCE_ORDER now live in shared-helpers.js.
-
-    // ── Source icon row ────────────────────────────────────────────────
-    function renderSourceRow() {
-        sourceRow.innerHTML = SOURCE_ORDER.map(src => {
-            const info = SOURCE_LABELS[src];
-            if (!info) return '';
-            const active = src === currentSearchSource;
-            const cached = !!_cachedData.sources[src];
-            const loading = _cachedData.loadingSources.has(src);
-            const fallback = _cachedData.fallbacks[src];
-            const configured = _configuredSources[src] !== false;
-            const classes = [
-                'enh-source-icon',
-                active ? 'active' : '',
-                cached ? 'cached' : '',
-                loading ? 'loading' : '',
-                fallback ? 'fallback-warning' : '',
-                configured ? '' : 'unconfigured',
-            ].filter(Boolean).join(' ');
-            let title;
-            if (!configured) {
-                title = `${info.text} — set up in Settings`;
-            } else if (fallback) {
-                title = `${info.text} unavailable — served from ${(SOURCE_LABELS[fallback] || {}).text || fallback}`;
-            } else {
-                title = info.text;
-            }
-            // Prefer the brand logo when available; fall back to the emoji.
-            // Spinner glyph overrides both while loading.
-            const glyph = loading
-                ? '⏳'
-                : (info.logo
-                    ? `<img src="${escapeHtml(info.logo)}" alt="" loading="lazy">`
-                    : info.icon);
-            return `
-                <button class="${classes}" data-source="${src}" role="tab"
-                        aria-selected="${active}" title="${escapeHtml(title)}">
-                    <span class="enh-source-icon-glyph">${glyph}</span>
-                    <span class="enh-source-icon-label">${escapeHtml(info.text)}</span>
-                </button>`;
-        }).join('');
-        sourceRow.querySelectorAll('.enh-source-icon').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                // Stop the outside-click document handler from dismissing the
-                // dropdown. `renderSourceRow` re-renders after a source switch,
-                // detaching this button from the DOM, so the bubbled handler's
-                // `closest('#enh-source-row')` would fail on the detached target.
-                e.stopPropagation();
-                setActiveSource(btn.dataset.source);
-            });
-        });
+    // ── Fallback banner ("Spotify unavailable — showing Deezer") ───────
+    function _renderFallbackBanner(state) {
+        const banner = document.getElementById('enh-fallback-banner');
+        if (!banner) return;
+        const src = state.activeSource;
+        const actual = state.fallbacks[src];
+        if (actual && actual !== src) {
+            const clicked = (SOURCE_LABELS[src] || {}).text || src;
+            const served = (SOURCE_LABELS[actual] || {}).text || actual;
+            banner.textContent = `${clicked} unavailable — showing ${served}.`;
+            banner.classList.remove('hidden');
+        } else {
+            banner.classList.add('hidden');
+        }
     }
 
-    async function _initDefaultSource() {
-        try {
-            const resp = await fetch('/api/settings');
-            if (resp.ok) {
-                const settings = await resp.json();
-                const cfg = settings.metadata && settings.metadata.fallback_source;
-                if (cfg && SOURCE_LABELS[cfg]) {
-                    currentSearchSource = cfg;
-                }
-            }
-        } catch (_) { /* settings fetch best-effort */ }
-        if (!SOURCE_LABELS[currentSearchSource]) currentSearchSource = 'spotify';
-        // Pull per-source configured state in parallel so the dimmed icons
-        // don't flash on first render. Errors fall through to the optimistic
-        // default set at init.
-        try {
-            _configuredSources = await fetchSourceConfiguredMap();
-        } catch (_) { /* keep optimistic default */ }
-        // If the configured primary turns out to be unconfigured (e.g.
-        // spotify saved as primary but the user never entered credentials),
-        // bump to the first source that is configured so the default click
-        // doesn't land on a dimmed "set up" icon.
-        if (_configuredSources[currentSearchSource] === false) {
-            const firstConfigured = SOURCE_ORDER.find(s => _configuredSources[s] !== false);
-            if (firstConfigured) currentSearchSource = firstConfigured;
-        }
-        renderSourceRow();
-    }
-    _initDefaultSource();
+    // Central re-render callback — called by the controller whenever state
+    // changes (cache hit, fetch settle, query reset). Drives the enhanced
+    // dropdown UI: loading state, empty state, results render, fallback
+    // banner.
+    function _renderFromState(state) {
+        const src = state.activeSource;
 
-    // ── Source selection ───────────────────────────────────────────────
-    function setActiveSource(src) {
-        if (!SOURCE_LABELS[src]) return;
+        // Soulseek has its own surface (basic-section) — the controller fires
+        // onSoulseekSelected for that, so there's nothing to render here.
+        if (src === 'soulseek') return;
 
-        // Not configured — jump to the relevant card in Settings rather than
-        // firing a search that can't succeed. Don't swap activeSource so the
-        // user's previous pick stays current when they come back.
-        if (_configuredSources[src] === false) {
-            openSettingsForSource(src);
-            return;
-        }
-
-        if (src === currentSearchSource) return;
-        currentSearchSource = src;
-
-        // Soulseek routes to the basic search UI (raw file results). We keep
-        // no cache for it — the basic search renders straight to the page.
-        if (src === 'soulseek') {
-            basicSection.classList.add('active');
-            enhancedSection.classList.remove('active');
-            hideDropdown();
-            renderSourceRow();
-            const basicInput = document.getElementById('downloads-search-input');
-            if (basicInput && _cachedData.query) {
-                basicInput.value = _cachedData.query;
-                if (typeof performDownloadsSearch === 'function') performDownloadsSearch();
-            }
-            return;
-        }
-
-        // Other sources use the enhanced dropdown.
+        // Ensure the enhanced section is visible (may have been hidden if the
+        // user was previously on Soulseek).
         basicSection.classList.remove('active');
         enhancedSection.classList.add('active');
-        renderSourceRow();
 
-        if (!_cachedData.query) return;
+        _renderFallbackBanner(state);
 
-        if (_cachedData.sources[src]) {
-            _renderFromCache(src);
-        } else {
-            _fetchAndRenderSource(src);
+        const cached = state.sources[src];
+        const loading = state.loadingSources.has(src);
+
+        // Mid-fetch with no cache yet → loading state.
+        if (loading && !cached) {
+            emptyState.classList.add('hidden');
+            resultsContainer.classList.add('hidden');
+            loadingState.classList.remove('hidden');
+            const loadingText = document.getElementById('enhanced-loading-text');
+            if (loadingText) {
+                const info = SOURCE_LABELS[src];
+                loadingText.textContent = `Searching ${(info && info.text) || src} and your library...`;
+            }
+            showDropdown();
+            return;
         }
-    }
 
-    // ── Render + fetch ─────────────────────────────────────────────────
-    function _renderFromCache(src) {
-        const cached = _cachedData.sources[src];
-        if (!cached) return;
+        // No cache + no query → nothing to show; hide the dropdown.
+        if (!cached) {
+            if (!state.query) {
+                hideDropdown();
+                return;
+            }
+            // Fetch settled with no data — empty state.
+            loadingState.classList.add('hidden');
+            resultsContainer.classList.add('hidden');
+            emptyState.classList.remove('hidden');
+            showDropdown();
+            return;
+        }
+
+        const total = src === 'youtube_videos'
+            ? ((cached.videos && cached.videos.length) || 0)
+            : ((cached.db_artists && cached.db_artists.length) || 0)
+              + ((cached.artists && cached.artists.length) || 0)
+              + ((cached.albums && cached.albums.length) || 0)
+              + ((cached.tracks && cached.tracks.length) || 0);
 
         loadingState.classList.add('hidden');
+
+        if (total === 0) {
+            resultsContainer.classList.add('hidden');
+            emptyState.classList.remove('hidden');
+            showDropdown();
+            return;
+        }
+
         emptyState.classList.add('hidden');
         resultsContainer.classList.remove('hidden');
         showDropdown();
-
-        _renderFallbackBanner(src);
 
         if (src === 'youtube_videos') {
             ['enh-db-artists-section', 'enh-spotify-artists-section', 'enh-albums-section', 'enh-singles-section', 'enh-tracks-section'].forEach(id => {
@@ -257,136 +180,27 @@ function initializeSearchModeToggle() {
         });
     }
 
-    function _renderFallbackBanner(src) {
-        const banner = document.getElementById('enh-fallback-banner');
-        if (!banner) return;
-        const actual = _cachedData.fallbacks[src];
-        if (actual && actual !== src) {
-            const clicked = (SOURCE_LABELS[src] || {}).text || src;
-            const served = (SOURCE_LABELS[actual] || {}).text || actual;
-            banner.textContent = `${clicked} unavailable — showing ${served}.`;
-            banner.classList.remove('hidden');
-        } else {
-            banner.classList.add('hidden');
-        }
-    }
-
-    async function _fetchAndRenderSource(src) {
-        const query = _cachedData.query;
-        if (!query) return;
-
-        _cachedData.loadingSources.add(src);
-        renderSourceRow();
-
-        showDropdown();
-        emptyState.classList.add('hidden');
-        resultsContainer.classList.add('hidden');
-        loadingState.classList.remove('hidden');
-        const loadingText = document.getElementById('enhanced-loading-text');
-        if (loadingText) {
-            const info = SOURCE_LABELS[src];
-            loadingText.textContent = `Searching ${(info && info.text) || src} and your library...`;
-        }
-
-        if (abortController) abortController.abort();
-        abortController = new AbortController();
-
-        try {
-            if (src === 'youtube_videos') {
-                await _fetchYouTubeVideos(query, abortController.signal);
-            } else {
-                const data = await enhancedSearchFetch(query, {
-                    source: src,
-                    signal: abortController.signal,
-                });
-                _cachedData.sources[src] = {
-                    artists: data.spotify_artists || [],
-                    albums: data.spotify_albums || [],
-                    tracks: data.spotify_tracks || [],
-                    videos: [],
-                    available: true,
-                    db_artists: data.db_artists || [],
-                };
-                const served = data.primary_source || data.metadata_source;
-                if (served && served !== src) {
-                    _cachedData.fallbacks[src] = served;
+    const searchController = createSearchController({
+        sourceRowElement: sourceRow,
+        iconClassPrefix: 'enh',
+        onStateChange: _renderFromState,
+        onSoulseekSelected: (query) => {
+            // Soulseek returns raw file results, rendered by the basic-search
+            // UI — swap sections and re-fire the basic search with the
+            // current query.
+            basicSection.classList.add('active');
+            enhancedSection.classList.remove('active');
+            hideDropdown();
+            const basicInput = document.getElementById('downloads-search-input');
+            if (basicInput) {
+                if (query) basicInput.value = query;
+                if (basicInput.value && typeof performDownloadsSearch === 'function') {
+                    performDownloadsSearch();
                 }
             }
-
-            _cachedData.loadingSources.delete(src);
-            renderSourceRow();
-
-            if (currentSearchSource === src) {
-                const cached = _cachedData.sources[src];
-                const total = src === 'youtube_videos'
-                    ? ((cached && cached.videos && cached.videos.length) || 0)
-                    : ((cached && cached.db_artists && cached.db_artists.length) || 0)
-                    + ((cached && cached.artists && cached.artists.length) || 0)
-                    + ((cached && cached.albums && cached.albums.length) || 0)
-                    + ((cached && cached.tracks && cached.tracks.length) || 0);
-                loadingState.classList.add('hidden');
-                if (total === 0) {
-                    emptyState.classList.remove('hidden');
-                } else {
-                    _renderFromCache(src);
-                }
-            }
-        } catch (err) {
-            _cachedData.loadingSources.delete(src);
-            renderSourceRow();
-            if (err.name !== 'AbortError') {
-                console.error(`Source fetch failed for ${src}:`, err);
-                if (currentSearchSource === src) {
-                    loadingState.classList.add('hidden');
-                    emptyState.classList.remove('hidden');
-                }
-            }
-        }
-    }
-
-    async function _fetchYouTubeVideos(query, signal) {
-        const response = await fetch('/api/enhanced-search/source/youtube_videos', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query }),
-            signal,
-        });
-        if (!response.ok) throw new Error(`YouTube search failed: ${response.status}`);
-
-        _cachedData.sources['youtube_videos'] = {
-            artists: [], albums: [], tracks: [], videos: [],
-            available: true, db_artists: [],
-        };
-        const cache = _cachedData.sources['youtube_videos'];
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-
-            let newlineIdx;
-            while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
-                const line = buffer.slice(0, newlineIdx).trim();
-                buffer = buffer.slice(newlineIdx + 1);
-                if (!line) continue;
-                try {
-                    const chunk = JSON.parse(line);
-                    if (chunk.type === 'videos') {
-                        cache.videos = chunk.data;
-                        // Live-render if still active — lets the user see results
-                        // as soon as the chunk arrives.
-                        if (currentSearchSource === 'youtube_videos') {
-                            _renderFromCache('youtube_videos');
-                        }
-                    }
-                } catch (_) { /* best-effort NDJSON parse */ }
-            }
-        }
-    }
+        },
+    });
+    searchController.init();
 
     // Live search with debouncing
     if (enhancedInput) {
@@ -409,7 +223,7 @@ function initializeSearchModeToggle() {
 
             // Debounce search
             debounceTimer = setTimeout(() => {
-                performEnhancedSearch(query);
+                searchController.submitQuery(query);
             }, 300);
         });
 
@@ -418,7 +232,7 @@ function initializeSearchModeToggle() {
                 const query = e.target.value.trim();
                 if (query.length >= 2) {
                     clearTimeout(debounceTimer);
-                    performEnhancedSearch(query);
+                    searchController.submitQuery(query);
                 }
             }
         });
@@ -487,44 +301,14 @@ function initializeSearchModeToggle() {
         }
     });
 
-    async function performEnhancedSearch(query) {
-        console.log('Enhanced search:', query, '→', currentSearchSource);
-
-        // Query changed? Drop the whole per-query cache so we never serve
-        // stale results across queries. Icon dots and fallback banner reset.
-        if (query !== _cachedData.query) {
-            _cachedData.query = query;
-            _cachedData.sources = {};
-            _cachedData.fallbacks = {};
-            _cachedData.loadingSources = new Set();
-            renderSourceRow();
-        }
-
-        // Soulseek → existing basic search flow, no cache here.
-        if (currentSearchSource === 'soulseek') {
-            const basicInput = document.getElementById('downloads-search-input');
-            if (basicInput) {
-                basicInput.value = query;
-                if (typeof performDownloadsSearch === 'function') performDownloadsSearch();
-            }
-            return;
-        }
-
-        // Same query + same source that's already cached → instant render.
-        if (_cachedData.sources[currentSearchSource]) {
-            _renderFromCache(currentSearchSource);
-            return;
-        }
-
-        await _fetchAndRenderSource(currentSearchSource);
-    }
-
     function renderDropdownResults(data) {
+        const activeSource = searchController.state.activeSource;
+
         // Music Videos tab — don't render regular sections
-        if (currentSearchSource === 'youtube_videos') return;
+        if (activeSource === 'youtube_videos') return;
 
         // Determine source badge from active tab (not just primary)
-        const displaySource = currentSearchSource || data.metadata_source || 'spotify';
+        const displaySource = activeSource || data.metadata_source || 'spotify';
         const sourceInfo = SOURCE_LABELS[displaySource] || SOURCE_LABELS.spotify;
         const sourceBadge = { text: sourceInfo.text, class: sourceInfo.badgeClass };
 
@@ -561,7 +345,7 @@ function initializeSearchModeToggle() {
                 meta: 'Artist',
                 badge: sourceBadge,
                 onClick: () => {
-                    const sourceOverride = currentSearchSource;
+                    const sourceOverride = searchController.state.activeSource;
                     console.log(`🎵 Opening artist detail: ${artist.name} (ID: ${artist.id}, source: ${sourceOverride})`);
                     hideDropdown();
                     navigateToArtistDetail(artist.id, artist.name, sourceOverride || null);
@@ -797,8 +581,9 @@ function initializeSearchModeToggle() {
                 if (!artistId) continue;
 
                 try {
-                    const imgUrl = currentSearchSource && currentSearchSource !== 'spotify'
-                        ? `/api/artist/${artistId}/image?source=${currentSearchSource}`
+                    const activeSource = searchController.state.activeSource;
+                    const imgUrl = activeSource && activeSource !== 'spotify'
+                        ? `/api/artist/${artistId}/image?source=${activeSource}`
                         : `/api/artist/${artistId}/image`;
                     const response = await fetch(imgUrl);
                     const data = await response.json();
@@ -846,8 +631,9 @@ function initializeSearchModeToggle() {
         try {
             // Fetch full album data with tracks — pass source for correct routing
             const albumParams = new URLSearchParams({ name: album.name || '', artist: album.artist || '' });
-            if (currentSearchSource && currentSearchSource !== 'spotify') {
-                albumParams.set('source', currentSearchSource);
+            const activeSource = searchController.state.activeSource;
+            if (activeSource && activeSource !== 'spotify') {
+                albumParams.set('source', activeSource);
             }
             // Pass Hydrabase plugin origin so server routes to correct client
             if (album.external_urls?.hydrabase_plugin) {
@@ -913,7 +699,7 @@ function initializeSearchModeToggle() {
                 id: firstArtist.id || album.id?.split?.('_')?.[0] || '',
                 name: firstArtist.name || album.artist,
                 image_url: firstArtist.image_url || firstArtist.images?.[0]?.url || '',
-                source: currentSearchSource || '',
+                source: activeSource || '',
             };
 
             // Prepare full album object for modal
