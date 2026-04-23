@@ -23311,8 +23311,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .releases-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(225px, 1fr));
+    gap: 20px;
     padding: 8px 0;
 }
 
@@ -23536,8 +23536,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     }
 
     .releases-grid {
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-        gap: 16px;
+        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        gap: 18px;
     }
 
     .release-card {
