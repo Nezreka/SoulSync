@@ -85,6 +85,56 @@ const SOURCE_ORDER = [
     'youtube_videos', 'soulseek',
 ];
 
+// Sources the config-status endpoint doesn't cover because they don't need
+// user-supplied credentials — they always render as "configured" in the picker.
+const _ALWAYS_CONFIGURED_SOURCES = new Set(['musicbrainz', 'youtube_videos', 'soulseek']);
+
+// Fetch /api/settings/config-status and return a map { src -> bool }
+// covering every source in SOURCE_ORDER. Sources not present in the backend
+// registry (musicbrainz / youtube_videos / soulseek) are reported as
+// configured so the picker doesn't dim always-available sources.
+async function fetchSourceConfiguredMap() {
+    const map = {};
+    try {
+        const resp = await fetch('/api/settings/config-status');
+        if (resp.ok) {
+            const data = await resp.json();
+            for (const src of SOURCE_ORDER) {
+                if (_ALWAYS_CONFIGURED_SOURCES.has(src)) {
+                    map[src] = true;
+                } else {
+                    map[src] = !!(data[src] && data[src].configured);
+                }
+            }
+            return map;
+        }
+    } catch (_) { /* fall through to conservative default */ }
+    // Network / endpoint failure — be permissive rather than dim everything.
+    for (const src of SOURCE_ORDER) map[src] = true;
+    return map;
+}
+
+// Navigate to Settings → Connections tab and scroll to the service card that
+// matches the picker's source id. Called when a user clicks an unconfigured
+// source icon.
+function openSettingsForSource(src) {
+    if (typeof navigateToPage !== 'function') return;
+    navigateToPage('settings');
+    setTimeout(() => {
+        try {
+            if (typeof switchSettingsTab === 'function') switchSettingsTab('connections');
+        } catch (_) { /* best-effort */ }
+        setTimeout(() => {
+            const card = document.querySelector(`#settings-page .stg-service[data-service="${src}"]`);
+            if (card) {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                card.classList.add('stg-service-flash');
+                setTimeout(() => card.classList.remove('stg-service-flash'), 2200);
+            }
+        }, 120);
+    }, 60);
+}
+
 // Render a single enhanced-search result section (artists / albums / tracks).
 // Shared between the Search page and the global widget. The mapItem callback
 // projects each backend item to the card config consumed here.

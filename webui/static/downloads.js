@@ -5022,10 +5022,14 @@ const _gsState = {
     sources: {},              // src -> {artists, albums, tracks, videos, db_artists, ...}
     fallbacks: {},            // src -> actual source served when backend fell back (rate-limit)
     loadingSources: new Set(),
+    configuredSources: {},    // src -> bool, populated from /api/settings/config-status
     abortCtrl: null,
     debounceTimer: null,
     _defaultSourceResolved: false,
 };
+// Permissive initial map — replaced by the real config-status lookup on
+// first popover open. Prevents a flash of "all unconfigured" icons.
+for (const _src of SOURCE_ORDER) _gsState.configuredSources[_src] = true;
 
 (function initGlobalSearch() {
     // Defer init until DOM is ready
@@ -5160,6 +5164,16 @@ async function _gsInitDefaultSource() {
         }
     } catch (_) { /* best-effort */ }
     if (!SOURCE_LABELS[_gsState.activeSource]) _gsState.activeSource = 'spotify';
+    // Fetch per-source configured state so unconfigured icons render dimmed.
+    try {
+        _gsState.configuredSources = await fetchSourceConfiguredMap();
+    } catch (_) { /* keep optimistic default */ }
+    // If the configured primary is itself unconfigured, fall forward to the
+    // first configured source so the default active icon is actually usable.
+    if (_gsState.configuredSources[_gsState.activeSource] === false) {
+        const firstConfigured = SOURCE_ORDER.find(s => _gsState.configuredSources[s] !== false);
+        if (firstConfigured) _gsState.activeSource = firstConfigured;
+    }
 }
 
 async function _gsPerformSearch(query) {
@@ -5296,14 +5310,21 @@ function _gsSourceRowHtml() {
         const cached = !!_gsState.sources[src];
         const loading = _gsState.loadingSources.has(src);
         const fallback = _gsState.fallbacks[src];
+        const configured = _gsState.configuredSources[src] !== false;
         const classes = ['gsearch-source-icon',
             active ? 'active' : '',
             cached ? 'cached' : '',
             loading ? 'loading' : '',
-            fallback ? 'fallback-warning' : ''].filter(Boolean).join(' ');
-        const title = fallback
-            ? `${info.text} unavailable — served from ${(SOURCE_LABELS[fallback] || {}).text || fallback}`
-            : info.text;
+            fallback ? 'fallback-warning' : '',
+            configured ? '' : 'unconfigured'].filter(Boolean).join(' ');
+        let title;
+        if (!configured) {
+            title = `${info.text} — set up in Settings`;
+        } else if (fallback) {
+            title = `${info.text} unavailable — served from ${(SOURCE_LABELS[fallback] || {}).text || fallback}`;
+        } else {
+            title = info.text;
+        }
         const glyph = loading
             ? '⏳'
             : (info.logo
@@ -5486,6 +5507,13 @@ async function _gsLazyLoadArtistImages() {
 function _gsSetActiveSource(src) {
     if (!SOURCE_LABELS[src]) return;
     _gsState._lastInteraction = Date.now();
+
+    // Not configured — jump to Settings instead of firing a doomed search.
+    if (_gsState.configuredSources[src] === false) {
+        _gsDeactivate();
+        openSettingsForSource(src);
+        return;
+    }
 
     // Soulseek — hand off to the Search page since its raw file results need
     // more room than the popover provides.

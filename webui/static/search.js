@@ -73,6 +73,13 @@ function initializeSearchModeToggle() {
         loadingSources: new Set(),
     };
 
+    // Which sources have credentials saved. Populated asynchronously on init
+    // via /api/settings/config-status. Unconfigured sources render dimmed
+    // and clicking them redirects to Settings → Connections instead of
+    // firing a search.
+    let _configuredSources = {};
+    for (const src of SOURCE_ORDER) _configuredSources[src] = true;  // optimistic default
+
     // Initialize enhanced search
     const enhancedInput = document.getElementById('enhanced-search-input');
     const enhancedSearchBtn = document.getElementById('enhanced-search-btn');
@@ -96,16 +103,23 @@ function initializeSearchModeToggle() {
             const cached = !!_cachedData.sources[src];
             const loading = _cachedData.loadingSources.has(src);
             const fallback = _cachedData.fallbacks[src];
+            const configured = _configuredSources[src] !== false;
             const classes = [
                 'enh-source-icon',
                 active ? 'active' : '',
                 cached ? 'cached' : '',
                 loading ? 'loading' : '',
                 fallback ? 'fallback-warning' : '',
+                configured ? '' : 'unconfigured',
             ].filter(Boolean).join(' ');
-            const title = fallback
-                ? `${info.text} unavailable — served from ${(SOURCE_LABELS[fallback] || {}).text || fallback}`
-                : info.text;
+            let title;
+            if (!configured) {
+                title = `${info.text} — set up in Settings`;
+            } else if (fallback) {
+                title = `${info.text} unavailable — served from ${(SOURCE_LABELS[fallback] || {}).text || fallback}`;
+            } else {
+                title = info.text;
+            }
             // Prefer the brand logo when available; fall back to the emoji.
             // Spinner glyph overrides both while loading.
             const glyph = loading
@@ -144,6 +158,20 @@ function initializeSearchModeToggle() {
             }
         } catch (_) { /* settings fetch best-effort */ }
         if (!SOURCE_LABELS[currentSearchSource]) currentSearchSource = 'spotify';
+        // Pull per-source configured state in parallel so the dimmed icons
+        // don't flash on first render. Errors fall through to the optimistic
+        // default set at init.
+        try {
+            _configuredSources = await fetchSourceConfiguredMap();
+        } catch (_) { /* keep optimistic default */ }
+        // If the configured primary turns out to be unconfigured (e.g.
+        // spotify saved as primary but the user never entered credentials),
+        // bump to the first source that is configured so the default click
+        // doesn't land on a dimmed "set up" icon.
+        if (_configuredSources[currentSearchSource] === false) {
+            const firstConfigured = SOURCE_ORDER.find(s => _configuredSources[s] !== false);
+            if (firstConfigured) currentSearchSource = firstConfigured;
+        }
         renderSourceRow();
     }
     _initDefaultSource();
@@ -151,6 +179,15 @@ function initializeSearchModeToggle() {
     // ── Source selection ───────────────────────────────────────────────
     function setActiveSource(src) {
         if (!SOURCE_LABELS[src]) return;
+
+        // Not configured — jump to the relevant card in Settings rather than
+        // firing a search that can't succeed. Don't swap activeSource so the
+        // user's previous pick stays current when they come back.
+        if (_configuredSources[src] === false) {
+            openSettingsForSource(src);
+            return;
+        }
+
         if (src === currentSearchSource) return;
         currentSearchSource = src;
 
