@@ -2832,15 +2832,17 @@ function _adlRenderBatchHistory() {
         const failed = h.tracks_failed || 0;
         const total = h.total_tracks || 0;
 
-        // Build stats: "found/total  Xnew  Xfailed"
+        // Build stats line: "X in library · X downloaded · X failed  (of N)"
         const statsParts = [];
         if (found > 0 || downloaded > 0) {
             const owned = found - downloaded;  // already in library before this sync
-            if (owned > 0) statsParts.push(`<span style="color:rgba(74,222,128,0.7)" title="Already in library">${owned}</span>`);
-            if (downloaded > 0) statsParts.push(`<span style="color:rgba(96,165,250,0.7)" title="Downloaded">${downloaded} new</span>`);
+            if (owned > 0) statsParts.push(`<span style="color:rgba(74,222,128,0.7)" title="Already in library">${owned} in library</span>`);
+            if (downloaded > 0) statsParts.push(`<span style="color:rgba(96,165,250,0.7)" title="Downloaded">${downloaded} downloaded</span>`);
         }
         if (failed > 0) statsParts.push(`<span style="color:#ef4444" title="Failed">${failed} failed</span>`);
-        if (statsParts.length === 0) statsParts.push(`0/${total}`);
+        const notFound = total - found - failed;
+        if (notFound > 0) statsParts.push(`<span title="Not found">${notFound} not found</span>`);
+        if (statsParts.length === 0) statsParts.push(`${total} tracks`);
 
         let dateText = '';
         if (h.completed_at) {
@@ -2877,11 +2879,16 @@ function _adlRenderBatchHistory() {
             : '';
 
         return `<div class="adl-batch-history-item">
-            ${histDot}
             ${thumb}
-            <div class="adl-batch-history-name">${name} ${sourceLabel}</div>
-            <div class="adl-batch-history-stats">${statsParts.join(' · ')}</div>
-            <div class="adl-batch-history-date">${dateText}</div>
+            <div class="adl-batch-history-content">
+                <div class="adl-batch-history-row1">
+                    ${histDot}
+                    <span class="adl-batch-history-name">${name}</span>
+                    ${sourceLabel}
+                    <span class="adl-batch-history-date">${dateText}</span>
+                </div>
+                <div class="adl-batch-history-row2">${statsParts.join(' · ')}</div>
+            </div>
         </div>`;
     }).join('');
 }
