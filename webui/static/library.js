@@ -358,13 +358,60 @@ function showLibraryLoading(show) {
 
 function showLibraryEmpty(show) {
     const emptyElement = document.getElementById("library-empty");
-    if (emptyElement) {
-        if (show) {
-            emptyElement.classList.remove("hidden");
-        } else {
-            emptyElement.classList.add("hidden");
+    if (!emptyElement) return;
+    if (!show) {
+        emptyElement.classList.add("hidden");
+        return;
+    }
+
+    // When a search query is active and returned zero library hits, swap the
+    // generic "no artists" copy for a CTA that hands the query off to /search
+    // so the user can look the artist up across metadata sources without
+    // retyping.
+    const query = (libraryPageState.currentSearch || '').trim();
+    const iconEl = document.getElementById('library-empty-icon');
+    const titleEl = document.getElementById('library-empty-title');
+    const subtitleEl = document.getElementById('library-empty-subtitle');
+    const ctaEl = document.getElementById('library-empty-search-cta');
+    const ctaQueryEl = document.getElementById('library-empty-search-cta-query');
+
+    if (query) {
+        if (iconEl) iconEl.textContent = '🔎';
+        if (titleEl) titleEl.textContent = `"${query}" isn't in your library`;
+        if (subtitleEl) subtitleEl.textContent = 'They might be available on a connected metadata source.';
+        if (ctaQueryEl) ctaQueryEl.textContent = `"${query}"`;
+        if (ctaEl) {
+            ctaEl.classList.remove('hidden');
+            // Rebind cleanly — onclick avoids duplicate listeners across renders.
+            ctaEl.onclick = () => _handoffLibrarySearchToEnhancedSearch(query);
+        }
+    } else {
+        if (iconEl) iconEl.textContent = '🎵';
+        if (titleEl) titleEl.textContent = 'No artists found';
+        if (subtitleEl) subtitleEl.textContent = 'Try adjusting your search or filters';
+        if (ctaEl) {
+            ctaEl.classList.add('hidden');
+            ctaEl.onclick = null;
         }
     }
+
+    emptyElement.classList.remove("hidden");
+}
+
+// Navigate to /search and pre-fill the enhanced search input with the query
+// the user had typed into the library search. Uses the same hand-off pattern
+// the global widget uses for Soulseek — navigate, then dispatch an `input`
+// event so the Search page's existing debounced search kicks in.
+function _handoffLibrarySearchToEnhancedSearch(query) {
+    if (typeof navigateToPage !== 'function') return;
+    navigateToPage('search');
+    setTimeout(() => {
+        const input = document.getElementById('enhanced-search-input');
+        if (input && query) {
+            input.value = query;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    }, 300);
 }
 
 async function openWatchAllUnwatchedModal() {

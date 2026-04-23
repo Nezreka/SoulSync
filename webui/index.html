@@ -2307,11 +2307,19 @@
                             <!-- Artist cards will be populated here -->
                         </div>
 
-                        <!-- Empty State -->
+                        <!-- Empty State — populated by showLibraryEmpty() in library.js.
+                             Shows a generic "no artists" message by default; when the
+                             user's search has no library matches, it switches to a
+                             search-online CTA that hands off to the /search page. -->
                         <div class="library-empty hidden" id="library-empty">
-                            <div class="empty-icon">🎵</div>
-                            <div class="empty-title">No artists found</div>
-                            <div class="empty-subtitle">Try adjusting your search or filters</div>
+                            <div class="empty-icon" id="library-empty-icon">🎵</div>
+                            <div class="empty-title" id="library-empty-title">No artists found</div>
+                            <div class="empty-subtitle" id="library-empty-subtitle">Try adjusting your search or filters</div>
+                            <button class="library-empty-search-cta hidden" id="library-empty-search-cta">
+                                <span class="library-empty-search-cta-icon">🔍</span>
+                                <span class="library-empty-search-cta-text">Search online for <span id="library-empty-search-cta-query"></span></span>
+                                <span class="library-empty-search-cta-arrow">→</span>
+                            </button>
                         </div>
 
                         <!-- Pagination -->

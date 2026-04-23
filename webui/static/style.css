@@ -23054,6 +23054,39 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     max-width: 400px;
 }
 
+/* Hand-off CTA shown in the library empty state when the user's search
+   returns no library matches — offers to run the same query against the
+   configured metadata source on the /search page. */
+.library-empty-search-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.22), rgba(var(--accent-rgb), 0.08));
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    border-radius: 10px;
+    color: rgb(var(--accent-light-rgb, var(--accent-rgb)));
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.library-empty-search-cta:hover {
+    transform: translateY(-1px);
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.22);
+}
+.library-empty-search-cta:active { transform: translateY(0); }
+.library-empty-search-cta-icon { font-size: 16px; }
+.library-empty-search-cta-arrow {
+    font-weight: 700;
+    transition: transform 0.15s ease;
+}
+.library-empty-search-cta:hover .library-empty-search-cta-arrow { transform: translateX(3px); }
+#library-empty-search-cta-query { color: #fff; }
+
 /* Pagination */
 .library-pagination {
     display: flex;
