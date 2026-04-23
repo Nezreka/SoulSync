@@ -59541,6 +59541,16 @@ body.reduce-effects *::after {
     opacity: 0.4;
 }
 
+/* Deep-link highlight animation */
+.discover-sync-card-highlight {
+    animation: discover-card-glow 2.5s ease-out;
+}
+
+@keyframes discover-card-glow {
+    0% { border-color: rgba(167, 139, 250, 0.7); box-shadow: 0 0 20px rgba(167, 139, 250, 0.3); }
+    100% { border-color: rgba(255, 255, 255, 0.08); box-shadow: none; }
+}
+
 .discover-sync-empty-hint {
     background: rgba(255, 193, 7, 0.08);
     border: 1px solid rgba(255, 193, 7, 0.25);

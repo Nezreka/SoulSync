@@ -2141,7 +2141,13 @@ function initializeDownloadManagerToggle() {
 }
 
 function navigateToPage(pageId, options = {}) {
-    if (pageId === currentPage) return;
+    if (pageId === currentPage) {
+        // Already on this page — still process pending sync tab actions
+        if (pageId === 'sync' && window._pendingSyncTabAction && typeof _applySyncTabAction === 'function') {
+            _applySyncTabAction();
+        }
+        return;
+    }
 
     // Permission guard — redirect to home page if not allowed
     if (!isPageAllowed(pageId)) {
@@ -2235,6 +2241,10 @@ async function loadPageData(pageId) {
             case 'sync':
                 initializeSyncPage();
                 await loadSyncData();
+                // Process any pending deep-link tab switch (e.g. from Discover page)
+                if (window._pendingSyncTabAction && typeof _applySyncTabAction === 'function') {
+                    _applySyncTabAction();
+                }
                 break;
             case 'downloads':
                 initializeSearch();
