@@ -22619,7 +22619,11 @@ def _check_and_remove_from_wishlist(context):
         
         # Try to extract Spotify track ID from various sources in the context
         spotify_track_id = None
-        
+        # Populated lazily by Method 3 or Method 4. Initialized here so Method 4's
+        # `if not wishlist_tracks` guard doesn't UnboundLocalError when Methods 1/2
+        # found nothing and Method 3 never ran (no wishlist_id in track_info).
+        wishlist_tracks = []
+
         # Method 1: Direct track_info with id
         track_info = context.get('track_info', {})
         if track_info.get('id'):
