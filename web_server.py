@@ -32750,9 +32750,17 @@ def _record_sync_history_completion(batch_id, batch):
 def _push_playlist_to_server(batch_id, batch):
     """After a batch completes, push the playlist to the media server.
     Runs in a background thread. Triggers a scan, waits, then searches for tracks and creates/updates the playlist.
-    Supports discover, mirrored, and auto-mirror playlists."""
+    Supports discover, mirrored, and auto-mirror playlists.
+    Currently only Navidrome is supported; Plex/Jellyfin users get 'skipped'."""
     database = get_database()
     try:
+        # Only Navidrome supports playlist push right now
+        active_server = config_manager.get_active_media_server()
+        if active_server != 'navidrome' or not navidrome_client or not navidrome_client.is_connected():
+            logger.info(f"[PlaylistPush] Server push skipped — active server is '{active_server}', not navidrome (or not connected)")
+            database.update_sync_history_push_status(batch_id, 'skipped')
+            return
+
         playlist_id = batch.get('playlist_id', '')
         playlist_name = batch.get('playlist_name', '')
         if not playlist_name:
