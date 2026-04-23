@@ -59400,17 +59400,15 @@ body[data-artist-source="source"] #artist-detail-page #enhanced-view-container {
     display: none !important;
 }
 
-/* Library-only: completion bars, enrichment coverage, Top Tracks sidebar, Radio / Enhance Quality buttons */
-body[data-artist-source="source"] #artist-detail-page .collection-overview,
+/* Library-only buttons: Radio + Enhance Quality both require owned tracks.
+   Enrichment coverage is a per-track DB enrichment percentage that doesn't
+   apply to artists you don't own.
+   .collection-overview and #artist-hero-sidebar both render usefully for
+   source artists (collection shows 0/N missing, Top Tracks pulls from
+   Last.fm by name) so they stay visible. */
 body[data-artist-source="source"] #artist-detail-page .artist-enrichment-coverage,
-body[data-artist-source="source"] #artist-detail-page #artist-hero-sidebar,
 body[data-artist-source="source"] #artist-detail-page #library-artist-radio-btn,
 body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-btn {
-    display: none !important;
-}
-
-/* Library-only: section-stats "0 owned / 0 missing" counts don't apply */
-body[data-artist-source="source"] #artist-detail-page .section-stats {
     display: none !important;
 }
 
