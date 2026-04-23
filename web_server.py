@@ -11399,9 +11399,10 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
     lastfm_url = None
     if resolved_name:
         try:
-            from core.lastfm_client import LastFMClient
-            lastfm = LastFMClient()
-            if lastfm and getattr(lastfm, 'enabled', True):
+            lastfm_api_key = config_manager.get('lastfm.api_key', '') or ''
+            if lastfm_api_key:
+                from core.lastfm_client import LastFMClient
+                lastfm = LastFMClient(api_key=lastfm_api_key)
                 lf_info = lastfm.get_artist_info(resolved_name)
                 if lf_info:
                     bio_obj = lf_info.get('bio') or {}
