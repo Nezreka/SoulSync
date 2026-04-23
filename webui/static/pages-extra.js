@@ -2878,6 +2878,20 @@ function _adlRenderBatchHistory() {
             ? `<img src="${_adlEsc(h.thumb_url)}" class="adl-batch-history-thumb" loading="lazy">`
             : '';
 
+        // Server push status indicator
+        let pushBadge = '';
+        if (h.server_push_status) {
+            const pushIcons = {
+                pending: ['⏳', 'rgba(251,191,36,0.7)', 'Waiting to push to server'],
+                pushing: ['⬆', 'rgba(96,165,250,0.7)', 'Pushing to server...'],
+                success: ['✓', 'rgba(74,222,128,0.7)', 'Pushed to server'],
+                failed: ['✗', 'rgba(239,68,68,0.7)', 'Server push failed'],
+                skipped: ['—', 'rgba(255,255,255,0.2)', 'Server push skipped'],
+            };
+            const [icon, color, tip] = pushIcons[h.server_push_status] || ['?', 'rgba(255,255,255,0.3)', h.server_push_status];
+            pushBadge = ` · <span style="color:${color}" title="${tip}">${icon} server</span>`;
+        }
+
         return `<div class="adl-batch-history-item">
             ${thumb}
             <div class="adl-batch-history-content">
@@ -2887,7 +2901,7 @@ function _adlRenderBatchHistory() {
                     ${sourceLabel}
                     <span class="adl-batch-history-date">${dateText}</span>
                 </div>
-                <div class="adl-batch-history-row2">${statsParts.join(' · ')}</div>
+                <div class="adl-batch-history-row2">${statsParts.join(' · ')}${pushBadge}</div>
             </div>
         </div>`;
     }).join('');
