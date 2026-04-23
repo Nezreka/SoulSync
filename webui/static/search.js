@@ -1,21 +1,8 @@
 // SEARCH FUNCTIONALITY
 // ===============================
-
-// Shared enhanced-search fetch used by the Search page and the global widget.
-// Pass source to restrict results to a single metadata provider; omit or pass
-// null/'auto' to let the backend fan out across all configured sources.
-async function enhancedSearchFetch(query, { source = null, signal = null } = {}) {
-    const body = { query };
-    if (source && source !== 'auto') body.source = source;
-    const res = await fetch('/api/enhanced-search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: signal || undefined,
-    });
-    if (!res.ok) throw new Error(`Enhanced search failed: ${res.status}`);
-    return res.json();
-}
+// `enhancedSearchFetch`, `SOURCE_LABELS`, and `renderCompactSection` live in
+// shared-helpers.js so the Search page and the global widget share the same
+// implementations.
 
 function initializeSearch() {
     // --- FIX: Corrected the element IDs to match the HTML ---
@@ -107,15 +94,7 @@ function initializeSearchModeToggle() {
     let _activeSearchSource = null;   // Currently displayed source tab
     let _altSourceController = null;  // AbortController for alternate source fetches
 
-    const SOURCE_LABELS = {
-        spotify: { text: 'Spotify', tabClass: 'enh-tab-spotify', badgeClass: 'enh-badge-spotify' },
-        itunes: { text: 'Apple Music', tabClass: 'enh-tab-itunes', badgeClass: 'enh-badge-itunes' },
-        deezer: { text: 'Deezer', tabClass: 'enh-tab-deezer', badgeClass: 'enh-badge-deezer' },
-        discogs: { text: 'Discogs', tabClass: 'enh-tab-discogs', badgeClass: 'enh-badge-discogs' },
-        hydrabase: { text: 'Hydrabase', tabClass: 'enh-tab-hydrabase', badgeClass: 'enh-badge-hydrabase' },
-        youtube_videos: { text: 'Music Videos', tabClass: 'enh-tab-youtube', badgeClass: 'enh-badge-youtube' },
-        musicbrainz: { text: 'MusicBrainz', tabClass: 'enh-tab-musicbrainz', badgeClass: 'enh-badge-musicbrainz' },
-    };
+    // SOURCE_LABELS now lives in shared-helpers.js.
 
     // Live search with debouncing
     if (enhancedInput) {
@@ -808,118 +787,7 @@ function initializeSearchModeToggle() {
         return `${minutes}:${seconds.toString().padStart(2, '0')}`;
     }
 
-    function renderCompactSection(sectionId, listId, countId, items, mapItem) {
-        const section = document.getElementById(sectionId);
-        const list = document.getElementById(listId);
-        const count = document.getElementById(countId);
-
-        if (!list) return;
-
-        list.innerHTML = '';
-
-        if (!items || items.length === 0) {
-            section.classList.add('hidden');
-            return;
-        }
-
-        section.classList.remove('hidden');
-        count.textContent = items.length;
-
-        // Determine type based on section ID
-        const isArtist = sectionId.includes('artists');
-        const isAlbum = sectionId.includes('albums') || sectionId.includes('singles');
-        const isTrack = sectionId.includes('tracks');
-
-        // Add appropriate grid class to list
-        if (isArtist) {
-            list.classList.add('enh-artists-grid');
-        } else if (isAlbum) {
-            list.classList.add('enh-albums-grid');
-        } else if (isTrack) {
-            list.classList.add('enh-tracks-list');
-        }
-
-        items.forEach(item => {
-            const config = mapItem(item);
-            const elem = document.createElement('div');
-
-            // Add appropriate card class
-            if (isArtist) {
-                elem.className = 'enh-compact-item artist-card';
-                // Add data attributes for lazy loading
-                if (item.id) {
-                    elem.dataset.artistId = item.id;
-                    elem.dataset.needsImage = config.image ? 'false' : 'true';
-                }
-            } else if (isAlbum) {
-                elem.className = 'enh-compact-item album-card';
-            } else if (isTrack) {
-                elem.className = 'enh-compact-item track-item';
-            }
-
-            // Build image HTML with type-specific classes
-            let imageClass = 'enh-item-image';
-            let placeholderClass = 'enh-item-image-placeholder';
-
-            if (isArtist) {
-                imageClass += ' artist-image';
-                placeholderClass += ' artist-placeholder';
-            } else if (isAlbum) {
-                imageClass += ' album-cover';
-                placeholderClass += ' album-placeholder';
-            } else if (isTrack) {
-                imageClass += ' track-cover';
-                placeholderClass += ' track-placeholder';
-            }
-
-            const imageHtml = config.image
-                ? `<img src="${escapeHtml(config.image)}" class="${imageClass}" alt="${escapeHtml(config.name)}">`
-                : `<div class="${placeholderClass}" data-lazy-image="true">${config.placeholder}</div>`;
-
-            const badgeHtml = config.badge
-                ? `<div class="enh-item-badge ${config.badge.class}">${config.badge.text}</div>`
-                : '';
-
-            const durationHtml = config.duration && isTrack
-                ? `<div class="enh-item-duration">
-                     ${escapeHtml(config.duration)}
-                     <button class="enh-item-play-btn" title="Stream this track">▶</button>
-                   </div>`
-                : '';
-
-            elem.innerHTML = `
-                ${imageHtml}
-                <div class="enh-item-info">
-                    <div class="enh-item-name">${escapeHtml(config.name)}</div>
-                    <div class="enh-item-meta">${escapeHtml(config.meta)}</div>
-                </div>
-                ${durationHtml}
-                ${badgeHtml}
-            `;
-
-            elem.addEventListener('click', config.onClick);
-
-            // Add play button handler for tracks
-            if (isTrack && config.onPlay) {
-                const playBtn = elem.querySelector('.enh-item-play-btn');
-                if (playBtn) {
-                    playBtn.addEventListener('click', (e) => {
-                        e.stopPropagation(); // Don't trigger main onClick
-                        config.onPlay();
-                    });
-                }
-            }
-
-            list.appendChild(elem);
-
-            // Extract colors from image for dynamic glow effect
-            if (config.image) {
-                extractImageColors(config.image, (colors) => {
-                    applyDynamicGlow(elem, colors);
-                });
-            }
-        });
-    }
+    // renderCompactSection now lives in shared-helpers.js.
 
     async function handleEnhancedSearchAlbumClick(album) {
         console.log(`💿 Enhanced search album clicked: ${album.name} by ${album.artist}`);
