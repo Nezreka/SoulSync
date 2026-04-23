@@ -2881,10 +2881,24 @@ function _adlRenderBatchHistory() {
         const dotTip = dotSource ? `Source: ${dotSource}` : 'Unknown source';
         const histDot = `<span class="adl-batch-history-dot" style="background:rgba(${dotColor}, 0.6)" title="${dotTip}"></span>`;
 
-        // Thumbnail with placeholder fallback
+        // Thumbnail with playlist-type icon fallback
+        let placeholderIcon = '♫';
+        const pName = (h.playlist_name || '').toLowerCase();
+        if (pName.includes('fresh tape') || pName.includes('release radar')) placeholderIcon = '🎵';
+        else if (pName.includes('archives') || pName.includes('discovery weekly')) placeholderIcon = '📚';
+        else if (pName.includes('seasonal')) placeholderIcon = '🌿';
+        else if (pName.includes('popular picks')) placeholderIcon = '🔥';
+        else if (pName.includes('hidden gems')) placeholderIcon = '💎';
+        else if (pName.includes('discovery shuffle')) placeholderIcon = '🔀';
+        else if (pName.includes('familiar fav')) placeholderIcon = '❤️';
+        else if (pName.includes('jam')) placeholderIcon = '🎸';
+        else if (pName.includes('explor')) placeholderIcon = '🔭';
+        else if (dotSource === 'mirrored' || dotSource === 'youtube') placeholderIcon = '🔗';
+        else if (dotSource === 'wishlist') placeholderIcon = '⭐';
+        else if (dotSource === 'album') placeholderIcon = '💿';
         const thumb = h.thumb_url
-            ? `<img src="${_adlEsc(h.thumb_url)}" class="adl-batch-history-thumb" loading="lazy" onerror="this.classList.add('adl-batch-history-thumb-placeholder');this.removeAttribute('src')">`
-            : `<span class="adl-batch-history-thumb adl-batch-history-thumb-placeholder"></span>`;
+            ? `<img src="${_adlEsc(h.thumb_url)}" class="adl-batch-history-thumb" loading="lazy" data-icon="${placeholderIcon}" onerror="var s=document.createElement('span');s.className='adl-batch-history-thumb adl-batch-history-thumb-placeholder';s.textContent=this.dataset.icon;this.parentNode.replaceChild(s,this)">`
+            : `<span class="adl-batch-history-thumb adl-batch-history-thumb-placeholder">${placeholderIcon}</span>`;
 
         // Server push status indicator
         let pushBadge = '';

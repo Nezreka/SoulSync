@@ -57206,9 +57206,10 @@ body.reduce-effects *::after {
     justify-content: center;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 14px;
 }
 
-.adl-batch-history-thumb-placeholder::after {
+.adl-batch-history-thumb-placeholder:empty::after {
     content: '♫';
     font-size: 12px;
     color: rgba(255, 255, 255, 0.2);
