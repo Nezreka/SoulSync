@@ -31,18 +31,26 @@ async function enhancedSearchFetch(query, { source = null, signal = null } = {})
     return res.json();
 }
 
-// Per-source labels + tab/badge CSS classes. Referenced by both the Search
-// page and the global search widget for consistent badge/icon rendering.
+// Per-source labels + tab/badge CSS classes + icon glyph for the source
+// picker row. Referenced by both the Search page and the global search
+// widget for consistent badge/icon rendering.
 const SOURCE_LABELS = {
-    spotify: { text: 'Spotify', tabClass: 'enh-tab-spotify', badgeClass: 'enh-badge-spotify' },
-    itunes: { text: 'Apple Music', tabClass: 'enh-tab-itunes', badgeClass: 'enh-badge-itunes' },
-    deezer: { text: 'Deezer', tabClass: 'enh-tab-deezer', badgeClass: 'enh-badge-deezer' },
-    discogs: { text: 'Discogs', tabClass: 'enh-tab-discogs', badgeClass: 'enh-badge-discogs' },
-    hydrabase: { text: 'Hydrabase', tabClass: 'enh-tab-hydrabase', badgeClass: 'enh-badge-hydrabase' },
-    youtube_videos: { text: 'Music Videos', tabClass: 'enh-tab-youtube', badgeClass: 'enh-badge-youtube' },
-    musicbrainz: { text: 'MusicBrainz', tabClass: 'enh-tab-musicbrainz', badgeClass: 'enh-badge-musicbrainz' },
-    soulseek: { text: 'Soulseek', tabClass: 'enh-tab-soulseek', badgeClass: 'enh-badge-soulseek' },
+    spotify: { text: 'Spotify', icon: '🎵', tabClass: 'enh-tab-spotify', badgeClass: 'enh-badge-spotify' },
+    itunes: { text: 'Apple Music', icon: '🍎', tabClass: 'enh-tab-itunes', badgeClass: 'enh-badge-itunes' },
+    deezer: { text: 'Deezer', icon: '🎶', tabClass: 'enh-tab-deezer', badgeClass: 'enh-badge-deezer' },
+    discogs: { text: 'Discogs', icon: '📀', tabClass: 'enh-tab-discogs', badgeClass: 'enh-badge-discogs' },
+    hydrabase: { text: 'Hydrabase', icon: '💎', tabClass: 'enh-tab-hydrabase', badgeClass: 'enh-badge-hydrabase' },
+    musicbrainz: { text: 'MusicBrainz', icon: '🧠', tabClass: 'enh-tab-musicbrainz', badgeClass: 'enh-badge-musicbrainz' },
+    youtube_videos: { text: 'Music Videos', icon: '🎬', tabClass: 'enh-tab-youtube', badgeClass: 'enh-badge-youtube' },
+    soulseek: { text: 'Soulseek', icon: '🎼', tabClass: 'enh-tab-soulseek', badgeClass: 'enh-badge-soulseek' },
 };
+
+// Canonical display order for the source picker. Standard metadata sources
+// first, then YouTube Music Videos, then Soulseek (basic-file source).
+const SOURCE_ORDER = [
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz',
+    'youtube_videos', 'soulseek',
+];
 
 // Render a single enhanced-search result section (artists / albums / tracks).
 // Shared between the Search page and the global widget. The mapItem callback
