@@ -7886,6 +7886,11 @@
     <script src="{{ url_for('static', filename='pages-extra.js') }}"></script>
     <script src="{{ url_for('static', filename='init.js') }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->
+    <!-- Ambient glow under the global search bar. Radial gradient, brightest
+         directly under the bar, tapering out toward the window corners.
+         Purely decorative (pointer-events: none). Visibility follows the bar
+         via _gsUpdateVisibility(). -->
+    <div class="gsearch-aura" id="gsearch-aura"></div>
     <!-- Global Search Bar — Spotlight-style search from anywhere -->
     <div class="gsearch-bar" id="gsearch-bar">
         <div class="gsearch-icon">
