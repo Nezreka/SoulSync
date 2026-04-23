@@ -2768,41 +2768,19 @@ function renderEnrichmentCards(enrichment) {
 // container that live on the artist-detail page.
 // ----------------------------------------------------------------------------
 
-// Similar artists lives on two pages (the inline Artists page and the standalone
-// artist-detail page), each with its own set of IDs so they don't collide in the
-// DOM. This resolver picks the set whose `.page` ancestor is currently active.
+// Similar artists section lives on the standalone artist-detail page with the
+// 'ad-' prefixed ids. The resolver shape was originally designed for both the
+// inline Artists page and the standalone page; the inline page has since been
+// retired, so only the standalone candidate remains.
 function _resolveSimilarArtistsTargets() {
-    const candidates = [
-        // standalone artist-detail page (scoped ids)
-        { section: 'ad-similar-artists-section', loading: 'ad-similar-artists-loading', error: 'ad-similar-artists-error', bubbles: 'ad-similar-artists-bubbles-container' },
-        // legacy inline Artists page (base ids)
-        { section: 'similar-artists-section', loading: 'similar-artists-loading', error: 'similar-artists-error', bubbles: 'similar-artists-bubbles-container' },
-    ];
-    // Prefer the set whose parent .page is currently active.
-    for (const c of candidates) {
-        const el = document.getElementById(c.section);
-        if (el && el.closest('.page.active')) {
-            return {
-                section: el,
-                loadingEl: document.getElementById(c.loading),
-                errorEl: document.getElementById(c.error),
-                container: document.getElementById(c.bubbles),
-            };
-        }
-    }
-    // Fallback: return the first set that exists at all.
-    for (const c of candidates) {
-        const el = document.getElementById(c.section);
-        if (el) {
-            return {
-                section: el,
-                loadingEl: document.getElementById(c.loading),
-                errorEl: document.getElementById(c.error),
-                container: document.getElementById(c.bubbles),
-            };
-        }
-    }
-    return null;
+    const sectionEl = document.getElementById('ad-similar-artists-section');
+    if (!sectionEl) return null;
+    return {
+        section: sectionEl,
+        loadingEl: document.getElementById('ad-similar-artists-loading'),
+        errorEl: document.getElementById('ad-similar-artists-error'),
+        container: document.getElementById('ad-similar-artists-bubbles-container'),
+    };
 }
 
 async function loadSimilarArtists(artistName) {
@@ -3110,21 +3088,78 @@ function createSimilarArtistBubble(artist) {
         bubble.appendChild(genres);
     }
 
-    // Add click handler — page-aware destination. From the standalone artist-
-    // detail page, navigate to the standalone route. From the inline Artists
-    // page, swap the inline view via selectArtistForDetail.
+    // Click → navigate to the standalone artist-detail page. Works for both
+    // library and source artists thanks to the source-aware backend endpoint.
     bubble.addEventListener('click', () => {
         console.log(`🎵 Clicked similar artist: ${artist.name} (ID: ${artist.id})`);
-        const onStandalone = !!document.querySelector('#artist-detail-page.active');
-        if (onStandalone && typeof navigateToArtistDetail === 'function') {
-            navigateToArtistDetail(artist.id, artist.name, artist.source || null);
-        } else if (typeof selectArtistForDetail === 'function') {
-            selectArtistForDetail(
-                artist,
-                artist.source ? { source: artist.source, plugin: artist.plugin } : {}
-            );
-        }
+        navigateToArtistDetail(artist.id, artist.name, artist.source || null);
     });
 
     return bubble;
+}
+
+
+// ----------------------------------------------------------------------------
+// Lazy artist-card image loader (used by wishlist-tools.js + the legacy inline
+// Artists page search results). Fetches /api/artist/<id>/image for each card
+// flagged data-needs-image="true" in batches of 5.
+// ----------------------------------------------------------------------------
+
+async function lazyLoadArtistImages(container) {
+    if (!container) {
+        console.error('❌ lazyLoadArtistImages: container is null');
+        return;
+    }
+
+    const cardsNeedingImages = container.querySelectorAll('[data-needs-image="true"]');
+    if (cardsNeedingImages.length === 0) return;
+
+    const batchSize = 5;
+    const cards = Array.from(cardsNeedingImages);
+
+    for (let i = 0; i < cards.length; i += batchSize) {
+        const batch = cards.slice(i, i + batchSize);
+        await Promise.all(batch.map(async (card) => {
+            const artistId = card.dataset.artistId;
+            if (!artistId) return;
+            try {
+                const response = await fetch(`/api/artist/${artistId}/image`);
+                const data = await response.json();
+                if (data.success && data.image_url) {
+                    if (card.classList.contains('suggestion-card')) {
+                        card.style.backgroundImage = `url(${data.image_url})`;
+                        card.style.backgroundSize = 'cover';
+                        card.style.backgroundPosition = 'center';
+                    } else if (card.classList.contains('artist-card')) {
+                        const bgElement = card.querySelector('.artist-card-background');
+                        if (bgElement) {
+                            bgElement.style.cssText = `background-image: url('${data.image_url}'); background-size: cover; background-position: center;`;
+                        }
+                    }
+                    card.dataset.needsImage = 'false';
+                }
+            } catch (error) {
+                console.error(`❌ Failed to load image for artist ${artistId}:`, error);
+            }
+        }));
+    }
+}
+
+// Legacy global alias — wishlist-tools.js falls back to window.lazyLoadArtistImages
+window.lazyLoadArtistImages = lazyLoadArtistImages;
+
+
+// ----------------------------------------------------------------------------
+// Album-card completion overlay error state (called from checkDiscographyCompletion
+// when the API request fails)
+// ----------------------------------------------------------------------------
+
+function showCompletionError() {
+    const allOverlays = document.querySelectorAll('.completion-overlay.checking');
+    allOverlays.forEach(overlay => {
+        overlay.classList.remove('checking');
+        overlay.classList.add('error');
+        overlay.innerHTML = '<span class="completion-status">Error</span>';
+        overlay.title = 'Failed to check completion status';
+    });
 }

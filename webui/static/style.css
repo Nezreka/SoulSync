@@ -59413,3 +59413,41 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
 body[data-artist-source="source"] #artist-detail-page .section-stats {
     display: none !important;
 }
+
+
+/* =========================================================================
+   Standalone /artist-detail page hero — blurred-background treatment
+   ========================================================================= */
+
+#artist-detail-page .artist-hero-section {
+    position: relative;
+    overflow: hidden;
+}
+
+#artist-detail-page .artist-detail-hero-bg {
+    position: absolute;
+    inset: -20px;
+    background-size: cover;
+    background-position: center top;
+    background-repeat: no-repeat;
+    filter: blur(50px) brightness(0.35) saturate(1.4);
+    transform: scale(1.3);
+    z-index: 0;
+    pointer-events: none;
+}
+
+#artist-detail-page .artist-detail-hero-overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg,
+        rgba(8, 8, 8, 0.5) 0%,
+        rgba(12, 12, 12, 0.7) 60%,
+        rgba(12, 12, 12, 0.9) 100%);
+    z-index: 1;
+    pointer-events: none;
+}
+
+#artist-detail-page .artist-hero-content {
+    position: relative;
+    z-index: 2;
+}
