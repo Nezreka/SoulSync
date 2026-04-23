@@ -1754,37 +1754,35 @@ function updateLibraryReleaseCard(data) {
         }
     }
 
-    // Update completion text element in-place
-    const completionText = card.querySelector('.completion-text');
-    if (completionText) {
-        completionText.classList.remove('checking', 'complete', 'partial', 'missing');
+    // Update the floating completion-overlay badge (new big-photo card markup).
+    const overlay = card.querySelector('.completion-overlay');
+    const overlayStatus = overlay && overlay.querySelector('.completion-status');
+    if (overlay && overlayStatus) {
+        overlay.classList.remove('checking', 'completed', 'nearly_complete', 'partial', 'missing', 'error');
+        let badgeCls = '';
+        let badgeText = '';
+        let badgeTitle = '';
         if (isOwned) {
             if (effectiveMissing <= 0) {
-                completionText.textContent = `Complete (${data.owned_tracks})`;
-                completionText.className = 'completion-text complete';
+                badgeCls = 'completed';
+                badgeText = '✓ Owned';
+                badgeTitle = `Complete (${data.owned_tracks} tracks)`;
             } else {
-                completionText.textContent = `${data.owned_tracks}/${data.expected_tracks} tracks`;
-                completionText.className = 'completion-text partial';
-                completionText.title = `Missing ${effectiveMissing} track${effectiveMissing !== 1 ? 's' : ''}`;
+                const pct = data.completion_percentage || Math.round((data.owned_tracks / data.expected_tracks) * 100);
+                badgeCls = pct >= 75 ? 'nearly_complete' : 'partial';
+                badgeText = `${data.owned_tracks}/${data.expected_tracks}`;
+                badgeTitle = `Missing ${effectiveMissing} track${effectiveMissing !== 1 ? 's' : ''}`;
             }
         } else {
-            completionText.textContent = 'Missing';
-            completionText.className = 'completion-text missing';
+            badgeCls = 'missing';
+            badgeText = 'Missing';
+            badgeTitle = data.expected_tracks > 0
+                ? `${data.expected_tracks} track${data.expected_tracks !== 1 ? 's' : ''} not in library`
+                : 'Not in library';
         }
-    }
-
-    // Update completion fill bar in-place
-    const completionFill = card.querySelector('.completion-fill');
-    if (completionFill) {
-        completionFill.classList.remove('checking', 'complete', 'partial', 'missing');
-        if (isOwned) {
-            const pct = isComplete ? 100 : (data.completion_percentage || 100);
-            completionFill.style.width = `${pct}%`;
-            completionFill.classList.add(effectiveMissing <= 0 ? 'complete' : 'partial');
-        } else {
-            completionFill.style.width = '0%';
-            completionFill.classList.add('missing');
-        }
+        overlay.classList.add(badgeCls);
+        overlayStatus.textContent = badgeText;
+        overlay.title = badgeTitle;
     }
 
     // Display format tags on owned releases
