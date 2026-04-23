@@ -2490,7 +2490,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .helper-first-launch-tip {
     position: fixed;
     bottom: 34px;
-    right: 84px;
+    right: 136px;
     padding: 8px 16px;
     background: rgba(16, 16, 16, 0.95);
     border: 1px solid rgba(var(--accent-rgb), 0.3);
@@ -11920,6 +11920,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     overflow: hidden;
     border-top-left-radius: 20px;
     border-top-right-radius: 20px;
+    flex-shrink: 0;
 }
 
 .mirrored-modal-hero {
@@ -12120,6 +12121,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
     border-bottom-left-radius: 20px;
     border-bottom-right-radius: 20px;
+    flex-shrink: 0;
 }
 
 .mirrored-modal-footer button {
@@ -59520,4 +59522,323 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
 
 #artist-detail-page .release-card.album-card .mb-card-icon:hover {
     opacity: 1;
+
+/* ── SoulSync Discover Sync Tab ───────────────────────────────────────── */
+
+.discover-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23a78bfa"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm-5-9l7.5-4.5L12 14l-5-3z"/></svg>');
+}
+
+.sync-tab-button[data-tab="discover"].active {
+    background: linear-gradient(135deg, #a78bfa, #7c3aed);
+    color: #fff;
+    box-shadow: 0 4px 15px rgba(167, 139, 250, 0.3);
+}
+
+.sync-tab-button.active .discover-icon {
+    background-image: url('data:image/svg+xml;charset=utf-8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ffffff"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm-5-9l7.5-4.5L12 14l-5-3z"/></svg>');
+}
+
+.discover-sync-subtitle {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 13px;
+    margin: 4px 0 0 0;
+    font-weight: 400;
+    line-height: 1.4;
+}
+
+.discover-sync-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    margin: 3px 6px;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.25s ease;
+}
+
+.discover-sync-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(167, 139, 250, 0.2);
+}
+
+.discover-sync-card-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+}
+
+.discover-sync-card-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.discover-sync-card-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.discover-sync-card-meta-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.discover-sync-source-badge {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 1px 7px;
+    border-radius: 4px;
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.1);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+}
+
+.discover-sync-card-desc {
+    display: none;
+}
+
+.discover-sync-card-meta {
+    display: none;
+}
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.discover-sync-separator {
+    opacity: 0.4;
+}
+
+.discover-sync-track-count {
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.discover-sync-status {
+    font-weight: 500;
+}
+
+.discover-sync-status.synced {
+    color: #22c55e;
+}
+
+.discover-sync-status.syncing {
+    color: #facc15;
+}
+
+.discover-sync-status.not-synced {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.discover-sync-last-synced {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.discover-sync-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+.discover-sync-toggle-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.discover-sync-toggle-label {
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.4);
+    white-space: nowrap;
+}
+
+.discover-sync-toggle {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+    cursor: pointer;
+}
+
+.discover-sync-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.discover-sync-toggle-slider {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 22px;
+    transition: all 0.25s ease;
+}
+
+.discover-sync-toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    left: 3px;
+    bottom: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: all 0.25s ease;
+}
+
+.discover-sync-toggle input:checked + .discover-sync-toggle-slider {
+    background: #a78bfa;
+}
+
+.discover-sync-toggle input:checked + .discover-sync-toggle-slider::before {
+    transform: translateX(18px);
+}
+
+.discover-sync-btn {
+    padding: 8px 16px;
+    background: linear-gradient(135deg, #a78bfa, #7c3aed);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.25s ease;
+}
+
+.discover-sync-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(167, 139, 250, 0.35);
+}
+
+.discover-sync-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* Empty-state styling */
+.discover-sync-card-empty {
+    opacity: 0.55;
+}
+
+.discover-sync-card-empty .discover-sync-toggle-slider {
+    opacity: 0.4;
+}
+
+/* Deep-link highlight animation */
+.discover-sync-card-highlight {
+    animation: discover-card-glow 2.5s ease-out;
+}
+
+@keyframes discover-card-glow {
+    0% { border-color: rgba(167, 139, 250, 0.7); box-shadow: 0 0 20px rgba(167, 139, 250, 0.3); }
+    100% { border-color: rgba(255, 255, 255, 0.08); box-shadow: none; }
+}
+
+.discover-sync-empty-hint {
+    background: rgba(255, 193, 7, 0.08);
+    border: 1px solid rgba(255, 193, 7, 0.25);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    color: #ccc;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.discover-sync-empty-hint p {
+    margin: 0 0 6px 0;
+}
+
+.discover-sync-empty-hint p:last-child {
+    margin-bottom: 0;
+}
+
+.discover-sync-empty-hint strong {
+    color: #ffc107;
+}
+
+.discover-sync-source-info {
+    color: #888;
+    font-size: 0.82rem;
+    margin-bottom: 12px;
+    padding-left: 4px;
+}
+
+.discover-sync-source-info strong {
+    color: #aaa;
+}
+
+@media (max-width: 768px) {
+    .discover-sync-card {
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+
+    .discover-sync-card-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+
+/* Discover playlist modal extras */
+.mirrored-modal-hero-icon.discover {
+    background: linear-gradient(135deg, rgba(167, 139, 250, 0.2) 0%, rgba(124, 58, 237, 0.12) 100%);
+    border-color: rgba(167, 139, 250, 0.3);
+    box-shadow: 0 8px 24px rgba(167, 139, 250, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    color: #a78bfa;
+}
+
+.discover-modal-track-img {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    object-fit: cover;
+    vertical-align: middle;
+}
+
+.discover-modal-track-img-placeholder {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.track-cover {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    flex-shrink: 0;
+}
+
+#discover-playlist-modal .mirrored-track-header,
+#discover-playlist-modal .mirrored-track-row {
+    grid-template-columns: 40px 40px 1.4fr 1.2fr 1fr 56px;
 }
