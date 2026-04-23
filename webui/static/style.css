@@ -255,11 +255,15 @@ body {
 
 .sidebar-header {
     min-height: 115px;
-    background: linear-gradient(180deg,
+    /* Opaque base layered under the accent gradient so nav items scrolling
+       past the sticky header don't bleed through the translucent stops. */
+    background:
+        linear-gradient(180deg,
             rgba(var(--accent-rgb), 0.14) 0%,
             rgba(var(--accent-rgb), 0.08) 30%,
             rgba(var(--accent-rgb), 0.03) 70%,
-            rgba(18, 18, 18, 1) 100%);
+            rgba(18, 18, 18, 1) 100%),
+        rgb(18, 18, 18);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     border-top-right-radius: 20px;
     padding: 20px 24px;
@@ -269,6 +273,10 @@ body {
     gap: 8px;
     position: sticky;
     top: 0;
+    /* Explicitly lift above the nav buttons. `.sidebar > *` sets z-index 1 on
+       every sidebar child, so without this the sticky header paints at the
+       same stacking level as the nav and loses to it on DOM order. */
+    z-index: 2;
     overflow: hidden;
     flex-shrink: 0;
 
