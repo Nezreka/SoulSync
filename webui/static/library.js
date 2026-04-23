@@ -966,10 +966,18 @@ function populateArtistDetailPage(data) {
     // Populate discography sections
     populateDiscographySections(discography);
 
-    // Initialize library watchlist button if it exists (for library page)
+    // Initialize the watchlist button. Library artists that have been enriched
+    // get the canonical Spotify identity; source artists fall back to the id
+    // they came in with (Deezer/iTunes/Discogs/etc.).
     const libraryWatchlistBtn = document.getElementById('library-artist-watchlist-btn');
-    if (libraryWatchlistBtn && data.spotify_artist && data.spotify_artist.spotify_artist_id) {
-        initializeLibraryWatchlistButton(data.spotify_artist.spotify_artist_id, data.spotify_artist.spotify_artist_name);
+    if (libraryWatchlistBtn) {
+        const watchlistId = (data.spotify_artist && data.spotify_artist.spotify_artist_id)
+            || artist.id;
+        const watchlistName = (data.spotify_artist && data.spotify_artist.spotify_artist_name)
+            || artist.name;
+        if (watchlistId && watchlistName) {
+            initializeLibraryWatchlistButton(watchlistId, watchlistName);
+        }
     }
 
     // Load Similar Artists section (works for both library + source artists via
