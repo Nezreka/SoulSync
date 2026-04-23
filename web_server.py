@@ -32748,16 +32748,23 @@ def _record_sync_history_completion(batch_id, batch):
 
 
 def _push_playlist_to_server(batch_id, batch):
-    """After a batch completes, push the playlist to the media server.
+    """After a batch completes, push the playlist to the active media server.
     Runs in a background thread. Triggers a scan, waits, then searches for tracks and creates/updates the playlist.
-    Supports discover, mirrored, and auto-mirror playlists.
-    Currently only Navidrome is supported; Plex/Jellyfin users get 'skipped'."""
+    Supports Navidrome, Plex, and Jellyfin."""
     database = get_database()
     try:
-        # Only Navidrome supports playlist push right now
+        # Resolve the active media server client
         active_server = config_manager.get_active_media_server()
-        if active_server != 'navidrome' or not navidrome_client or not navidrome_client.is_connected():
-            logger.info(f"[PlaylistPush] Server push skipped — active server is '{active_server}', not navidrome (or not connected)")
+        server_client = None
+        if active_server == 'navidrome' and navidrome_client and navidrome_client.is_connected():
+            server_client = navidrome_client
+        elif active_server == 'plex' and plex_client and plex_client.is_connected():
+            server_client = plex_client
+        elif active_server == 'jellyfin' and jellyfin_client and jellyfin_client.is_connected():
+            server_client = jellyfin_client
+
+        if not server_client:
+            logger.info(f"[PlaylistPush] Server push skipped — no connected media server (active: '{active_server}')")
             database.update_sync_history_push_status(batch_id, 'skipped')
             return
 
@@ -32808,53 +32815,43 @@ def _push_playlist_to_server(batch_id, batch):
             database.update_sync_history_push_status(batch_id, 'skipped')
             return
 
-        logger.info(f"[PlaylistPush] {playlist_name}: {len(tracks_to_find)} tracks to push to server, triggering scan first")
+        logger.info(f"[PlaylistPush] {playlist_name}: {len(tracks_to_find)} tracks to push to {active_server}, triggering scan first")
 
         # Trigger a library scan so newly downloaded tracks are indexed
-        if navidrome_client and navidrome_client.is_connected():
-            navidrome_client.trigger_library_scan()
-        elif hasattr(web_scan_manager, 'request_scan'):
-            web_scan_manager.request_scan(f"Playlist push: {playlist_name}")
+        server_client.trigger_library_scan()
 
         # Wait for scan to finish (poll every 5s, up to 90s)
-        if navidrome_client and navidrome_client.is_connected():
-            for _ in range(18):
-                time.sleep(5)
-                if not navidrome_client.is_library_scanning():
-                    break
-            logger.info(f"[PlaylistPush] Scan complete, searching for tracks")
-        else:
-            time.sleep(30)
+        for _ in range(18):
+            time.sleep(5)
+            if not server_client.is_library_scanning():
+                break
+        logger.info(f"[PlaylistPush] Scan complete, searching for tracks on {active_server}")
 
         # Search for each track on the media server
         matched_server_tracks = []
-        if navidrome_client and navidrome_client.is_connected():
-            for t in tracks_to_find:
-                results = navidrome_client.search_tracks(t['title'], t['artist'], limit=5)
-                if results:
-                    # Use the first result's underlying NavidromeTrack for playlist creation
-                    best = results[0]
-                    nav_track = getattr(best, '_original_navidrome_track', None)
-                    if nav_track:
-                        matched_server_tracks.append(nav_track)
-                        logger.debug(f"[PlaylistPush] Matched: '{t['title']}' by '{t['artist']}' → {best.id}")
-                    else:
-                        matched_server_tracks.append(best)
-                else:
-                    logger.info(f"[PlaylistPush] No match for: '{t['title']}' by '{t['artist']}'")
+        for t in tracks_to_find:
+            results = server_client.search_tracks(t['title'], t['artist'], limit=5)
+            if results:
+                best = results[0]
+                # Navidrome/Plex store the original server object for playlist creation
+                original = getattr(best, '_original_navidrome_track', None) or getattr(best, '_original_plex_track', None)
+                matched_server_tracks.append(original if original else best)
+                logger.debug(f"[PlaylistPush] Matched: '{t['title']}' by '{t['artist']}' → {getattr(best, 'id', getattr(best, 'ratingKey', '?'))}")
+            else:
+                logger.info(f"[PlaylistPush] No match for: '{t['title']}' by '{t['artist']}'")
 
         if not matched_server_tracks:
-            logger.warning(f"[PlaylistPush] No tracks matched on server for {playlist_name}")
+            logger.warning(f"[PlaylistPush] No tracks matched on {active_server} for {playlist_name}")
             database.update_sync_history_push_status(batch_id, 'failed')
             return
 
-        logger.info(f"[PlaylistPush] Pushing {len(matched_server_tracks)}/{len(tracks_to_find)} tracks to '{playlist_name}' on server")
-        success = navidrome_client.update_playlist(playlist_name, matched_server_tracks)
+        logger.info(f"[PlaylistPush] Pushing {len(matched_server_tracks)}/{len(tracks_to_find)} tracks to '{playlist_name}' on {active_server}")
+        success = server_client.update_playlist(playlist_name, matched_server_tracks)
         if success:
-            logger.info(f"[PlaylistPush] Successfully pushed '{playlist_name}' to server with {len(matched_server_tracks)} tracks")
+            logger.info(f"[PlaylistPush] Successfully pushed '{playlist_name}' to {active_server} with {len(matched_server_tracks)} tracks")
             database.update_sync_history_push_status(batch_id, 'success')
         else:
-            logger.warning(f"[PlaylistPush] Failed to push '{playlist_name}' to server")
+            logger.warning(f"[PlaylistPush] Failed to push '{playlist_name}' to {active_server}")
             database.update_sync_history_push_status(batch_id, 'failed')
 
     except Exception as e:
