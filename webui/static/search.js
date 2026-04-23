@@ -106,15 +106,29 @@ function initializeSearchModeToggle() {
             const title = fallback
                 ? `${info.text} unavailable — served from ${(SOURCE_LABELS[fallback] || {}).text || fallback}`
                 : info.text;
+            // Prefer the brand logo when available; fall back to the emoji.
+            // Spinner glyph overrides both while loading.
+            const glyph = loading
+                ? '⏳'
+                : (info.logo
+                    ? `<img src="${escapeHtml(info.logo)}" alt="" loading="lazy">`
+                    : info.icon);
             return `
                 <button class="${classes}" data-source="${src}" role="tab"
                         aria-selected="${active}" title="${escapeHtml(title)}">
-                    <span class="enh-source-icon-glyph">${loading ? '⏳' : info.icon}</span>
+                    <span class="enh-source-icon-glyph">${glyph}</span>
                     <span class="enh-source-icon-label">${escapeHtml(info.text)}</span>
                 </button>`;
         }).join('');
         sourceRow.querySelectorAll('.enh-source-icon').forEach(btn => {
-            btn.addEventListener('click', () => setActiveSource(btn.dataset.source));
+            btn.addEventListener('click', (e) => {
+                // Stop the outside-click document handler from dismissing the
+                // dropdown. `renderSourceRow` re-renders after a source switch,
+                // detaching this button from the DOM, so the bubbled handler's
+                // `closest('#enh-source-row')` would fail on the detached target.
+                e.stopPropagation();
+                setActiveSource(btn.dataset.source);
+            });
         });
     }
 
@@ -424,9 +438,13 @@ function initializeSearchModeToggle() {
         const dropdown = document.getElementById('enhanced-dropdown');
         if (dropdown && !dropdown.classList.contains('hidden')) {
             const isClickInside = e.target.closest('.enhanced-search-input-wrapper');
+            // Source icons live above the input, outside the dropdown — they
+            // control which cached source is shown, so don't dismiss when the
+            // user clicks them.
+            const isClickOnSourceRow = e.target.closest('#enh-source-row');
             // Modal sits above the dropdown; closing it shouldn't dismiss results.
             const isClickInModal = e.target.closest('.download-missing-modal');
-            if (!isClickInside && !isClickInModal) {
+            if (!isClickInside && !isClickOnSourceRow && !isClickInModal) {
                 hideDropdown();
             }
         }

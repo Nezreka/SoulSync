@@ -32,17 +32,50 @@ async function enhancedSearchFetch(query, { source = null, signal = null } = {})
 }
 
 // Per-source labels + tab/badge CSS classes + icon glyph for the source
-// picker row. Referenced by both the Search page and the global search
-// widget for consistent badge/icon rendering.
+// picker row. The `logo` URL (when present) renders as an <img> in the
+// source-picker chip; `icon` stays as the emoji fallback for sources
+// without a canonical logo. Logo URLs mirror the constants in core.js so
+// both places stay in sync.
 const SOURCE_LABELS = {
-    spotify: { text: 'Spotify', icon: '🎵', tabClass: 'enh-tab-spotify', badgeClass: 'enh-badge-spotify' },
-    itunes: { text: 'Apple Music', icon: '🍎', tabClass: 'enh-tab-itunes', badgeClass: 'enh-badge-itunes' },
-    deezer: { text: 'Deezer', icon: '🎶', tabClass: 'enh-tab-deezer', badgeClass: 'enh-badge-deezer' },
-    discogs: { text: 'Discogs', icon: '📀', tabClass: 'enh-tab-discogs', badgeClass: 'enh-badge-discogs' },
-    hydrabase: { text: 'Hydrabase', icon: '💎', tabClass: 'enh-tab-hydrabase', badgeClass: 'enh-badge-hydrabase' },
-    musicbrainz: { text: 'MusicBrainz', icon: '🧠', tabClass: 'enh-tab-musicbrainz', badgeClass: 'enh-badge-musicbrainz' },
-    youtube_videos: { text: 'Music Videos', icon: '🎬', tabClass: 'enh-tab-youtube', badgeClass: 'enh-badge-youtube' },
-    soulseek: { text: 'Soulseek', icon: '🎼', tabClass: 'enh-tab-soulseek', badgeClass: 'enh-badge-soulseek' },
+    spotify: {
+        text: 'Spotify', icon: '🎵',
+        logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+        tabClass: 'enh-tab-spotify', badgeClass: 'enh-badge-spotify',
+    },
+    itunes: {
+        text: 'Apple Music', icon: '🍎',
+        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png',
+        tabClass: 'enh-tab-itunes', badgeClass: 'enh-badge-itunes',
+    },
+    deezer: {
+        text: 'Deezer', icon: '🎶',
+        logo: 'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610',
+        tabClass: 'enh-tab-deezer', badgeClass: 'enh-badge-deezer',
+    },
+    discogs: {
+        text: 'Discogs', icon: '📀',
+        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/Discogs_icon.svg/960px-Discogs_icon.svg.png',
+        tabClass: 'enh-tab-discogs', badgeClass: 'enh-badge-discogs',
+    },
+    hydrabase: {
+        text: 'Hydrabase', icon: '💎',
+        logo: '/static/hydrabase.png',
+        tabClass: 'enh-tab-hydrabase', badgeClass: 'enh-badge-hydrabase',
+    },
+    musicbrainz: {
+        text: 'MusicBrainz', icon: '🧠',
+        logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png',
+        tabClass: 'enh-tab-musicbrainz', badgeClass: 'enh-badge-musicbrainz',
+    },
+    youtube_videos: {
+        text: 'Music Videos', icon: '🎬',
+        tabClass: 'enh-tab-youtube', badgeClass: 'enh-badge-youtube',
+    },
+    soulseek: {
+        // No canonical brand logo available — stick with a basic music glyph.
+        text: 'Soulseek', icon: '🎼',
+        tabClass: 'enh-tab-soulseek', badgeClass: 'enh-badge-soulseek',
+    },
 };
 
 // Canonical display order for the source picker. Standard metadata sources

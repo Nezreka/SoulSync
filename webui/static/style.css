@@ -5484,6 +5484,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: flex;
     flex-wrap: nowrap;
     overflow-x: auto;
+    overflow-y: visible;
     gap: 6px;
     padding: 10px 14px 8px;
     flex-shrink: 0;
@@ -5520,7 +5521,21 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #fff;
     border-color: rgba(255, 255, 255, 0.14);
 }
-.gsearch-source-icon-glyph { font-size: 16px; line-height: 1; }
+.gsearch-source-icon-glyph {
+    font-size: 16px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+}
+.gsearch-source-icon-glyph img {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    display: block;
+}
 .gsearch-source-icon-label { font-size: 10px; letter-spacing: 0.02em; }
 
 .gsearch-source-icon[data-source="spotify"].active { background: rgba(29, 185, 84, 0.18); color: #1db954; border-color: rgba(29, 185, 84, 0.4); }
@@ -33603,11 +33618,16 @@ div.artist-hero-badge {
     display: flex;
     flex-wrap: nowrap;
     overflow-x: auto;
+    overflow-y: visible;
     gap: 10px;
     padding: 10px 4px 8px;
     margin: 8px 0 12px;
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    /* Don't compress when the parent flex container is tight (e.g. when a
+       `.search-section.active` sibling has flex-grow:1 and the viewport
+       forces a layout squeeze — would otherwise clip the icons). */
+    flex-shrink: 0;
 }
 .enh-source-row::-webkit-scrollbar { height: 6px; }
 .enh-source-row::-webkit-scrollbar-track { background: transparent; }
@@ -33644,6 +33664,17 @@ div.artist-hero-badge {
 .enh-source-icon-glyph {
     font-size: 20px;
     line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+}
+.enh-source-icon-glyph img {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+    display: block;
 }
 .enh-source-icon-label {
     font-size: 11px;

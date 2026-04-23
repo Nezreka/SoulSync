@@ -5304,8 +5304,13 @@ function _gsSourceRowHtml() {
         const title = fallback
             ? `${info.text} unavailable — served from ${(SOURCE_LABELS[fallback] || {}).text || fallback}`
             : info.text;
+        const glyph = loading
+            ? '⏳'
+            : (info.logo
+                ? `<img src="${_escAttr(info.logo)}" alt="" loading="lazy">`
+                : info.icon);
         return `<button class="${classes}" data-source="${src}" onclick="_gsSetActiveSource('${src}')" title="${_escAttr(title)}">
-            <span class="gsearch-source-icon-glyph">${loading ? '⏳' : info.icon}</span>
+            <span class="gsearch-source-icon-glyph">${glyph}</span>
             <span class="gsearch-source-icon-label">${_escToast(info.text)}</span>
         </button>`;
     }).join('') + '</div>';
