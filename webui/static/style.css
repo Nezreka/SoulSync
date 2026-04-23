@@ -5479,6 +5479,91 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .gsearch-tab.active { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); border-color: rgba(var(--accent-rgb), 0.2); }
 .gsearch-tab:hover:not(.active) { background: rgba(255,255,255,0.06); }
 
+/* Source icon row (replaces post-search tabs) */
+.gsearch-source-row {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
+    padding: 10px 14px 8px;
+    flex-shrink: 0;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+.gsearch-source-row::-webkit-scrollbar { height: 4px; }
+.gsearch-source-row::-webkit-scrollbar-track { background: transparent; }
+.gsearch-source-row::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 2px; }
+
+.gsearch-source-icon {
+    position: relative;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 56px;
+    padding: 6px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.gsearch-source-icon:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.14);
+}
+.gsearch-source-icon-glyph { font-size: 16px; line-height: 1; }
+.gsearch-source-icon-label { font-size: 10px; letter-spacing: 0.02em; }
+
+.gsearch-source-icon[data-source="spotify"].active { background: rgba(29, 185, 84, 0.18); color: #1db954; border-color: rgba(29, 185, 84, 0.4); }
+.gsearch-source-icon[data-source="itunes"].active { background: rgba(252, 60, 68, 0.18); color: #fc3c44; border-color: rgba(252, 60, 68, 0.4); }
+.gsearch-source-icon[data-source="deezer"].active { background: rgba(162, 56, 255, 0.18); color: #a238ff; border-color: rgba(162, 56, 255, 0.4); }
+.gsearch-source-icon[data-source="discogs"].active { background: rgba(212, 165, 116, 0.18); color: #D4A574; border-color: rgba(212, 165, 116, 0.4); }
+.gsearch-source-icon[data-source="hydrabase"].active { background: rgba(0, 180, 216, 0.18); color: #00b4d8; border-color: rgba(0, 180, 216, 0.4); }
+.gsearch-source-icon[data-source="musicbrainz"].active { background: rgba(186, 51, 88, 0.18); color: #BA3358; border-color: rgba(186, 51, 88, 0.4); }
+.gsearch-source-icon[data-source="youtube_videos"].active { background: rgba(255, 0, 0, 0.18); color: #ff4444; border-color: rgba(255, 0, 0, 0.4); }
+.gsearch-source-icon[data-source="soulseek"].active { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: rgba(255, 255, 255, 0.3); }
+
+.gsearch-source-icon.cached::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    right: 5px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.75;
+}
+.gsearch-source-icon.loading .gsearch-source-icon-glyph {
+    animation: gsearch-source-loading-spin 1.2s linear infinite;
+    opacity: 0.7;
+}
+@keyframes gsearch-source-loading-spin {
+    from { transform: rotate(0); }
+    to   { transform: rotate(360deg); }
+}
+.gsearch-source-icon.fallback-warning { border-color: rgba(250, 176, 5, 0.5); }
+
+.gsearch-fallback-banner {
+    padding: 6px 14px;
+    margin: 0 12px 6px;
+    border-radius: 6px;
+    background: rgba(250, 176, 5, 0.12);
+    border: 1px solid rgba(250, 176, 5, 0.3);
+    color: #fab005;
+    font-size: 10.5px;
+    font-weight: 500;
+}
+
 /* Section headers */
 .gsearch-section-header {
     font-size: 10px;
