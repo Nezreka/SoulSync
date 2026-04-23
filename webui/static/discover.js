@@ -7875,14 +7875,115 @@ function checkForActiveDiscoverDownloads() {
 }
 
 async function startDiscoverPlaylistSync(playlistType, playlistName) {
-    console.log(`🔄 Navigating to Sync → Discover tab for ${playlistName}`);
+    console.log(`🔄 Starting sync for ${playlistName} (fire-and-forget from Discover page)`);
 
-    // Navigate to the Sync page → Discover tab, highlight the card, and auto-sync
-    navigateToSyncTab('discover', {
-        highlight: `discover-sync-card-${playlistType}`,
-        autoSync: playlistType,
-        autoSyncName: playlistName,
-    });
+    // Disable the sync button on the Discover page
+    const buttonId = playlistType.replace(/_/g, '-') + '-sync-btn';
+    const syncButton = document.getElementById(buttonId);
+    if (syncButton) {
+        syncButton.disabled = true;
+        syncButton.style.opacity = '0.5';
+        syncButton.style.cursor = 'not-allowed';
+    }
+
+    try {
+        // Fetch tracks from API
+        const apiUrl = _discoverPlaylistApiUrl(playlistType);
+        if (!apiUrl) {
+            showToast(`Unknown playlist type: ${playlistType}`, 'error');
+            if (syncButton) { syncButton.disabled = false; syncButton.style.opacity = '1'; syncButton.style.cursor = 'pointer'; }
+            return;
+        }
+
+        const tracksResponse = await fetch(apiUrl);
+        let tracks = [];
+        if (tracksResponse.ok) {
+            const data = await tracksResponse.json();
+            tracks = data.tracks || [];
+        }
+
+        if (!tracks.length) {
+            showToast(`No tracks available for ${playlistName}`, 'warning');
+            if (syncButton) { syncButton.disabled = false; syncButton.style.opacity = '1'; syncButton.style.cursor = 'pointer'; }
+            return;
+        }
+
+        // Convert to sync format
+        const syncTracks = tracks.map(track => {
+            if (track.track_data_json) {
+                const t = track.track_data_json;
+                if (t.artists && Array.isArray(t.artists)) {
+                    t.artists = t.artists.map(a => a.name || a);
+                }
+                return t;
+            }
+            return {
+                id: track.spotify_track_id || track.track_id || '',
+                name: track.track_name || track.name || '',
+                artists: [track.artist_name || 'Unknown Artist'],
+                album: track.album_name || '',
+                duration_ms: track.duration_ms || 0,
+                image_url: track.album_cover_url || track.image_url || ''
+            };
+        });
+
+        const virtualPlaylistId = `discover_${playlistType}`;
+
+        // Fire the batch download
+        const batchResponse = await fetch(`/api/playlists/${virtualPlaylistId}/start-missing-process`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tracks: syncTracks, playlist_name: playlistName })
+        });
+
+        const result = await batchResponse.json();
+        if (result.success) {
+            // Show toast with clickable link to Sync → Discover tab
+            _showSyncToastWithLink(
+                `${playlistName} (${syncTracks.length} tracks) syncing...`,
+                'info',
+                'View in Sync \u2192',
+                () => navigateToSyncTab('discover', { highlight: `discover-sync-card-${playlistType}` })
+            );
+        } else {
+            showToast(`Failed to start sync: ${result.error || 'Unknown error'}`, 'error');
+            if (syncButton) { syncButton.disabled = false; syncButton.style.opacity = '1'; syncButton.style.cursor = 'pointer'; }
+        }
+    } catch (error) {
+        console.error(`Error syncing ${playlistName}:`, error);
+        showToast(`Failed to sync ${playlistName}`, 'error');
+        if (syncButton) { syncButton.disabled = false; syncButton.style.opacity = '1'; syncButton.style.cursor = 'pointer'; }
+    }
+}
+
+/**
+ * Show a toast with a clickable action link (like showToast but with a custom link).
+ */
+function _showSyncToastWithLink(message, type, linkText, onClick) {
+    const container = document.getElementById('toast-container');
+    if (!container) { showToast(message, type); return; }
+
+    const icon = { success: '\u2705', error: '\u274c', warning: '\u26a0\ufe0f', info: '\u2139\ufe0f' }[type] || '\u2139\ufe0f';
+    const toast = document.createElement('div');
+    toast.className = `toast-compact toast-${type}`;
+    toast.innerHTML = `<span class="toast-compact-icon">${icon}</span><span class="toast-compact-msg">${_escToast(message)}</span>`;
+
+    const link = document.createElement('span');
+    link.className = 'toast-compact-link';
+    link.textContent = linkText;
+    link.onclick = e => { e.stopPropagation(); onClick(); };
+    toast.appendChild(link);
+
+    toast.onclick = () => { toast.classList.add('toast-exit'); setTimeout(() => { if (container.contains(toast)) container.removeChild(toast); }, 200); };
+    container.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('toast-enter'));
+
+    setTimeout(() => {
+        if (container.contains(toast)) {
+            toast.classList.add('toast-exit');
+            setTimeout(() => { if (container.contains(toast)) container.removeChild(toast); }, 300);
+        }
+    }, 6000);
 }
 
 // Track active discover sync pollers
