@@ -5043,6 +5043,8 @@ for (const _src of SOURCE_ORDER) _gsState.configuredSources[_src] = true;
 
         input.addEventListener('focus', () => {
             bar.classList.add('active');
+            const aura = document.getElementById('gsearch-aura');
+            if (aura) aura.classList.add('active');
             _gsState.active = true;
             const shortcut = document.getElementById('gsearch-shortcut');
             if (shortcut) shortcut.style.display = 'none';
@@ -5125,18 +5127,22 @@ for (const _src of SOURCE_ORDER) _gsState.configuredSources[_src] = true;
 
 function _gsUpdateVisibility() {
     const bar = document.getElementById('gsearch-bar');
+    const aura = document.getElementById('gsearch-aura');
     if (!bar) return;
     // Hide on the Search page where the unified search already exists. Accept the
     // legacy 'downloads' id for callers that predate the page rename.
     const onSearchPage = typeof currentPage !== 'undefined' && (currentPage === 'search' || currentPage === 'downloads');
     bar.style.display = onSearchPage ? 'none' : '';
+    if (aura) aura.classList.toggle('hidden', onSearchPage);
     if (onSearchPage && _gsState.active) _gsDeactivate();
 }
 
 function _gsDeactivate() {
     const bar = document.getElementById('gsearch-bar');
+    const aura = document.getElementById('gsearch-aura');
     const shortcut = document.getElementById('gsearch-shortcut');
     if (bar) bar.classList.remove('active');
+    if (aura) aura.classList.remove('active');
     if (shortcut) shortcut.style.display = '';
     _gsState.active = false;
     _gsHideResults();

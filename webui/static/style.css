@@ -5336,6 +5336,38 @@ body.helper-mode-active #dashboard-activity-feed:hover {
    GLOBAL SEARCH BAR — Spotlight-style search from anywhere
    ================================================================================== */
 
+/* Ambient glow under the global search bar — a radial gradient that emanates
+   from the bar's position and tapers out toward the window corners. Pointer
+   events disabled so it never intercepts clicks; hidden on /search where the
+   bar itself is hidden. */
+.gsearch-aura {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 260px;
+    pointer-events: none;
+    z-index: 99990; /* below the bar (99998) but above most page content */
+    opacity: 0.55;
+    transition: opacity 0.4s ease, background 0.4s ease;
+    background:
+        radial-gradient(ellipse 620px 230px at 50% 100%,
+            rgba(var(--accent-rgb), 0.22) 0%,
+            rgba(var(--accent-rgb), 0.10) 32%,
+            rgba(var(--accent-rgb), 0.03) 62%,
+            transparent 85%);
+}
+.gsearch-aura.hidden { display: none; }
+.gsearch-aura.active {
+    opacity: 1;
+    background:
+        radial-gradient(ellipse 820px 280px at 50% 100%,
+            rgba(var(--accent-rgb), 0.40) 0%,
+            rgba(var(--accent-rgb), 0.18) 28%,
+            rgba(var(--accent-rgb), 0.05) 58%,
+            transparent 85%);
+}
+
 .gsearch-bar {
     position: fixed;
     bottom: 24px;
