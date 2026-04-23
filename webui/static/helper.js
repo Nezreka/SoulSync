@@ -917,17 +917,13 @@ const HELPER_CONTENT = {
         description: 'Search for music across your configured metadata sources and download from Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer.',
         docsId: 'search'
     },
-    '#toggle-download-manager-btn': {
-        title: 'Toggle Download Manager',
-        description: 'Show or hide the download manager panel on the right side. The panel shows active downloads, finished downloads, and queue management.',
-        docsId: 'search-manager'
-    },
-    '.search-mode-toggle': {
-        title: 'Search Mode',
-        description: 'Switch between Enhanced Search (categorized metadata results with album art) and Basic Search (raw Soulseek results with detailed file info and filters).',
+    '.search-source-picker-container': {
+        title: 'Search From',
+        description: 'Pick which metadata source to search. "All sources (Auto)" keeps the multi-source fan-out behavior; any specific source hits only that provider. "Soulseek (raw files)" switches to raw P2P file search with quality filters.',
         tips: [
-            'Enhanced: shows Artists, Albums, Singles, Tracks from your metadata source',
-            'Basic: shows raw Soulseek P2P results with format, bitrate, size, uploader info'
+            'Auto: searches your configured primary source plus library matches',
+            'Spotify / Apple Music / Deezer / Discogs / Hydrabase / MusicBrainz: metadata-only results for that provider',
+            'Soulseek: raw file results with format, bitrate, size, uploader — same as the old Basic Search'
         ],
         docsId: 'search-enhanced'
     },
@@ -955,7 +951,7 @@ const HELPER_CONTENT = {
     },
     '#enh-spotify-artists-section': {
         title: 'Artists',
-        description: 'Artists from your metadata source matching the search. Click to view their full discography on the Artists page.',
+        description: 'Artists from your metadata source matching the search. Click one to open their discography.',
     },
     '#enh-albums-section': {
         title: 'Albums',
@@ -1010,33 +1006,7 @@ const HELPER_CONTENT = {
         docsId: 'search-basic'
     },
 
-    // Download Manager Side Panel
-    '.downloads-side-panel': {
-        title: 'Download Manager',
-        description: 'Shows all active and completed downloads. Manage downloads, clear completed items, or cancel active transfers.',
-        docsId: 'search-manager'
-    },
-    '.controls-panel': {
-        title: 'Download Controls',
-        description: 'Overview of active and finished download counts. Clear Completed removes finished items from the list. Clear Current cancels all active downloads.',
-        docsId: 'search-manager'
-    },
-    '.controls-panel__clear-btn': {
-        title: 'Clear Completed',
-        description: 'Remove all finished downloads from the download manager list. Doesn\'t affect the downloaded files — they\'re already in your library.',
-    },
-    '.controls-panel__cancel-all-btn': {
-        title: 'Clear Current',
-        description: 'Cancel all active downloads in progress. Files that were partially downloaded will be cleaned up.',
-    },
-    '#active-queue': {
-        title: 'Download Queue',
-        description: 'Active downloads in progress. Each item shows track name, format, download speed, progress, and a cancel button.',
-    },
-    '#finished-queue': {
-        title: 'Finished Downloads',
-        description: 'Completed downloads. Shows track name, format, file size, and final status (success or error).',
-    },
+    // (Download Manager side-panel was retired — see the dedicated Downloads page)
 
     // ─── DISCOVER PAGE ────────────────────────────────────────────────
 
@@ -1290,145 +1260,41 @@ const HELPER_CONTENT = {
         description: 'Personalized mixes generated from your listening patterns. Each mix focuses on a different aspect of your taste — genre clusters, mood, or artist groups.',
     },
 
-    // ─── ARTISTS PAGE ─────────────────────────────────────────────────
+    // ─── ARTIST DETAIL PAGE ───────────────────────────────────────────
+    // (The standalone /artist-detail page is the unified destination for
+    // both library and metadata-source artists. The inline /artists page
+    // was retired in the unification project.)
 
-    // Search State
-    '.artists-search-state': {
-        title: 'Artist Search',
-        description: 'Search for any artist by name. Results show artist cards with images — click one to view their full discography.',
-        docsId: 'art-search'
-    },
-    '#artists-search-input': {
-        title: 'Search Input',
-        description: 'Type an artist name to search across your active metadata source. Results appear as you type with a short debounce delay.',
-        docsId: 'art-search'
-    },
-    '#artists-search-status': {
-        title: 'Search Status',
-        description: 'Shows the current search state — ready, searching, or result count.',
-    },
-
-    // Results State
-    '#artists-results-state': {
-        title: 'Search Results',
-        description: 'Artist cards matching your search. Click any artist to view their full discography with albums, singles, and EPs.',
-        docsId: 'art-search'
-    },
-    '#artists-back-button': {
-        title: 'Back to Search',
-        description: 'Return to the initial search view to start a new artist search.',
-    },
-    '#artists-cards-container': {
-        title: 'Artist Cards',
-        description: 'Each card shows an artist from your metadata source. Click to load their full discography.',
-    },
-
-    // Artist Detail — Hero
-    '#artists-hero-section': {
-        title: 'Artist Profile',
-        description: 'Rich artist profile with photo, name, genres, bio, and service links. Data comes from your metadata cache and library enrichment (Last.fm, Spotify, MusicBrainz, etc.).',
-        tips: [
-            'Service badges link to the artist on each platform',
-            'Bio comes from Last.fm enrichment if the artist is in your library',
-            'Listener and play count stats from Last.fm',
-            'Genre pills combine metadata source genres with Last.fm tags'
-        ],
-        docsId: 'art-detail'
-    },
-    '.artists-hero-name': {
-        title: 'Artist Name',
-        description: 'The artist\'s official name from your metadata source.',
-    },
-    '.artists-hero-badges': {
-        title: 'Service Badges',
-        description: 'Links to this artist on external services. Click any badge to open the artist\'s page on that platform. Badges appear for services where this artist has been enriched.',
-        tips: [
-            'Spotify, MusicBrainz, Deezer, iTunes, Last.fm, Genius, Tidal, Qobuz',
-            'Badges only appear when the artist has an ID for that service',
-            'Data comes from library enrichment workers'
-        ]
-    },
-    '.artists-hero-genres': {
-        title: 'Genres',
-        description: 'Genre tags for this artist. Combines genres from your metadata source with Last.fm tags for comprehensive coverage.',
-    },
-    '.artists-hero-bio': {
-        title: 'Artist Bio',
-        description: 'Biography from Last.fm. Click "Read more" to expand. Only available for artists in your library that have been enriched by the Last.fm worker.',
-    },
-    '.artists-hero-stats': {
-        title: 'Listener Stats',
-        description: 'Last.fm listener count and total play count. Shows how popular this artist is globally on Last.fm.',
-    },
-    '#artist-detail-watchlist-btn': {
-        title: 'Watchlist',
-        description: 'Add or remove this artist from your Watchlist. Watched artists are scanned for new releases which get added to your Wishlist for download.',
-        docsId: 'art-watchlist'
-    },
-    '#artist-detail-watchlist-settings-btn': {
-        title: 'Watchlist Settings',
-        description: 'Configure which release types to monitor for this artist — Albums, EPs, Singles, and content filters (live, remixes, acoustic, compilations).',
-        docsId: 'art-settings'
-    },
-
-    // Discography Tabs
-    '.artist-detail-tabs': {
-        title: 'Discography Tabs',
-        description: 'Switch between Albums and Singles & EPs. Each tab shows the artist\'s releases in that category.',
-        docsId: 'art-detail'
-    },
-    '#albums-tab': {
-        title: 'Albums',
-        description: 'Full-length studio albums by this artist. Click any album card to open the download modal.',
-    },
-    '#singles-tab': {
-        title: 'Singles & EPs',
-        description: 'Singles and extended plays by this artist. Includes single tracks, 2-3 track releases, and EPs.',
-    },
-
-    // Album Cards
-    '#album-cards-container': {
-        title: 'Album Grid',
-        description: 'Album cards with cover art. Click any album to open the download modal where you can select tracks, check library matches, and start downloading.',
-        tips: [
-            'Cover art fills the card with album name overlaid at the bottom',
-            'Completion badges show ownership status (Complete, Partial, Missing)',
-            'Cards check your library automatically after loading'
-        ],
-        docsId: 'art-detail'
-    },
-    '#singles-cards-container': {
-        title: 'Singles Grid',
-        description: 'Single and EP cards. Same behavior as albums — click to open the download modal.',
-    },
     '.album-card': {
         title: 'Release Card',
         description: 'An album, single, or EP from this artist. Click to open the download modal with track selection, library matching, and download controls.',
         tips: [
-            'Completion overlay shows how many tracks you own',
-            'Green = complete, Yellow = partial, Red = missing',
-            '"Checking..." means library match is in progress'
+            'Big-photo cover art fills the card with title and year overlaid at the bottom',
+            'Completion badge (top-right) shows ownership status: ✓ Owned / N/M / Missing',
+            'Library artists check ownership in the background — badge starts as "Checking…" then resolves'
         ]
     },
     '.completion-overlay': {
-        title: 'Completion Status',
-        description: 'Shows how many tracks from this release are in your library. "Complete" means you have all tracks, "Partial" shows owned/total, "Missing" means none found.',
+        title: 'Completion Badge',
+        description: 'Top-right badge showing ownership state for library artists. ✓ Owned = full match, N/M = partial (owned/total tracks), Missing = no match. Source artists don\'t show this badge.',
     },
-
-    // Similar Artists
-    '#similar-artists-section': {
+    '#ad-similar-artists-section': {
         title: 'Similar Artists',
-        description: 'Artists with a similar sound, streamed in real-time from your metadata source. Click any card to view that artist\'s discography.',
+        description: 'Artists with a similar sound, fetched from MusicMap by name. Works for both library and source artists. Click any bubble to navigate to that artist\'s detail page.',
         tips: [
-            'Cards load progressively as the server finds matches',
-            'Click a card to navigate to that artist\'s discography',
-            'Images are lazy-loaded for performance'
+            'Bubbles load progressively',
+            'Click navigates to the standalone artist-detail page'
         ],
         docsId: 'art-detail'
     },
     '.similar-artist-bubble': {
         title: 'Similar Artist',
         description: 'An artist similar to the one you\'re viewing. Click to load their discography and browse their releases.',
+    },
+    '.search-source-picker-container': {
+        title: 'Search Source',
+        description: 'Pick which metadata source the Search page queries. "All sources (Auto)" fans out across configured providers (the legacy default); pick a specific source to constrain the lookup. "Soulseek (raw files)" routes to the file-search pipeline that used to be the Basic mode.',
+        docsId: 'search'
     },
 
     // ─── AUTOMATIONS PAGE ─────────────────────────────────────────────
@@ -2378,9 +2244,9 @@ function toggleHelperMode() {
 const PAGE_TOUR_MAP = {
     'dashboard':   'dashboard',
     'sync':        'sync-playlist',
-    'downloads':   'first-download',
+    'search':      'first-download',
+    'downloads':   'first-download',  // legacy id — the Search page used to be called 'downloads'
     'discover':    'discover',
-    'artists':     'artists-browse',
     'automations': 'automations',
     'library':     'library',
     'stats':       'stats',
@@ -2542,15 +2408,11 @@ const HELPER_TOURS = {
         description: 'Step-by-step guide to downloading your first album.',
         icon: '⬇️',
         steps: [
-            // Search page layout (top-to-bottom, elements visible on load)
-            { page: 'downloads', selector: '.search-mode-toggle', title: 'Search Modes', description: 'Two search modes: Enhanced Search (default) shows categorized results from your metadata source. Classic Search queries your download source directly for raw file results.' },
-            { page: 'downloads', selector: '.enhanced-search-input-wrapper', title: 'Search for Music', description: 'Type an artist or album name here. Results appear in categorized sections — Artists, Albums, Singles/EPs, and Tracks. Try searching for your favorite artist now!' },
-            { page: 'downloads', selector: '#toggle-download-manager-btn', title: 'Download Manager', description: 'This button toggles the download manager panel on the right side. It shows active downloads with progress bars, queued items, and completed downloads with their file paths.' },
-
-            // What results look like (describe since they appear after searching)
-            { page: 'downloads', selector: '#enh-results-container', title: 'Search Results', description: 'After searching, results appear here organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
-            { page: 'downloads', selector: '.search-mode-toggle', title: 'Downloading an Album', description: 'Click any album card to open the download modal. You\'ll see the tracklist, quality options, and a big "Download Album" button. Individual tracks have a play button to preview before downloading.' },
-            { page: 'downloads', selector: '.enhanced-search-input-wrapper', title: 'That\'s It!', description: 'Search, click, download — it\'s that simple. Albums go to your configured download path, get tagged with metadata, and sync to your media server automatically. 🎉' },
+            { page: 'search', selector: '.search-source-picker-container', title: 'Pick a Search Source', description: '"All sources (Auto)" fans out across every provider. Pick a specific one (Spotify, Apple Music, Deezer, etc.) to get results from just that catalog. "Soulseek (raw files)" is the old Basic mode — raw P2P file results with quality filters.' },
+            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Search for Music', description: 'Type an artist or album name here. Results appear in categorized sections — Artists, Albums, Singles/EPs, and Tracks. Try searching for your favorite artist now!' },
+            { page: 'search', selector: '#enh-results-container', title: 'Search Results', description: 'After searching, results appear organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
+            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Downloading an Album', description: 'Click any album card to open the download modal. You\'ll see the tracklist, quality options, and a big "Download Album" button. Individual tracks have a play button to preview before downloading.' },
+            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'That\'s It!', description: 'Search, click, download. Albums go to your configured download path, get tagged with metadata, and sync to your media server automatically. Active downloads live on the dedicated Downloads page.' },
         ]
     },
     'sync-playlist': {
@@ -2576,20 +2438,8 @@ const HELPER_TOURS = {
             { page: 'sync', selector: '.sync-sidebar', title: 'Sync Controls', description: 'The command center. Select playlists with checkboxes on the left, then click "Start Sync" here. Progress bars, match counts, and logs update in real-time. That\'s the sync flow! 🎉' },
         ]
     },
-    'artists-browse': {
-        title: 'Browse Artists',
-        description: 'Search for artists and explore their discography.',
-        icon: '🎤',
-        steps: [
-            // Artists list page (visible on load)
-            { page: 'artists', selector: '#artists-search-input', title: 'Search for an Artist', description: 'Type any artist name to search your metadata source. Results appear instantly as cards below. Click one to open their full profile and discography.' },
-
-            // Artist detail page (describe what they'll see after clicking)
-            { page: 'artists', selector: '#artists-search-input', title: 'Artist Profile', description: 'After clicking an artist, you\'ll see a rich hero section with their photo, bio, genres, listening stats from Last.fm, and links to external services like Spotify and MusicBrainz.' },
-            { page: 'artists', selector: '#artists-search-input', title: 'Discography & Downloads', description: 'Below the hero, tabs show Albums and Singles/EPs. Click any release to open the download modal. The "Similar Artists" section at the bottom shows recommendations — click any to keep exploring.' },
-            { page: 'artists', selector: '#artists-search-input', title: 'Try It Now!', description: 'Search for your favorite artist above to see their full profile. From there you can download albums, explore similar artists, and add them to your watchlist. 🎉' },
-        ]
-    },
+    // 'artists-browse' tour retired — the Artists sidebar entry was replaced by the
+    // unified Search page (see the first-download tour for the new flow).
     'automations': {
         title: 'Build an Automation',
         description: 'Create automated workflows with triggers and actions.',
@@ -3111,7 +2961,7 @@ const SETUP_STEPS = [
     { id: 'download-source', label: 'Set Up Download Source',       desc: 'Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer',  icon: '⬇️', page: 'settings', settingsTab: 'downloads' },
     { id: 'download-paths',  label: 'Configure Download Paths',     desc: 'Where music is saved and organized',                 icon: '📁', page: 'settings', settingsTab: 'downloads' },
     { id: 'first-scan',      label: 'Run First Library Scan',       desc: 'Import your existing collection from media server',  icon: '🔍', page: 'dashboard', selector: '#db-updater-card' },
-    { id: 'first-download',  label: 'Download Your First Track',    desc: 'Search for and download something',                  icon: '🎶', page: 'downloads' },
+    { id: 'first-download',  label: 'Download Your First Track',    desc: 'Search for and download something',                  icon: '🎶', page: 'search' },
     { id: 'watchlist',       label: 'Add an Artist to Watchlist',   desc: 'Monitor for new releases automatically',             icon: '👁️', page: 'library' },
     { id: 'automation',      label: 'Create an Automation',         desc: 'Schedule tasks and build workflows',                 icon: '🤖', page: 'automations' },
 ];
@@ -3218,14 +3068,8 @@ async function _checkSetupStatus() {
             results['first-download'] = Date.now();
             _markSetupComplete('first-download');
         }
-        // Also check the finished queue (if on downloads page)
-        if (!results['first-download']) {
-            const fq = document.querySelector('#finished-queue');
-            if (fq && fq.querySelector('.download-item')) {
-                results['first-download'] = Date.now();
-                _markSetupComplete('first-download');
-            }
-        }
+        // (The legacy #finished-queue side-panel was retired; the dashboard stat card
+        // above is now the single source of truth for the first-download milestone.)
     }
 
     return results;
@@ -3598,7 +3442,22 @@ function closeHelperSearch() {
 // WHAT'S NEW (Phase 6)
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Entries tagged with `unreleased: true` are accumulating under a version label
+// but won't display until the build version catches up. The Search/Artists
+// unification project stays folded here at 2.40 until the whole thing ships.
 const WHATS_NEW = {
+    '2.40': [
+        // --- Search & Artists unification (in progress, not yet released) ---
+        { date: 'Unreleased — Search & Artists unification', unreleased: true },
+        { title: 'Search Source Picker', desc: 'The Search page\'s Enhanced/Basic toggle is replaced by a single "Search from" dropdown at the top — pick All sources (Auto), Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, or Soulseek (raw files). Auto keeps today\'s multi-source fan-out; picking a specific source hits only that provider so there are no more surprise Spotify rate-limit hits from flows that didn\'t need Spotify. "Soulseek" routes to the raw-file search (what "Basic" used to do), so one picker now covers both old modes. Loading text reflects the selected source', page: 'search', unreleased: true },
+        { title: 'Explicit Source Selection on /api/enhanced-search', desc: 'The enhanced-search endpoint now accepts an optional `source` body param (spotify, itunes, deezer, discogs, hydrabase, musicbrainz, auto). When a specific source is chosen, only that provider is queried and db_artists (local library matches) still come back. Cache keys isolate per-source so single-source and multi-source results don\'t collide. Omitted or `auto` preserves the old multi-source fan-out behavior unchanged — nothing breaks for existing callers', page: 'search', unreleased: true },
+        { title: 'Shared Enhanced-Search Fetch Helper', desc: 'Internal refactor — the Search page dropdown and the global search widget now route through one shared enhancedSearchFetch helper in search.js instead of duplicating the POST boilerplate. Zero UX change, but it means any future source-picker tweak only needs wiring in one place', page: 'search', unreleased: true },
+        { title: 'Search Page Renamed to /search', desc: 'The Search page\'s internal id is now "search" instead of the confusing "downloads" (which clashed with the actual Downloads page). Sidebar label unchanged. URL is now /search; /downloads still resolves so old bookmarks keep working. Profile ACL "Page Access" now saves as "search"; existing profiles with "downloads" in allowed_pages still resolve through a legacy-compat check', page: 'search', unreleased: true },
+        { title: 'Embedded Download Manager Removed from Search Page', desc: 'The Search page used to carry a second copy of the Download Manager (active + finished queues, clear/cancel-all buttons) that was hidden by default and duplicated the dedicated Downloads page. That duplicate is gone — toggle button, side-panel HTML, and its 1-second polling loop all removed. About 330 lines of dead code cleaned up. The dedicated Downloads sidebar page is now the single downloads UI', page: 'search', unreleased: true },
+        { title: 'Artists Sidebar Entry Retired — Use Search Instead', desc: 'Cin flagged that "Artists" in the sidebar read like a library section but was actually a dedicated artist-search page, duplicating what the unified Search already does. The sidebar entry is gone. New flow: Sidebar → Search → type artist name → click their result. "Browse Artists" on the empty Watchlist page and "View artist from Wishlist" now open Search pre-filled with the artist\'s name. Removed "Artists" from profile Home Page + Page Access options. Deep link to /artists still resolves so old bookmarks keep working — the page just isn\'t promoted anywhere', page: 'search', unreleased: true },
+        { title: 'Artist Detail Back Button Fallback', desc: 'The back button on the Artists-page inline detail view used to dump users on an empty "Search for an artist..." screen when they arrived from outside the Artists page — a dead end now that Artists isn\'t in the sidebar. If you searched inside the Artists page, back still returns to your results list. Otherwise (arriving from Search, Discover, Watchlist, etc.), back uses the browser history to land you on whichever page you came from. Falls back to the Search page only when there\'s no browser history to go back to (the natural place to find another artist)', page: 'search', unreleased: true },
+        { title: 'Interactive Help Updated for Unified Search', desc: 'The click-for-help annotations and the "Your First Download" guided tour were rewritten for the new Search page. Stale annotations pointing at removed elements (Basic/Enhanced toggle button, side-panel queues, download-manager controls) are deleted. The first-download tour now runs on /search and opens with the source picker. PAGE_TOUR_MAP accepts both "search" and the legacy "downloads" id so old bookmarks still match a tour. Retired the standalone "Browse Artists" tour', page: 'help', unreleased: true },
+    ],
     '2.39': [
         // --- April 22, 2026 ---
         { date: 'April 22, 2026' },
@@ -3802,7 +3661,13 @@ function _getCurrentVersion() {
 }
 
 function _getLatestWhatsNewVersion() {
-    const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
+    // Only surface entries whose version number is <= the current build. Entries
+    // sitting at higher versions are unreleased work-in-progress and shouldn't
+    // flag as "new" in the helper badge until the build catches up.
+    const buildVer = parseFloat(_getCurrentVersion()) || 2.39;
+    const versions = Object.keys(WHATS_NEW)
+        .filter(v => (parseFloat(v) || 0) <= buildVer)
+        .sort((a, b) => parseFloat(b) - parseFloat(a));
     return versions[0] || '2.39';
 }
 
@@ -3891,8 +3756,11 @@ function _openFullChangelog() {
 }
 
 function _showOlderNotes() {
-    // Cycle to next older version in the what's new panel
-    const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
+    // Cycle to next older version in the what's new panel (skip unreleased entries)
+    const buildVer = parseFloat(_getCurrentVersion()) || 2.39;
+    const versions = Object.keys(WHATS_NEW)
+        .filter(v => (parseFloat(v) || 0) <= buildVer)
+        .sort((a, b) => parseFloat(b) - parseFloat(a));
     const panel = _helperPopover;
     if (!panel) return;
     const currentTitle = panel.querySelector('.helper-popover-title');

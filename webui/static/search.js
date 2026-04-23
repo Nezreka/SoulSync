@@ -1,6 +1,22 @@
 // SEARCH FUNCTIONALITY
 // ===============================
 
+// Shared enhanced-search fetch used by the Search page and the global widget.
+// Pass source to restrict results to a single metadata provider; omit or pass
+// null/'auto' to let the backend fan out across all configured sources.
+async function enhancedSearchFetch(query, { source = null, signal = null } = {}) {
+    const body = { query };
+    if (source && source !== 'auto') body.source = source;
+    const res = await fetch('/api/enhanced-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: signal || undefined,
+    });
+    if (!res.ok) throw new Error(`Enhanced search failed: ${res.status}`);
+    return res.json();
+}
+
 function initializeSearch() {
     // --- FIX: Corrected the element IDs to match the HTML ---
     const searchInput = document.getElementById('downloads-search-input');
@@ -40,41 +56,38 @@ function initializeSearchModeToggle() {
         return;
     }
 
-    const toggleContainer = document.querySelector('.search-mode-toggle');
-    const modeBtns = document.querySelectorAll('.search-mode-btn');
+    const sourceSelect = document.getElementById('search-source-select');
     const basicSection = document.getElementById('basic-search-section');
     const enhancedSection = document.getElementById('enhanced-search-section');
 
-    if (!toggleContainer || !modeBtns.length || !basicSection || !enhancedSection) {
-        console.warn('Search mode toggle elements not found');
+    if (!sourceSelect || !basicSection || !enhancedSection) {
+        console.warn('Search source picker elements not found');
         return;
     }
 
     searchModeToggleInitialized = true;
-    console.log('✅ Initializing search mode toggle (first time only)');
+    console.log('✅ Initializing search source picker (first time only)');
 
-    modeBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const mode = btn.dataset.mode;
+    // Current source selection — 'auto' (fan-out) by default. Soulseek routes
+    // to the raw-file basic search; everything else routes to enhanced.
+    let currentSearchSource = sourceSelect.value || 'auto';
 
-            // Update button active states
-            modeBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+    const applySourceSelection = (value) => {
+        currentSearchSource = value;
+        if (value === 'soulseek') {
+            basicSection.classList.add('active');
+            enhancedSection.classList.remove('active');
+        } else {
+            basicSection.classList.remove('active');
+            enhancedSection.classList.add('active');
+        }
+    };
 
-            // Update toggle slider position
-            toggleContainer.setAttribute('data-active', mode);
+    applySourceSelection(currentSearchSource);
 
-            // Toggle sections
-            if (mode === 'basic') {
-                basicSection.classList.add('active');
-                enhancedSection.classList.remove('active');
-                console.log('Switched to basic search mode');
-            } else {
-                basicSection.classList.remove('active');
-                enhancedSection.classList.add('active');
-                console.log('Switched to enhanced search mode');
-            }
-        });
+    sourceSelect.addEventListener('change', (e) => {
+        applySourceSelection(e.target.value);
+        console.log('Search source →', currentSearchSource);
     });
 
     // Initialize enhanced search
@@ -191,7 +204,9 @@ function initializeSearchModeToggle() {
         const dropdown = document.getElementById('enhanced-dropdown');
         if (dropdown && !dropdown.classList.contains('hidden')) {
             const isClickInside = e.target.closest('.enhanced-search-input-wrapper');
-            if (!isClickInside) {
+            // Modal sits above the dropdown; closing it shouldn't dismiss results.
+            const isClickInModal = e.target.closest('.download-missing-modal');
+            if (!isClickInside && !isClickInModal) {
                 hideDropdown();
             }
         }
@@ -205,7 +220,14 @@ function initializeSearchModeToggle() {
         showDropdown();
         const loadingText = document.getElementById('enhanced-loading-text');
         if (loadingText) {
-            loadingText.textContent = `Searching across ${currentMusicSourceName} and your library...`;
+            const _sourceLabelMap = {
+                spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer',
+                discogs: 'Discogs', hydrabase: 'Hydrabase', musicbrainz: 'MusicBrainz',
+            };
+            const _sourceName = currentSearchSource && currentSearchSource !== 'auto'
+                ? (_sourceLabelMap[currentSearchSource] || currentSearchSource)
+                : currentMusicSourceName;
+            loadingText.textContent = `Searching across ${_sourceName} and your library...`;
         }
         loadingState.classList.remove('hidden');
         emptyState.classList.add('hidden');
@@ -225,16 +247,10 @@ function initializeSearchModeToggle() {
         _enhancedSearchData = { db_artists: [], primary_source: null, sources: {}, searchId, query };
 
         try {
-            const response = await fetch('/api/enhanced-search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query }),
-                signal: abortController.signal
+            const data = await enhancedSearchFetch(query, {
+                source: currentSearchSource,
+                signal: abortController.signal,
             });
-
-            if (!response.ok) throw new Error('Search failed');
-
-            const data = await response.json();
             console.log('Enhanced results:', data);
 
             // Store multi-source state
@@ -322,22 +338,11 @@ function initializeSearchModeToggle() {
                 name: artist.name,
                 meta: 'Artist',
                 badge: sourceBadge,
-                onClick: async () => {
+                onClick: () => {
                     const sourceOverride = _activeSearchSource;
                     console.log(`🎵 Opening artist detail: ${artist.name} (ID: ${artist.id}, source: ${sourceOverride})`);
                     hideDropdown();
-
-                    // Navigate to Artists page
-                    navigateToPage('artists');
-
-                    // Small delay to let the page load
-                    await new Promise(resolve => setTimeout(resolve, 100));
-
-                    // Load the artist details with source context
-                    await selectArtistForDetail(artist, {
-                        source: sourceOverride,
-                        plugin: artist.external_urls?.hydrabase_plugin,
-                    });
+                    navigateToArtistDetail(artist.id, artist.name, sourceOverride || null);
                 }
             })
         );
@@ -919,7 +924,6 @@ function initializeSearchModeToggle() {
     async function handleEnhancedSearchAlbumClick(album) {
         console.log(`💿 Enhanced search album clicked: ${album.name} by ${album.artist}`);
 
-        hideDropdown();
         showLoadingOverlay('Loading album...');
 
         try {
@@ -1042,7 +1046,6 @@ function initializeSearchModeToggle() {
     async function streamEnhancedSearchTrack(track) {
         console.log(`▶️ Stream enhanced search track: ${track.name} by ${track.artist}`);
 
-        hideDropdown();
         showLoadingOverlay(`Searching for ${track.name}...`);
 
         try {
@@ -1100,7 +1103,6 @@ function initializeSearchModeToggle() {
     async function handleEnhancedSearchTrackClick(track) {
         console.log(`🎵 Enhanced search track clicked: ${track.name} by ${track.artist}`);
 
-        hideDropdown();
         showLoadingOverlay('Loading track...');
 
         try {
@@ -1316,9 +1318,9 @@ function initializeSearchModeToggle() {
             dropdown.classList.remove('hidden');
             updateToggleButtonState();
         }
-        // Hide the page header + search mode toggle to reclaim space
-        const header = document.querySelector('#downloads-page .downloads-header');
-        const modeToggle = document.querySelector('.search-mode-toggle-container');
+        // Hide the page header + source picker to reclaim space
+        const header = document.querySelector('#search-page .downloads-header');
+        const modeToggle = document.querySelector('.search-source-picker-container');
         const slskdPlaceholder = document.querySelector('#enhanced-search-section .search-results-container');
         if (header) header.classList.add('enh-results-active-hide');
         if (modeToggle) modeToggle.classList.add('enh-results-active-hide');
@@ -1332,8 +1334,8 @@ function initializeSearchModeToggle() {
             updateToggleButtonState();
         }
         // Restore hidden elements
-        const header = document.querySelector('#downloads-page .downloads-header');
-        const modeToggle = document.querySelector('.search-mode-toggle-container');
+        const header = document.querySelector('#search-page .downloads-header');
+        const modeToggle = document.querySelector('.search-source-picker-container');
         const slskdPlaceholder = document.querySelector('#enhanced-search-section .search-results-container');
         if (header) header.classList.remove('enh-results-active-hide');
         if (modeToggle) modeToggle.classList.remove('enh-results-active-hide');

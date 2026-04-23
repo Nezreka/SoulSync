@@ -420,7 +420,7 @@ const DOCS_SECTIONS = [
                 <h3 class="docs-subsection-title">How to: Set Up Auto-Downloads</h3>
                 <p class="docs-text"><strong>Goal:</strong> Automatically download new releases from your favorite artists without manual intervention.</p>
                 <ol class="docs-steps">
-                    <li><strong>Add artists to your Watchlist</strong> &mdash; Search for artists on the Artists page and click the Watch button on each one</li>
+                    <li><strong>Add artists to your Watchlist</strong> &mdash; Find artists via the Search page (or click an artist anywhere in the app), then click the Watch button on the artist detail page</li>
                     <li><strong>Go to Automations</strong> &mdash; The built-in "Auto-Scan Watchlist" automation checks for new releases every 24 hours</li>
                     <li><strong>Enable "Auto-Process Wishlist"</strong> &mdash; This automation picks up new releases found by the scan and downloads them every 30 minutes</li>
                     <li><strong>Done!</strong> &mdash; New releases from watched artists are automatically found, queued, downloaded, tagged, and added to your library</li>

@@ -634,16 +634,7 @@ function _navigateToArtistFromModal(artistId, artistName, imageUrl, source, play
     if (!artistName) return;
     // Close the download modal
     if (playlistId) closeDownloadMissingModal(playlistId);
-    // Navigate to Artists page and load discography
-    navigateToPage('artists');
-    setTimeout(() => {
-        // If we have an artist ID, use it directly
-        // If not, search by name — selectArtistForDetail handles both
-        selectArtistForDetail(
-            { id: artistId || artistName, name: artistName, image_url: imageUrl || '' },
-            source ? { source: source } : undefined
-        );
-    }, 200);
+    navigateToArtistDetail(artistId || artistName, artistName, source || null);
 }
 
 async function closeDownloadMissingModal(playlistId) {
@@ -4267,335 +4258,7 @@ function updateModalSyncProgress(playlistId, progress) {
 }
 
 
-// Download tracking state management - matching GUI functionality
-let activeDownloads = {};
-let finishedDownloads = {};
-let downloadStatusInterval = null;
-let isDownloadPollingActive = false;
-
-async function loadDownloadsData() {
-    // Downloads page loads search results dynamically
-    console.log('Downloads page loaded');
-
-    // Event listeners are already set up in initializeSearch() - don't duplicate them
-    const clearButton = document.querySelector('.controls-panel__clear-btn');
-    const cancelAllButton = document.querySelector('.controls-panel__cancel-all-btn');
-
-    if (clearButton) {
-        clearButton.addEventListener('click', clearFinishedDownloads);
-    }
-    if (cancelAllButton) {
-        cancelAllButton.addEventListener('click', cancelAllDownloads);
-    }
-
-    // Start sophisticated polling system (1-second interval like GUI)
-    startDownloadPolling();
-
-    // Initialize tab management
-    initializeDownloadTabs();
-}
-
-function startDownloadPolling() {
-    if (isDownloadPollingActive) return;
-
-    console.log('Starting download status polling (1-second interval)');
-    isDownloadPollingActive = true;
-
-    // Initial call
-    updateDownloadQueues();
-
-    // Start 1-second polling (matching GUI's 1000ms timer)
-    downloadStatusInterval = setInterval(updateDownloadQueues, 1000);
-}
-
-function stopDownloadPolling() {
-    if (downloadStatusInterval) {
-        clearInterval(downloadStatusInterval);
-        downloadStatusInterval = null;
-    }
-    isDownloadPollingActive = false;
-    console.log('Stopped download status polling');
-}
-
-async function updateDownloadQueues() {
-    if (document.hidden) return; // Skip polling when tab is not visible
-    try {
-        const response = await fetch('/api/downloads/status');
-        const data = await response.json();
-
-        if (data.error) {
-            console.error("Error fetching download status:", data.error);
-            return;
-        }
-
-        const newActive = {};
-        const newFinished = {};
-
-        // Terminal states matching GUI logic
-        const terminalStates = ['Completed', 'Succeeded', 'Cancelled', 'Canceled', 'Failed', 'Errored'];
-
-        // Process transfers exactly like GUI
-        data.transfers.forEach(item => {
-            const isTerminal = terminalStates.some(state =>
-                item.state && item.state.includes(state)
-            );
-
-            if (isTerminal) {
-                newFinished[item.id] = item;
-            } else {
-                newActive[item.id] = item;
-            }
-        });
-
-        // Update global state
-        activeDownloads = newActive;
-        finishedDownloads = newFinished;
-
-        // Render both queues
-        renderQueue('active-queue', activeDownloads, true);
-        renderQueue('finished-queue', finishedDownloads, false);
-
-        // Update tab counts
-        updateTabCounts();
-
-        // Update stats in the side panel
-        updateDownloadStats();
-
-    } catch (error) {
-        // Only log errors occasionally to avoid console spam
-        if (Math.random() < 0.1) {
-            console.error("Failed to update download queues:", error);
-        }
-    }
-}
-
-function renderQueue(containerId, downloads, isActiveQueue) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-
-    const downloadIds = Object.keys(downloads);
-
-    if (downloadIds.length === 0) {
-        container.innerHTML = `<div class="download-queue__empty-message">${isActiveQueue ? 'No active downloads.' : 'No finished downloads.'}</div>`;
-        return;
-    }
-
-    let html = '';
-    for (const id of downloadIds) {
-        const item = downloads[id];
-
-        // Extract display title from filename
-        let title = 'Unknown File';
-        if (item.filename) {
-            // YouTube/Tidal filenames are encoded as "id||title"
-            if ((item.username === 'youtube' || item.username === 'tidal' || item.username === 'qobuz' || item.username === 'hifi') && item.filename.includes('||')) {
-                const parts = item.filename.split('||');
-                title = parts[1] || parts[0];  // Use title part, fallback to id
-            } else {
-                // Regular Soulseek filename - extract last part of path
-                title = item.filename.split(/[\\/]/).pop();
-            }
-        }
-
-        const progress = item.percentComplete || 0;
-        const bytesTransferred = item.bytesTransferred || 0;
-        const totalBytes = item.size || 0;
-        const speed = item.averageSpeed || 0;
-
-        // Format file size
-        const formatSize = (bytes) => {
-            if (!bytes) return 'Unknown size';
-            const units = ['B', 'KB', 'MB', 'GB'];
-            let size = bytes;
-            let unitIndex = 0;
-            while (size >= 1024 && unitIndex < units.length - 1) {
-                size /= 1024;
-                unitIndex++;
-            }
-            return `${size.toFixed(1)} ${units[unitIndex]}`;
-        };
-
-        // Format speed
-        const formatSpeed = (bytesPerSecond) => {
-            if (!bytesPerSecond || bytesPerSecond <= 0) return '';
-            return `${formatSize(bytesPerSecond)}/s`;
-        };
-
-        let actionButtonHTML = '';
-        if (isActiveQueue) {
-            // Active items get progress bar and cancel button
-            actionButtonHTML = `
-                <div class="download-item__progress-container">
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: ${progress}%;"></div>
-                    </div>
-                    <div class="progress-text">
-                        ${item.state} - ${progress.toFixed(1)}%
-                        ${speed > 0 ? `• ${formatSpeed(speed)}` : ''}
-                        ${totalBytes > 0 ? `• ${formatSize(bytesTransferred)} / ${formatSize(totalBytes)}` : ''}
-                    </div>
-                </div>
-                <button class="download-item__cancel-btn" onclick="cancelDownloadItem('${item.id}', '${item.username}')">✕ Cancel</button>
-            `;
-        } else {
-            // Finished items get status and open button
-            let statusClass = '';
-            if (item.state.includes('Cancelled')) statusClass = 'status--cancelled';
-            else if (item.state.includes('Failed') || item.state.includes('Errored')) statusClass = 'status--failed';
-            else if (item.state.includes('Completed') || item.state.includes('Succeeded')) statusClass = 'status--completed';
-
-            actionButtonHTML = `
-                <div class="download-item__status-container">
-                    <span class="download-item__status-text ${statusClass}">${item.state}</span>
-                </div>
-                <button class="download-item__open-btn" title="Cannot open folder from web browser" disabled>📁 Open</button>
-            `;
-        }
-
-        // Enrich with metadata from backend context (artist, album, artwork)
-        const meta = item._meta || {};
-        const sourceLabels = { youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', lidarr: 'Lidarr' };
-        const sourceBadge = sourceLabels[item.username] || item.username;
-
-        html += `
-            <div class="download-item" data-id="${item.id}">
-                <div class="download-item__art">
-                    ${meta.artwork_url
-                        ? `<img src="${meta.artwork_url}" alt="" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\'download-item__art-placeholder\\'>&#9835;</div>'">`
-                        : '<div class="download-item__art-placeholder">&#9835;</div>'}
-                </div>
-                <div class="download-item__info">
-                    <div class="download-item__title" title="${title}">${title}</div>
-                    ${meta.artist || meta.album ? `
-                        <div class="download-item__meta">
-                            ${meta.artist ? `<span>${escapeHtml(meta.artist)}</span>` : ''}
-                            ${meta.artist && meta.album ? '<span class="download-item__sep">&middot;</span>' : ''}
-                            ${meta.album ? `<span class="download-item__album">${escapeHtml(meta.album)}</span>` : ''}
-                        </div>
-                    ` : ''}
-                    <div class="download-item__badges">
-                        <span class="download-item__source">${sourceBadge}</span>
-                        ${meta.quality ? `<span class="download-item__quality">${escapeHtml(meta.quality)}</span>` : ''}
-                    </div>
-                </div>
-                <div class="download-item__content">
-                    ${actionButtonHTML}
-                </div>
-            </div>
-        `;
-    }
-    container.innerHTML = html;
-}
-
-function updateTabCounts() {
-    const activeCount = Object.keys(activeDownloads).length;
-    const finishedCount = Object.keys(finishedDownloads).length;
-
-    const activeTabBtn = document.querySelector('.tab-btn[data-tab="active-queue"]');
-    const finishedTabBtn = document.querySelector('.tab-btn[data-tab="finished-queue"]');
-
-    if (activeTabBtn) activeTabBtn.textContent = `Download Queue (${activeCount})`;
-    if (finishedTabBtn) finishedTabBtn.textContent = `Finished (${finishedCount})`;
-}
-
-function updateDownloadStats() {
-    const activeCount = Object.keys(activeDownloads).length;
-    const finishedCount = Object.keys(finishedDownloads).length;
-
-    const activeLabel = document.getElementById('active-downloads-label');
-    const finishedLabel = document.getElementById('finished-downloads-label');
-
-    if (activeLabel) activeLabel.textContent = `• Active Downloads: ${activeCount}`;
-    if (finishedLabel) finishedLabel.textContent = `• Finished Downloads: ${finishedCount}`;
-}
-
-function initializeDownloadTabs() {
-    const tabButtons = document.querySelectorAll('.tab-btn');
-    tabButtons.forEach(btn => {
-        btn.addEventListener('click', () => switchDownloadTab(btn));
-    });
-}
-
-function switchDownloadTab(button) {
-    const targetTabId = button.getAttribute('data-tab');
-
-    // Update buttons
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    button.classList.add('active');
-
-    // Update content panes
-    document.querySelectorAll('.download-queue').forEach(queue => queue.classList.remove('active'));
-    const targetQueue = document.getElementById(targetTabId);
-    if (targetQueue) targetQueue.classList.add('active');
-}
-
-async function cancelDownloadItem(downloadId, username) {
-    try {
-        const response = await fetch('/api/downloads/cancel', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ download_id: downloadId, username: username })
-        });
-        const result = await response.json();
-
-        if (result.success) {
-            showToast('Download cancelled', 'success');
-        } else {
-            showToast(`Failed to cancel: ${result.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Error cancelling download:', error);
-        showToast('Error sending cancel request', 'error');
-    }
-}
-
-async function clearFinishedDownloads() {
-    const finishedCount = Object.keys(finishedDownloads).length;
-    if (finishedCount === 0) {
-        showToast('No finished downloads to clear', 'error');
-        return;
-    }
-
-    try {
-        const response = await fetch('/api/downloads/clear-finished', {
-            method: 'POST'
-        });
-        const result = await response.json();
-
-        if (result.success) {
-            showToast('Finished downloads cleared', 'success');
-        } else {
-            showToast(`Failed to clear: ${result.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Error clearing finished downloads:', error);
-        showToast('Error sending clear request', 'error');
-    }
-}
-
-async function cancelAllDownloads() {
-    if (!await showConfirmDialog({ title: 'Cancel All Downloads', message: 'Cancel ALL active downloads and clear the transfer list? This cannot be undone.', confirmText: 'Cancel All', destructive: true })) {
-        return;
-    }
-
-    try {
-        const response = await fetch('/api/downloads/cancel-all', {
-            method: 'POST'
-        });
-        const result = await response.json();
-
-        if (result.success) {
-            showToast('All downloads cancelled and cleared', 'success');
-        } else {
-            showToast(`Failed to cancel: ${result.error}`, 'error');
-        }
-    } catch (error) {
-        console.error('Error cancelling all downloads:', error);
-        showToast('Error cancelling downloads', 'error');
-    }
-}
-
-// REPLACE the old performDownloadsSearch function with this new one.
+// Raw Soulseek file search (used by the 'Soulseek (raw files)' source picker option).
 async function performDownloadsSearch() {
     const query = document.getElementById('downloads-search-input').value.trim();
     if (!query) {
@@ -5454,10 +5117,11 @@ const _gsState = {
 function _gsUpdateVisibility() {
     const bar = document.getElementById('gsearch-bar');
     if (!bar) return;
-    // Hide on downloads page where enhanced search already exists
-    const onDownloads = typeof currentPage !== 'undefined' && currentPage === 'downloads';
-    bar.style.display = onDownloads ? 'none' : '';
-    if (onDownloads && _gsState.active) _gsDeactivate();
+    // Hide on the Search page where the unified search already exists. Accept the
+    // legacy 'downloads' id for callers that predate the page rename.
+    const onSearchPage = typeof currentPage !== 'undefined' && (currentPage === 'search' || currentPage === 'downloads');
+    bar.style.display = onSearchPage ? 'none' : '';
+    if (onSearchPage && _gsState.active) _gsDeactivate();
 }
 
 function _gsDeactivate() {
@@ -5492,13 +5156,7 @@ async function _gsPerformSearch(query) {
     results.classList.add('visible');
 
     try {
-        const res = await fetch('/api/enhanced-search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query }),
-            signal: _gsState.abortCtrl.signal,
-        });
-        const data = await res.json();
+        const data = await enhancedSearchFetch(query, { signal: _gsState.abortCtrl.signal });
         _gsState.data = data;
         _gsState.activeSource = data.primary_source || 'spotify';
         _gsState.sources = {};
@@ -5767,18 +5425,8 @@ function _gsSwitchSource(src) {
 
 function _gsClickArtist(id, name, isLibrary) {
     _gsDeactivate();
-    if (isLibrary) {
-        // Same as enhanced search: navigateToArtistDetail
-        navigateToArtistDetail(id, name);
-    } else {
-        // Same as enhanced search: navigate to Artists page + selectArtistForDetail
-        navigateToPage('artists');
-        setTimeout(() => {
-            selectArtistForDetail({ id, name, image_url: '' }, {
-                source: _gsState.activeSource || '',
-            });
-        }, 150);
-    }
+    const source = isLibrary ? null : (_gsState.activeSource || null);
+    navigateToArtistDetail(id, name, source);
 }
 
 async function _gsClickAlbum(albumId, albumName, artistName, imageUrl, source) {
@@ -5872,8 +5520,8 @@ async function _gsClickTrack(artistName, trackName, albumName, trackId, imageUrl
         );
     } catch (e) {
         console.error('Error opening track download:', e);
-        // Fallback: navigate to enhanced search
-        navigateToPage('downloads');
+        // Fallback: navigate to the unified Search page
+        navigateToPage('search');
         setTimeout(() => {
             const input = document.getElementById('enhanced-search-input');
             if (input) { input.value = `${artistName} ${trackName}`.trim(); input.dispatchEvent(new Event('input')); }
