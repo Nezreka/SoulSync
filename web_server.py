@@ -11335,159 +11335,60 @@ def _find_library_artist_for_source(database, source, source_artist_id, artist_n
 
 
 def _build_source_only_artist_detail(artist_id, artist_name, source):
-    """Synthesize an artist-detail response from a single metadata source for an
-    artist that isn't in the local library. Used when `/api/artist-detail/<id>`
-    is called with a `source` param and the library DB lookup misses.
+    """Thin wrapper around ``core.artist_source_detail.build_source_only_artist_detail``.
 
-    Enriches the response with whatever metadata we can pull on demand:
-      - Image URL via metadata_service helper
-      - Source-specific ID field (so the source's own service badge renders)
-      - Genres from the source's get_artist_info if available
-      - Last.fm bio + listeners + playcount + URL by artist name
+    Builds the per-source client bag from web_server's module globals (each
+    source's module-level client + Last.fm api key), forwards to the pure
+    implementation in ``core/``, and wraps the (dict, status) return in
+    ``jsonify``.
     """
-    from core.metadata_service import (
-        MetadataLookupOptions,
-        get_artist_detail_discography as _get_artist_detail_discography,
-        get_artist_image_url as _get_artist_image_url,
-    )
+    from core.artist_source_detail import build_source_only_artist_detail
 
-    resolved_name = (artist_name or artist_id or '').strip()
-
-    # 1. Image URL via the same helper /api/artist/<id>/image uses.
-    image_url = None
+    # Resolve the per-source clients defensively — the original inline code
+    # wrapped the whole source-side lookup in try/except so a failing
+    # client helper (e.g. Spotify auth probe during a rate-limit ban,
+    # Discogs client init error) would degrade gracefully to empty
+    # enrichment instead of 500-ing the request. Preserve that.
+    sp = None
+    dz = None
+    it = None
+    dc = None
     try:
-        image_url = _get_artist_image_url(artist_id, source_override=source)
+        if spotify_client and spotify_client.is_spotify_authenticated():
+            sp = spotify_client
     except Exception as e:
-        logger.debug(f"Artist image lookup failed for {source}:{artist_id}: {e}")
-
-    # 2. Source-side artist info (image, genres, followers depending on source).
-    source_genres = []
-    source_followers = None
+        logger.debug(f"Spotify client resolution failed: {e}")
     try:
-        if source == 'spotify' and spotify_client and spotify_client.is_spotify_authenticated():
-            sp_artist = spotify_client.get_artist(artist_id, allow_fallback=False)
-            if sp_artist:
-                source_genres = sp_artist.get('genres') or []
-                source_followers = (sp_artist.get('followers') or {}).get('total')
-                if not image_url and sp_artist.get('images'):
-                    image_url = sp_artist['images'][0].get('url')
-        elif source == 'deezer':
-            dz = _get_deezer_client()
-            if dz:
-                dz_artist = dz.get_artist_info(artist_id)
-                if dz_artist:
-                    source_genres = dz_artist.get('genres') or []
-                    source_followers = (dz_artist.get('followers') or {}).get('total')
-        elif source == 'itunes':
-            it = _get_itunes_client()
-            if it:
-                it_artist = it.get_artist(artist_id)
-                if it_artist:
-                    source_genres = it_artist.get('genres') or []
-        elif source == 'discogs':
-            token = config_manager.get('discogs.token', '')
-            if token:
-                dc = _get_discogs_client(token)
-                if dc:
-                    dc_artist = dc.get_artist(artist_id)
-                    if dc_artist:
-                        source_genres = dc_artist.get('genres') or []
+        dz = _get_deezer_client()
     except Exception as e:
-        logger.debug(f"Source-side artist info lookup failed for {source}:{artist_id}: {e}")
+        logger.debug(f"Deezer client resolution failed: {e}")
+    try:
+        it = _get_itunes_client()
+    except Exception as e:
+        logger.debug(f"iTunes client resolution failed: {e}")
+    try:
+        discogs_token = config_manager.get('discogs.token', '') or ''
+        if discogs_token:
+            dc = _get_discogs_client(discogs_token)
+    except Exception as e:
+        logger.debug(f"Discogs client resolution failed: {e}")
 
-    # 3. Last.fm enrichment by artist name — bio + listeners + playcount + url.
-    lastfm_bio = None
-    lastfm_listeners = None
-    lastfm_playcount = None
-    lastfm_url = None
-    if resolved_name:
-        try:
-            lastfm_api_key = config_manager.get('lastfm.api_key', '') or ''
-            if lastfm_api_key:
-                from core.lastfm_client import LastFMClient
-                lastfm = LastFMClient(api_key=lastfm_api_key)
-                lf_info = lastfm.get_artist_info(resolved_name)
-                if lf_info:
-                    bio_obj = lf_info.get('bio') or {}
-                    lastfm_bio = bio_obj.get('content') or bio_obj.get('summary')
-                    stats_obj = lf_info.get('stats') or {}
-                    if stats_obj.get('listeners'):
-                        try:
-                            lastfm_listeners = int(stats_obj['listeners'])
-                        except (ValueError, TypeError):
-                            pass
-                    if stats_obj.get('playcount'):
-                        try:
-                            lastfm_playcount = int(stats_obj['playcount'])
-                        except (ValueError, TypeError):
-                            pass
-                    lastfm_url = lf_info.get('url')
-        except Exception as e:
-            logger.debug(f"Last.fm enrichment failed for {resolved_name}: {e}")
+    try:
+        lastfm_api_key = config_manager.get('lastfm.api_key', '') or None
+    except Exception:
+        lastfm_api_key = None
 
-    # 4. Discography from the specified source. Skip the variant-dedup so the
-    #    page shows every release the source returns — matches the inline
-    #    Artists-page behaviour the user is comparing against.
-    discography_result = _get_artist_detail_discography(
+    payload, status = build_source_only_artist_detail(
         artist_id,
-        artist_name=resolved_name or artist_id,
-        options=MetadataLookupOptions(
-            source_override=source,
-            allow_fallback=True,
-            skip_cache=False,
-            max_pages=0,
-            limit=50,
-            artist_source_ids={source: artist_id},
-            dedup_variants=False,
-        ),
+        artist_name,
+        source,
+        spotify_client=sp,
+        deezer_client=dz,
+        itunes_client=it,
+        discogs_client=dc,
+        lastfm_api_key=lastfm_api_key,
     )
-
-    if not discography_result.get('success'):
-        return jsonify({
-            "success": False,
-            "error": discography_result.get('error', 'Could not load discography'),
-            "source": source,
-        }), 404
-
-    artist_info = {
-        "id": artist_id,
-        "name": resolved_name or artist_id,
-        "image_url": image_url,
-        "server_source": None,  # not in library
-        "genres": source_genres,
-    }
-
-    # Set the source-specific ID so the corresponding service badge renders on
-    # the hero (e.g. source=deezer -> deezer_id; source=spotify -> spotify_artist_id).
-    source_id_field = _SOURCE_ID_FIELD.get(source)
-    if source_id_field:
-        artist_info[source_id_field] = artist_id
-
-    if source_followers is not None:
-        artist_info['followers'] = source_followers
-    if lastfm_bio:
-        artist_info['lastfm_bio'] = lastfm_bio
-    if lastfm_listeners is not None:
-        artist_info['lastfm_listeners'] = lastfm_listeners
-    if lastfm_playcount is not None:
-        artist_info['lastfm_playcount'] = lastfm_playcount
-    if lastfm_url:
-        artist_info['lastfm_url'] = lastfm_url
-
-    logger.info(
-        f"Source-only artist-detail: {artist_info['name']} from {source} — "
-        f"albums={len(discography_result.get('albums', []))}, "
-        f"eps={len(discography_result.get('eps', []))}, "
-        f"singles={len(discography_result.get('singles', []))}, "
-        f"genres={len(source_genres)}, lastfm_bio={'yes' if lastfm_bio else 'no'}"
-    )
-
-    return jsonify({
-        "success": True,
-        "artist": artist_info,
-        "discography": discography_result,
-        "enrichment_coverage": {},
-    })
+    return jsonify(payload), status
 
 
 @app.route('/api/artist-detail/<artist_id>')
