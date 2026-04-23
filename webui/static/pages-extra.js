@@ -2881,10 +2881,10 @@ function _adlRenderBatchHistory() {
         const dotTip = dotSource ? `Source: ${dotSource}` : 'Unknown source';
         const histDot = `<span class="adl-batch-history-dot" style="background:rgba(${dotColor}, 0.6)" title="${dotTip}"></span>`;
 
-        // Optional thumbnail
+        // Thumbnail with placeholder fallback
         const thumb = h.thumb_url
-            ? `<img src="${_adlEsc(h.thumb_url)}" class="adl-batch-history-thumb" loading="lazy">`
-            : '';
+            ? `<img src="${_adlEsc(h.thumb_url)}" class="adl-batch-history-thumb" loading="lazy" onerror="this.classList.add('adl-batch-history-thumb-placeholder');this.removeAttribute('src')">`
+            : `<span class="adl-batch-history-thumb adl-batch-history-thumb-placeholder"></span>`;
 
         // Server push status indicator
         let pushBadge = '';
