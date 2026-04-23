@@ -1859,23 +1859,10 @@
                             </div>
                         </div>
 
-                        <!-- Search Source Picker (replaces Enhanced/Basic toggle) -->
-                        <div class="search-source-picker-container">
-                            <label for="search-source-select" class="search-source-picker-label">Search from</label>
-                            <div class="search-source-picker-wrapper">
-                                <select id="search-source-select" class="search-source-picker-select">
-                                    <option value="auto" selected>All sources (Auto)</option>
-                                    <option value="spotify">Spotify</option>
-                                    <option value="itunes">Apple Music</option>
-                                    <option value="deezer">Deezer</option>
-                                    <option value="discogs">Discogs</option>
-                                    <option value="hydrabase">Hydrabase</option>
-                                    <option value="musicbrainz">MusicBrainz</option>
-                                    <option value="soulseek">Soulseek (raw files)</option>
-                                </select>
-                                <span class="search-source-picker-caret">▾</span>
-                            </div>
-                        </div>
+                        <!-- Search source picker — icon row populated by search.js.
+                             Each icon triggers a single-source fetch (no fan-out);
+                             results are cached per (query, source) pair. -->
+                        <div id="enh-source-row" class="enh-source-row" role="tablist" aria-label="Search source"></div>
 
                         <!-- Basic Search Section (Current) -->
                         <div id="basic-search-section" class="search-section">
@@ -2017,8 +2004,9 @@
                                         <!-- Results Container -->
                                         <div id="enhanced-results-container" class="enhanced-results-container hidden">
 
-                                            <!-- Source Tabs -->
-                                            <div id="enh-source-tabs" class="enh-source-tabs hidden"></div>
+                                            <!-- Fallback banner — shown when user clicked Spotify but backend
+                                                 served Deezer due to rate-limit, etc. Populated by search.js. -->
+                                            <div id="enh-fallback-banner" class="enh-fallback-banner hidden"></div>
 
                                             <!-- Artists Container (Side by Side) -->
                                             <div class="enh-artists-wrapper">

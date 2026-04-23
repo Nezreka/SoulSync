@@ -43,11 +43,11 @@ function initializeSearchModeToggle() {
         return;
     }
 
-    const sourceSelect = document.getElementById('search-source-select');
+    const sourceRow = document.getElementById('enh-source-row');
     const basicSection = document.getElementById('basic-search-section');
     const enhancedSection = document.getElementById('enhanced-search-section');
 
-    if (!sourceSelect || !basicSection || !enhancedSection) {
+    if (!sourceRow || !basicSection || !enhancedSection) {
         console.warn('Search source picker elements not found');
         return;
     }
@@ -55,27 +55,23 @@ function initializeSearchModeToggle() {
     searchModeToggleInitialized = true;
     console.log('✅ Initializing search source picker (first time only)');
 
-    // Current source selection — 'auto' (fan-out) by default. Soulseek routes
-    // to the raw-file basic search; everything else routes to enhanced.
-    let currentSearchSource = sourceSelect.value || 'auto';
+    // Active source — the icon the user is currently viewing. Initialized from
+    // the user's configured primary source via /api/settings (below). No 'auto'
+    // / fan-out mode: every search targets exactly one source.
+    let currentSearchSource = 'spotify';
 
-    const applySourceSelection = (value) => {
-        currentSearchSource = value;
-        if (value === 'soulseek') {
-            basicSection.classList.add('active');
-            enhancedSection.classList.remove('active');
-        } else {
-            basicSection.classList.remove('active');
-            enhancedSection.classList.add('active');
-        }
+    // Per-query cache. `sources[src]` holds the result payload the last time
+    // `src` was fetched for the current query. `fallbacks[src]` records the
+    // source the backend actually served when it auto-fell-back (e.g. user
+    // clicked Spotify but got Deezer because Spotify is rate-limited).
+    // `loadingSources` drives per-icon spinners. Cleared whenever the query
+    // string changes — we never serve stale results across queries.
+    let _cachedData = {
+        query: '',
+        sources: {},
+        fallbacks: {},
+        loadingSources: new Set(),
     };
-
-    applySourceSelection(currentSearchSource);
-
-    sourceSelect.addEventListener('change', (e) => {
-        applySourceSelection(e.target.value);
-        console.log('Search source →', currentSearchSource);
-    });
 
     // Initialize enhanced search
     const enhancedInput = document.getElementById('enhanced-search-input');
@@ -89,12 +85,257 @@ function initializeSearchModeToggle() {
     let debounceTimer = null;
     let abortController = null;
 
-    // Multi-source search state
-    let _enhancedSearchData = null;   // Full response with all sources
-    let _activeSearchSource = null;   // Currently displayed source tab
-    let _altSourceController = null;  // AbortController for alternate source fetches
+    // SOURCE_LABELS + SOURCE_ORDER now live in shared-helpers.js.
 
-    // SOURCE_LABELS now lives in shared-helpers.js.
+    // ── Source icon row ────────────────────────────────────────────────
+    function renderSourceRow() {
+        sourceRow.innerHTML = SOURCE_ORDER.map(src => {
+            const info = SOURCE_LABELS[src];
+            if (!info) return '';
+            const active = src === currentSearchSource;
+            const cached = !!_cachedData.sources[src];
+            const loading = _cachedData.loadingSources.has(src);
+            const fallback = _cachedData.fallbacks[src];
+            const classes = [
+                'enh-source-icon',
+                active ? 'active' : '',
+                cached ? 'cached' : '',
+                loading ? 'loading' : '',
+                fallback ? 'fallback-warning' : '',
+            ].filter(Boolean).join(' ');
+            const title = fallback
+                ? `${info.text} unavailable — served from ${(SOURCE_LABELS[fallback] || {}).text || fallback}`
+                : info.text;
+            return `
+                <button class="${classes}" data-source="${src}" role="tab"
+                        aria-selected="${active}" title="${escapeHtml(title)}">
+                    <span class="enh-source-icon-glyph">${loading ? '⏳' : info.icon}</span>
+                    <span class="enh-source-icon-label">${escapeHtml(info.text)}</span>
+                </button>`;
+        }).join('');
+        sourceRow.querySelectorAll('.enh-source-icon').forEach(btn => {
+            btn.addEventListener('click', () => setActiveSource(btn.dataset.source));
+        });
+    }
+
+    async function _initDefaultSource() {
+        try {
+            const resp = await fetch('/api/settings');
+            if (resp.ok) {
+                const settings = await resp.json();
+                const cfg = settings.metadata && settings.metadata.fallback_source;
+                if (cfg && SOURCE_LABELS[cfg]) {
+                    currentSearchSource = cfg;
+                }
+            }
+        } catch (_) { /* settings fetch best-effort */ }
+        if (!SOURCE_LABELS[currentSearchSource]) currentSearchSource = 'spotify';
+        renderSourceRow();
+    }
+    _initDefaultSource();
+
+    // ── Source selection ───────────────────────────────────────────────
+    function setActiveSource(src) {
+        if (!SOURCE_LABELS[src]) return;
+        if (src === currentSearchSource) return;
+        currentSearchSource = src;
+
+        // Soulseek routes to the basic search UI (raw file results). We keep
+        // no cache for it — the basic search renders straight to the page.
+        if (src === 'soulseek') {
+            basicSection.classList.add('active');
+            enhancedSection.classList.remove('active');
+            hideDropdown();
+            renderSourceRow();
+            const basicInput = document.getElementById('downloads-search-input');
+            if (basicInput && _cachedData.query) {
+                basicInput.value = _cachedData.query;
+                if (typeof performDownloadsSearch === 'function') performDownloadsSearch();
+            }
+            return;
+        }
+
+        // Other sources use the enhanced dropdown.
+        basicSection.classList.remove('active');
+        enhancedSection.classList.add('active');
+        renderSourceRow();
+
+        if (!_cachedData.query) return;
+
+        if (_cachedData.sources[src]) {
+            _renderFromCache(src);
+        } else {
+            _fetchAndRenderSource(src);
+        }
+    }
+
+    // ── Render + fetch ─────────────────────────────────────────────────
+    function _renderFromCache(src) {
+        const cached = _cachedData.sources[src];
+        if (!cached) return;
+
+        loadingState.classList.add('hidden');
+        emptyState.classList.add('hidden');
+        resultsContainer.classList.remove('hidden');
+        showDropdown();
+
+        _renderFallbackBanner(src);
+
+        if (src === 'youtube_videos') {
+            ['enh-db-artists-section', 'enh-spotify-artists-section', 'enh-albums-section', 'enh-singles-section', 'enh-tracks-section'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('hidden');
+            });
+            const artistsWrapper = document.querySelector('.enh-artists-wrapper');
+            if (artistsWrapper) artistsWrapper.style.display = 'none';
+            _renderVideoResults(cached.videos || []);
+            return;
+        }
+
+        const videosSec = document.getElementById('enh-videos-section');
+        if (videosSec) videosSec.classList.add('hidden');
+        const artistsWrapper = document.querySelector('.enh-artists-wrapper');
+        if (artistsWrapper) artistsWrapper.style.display = '';
+
+        renderDropdownResults({
+            db_artists: cached.db_artists || [],
+            spotify_artists: cached.artists || [],
+            spotify_albums: cached.albums || [],
+            spotify_tracks: cached.tracks || [],
+            metadata_source: src,
+        });
+    }
+
+    function _renderFallbackBanner(src) {
+        const banner = document.getElementById('enh-fallback-banner');
+        if (!banner) return;
+        const actual = _cachedData.fallbacks[src];
+        if (actual && actual !== src) {
+            const clicked = (SOURCE_LABELS[src] || {}).text || src;
+            const served = (SOURCE_LABELS[actual] || {}).text || actual;
+            banner.textContent = `${clicked} unavailable — showing ${served}.`;
+            banner.classList.remove('hidden');
+        } else {
+            banner.classList.add('hidden');
+        }
+    }
+
+    async function _fetchAndRenderSource(src) {
+        const query = _cachedData.query;
+        if (!query) return;
+
+        _cachedData.loadingSources.add(src);
+        renderSourceRow();
+
+        showDropdown();
+        emptyState.classList.add('hidden');
+        resultsContainer.classList.add('hidden');
+        loadingState.classList.remove('hidden');
+        const loadingText = document.getElementById('enhanced-loading-text');
+        if (loadingText) {
+            const info = SOURCE_LABELS[src];
+            loadingText.textContent = `Searching ${(info && info.text) || src} and your library...`;
+        }
+
+        if (abortController) abortController.abort();
+        abortController = new AbortController();
+
+        try {
+            if (src === 'youtube_videos') {
+                await _fetchYouTubeVideos(query, abortController.signal);
+            } else {
+                const data = await enhancedSearchFetch(query, {
+                    source: src,
+                    signal: abortController.signal,
+                });
+                _cachedData.sources[src] = {
+                    artists: data.spotify_artists || [],
+                    albums: data.spotify_albums || [],
+                    tracks: data.spotify_tracks || [],
+                    videos: [],
+                    available: true,
+                    db_artists: data.db_artists || [],
+                };
+                const served = data.primary_source || data.metadata_source;
+                if (served && served !== src) {
+                    _cachedData.fallbacks[src] = served;
+                }
+            }
+
+            _cachedData.loadingSources.delete(src);
+            renderSourceRow();
+
+            if (currentSearchSource === src) {
+                const cached = _cachedData.sources[src];
+                const total = src === 'youtube_videos'
+                    ? ((cached && cached.videos && cached.videos.length) || 0)
+                    : ((cached && cached.db_artists && cached.db_artists.length) || 0)
+                    + ((cached && cached.artists && cached.artists.length) || 0)
+                    + ((cached && cached.albums && cached.albums.length) || 0)
+                    + ((cached && cached.tracks && cached.tracks.length) || 0);
+                loadingState.classList.add('hidden');
+                if (total === 0) {
+                    emptyState.classList.remove('hidden');
+                } else {
+                    _renderFromCache(src);
+                }
+            }
+        } catch (err) {
+            _cachedData.loadingSources.delete(src);
+            renderSourceRow();
+            if (err.name !== 'AbortError') {
+                console.error(`Source fetch failed for ${src}:`, err);
+                if (currentSearchSource === src) {
+                    loadingState.classList.add('hidden');
+                    emptyState.classList.remove('hidden');
+                }
+            }
+        }
+    }
+
+    async function _fetchYouTubeVideos(query, signal) {
+        const response = await fetch('/api/enhanced-search/source/youtube_videos', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query }),
+            signal,
+        });
+        if (!response.ok) throw new Error(`YouTube search failed: ${response.status}`);
+
+        _cachedData.sources['youtube_videos'] = {
+            artists: [], albums: [], tracks: [], videos: [],
+            available: true, db_artists: [],
+        };
+        const cache = _cachedData.sources['youtube_videos'];
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            let newlineIdx;
+            while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+                const line = buffer.slice(0, newlineIdx).trim();
+                buffer = buffer.slice(newlineIdx + 1);
+                if (!line) continue;
+                try {
+                    const chunk = JSON.parse(line);
+                    if (chunk.type === 'videos') {
+                        cache.videos = chunk.data;
+                        // Live-render if still active — lets the user see results
+                        // as soon as the chunk arrives.
+                        if (currentSearchSource === 'youtube_videos') {
+                            _renderFromCache('youtube_videos');
+                        }
+                    }
+                } catch (_) { /* best-effort NDJSON parse */ }
+            }
+        }
+    }
 
     // Live search with debouncing
     if (enhancedInput) {
@@ -192,96 +433,43 @@ function initializeSearchModeToggle() {
     });
 
     async function performEnhancedSearch(query) {
-        console.log('Enhanced search:', query);
-        const searchId = Date.now() + Math.random();
+        console.log('Enhanced search:', query, '→', currentSearchSource);
 
-        // Show loading state with correct source name
-        showDropdown();
-        const loadingText = document.getElementById('enhanced-loading-text');
-        if (loadingText) {
-            const _sourceLabelMap = {
-                spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer',
-                discogs: 'Discogs', hydrabase: 'Hydrabase', musicbrainz: 'MusicBrainz',
-            };
-            const _sourceName = currentSearchSource && currentSearchSource !== 'auto'
-                ? (_sourceLabelMap[currentSearchSource] || currentSearchSource)
-                : currentMusicSourceName;
-            loadingText.textContent = `Searching across ${_sourceName} and your library...`;
+        // Query changed? Drop the whole per-query cache so we never serve
+        // stale results across queries. Icon dots and fallback banner reset.
+        if (query !== _cachedData.query) {
+            _cachedData.query = query;
+            _cachedData.sources = {};
+            _cachedData.fallbacks = {};
+            _cachedData.loadingSources = new Set();
+            renderSourceRow();
         }
-        loadingState.classList.remove('hidden');
-        emptyState.classList.add('hidden');
-        resultsContainer.classList.add('hidden');
 
-        // Abort previous requests (primary + alternates)
-        if (abortController) {
-            abortController.abort();
-        }
-        if (_altSourceController) {
-            _altSourceController.abort();
-        }
-        abortController = new AbortController();
-        _altSourceController = new AbortController();
-
-        // Initialize multi-source state early so alternate fetches can write to it
-        _enhancedSearchData = { db_artists: [], primary_source: null, sources: {}, searchId, query };
-
-        try {
-            const data = await enhancedSearchFetch(query, {
-                source: currentSearchSource,
-                signal: abortController.signal,
-            });
-            console.log('Enhanced results:', data);
-
-            // Store multi-source state
-            const primarySource = data.primary_source || data.metadata_source || 'deezer';
-            _activeSearchSource = primarySource;
-            _enhancedSearchData = _enhancedSearchData || {};
-            _enhancedSearchData.db_artists = data.db_artists;
-            _enhancedSearchData.primary_source = primarySource;
-            if (!_enhancedSearchData.sources) _enhancedSearchData.sources = {};
-            _enhancedSearchData.sources[primarySource] = {
-                artists: data.spotify_artists || [],
-                albums: data.spotify_albums || [],
-                tracks: data.spotify_tracks || [],
-                available: true,
-            };
-
-            // Calculate total from primary source
-            const total = (data.db_artists?.length || 0) +
-                (data.spotify_artists?.length || 0) +
-                (data.spotify_albums?.length || 0) +
-                (data.spotify_tracks?.length || 0);
-
-            // Hide loading
-            loadingState.classList.add('hidden');
-
-            if (total === 0) {
-                emptyState.classList.remove('hidden');
-            } else {
-                renderSourceTabs(_enhancedSearchData);
-                renderDropdownResults(data);
-                resultsContainer.classList.remove('hidden');
+        // Soulseek → existing basic search flow, no cache here.
+        if (currentSearchSource === 'soulseek') {
+            const basicInput = document.getElementById('downloads-search-input');
+            if (basicInput) {
+                basicInput.value = query;
+                if (typeof performDownloadsSearch === 'function') performDownloadsSearch();
             }
-
-            // Alternate sources now start after the primary response has landed.
-            // This avoids speculative fan-out for short or aborted searches.
-            _queueAlternateSourceFetches(data.alternate_sources || [], query, searchId);
-
-        } catch (error) {
-            if (error.name !== 'AbortError') {
-                console.error('Enhanced search error:', error);
-                loadingState.classList.add('hidden');
-                emptyState.classList.remove('hidden');
-            }
+            return;
         }
+
+        // Same query + same source that's already cached → instant render.
+        if (_cachedData.sources[currentSearchSource]) {
+            _renderFromCache(currentSearchSource);
+            return;
+        }
+
+        await _fetchAndRenderSource(currentSearchSource);
     }
 
     function renderDropdownResults(data) {
         // Music Videos tab — don't render regular sections
-        if (_activeSearchSource === 'youtube_videos') return;
+        if (currentSearchSource === 'youtube_videos') return;
 
         // Determine source badge from active tab (not just primary)
-        const displaySource = _activeSearchSource || data.metadata_source || 'spotify';
+        const displaySource = currentSearchSource || data.metadata_source || 'spotify';
         const sourceInfo = SOURCE_LABELS[displaySource] || SOURCE_LABELS.spotify;
         const sourceBadge = { text: sourceInfo.text, class: sourceInfo.badgeClass };
 
@@ -318,7 +506,7 @@ function initializeSearchModeToggle() {
                 meta: 'Artist',
                 badge: sourceBadge,
                 onClick: () => {
-                    const sourceOverride = _activeSearchSource;
+                    const sourceOverride = currentSearchSource;
                     console.log(`🎵 Opening artist detail: ${artist.name} (ID: ${artist.id}, source: ${sourceOverride})`);
                     hideDropdown();
                     navigateToArtistDetail(artist.id, artist.name, sourceOverride || null);
@@ -470,200 +658,6 @@ function initializeSearchModeToggle() {
         }
     }
 
-    function _queueAlternateSourceFetches(alternateSources, query, searchId) {
-        if (!Array.isArray(alternateSources) || alternateSources.length === 0) return;
-
-        // Fetch metadata sources first, then YouTube last so it does not compete
-        // with the primary artist/album/track results for early attention.
-        const orderedSources = ['spotify', 'itunes', 'deezer', 'discogs', 'musicbrainz', 'hydrabase', 'youtube_videos']
-            .filter(src => alternateSources.includes(src) && src !== _activeSearchSource);
-
-        orderedSources.forEach((src, index) => {
-            setTimeout(() => {
-                if (!_enhancedSearchData || _enhancedSearchData.searchId !== searchId) return;
-                _fetchAlternateSource(src, query, searchId);
-            }, index * 150);
-        });
-    }
-
-    async function _fetchAlternateSource(sourceName, query, searchId) {
-        try {
-            if (!_enhancedSearchData || _enhancedSearchData.searchId !== searchId) return;
-
-            const response = await fetch(`/api/enhanced-search/source/${sourceName}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query }),
-                signal: _altSourceController?.signal,
-            });
-            if (!response.ok) return;
-            if (!_enhancedSearchData || _enhancedSearchData.searchId !== searchId) return;
-
-            // Stream NDJSON — render each search type (artists, albums, tracks) as it arrives
-            if (!_enhancedSearchData.sources[sourceName]) {
-                const loadingSet = sourceName === 'youtube_videos' ? new Set(['videos']) : new Set(['artists', 'albums', 'tracks']);
-                _enhancedSearchData.sources[sourceName] = { artists: [], albums: [], tracks: [], videos: [], available: true, _loading: loadingSet };
-            }
-            const sourceData = _enhancedSearchData.sources[sourceName];
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-
-                let newlineIdx;
-                while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
-                    const line = buffer.slice(0, newlineIdx).trim();
-                    buffer = buffer.slice(newlineIdx + 1);
-                    if (!line) continue;
-                    if (!_enhancedSearchData || _enhancedSearchData.searchId !== searchId) return;
-
-                    try {
-                        const chunk = JSON.parse(line);
-                        if (chunk.type === 'artists') { sourceData.artists = chunk.data; if (sourceData._loading) sourceData._loading.delete('artists'); }
-                        else if (chunk.type === 'albums') { sourceData.albums = chunk.data; if (sourceData._loading) sourceData._loading.delete('albums'); }
-                        else if (chunk.type === 'tracks') { sourceData.tracks = chunk.data; if (sourceData._loading) sourceData._loading.delete('tracks'); }
-                        else if (chunk.type === 'videos') { sourceData.videos = chunk.data; if (sourceData._loading) sourceData._loading.delete('videos'); }
-                        else if (chunk.type === 'done') { delete sourceData._loading; break; }
-
-                        // Re-render tabs + content if this is the active source
-                        if (_enhancedSearchData.primary_source) {
-                            renderSourceTabs(_enhancedSearchData);
-                            if (_activeSearchSource === sourceName) {
-                                window._switchEnhSourceTab(sourceName);
-                            }
-                        }
-                    } catch (parseErr) {
-                        console.debug(`NDJSON parse error for ${sourceName}:`, parseErr);
-                    }
-                }
-            }
-
-            // Final render
-            if (_enhancedSearchData && _enhancedSearchData.searchId === searchId && _enhancedSearchData.primary_source) {
-                renderSourceTabs(_enhancedSearchData);
-            }
-        } catch (e) {
-            if (e.name !== 'AbortError') {
-                console.debug(`Alternate source ${sourceName} failed:`, e);
-            }
-        }
-    }
-
-    function renderSourceTabs(data) {
-        const tabBar = document.getElementById('enh-source-tabs');
-        if (!tabBar) return;
-
-        const sources = data.sources || {};
-        const primary = data.primary_source || 'spotify';
-
-        // Build tab list: primary first, then alternates sorted alphabetically.
-        // Hide completed zero-result sources so the bar stays focused.
-        const sourceNames = Object.keys(sources).filter(s => sources[s].available);
-        const visibleSources = sourceNames.filter(name => {
-            const src = sources[name] || {};
-            const count = name === 'youtube_videos'
-                ? (src.videos?.length || 0)
-                : (src.artists?.length || 0) + (src.albums?.length || 0) + (src.tracks?.length || 0);
-            const isLoading = !!(src._loading && src._loading.size > 0);
-            return isLoading || count > 0 || name === _activeSearchSource;
-        });
-        if (visibleSources.length <= 1) {
-            tabBar.classList.add('hidden');
-            tabBar.innerHTML = '';
-            return;
-        }
-
-        // Primary tab first, then others
-        const ordered = [primary, ...visibleSources.filter(s => s !== primary).sort()];
-
-        tabBar.innerHTML = ordered.map(name => {
-            const info = SOURCE_LABELS[name] || { text: name, tabClass: '' };
-            const src = sources[name] || {};
-            const count = name === 'youtube_videos'
-                ? (src.videos?.length || 0)
-                : (src.artists?.length || 0) + (src.albums?.length || 0) + (src.tracks?.length || 0);
-            const isActive = name === _activeSearchSource;
-            return `<button class="enh-source-tab ${info.tabClass} ${isActive ? 'active' : ''}"
-                            onclick="window._switchEnhSourceTab('${name}')"
-                            data-source="${name}">
-                        ${info.text}<span class="enh-tab-count">(${count})</span>
-                    </button>`;
-        }).join('');
-
-        tabBar.classList.remove('hidden');
-    }
-
-    // Expose tab switch globally (onclick from HTML)
-    window._switchEnhSourceTab = function (sourceName) {
-        if (!_enhancedSearchData || !_enhancedSearchData.sources) return;
-        const src = _enhancedSearchData.sources[sourceName];
-        if (!src) return;
-
-        _activeSearchSource = sourceName;
-
-        // Update tab active states
-        document.querySelectorAll('.enh-source-tab').forEach(tab => {
-            tab.classList.toggle('active', tab.dataset.source === sourceName);
-        });
-
-        // Music Videos tab — render video cards instead of regular sections
-        if (sourceName === 'youtube_videos') {
-            // Hide ALL regular sections including wrappers
-            ['enh-db-artists-section', 'enh-spotify-artists-section', 'enh-albums-section', 'enh-singles-section', 'enh-tracks-section'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.classList.add('hidden');
-            });
-            // Hide the artists wrapper div too
-            const artistsWrapper = document.querySelector('.enh-artists-wrapper');
-            if (artistsWrapper) artistsWrapper.style.display = 'none';
-            _renderVideoResults(src.videos || []);
-            resultsContainer.classList.remove('hidden');
-            return;
-        }
-
-        // Hide videos section and restore regular layout when switching to a metadata tab
-        const videosSec = document.getElementById('enh-videos-section');
-        if (videosSec) videosSec.classList.add('hidden');
-        const artistsWrapper = document.querySelector('.enh-artists-wrapper');
-        if (artistsWrapper) artistsWrapper.style.display = '';
-
-        // Build data in the shape renderDropdownResults expects
-        const viewData = {
-            db_artists: _enhancedSearchData.db_artists,
-            spotify_artists: src.artists || [],
-            spotify_albums: src.albums || [],
-            spotify_tracks: src.tracks || [],
-            metadata_source: sourceName,
-        };
-
-        renderDropdownResults(viewData);
-        resultsContainer.classList.remove('hidden');
-
-        // Show loading spinners for categories still streaming
-        if (src._loading && src._loading.size > 0) {
-            const loadingHtml = '<div class="enh-section-loading"><div class="server-search-spinner" style="width:16px;height:16px"></div><span>Loading...</span></div>';
-            if (src._loading.has('artists')) {
-                const sec = document.getElementById('enh-spotify-artists-section');
-                if (sec) { sec.classList.remove('hidden'); document.getElementById('enh-spotify-artists-list').innerHTML = loadingHtml; }
-            }
-            if (src._loading.has('albums')) {
-                const sec = document.getElementById('enh-albums-section');
-                if (sec) { sec.classList.remove('hidden'); document.getElementById('enh-albums-list').innerHTML = loadingHtml; }
-                const sec2 = document.getElementById('enh-singles-section');
-                if (sec2) { sec2.classList.remove('hidden'); document.getElementById('enh-singles-list').innerHTML = loadingHtml; }
-            }
-            if (src._loading.has('tracks')) {
-                const sec = document.getElementById('enh-tracks-section');
-                if (sec) { sec.classList.remove('hidden'); document.getElementById('enh-tracks-list').innerHTML = loadingHtml; }
-            }
-        }
-    };
-
     function _renderVideoResults(videos) {
         let section = document.getElementById('enh-videos-section');
         if (!section) {
@@ -748,8 +742,8 @@ function initializeSearchModeToggle() {
                 if (!artistId) continue;
 
                 try {
-                    const imgUrl = _activeSearchSource && _activeSearchSource !== 'spotify'
-                        ? `/api/artist/${artistId}/image?source=${_activeSearchSource}`
+                    const imgUrl = currentSearchSource && currentSearchSource !== 'spotify'
+                        ? `/api/artist/${artistId}/image?source=${currentSearchSource}`
                         : `/api/artist/${artistId}/image`;
                     const response = await fetch(imgUrl);
                     const data = await response.json();
@@ -797,8 +791,8 @@ function initializeSearchModeToggle() {
         try {
             // Fetch full album data with tracks — pass source for correct routing
             const albumParams = new URLSearchParams({ name: album.name || '', artist: album.artist || '' });
-            if (_activeSearchSource && _activeSearchSource !== 'spotify') {
-                albumParams.set('source', _activeSearchSource);
+            if (currentSearchSource && currentSearchSource !== 'spotify') {
+                albumParams.set('source', currentSearchSource);
             }
             // Pass Hydrabase plugin origin so server routes to correct client
             if (album.external_urls?.hydrabase_plugin) {
@@ -864,7 +858,7 @@ function initializeSearchModeToggle() {
                 id: firstArtist.id || album.id?.split?.('_')?.[0] || '',
                 name: firstArtist.name || album.artist,
                 image_url: firstArtist.image_url || firstArtist.images?.[0]?.url || '',
-                source: _activeSearchSource || '',
+                source: currentSearchSource || '',
             };
 
             // Prepare full album object for modal
