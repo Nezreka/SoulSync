@@ -3628,3 +3628,118 @@
         bottom: 54px;
     }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Source picker row — Search page + global widget responsive.
+   Chips shrink on tablet, labels drop on phone so the full row
+   of 8 sources remains scannable without hijacking the screen. */
+@media (max-width: 768px) {
+    .enh-source-row {
+        padding: 8px 8px;
+        margin: 8px 0 10px;
+        gap: 6px;
+        border-radius: 12px;
+    }
+    .enh-source-icon {
+        min-width: 72px;
+        padding: 8px 10px;
+        gap: 4px;
+        font-size: 10.5px;
+    }
+    .enh-source-icon-glyph,
+    .enh-source-icon-glyph img {
+        width: 24px;
+        height: 24px;
+    }
+    .enh-source-icon-label { font-size: 10.5px; }
+    .enh-fallback-banner {
+        font-size: 11px;
+        padding: 6px 10px;
+    }
+
+    /* Global widget source row (inside the popover) */
+    .gsearch-source-row {
+        padding: 10px 10px 6px;
+        gap: 4px;
+    }
+    .gsearch-source-icon {
+        min-width: 62px;
+        padding: 6px 8px;
+        gap: 3px;
+    }
+    .gsearch-source-icon-glyph,
+    .gsearch-source-icon-glyph img {
+        width: 20px;
+        height: 20px;
+    }
+    .gsearch-fallback-banner {
+        font-size: 10px;
+        padding: 5px 10px;
+    }
+
+    /* Ambient glow under the global search — trim size so it doesn't
+       dominate a short mobile viewport. */
+    .gsearch-aura {
+        height: 180px;
+        background:
+            radial-gradient(ellipse 440px 160px at 50% 100%,
+                rgba(var(--accent-rgb), 0.20) 0%,
+                rgba(var(--accent-rgb), 0.08) 35%,
+                rgba(var(--accent-rgb), 0.02) 65%,
+                transparent 85%);
+    }
+    .gsearch-aura.active {
+        background:
+            radial-gradient(ellipse 540px 200px at 50% 100%,
+                rgba(var(--accent-rgb), 0.34) 0%,
+                rgba(var(--accent-rgb), 0.14) 28%,
+                rgba(var(--accent-rgb), 0.04) 58%,
+                transparent 85%);
+    }
+
+    /* Library empty-state hand-off CTA — allow wrap on narrow screens
+       so long artist queries don't overflow. */
+    .library-empty-search-cta {
+        flex-wrap: wrap;
+        justify-content: center;
+        padding: 10px 14px;
+        font-size: 13px;
+        max-width: 100%;
+    }
+    .library-empty-search-cta-text {
+        white-space: normal;
+        text-align: center;
+    }
+}
+
+/* Very narrow phones — drop the icon labels entirely and show just the
+   glyphs. Tap target stays big enough, row compacts dramatically. */
+@media (max-width: 480px) {
+    .enh-source-row {
+        padding: 6px 6px;
+        gap: 4px;
+        border-radius: 10px;
+    }
+    .enh-source-icon {
+        min-width: 44px;
+        padding: 6px 8px;
+    }
+    .enh-source-icon-label { display: none; }
+
+    .gsearch-source-row {
+        padding: 8px 8px 5px;
+        gap: 4px;
+    }
+    .gsearch-source-icon {
+        min-width: 40px;
+        padding: 5px 7px;
+    }
+    .gsearch-source-icon-label { display: none; }
+
+    .gsearch-aura { height: 140px; }
+
+    .library-empty-search-cta {
+        font-size: 12px;
+        padding: 9px 12px;
+    }
+}
