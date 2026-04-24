@@ -559,9 +559,15 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
             placeholderClass += ' track-placeholder';
         }
 
+        // Fallback placeholder used when the image 404s (common for MB
+        // Cover Art Archive URLs — we construct them deterministically
+        // without probing first, so some will miss). Without onerror the
+        // browser shows its broken-image icon.
+        const placeholderHtml = `<div class="${placeholderClass}" data-lazy-image="true">${config.placeholder}</div>`;
+        const escapedFallback = placeholderHtml.replace(/"/g, '&quot;');
         const imageHtml = config.image
-            ? `<img src="${escapeHtml(config.image)}" class="${imageClass}" alt="${escapeHtml(config.name)}">`
-            : `<div class="${placeholderClass}" data-lazy-image="true">${config.placeholder}</div>`;
+            ? `<img src="${escapeHtml(config.image)}" class="${imageClass}" alt="${escapeHtml(config.name)}" onerror="this.outerHTML='${escapedFallback}'">`
+            : placeholderHtml;
 
         const badgeHtml = config.badge
             ? `<div class="enh-item-badge ${config.badge.class}">${config.badge.text}</div>`
