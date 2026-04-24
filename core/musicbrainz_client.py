@@ -370,6 +370,38 @@ class MusicBrainzClient:
             return None
     
     @rate_limited
+    def get_release_group(self, mbid: str, includes: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+        """Get full release-group details by MBID.
+
+        Release-groups are the 'canonical album' entity in MusicBrainz —
+        they group every edition/reissue/region-specific release of the
+        same logical album under one MBID. Use `inc=releases` to list the
+        individual releases this group contains (each with its own
+        tracklist); use `inc=artist-credits` for artist info.
+
+        Args:
+            mbid: Release-group's MusicBrainz ID
+            includes: Optional list, e.g. ['releases', 'artist-credits']
+
+        Returns:
+            Release-group data or None if not found.
+        """
+        try:
+            params = {'fmt': 'json'}
+            if includes:
+                params['inc'] = '+'.join(includes)
+            response = self.session.get(
+                f"{self.BASE_URL}/release-group/{mbid}",
+                params=params,
+                timeout=10
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Error fetching release-group {mbid}: {e}")
+            return None
+
+    @rate_limited
     def get_recording(self, mbid: str, includes: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
         """
         Get full recording details by MusicBrainz ID

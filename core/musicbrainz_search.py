@@ -574,69 +574,138 @@ class MusicBrainzSearchClient:
             logger.warning(f"MusicBrainz track search failed: {e}")
             return []
 
-    def get_album(self, release_mbid: str) -> Optional[Dict[str, Any]]:
-        """Get full album details with track listing for download modal."""
-        try:
-            release = self._client.get_release(release_mbid, includes=['recordings', 'artist-credits', 'release-groups'])
-            if not release:
-                return None
+    def _pick_representative_release(self, releases: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Pick the best release out of a release-group's editions.
 
-            title = release.get('title', '')
-            artists_raw = _extract_artist_credit(release.get('artist-credit', []))
-            release_date = release.get('date', '') or ''
-
-            rg = release.get('release-group', {})
-            primary_type = rg.get('primary-type', '') or ''
-            secondary_types = rg.get('secondary-types', []) or []
-            album_type = _map_release_type(primary_type, secondary_types)
-
-            # Cover art
-            rg_mbid = rg.get('id', '')
-            image_url = self._cached_art(release_mbid, rg_mbid)
-
-            # Build tracks from media
-            tracks = []
-            total_tracks = 0
-            media_list = release.get('media', [])
-            for media_idx, media in enumerate(media_list):
-                disc_number = media.get('position', media_idx + 1)
-                for track in media.get('tracks', []):
-                    total_tracks += 1
-                    recording = track.get('recording', {})
-                    track_artists = _extract_artist_credit(recording.get('artist-credit', []))
-                    if not track_artists:
-                        track_artists = artists_raw
-
-                    try:
-                        track_num = int(track.get('number', track.get('position', total_tracks)))
-                    except (ValueError, TypeError):
-                        track_num = total_tracks
-
-                    tracks.append({
-                        'id': recording.get('id', track.get('id', '')),
-                        'name': recording.get('title', track.get('title', '')),
-                        'artists': [{'name': a} for a in track_artists],
-                        'duration_ms': recording.get('length', 0) or track.get('length', 0) or 0,
-                        'track_number': track_num,
-                        'disc_number': disc_number,
-                    })
-
-            images = [{'url': image_url, 'height': 250, 'width': 250}] if image_url else []
-
-            return {
-                'id': release_mbid,
-                'name': title,
-                'artists': [{'name': a, 'id': ''} for a in (artists_raw or ['Unknown Artist'])],
-                'release_date': release_date,
-                'total_tracks': total_tracks,
-                'album_type': album_type,
-                'images': images,
-                'tracks': tracks,
-                'external_urls': {'musicbrainz': f'https://musicbrainz.org/release/{release_mbid}'},
-            }
-        except Exception as e:
-            logger.error(f"MusicBrainz album detail failed for {release_mbid}: {e}")
+        Release-groups often contain 5-20+ releases (original, reissues,
+        remasters, regional editions, bonus-track editions). We want a
+        single canonical version to show the user as 'the album.' Prefer:
+        1. Official releases (not promo/bootleg)
+        2. Earliest date (the original)
+        3. Any release with media (skip entries that are just stubs)
+        """
+        if not releases:
             return None
+
+        def _key(r):
+            status = (r.get('status') or '').lower()
+            status_rank = 0 if status == 'official' else 1  # Official first
+            has_media = 0 if r.get('media') else 1  # Real tracklists first
+            date = (r.get('date') or '9999-99-99')[:10]
+            return (has_media, status_rank, date)
+
+        return sorted(releases, key=_key)[0]
+
+    def get_album(self, album_mbid: str) -> Optional[Dict[str, Any]]:
+        """Get full album details with track listing for download modal.
+
+        The MBID passed in could be either:
+        - A release-group MBID (from `search_albums` browse path — the
+          common case now that bare-name searches route artist-first →
+          browse), or
+        - A release MBID (from the text-search fallback path).
+
+        Try release-group first since that's the majority; if it 404s,
+        fall back to direct release lookup. Release-group resolution adds
+        one extra API call (~1s at the 1-rps rate limit) to pick a
+        representative release and then fetch its tracklist.
+        """
+        try:
+            # Path A: release-group MBID (new browse-based search default)
+            rg = self._client.get_release_group(
+                album_mbid, includes=['releases', 'artist-credits']
+            )
+            if rg:
+                releases = rg.get('releases') or []
+                rep = self._pick_representative_release(releases)
+                if rep and rep.get('id'):
+                    album = self._render_release_as_album(
+                        rep['id'],
+                        rg_fallback=rg,
+                    )
+                    if album:
+                        # Keep the release-group MBID as the canonical
+                        # Album.id so downstream code can re-fetch with
+                        # the same URL.
+                        album['id'] = album_mbid
+                        album['external_urls'] = {
+                            'musicbrainz': f'https://musicbrainz.org/release-group/{album_mbid}'
+                        }
+                        return album
+
+            # Path B: release MBID (text-search fallback path)
+            return self._render_release_as_album(album_mbid)
+        except Exception as e:
+            logger.error(f"MusicBrainz album detail failed for {album_mbid}: {e}")
+            return None
+
+    def _render_release_as_album(self, release_mbid: str,
+                                  rg_fallback: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """Fetch a specific release and project it to the album-detail dict
+        shape the download modal expects. `rg_fallback` supplies release-group
+        metadata (type, artist credits) when resolving from a release-group
+        whose releases may be lightly populated."""
+        release = self._client.get_release(
+            release_mbid, includes=['recordings', 'artist-credits', 'release-groups']
+        )
+        if not release:
+            return None
+
+        title = release.get('title', '')
+        artists_raw = _extract_artist_credit(release.get('artist-credit', []))
+        if not artists_raw and rg_fallback:
+            artists_raw = _extract_artist_credit(rg_fallback.get('artist-credit', []))
+        release_date = release.get('date', '') or ''
+        if not release_date and rg_fallback:
+            release_date = rg_fallback.get('first-release-date', '') or ''
+
+        rg = release.get('release-group', rg_fallback or {}) or {}
+        primary_type = rg.get('primary-type', '') or ''
+        secondary_types = rg.get('secondary-types', []) or []
+        album_type = _map_release_type(primary_type, secondary_types)
+
+        rg_mbid = rg.get('id', '')
+        image_url = self._cached_art(release_mbid, rg_mbid)
+
+        tracks = []
+        total_tracks = 0
+        media_list = release.get('media', [])
+        for media_idx, media in enumerate(media_list):
+            disc_number = media.get('position', media_idx + 1)
+            for track in media.get('tracks', []):
+                total_tracks += 1
+                recording = track.get('recording', {})
+                track_artists = _extract_artist_credit(recording.get('artist-credit', []))
+                if not track_artists:
+                    track_artists = artists_raw
+
+                try:
+                    track_num = int(track.get('number', track.get('position', total_tracks)))
+                except (ValueError, TypeError):
+                    track_num = total_tracks
+
+                tracks.append({
+                    'id': recording.get('id', track.get('id', '')),
+                    'name': recording.get('title', track.get('title', '')),
+                    'artists': [{'name': a} for a in track_artists],
+                    'duration_ms': recording.get('length', 0) or track.get('length', 0) or 0,
+                    'track_number': track_num,
+                    'disc_number': disc_number,
+                })
+
+        images = [{'url': image_url, 'height': 250, 'width': 250}] if image_url else []
+
+        return {
+            'id': release_mbid,
+            'name': title,
+            'artists': [{'name': a, 'id': ''} for a in (artists_raw or ['Unknown Artist'])],
+            'release_date': release_date,
+            'total_tracks': total_tracks,
+            'album_type': album_type,
+            'images': images,
+            'tracks': tracks,
+            'external_urls': {'musicbrainz': f'https://musicbrainz.org/release/{release_mbid}'},
+        }
 
     def get_artist_albums(self, artist_mbid: str, album_type: str = 'album,single') -> List:
         """Get artist's releases for discography view."""

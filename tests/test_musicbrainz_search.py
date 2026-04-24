@@ -440,6 +440,101 @@ def test_search_tracks_structured_query_uses_text_path():
     assert len(tracks) == 1
 
 
+def test_get_album_resolves_release_group_mbid_to_release():
+    """When the album ID is a release-group MBID (from the browse path),
+    get_album must look up the release-group, pick a canonical release,
+    and fetch that release's tracklist. Fetching /release/<rg-mbid>
+    directly 404s."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    # Release-group lookup returns two editions — an Official release and
+    # a promo. The Official earlier release should win.
+    client._client.get_release_group.return_value = {
+        'id': 'rg-damn',
+        'title': 'DAMN.',
+        'primary-type': 'Album',
+        'secondary-types': [],
+        'first-release-date': '2017-04-14',
+        'artist-credit': [{'name': 'Kendrick Lamar'}],
+        'releases': [
+            {'id': 'rel-promo', 'status': 'Promotion', 'date': '2017-04-01',
+             'media': [{'track-count': 14, 'tracks': []}]},
+            {'id': 'rel-official', 'status': 'Official', 'date': '2017-04-14',
+             'media': [{'track-count': 14, 'tracks': []}]},
+        ],
+    }
+    # Release lookup returns a full release with tracklist.
+    client._client.get_release.return_value = {
+        'id': 'rel-official',
+        'title': 'DAMN.',
+        'date': '2017-04-14',
+        'artist-credit': [{'name': 'Kendrick Lamar'}],
+        'release-group': {'id': 'rg-damn', 'primary-type': 'Album', 'secondary-types': []},
+        'media': [
+            {'position': 1, 'tracks': [
+                {'id': 't1', 'number': '1', 'position': 1, 'length': 50000,
+                 'recording': {'id': 'rec-1', 'title': 'BLOOD.',
+                               'artist-credit': [{'name': 'Kendrick Lamar'}], 'length': 50000}},
+            ]},
+        ],
+    }
+
+    album = client.get_album('rg-damn')
+
+    # Must have called release-group first, then release for the picked edition.
+    client._client.get_release_group.assert_called_once_with(
+        'rg-damn', includes=['releases', 'artist-credits']
+    )
+    client._client.get_release.assert_called_once_with(
+        'rel-official', includes=['recordings', 'artist-credits', 'release-groups']
+    )
+    assert album is not None
+    assert album['id'] == 'rg-damn'  # Canonical ID stays the release-group MBID.
+    assert album['name'] == 'DAMN.'
+    assert len(album['tracks']) == 1
+    assert album['tracks'][0]['name'] == 'BLOOD.'
+    assert 'release-group' in album['external_urls']['musicbrainz']
+
+
+def test_get_album_falls_back_to_release_lookup_on_rg_miss():
+    """When the MBID is a release (from the text-search fallback path) the
+    release-group lookup 404s, but the direct release lookup works."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    # Release-group lookup returns None (simulating 404).
+    client._client.get_release_group.return_value = None
+    client._client.get_release.return_value = {
+        'id': 'rel-abc',
+        'title': 'Some Album',
+        'date': '2020-01-01',
+        'artist-credit': [{'name': 'Some Artist'}],
+        'release-group': {'id': 'rg-abc', 'primary-type': 'Album', 'secondary-types': []},
+        'media': [{'position': 1, 'tracks': []}],
+    }
+
+    album = client.get_album('rel-abc')
+
+    client._client.get_release_group.assert_called_once()
+    client._client.get_release.assert_called_once()
+    assert album is not None
+    assert album['id'] == 'rel-abc'  # Falls back to release MBID since rg lookup missed.
+
+
+def test_pick_representative_release_prefers_official_with_media():
+    """The release picker should skip stub releases (no media) and pick
+    Official over Promotion status."""
+    client = MusicBrainzSearchClient()
+    releases = [
+        {'id': 'stub', 'status': 'Official', 'date': '2020-01-01'},  # No media
+        {'id': 'promo', 'status': 'Promotion', 'date': '2019-12-01',
+         'media': [{'track-count': 10}]},
+        {'id': 'official', 'status': 'Official', 'date': '2020-01-05',
+         'media': [{'track-count': 10}]},
+    ]
+    picked = client._pick_representative_release(releases)
+    assert picked['id'] == 'official'
+
+
 def test_search_tracks_text_path_filters_by_score():
     client = MusicBrainzSearchClient()
     client._client = MagicMock()
