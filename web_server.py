@@ -32784,7 +32784,7 @@ def _push_discover_playlist_to_server(batch_id, batch):
                 time.sleep(5)
                 if not navidrome_client.is_library_scanning():
                     break
-            logger.info(f"[DiscoverPush] Scan complete, searching for tracks")
+            logger.info("[DiscoverPush] Scan complete, searching for tracks")
         else:
             time.sleep(30)
 
