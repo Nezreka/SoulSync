@@ -1,0 +1,475 @@
+"""Shared file and path helpers for import processing."""
+
+from __future__ import annotations
+
+import logging
+import os
+import re
+import shutil
+import subprocess
+import time
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+logger = logging.getLogger("import_file_ops")
+
+
+def _get_config_manager():
+    from config.settings import config_manager
+    return config_manager
+
+
+def safe_move_file(src, dst):
+    """Move a file safely across filesystems."""
+    src = Path(src)
+    dst = Path(dst)
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    if not src.exists():
+        if dst.exists():
+            logger.info(f"Source gone but destination exists, file already transferred: {dst.name}")
+            return
+        raise FileNotFoundError(f"Source file not found and destination does not exist: {src}")
+
+    if dst.exists():
+        for _attempt in range(3):
+            try:
+                dst.unlink()
+                break
+            except PermissionError:
+                if _attempt < 2:
+                    time.sleep(1)
+                else:
+                    logger.warning(f"Could not remove locked destination after 3 attempts: {dst.name}")
+            except Exception:
+                break
+
+    try:
+        shutil.move(str(src), str(dst))
+        return
+    except FileNotFoundError:
+        if dst.exists():
+            logger.info(f"Source moved by another thread, destination exists: {dst.name}")
+            return
+        raise
+    except (OSError, PermissionError) as e:
+        error_msg = str(e).lower()
+
+        if dst.exists() and dst.stat().st_size > 0:
+            logger.warning(f"Move raised {type(e).__name__} but destination exists, treating as success: {e}")
+            try:
+                src.unlink()
+            except Exception:
+                logger.info(f"Could not delete source file (may be owned by another process): {src}")
+            return
+
+        if "cross-device" in error_msg or "operation not permitted" in error_msg or "permission denied" in error_msg:
+            logger.warning(f"Cross-device move detected, using fallback copy method: {e}")
+            try:
+                with open(src, "rb") as f_src:
+                    with open(dst, "wb") as f_dst:
+                        shutil.copyfileobj(f_src, f_dst)
+                        f_dst.flush()
+                        os.fsync(f_dst.fileno())
+
+                try:
+                    src.unlink()
+                except PermissionError:
+                    logger.info(f"Could not delete source file (may be owned by another process): {src}")
+                logger.info(f"Successfully moved file using fallback method: {src} -> {dst}")
+                return
+            except Exception as fallback_error:
+                logger.error(f"Fallback copy also failed: {fallback_error}")
+                raise
+        raise
+
+
+def extract_track_number_from_filename(filename: str, title: str = None) -> int:
+    """Extract track number from a filename. Returns 1 if not found."""
+    basename = os.path.splitext(os.path.basename(filename))[0].strip()
+
+    match = re.match(r"^\d[\-\.](\d{1,2})\s*[\-\.]\s*", basename)
+    if match:
+        num = int(match.group(1))
+        if 1 <= num <= 99:
+            return num
+
+    match = re.match(r"^\(?(\d{1,3})\)?\s*[\-\.)\]]\s*", basename)
+    if match:
+        num = int(match.group(1))
+        if 1 <= num <= 999:
+            return num
+
+    return 1
+
+
+def _coerce_tag_number(value: Any, default: int = 1) -> int:
+    if value in (None, ""):
+        return default
+
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else None
+
+    if value in (None, ""):
+        return default
+
+    text = str(value).strip()
+    if not text:
+        return default
+
+    match = re.match(r"^(\d+)", text)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return default
+
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return default
+
+
+def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -> Dict[str, Any]:
+    """Read common audio tag metadata from a staging file."""
+    try:
+        from mutagen import File as MutagenFile
+
+        tags = MutagenFile(file_path, easy=True)
+    except Exception:
+        tags = None
+
+    filename = filename or os.path.basename(file_path)
+    stem = os.path.splitext(os.path.basename(filename))[0]
+
+    def _first_tag(*keys: str) -> str:
+        if not tags:
+            return ""
+        for key in keys:
+            try:
+                value = tags.get(key)  # type: ignore[attr-defined]
+            except Exception:
+                value = None
+            if value:
+                if isinstance(value, (list, tuple)):
+                    value = value[0] if value else ""
+                text = str(value).strip()
+                if text:
+                    return text
+        return ""
+
+    title = _first_tag("title")
+    artist = _first_tag("artist")
+    albumartist = _first_tag("albumartist")
+    album = _first_tag("album")
+
+    if not title:
+        title = stem
+    if not albumartist:
+        albumartist = artist
+
+    track_number = _coerce_tag_number(_first_tag("tracknumber", "track_number"), default=0)
+    if not track_number:
+        track_number = extract_track_number_from_filename(filename or file_path)
+
+    disc_number = _coerce_tag_number(_first_tag("discnumber", "disc_number"), default=1)
+
+    return {
+        "title": title,
+        "artist": artist,
+        "albumartist": albumartist,
+        "album": album,
+        "track_number": track_number,
+        "disc_number": disc_number,
+    }
+
+
+def cleanup_empty_directories(download_path, moved_file_path):
+    """Remove empty directories after a move, ignoring hidden files."""
+    try:
+        current_dir = os.path.dirname(moved_file_path)
+        while current_dir != download_path and current_dir.startswith(download_path):
+            is_empty = not any(not f.startswith(".") for f in os.listdir(current_dir))
+            if is_empty:
+                logger.warning(f"Removing empty directory: {current_dir}")
+                os.rmdir(current_dir)
+                current_dir = os.path.dirname(current_dir)
+            else:
+                break
+    except Exception as e:
+        logger.error(f"An error occurred during directory cleanup: {e}")
+
+
+def get_audio_quality_string(file_path):
+    """Return a compact audio quality string for the given file."""
+    try:
+        ext = os.path.splitext(file_path)[1].lower()
+
+        if ext == ".flac":
+            from mutagen.flac import FLAC
+            audio = FLAC(file_path)
+            return f"FLAC {audio.info.bits_per_sample}bit"
+
+        if ext == ".mp3":
+            from mutagen.mp3 import MP3, BitrateMode
+
+            audio = MP3(file_path)
+            bitrate_kbps = audio.info.bitrate // 1000
+            if audio.info.bitrate_mode == BitrateMode.VBR:
+                return "MP3-VBR"
+            return f"MP3-{bitrate_kbps}"
+
+        if ext in (".m4a", ".aac", ".mp4"):
+            from mutagen.mp4 import MP4
+            audio = MP4(file_path)
+            return f"M4A-{audio.info.bitrate // 1000}"
+
+        if ext == ".ogg":
+            from mutagen.oggvorbis import OggVorbis
+            audio = OggVorbis(file_path)
+            return f"OGG-{audio.info.bitrate // 1000}"
+
+        if ext == ".opus":
+            from mutagen.oggopus import OggOpus
+
+            audio = OggOpus(file_path)
+            return f"OPUS-{audio.info.bitrate // 1000}"
+
+        return ""
+    except Exception as e:
+        logger.debug(f"Could not determine audio quality for {file_path}: {e}")
+        return ""
+
+
+def get_quality_tier_from_extension(file_path):
+    """Classify a file extension into a quality tier."""
+    if not file_path:
+        return ("unknown", 999)
+
+    ext = os.path.splitext(file_path)[1].lower()
+    quality_tiers = {
+        "lossless": {
+            "extensions": [".flac", ".ape", ".wav", ".alac", ".dsf", ".dff", ".aiff", ".aif"],
+            "tier": 1,
+        },
+        "high_lossy": {
+            "extensions": [".opus", ".ogg"],
+            "tier": 2,
+        },
+        "standard_lossy": {
+            "extensions": [".m4a", ".aac"],
+            "tier": 3,
+        },
+        "low_lossy": {
+            "extensions": [".mp3", ".wma"],
+            "tier": 4,
+        },
+    }
+
+    for tier_name, tier_data in quality_tiers.items():
+        if ext in tier_data["extensions"]:
+            return (tier_name, tier_data["tier"])
+
+    return ("unknown", 999)
+
+
+def downsample_hires_flac(final_path, context):
+    """Downsample a hi-res FLAC to 16-bit/44.1kHz if enabled."""
+    from mutagen.flac import FLAC
+
+    config_manager = _get_config_manager()
+    if not config_manager.get("lossy_copy.downsample_hires", False):
+        return None
+
+    if os.path.splitext(final_path)[1].lower() != ".flac":
+        return None
+
+    try:
+        audio = FLAC(final_path)
+        original_bits = audio.info.bits_per_sample
+        original_rate = audio.info.sample_rate
+    except Exception as e:
+        logger.error(f"[Downsample] Could not read FLAC info: {e}")
+        return None
+
+    if original_bits <= 16 and original_rate <= 44100:
+        return None
+
+    logger.info(f"[Downsample] Converting {original_bits}-bit/{original_rate}Hz -> 16-bit/44100Hz: {os.path.basename(final_path)}")
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        local = os.path.join(os.path.dirname(__file__), "tools", "ffmpeg")
+        if os.path.isfile(local):
+            ffmpeg_bin = local
+        else:
+            logger.warning("[Downsample] ffmpeg not found - skipping hi-res conversion")
+            return None
+
+    temp_path = final_path + ".tmp.flac"
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg_bin, "-i", final_path,
+                "-sample_fmt", "s16",
+                "-ar", "44100",
+                "-map_metadata", "0",
+                "-compression_level", "8",
+                "-y", temp_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+
+        if result.returncode != 0:
+            logger.error(f"[Downsample] ffmpeg failed: {result.stderr[:200]}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return None
+
+        if not os.path.isfile(temp_path) or os.path.getsize(temp_path) == 0:
+            logger.warning("[Downsample] Output file missing or empty")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return None
+
+        verify_audio = FLAC(temp_path)
+        if verify_audio.info.bits_per_sample != 16:
+            logger.info(f"[Downsample] Output not 16-bit ({verify_audio.info.bits_per_sample}-bit), aborting")
+            os.remove(temp_path)
+            return None
+
+        os.replace(temp_path, final_path)
+        logger.info(f"[Downsample] Converted to 16-bit/44.1kHz: {os.path.basename(final_path)}")
+
+        new_quality = "FLAC 16bit"
+        try:
+            updated_audio = FLAC(final_path)
+            updated_audio["QUALITY"] = new_quality
+            updated_audio.save()
+        except Exception as tag_err:
+            logger.error(f"[Downsample] Could not update QUALITY tag: {tag_err}")
+
+        old_quality = context.get("_audio_quality", "")
+        context["_audio_quality"] = new_quality
+
+        if old_quality and old_quality != new_quality and old_quality in os.path.basename(final_path):
+            new_basename = os.path.basename(final_path).replace(old_quality, new_quality)
+            new_path = os.path.join(os.path.dirname(final_path), new_basename)
+            try:
+                os.rename(final_path, new_path)
+                logger.info(f"[Downsample] Renamed: {os.path.basename(final_path)} -> {new_basename}")
+                for lyrics_ext in (".lrc", ".txt"):
+                    old_lyrics = os.path.splitext(final_path)[0] + lyrics_ext
+                    if os.path.isfile(old_lyrics):
+                        new_lyrics = os.path.splitext(new_path)[0] + lyrics_ext
+                        os.rename(old_lyrics, new_lyrics)
+                return new_path
+            except Exception as rename_err:
+                logger.error(f"[Downsample] Could not rename file: {rename_err}")
+
+        return final_path
+    except subprocess.TimeoutExpired:
+        logger.info(f"[Downsample] Conversion timed out for: {os.path.basename(final_path)}")
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    except Exception as e:
+        logger.error(f"[Downsample] Conversion error: {e}")
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+    return None
+
+
+def create_lossy_copy(final_path):
+    """Convert a FLAC file to a lossy copy using the configured codec."""
+    from mutagen.flac import FLAC
+
+    config_manager = _get_config_manager()
+    if not config_manager.get("lossy_copy.enabled", False):
+        return None
+
+    if os.path.splitext(final_path)[1].lower() != ".flac":
+        return None
+
+    codec = config_manager.get("lossy_copy.codec", "mp3").lower()
+    bitrate = config_manager.get("lossy_copy.bitrate", "320")
+
+    if codec == "opus" and int(bitrate) > 256:
+        bitrate = "256"
+
+    codec_map = {
+        "mp3": ("libmp3lame", ".mp3", f"MP3-{bitrate}", ["-vn", "-id3v2_version", "3"]),
+        "opus": ("libopus", ".opus", f"OPUS-{bitrate}", ["-vn", "-map", "0:a", "-vbr", "on"]),
+        "aac": ("aac", ".m4a", f"AAC-{bitrate}", ["-vn", "-movflags", "+faststart"]),
+    }
+
+    if codec not in codec_map:
+        logger.info(f"[Lossy Copy] Unknown codec '{codec}' - skipping conversion")
+        return None
+
+    ffmpeg_codec, out_ext, quality_label, extra_args = codec_map[codec]
+    out_path = os.path.splitext(final_path)[0] + out_ext
+
+    original_quality = get_audio_quality_string(final_path)
+    if original_quality:
+        out_basename = os.path.basename(out_path)
+        if original_quality in out_basename:
+            out_basename = out_basename.replace(original_quality, quality_label)
+            out_path = os.path.join(os.path.dirname(out_path), out_basename)
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        local = os.path.join(os.path.dirname(__file__), "tools", "ffmpeg")
+        if os.path.isfile(local):
+            ffmpeg_bin = local
+        else:
+            logger.warning(f"[Lossy Copy] ffmpeg not found - skipping {codec.upper()} conversion")
+            return None
+
+    try:
+        logger.info(f"[Lossy Copy] Converting to {quality_label}: {os.path.basename(final_path)}")
+        cmd = [
+            ffmpeg_bin, "-i", final_path,
+            "-codec:a", ffmpeg_codec,
+            "-b:a", f"{bitrate}k",
+            "-map_metadata", "0",
+        ] + extra_args + ["-y", out_path]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+        if result.returncode == 0:
+            logger.info(f"[Lossy Copy] Created {quality_label} copy: {os.path.basename(out_path)}")
+            try:
+                from mutagen import File as MutagenFile
+                audio = MutagenFile(out_path)
+                if audio is not None:
+                    if codec == "mp3":
+                        from mutagen.id3 import TXXX
+                        audio.tags.add(TXXX(encoding=3, desc="QUALITY", text=[quality_label]))
+                    elif codec == "opus":
+                        audio["QUALITY"] = [quality_label]
+                    elif codec == "aac":
+                        from mutagen.mp4 import MP4FreeForm
+                        audio["----:com.apple.iTunes:QUALITY"] = [MP4FreeForm(quality_label.encode("utf-8"))]
+                    audio.save()
+            except Exception as tag_err:
+                logger.error(f"[Lossy Copy] Could not update QUALITY tag: {tag_err}")
+            return out_path
+
+        logger.error(f"[Lossy Copy] ffmpeg failed: {result.stderr[:200]}")
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except Exception:
+                pass
+        return None
+    except subprocess.TimeoutExpired:
+        logger.warning(f"[Lossy Copy] Conversion timed out for: {os.path.basename(final_path)}")
+    except Exception as e:
+        logger.error(f"[Lossy Copy] Conversion error: {e}")
+    return None

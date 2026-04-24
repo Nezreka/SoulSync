@@ -26,6 +26,9 @@ from flask import Flask, render_template, request, jsonify, redirect, send_file,
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger, setup_logging
 from utils.async_helpers import run_async
+from mutagen.flac import FLAC
+from mutagen.mp4 import MP4
+from mutagen.oggvorbis import OggVorbis
 
 # --- Core Application Imports ---
 # Import the same core clients and config manager used by the GUI app
@@ -94,6 +97,56 @@ from core.database_update_worker import DatabaseUpdateWorker
 from core.web_scan_manager import WebScanManager
 from core.lyrics_client import lyrics_client
 from core.metadata_cache import get_metadata_cache
+from core.import_context import (
+    build_import_album_info,
+    get_import_clean_album,
+    get_import_clean_artist,
+    get_import_clean_title,
+    get_import_context_album,
+    get_import_context_artist,
+    get_import_has_clean_metadata,
+    get_import_has_full_metadata,
+    get_import_original_search,
+    get_import_source,
+    get_import_source_ids,
+    get_import_track_info,
+    get_library_source_id_columns,
+    get_source_tag_names,
+    normalize_import_context,
+)
+from core.import_album import (
+    build_album_import_context,
+    build_album_import_match_payload,
+    resolve_album_artist_context,
+)
+from core.import_album_naming import resolve_album_group as _resolve_album_group
+from core.import_filename import extract_track_number_from_filename, parse_filename_metadata
+from core.import_staging import (
+    get_import_suggestions_cache,
+    get_primary_source,
+    get_staging_path,
+    read_staging_file_metadata,
+    refresh_import_suggestions_cache,
+    search_import_albums,
+    search_import_tracks,
+    start_import_suggestions_cache,
+)
+from core.import_paths import build_final_path_for_track as _build_final_path_for_track
+from core.metadata_common import get_file_lock
+from core.import_runtime_state import (
+    activity_feed,
+    activity_feed_lock,
+    add_activity_item,
+    download_batches,
+    download_tasks,
+    matched_context_lock,
+    matched_downloads_context,
+    mark_task_completed as _core_mark_task_completed,
+    set_activity_toast_emitter,
+    tasks_lock,
+)
+from core import metadata_enrichment
+from core.metadata_source import normalize_album_cache_key
 from database.music_database import get_database, MusicDatabase
 from services.sync_service import PlaylistSyncService
 
@@ -225,6 +278,7 @@ _socketio_cors_origins = _resolve_socketio_cors_origins(config_manager)
 socketio = SocketIO(app, async_mode='threading', cors_allowed_origins=_socketio_cors_origins)
 _log_socketio_startup_status(_socketio_cors_origins, logger)
 _socketio_rejection_logger = _SocketIORejectionLogger(logger)
+set_activity_toast_emitter(socketio.emit)
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}
@@ -1883,7 +1937,7 @@ def _register_automation_handlers():
 
         # --- 4. Sweep empty staging directories ---
         _update_automation_progress(automation_id, phase='Sweeping import folder...', progress=60)
-        staging_path = _get_staging_path()
+        staging_path = get_staging_path()
         s_removed = 0
         if os.path.isdir(staging_path):
             for dirpath, _dirnames, _filenames in os.walk(staging_path, topdown=False):
@@ -2162,346 +2216,6 @@ def _register_automation_handlers():
 
     logger.info("Automation action handlers registered")
 
-
-def _emit_track_downloaded(context):
-    """Emit track_downloaded event for automation engine. Safe to call anywhere."""
-    try:
-        if not automation_engine:
-            return
-        ti = context.get('track_info') or context.get('search_result') or {}
-        artist_name = ''
-        artists = ti.get('artists', [])
-        if artists:
-            a = artists[0]
-            artist_name = a.get('name', str(a)) if isinstance(a, dict) else str(a)
-        automation_engine.emit('track_downloaded', {
-            'artist': artist_name,
-            'title': ti.get('name', ti.get('title', '')),
-            'album': ti.get('album', ''),
-            'quality': context.get('_audio_quality', 'Unknown'),
-        })
-    except Exception:
-        pass
-
-
-def _record_library_history_download(context):
-    """Record a completed download to the library_history table. Non-blocking."""
-    try:
-        # Determine download source
-        search_result = context.get('original_search_result') or context.get('search_result') or {}
-        username = search_result.get('username', context.get('_download_username', ''))
-        _svc_map = {'youtube': 'YouTube', 'tidal': 'Tidal', 'qobuz': 'Qobuz', 'hifi': 'HiFi', 'deezer_dl': 'Deezer', 'lidarr': 'Lidarr'}
-        download_source = _svc_map.get(username, 'Soulseek')
-
-        ti = context.get('track_info') or context.get('search_result') or {}
-        artist_name = ''
-        artists = ti.get('artists', [])
-        if artists:
-            a = artists[0]
-            artist_name = a.get('name', str(a)) if isinstance(a, dict) else str(a)
-        if not artist_name:
-            artist_name = ti.get('artist', '')
-
-        album_raw = ti.get('album', '')
-        album_name = album_raw.get('name', '') if isinstance(album_raw, dict) else str(album_raw or '')
-
-        title = ti.get('name', ti.get('title', ''))
-        quality = context.get('_audio_quality', '')
-        file_path = context.get('_final_processed_path', context.get('_final_path', ''))
-
-        # Try to get album art URL
-        thumb_url = ''
-        spotify_album = context.get('spotify_album')
-        if spotify_album and isinstance(spotify_album, dict):
-            thumb_url = spotify_album.get('image_url', '')
-            if not thumb_url:
-                images = spotify_album.get('images', [])
-                if images:
-                    thumb_url = images[0].get('url', '')
-        if not thumb_url:
-            album_info = context.get('album_info', {})
-            if isinstance(album_info, dict):
-                thumb_url = album_info.get('album_image_url', '')
-
-        # Source provenance — what file/track was actually downloaded
-        source_filename = search_result.get('filename', '')
-        # Track ID: try search result first, then track_info (Spotify ID used for streaming lookups)
-        source_track_id = (search_result.get('track_id', '')
-                           or search_result.get('id', '')
-                           or ti.get('id', ''))
-
-        # Source title/artist — what the download source said the track was.
-        # For Soulseek: parsed from the peer's filename by TrackResult._parse_filename_metadata()
-        # For Tidal/YouTube/Qobuz: from the streaming API's own metadata
-        # These live on the candidate's original fields, NOT the spotify_clean_* fields
-        source_track_title = search_result.get('title', '') or search_result.get('name', '')
-        source_artist = search_result.get('artist', '')
-        # For streaming sources, track ID is encoded in filename as "id||display_name"
-        if source_filename and '||' in source_filename and username in ('tidal', 'youtube', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
-            _stream_id = source_filename.split('||')[0]
-            if _stream_id and not source_track_id:
-                source_track_id = _stream_id
-
-        # AcoustID verification result
-        acoustid_result = context.get('_acoustid_result', '')
-
-        db = get_database()
-        db.add_library_history_entry(
-            event_type='download',
-            title=title,
-            artist_name=artist_name,
-            album_name=album_name,
-            quality=quality,
-            file_path=file_path,
-            thumb_url=thumb_url,
-            download_source=download_source,
-            source_track_id=source_track_id,
-            source_track_title=source_track_title,
-            source_filename=source_filename,
-            acoustid_result=acoustid_result,
-            source_artist=source_artist
-        )
-    except Exception:
-        pass  # Non-critical, never block download flow
-
-
-def _record_download_provenance(context):
-    """Record download source provenance for track lineage tracking. Non-blocking."""
-    try:
-        # Extract source info
-        search_result = context.get('original_search_result') or context.get('search_result') or {}
-        username = search_result.get('username', context.get('_download_username', ''))
-        filename = search_result.get('filename', '')
-
-        # Determine source service from username
-        service_map = {'youtube': 'youtube', 'tidal': 'tidal', 'qobuz': 'qobuz', 'hifi': 'hifi', 'deezer_dl': 'deezer', 'lidarr': 'lidarr'}
-        source_service = service_map.get(username, 'soulseek')
-
-        # Track metadata
-        ti = context.get('track_info') or context.get('search_result') or {}
-        artist_name = ''
-        artists = ti.get('artists', [])
-        if artists:
-            a = artists[0]
-            artist_name = a.get('name', str(a)) if isinstance(a, dict) else str(a)
-        if not artist_name:
-            artist_name = ti.get('artist', '')
-
-        album_raw = ti.get('album', '')
-        album_name = album_raw.get('name', '') if isinstance(album_raw, dict) else str(album_raw or '')
-        title = ti.get('name', ti.get('title', ''))
-
-        file_path = context.get('_final_processed_path', context.get('_final_path', ''))
-        quality = context.get('_audio_quality', '')
-        size = search_result.get('size', 0)
-
-        # Read audio details from the file for provenance (survives transcoding)
-        bit_depth = None
-        sample_rate = None
-        bitrate = None
-        try:
-            if file_path and os.path.isfile(file_path):
-                from mutagen import File as MutagenFile
-                audio = MutagenFile(file_path)
-                if audio and audio.info:
-                    sample_rate = getattr(audio.info, 'sample_rate', None)
-                    bitrate = getattr(audio.info, 'bitrate', None)
-                    bit_depth = getattr(audio.info, 'bits_per_sample', None)
-        except Exception:
-            pass
-
-        db = get_database()
-        db.record_track_download(
-            file_path=file_path,
-            source_service=source_service,
-            source_username=username,
-            source_filename=filename,
-            source_size=size or 0,
-            audio_quality=quality,
-            track_title=title,
-            track_artist=artist_name,
-            track_album=album_name,
-            bit_depth=bit_depth,
-            sample_rate=sample_rate,
-            bitrate=bitrate,
-        )
-    except Exception:
-        pass  # Non-critical, never block download flow
-
-
-def _record_soulsync_library_entry(context, spotify_artist, album_info):
-    """Write artist/album/track to library DB after successful download/import.
-
-    Only runs when active server is 'soulsync' (standalone mode). Creates
-    DB records with server_source='soulsync' and pre-populates enrichment
-    IDs so enrichment workers don't need to re-discover them.
-    """
-    try:
-        active_server = config_manager.get_active_media_server()
-        if active_server != 'soulsync':
-            return
-
-        final_path = context.get('_final_processed_path')
-        if not final_path:
-            return
-
-        spotify_album = context.get('spotify_album', {}) or {}
-        track_info = context.get('track_info', {}) or {}
-        original_search = context.get('original_search_result', {}) or {}
-
-        artist_name = (spotify_artist or {}).get('name', '')
-        if not artist_name:
-            artist_name = original_search.get('spotify_clean_artist', '') or original_search.get('artist', '')
-        if not artist_name or artist_name in ('Unknown', 'Unknown Artist'):
-            return
-
-        album_name = ''
-        if album_info and isinstance(album_info, dict):
-            album_name = album_info.get('album_name', '')
-        if not album_name:
-            album_name = spotify_album.get('name', '') or original_search.get('album', '')
-        if not album_name:
-            album_name = track_info.get('name', 'Unknown')
-
-        track_name = original_search.get('spotify_clean_title', '') or track_info.get('name', '') or original_search.get('title', '')
-        track_number = (track_info.get('track_number') or (album_info.get('track_number') if isinstance(album_info, dict) else None)) or 1
-        duration_ms = track_info.get('duration_ms', 0) or 0
-
-        year = None
-        release_date = spotify_album.get('release_date', '')
-        if release_date and len(release_date) >= 4:
-            try:
-                year = int(release_date[:4])
-            except ValueError:
-                pass
-
-        image_url = spotify_album.get('image_url', '')
-        if not image_url:
-            images = spotify_album.get('images', [])
-            if images and isinstance(images, list) and len(images) > 0:
-                img = images[0]
-                image_url = img.get('url', '') if isinstance(img, dict) else str(img)
-
-        # Enrichment IDs from context — saves enrichment workers from re-discovering
-        spotify_artist_id = (spotify_artist or {}).get('id', '')
-        if spotify_artist_id in ('auto_import', 'from_sync_modal', 'explicit_artist', ''):
-            spotify_artist_id = ''
-        spotify_album_id = spotify_album.get('id', '')
-        if spotify_album_id in ('from_sync_modal', 'explicit_album', ''):
-            spotify_album_id = ''
-        spotify_track_id = track_info.get('id', '') or original_search.get('id', '')
-
-        genres = (spotify_artist or {}).get('genres', [])
-        if genres:
-            from core.genre_filter import filter_genres as _gf2
-            genres = _gf2(genres, config_manager)
-        genres_json = json.dumps(genres) if genres else ''
-
-        bitrate = 0
-        try:
-            from mutagen import File as MutagenFile
-            audio = MutagenFile(final_path)
-            if audio and hasattr(audio, 'info') and audio.info and hasattr(audio.info, 'bitrate'):
-                bitrate = int(audio.info.bitrate / 1000) if audio.info.bitrate else 0
-        except Exception:
-            pass
-
-        import hashlib
-        def _sid(text):
-            return str(abs(int(hashlib.md5(text.encode('utf-8', errors='replace')).hexdigest(), 16)) % (10 ** 9))
-
-        artist_id = _sid(artist_name.lower().strip())
-        album_id = _sid(f"{artist_name}::{album_name}".lower().strip())
-        track_id = _sid(final_path)
-        total_tracks = spotify_album.get('total_tracks', 0) or 0
-
-        db = get_database()
-        with db._get_connection() as conn:
-            cursor = conn.cursor()
-
-            # ── Artist: find existing soulsync record or create ──
-            cursor.execute("SELECT id FROM artists WHERE id = ? AND server_source = 'soulsync'", (artist_id,))
-            if not cursor.fetchone():
-                # Check if soulsync artist exists by name
-                cursor.execute("SELECT id FROM artists WHERE name COLLATE NOCASE = ? AND server_source = 'soulsync' LIMIT 1", (artist_name,))
-                existing_by_name = cursor.fetchone()
-                if existing_by_name:
-                    artist_id = existing_by_name[0]
-                else:
-                    # Avoid PK collision with other server sources
-                    cursor.execute("SELECT id FROM artists WHERE id = ?", (artist_id,))
-                    if cursor.fetchone():
-                        # ID taken by another source — append suffix
-                        artist_id = _sid(artist_name.lower().strip() + '::soulsync')
-                    cursor.execute("""
-                        INSERT INTO artists (id, name, genres, thumb_url, server_source, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, (artist_id, artist_name, genres_json, image_url))
-                    if spotify_artist_id:
-                        try:
-                            cursor.execute("UPDATE artists SET spotify_artist_id = ? WHERE id = ?", (spotify_artist_id, artist_id))
-                        except Exception:
-                            pass
-
-            # ── Album: find existing soulsync record or create ──
-            cursor.execute("SELECT id FROM albums WHERE id = ? AND server_source = 'soulsync'", (album_id,))
-            if not cursor.fetchone():
-                cursor.execute("SELECT id FROM albums WHERE title COLLATE NOCASE = ? AND artist_id = ? AND server_source = 'soulsync' LIMIT 1",
-                               (album_name, artist_id))
-                existing_album_by_name = cursor.fetchone()
-                if existing_album_by_name:
-                    album_id = existing_album_by_name[0]
-                else:
-                    # Avoid PK collision
-                    cursor.execute("SELECT id FROM albums WHERE id = ?", (album_id,))
-                    if cursor.fetchone():
-                        album_id = _sid(f"{artist_name}::{album_name}::soulsync".lower().strip())
-                    cursor.execute("""
-                        INSERT INTO albums (id, artist_id, title, year, thumb_url, genres, track_count,
-                                            duration, server_source, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, (album_id, artist_id, album_name, year, image_url, genres_json, total_tracks, duration_ms))
-                    if spotify_album_id:
-                        try:
-                            cursor.execute("UPDATE albums SET spotify_album_id = ? WHERE id = ?", (spotify_album_id, album_id))
-                        except Exception:
-                            pass
-
-            # ── Track ──
-            # Determine per-track artist (for compilations/features where track artist != album artist)
-            track_artist = None
-            track_artists_list = track_info.get('artists', []) or original_search.get('artists', [])
-            if track_artists_list:
-                first_track_artist = track_artists_list[0]
-                if isinstance(first_track_artist, dict):
-                    ta_name = first_track_artist.get('name', '')
-                else:
-                    ta_name = str(first_track_artist)
-                if ta_name and ta_name.lower() != artist_name.lower():
-                    track_artist = ta_name  # Only store when different from album artist
-
-            cursor.execute("SELECT id FROM tracks WHERE file_path = ?", (final_path,))
-            if not cursor.fetchone():
-                cursor.execute("""
-                    INSERT INTO tracks (id, album_id, artist_id, title, track_number,
-                                        duration, file_path, bitrate, track_artist, server_source,
-                                        created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """, (track_id, album_id, artist_id, track_name, track_number,
-                      duration_ms, final_path, bitrate, track_artist))
-                if spotify_track_id:
-                    try:
-                        cursor.execute("UPDATE tracks SET spotify_track_id = ? WHERE id = ?", (spotify_track_id, track_id))
-                    except Exception:
-                        pass
-
-            conn.commit()
-            logger.info(f"[SoulSync Library] Added: {artist_name} / {album_name} / {track_name}")
-
-    except Exception as e:
-        logger.debug(f"[SoulSync Library] Non-critical error: {e}")
-
-
 # --- Register Public REST API Blueprint (v1) ---
 try:
     from api import create_api_blueprint, limiter
@@ -2652,30 +2366,13 @@ def _update_automation_progress(automation_id, **kwargs):
                 pass
 
 # --- Global Matched Downloads Context Management ---
-# Thread-safe storage for matched download contexts
-# Key: slskd download ID, Value: dict containing Spotify artist/album data
-matched_downloads_context = {}
-matched_context_lock = threading.Lock()
+# Shared with core.import_runtime_state so the refactored pipeline and web
+# server operate on the same context registry.
 _orphaned_download_keys = set()  # Context keys of downloads abandoned during retry
-
-# --- File-Level Metadata Write Locking ---
-# Prevents concurrent threads from writing metadata to the same file simultaneously
-_metadata_write_locks = {}  # file_path -> threading.Lock()
-_metadata_locks_lock = threading.Lock()  # Lock for the locks dict
-
-def _get_file_lock(file_path):
-    """Get or create a lock for a specific file path to prevent concurrent metadata writes."""
-    with _metadata_locks_lock:
-        if file_path not in _metadata_write_locks:
-            _metadata_write_locks[file_path] = threading.Lock()
-        return _metadata_write_locks[file_path]
 
 # --- Download Missing Tracks Modal State Management ---
 # Thread-safe state tracking for modal download functionality with batch management
 missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="MissingTrackWorker")
-download_tasks = {}  # task_id -> task state dict
-download_batches = {}  # batch_id -> {queue, active_count, max_concurrent}
-tasks_lock = threading.Lock()
 batch_locks = {}  # batch_id -> Lock() for atomic batch operations
 
 def _get_max_concurrent():
@@ -2707,8 +2404,7 @@ def _mark_task_completed(task_id, track_info=None):
     Assumes task_id exists in download_tasks (should be called within tasks_lock).
     """
     global session_completed_downloads
-
-    download_tasks[task_id]['status'] = 'completed'
+    _core_mark_task_completed(task_id, track_info)
 
     # Increment session counter (matches dashboard.py behavior)
     with session_stats_lock:
@@ -4158,12 +3854,6 @@ _EDITION_BARE_RE = _re.compile(
     r'(?:\s+(?:edition|version))?\s*$',
     _re.IGNORECASE
 )
-
-def _normalize_album_cache_key(album_name):
-    """Normalize album name for cache key: strip edition suffixes, lowercase, strip whitespace."""
-    result = _EDITION_PAREN_RE.sub('', album_name)
-    result = _EDITION_BARE_RE.sub('', result)
-    return result.lower().strip()
 
 def _prepare_stream_task(track_data):
     """
@@ -6225,10 +5915,6 @@ def get_debug_info():
     return jsonify(info)
 
 
-# Global activity tracking storage
-activity_feed = []
-activity_feed_lock = threading.Lock()
-
 @app.route('/api/activity/feed')
 def get_activity_feed():
     """Get recent activity feed for dashboard"""
@@ -6296,37 +5982,6 @@ def get_activity_logs():
 
     except Exception as e:
         return jsonify({'logs': [f'Error reading activity feed: {str(e)}']})
-
-def add_activity_item(icon: str, title: str, subtitle: str, time_ago: str = "Now", show_toast: bool = True):
-    """Add activity item to the feed (replicates dashboard.py functionality)"""
-    try:
-        import time
-        from datetime import datetime, timezone
-        activity_item = {
-            'icon': icon,
-            'title': title,
-            'subtitle': subtitle,
-            'time': datetime.now(timezone.utc).isoformat(),
-            'timestamp': time.time(),
-            'show_toast': show_toast
-        }
-
-        with activity_feed_lock:
-            activity_feed.append(activity_item)
-            # Keep only last 20 items to prevent memory growth
-            if len(activity_feed) > 20:
-                activity_feed.pop(0)
-
-        # Instant toast push via WebSocket (replaces 3-second polling)
-        if show_toast:
-            try:
-                socketio.emit('dashboard:toast', activity_item)
-            except Exception:
-                pass
-
-        logger.info(f"Activity: {icon} {title} - {subtitle}")
-    except Exception as e:
-        logger.error(f"Error adding activity item: {e}")
 
 # --- Internal API Key Management (browser-only, no auth) ---
 @app.route('/api/v1/api-keys-internal', methods=['GET'])
@@ -13238,7 +12893,7 @@ def write_track_tags(track_id):
                 cover_url = thumb
 
         # Use file lock for thread safety
-        file_lock = _get_file_lock(resolved_path)
+        file_lock = get_file_lock(resolved_path)
         with file_lock:
             result = write_tags_to_file(resolved_path, db_data, embed_cover=embed_cover, cover_url=cover_url)
 
@@ -13396,7 +13051,7 @@ def write_tracks_tags_batch():
                         if thumb and thumb.startswith('http'):
                             art_data = cover_cache.get(thumb)
 
-                    file_lock = _get_file_lock(resolved_path)
+                    file_lock = get_file_lock(resolved_path)
                     with file_lock:
                         write_result = write_tags_to_file(
                             resolved_path, db_data,
@@ -13523,7 +13178,7 @@ def analyze_track_replaygain(track_id):
 
     track_gain_db = _RG_REFERENCE_LUFS - lufs
 
-    file_lock = _get_file_lock(file_path)
+    file_lock = get_file_lock(file_path)
     with file_lock:
         ok = _rg_write_tags(file_path, track_gain_db, peak_dbfs)
 
@@ -13625,7 +13280,7 @@ def analyze_album_replaygain(album_id):
                 continue
             file_path, track_gain_db, peak_dbfs = entry
             try:
-                file_lock = _get_file_lock(file_path)
+                file_lock = get_file_lock(file_path)
                 with file_lock:
                     _rg_write_tags(file_path, track_gain_db, peak_dbfs,
                                    album_gain_db, album_peak_dbfs)
@@ -13711,7 +13366,7 @@ def analyze_tracks_replaygain_batch():
             try:
                 lufs, peak_dbfs = _rg_analyze_track(file_path)
                 track_gain_db = _RG_REFERENCE_LUFS - lufs
-                file_lock = _get_file_lock(file_path)
+                file_lock = get_file_lock(file_path)
                 with file_lock:
                     _rg_write_tags(file_path, track_gain_db, peak_dbfs)
                 with _rg_batch_lock:
@@ -16562,7 +16217,7 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
                 _pf_mbid = _pf_release['id']
                 _pf_artist_key = spotify_artist['name'].lower().strip()
                 with _mb_release_cache_lock:
-                    _mb_release_cache[(_normalize_album_cache_key(spotify_album['name']), _pf_artist_key)] = _pf_mbid
+                    _mb_release_cache[(normalize_album_cache_key(spotify_album['name']), _pf_artist_key)] = _pf_mbid
                     _mb_release_cache[(spotify_album['name'].lower().strip(), _pf_artist_key)] = _pf_mbid
                 with _mb_release_detail_cache_lock:
                     _mb_release_detail_cache[_pf_mbid] = _pf_release
@@ -16703,7 +16358,7 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
                 _pf_mbid = _pf_release['id']
                 _pf_artist_key = spotify_artist['name'].lower().strip()
                 with _mb_release_cache_lock:
-                    _mb_release_cache[(_normalize_album_cache_key(spotify_album['name']), _pf_artist_key)] = _pf_mbid
+                    _mb_release_cache[(normalize_album_cache_key(spotify_album['name']), _pf_artist_key)] = _pf_mbid
                     _mb_release_cache[(spotify_album['name'].lower().strip(), _pf_artist_key)] = _pf_mbid
                 with _mb_release_detail_cache_lock:
                     _mb_release_detail_cache[_pf_mbid] = _pf_release
@@ -16775,9 +16430,6 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
             continue
             
     return started_count
-
-
-
 
 @app.route('/api/download/matched', methods=['POST'])
 def start_matched_download():
@@ -16903,82 +16555,12 @@ def start_matched_download():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
-
-
-
-
-
 def _parse_filename_metadata(filename: str) -> dict:
     """
     A direct port of the metadata parsing logic from the GUI's soulseek_client.py.
     This is the crucial missing step that cleans filenames BEFORE Spotify matching.
     """
-    import re
-    import os
-    
-    metadata = {
-        'artist': None,
-        'title': None,
-        'album': None,
-        'track_number': None
-    }
-    
-    # Get just the filename without extension and path
-    base_name = os.path.splitext(os.path.basename(filename))[0]
-    
-    # --- Logic from soulseek_client.py ---
-    patterns = [
-        # Pattern: 01 - Artist - Title (three-part with track number)
-        r'^(?P<track_number>\d{1,2})\s*[-\.]\s*(?P<artist>.+?)\s*[-–]\s*(?P<title>.+)$',
-        # Pattern: 01 - Title (track number + title — must come before Artist - Title
-        # to prevent "08 - Kilburn Market Dub" matching as artist="08")
-        r'^(?P<track_number>\d{1,2})\s*[-\.]\s*(?P<title>.+)$',
-        # Pattern: Artist - Title
-        r'^(?P<artist>.+?)\s*[-–]\s*(?P<title>.+)$',
-    ]
-    
-    for pattern in patterns:
-        match = re.match(pattern, base_name)
-        if match:
-            match_dict = match.groupdict()
-            metadata['track_number'] = int(match_dict['track_number']) if match_dict.get('track_number') else None
-            metadata['artist'] = match_dict.get('artist', '').strip() or None
-            metadata['title'] = match_dict.get('title', '').strip() or None
-            break # Stop after first successful match
-            
-    # If title is still missing, use the whole base_name
-    if not metadata['title']:
-        metadata['title'] = base_name.strip()
-
-    # Fallback for underscore formats like 'Artist_Album_01_Title'
-    if not metadata['artist'] and '_' in base_name:
-        parts = base_name.split('_')
-        if len(parts) >= 3:
-            # A common pattern is Artist_Album_TrackNum_Title
-            if parts[-2].isdigit():
-                metadata['artist'] = parts[0].strip()
-                metadata['title'] = parts[-1].strip()
-                metadata['track_number'] = int(parts[-2])
-                metadata['album'] = parts[1].strip()
-    
-    # Final cleanup on title if it contains the artist
-    if metadata['artist'] and metadata['title'] and metadata['artist'].lower() in metadata['title'].lower():
-         metadata['title'] = metadata['title'].replace(metadata['artist'], '').lstrip(' -–_').strip()
-
-
-    # Try to extract album from the full directory path
-    if '/' in filename or '\\' in filename:
-        path_parts = filename.replace('\\', '/').split('/')
-        if len(path_parts) >= 2:
-            # The parent directory is often the album
-            potential_album = path_parts[-2]
-            # Clean common prefixes like '2024 - '
-            cleaned_album = re.sub(r'^\d{4}\s*-\s*', '', potential_album).strip()
-            metadata['album'] = cleaned_album
-
-    logger.info(f"Parsed Filename '{base_name}': Artist='{metadata['artist']}', Title='{metadata['title']}', Album='{metadata['album']}', Track#='{metadata['track_number']}'")
-    return metadata
-
+    return parse_filename_metadata(filename)
 
 def _read_staging_file_metadata(full_path: str, filename: str) -> dict:
     """Read metadata from a staging file — tags first, filename parsing as fallback.
@@ -16986,57 +16568,7 @@ def _read_staging_file_metadata(full_path: str, filename: str) -> dict:
     Returns dict with: title, artist, albumartist, album, track_number, disc_number.
     Only falls back to filename parsing when BOTH title AND artist tags are empty.
     """
-    meta = {
-        'title': None, 'artist': None, 'albumartist': None,
-        'album': None, 'track_number': None, 'disc_number': None,
-    }
-
-    # Phase 1: Read embedded tags (most reliable)
-    try:
-        from mutagen import File as MutagenFile
-        tags = MutagenFile(full_path, easy=True)
-        if tags:
-            def _first(tag_list):
-                if isinstance(tag_list, list) and tag_list:
-                    val = str(tag_list[0]).strip()
-                    return val if val else None
-                return None
-
-            meta['title'] = _first(tags.get('title'))
-            meta['artist'] = _first(tags.get('artist'))
-            meta['albumartist'] = _first(tags.get('albumartist'))
-            meta['album'] = _first(tags.get('album'))
-
-            tn = _first(tags.get('tracknumber'))
-            if tn:
-                try:
-                    meta['track_number'] = int(tn.split('/')[0])
-                except (ValueError, IndexError):
-                    pass
-
-            dn = _first(tags.get('discnumber'))
-            if dn:
-                try:
-                    meta['disc_number'] = int(dn.split('/')[0])
-                except (ValueError, IndexError):
-                    pass
-    except Exception:
-        pass
-
-    # Phase 2: Only fall back to filename parsing when tags are genuinely empty
-    if not meta['title'] and not meta['artist']:
-        parsed = _parse_filename_metadata(filename)
-        meta['title'] = parsed.get('title') or os.path.splitext(os.path.basename(filename))[0]
-        meta['artist'] = parsed.get('artist')
-        if not meta['track_number']:
-            meta['track_number'] = parsed.get('track_number')
-        if not meta['album']:
-            meta['album'] = parsed.get('album')
-    elif not meta['title']:
-        # Has artist tag but no title — use filename for title only
-        meta['title'] = os.path.splitext(os.path.basename(filename))[0]
-
-    return meta
+    return read_staging_file_metadata(full_path, filename)
 
 
 # ===================================================================
@@ -17158,223 +16690,6 @@ def _search_track_in_album_context(original_search: dict, artist: dict) -> dict:
     except Exception as e:
         logger.error(f"Error in _search_track_in_album_context: {e}")
         return None
-
-
-
-
-def _detect_album_info_web(context: dict, artist: dict) -> dict:
-    """
-    Enhanced album detection with GUI parity - multi-priority logic.
-    (Updated to match GUI downloads.py logic exactly)
-    """
-    try:
-        # Log available data for debugging (GUI PARITY)
-        original_search = context.get("original_search_result", {})
-        logger.info(
-            "[Album Detection] start: track=%r clean_spotify_title=%r clean_spotify_album=%r "
-            "filename_album=%r artist=%r clean_data=%s album_download=%s",
-            original_search.get('title', 'Unknown'),
-            original_search.get('spotify_clean_title', 'None'),
-            original_search.get('spotify_clean_album', 'None'),
-            original_search.get('album', 'None'),
-            artist.get('name', 'Unknown'),
-            context.get('has_clean_spotify_data', False),
-            context.get('is_album_download', False),
-        )
-        spotify_album_context = context.get("spotify_album")
-        is_album_download = context.get("is_album_download", False)
-        artist_name = artist['name']
-        
-        logger.info(
-            "[Album Detection] track=%r artist=%r has_album_attr=%s album=%r",
-            original_search.get('title', 'Unknown'),
-            artist_name,
-            bool(original_search.get('album')),
-            original_search.get('album'),
-        )
-
-        # --- THIS IS THE CRITICAL FIX ---
-        # If this is part of a matched album download, we TRUST the context data completely.
-        # This is the exact logic from downloads.py.
-        if is_album_download and spotify_album_context:
-            # We exclusively use the track number and title that were matched
-            # *before* the download started. We do not try to re-parse the filename.
-            track_number = original_search.get('track_number', 1)
-            clean_track_name = original_search.get('title', 'Unknown Track')
-
-            logger.info(
-                "[Album Detection] using matched context: track_number=%s title=%r album=%r",
-                track_number,
-                clean_track_name,
-                spotify_album_context['name'],
-            )
-
-            return {
-                'is_album': True,
-                'album_name': spotify_album_context['name'],
-                'track_number': track_number,
-                'clean_track_name': clean_track_name,
-                'album_image_url': spotify_album_context.get('image_url')
-            }
-
-        # PRIORITY 1: Try album-aware search using clean Spotify album name (GUI PARITY)
-        # Prioritize clean Spotify album name over filename-parsed album
-        clean_album_name = original_search.get('spotify_clean_album')
-        fallback_album_name = original_search.get('album')
-        
-        album_name_to_use = None
-        album_source = None
-        
-        if clean_album_name and clean_album_name.strip() and clean_album_name != "Unknown Album":
-            album_name_to_use = clean_album_name
-            album_source = "CLEAN_SPOTIFY"
-        elif fallback_album_name and fallback_album_name.strip() and fallback_album_name != "Unknown Album":
-            album_name_to_use = fallback_album_name
-            album_source = "FILENAME_PARSED"
-        
-        if album_name_to_use:
-            track_title = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown')
-            logger.info(f"ALBUM-AWARE SEARCH ({album_source}): Looking for '{track_title}' in album '{album_name_to_use}'")
-            
-            # Temporarily set the album for the search
-            original_album = original_search.get('album')
-            original_search['album'] = album_name_to_use
-            
-            try:
-                album_result = _search_track_in_album_context_web(context, artist)
-                if album_result:
-                    logger.info(f"PRIORITY 1 SUCCESS: Found track using {album_source} album name - FORCING album classification")
-                    return album_result
-                else:
-                    logger.error(f"PRIORITY 1 FAILED: Track not found using {album_source} album name")
-            finally:
-                # Restore original album value
-                if original_album is not None:
-                    original_search['album'] = original_album
-                else:
-                    original_search.pop('album', None)
-
-        # PRIORITY 2: Fallback to individual track search for clean metadata
-        logger.info("Searching Spotify for individual track info (PRIORITY 2)...")
-        
-        # Clean the track title before searching - remove artist prefix  
-        # Prioritize clean Spotify title over filename-parsed title
-        track_title_to_use = original_search.get('spotify_clean_title') or original_search.get('title', '')
-        clean_title = _clean_track_title_web(track_title_to_use, artist_name)
-        logger.info(f"Cleaned title: '{track_title_to_use}' -> '{clean_title}'")
-        
-        # Search for the track by artist and cleaned title
-        query = f"artist:{artist_name} track:{clean_title}"
-        tracks = spotify_client.search_tracks(query, limit=5)
-        
-        # Find the best matching track (prefer album versions over singles)
-        best_match = None
-        best_confidence = 0
-
-        if tracks:
-            from core.matching_engine import MusicMatchingEngine
-            matching_engine = MusicMatchingEngine()
-            for track in tracks:
-                # Calculate confidence based on artist and title similarity
-                artist_confidence = matching_engine.similarity_score(
-                    matching_engine.normalize_string(artist_name),
-                    matching_engine.normalize_string(track.artists[0] if track.artists else '')
-                )
-                title_confidence = matching_engine.similarity_score(
-                    matching_engine.normalize_string(clean_title),
-                    matching_engine.normalize_string(track.name)
-                )
-
-                combined_confidence = (artist_confidence * 0.6 + title_confidence * 0.4)
-
-                # Small bonus for album tracks so they win ties over singles/EPs
-                album_type = getattr(track, 'album_type', None) or ''
-                if album_type == 'album':
-                    combined_confidence += 0.02
-                elif album_type == 'ep':
-                    combined_confidence += 0.01
-
-                if combined_confidence > best_confidence and combined_confidence > 0.75:  # Higher threshold to avoid bad matches
-                    best_match = track
-                    best_confidence = combined_confidence
-
-        # If we found a good Spotify match, use it for clean metadata
-        if best_match and best_confidence > 0.75:
-            logger.info(f"Found matching Spotify track: '{best_match.name}' - Album: '{best_match.album}' (confidence: {best_confidence:.2f})")
-            
-            # Get detailed track information using Spotify's track API
-            detailed_track = None
-            if hasattr(best_match, 'id') and best_match.id:
-                logger.info(f"Getting detailed track info from Spotify API for track ID: {best_match.id}")
-                detailed_track = spotify_client.get_track_details(best_match.id)
-            
-            # Use detailed track data if available
-            if detailed_track:
-                logger.info("Got detailed track data from Spotify API")
-                album_name = _clean_album_title_web(detailed_track['album']['name'], artist_name)
-                clean_track_name = detailed_track['name']  # Use Spotify's clean track name
-                album_type = detailed_track['album'].get('album_type', 'album')
-                total_tracks = detailed_track['album'].get('total_tracks', 1)
-                spotify_track_number = detailed_track.get('track_number', 1)
-                
-                logger.info(f"Spotify album info: '{album_name}' (type: {album_type}, total_tracks: {total_tracks}, track#: {spotify_track_number})")
-                logger.info(f"Clean track name from Spotify: '{clean_track_name}'")
-                
-                # Enhanced album detection using detailed API data (GUI PARITY)
-                is_album = (
-                    # Album type is 'album' (not 'single')
-                    album_type == 'album' and
-                    # Album has multiple tracks
-                    total_tracks > 1 and
-                    # Album name different from track name
-                    matching_engine.normalize_string(album_name) != matching_engine.normalize_string(clean_track_name) and
-                    # Album name is not just the artist name
-                    matching_engine.normalize_string(album_name) != matching_engine.normalize_string(artist_name)
-                )
-                
-                album_image_url = None
-                if detailed_track['album'].get('images'):
-                    album_image_url = detailed_track['album']['images'][0].get('url')
-                
-                logger.info(f"Album classification: {is_album} (type={album_type}, tracks={total_tracks})")
-                
-                return {
-                    'is_album': is_album,
-                    'album_name': album_name,
-                    'track_number': spotify_track_number,
-                    'clean_track_name': clean_track_name,
-                    'album_image_url': album_image_url,
-                    'confidence': best_confidence,
-                    'source': 'spotify_api_detailed'
-                }
-
-        # Fallback: Use original data with basic cleaning
-        logger.warning("No good Spotify match found, using original data")
-        fallback_title = _clean_track_title_web(original_search.get('title', 'Unknown Track'), artist_name)
-
-        # Preserve track_number from context if available (playlist sync tracks have it)
-        _ctx_track_number = (original_search.get('track_number')
-                             or context.get('track_info', {}).get('track_number')
-                             or 1)
-
-        return {
-            'is_album': False,
-            'clean_track_name': fallback_title,
-            'album_name': fallback_title,
-            'track_number': _ctx_track_number,
-            'confidence': 0.0,
-            'source': 'fallback_original'
-        }
-
-    except Exception as e:
-        logger.error(f"Error in _detect_album_info_web: {e}")
-        clean_title = _clean_track_title_web(context.get("original_search_result", {}).get('title', 'Unknown'), artist.get('name', ''))
-        _err_tn = (context.get("original_search_result", {}).get('track_number')
-                   or context.get('track_info', {}).get('track_number')
-                   or 1)
-        return {'is_album': False, 'clean_track_name': clean_title, 'album_name': clean_title, 'track_number': _err_tn}
-
-
 
 
 def _cleanup_empty_directories(download_path, moved_file_path):
@@ -18520,333 +17835,6 @@ def _get_audio_quality_string(file_path):
         logger.debug(f"Could not determine audio quality for {file_path}: {e}")
         return ''
 
-def _downsample_hires_flac(final_path, context):
-    """Downsample a 24-bit hi-res FLAC to 16-bit/44.1kHz CD quality.
-
-    Only runs when downsample_hires is enabled and the file is a 24-bit FLAC.
-    Replaces the original file in-place (write to temp, verify, swap).
-
-    Returns the (possibly renamed) final_path, or None if no conversion needed.
-    """
-    if not config_manager.get('lossy_copy.downsample_hires', False):
-        return None
-
-    ext = os.path.splitext(final_path)[1].lower()
-    if ext != '.flac':
-        return None
-
-    # Check current bit depth — only downsample if hi-res (>16 bit)
-    try:
-        from mutagen.flac import FLAC
-        audio = FLAC(final_path)
-        original_bits = audio.info.bits_per_sample
-        original_rate = audio.info.sample_rate
-    except Exception as e:
-        logger.error(f"[Downsample] Could not read FLAC info: {e}")
-        return None
-
-    if original_bits <= 16 and original_rate <= 44100:
-        return None  # Already CD quality or below
-
-    logger.info(f"[Downsample] Converting {original_bits}-bit/{original_rate}Hz → 16-bit/44100Hz: {os.path.basename(final_path)}")
-
-    ffmpeg_bin = shutil.which('ffmpeg')
-    if not ffmpeg_bin:
-        local = os.path.join(os.path.dirname(__file__), 'tools', 'ffmpeg')
-        if os.path.isfile(local):
-            ffmpeg_bin = local
-        else:
-            logger.warning("[Downsample] ffmpeg not found — skipping hi-res conversion")
-            return None
-
-    temp_path = final_path + '.tmp.flac'
-    try:
-        result = subprocess.run([
-            ffmpeg_bin, '-i', final_path,
-            '-sample_fmt', 's16',
-            '-ar', '44100',
-            '-map_metadata', '0',
-            '-compression_level', '8',
-            '-y', temp_path
-        ], capture_output=True, text=True, timeout=300)
-
-        if result.returncode != 0:
-            logger.error(f"[Downsample] ffmpeg failed: {result.stderr[:200]}")
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            return None
-
-        # Verify the output is a valid 16-bit FLAC
-        if not os.path.isfile(temp_path) or os.path.getsize(temp_path) == 0:
-            logger.warning("[Downsample] Output file missing or empty")
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            return None
-
-        verify_audio = FLAC(temp_path)
-        if verify_audio.info.bits_per_sample != 16:
-            logger.info(f"[Downsample] Output not 16-bit ({verify_audio.info.bits_per_sample}-bit), aborting")
-            os.remove(temp_path)
-            return None
-
-        # Atomic swap — replace original with downsampled version
-        os.replace(temp_path, final_path)
-        logger.info(f"[Downsample] Converted to 16-bit/44.1kHz: {os.path.basename(final_path)}")
-
-        # Update QUALITY tag in the new file
-        new_quality = 'FLAC 16bit'
-        try:
-            updated_audio = FLAC(final_path)
-            updated_audio['QUALITY'] = new_quality
-            updated_audio.save()
-        except Exception as tag_err:
-            logger.error(f"[Downsample] Could not update QUALITY tag: {tag_err}")
-
-        # Update context so downstream (lossy copy, metadata) reflects new quality
-        old_quality = context.get('_audio_quality', '')
-        context['_audio_quality'] = new_quality
-
-        # If filename contains old quality string (from $quality template), rename
-        if old_quality and old_quality != new_quality and old_quality in os.path.basename(final_path):
-            new_basename = os.path.basename(final_path).replace(old_quality, new_quality)
-            new_path = os.path.join(os.path.dirname(final_path), new_basename)
-            try:
-                os.rename(final_path, new_path)
-                logger.info(f"[Downsample] Renamed: {os.path.basename(final_path)} → {new_basename}")
-                # Rename matching lyrics sidecar file if it exists (.lrc or .txt)
-                for lyrics_ext in ('.lrc', '.txt'):
-                    old_lyrics = os.path.splitext(final_path)[0] + lyrics_ext
-                    if os.path.isfile(old_lyrics):
-                        new_lyrics = os.path.splitext(new_path)[0] + lyrics_ext
-                        os.rename(old_lyrics, new_lyrics)
-                return new_path
-            except Exception as rename_err:
-                logger.error(f"[Downsample] Could not rename file: {rename_err}")
-
-        return final_path
-
-    except subprocess.TimeoutExpired:
-        logger.info(f"[Downsample] Conversion timed out for: {os.path.basename(final_path)}")
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-    except Exception as e:
-        logger.error(f"[Downsample] Conversion error: {e}")
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
-    return None
-
-
-def _create_lossy_copy(final_path):
-    """Convert a FLAC file to a lossy codec at the user's configured bitrate.
-
-    Supported codecs: mp3 (libmp3lame), opus (libopus), aac (aac/libfdk_aac).
-    Only runs when lossy_copy is enabled and the file is a FLAC.
-    Places the output alongside the FLAC with the same basename.
-
-    Returns the output path if Blasphemy Mode deleted the original, else None.
-    """
-    if not config_manager.get('lossy_copy.enabled', False):
-        return None
-
-    ext = os.path.splitext(final_path)[1].lower()
-    if ext != '.flac':
-        return None
-
-    codec = config_manager.get('lossy_copy.codec', 'mp3').lower()
-    bitrate = config_manager.get('lossy_copy.bitrate', '320')
-
-    # Opus max per-channel bitrate is 256kbps — cap to avoid encoding failures
-    if codec == 'opus' and int(bitrate) > 256:
-        bitrate = '256'
-
-    # Codec configuration: (ffmpeg_codec, extension, quality_label, extra_args)
-    # -vn strips video/image streams (embedded cover art) which can cause
-    # conversion failures when the output muxer can't handle image streams
-    codec_map = {
-        'mp3':  ('libmp3lame', '.mp3',  f'MP3-{bitrate}',  ['-vn', '-id3v2_version', '3']),
-        'opus': ('libopus',    '.opus', f'OPUS-{bitrate}',  ['-vn', '-map', '0:a', '-vbr', 'on']),
-        'aac':  ('aac',        '.m4a',  f'AAC-{bitrate}',   ['-vn', '-movflags', '+faststart']),
-    }
-
-    if codec not in codec_map:
-        logger.info(f"[Lossy Copy] Unknown codec '{codec}' — skipping conversion")
-        return None
-
-    ffmpeg_codec, out_ext, quality_label, extra_args = codec_map[codec]
-    out_path = os.path.splitext(final_path)[0] + out_ext
-
-    # If $quality was used in filename, swap FLAC quality for lossy quality
-    original_quality = _get_audio_quality_string(final_path)
-    if original_quality:
-        out_basename = os.path.basename(out_path)
-        if original_quality in out_basename:
-            out_basename = out_basename.replace(original_quality, quality_label)
-            out_path = os.path.join(os.path.dirname(out_path), out_basename)
-
-    ffmpeg_bin = shutil.which('ffmpeg')
-    if not ffmpeg_bin:
-        local = os.path.join(os.path.dirname(__file__), 'tools', 'ffmpeg')
-        if os.path.isfile(local):
-            ffmpeg_bin = local
-        else:
-            logger.warning(f"[Lossy Copy] ffmpeg not found — skipping {codec.upper()} conversion")
-            return None
-
-    try:
-        logger.info(f"[Lossy Copy] Converting to {quality_label}: {os.path.basename(final_path)}")
-        cmd = [
-            ffmpeg_bin, '-i', final_path,
-            '-codec:a', ffmpeg_codec,
-            '-b:a', f'{bitrate}k',
-            '-map_metadata', '0',
-        ] + extra_args + ['-y', out_path]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-
-        if result.returncode == 0:
-            logger.info(f"[Lossy Copy] Created {quality_label} copy: {os.path.basename(out_path)}")
-
-            # Fix QUALITY tag — the FLAC's tag was copied verbatim by ffmpeg
-            try:
-                from mutagen import File as MutagenFile
-                audio = MutagenFile(out_path)
-                if audio is not None:
-                    if codec == 'mp3':
-                        from mutagen.id3 import TXXX
-                        audio.tags.add(TXXX(encoding=3, desc='QUALITY', text=[quality_label]))
-                    elif codec == 'opus':
-                        audio['QUALITY'] = [quality_label]
-                    elif codec == 'aac':
-                        from mutagen.mp4 import MP4FreeForm
-                        audio['----:com.apple.iTunes:QUALITY'] = [MP4FreeForm(quality_label.encode('utf-8'))]
-                    audio.save()
-            except Exception as tag_err:
-                logger.error(f"[Lossy Copy] Could not update QUALITY tag: {tag_err}")
-
-            # Embed cover art from source FLAC into the lossy copy
-            # Opus/OGG can't inherit FLAC cover art via ffmpeg -map_metadata alone
-            if codec in ('opus', 'aac'):
-                try:
-                    from mutagen import File as MutagenFile
-                    from mutagen.flac import FLAC as MutagenFLAC
-                    source_audio = MutagenFLAC(final_path)
-                    pic = None
-                    if source_audio and source_audio.pictures:
-                        pic = source_audio.pictures[0]
-
-                    # Fallback: read cover.jpg from the same directory
-                    if not pic:
-                        cover_path = os.path.join(os.path.dirname(final_path), 'cover.jpg')
-                        if os.path.isfile(cover_path):
-                            try:
-                                from mutagen.flac import Picture
-                                with open(cover_path, 'rb') as f:
-                                    img_data = f.read()
-                                pic = Picture()
-                                pic.type = 3  # Cover (front)
-                                pic.mime = 'image/jpeg'
-                                pic.desc = 'Cover'
-                                pic.width = 0
-                                pic.height = 0
-                                pic.depth = 0
-                                pic.colors = 0
-                                pic.data = img_data
-                                logger.warning("[Lossy Copy] Using cover.jpg as art source (FLAC had no embedded art)")
-                            except Exception:
-                                pass
-
-                    if pic:
-                        dest_audio = MutagenFile(out_path)
-                        if dest_audio is not None:
-                            if codec == 'opus':
-                                import base64
-                                from mutagen.oggopus import OggOpus
-                                if isinstance(dest_audio, OggOpus):
-                                    # OGG stores pictures as base64-encoded METADATA_BLOCK_PICTURE
-                                    import struct
-                                    # Build METADATA_BLOCK_PICTURE block
-                                    picture_data = (
-                                        struct.pack('>II', pic.type, len(pic.mime.encode('utf-8')))
-                                        + pic.mime.encode('utf-8')
-                                        + struct.pack('>I', len(pic.desc.encode('utf-8')))
-                                        + pic.desc.encode('utf-8')
-                                        + struct.pack('>IIII', pic.width, pic.height, pic.depth, pic.colors)
-                                        + struct.pack('>I', len(pic.data))
-                                        + pic.data
-                                    )
-                                    dest_audio['METADATA_BLOCK_PICTURE'] = [base64.b64encode(picture_data).decode('ascii')]
-                                    dest_audio.save()
-                                    logger.info("[Lossy Copy] Embedded cover art in Opus file")
-                            elif codec == 'aac':
-                                from mutagen.mp4 import MP4Cover
-                                fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in pic.mime else MP4Cover.FORMAT_PNG
-                                dest_audio['covr'] = [MP4Cover(pic.data, imageformat=fmt)]
-                                dest_audio.save()
-                                logger.info("[Lossy Copy] Embedded cover art in M4A file")
-                except Exception as art_err:
-                    logger.error(f"[Lossy Copy] Could not embed cover art: {art_err}")
-
-            # Blasphemy Mode: delete original FLAC if enabled and output is verified
-            if config_manager.get('lossy_copy.delete_original', False):
-                try:
-                    if os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
-                        from mutagen import File as MutagenFile
-                        test_audio = MutagenFile(out_path)
-                        if test_audio is not None:
-                            # Update provenance record to point to the new transcoded file
-                            try:
-                                db = get_database()
-                                db.update_provenance_file_path(final_path, out_path)
-                            except Exception:
-                                pass
-                            os.remove(final_path)
-                            logger.info(f"[Blasphemy Mode] Deleted original: {os.path.basename(final_path)}")
-                            # Rename lyrics sidecar file to match the output filename
-                            for lyrics_ext in ('.lrc', '.txt'):
-                                src_lyrics = os.path.splitext(final_path)[0] + lyrics_ext
-                                if os.path.isfile(src_lyrics):
-                                    dst_lyrics = os.path.splitext(out_path)[0] + lyrics_ext
-                                    try:
-                                        os.rename(src_lyrics, dst_lyrics)
-                                        logger.info(f"[Blasphemy Mode] Renamed {lyrics_ext}: {os.path.basename(src_lyrics)} -> {os.path.basename(dst_lyrics)}")
-                                    except Exception as lrc_err:
-                                        logger.error(f"[Blasphemy Mode] Could not rename {lyrics_ext}: {lrc_err}")
-                            return out_path
-                        else:
-                            logger.error(f"[Blasphemy Mode] Output failed audio validation, keeping original: {os.path.basename(final_path)}")
-                    else:
-                        logger.warning(f"[Blasphemy Mode] Output missing or empty, keeping original: {os.path.basename(final_path)}")
-                except Exception as del_err:
-                    logger.error(f"[Blasphemy Mode] Error during original deletion, keeping original: {del_err}")
-        else:
-            # ffmpeg always prints its version banner to stderr (~300 chars).
-            # Strip it so the actual error is visible, and show more than 200 chars.
-            stderr = result.stderr or ''
-            # Remove the version/config preamble (ends after the first empty line)
-            stderr_lines = stderr.split('\n')
-            error_lines = []
-            past_banner = False
-            for line in stderr_lines:
-                if past_banner:
-                    error_lines.append(line)
-                elif line.strip() == '':
-                    past_banner = True
-            error_msg = '\n'.join(error_lines).strip() if error_lines else stderr[-500:]
-            logger.error(f"[Lossy Copy] ffmpeg failed (exit code {result.returncode}): {error_msg[:500]}")
-            # Clean up empty/broken output file
-            if os.path.isfile(out_path) and os.path.getsize(out_path) == 0:
-                os.remove(out_path)
-                logger.warning(f"[Lossy Copy] Removed empty output file: {os.path.basename(out_path)}")
-    except subprocess.TimeoutExpired:
-        logger.info(f"[Lossy Copy] Conversion timed out for: {os.path.basename(final_path)}")
-        if os.path.isfile(out_path) and os.path.getsize(out_path) == 0:
-            os.remove(out_path)
-    except Exception as e:
-        logger.error(f"[Lossy Copy] Conversion error: {e}")
-    return None
 
 def _get_album_type_display(raw_type, track_count) -> str:
     """
@@ -19096,516 +18084,10 @@ from mutagen.apev2 import APEv2, APENoHeaderError
 import urllib.request
 
 def _wipe_source_tags(file_path: str) -> bool:
-    """Emergency tag wipe — clears ALL tags from a file without writing new ones.
-    Used when full metadata enhancement is skipped or fails, to prevent original
-    Soulseek source tags (especially MusicBrainz IDs from the uploader) from
-    persisting and causing album splits in media servers like Navidrome."""
-    try:
-        _strip_all_non_audio_tags(file_path)
-        audio = MutagenFile(file_path)
-        if audio is None:
-            return False
-        if hasattr(audio, 'clear_pictures'):
-            audio.clear_pictures()
-        if audio.tags is not None:
-            tag_count = len(audio.tags)
-            audio.tags.clear()
-        else:
-            audio.add_tags()
-            tag_count = 0
-        if isinstance(audio.tags, ID3):
-            audio.save(v1=0, v2_version=4)
-        elif isinstance(audio, FLAC):
-            audio.save(deleteid3=True)
-        else:
-            audio.save()
-        if tag_count > 0:
-            logger.info(f"[Tag Wipe] Stripped {tag_count} source tags from: {os.path.basename(file_path)}")
-        return True
-    except Exception as e:
-        logger.error(f"[Tag Wipe] Failed (non-fatal): {e}")
-        return False
-
-
-def _strip_all_non_audio_tags(file_path: str) -> dict:
-    """
-    Strip ALL non-audio tag containers from a file before metadata rewriting.
-    MP3 files from Soulseek commonly carry APEv2 tags (foobar2000 users)
-    with stale metadata that Mutagen's ID3 handler cannot see or clear.
-    Must run BEFORE MutagenFile() opens the file.
-    """
-    summary = {'apev2_stripped': False, 'apev2_tag_count': 0}
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext != '.mp3':
-        return summary
-    try:
-        apev2_tags = APEv2(file_path)
-        tag_count = len(apev2_tags)
-        tag_keys = list(apev2_tags.keys())
-        apev2_tags.delete(file_path)
-        summary['apev2_stripped'] = True
-        summary['apev2_tag_count'] = tag_count
-        logger.info(f"Stripped {tag_count} APEv2 tags: {', '.join(tag_keys[:10])}")
-    except APENoHeaderError:
-        pass  # No APEv2 tags — common case
-    except Exception as e:
-        logger.error(f"Could not strip APEv2 tags (non-fatal): {e}")
-    return summary
-
-def _verify_metadata_written(file_path: str) -> bool:
-    """Re-open file and verify core metadata fields are present."""
-    try:
-        check = MutagenFile(file_path)
-        if check is None or check.tags is None:
-            logger.info(f"[VERIFY] Tags are None after save: {file_path}")
-            return False
-        title_found = False
-        artist_found = False
-        if isinstance(check.tags, ID3):
-            title_found = bool(check.tags.getall('TIT2'))
-            artist_found = bool(check.tags.getall('TPE1'))
-            # Confirm APEv2 is gone
-            try:
-                APEv2(file_path)
-                logger.info("[VERIFY] APEv2 tags still present after processing!")
-                return False
-            except APENoHeaderError:
-                pass
-        elif isinstance(check, (FLAC, OggVorbis)) or _is_ogg_opus(check):
-            title_found = bool(check.get('title'))
-            artist_found = bool(check.get('artist'))
-        elif isinstance(check, MP4):
-            title_found = bool(check.get('\xa9nam'))
-            artist_found = bool(check.get('\xa9ART'))
-        if not title_found or not artist_found:
-            logger.warning(f"[VERIFY] Missing metadata - title:{title_found} artist:{artist_found}")
-            return False
-        logger.info("[VERIFY] Metadata verified OK")
-        return True
-    except Exception as e:
-        logger.error(f"[VERIFY] Verification error (non-fatal): {e}")
-        return False
-
-def _is_ogg_opus(audio_file):
-    """Check if a Mutagen file object is OggOpus (uses VorbisComment tags like FLAC/OGG)."""
-    return type(audio_file).__name__ == 'OggOpus'
+    return metadata_enrichment.wipe_source_tags(file_path)
 
 def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
-    """
-    Core function to enhance audio file metadata using Spotify data.
-    Thread-safe with per-file locking to prevent concurrent metadata writes.
-
-    Opens the file once in non-easy mode, clears all tags in memory, writes
-    new tags using format-specific frames/keys, embeds album art and source
-    IDs, then saves once.  This avoids the old clear→save→reopen pattern
-    which stripped the ID3v2 header from MP3 files, leaving them tagless.
-    """
-    if not config_manager.get('metadata_enhancement.enabled', True):
-        logger.warning("Metadata enhancement disabled in config.")
-        return True
-
-    # Normalize None album_info to empty dict to prevent AttributeError on .get() calls
-    if album_info is None:
-        album_info = {}
-
-    # Acquire per-file lock to prevent concurrent metadata writes to the same file
-    file_lock = _get_file_lock(file_path)
-    with file_lock:
-        logger.info(f"Enhancing metadata for: {os.path.basename(file_path)}")
-        try:
-            # Strip APEv2 tags from MP3 (invisible to ID3 handler)
-            strip_summary = _strip_all_non_audio_tags(file_path)
-
-            audio_file = MutagenFile(file_path)
-            if audio_file is None:
-                logger.error(f"Could not load audio file with Mutagen: {file_path}")
-                return False
-
-            # ── Wipe ALL existing tags and save immediately ──
-            # Files from Soulseek carry random metadata (wrong comments,
-            # encoder info, ReplayGain, old album art, random TXXX frames).
-            # Save the cleared state FIRST so that if anything below throws,
-            # the file at least has clean (empty) tags instead of junk that
-            # causes album fragmentation in media servers.
-            if hasattr(audio_file, 'clear_pictures'):
-                audio_file.clear_pictures()
-
-            if audio_file.tags is not None:
-                if len(audio_file.tags) > 0:
-                    tag_keys = list(audio_file.tags.keys())[:15]
-                    logger.info(f"Clearing {len(audio_file.tags)} existing tags: "
-                          f"{', '.join(str(k) for k in tag_keys)}")
-                audio_file.tags.clear()
-            else:
-                audio_file.add_tags()
-
-            # Persist the wipe — guarantees junk tags are gone even if later steps fail
-            if isinstance(audio_file.tags, ID3):
-                audio_file.save(v1=0, v2_version=4)
-            elif isinstance(audio_file, FLAC):
-                audio_file.save(deleteid3=True)
-            else:
-                audio_file.save()
-
-            metadata = _extract_spotify_metadata(context, artist, album_info)
-            if not metadata:
-                logger.error("Could not extract Spotify metadata, saving with cleared tags.")
-                if isinstance(audio_file.tags, ID3):
-                    audio_file.save(v1=0, v2_version=4)
-                elif isinstance(audio_file, FLAC):
-                    audio_file.save(deleteid3=True)
-                else:
-                    audio_file.save()
-                return True
-
-            # ── Write standard tags using format-specific API ──
-            track_num_str = f"{metadata.get('track_number', 1)}/{metadata.get('total_tracks', 1)}"
-
-            _write_multi = config_manager.get('metadata_enhancement.tags.write_multi_artist', False)
-            _artists_list = metadata.get('_artists_list', [])
-
-            if isinstance(audio_file.tags, ID3):
-                # MP3: write ID3 frames directly
-                if metadata.get('title'):
-                    audio_file.tags.add(TIT2(encoding=3, text=[metadata['title']]))
-                if metadata.get('artist'):
-                    audio_file.tags.add(TPE1(encoding=3, text=[metadata['artist']]))
-                    # Multi-value: write each artist as separate TPE1 text value
-                    if _write_multi and len(_artists_list) > 1:
-                        audio_file.tags.add(TPE1(encoding=3, text=_artists_list))
-                if metadata.get('album_artist'):
-                    audio_file.tags.add(TPE2(encoding=3, text=[metadata['album_artist']]))
-                if metadata.get('album'):
-                    audio_file.tags.add(TALB(encoding=3, text=[metadata['album']]))
-                if metadata.get('date'):
-                    audio_file.tags.add(TDRC(encoding=3, text=[metadata['date']]))
-                if metadata.get('genre'):
-                    audio_file.tags.add(TCON(encoding=3, text=[metadata['genre']]))
-                audio_file.tags.add(TRCK(encoding=3, text=[track_num_str]))
-                if metadata.get('disc_number'):
-                    audio_file.tags.add(TPOS(encoding=3, text=[str(metadata['disc_number'])]))
-
-            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-                # FLAC / OGG Vorbis / OGG Opus: dict-style VorbisComment tags
-                if metadata.get('title'):
-                    audio_file['title'] = [metadata['title']]
-                if metadata.get('artist'):
-                    audio_file['artist'] = [metadata['artist']]
-                    # Multi-value: write ARTISTS tag with individual values
-                    if _write_multi and len(_artists_list) > 1:
-                        audio_file['artists'] = _artists_list
-                if metadata.get('album_artist'):
-                    audio_file['albumartist'] = [metadata['album_artist']]
-                if metadata.get('album'):
-                    audio_file['album'] = [metadata['album']]
-                if metadata.get('date'):
-                    audio_file['date'] = [metadata['date']]
-                if metadata.get('genre'):
-                    audio_file['genre'] = [metadata['genre']]
-                audio_file['tracknumber'] = [track_num_str]
-                if metadata.get('disc_number'):
-                    audio_file['discnumber'] = [str(metadata['disc_number'])]
-
-            elif isinstance(audio_file, MP4):
-                # MP4 / M4A: Apple-style tag keys
-                if metadata.get('title'):
-                    audio_file['\xa9nam'] = [metadata['title']]
-                if metadata.get('artist'):
-                    # Multi-value: write each artist as separate list entry
-                    if _write_multi and len(_artists_list) > 1:
-                        audio_file['\xa9ART'] = _artists_list
-                    else:
-                        audio_file['\xa9ART'] = [metadata['artist']]
-                if metadata.get('album_artist'):
-                    audio_file['aART'] = [metadata['album_artist']]
-                if metadata.get('album'):
-                    audio_file['\xa9alb'] = [metadata['album']]
-                if metadata.get('date'):
-                    audio_file['\xa9day'] = [metadata['date']]
-                if metadata.get('genre'):
-                    audio_file['\xa9gen'] = [metadata['genre']]
-                track_num = metadata.get('track_number', 1)
-                total_tracks = metadata.get('total_tracks', 1)
-                audio_file['trkn'] = [(track_num, total_tracks)]
-                if metadata.get('disc_number'):
-                    audio_file['disk'] = [(metadata['disc_number'], 0)]
-
-            # ── Embed source IDs (Spotify, MusicBrainz, etc.) on the same object ──
-            # Runs before album art so MusicBrainz release ID is available for
-            # Cover Art Archive high-resolution lookup.
-            _embed_source_ids(audio_file, metadata, context)
-
-            # Propagate MusicBrainz release ID to album_info so _download_cover_art
-            # can use it for Cover Art Archive high-res cover.jpg
-            if album_info is not None and metadata.get('musicbrainz_release_id'):
-                album_info['musicbrainz_release_id'] = metadata['musicbrainz_release_id']
-
-            # ── Embed album art on the same object ──
-            if config_manager.get('metadata_enhancement.embed_album_art', True):
-                _embed_album_art_metadata(audio_file, metadata)
-
-            # ── Embed audio quality tag ──
-            quality = context.get('_audio_quality', '')
-            if quality and config_manager.get('metadata_enhancement.tags.quality_tag', True) is not False:
-                if isinstance(audio_file.tags, ID3):
-                    audio_file.tags.add(TXXX(encoding=3, desc='QUALITY', text=[quality]))
-                elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-                    audio_file['quality'] = [quality]
-                elif isinstance(audio_file, MP4):
-                    audio_file['----:com.apple.iTunes:QUALITY'] = [MP4FreeForm(quality.encode('utf-8'))]
-
-            # ── Single save for everything ──
-            if isinstance(audio_file.tags, ID3):
-                audio_file.save(v1=0, v2_version=4)
-            elif isinstance(audio_file, FLAC):
-                audio_file.save(deleteid3=True)
-            else:
-                audio_file.save()
-
-            # Verify metadata was written
-            verified = _verify_metadata_written(file_path)
-            if verified:
-                logger.info("Metadata enhanced successfully.")
-            else:
-                logger.info("Metadata saved but verification found issues (see above).")
-            return True
-        except Exception as e:
-            import traceback
-            logger.error(f"Error enhancing metadata for {file_path}: {e}")
-            logger.error(f"[Metadata Debug] Exception type: {type(e).__name__}")
-            logger.info(f"[Metadata Debug] File exists: {os.path.exists(file_path)}")
-            logger.warning(f"[Metadata Debug] Artist: {artist.get('name', 'MISSING') if artist else 'None'}")
-            logger.warning(f"[Metadata Debug] Album info: {album_info.get('album_name', 'MISSING') if album_info else 'None'}")
-            logger.error(f"[Metadata Debug] Traceback:\n{traceback.format_exc()}")
-            return False
-
-def _generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
-    """
-    Generate LRC lyrics file using LRClib API.
-    Elegant addition to post-processing - extracts metadata from existing context.
-    """
-    if not config_manager.get('metadata_enhancement.lrclib_enabled', True):
-        return False
-    try:
-        # Extract track information from existing context (same as metadata enhancement)
-        original_search = context.get("original_search_result", {})
-        spotify_album = context.get("spotify_album")
-
-        # Get track metadata
-        track_name = (original_search.get('spotify_clean_title') or
-                     original_search.get('title', 'Unknown Track'))
-
-        # Handle artist parameter (can be dict or object)
-        if isinstance(artist, dict):
-            artist_name = artist.get('name', 'Unknown Artist')
-        elif hasattr(artist, 'name'):
-            artist_name = artist.name
-        else:
-            artist_name = str(artist) if artist else 'Unknown Artist'
-        album_name = None
-        duration_seconds = None
-
-        # Get album name if available
-        if album_info.get('is_album'):
-            album_name = (original_search.get('spotify_clean_album') or
-                         album_info.get('album_name') or
-                         (spotify_album.get('name') if spotify_album else None))
-
-        # Get duration from original search context
-        if original_search.get('duration_ms'):
-            duration_seconds = int(original_search['duration_ms'] / 1000)
-
-        # Generate LRC file using lyrics client
-        success = lyrics_client.create_lrc_file(
-            audio_file_path=file_path,
-            track_name=track_name,
-            artist_name=artist_name,
-            album_name=album_name,
-            duration_seconds=duration_seconds
-        )
-
-        if success:
-            logger.info(f"LRC file generated for: {track_name}")
-        else:
-            logger.warning(f"No lyrics found for: {track_name}")
-
-        return success
-
-    except Exception as e:
-        logger.error(f"Error generating LRC file for {file_path}: {e}")
-        return False
-
-def _extract_spotify_metadata(context: dict, artist: dict, album_info: dict) -> dict:
-    """Extracts a comprehensive metadata dictionary from the provided context."""
-    metadata = {}
-    if album_info is None:
-        album_info = {}
-    original_search = context.get("original_search_result", {})
-    spotify_album = context.get("spotify_album")
-
-    # Priority 1: Spotify clean title from context
-    if original_search.get('spotify_clean_title'):
-        metadata['title'] = original_search['spotify_clean_title']
-        logger.info(f"Metadata: Using Spotify clean title: '{metadata['title']}'")
-    # Priority 2: Album info clean name
-    elif album_info.get('clean_track_name'):
-        metadata['title'] = album_info['clean_track_name']
-        logger.info(f"Metadata: Using album info clean name: '{metadata['title']}'")
-    # Priority 3: Original title as fallback
-    else:
-        metadata['title'] = original_search.get('title', '')
-        logger.warning(f"Metadata: Using original title as fallback: '{metadata['title']}'")
-    # Handle multiple artists from Spotify data
-    original_search = context.get("original_search_result", {})
-    if 'artists' in original_search and isinstance(original_search['artists'], list) and len(original_search['artists']) > 0:
-        all_artists = []
-        for a in original_search['artists']:
-            if isinstance(a, dict) and 'name' in a:
-                all_artists.append(a['name'])
-            elif isinstance(a, str):
-                all_artists.append(a)
-            else:
-                all_artists.append(str(a))
-        metadata['artist'] = ', '.join(all_artists)
-        logger.info(f"Metadata: Using all artists: '{metadata['artist']}'")
-    else:
-        # Fallback to single artist
-        metadata['artist'] = artist.get('name', '')
-        logger.info(f"Metadata: Using primary artist: '{metadata['artist']}'")
-
-    # Resolve album_artist for consistent tagging across all tracks in an album.
-    # Priority: 1) explicit batch artist context (same artist for whole album)
-    #           2) album-level artists from spotify_album
-    #           3) context-level artist (spotify_artist parameter)
-    #           4) collab mode first-artist resolution (per-track, last resort)
-    # Using album-level artist prevents media server album splits when an artist
-    # changed names (Kanye West → Ye) and Spotify returns different per-track artists.
-    _raw_album_artist = artist.get('name', '')
-    _track_info_ctx = context.get('track_info', {}) or {}
-    _explicit_aa = _track_info_ctx.get('_explicit_artist_context') if isinstance(_track_info_ctx, dict) else None
-
-    # Build album-level artists list for collab mode resolution.
-    # Using album-level artists (instead of per-track) ensures collab mode produces
-    # the SAME album_artist tag for every track, preventing media server album splits.
-    _album_artists_for_collab = None
-    if isinstance(_explicit_aa, dict) and _explicit_aa.get('name'):
-        _raw_album_artist = _explicit_aa['name']
-        _album_artists_for_collab = [_explicit_aa]
-    elif isinstance(_explicit_aa, str) and _explicit_aa:
-        _raw_album_artist = _explicit_aa
-        _album_artists_for_collab = [{'name': _explicit_aa}]
-    elif spotify_album and isinstance(spotify_album, dict):
-        _sa_aa = spotify_album.get('artists', [])
-        if _sa_aa:
-            _first_aa = _sa_aa[0]
-            if isinstance(_first_aa, dict) and _first_aa.get('name'):
-                _raw_album_artist = _first_aa['name']
-            elif isinstance(_first_aa, str) and _first_aa:
-                _raw_album_artist = _first_aa
-            _album_artists_for_collab = _sa_aa
-
-    collab_mode = config_manager.get('file_organization.collab_artist_mode', 'first')
-    if collab_mode == 'first' and _raw_album_artist:
-        original_search = context.get("original_search_result", {})
-        # Prefer album-level artists for collab resolution (consistent per album)
-        _ctx_artists = _album_artists_for_collab or original_search.get('artists') or _track_info_ctx.get('artists') or []
-        if len(_ctx_artists) > 1:
-            # Multiple artist objects (Spotify) — use first
-            first = _ctx_artists[0]
-            _raw_album_artist = first.get('name', first) if isinstance(first, dict) else str(first)
-        elif len(_ctx_artists) == 1 and (',' in _raw_album_artist or ' & ' in _raw_album_artist):
-            # Single combined string (iTunes) — resolve via artist ID
-            _aid = str(artist.get('id', ''))
-            _src = original_search.get('_source') or _track_info_ctx.get('_source', '')
-            if _aid.isdigit() and _src != 'deezer':
-                try:
-                    resolved = _get_itunes_client().resolve_primary_artist(_aid)
-                    if resolved and resolved != _raw_album_artist:
-                        _raw_album_artist = resolved
-                except Exception:
-                    pass
-    metadata['album_artist'] = _raw_album_artist  # Crucial for library organization
-
-    if album_info.get('is_album'):
-        metadata['album'] = album_info.get('album_name', 'Unknown Album')
-        track_num = album_info.get('track_number', 1)
-        metadata['track_number'] = track_num
-        metadata['total_tracks'] = spotify_album.get('total_tracks', 1) if spotify_album else 1
-        logger.info(f"[METADATA] Album track - track_number: {track_num}, album: {metadata['album']}")
-    else:
-        # SAFEGUARD: If we have spotify_album context, never use track title as album name
-        # This prevents album tracks from being tagged as singles due to classification errors
-        if spotify_album and spotify_album.get('name'):
-            logger.info("[SAFEGUARD] Using spotify_album name instead of track title for album metadata")
-            metadata['album'] = spotify_album['name']
-            # Use corrected track_number from album_info (which should be updated by post-processing)
-            corrected_track_number = album_info.get('track_number', 1) if album_info else 1
-            metadata['track_number'] = corrected_track_number
-            metadata['total_tracks'] = spotify_album.get('total_tracks', 1)
-            logger.info(f"[SAFEGUARD] Using track_number: {corrected_track_number}")
-        else:
-            metadata['album'] = metadata['title'] # For true singles, album is the title
-            metadata['track_number'] = 1
-            metadata['total_tracks'] = 1
-
-    # Always write disc_number to overwrite any stale tags from the soulseek source.
-    # Without this, original disc tags persist and can cause media servers (Plex) to
-    # split a single album into standard/deluxe based on differing disc numbers.
-    # Priority: original_search context (from API) > album_info > default to 1
-    disc_num = original_search.get('disc_number')
-    if disc_num is None and album_info:
-        disc_num = album_info.get('disc_number')
-    if disc_num is None:
-        disc_num = 1
-    metadata['disc_number'] = disc_num
-
-    if spotify_album and spotify_album.get('release_date'):
-        metadata['date'] = spotify_album['release_date'][:4]
-
-    if artist.get('genres'):
-        from core.genre_filter import filter_genres
-        _genre_list = filter_genres(list(artist['genres'][:2]), config_manager)
-        if _genre_list:
-            metadata['genre'] = ', '.join(_genre_list)
-
-    metadata['album_art_url'] = album_info.get('album_image_url') if album_info else None
-
-    # Playlist mode fallback: album_info is None, try to get art from spotify_album context
-    if not metadata['album_art_url']:
-        _spa = context.get('spotify_album', {})
-        if _spa:
-            _spa_img = _spa.get('image_url')
-            if not _spa_img and _spa.get('images'):
-                _spa_img = _spa['images'][0].get('url') if isinstance(_spa['images'][0], dict) else None
-            metadata['album_art_url'] = _spa_img
-
-    # Extract source IDs (Spotify or iTunes) for tag embedding
-    track_info = context.get("track_info", {})
-    if track_info and track_info.get('id'):
-        # Spotify track IDs are alphanumeric strings; iTunes IDs are numeric
-        # Beatport IDs (beatport_*) are neither — skip them for external ID tagging
-        track_id = str(track_info['id'])
-        if track_id.isdigit():
-            metadata['itunes_track_id'] = track_id
-        elif not track_id.startswith('beatport_'):
-            metadata['spotify_track_id'] = track_id
-    if artist.get('id'):
-        artist_id = str(artist['id'])
-        if artist_id.isdigit():
-            metadata['itunes_artist_id'] = artist_id
-        elif not artist_id.startswith('beatport_'):
-            metadata['spotify_artist_id'] = artist_id
-    if spotify_album and spotify_album.get('id'):
-        album_id = str(spotify_album['id'])
-        if album_id.isdigit():
-            metadata['itunes_album_id'] = album_id
-        elif not album_id.startswith('beatport_'):
-            metadata['spotify_album_id'] = album_id
-
-    # Summary log for debugging metadata issues (e.g. wrong album_artist / track_number)
-    logger.info(f"[Metadata Summary] title='{metadata.get('title')}' | artist='{metadata.get('artist')}' | album_artist='{metadata.get('album_artist')}' | album='{metadata.get('album')}' | track={metadata.get('track_number')}/{metadata.get('total_tracks')} | disc={metadata.get('disc_number')}")
-
-    return metadata
+    return metadata_enrichment.enhance_file_metadata(file_path, context, artist, album_info)
 
 def _get_image_dimensions(data: bytes):
     """Extract width/height from JPEG or PNG image data without PIL."""
@@ -19633,870 +18115,12 @@ def _get_image_dimensions(data: bytes):
     return None, None
 
 
-def _embed_album_art_metadata(audio_file, metadata: dict):
-    """Downloads and embeds album art — tries Cover Art Archive (full resolution)
-    first if MusicBrainz release ID is available, falls back to Spotify/iTunes URL."""
-    try:
-        image_data = None
-        mime_type = None
-
-        # Try Cover Art Archive first (often 1200x1200+, original quality) — opt-in
-        release_mbid = metadata.get('musicbrainz_release_id')
-        if release_mbid and config_manager.get('metadata_enhancement.prefer_caa_art', False):
-            try:
-                caa_url = f"https://coverartarchive.org/release/{release_mbid}/front"
-                req = urllib.request.Request(caa_url, headers={'Accept': 'image/*'})
-                with urllib.request.urlopen(req, timeout=10) as response:
-                    image_data = response.read()
-                    mime_type = response.info().get_content_type() or 'image/jpeg'
-                if image_data and len(image_data) > 1000:
-                    logger.info(f"Cover art from Cover Art Archive ({len(image_data) // 1024}KB)")
-                else:
-                    image_data = None  # Too small, likely an error page
-            except Exception:
-                image_data = None  # Fall through to Spotify/iTunes URL
-
-        # Fallback to Spotify/iTunes/Deezer URL (typically 640x640)
-        if not image_data:
-            art_url = metadata.get('album_art_url')
-            if not art_url:
-                logger.warning("No album art URL available for embedding.")
-                return
-            with urllib.request.urlopen(art_url, timeout=10) as response:
-                image_data = response.read()
-                mime_type = response.info().get_content_type()
-
-        if not image_data:
-            logger.error("Failed to download album art data.")
-            return
-
-        # MP3 (ID3)
-        if isinstance(audio_file.tags, ID3):
-            audio_file.tags.add(APIC(encoding=3, mime=mime_type, type=3, desc='Cover', data=image_data))
-        # FLAC
-        elif isinstance(audio_file, FLAC):
-            picture = Picture()
-            picture.data = image_data
-            picture.type = 3
-            picture.mime = mime_type
-            # Detect actual dimensions from image data
-            _img_w, _img_h = _get_image_dimensions(image_data)
-            picture.width = _img_w or 640
-            picture.height = _img_h or 640
-            picture.depth = 24
-            audio_file.add_picture(picture)
-        # MP4/M4A
-        elif isinstance(audio_file, MP4):
-            fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in mime_type else MP4Cover.FORMAT_PNG
-            audio_file['covr'] = [MP4Cover(image_data, imageformat=fmt)]
-        
-        logger.info("Album art successfully embedded.")
-    except Exception as e:
-        logger.error(f"Error embedding album art: {e}")
-
-def _embed_source_ids(audio_file, metadata: dict, context: dict = None):
-    """
-    Lookup MusicBrainz, Deezer, AudioDB, Tidal, Qobuz, Last.fm, and Genius
-    metadata, then embed them along with Spotify/iTunes source IDs as custom
-    tags into the audio file.
-    Tags written: source IDs, BPM (Deezer), mood/style (AudioDB), ISRC
-    (MB→Deezer→Tidal→Qobuz fallback), copyright (Tidal→Qobuz),
-    label (Qobuz), URLs (Last.fm/Genius),
-    and merged genres (Spotify+MB+AudioDB+Last.fm).
-    One file write, one shot.  Concurrent calls are safe — each service has
-    its own global rate limiter.
-    Operates on a non-easy-mode MutagenFile object (caller must save).
-    """
-    try:
-        # ── Per-tag config: maps internal tag name → config path ──
-        # Each tag can be individually toggled via {service}.tags.{tag_name}
-        _TAG_CONFIG = {
-            # Spotify (from metadata, no API call)
-            'SPOTIFY_TRACK_ID': 'spotify.tags.track_id',
-            'SPOTIFY_ARTIST_ID': 'spotify.tags.artist_id',
-            'SPOTIFY_ALBUM_ID': 'spotify.tags.album_id',
-            # iTunes (from metadata, no API call)
-            'ITUNES_TRACK_ID': 'itunes.tags.track_id',
-            'ITUNES_ARTIST_ID': 'itunes.tags.artist_id',
-            'ITUNES_ALBUM_ID': 'itunes.tags.album_id',
-            # MusicBrainz IDs
-            'MUSICBRAINZ_RECORDING_ID': 'musicbrainz.tags.recording_id',
-            'MUSICBRAINZ_ARTIST_ID': 'musicbrainz.tags.artist_id',
-            'MUSICBRAINZ_RELEASE_ID': 'musicbrainz.tags.release_id',
-            'MUSICBRAINZ_RELEASEGROUPID': 'musicbrainz.tags.release_group_id',
-            'MUSICBRAINZ_ALBUMARTISTID': 'musicbrainz.tags.album_artist_id',
-            'MUSICBRAINZ_RELEASETRACKID': 'musicbrainz.tags.release_track_id',
-            # MusicBrainz Release Info
-            'RELEASETYPE': 'musicbrainz.tags.release_type',
-            'ORIGINALDATE': 'musicbrainz.tags.original_date',
-            'RELEASESTATUS': 'musicbrainz.tags.release_status',
-            'RELEASECOUNTRY': 'musicbrainz.tags.release_country',
-            'BARCODE': 'musicbrainz.tags.barcode',
-            'MEDIA': 'musicbrainz.tags.media',
-            'TOTALDISCS': 'musicbrainz.tags.total_discs',
-            'CATALOGNUMBER': 'musicbrainz.tags.catalog_number',
-            'SCRIPT': 'musicbrainz.tags.script',
-            'ASIN': 'musicbrainz.tags.asin',
-            # Deezer
-            'DEEZER_TRACK_ID': 'deezer.tags.track_id',
-            'DEEZER_ARTIST_ID': 'deezer.tags.artist_id',
-            # AudioDB
-            'AUDIODB_TRACK_ID': 'audiodb.tags.track_id',
-            # Tidal
-            'TIDAL_TRACK_ID': 'tidal.tags.track_id',
-            'TIDAL_ARTIST_ID': 'tidal.tags.artist_id',
-            # Qobuz
-            'QOBUZ_TRACK_ID': 'qobuz.tags.track_id',
-            'QOBUZ_ARTIST_ID': 'qobuz.tags.artist_id',
-            # Genius
-            'GENIUS_TRACK_ID': 'genius.tags.track_id',
-        }
-
-        def _tag_enabled(config_path):
-            """Check if an individual tag is enabled (defaults to True)."""
-            return config_manager.get(config_path, True) is not False
-
-        # ── Helper: normalize + compare names (same logic as enrichment workers) ──
-        from difflib import SequenceMatcher
-        def _names_match(a: str, b: str, threshold: float = 0.75) -> bool:
-            if not a or not b:
-                return False
-            norm = lambda s: re.sub(r'[^a-z0-9 ]', '', re.sub(r'\(.*?\)', '', s).lower()).strip()
-            return SequenceMatcher(None, norm(a), norm(b)).ratio() >= threshold
-
-        # ── 1. Collect Spotify / iTunes IDs already in metadata ──
-        id_tags = {}
-        if config_manager.get('spotify.embed_tags', True) is not False:
-            if metadata.get('spotify_track_id'):
-                id_tags['SPOTIFY_TRACK_ID'] = metadata['spotify_track_id']
-            if metadata.get('spotify_artist_id'):
-                id_tags['SPOTIFY_ARTIST_ID'] = metadata['spotify_artist_id']
-            if metadata.get('spotify_album_id'):
-                id_tags['SPOTIFY_ALBUM_ID'] = metadata['spotify_album_id']
-        if config_manager.get('itunes.embed_tags', True) is not False:
-            if metadata.get('itunes_track_id'):
-                id_tags['ITUNES_TRACK_ID'] = metadata['itunes_track_id']
-            if metadata.get('itunes_artist_id'):
-                id_tags['ITUNES_ARTIST_ID'] = metadata['itunes_artist_id']
-            if metadata.get('itunes_album_id'):
-                id_tags['ITUNES_ALBUM_ID'] = metadata['itunes_album_id']
-
-        # Shared post-processing context for modular lookups
-        track_title = metadata.get('title', '')
-        artist_name = metadata.get('album_artist', '') or metadata.get('artist', '')
-
-        # Extract batch-level artist name for stable MB release cache keys.
-        # When downloading an album batch, all tracks should use the same artist key
-        # to guarantee they hit the same preflight-cached release MBID.
-        _track_info_for_pp = (context or {}).get('track_info', {}) or {}
-        _explicit_artist_for_pp = _track_info_for_pp.get('_explicit_artist_context') if isinstance(_track_info_for_pp, dict) else None
-        _batch_artist_name = None
-        if isinstance(_explicit_artist_for_pp, dict) and _explicit_artist_for_pp.get('name'):
-            _batch_artist_name = _explicit_artist_for_pp['name']
-        elif isinstance(_explicit_artist_for_pp, str) and _explicit_artist_for_pp:
-            _batch_artist_name = _explicit_artist_for_pp
-
-        pp = {
-            'id_tags': id_tags,
-            'track_title': track_title,
-            'artist_name': artist_name,
-            'batch_artist_name': _batch_artist_name,
-            'metadata': metadata,
-            'recording_mbid': None,
-            'artist_mbid': None,
-            'release_mbid': '',
-            'mb_genres': [],
-            'isrc': None,
-            'deezer_bpm': None, 'deezer_isrc': None,
-            'audiodb_mood': None, 'audiodb_style': None, 'audiodb_genre': None,
-            'tidal_isrc': None, 'tidal_copyright': None,
-            'qobuz_isrc': None, 'qobuz_copyright': None, 'qobuz_label': None,
-            'lastfm_tags': [], 'lastfm_url': None,
-            'genius_url': None,
-            'release_year': None,  # First source to find a year wins
-        }
-
-        # Run each metadata source lookup in configured order
-        _pp_source_order = config_manager.get('metadata_enhancement.post_process_order', None)
-        if not _pp_source_order or not isinstance(_pp_source_order, list):
-            _pp_source_order = ['musicbrainz', 'deezer', 'audiodb', 'tidal', 'qobuz', 'lastfm', 'genius']
-
-        _pp_lookup_map = {
-            'musicbrainz': _pp_lookup_musicbrainz,
-            'deezer': _pp_lookup_deezer,
-            'audiodb': _pp_lookup_audiodb,
-            'tidal': _pp_lookup_tidal,
-            'qobuz': _pp_lookup_qobuz,
-            'lastfm': _pp_lookup_lastfm,
-            'genius': _pp_lookup_genius,
-        }
-
-        for source_name in _pp_source_order:
-            fn = _pp_lookup_map.get(source_name)
-            if fn:
-                fn(pp, _names_match)
-
-        # Extract results from shared context after all lookups
-        recording_mbid = pp['recording_mbid']
-        artist_mbid = pp['artist_mbid']
-        _rc_mbid = pp['release_mbid']
-        mb_genres = pp['mb_genres']
-        isrc = pp['isrc']
-        deezer_bpm = pp['deezer_bpm']
-        deezer_isrc = pp['deezer_isrc']
-        audiodb_mood = pp['audiodb_mood']
-        audiodb_style = pp['audiodb_style']
-        audiodb_genre = pp['audiodb_genre']
-        tidal_isrc = pp['tidal_isrc']
-        tidal_copyright = pp['tidal_copyright']
-        qobuz_isrc = pp['qobuz_isrc']
-        qobuz_copyright = pp['qobuz_copyright']
-        qobuz_label = pp['qobuz_label']
-        lastfm_tags = pp['lastfm_tags']
-        lastfm_url = pp['lastfm_url']
-        genius_url = pp['genius_url']
-        id_tags = pp['id_tags']
-        release_year = pp['release_year']
-
-        # If metadata already has a date from Spotify context, use that as fallback
-        if not release_year and metadata.get('date'):
-            yr = str(metadata['date'])[:4]
-            if yr.isdigit():
-                release_year = yr
-
-        # Store release MBID in metadata for downstream use (e.g. Cover Art Archive)
-        if _rc_mbid:
-            metadata['musicbrainz_release_id'] = _rc_mbid
-
-        # Write release year to file tags if not already present
-        if release_year and 'ORIGINALDATE' not in id_tags:
-            id_tags['ORIGINALDATE'] = release_year
-        # If the file was written without a date tag, flag it for writing below
-        _needs_date_tag = release_year and not metadata.get('date')
-        if _needs_date_tag:
-            metadata['date'] = release_year
-
-        # Update DB album year if currently missing
-        if release_year:
-            try:
-                _pp_album_name = metadata.get('album', '')
-                _pp_artist_name = metadata.get('album_artist', '') or metadata.get('artist', '')
-                if _pp_album_name and _pp_artist_name:
-                    conn = get_database()._get_connection()
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute("""
-                            UPDATE albums SET year = ?
-                            WHERE (year IS NULL OR year = 0)
-                              AND id IN (
-                                SELECT al.id FROM albums al
-                                JOIN artists ar ON ar.id = al.artist_id
-                                WHERE LOWER(al.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
-                              )
-                        """, (int(release_year), _pp_album_name, _pp_artist_name))
-                        if cursor.rowcount > 0:
-                            conn.commit()
-                            logger.info(f"Updated album year to {release_year} in database")
-                        else:
-                            conn.rollback()
-                    finally:
-                        conn.close()
-            except Exception as e:
-                logger.error(f"Could not update album year in DB: {e}")
-
-        # (All source lookups now handled by _pp_lookup_* functions called via configurable order above)
-        if False:  # Dead code — old inline blocks preserved for reference during transition
-            try:
-                mb_service_for_detail = mb_worker.mb_service if mb_worker else None
-                if mb_service_for_detail:
-                    with _mb_release_detail_cache_lock:
-                        release_detail = _mb_release_detail_cache.get(_rc_mbid)
-                    if release_detail is None:
-                        release_detail = mb_service_for_detail.mb_client.get_release(
-                            _rc_mbid, includes=['release-groups', 'labels', 'media', 'artist-credits', 'recordings']
-                        ) or {}
-                        with _mb_release_detail_cache_lock:
-                            _mb_release_detail_cache[_rc_mbid] = release_detail
-                    if release_detail:
-                        rg = release_detail.get('release-group', {})
-                        if rg.get('id'):
-                            id_tags['MUSICBRAINZ_RELEASEGROUPID'] = rg['id']
-                        ac = release_detail.get('artist-credit', [])
-                        if ac and isinstance(ac[0], dict):
-                            aa_artist = ac[0].get('artist', {})
-                            if aa_artist.get('id'):
-                                id_tags['MUSICBRAINZ_ALBUMARTISTID'] = aa_artist['id']
-                        primary_type = rg.get('primary-type', '')
-                        if primary_type:
-                            id_tags['RELEASETYPE'] = primary_type
-                        orig_date = rg.get('first-release-date', '')
-                        if orig_date:
-                            id_tags['ORIGINALDATE'] = orig_date
-                        status = release_detail.get('status', '')
-                        if status:
-                            id_tags['RELEASESTATUS'] = status
-                        country = release_detail.get('country', '')
-                        if country:
-                            id_tags['RELEASECOUNTRY'] = country
-                        barcode = release_detail.get('barcode', '')
-                        if barcode:
-                            id_tags['BARCODE'] = barcode
-                        media_list = release_detail.get('media', [])
-                        if media_list:
-                            media_format = media_list[0].get('format', '')
-                            if media_format:
-                                id_tags['MEDIA'] = media_format
-                            id_tags['TOTALDISCS'] = str(len(media_list))
-                        label_info = release_detail.get('label-info', [])
-                        if label_info and isinstance(label_info[0], dict):
-                            cat_num = label_info[0].get('catalog-number', '')
-                            if cat_num:
-                                id_tags['CATALOGNUMBER'] = cat_num
-                        text_rep = release_detail.get('text-representation', {})
-                        if isinstance(text_rep, dict) and text_rep.get('script'):
-                            id_tags['SCRIPT'] = text_rep['script']
-                        asin = release_detail.get('asin', '')
-                        if asin:
-                            id_tags['ASIN'] = asin
-                        # Release Track ID — match by disc + track position
-                        _trk_num = metadata.get('track_number')
-                        _disc_num = metadata.get('disc_number') or 1
-                        if _trk_num and media_list:
-                            try:
-                                _trk_num_int = int(_trk_num)
-                                _disc_num_int = int(_disc_num)
-                                for medium in media_list:
-                                    if medium.get('position', 1) == _disc_num_int:
-                                        for mtrack in (medium.get('tracks') or medium.get('track-list', [])):
-                                            if mtrack.get('position') == _trk_num_int and mtrack.get('id'):
-                                                id_tags['MUSICBRAINZ_RELEASETRACKID'] = mtrack['id']
-                                                break
-                                        break
-                            except (ValueError, TypeError):
-                                pass
-                        logger.info(f"MusicBrainz release details: type={primary_type or '?'}, "
-                              f"country={country or '?'}, media={id_tags.get('MEDIA', '?')}")
-            except Exception as e:
-                logger.error(f"MusicBrainz release detail lookup failed (non-fatal): {e}")
-
-        # ── 2b. Deezer lookup for BPM, ISRC fallback, and source IDs ──
-        deezer_bpm = None
-        deezer_isrc = None
-        if not config_manager.get('deezer.embed_tags', True):
-            pass
-        elif track_title and artist_name:
-            try:
-                dz_client = deezer_worker.client if deezer_worker else None
-                if dz_client:
-                    dz_result = dz_client.search_track(artist_name, track_title)
-                    if dz_result and _names_match(dz_result.get('title', ''), track_title) and \
-                       _names_match(dz_result.get('artist', {}).get('name', ''), artist_name):
-                        dz_track_id = dz_result['id']
-                        id_tags['DEEZER_TRACK_ID'] = str(dz_track_id)
-                        dz_artist_id = dz_result.get('artist', {}).get('id')
-                        if dz_artist_id:
-                            id_tags['DEEZER_ARTIST_ID'] = str(dz_artist_id)
-                        logger.info(f"Deezer track matched: {dz_track_id}")
-
-                        # Get full track details for BPM and ISRC
-                        dz_details = dz_client.get_track_details(dz_track_id)
-                        if dz_details:
-                            bpm_val = dz_details.get('bpm')
-                            if bpm_val and bpm_val > 0:
-                                deezer_bpm = bpm_val
-                            dz_isrc = dz_details.get('isrc')
-                            if dz_isrc:
-                                deezer_isrc = dz_isrc
-                else:
-                    logger.info("Deezer worker not available, skipping Deezer lookup")
-            except Exception as e:
-                logger.error(f"Deezer lookup failed (non-fatal): {e}")
-
-        # ── 2c. AudioDB lookup for mood, style, genre, and source ID ──
-        audiodb_mood = None
-        audiodb_style = None
-        audiodb_genre = None
-        if not config_manager.get('audiodb.embed_tags', True):
-            pass
-        elif track_title and artist_name:
-            try:
-                adb_client = audiodb_worker.client if audiodb_worker else None
-                if adb_client:
-                    adb_result = adb_client.search_track(artist_name, track_title)
-                    if adb_result and _names_match(adb_result.get('strTrack', ''), track_title) and \
-                       _names_match(adb_result.get('strArtist', ''), artist_name):
-                        adb_track_id = adb_result.get('idTrack')
-                        if adb_track_id:
-                            id_tags['AUDIODB_TRACK_ID'] = str(adb_track_id)
-                            logger.info(f"AudioDB track matched: {adb_track_id}")
-                        # Use AudioDB's MusicBrainz IDs as fallbacks for any missing from MB lookup
-                        adb_mb_track = adb_result.get('strMusicBrainzID')
-                        if adb_mb_track and 'MUSICBRAINZ_RECORDING_ID' not in id_tags:
-                            id_tags['MUSICBRAINZ_RECORDING_ID'] = adb_mb_track
-                            recording_mbid = adb_mb_track
-                            logger.warning(f"MusicBrainz recording ID from AudioDB fallback: {adb_mb_track}")
-                        # NOTE: AudioDB's strMusicBrainzAlbumID is intentionally
-                        # NOT used as a fallback for MUSICBRAINZ_RELEASE_ID.
-                        # AudioDB links each track to its original album in MB,
-                        # which differs per track on compilations and splits
-                        # albums in players like Navidrome. Album MBID must come
-                        # from match_release (cached) to stay consistent.
-                        adb_mb_artist = adb_result.get('strMusicBrainzArtistID')
-                        if adb_mb_artist and 'MUSICBRAINZ_ARTIST_ID' not in id_tags:
-                            id_tags['MUSICBRAINZ_ARTIST_ID'] = adb_mb_artist
-                            artist_mbid = adb_mb_artist
-                            logger.warning(f"MusicBrainz artist ID from AudioDB fallback: {adb_mb_artist}")
-                        audiodb_mood = adb_result.get('strMood') or None
-                        audiodb_style = adb_result.get('strStyle') or None
-                        audiodb_genre = adb_result.get('strGenre') or None
-                else:
-                    logger.info("AudioDB worker not available, skipping AudioDB lookup")
-            except Exception as e:
-                logger.error(f"AudioDB lookup failed (non-fatal): {e}")
-
-        # ── 2d. Tidal lookup for ISRC fallback, copyright, and source IDs ──
-        tidal_isrc = None
-        tidal_copyright = None
-        if not config_manager.get('tidal.embed_tags', True):
-            pass
-        elif track_title and artist_name:
-            try:
-                if tidal_client and tidal_client.is_authenticated():
-                    td_result = tidal_client.search_track(artist_name, track_title)
-                    if td_result and _names_match(td_result.get('title', ''), track_title):
-                        td_track_id = td_result.get('id')
-                        if td_track_id:
-                            id_tags['TIDAL_TRACK_ID'] = str(td_track_id)
-                            logger.info(f"Tidal track matched: {td_track_id}")
-                        td_artist = td_result.get('artist', {})
-                        if isinstance(td_artist, dict) and td_artist.get('id'):
-                            id_tags['TIDAL_ARTIST_ID'] = str(td_artist['id'])
-                        # Get full details for ISRC and copyright
-                        if td_track_id:
-                            td_details = tidal_client.get_track(str(td_track_id))
-                            if td_details:
-                                td_isrc = td_details.get('isrc')
-                                if td_isrc:
-                                    tidal_isrc = td_isrc
-                                td_copyright = td_details.get('copyright')
-                                if isinstance(td_copyright, dict):
-                                    td_copyright = td_copyright.get('text', td_copyright.get('name', ''))
-                                if td_copyright:
-                                    tidal_copyright = td_copyright
-            except Exception as e:
-                logger.error(f"Tidal lookup failed (non-fatal): {e}")
-
-        # ── 2e. Qobuz lookup for ISRC fallback, copyright, label, and source IDs ──
-        qobuz_isrc = None
-        qobuz_copyright = None
-        qobuz_label = None
-        if not config_manager.get('qobuz.embed_tags', True):
-            pass
-        elif track_title and artist_name:
-            try:
-                qz_client = qobuz_enrichment_worker.client if qobuz_enrichment_worker else None
-                if qz_client and qz_client.is_authenticated():
-                    qz_result = qz_client.search_track(artist_name, track_title)
-                    if qz_result:
-                        qz_performer = (qz_result.get('performer') or {})
-                        if not isinstance(qz_performer, dict):
-                            qz_performer = {}
-                        qz_artist_name = qz_performer.get('name', '')
-                        if _names_match(qz_result.get('title', ''), track_title) and \
-                           _names_match(qz_artist_name, artist_name):
-                            qz_track_id = qz_result.get('id')
-                            if qz_track_id:
-                                id_tags['QOBUZ_TRACK_ID'] = str(qz_track_id)
-                                logger.info(f"Qobuz track matched: {qz_track_id}")
-                            if isinstance(qz_performer, dict) and qz_performer.get('id'):
-                                id_tags['QOBUZ_ARTIST_ID'] = str(qz_performer['id'])
-                            qz_isrc = qz_result.get('isrc')
-                            if isinstance(qz_isrc, dict):
-                                qz_isrc = qz_isrc.get('value', qz_isrc.get('id', ''))
-                            if qz_isrc:
-                                qobuz_isrc = qz_isrc
-                            qz_copyright = qz_result.get('copyright')
-                            if isinstance(qz_copyright, dict):
-                                qz_copyright = qz_copyright.get('text', qz_copyright.get('name', ''))
-                            if qz_copyright and isinstance(qz_copyright, str):
-                                qobuz_copyright = qz_copyright
-                            qz_album = qz_result.get('album', {})
-                            if isinstance(qz_album, dict):
-                                qz_label_info = qz_album.get('label', {})
-                                if isinstance(qz_label_info, dict) and qz_label_info.get('name'):
-                                    qobuz_label = qz_label_info['name']
-            except Exception as e:
-                logger.error(f"Qobuz lookup failed (non-fatal): {e}")
-
-        # ── 2f. Last.fm lookup for tags (genre merge) and URL ──
-        lastfm_tags = []
-        lastfm_url = None
-        if not config_manager.get('lastfm.embed_tags', True):
-            pass
-        elif track_title and artist_name:
-            try:
-                lf_client = lastfm_worker.client if lastfm_worker else None
-                if lf_client:
-                    lf_result = lf_client.get_track_info(artist_name, track_title)
-                    if lf_result:
-                        lf_url = lf_result.get('url')
-                        if lf_url:
-                            lastfm_url = lf_url
-                        lf_toptags = lf_result.get('toptags', {})
-                        if isinstance(lf_toptags, dict):
-                            tag_list = lf_toptags.get('tag', [])
-                            if isinstance(tag_list, list):
-                                lastfm_tags = [t.get('name', '') for t in tag_list if isinstance(t, dict) and t.get('name')]
-                            elif isinstance(tag_list, dict) and tag_list.get('name'):
-                                lastfm_tags = [tag_list['name']]
-                        logger.info(f"Last.fm track info found: {len(lastfm_tags)} tags")
-            except Exception as e:
-                logger.error(f"Last.fm lookup failed (non-fatal): {e}")
-
-        # ── 2g. Genius lookup for source ID and URL ──
-        # Genius has an aggressive global rate limiter (30→60→120s backoff) that
-        # blocks ALL callers including post-processing. We check the backoff
-        # state directly and skip immediately if Genius is rate-limited, rather
-        # than entering search_song which would sleep for up to 120s.
-        genius_url = None
-        if not config_manager.get('genius.embed_tags', True):
-            pass
-        elif track_title and artist_name:
-            try:
-                import core.genius_client as _genius_module
-                if time.time() < _genius_module._rate_limit_until:
-                    logger.info("Genius rate-limited, skipping (non-blocking)")
-                else:
-                    g_client = genius_worker.client if genius_worker else None
-                    if g_client:
-                        g_result = g_client.search_song(artist_name, track_title)
-                        if g_result:
-                            g_id = g_result.get('id')
-                            if g_id:
-                                id_tags['GENIUS_TRACK_ID'] = str(g_id)
-                                logger.info(f"Genius song matched: {g_id}")
-                            g_url = g_result.get('url')
-                            if g_url:
-                                genius_url = g_url
-            except Exception as e:
-                logger.error(f"Genius lookup failed (non-fatal): {e}")
-
-        if not id_tags and not deezer_bpm and not deezer_isrc and not audiodb_mood and not audiodb_style:
-            return
-
-        # ── 3. Filter tags by per-tag config, then write ──
-        filtered_tags = {}
-        for tag_name, value in id_tags.items():
-            config_path = _TAG_CONFIG.get(tag_name)
-            if config_path and not _tag_enabled(config_path):
-                continue
-            filtered_tags[tag_name] = value
-
-        # ── 3a. Write ID tags (MusicBrainz, source IDs, release info) ──
-        written = []
-
-        # Format-specific tag name mappings for Picard-compatible output
-        _ID3_TAG_MAP = {
-            'MUSICBRAINZ_RECORDING_ID': ('UFID', 'http://musicbrainz.org'),
-            'MUSICBRAINZ_ARTIST_ID': ('TXXX', 'MusicBrainz Artist Id'),
-            'MUSICBRAINZ_RELEASE_ID': ('TXXX', 'MusicBrainz Album Id'),
-            'MUSICBRAINZ_RELEASEGROUPID': ('TXXX', 'MusicBrainz Release Group Id'),
-            'MUSICBRAINZ_ALBUMARTISTID': ('TXXX', 'MusicBrainz Album Artist Id'),
-            'MUSICBRAINZ_RELEASETRACKID': ('TXXX', 'MusicBrainz Release Track Id'),
-            'RELEASETYPE': ('TXXX', 'MusicBrainz Album Type'),
-            'RELEASESTATUS': ('TXXX', 'MusicBrainz Album Status'),
-            'RELEASECOUNTRY': ('TXXX', 'MusicBrainz Album Release Country'),
-            'ORIGINALDATE': ('TDOR', None),
-            'MEDIA': ('TMED', None),
-        }
-        _VORBIS_TAG_MAP = {
-            'MUSICBRAINZ_RECORDING_ID': 'MUSICBRAINZ_TRACKID',
-            'MUSICBRAINZ_ARTIST_ID': 'MUSICBRAINZ_ARTISTID',
-            'MUSICBRAINZ_RELEASE_ID': 'MUSICBRAINZ_ALBUMID',
-            'MUSICBRAINZ_RELEASEGROUPID': 'MUSICBRAINZ_RELEASEGROUPID',
-            'MUSICBRAINZ_ALBUMARTISTID': 'MUSICBRAINZ_ALBUMARTISTID',
-            'MUSICBRAINZ_RELEASETRACKID': 'MUSICBRAINZ_RELEASETRACKID',
-        }
-        _MP4_TAG_MAP = {
-            'MUSICBRAINZ_RECORDING_ID': 'MusicBrainz Track Id',
-            'MUSICBRAINZ_ARTIST_ID': 'MusicBrainz Artist Id',
-            'MUSICBRAINZ_RELEASE_ID': 'MusicBrainz Album Id',
-            'MUSICBRAINZ_RELEASEGROUPID': 'MusicBrainz Release Group Id',
-            'MUSICBRAINZ_ALBUMARTISTID': 'MusicBrainz Album Artist Id',
-            'MUSICBRAINZ_RELEASETRACKID': 'MusicBrainz Release Track Id',
-            'RELEASETYPE': 'MusicBrainz Album Type',
-            'RELEASESTATUS': 'MusicBrainz Album Status',
-            'RELEASECOUNTRY': 'MusicBrainz Album Release Country',
-        }
-
-        # MP3 (ID3)
-        if isinstance(audio_file.tags, ID3):
-            for tag_name, value in filtered_tags.items():
-                id3_spec = _ID3_TAG_MAP.get(tag_name)
-                if id3_spec:
-                    frame_type, desc = id3_spec
-                    if frame_type == 'UFID':
-                        audio_file.tags.add(UFID(owner=desc, data=value.encode('ascii')))
-                        written.append(f'UFID:{desc}')
-                    elif frame_type == 'TDOR':
-                        audio_file.tags.add(TDOR(encoding=3, text=[value]))
-                        written.append('TDOR')
-                    elif frame_type == 'TMED':
-                        audio_file.tags.add(TMED(encoding=3, text=[value]))
-                        written.append('TMED')
-                    else:  # TXXX
-                        audio_file.tags.add(TXXX(encoding=3, desc=desc, text=[value]))
-                        written.append(f'TXXX:{desc}')
-                else:
-                    audio_file.tags.add(TXXX(encoding=3, desc=tag_name, text=[str(value)]))
-                    written.append(f'TXXX:{tag_name}')
-
-        # FLAC / OGG Vorbis
-        elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-            for tag_name, value in filtered_tags.items():
-                vorbis_key = _VORBIS_TAG_MAP.get(tag_name, tag_name)
-                audio_file[vorbis_key] = [str(value)]
-                written.append(vorbis_key)
-
-        # MP4 (M4A/AAC)
-        elif isinstance(audio_file, MP4):
-            for tag_name, value in filtered_tags.items():
-                mp4_desc = _MP4_TAG_MAP.get(tag_name, tag_name)
-                key = f'----:com.apple.iTunes:{mp4_desc}'
-                audio_file[key] = [MP4FreeForm(str(value).encode('utf-8'))]
-                written.append(key)
-
-        if written:
-            logger.info(f"Embedded IDs: {', '.join(written)}")
-
-        # ── 3a½. Write date tag if discovered during lookups (initial write had no date) ──
-        if _needs_date_tag and release_year:
-            if isinstance(audio_file.tags, ID3):
-                audio_file.tags.add(TDRC(encoding=3, text=[release_year]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-                audio_file['date'] = [release_year]
-            elif isinstance(audio_file, MP4):
-                audio_file['\xa9day'] = [release_year]
-            logger.info(f"Date tag: {release_year}")
-
-        # ── 3b. Write BPM tag (from Deezer) ──
-        if _tag_enabled('deezer.tags.bpm') and deezer_bpm and deezer_bpm > 0:
-            bpm_int = int(deezer_bpm)
-            if isinstance(audio_file.tags, ID3):
-                audio_file.tags.add(TBPM(encoding=3, text=[str(bpm_int)]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-                audio_file['BPM'] = [str(bpm_int)]
-            elif isinstance(audio_file, MP4):
-                audio_file['tmpo'] = [bpm_int]
-            logger.info(f"BPM: {bpm_int}")
-
-        # ── 3c. Write mood tag (from AudioDB) ──
-        if _tag_enabled('audiodb.tags.mood') and audiodb_mood:
-            if isinstance(audio_file.tags, ID3):
-                audio_file.tags.add(TXXX(encoding=3, desc='MOOD', text=[audiodb_mood]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-                audio_file['MOOD'] = [audiodb_mood]
-            elif isinstance(audio_file, MP4):
-                audio_file['----:com.apple.iTunes:MOOD'] = [MP4FreeForm(audiodb_mood.encode('utf-8'))]
-            logger.info(f"Mood: {audiodb_mood}")
-
-        # ── 3d. Write style tag (from AudioDB) ──
-        if _tag_enabled('audiodb.tags.style') and audiodb_style:
-            if isinstance(audio_file.tags, ID3):
-                audio_file.tags.add(TXXX(encoding=3, desc='STYLE', text=[audiodb_style]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-                audio_file['STYLE'] = [audiodb_style]
-            elif isinstance(audio_file, MP4):
-                audio_file['----:com.apple.iTunes:STYLE'] = [MP4FreeForm(audiodb_style.encode('utf-8'))]
-            logger.info(f"Style: {audiodb_style}")
-
-        # ── 4. Merge genres (Spotify + MusicBrainz + AudioDB + Last.fm) and overwrite tag ──
-        if _tag_enabled('metadata_enhancement.tags.genre_merge'):
-            enrichment_genres = (mb_genres if _tag_enabled('musicbrainz.tags.genres') else []) + \
-                                ([audiodb_genre] if audiodb_genre and _tag_enabled('audiodb.tags.genre') else []) + \
-                                (lastfm_tags if _tag_enabled('lastfm.tags.genres') else [])
-            if enrichment_genres:
-                from core.genre_filter import filter_genres as _gf
-                enrichment_genres = _gf(enrichment_genres, config_manager)
-                spotify_genres = [g.strip() for g in metadata.get('genre', '').split(',') if g.strip()]
-                seen = set()
-                merged = []
-                for g in spotify_genres + enrichment_genres:
-                    key = g.strip().lower()
-                    if key and key not in seen:
-                        seen.add(key)
-                        merged.append(g.strip().title())
-                    if len(merged) >= 5:
-                        break
-
-                if merged:
-                    genre_string = ', '.join(merged)
-                    if isinstance(audio_file.tags, ID3):
-                        audio_file.tags.add(TCON(encoding=3, text=[genre_string]))
-                    elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-                        audio_file['GENRE'] = [genre_string]
-                    elif isinstance(audio_file, MP4):
-                        audio_file['\xa9gen'] = [genre_string]
-                    logger.info(f"Genres merged: {genre_string}")
-
-        # ── 5. Write ISRC if available (per-source fallback chain) ──
-        _isrc_candidates = []
-        if isrc and _tag_enabled('musicbrainz.tags.isrc'):
-            _isrc_candidates.append(('MusicBrainz', isrc))
-        if deezer_isrc and _tag_enabled('deezer.tags.isrc'):
-            _isrc_candidates.append(('Deezer', deezer_isrc))
-        if tidal_isrc and _tag_enabled('tidal.tags.isrc'):
-            _isrc_candidates.append(('Tidal', tidal_isrc))
-        if qobuz_isrc and _tag_enabled('qobuz.tags.isrc'):
-            _isrc_candidates.append(('Qobuz', qobuz_isrc))
-        if _isrc_candidates:
-            source, final_isrc = _isrc_candidates[0]
-            if isinstance(audio_file.tags, ID3):
-                audio_file.tags.add(TSRC(encoding=3, text=[final_isrc]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-                audio_file['ISRC'] = [final_isrc]
-            elif isinstance(audio_file, MP4):
-                audio_file['----:com.apple.iTunes:ISRC'] = [MP4FreeForm(final_isrc.encode('utf-8'))]
-            logger.info(f"ISRC ({source}): {final_isrc}")
-
-        # ── 6. Write copyright tag (Tidal → Qobuz fallback) ──
-        _copyright_candidates = []
-        if tidal_copyright and _tag_enabled('tidal.tags.copyright'):
-            _copyright_candidates.append(('Tidal', tidal_copyright))
-        if qobuz_copyright and _tag_enabled('qobuz.tags.copyright'):
-            _copyright_candidates.append(('Qobuz', qobuz_copyright))
-        if _copyright_candidates:
-            source, final_copyright = _copyright_candidates[0]
-            if isinstance(audio_file.tags, ID3):
-                audio_file.tags.add(TCOP(encoding=3, text=[final_copyright]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-                audio_file['COPYRIGHT'] = [final_copyright]
-            elif isinstance(audio_file, MP4):
-                audio_file['cprt'] = [final_copyright]
-            logger.info(f"©️ Copyright ({source}): {final_copyright[:60]}")
-
-        # ── 7. Write label/publisher tag (from Qobuz) ──
-        if _tag_enabled('qobuz.tags.label') and qobuz_label:
-            if isinstance(audio_file.tags, ID3):
-                audio_file.tags.add(TPUB(encoding=3, text=[qobuz_label]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-                audio_file['LABEL'] = [qobuz_label]
-            elif isinstance(audio_file, MP4):
-                audio_file['----:com.apple.iTunes:LABEL'] = [MP4FreeForm(qobuz_label.encode('utf-8'))]
-            logger.info(f"Label (Qobuz): {qobuz_label}")
-
-        # ── 8. Write Last.fm and Genius URLs as custom tags ──
-        if _tag_enabled('lastfm.tags.url') and lastfm_url:
-            if isinstance(audio_file.tags, ID3):
-                audio_file.tags.add(TXXX(encoding=3, desc='LASTFM_URL', text=[lastfm_url]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-                audio_file['LASTFM_URL'] = [lastfm_url]
-            elif isinstance(audio_file, MP4):
-                audio_file['----:com.apple.iTunes:LASTFM_URL'] = [MP4FreeForm(lastfm_url.encode('utf-8'))]
-
-        if _tag_enabled('genius.tags.url') and genius_url:
-            if isinstance(audio_file.tags, ID3):
-                audio_file.tags.add(TXXX(encoding=3, desc='GENIUS_URL', text=[genius_url]))
-            elif isinstance(audio_file, (FLAC, OggVorbis)) or _is_ogg_opus(audio_file):
-                audio_file['GENIUS_URL'] = [genius_url]
-            elif isinstance(audio_file, MP4):
-                audio_file['----:com.apple.iTunes:GENIUS_URL'] = [MP4FreeForm(genius_url.encode('utf-8'))]
-
-    except Exception as e:
-        logger.error(f"Error embedding source IDs (non-fatal): {e}")
-
 def _download_cover_art(album_info: dict, target_dir: str, context: dict = None):
-    """Downloads cover.jpg into the specified directory.
-    Tries Cover Art Archive first (high-res) if MusicBrainz release ID is available
-    (set by _enhance_file_metadata during post-processing), falls back to source URL.
-    Accepts optional context to extract image URL from spotify_album when album_info lacks it."""
-    if not config_manager.get('metadata_enhancement.cover_art_download', True):
-        return
-    try:
-        cover_path = os.path.join(target_dir, "cover.jpg")
-        release_mbid = album_info.get('musicbrainz_release_id') if album_info else None
-        prefer_caa = config_manager.get('metadata_enhancement.prefer_caa_art', False)
-
-        # If cover.jpg exists but we now have a CAA MBID, check if we should upgrade
-        if os.path.exists(cover_path):
-            if release_mbid and prefer_caa:
-                try:
-                    existing_size = os.path.getsize(cover_path)
-                    # Typical Spotify/iTunes cover is ~50-150KB at 640x640
-                    # CAA covers are usually 300KB+ at 1200x1200
-                    if existing_size > 200_000:
-                        return  # Already high-res, skip
-                    # Low-res cover exists — try to upgrade from CAA
-                    is_upgrade = True
-                    logger.info(f"Existing cover.jpg is {existing_size // 1024}KB — attempting CAA upgrade...")
-                except Exception:
-                    return
-            else:
-                return
-        else:
-            is_upgrade = False
-
-        image_data = None
-
-        # Try Cover Art Archive first (often 1200x1200+, original quality) — opt-in
-        # The MBID is stored in album_info by _enhance_file_metadata before this is called
-        if release_mbid and prefer_caa:
-            try:
-                caa_url = f"https://coverartarchive.org/release/{release_mbid}/front"
-                req = urllib.request.Request(caa_url, headers={'Accept': 'image/*'})
-                with urllib.request.urlopen(req, timeout=10) as response:
-                    image_data = response.read()
-                if image_data and len(image_data) > 1000:
-                    logger.info(f"Cover art from Cover Art Archive ({len(image_data) // 1024}KB)")
-                else:
-                    image_data = None
-            except Exception:
-                image_data = None
-
-        # If upgrading and CAA failed, keep existing cover — don't overwrite with same low-res
-        if is_upgrade and not image_data:
-            logger.error("CAA upgrade failed — keeping existing cover.jpg")
-            return
-
-        # Fallback to Spotify/iTunes/Deezer URL
-        if not image_data:
-            art_url = album_info.get('album_image_url')
-            # If album_info lacks the URL, try the context's spotify_album
-            if not art_url and context:
-                spotify_album = context.get('spotify_album') or {}
-                art_url = spotify_album.get('image_url')
-                # Also try images array (raw Spotify API format)
-                if not art_url:
-                    images = spotify_album.get('images', [])
-                    if images and isinstance(images, list) and len(images) > 0:
-                        art_url = images[0].get('url') if isinstance(images[0], dict) else None
-                if art_url:
-                    logger.info("Using cover art URL from spotify_album context")
-            # Upgrade to highest available resolution before fetching
-            if art_url and 'i.scdn.co' in art_url:
-                from core.spotify_client import _upgrade_spotify_image_url
-                art_url = _upgrade_spotify_image_url(art_url)
-            elif art_url and 'mzstatic.com' in art_url:
-                import re as _re
-                art_url = _re.sub(r'\d+x\d+bb', '3000x3000bb', art_url)
-            if not art_url:
-                logger.warning("No cover art URL available for download.")
-                return
-            with urllib.request.urlopen(art_url, timeout=10) as response:
-                image_data = response.read()
-
-        if not image_data:
-            return
-
-        with open(cover_path, 'wb') as f:
-            f.write(image_data)
-
-        logger.info(f"Cover art downloaded to: {cover_path}")
-    except Exception as e:
-        logger.error(f"Error downloading cover.jpg: {e}")
-
-
-
+    return metadata_enrichment.download_cover_art(
+        album_info,
+        target_dir,
+        context,
+    )
 
 def _get_spotify_album_tracks(spotify_album: dict) -> list:
     """Fetches all tracks for a given Spotify album ID."""
@@ -20568,695 +18192,29 @@ def _match_track_to_spotify_title(slsk_track_meta: dict, spotify_tracks: list) -
     return slsk_track_meta # Fallback to original
 
 
-
-# --- Post-Processing Logic ---
-# ── Modular post-processing metadata lookup functions ──
-# Each function receives a shared `pp` context dict and writes its results to it.
-# The orchestrator in _post_process_matched_download calls them in configurable order.
-
-def _pp_lookup_musicbrainz(pp, _names_match):
-    """MusicBrainz: recording MBID, artist MBID, release MBID, ISRC, genres, release details."""
-    if not config_manager.get('musicbrainz.embed_tags', True):
-        return
-    track_title = pp['track_title']
-    artist_name = pp['artist_name']
-    metadata = pp['metadata']
-    id_tags = pp['id_tags']
-    if not track_title or not artist_name:
-        return
-    try:
-        mb_service = mb_worker.mb_service if mb_worker else None
-        if not mb_service:
-            logger.info("MusicBrainz worker not available, skipping MBID lookup")
-            return
-        result = mb_service.match_recording(track_title, artist_name)
-        if result and result.get('mbid'):
-            pp['recording_mbid'] = result['mbid']
-            id_tags['MUSICBRAINZ_RECORDING_ID'] = pp['recording_mbid']
-            logger.info(f"MusicBrainz recording matched: {pp['recording_mbid']}")
-            details = mb_service.mb_client.get_recording(pp['recording_mbid'], includes=['isrcs', 'genres'])
-            if details:
-                isrcs = details.get('isrcs', [])
-                if isrcs:
-                    pp['isrc'] = isrcs[0]
-                pp['mb_genres'] = [g['name'] for g in sorted(details.get('genres', []), key=lambda x: x.get('count', 0), reverse=True)]
-
-        track_artist_name = metadata.get('artist', '') or artist_name
-        if ', ' in track_artist_name:
-            track_artist_name = track_artist_name.split(', ')[0]
-        artist_result = mb_service.match_artist(track_artist_name)
-        if artist_result and artist_result.get('mbid'):
-            pp['artist_mbid'] = artist_result['mbid']
-            id_tags['MUSICBRAINZ_ARTIST_ID'] = pp['artist_mbid']
-
-        album_name_for_mb = metadata.get('album', '')
-        if album_name_for_mb:
-            # Use normalized key (strips edition suffixes) so "Album (Deluxe Edition)"
-            # and "Album (Deluxe)" and "Album" all share the same cached MBID.
-            # This prevents Navidrome from splitting one album into multiple entries.
-            # Prefer batch-level artist name (from album download context) for the cache key
-            # so all tracks in the batch hit the same preflight-cached entry, even if
-            # per-track metadata spells the artist slightly differently.
-            _artist_key = (pp.get('batch_artist_name') or artist_name).lower().strip()
-            _rc_key_norm = (_normalize_album_cache_key(album_name_for_mb), _artist_key)
-            _rc_key_exact = (album_name_for_mb.lower().strip(), _artist_key)
-            with _mb_release_cache_lock:
-                # Check normalized key first (catches edition variants)
-                cached = _mb_release_cache.get(_rc_key_norm)
-                if cached is None:
-                    cached = _mb_release_cache.get(_rc_key_exact)
-                if cached is not None:
-                    pp['release_mbid'] = cached
-                else:
-                    try:
-                        _rc_result = mb_service.match_release(album_name_for_mb, artist_name)
-                        pp['release_mbid'] = _rc_result.get('mbid', '') if _rc_result else ''
-                    except Exception:
-                        pp['release_mbid'] = ''
-                    # Cache under both normalized and exact keys
-                    _mb_release_cache[_rc_key_norm] = pp['release_mbid']
-                    _mb_release_cache[_rc_key_exact] = pp['release_mbid']
-            if pp['release_mbid']:
-                id_tags['MUSICBRAINZ_RELEASE_ID'] = pp['release_mbid']
-
-        # Release details (group, barcode, media, etc.)
-        if pp['release_mbid']:
-            with _mb_release_detail_cache_lock:
-                release_detail = _mb_release_detail_cache.get(pp['release_mbid'])
-            if release_detail is None:
-                release_detail = mb_service.mb_client.get_release(
-                    pp['release_mbid'], includes=['release-groups', 'labels', 'media', 'artist-credits', 'recordings']
-                ) or {}
-                with _mb_release_detail_cache_lock:
-                    _mb_release_detail_cache[pp['release_mbid']] = release_detail
-            if release_detail:
-                rg = release_detail.get('release-group', {})
-                if rg.get('id'): id_tags['MUSICBRAINZ_RELEASEGROUPID'] = rg['id']
-                ac = release_detail.get('artist-credit', [])
-                if ac and isinstance(ac[0], dict):
-                    aa = ac[0].get('artist', {})
-                    if aa.get('id'): id_tags['MUSICBRAINZ_ALBUMARTISTID'] = aa['id']
-                if rg.get('primary-type'): id_tags['RELEASETYPE'] = rg['primary-type']
-                if rg.get('first-release-date'):
-                    id_tags['ORIGINALDATE'] = rg['first-release-date']
-                    if not pp['release_year'] and len(rg['first-release-date']) >= 4:
-                        yr = rg['first-release-date'][:4]
-                        if yr.isdigit():
-                            pp['release_year'] = yr
-                if release_detail.get('status'): id_tags['RELEASESTATUS'] = release_detail['status']
-                if release_detail.get('country'): id_tags['RELEASECOUNTRY'] = release_detail['country']
-                if release_detail.get('barcode'): id_tags['BARCODE'] = release_detail['barcode']
-                media_list = release_detail.get('media', [])
-                if media_list:
-                    fmt = media_list[0].get('format', '')
-                    if fmt: id_tags['MEDIA'] = fmt
-                    id_tags['TOTALDISCS'] = str(len(media_list))
-                label_info = release_detail.get('label-info', [])
-                if label_info and isinstance(label_info[0], dict):
-                    cat = label_info[0].get('catalog-number', '')
-                    if cat: id_tags['CATALOGNUMBER'] = cat
-                text_rep = release_detail.get('text-representation', {})
-                if isinstance(text_rep, dict) and text_rep.get('script'):
-                    id_tags['SCRIPT'] = text_rep['script']
-                if release_detail.get('asin'): id_tags['ASIN'] = release_detail['asin']
-                # Picard-style: pull recording MBID from the release tracklist
-                # instead of using the independent match_recording() result.
-                # This guarantees the recording ID is consistent with the release.
-                _trk_num = metadata.get('track_number')
-                _disc_num = metadata.get('disc_number') or 1
-                if _trk_num and media_list:
-                    try:
-                        _trk_num_int, _disc_num_int = int(_trk_num), int(_disc_num)
-                        for medium in media_list:
-                            if medium.get('position', 1) == _disc_num_int:
-                                for mtrack in (medium.get('tracks') or medium.get('track-list', [])):
-                                    if mtrack.get('position') == _trk_num_int:
-                                        if mtrack.get('id'):
-                                            id_tags['MUSICBRAINZ_RELEASETRACKID'] = mtrack['id']
-                                        # Override recording MBID with the one from this release's tracklist
-                                        _release_recording = mtrack.get('recording', {})
-                                        if _release_recording.get('id'):
-                                            pp['recording_mbid'] = _release_recording['id']
-                                            id_tags['MUSICBRAINZ_RECORDING_ID'] = _release_recording['id']
-                                            logger.info(f"MusicBrainz recording from release tracklist: {_release_recording['id']}")
-                                        break
-                                break
-                    except (ValueError, TypeError):
-                        pass
-    except Exception as e:
-        logger.error(f"MusicBrainz lookup failed (non-fatal): {e}")
-
-
-def _pp_lookup_deezer(pp, _names_match):
-    """Deezer: BPM, ISRC fallback, track/artist IDs."""
-    if not config_manager.get('deezer.embed_tags', True):
-        return
-    track_title, artist_name = pp['track_title'], pp['artist_name']
-    id_tags = pp['id_tags']
-    if not track_title or not artist_name:
-        return
-    try:
-        dz_client = deezer_worker.client if deezer_worker else None
-        if not dz_client:
-            logger.info("Deezer worker not available, skipping Deezer lookup")
-            return
-        dz_result = dz_client.search_track(artist_name, track_title)
-        if dz_result and _names_match(dz_result.get('title', ''), track_title) and \
-           _names_match(dz_result.get('artist', {}).get('name', ''), artist_name):
-            dz_track_id = dz_result['id']
-            id_tags['DEEZER_TRACK_ID'] = str(dz_track_id)
-            dz_artist_id = dz_result.get('artist', {}).get('id')
-            if dz_artist_id:
-                id_tags['DEEZER_ARTIST_ID'] = str(dz_artist_id)
-            logger.info(f"Deezer track matched: {dz_track_id}")
-            dz_details = dz_client.get_track_details(dz_track_id)
-            if dz_details:
-                bpm_val = dz_details.get('bpm')
-                if bpm_val and bpm_val > 0:
-                    pp['deezer_bpm'] = bpm_val
-                dz_isrc = dz_details.get('isrc')
-                if dz_isrc:
-                    pp['deezer_isrc'] = dz_isrc
-            # Release year from Deezer album
-            if not pp['release_year']:
-                dz_album = dz_result.get('album', {})
-                dz_release = (dz_album.get('release_date', '') if isinstance(dz_album, dict) else '') or ''
-                if len(dz_release) >= 4 and dz_release[:4].isdigit():
-                    pp['release_year'] = dz_release[:4]
-    except Exception as e:
-        logger.error(f"Deezer lookup failed (non-fatal): {e}")
-
-
-def _pp_lookup_audiodb(pp, _names_match):
-    """AudioDB: mood, style, genre, track ID, MusicBrainz ID fallbacks."""
-    if not config_manager.get('audiodb.embed_tags', True):
-        return
-    track_title, artist_name = pp['track_title'], pp['artist_name']
-    id_tags = pp['id_tags']
-    if not track_title or not artist_name:
-        return
-    try:
-        adb_client = audiodb_worker.client if audiodb_worker else None
-        if not adb_client:
-            logger.info("AudioDB worker not available, skipping AudioDB lookup")
-            return
-        adb_result = adb_client.search_track(artist_name, track_title)
-        if adb_result and _names_match(adb_result.get('strTrack', ''), track_title) and \
-           _names_match(adb_result.get('strArtist', ''), artist_name):
-            adb_track_id = adb_result.get('idTrack')
-            if adb_track_id:
-                id_tags['AUDIODB_TRACK_ID'] = str(adb_track_id)
-                logger.info(f"AudioDB track matched: {adb_track_id}")
-            adb_mb_track = adb_result.get('strMusicBrainzID')
-            if adb_mb_track and 'MUSICBRAINZ_RECORDING_ID' not in id_tags:
-                id_tags['MUSICBRAINZ_RECORDING_ID'] = adb_mb_track
-                pp['recording_mbid'] = adb_mb_track
-                logger.warning(f"MusicBrainz recording ID from AudioDB fallback: {adb_mb_track}")
-            adb_mb_artist = adb_result.get('strMusicBrainzArtistID')
-            if adb_mb_artist and 'MUSICBRAINZ_ARTIST_ID' not in id_tags:
-                id_tags['MUSICBRAINZ_ARTIST_ID'] = adb_mb_artist
-                pp['artist_mbid'] = adb_mb_artist
-                logger.warning(f"MusicBrainz artist ID from AudioDB fallback: {adb_mb_artist}")
-            pp['audiodb_mood'] = adb_result.get('strMood') or None
-            pp['audiodb_style'] = adb_result.get('strStyle') or None
-            pp['audiodb_genre'] = adb_result.get('strGenre') or None
-    except Exception as e:
-        logger.error(f"AudioDB lookup failed (non-fatal): {e}")
-
-
-def _pp_lookup_tidal(pp, _names_match):
-    """Tidal: ISRC fallback, copyright, track/artist IDs."""
-    if not config_manager.get('tidal.embed_tags', True):
-        return
-    track_title, artist_name = pp['track_title'], pp['artist_name']
-    id_tags = pp['id_tags']
-    if not track_title or not artist_name:
-        return
-    try:
-        if not (tidal_client and tidal_client.is_authenticated()):
-            return
-        td_result = tidal_client.search_track(artist_name, track_title)
-        if td_result and _names_match(td_result.get('title', ''), track_title):
-            td_track_id = td_result.get('id')
-            if td_track_id:
-                id_tags['TIDAL_TRACK_ID'] = str(td_track_id)
-                logger.info(f"Tidal track matched: {td_track_id}")
-            td_artist = td_result.get('artist', {})
-            if isinstance(td_artist, dict) and td_artist.get('id'):
-                id_tags['TIDAL_ARTIST_ID'] = str(td_artist['id'])
-            if td_track_id:
-                td_details = tidal_client.get_track(str(td_track_id))
-                if td_details:
-                    td_isrc = td_details.get('isrc')
-                    if td_isrc:
-                        pp['tidal_isrc'] = td_isrc
-                    td_copyright = td_details.get('copyright')
-                    if isinstance(td_copyright, dict):
-                        td_copyright = td_copyright.get('text', td_copyright.get('name', ''))
-                    if td_copyright:
-                        pp['tidal_copyright'] = td_copyright
-            # Release year from Tidal album
-            if not pp['release_year']:
-                td_album = td_result.get('album', {})
-                td_release = ''
-                if isinstance(td_album, dict):
-                    td_release = str(td_album.get('release_date', '') or td_album.get('releaseDate', '') or '')
-                if len(td_release) >= 4 and td_release[:4].isdigit():
-                    pp['release_year'] = td_release[:4]
-    except Exception as e:
-        logger.error(f"Tidal lookup failed (non-fatal): {e}")
-
-
-def _pp_lookup_qobuz(pp, _names_match):
-    """Qobuz: ISRC fallback, copyright, label, track/artist IDs."""
-    if not config_manager.get('qobuz.embed_tags', True):
-        return
-    track_title, artist_name = pp['track_title'], pp['artist_name']
-    id_tags = pp['id_tags']
-    if not track_title or not artist_name:
-        return
-    try:
-        qz_client = qobuz_enrichment_worker.client if qobuz_enrichment_worker else None
-        if not (qz_client and qz_client.is_authenticated()):
-            return
-        qz_result = qz_client.search_track(artist_name, track_title)
-        if qz_result:
-            qz_performer = (qz_result.get('performer') or {})
-            if not isinstance(qz_performer, dict):
-                qz_performer = {}
-            qz_artist_name = qz_performer.get('name', '')
-            if _names_match(qz_result.get('title', ''), track_title) and \
-               _names_match(qz_artist_name, artist_name):
-                qz_track_id = qz_result.get('id')
-                if qz_track_id:
-                    id_tags['QOBUZ_TRACK_ID'] = str(qz_track_id)
-                    logger.info(f"Qobuz track matched: {qz_track_id}")
-                if isinstance(qz_performer, dict) and qz_performer.get('id'):
-                    id_tags['QOBUZ_ARTIST_ID'] = str(qz_performer['id'])
-                qz_isrc = qz_result.get('isrc')
-                if isinstance(qz_isrc, dict):
-                    qz_isrc = qz_isrc.get('value', qz_isrc.get('id', ''))
-                if qz_isrc:
-                    pp['qobuz_isrc'] = qz_isrc
-                qz_copyright = qz_result.get('copyright')
-                if isinstance(qz_copyright, dict):
-                    qz_copyright = qz_copyright.get('text', qz_copyright.get('name', ''))
-                if qz_copyright and isinstance(qz_copyright, str):
-                    pp['qobuz_copyright'] = qz_copyright
-                qz_album = qz_result.get('album', {})
-                if isinstance(qz_album, dict):
-                    qz_label_info = qz_album.get('label', {})
-                    if isinstance(qz_label_info, dict) and qz_label_info.get('name'):
-                        pp['qobuz_label'] = qz_label_info['name']
-                    # Release year from Qobuz album (prefer date string over Unix timestamp)
-                    if not pp['release_year']:
-                        qz_release = str(qz_album.get('release_date_original', '') or '')
-                        if not qz_release:
-                            # released_at is a Unix timestamp — convert to year
-                            qz_ts = qz_album.get('released_at')
-                            if qz_ts and isinstance(qz_ts, (int, float)) and qz_ts > 0:
-                                import datetime as _dt
-                                qz_release = str(_dt.datetime.utcfromtimestamp(qz_ts).year)
-                        if len(qz_release) >= 4 and qz_release[:4].isdigit():
-                            pp['release_year'] = qz_release[:4]
-    except Exception as e:
-        logger.error(f"Qobuz lookup failed (non-fatal): {e}")
-
-
-def _pp_lookup_lastfm(pp, _names_match):
-    """Last.fm: genre tags, track URL."""
-    if not config_manager.get('lastfm.embed_tags', True):
-        return
-    track_title, artist_name = pp['track_title'], pp['artist_name']
-    if not track_title or not artist_name:
-        return
-    try:
-        lf_client = lastfm_worker.client if lastfm_worker else None
-        if not lf_client:
-            return
-        lf_result = lf_client.get_track_info(artist_name, track_title)
-        if lf_result:
-            lf_url = lf_result.get('url')
-            if lf_url:
-                pp['lastfm_url'] = lf_url
-            lf_toptags = lf_result.get('toptags', {})
-            if isinstance(lf_toptags, dict):
-                tag_list = lf_toptags.get('tag', [])
-                if isinstance(tag_list, list):
-                    pp['lastfm_tags'] = [t.get('name', '') for t in tag_list if isinstance(t, dict) and t.get('name')]
-                elif isinstance(tag_list, dict) and tag_list.get('name'):
-                    pp['lastfm_tags'] = [tag_list['name']]
-            logger.info(f"Last.fm track info found: {len(pp['lastfm_tags'])} tags")
-    except Exception as e:
-        logger.error(f"Last.fm lookup failed (non-fatal): {e}")
-
-
-def _pp_lookup_genius(pp, _names_match):
-    """Genius: track ID, URL."""
-    if not config_manager.get('genius.embed_tags', True):
-        return
-    track_title, artist_name = pp['track_title'], pp['artist_name']
-    id_tags = pp['id_tags']
-    if not track_title or not artist_name:
-        return
-    try:
-        import core.genius_client as _genius_module
-        if time.time() < _genius_module._rate_limit_until:
-            logger.info("Genius rate-limited, skipping (non-blocking)")
-            return
-        g_client = genius_worker.client if genius_worker else None
-        if not g_client:
-            return
-        g_result = g_client.search_song(artist_name, track_title)
-        if g_result:
-            g_id = g_result.get('id')
-            if g_id:
-                id_tags['GENIUS_TRACK_ID'] = str(g_id)
-                logger.info(f"Genius song matched: {g_id}")
-            g_url = g_result.get('url')
-            if g_url:
-                pp['genius_url'] = g_url
-    except Exception as e:
-        logger.error(f"Genius lookup failed (non-fatal): {e}")
-
-
 def _post_process_matched_download_with_verification(context_key, context, file_path, task_id, batch_id):
     """
     NEW VERIFICATION WORKFLOW: Enhanced post-processing with file verification.
     Only sets task status to 'completed' after successful file verification and move operation.
     """
-    _pp = pp_logger
-    try:
-        # Call the existing post-processing logic (but skip its completion callback)
-        # We'll handle the completion callback ourselves after verification
-        original_task_id = context.pop('task_id', None)  # Temporarily remove to prevent double callback
-        original_batch_id = context.pop('batch_id', None)
-        _post_process_matched_download(context_key, context, file_path)
-        # Restore the IDs for our own callback
-        if original_task_id:
-            context['task_id'] = original_task_id
-        if original_batch_id:
-            context['batch_id'] = original_batch_id
+    from core.import_pipeline import post_process_matched_download_with_verification
+    return post_process_matched_download_with_verification(
+        context_key,
+        context,
+        file_path,
+        task_id,
+        batch_id,
+        _build_import_pipeline_runtime(),
+    )
 
-        # Check if race guard detected the source file was already gone
-        if context.get('_race_guard_failed'):
-            _pp.info(f"Race guard: source file gone for task {task_id} — marking as failed")
-            with tasks_lock:
-                if task_id in download_tasks:
-                    download_tasks[task_id]['status'] = 'failed'
-                    download_tasks[task_id]['error_message'] = 'Source file was already processed or removed by another task'
-            with matched_context_lock:
-                if context_key in matched_downloads_context:
-                    del matched_downloads_context[context_key]
-            _on_download_completed(batch_id, task_id, success=False)
-            return
-
-        # Check if AcoustID quarantined the file — no further processing needed
-        if context.get('_acoustid_quarantined'):
-            failure_msg = context.get('_acoustid_failure_msg', 'AcoustID verification failed')
-            _pp.info(f"File was quarantined by AcoustID verification (task={task_id}): {failure_msg}")
-            with tasks_lock:
-                if task_id in download_tasks:
-                    download_tasks[task_id]['status'] = 'failed'
-                    download_tasks[task_id]['error_message'] = f"AcoustID verification failed: {failure_msg}"
-            with matched_context_lock:
-                if context_key in matched_downloads_context:
-                    del matched_downloads_context[context_key]
-            _on_download_completed(batch_id, task_id, success=False)
-            return
-
-        # Check if simple download handler already completed everything
-        if context.get('_simple_download_completed'):
-            expected_final_path = context.get('_final_path')
-
-            if expected_final_path and os.path.exists(expected_final_path):
-                with tasks_lock:
-                    if task_id in download_tasks:
-                        _mark_task_completed(task_id, context.get('track_info'))
-
-                with matched_context_lock:
-                    if context_key in matched_downloads_context:
-                        del matched_downloads_context[context_key]
-
-                _on_download_completed(batch_id, task_id, success=True)
-                return
-            else:
-                _pp.info(f"FAILED simple download file not found at: {expected_final_path} (task={task_id}, context={context_key})")
-                with tasks_lock:
-                    if task_id in download_tasks:
-                        download_tasks[task_id]['status'] = 'failed'
-                        download_tasks[task_id]['error_message'] = f'Downloaded file not found at expected location: {os.path.basename(expected_final_path)}'
-
-                with matched_context_lock:
-                    if context_key in matched_downloads_context:
-                        del matched_downloads_context[context_key]
-
-                _on_download_completed(batch_id, task_id, success=False)
-                return
-
-        # VERIFICATION: Use the actual path that _post_process_matched_download computed and
-        # moved the file to, instead of recomputing independently. Independent recomputation
-        # can produce path mismatches (e.g., track_number extraction/validation differences)
-        # causing false "file verification failed" errors on successfully processed files.
-        expected_final_path = context.get('_final_processed_path')
-        if not expected_final_path:
-            _pp.info(f"No _final_processed_path in context for task {task_id} — cannot verify, assuming success")
-            with tasks_lock:
-                if task_id in download_tasks:
-                    _mark_task_completed(task_id, context.get('track_info'))
-            with matched_context_lock:
-                if context_key in matched_downloads_context:
-                    del matched_downloads_context[context_key]
-            _on_download_completed(batch_id, task_id, success=True)
-            return
-
-        # VERIFICATION: Check if file exists at the path processing actually used
-        if os.path.exists(expected_final_path):
-            # Mark task as completed only after successful verification
-            redownload_ctx = None
-            with tasks_lock:
-                if task_id in download_tasks:
-                    _mark_task_completed(task_id, context.get('track_info'))
-                    download_tasks[task_id]['metadata_enhanced'] = True
-                    redownload_ctx = download_tasks[task_id].get('_redownload_context')
-
-            with matched_context_lock:
-                if context_key in matched_downloads_context:
-                    del matched_downloads_context[context_key]
-
-            # Redownload hook: delete old file and update DB path (outside locks)
-            if redownload_ctx:
-                try:
-                    old_path = redownload_ctx.get('old_file_path')
-                    lib_track_id = redownload_ctx.get('library_track_id')
-                    if redownload_ctx.get('delete_old_file') and old_path and os.path.exists(old_path):
-                        if os.path.normpath(old_path) != os.path.normpath(expected_final_path):
-                            os.remove(old_path)
-                            logger.info(f"[Redownload] Deleted old file: {old_path}")
-                    if lib_track_id and expected_final_path:
-                        _rd_db = get_database()
-                        _rd_conn = _rd_db._get_connection()
-                        _rd_cursor = _rd_conn.cursor()
-                        _rd_cursor.execute("""
-                            UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP
-                            WHERE id = ?
-                        """, (expected_final_path, lib_track_id))
-                        _rd_conn.commit()
-                        _rd_conn.close()
-                        logger.info(f"[Redownload] Updated DB path for track {lib_track_id}")
-                except Exception as e:
-                    logger.error(f"[Redownload] Post-processing hook error: {e}")
-
-            _on_download_completed(batch_id, task_id, success=True)
-        else:
-            # Log failure details for diagnosis
-            track_name = context.get('original_search_result', {}).get('spotify_clean_title', context_key)
-            _pp.info(f"FAILED verification for '{track_name}' (task={task_id})")
-            _pp.info(f"  expected_final_path: {expected_final_path}")
-            _pp.info(f"  file_path (source): {file_path}, exists={os.path.exists(file_path)}")
-            _pp.info(f"  is_album={context.get('is_album_download', False)}, has_clean_data={context.get('has_clean_spotify_data', False)}")
-            expected_dir = os.path.dirname(expected_final_path)
-            if os.path.exists(expected_dir):
-                dir_contents = os.listdir(expected_dir)
-                _pp.info(f"  directory contains {len(dir_contents)} files: {dir_contents[:20]}")
-            else:
-                _pp.info(f"  directory does not exist: {expected_dir}")
-
-            with tasks_lock:
-                if task_id in download_tasks:
-                    download_tasks[task_id]['status'] = 'failed'
-                    download_tasks[task_id]['error_message'] = f'File verification failed: expected file at {os.path.basename(expected_final_path)} but it was not found after processing'
-
-            with matched_context_lock:
-                if context_key in matched_downloads_context:
-                    del matched_downloads_context[context_key]
-
-            _on_download_completed(batch_id, task_id, success=False)
-
-    except Exception as e:
-        import traceback
-        _pp.info(f"EXCEPTION in post-processing for '{context_key}' (task={task_id}): {e}")
-        _pp.info(traceback.format_exc())
-        with tasks_lock:
-            if task_id in download_tasks:
-                download_tasks[task_id]['status'] = 'failed'
-                download_tasks[task_id]['error_message'] = f"Post-processing verification failed: {str(e)}"
-
-        with matched_context_lock:
-            if context_key in matched_downloads_context:
-                del matched_downloads_context[context_key]
-
-        _on_download_completed(batch_id, task_id, success=False)
-
-
-def _check_flac_bit_depth(file_path, context, context_key):
-    """
-    Check if a FLAC file matches the user's preferred bit depth.
-    Returns True if the file was rejected (caller should return), False if OK.
-    With fallback enabled (default), accepts any FLAC bit depth rather than quarantining.
-    """
-    if not context.get('_audio_quality', '').startswith('FLAC'):
-        return False
-
-    from database.music_database import MusicDatabase
-    _qp_db = MusicDatabase()
-    _quality_profile = _qp_db.get_quality_profile()
-    _flac_config = _quality_profile.get('qualities', {}).get('flac', {})
-    _flac_pref = _flac_config.get('bit_depth', 'any')
-
-    if _flac_pref == 'any':
-        return False
-
-    # Parse actual bit depth from quality string like "FLAC 16bit"
-    _actual_bits = context['_audio_quality'].replace('FLAC ', '').replace('bit', '')
-    if _actual_bits == _flac_pref:
-        return False
-
-    # Bit depth doesn't match preference — check if fallback or downsample is enabled
-    _flac_fallback = _flac_config.get('bit_depth_fallback', True)
-    _downsample_enabled = config_manager.get('lossy_copy.downsample_hires', False)
-
-    if _flac_fallback or _downsample_enabled:
-        # Accept the file — it will be downsampled or a FLAC at any bit depth is better than a failed download
-        track_info = context.get('track_info', {})
-        track_name = track_info.get('name', os.path.basename(file_path))
-        if _downsample_enabled:
-            logger.info(f"[FLAC Downsample] Accepted {_actual_bits}-bit FLAC (will be downsampled to {_flac_pref}-bit): {track_name}")
-        else:
-            logger.warning(f"[FLAC Fallback] Accepted {_actual_bits}-bit FLAC (preferred {_flac_pref}-bit): {track_name}")
-        return False
-
-    # Strict mode — reject and quarantine
-    rejection_msg = f"FLAC bit depth mismatch: file is {_actual_bits}-bit, preference is {_flac_pref}-bit"
-    try:
-        quarantine_path = _move_to_quarantine(file_path, context, rejection_msg)
-        logger.info(f"File quarantined due to bit depth filter: {quarantine_path}")
-    except Exception as quarantine_error:
-        logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
-        try:
-            os.remove(file_path)
-        except Exception:
-            pass
-
-    context['_bitdepth_rejected'] = True
-    with matched_context_lock:
-        if context_key in matched_downloads_context:
-            del matched_downloads_context[context_key]
-
-    task_id = context.get('task_id')
-    batch_id = context.get('batch_id')
-    if task_id:
-        with tasks_lock:
-            if task_id in download_tasks:
-                download_tasks[task_id]['status'] = 'failed'
-                download_tasks[task_id]['error_message'] = f"Bit depth filter: {rejection_msg}"
-    if task_id and batch_id:
-        _on_download_completed(batch_id, task_id, success=False)
-    return True
-
-
-def _move_to_quarantine(file_path: str, context: dict, reason: str) -> str:
-    """
-    Move a file to quarantine folder when AcoustID verification fails.
-    Creates a JSON sidecar file with metadata about why the file was quarantined.
-
-    Args:
-        file_path: Original file path
-        context: Download context with track info
-        reason: Reason for quarantine
-
-    Returns:
-        Path to quarantined file
-    """
-    import json
-    from pathlib import Path
-    from datetime import datetime
-
-    # Get quarantine directory (inside download folder — always writable, even in Docker)
-    download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
-    quarantine_dir = Path(download_dir) / "ss_quarantine"
-    quarantine_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create quarantine entry with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    original_name = Path(file_path).stem
-    file_ext = Path(file_path).suffix
-
-    # Build quarantine filename: TIMESTAMP_originalname.ext.quarantined
-    # The .quarantined extension prevents audio file searches and media servers
-    # from picking up known-wrong files sitting in the downloads folder.
-    quarantine_filename = f"{timestamp}_{original_name}{file_ext}.quarantined"
-    quarantine_path = quarantine_dir / quarantine_filename
-
-    # Move file to quarantine
-    _safe_move_file(file_path, str(quarantine_path))
-
-    # Write metadata sidecar file
-    metadata_path = quarantine_dir / f"{timestamp}_{original_name}.json"
-
-    # Extract track info from context
-    track_info = context.get('track_info', {})
-    original_search = context.get('original_search_result', {})
-    spotify_artist = context.get('spotify_artist', {})
-
-    metadata = {
-        'original_filename': Path(file_path).name,
-        'quarantine_reason': reason,
-        'timestamp': datetime.now().isoformat(),
-        'expected_track': (
-            original_search.get('spotify_clean_title') or
-            track_info.get('name') or
-            original_search.get('title', 'Unknown')
-        ),
-        'expected_artist': spotify_artist.get('name', 'Unknown'),
-        'context_key': context.get('context_key', 'unknown')
-    }
-
-    try:
-        with open(metadata_path, 'w', encoding='utf-8') as f:
-            json.dump(metadata, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        logger.warning(f"Failed to write quarantine metadata: {e}")
-
-    logger.warning(f"File quarantined: {quarantine_path} - Reason: {reason}")
-
-    try:
-        if automation_engine:
-            ti = context.get('track_info', {})
-            artists = ti.get('artists', [])
-            artist_name = ''
-            if artists:
-                a = artists[0]
-                artist_name = a.get('name', str(a)) if isinstance(a, dict) else str(a)
-            automation_engine.emit('download_quarantined', {
-                'artist': artist_name,
-                'title': ti.get('name', ''),
-                'reason': reason or 'Unknown',
-            })
-    except Exception:
-        pass
-
-    return str(quarantine_path)
+def _build_import_pipeline_runtime():
+    """Collect live controller dependencies for the shared import pipeline."""
+    return types.SimpleNamespace(
+        automation_engine=automation_engine,
+        on_download_completed=_on_download_completed,
+        web_scan_manager=web_scan_manager,
+        repair_worker=repair_worker,
+    )
 
 
 def _safe_move_file(src, dst):
@@ -21362,872 +18320,8 @@ def _post_process_matched_download(context_key, context, file_path):
     Also handles simple downloads (from search page "Download" button) which
     just move files to /Transfer without metadata enhancement.
     """
-    # --- PER-FILE LOCK ---
-    # Acquire a per-context-key lock so only one thread processes a given file at a time.
-    # The Stream Processor and Verification Worker both call this function for the same file.
-    # Without serialization, they race to move the source file and the loser gets FileNotFoundError.
-    # With the lock, the second thread waits, then the existing protection checks detect
-    # "source gone + destination exists" and return early.
-    with _post_process_locks_lock:
-        if context_key not in _post_process_locks:
-            _post_process_locks[context_key] = threading.Lock()
-        file_lock = _post_process_locks[context_key]
-
-    file_lock.acquire()
-    try:
-        import os
-        import shutil
-        import time
-        from pathlib import Path
-
-        # --- RACE CONDITION GUARD ---
-        # If source file is already gone, another thread (stream processor or
-        # verification worker) already processed it. Check immediately after
-        # acquiring the lock to avoid wasting time on stability checks / acoustid.
-        if not os.path.exists(file_path):
-            existing_final = context.get('_final_processed_path')
-            if existing_final and os.path.exists(existing_final):
-                logger.info(f"[Race Guard] Source gone but destination exists — already processed by another thread: {os.path.basename(existing_final)}")
-                return
-            logger.error(f"[Race Guard] Source file gone and no known destination — marking as failed: {os.path.basename(file_path)}")
-            context['_race_guard_failed'] = True
-            return
-        # --- END RACE CONDITION GUARD ---
-
-        # --- FILE STABILITY CHECK ---
-        # Wait for the file to stop growing before processing. slskd may still be
-        # flushing write buffers when it reports "Completed". We poll the file size
-        # a few times; once it stabilises we know the write is finished.
-        _basename = os.path.basename(file_path)
-        _prev_size = -1
-        for _stability_check in range(5):
-            try:
-                _cur_size = os.path.getsize(file_path)
-            except OSError:
-                _cur_size = -1
-            if _cur_size == _prev_size and _cur_size > 0:
-                # Size unchanged — file is stable
-                break
-            _prev_size = _cur_size
-            if _stability_check == 0:
-                logger.info(f"Waiting for file to stabilise: {_basename} ({_cur_size} bytes)")
-            time.sleep(1.5)
-        else:
-            logger.info(f"File may still be writing after stability checks: {_basename} ({_prev_size} bytes)")
-        # --- END FILE STABILITY CHECK ---
-
-        # --- ACOUSTID VERIFICATION ---
-        # Optional verification that downloaded audio matches expected track.
-        # Only runs if enabled and configured. Fails gracefully (skips on any error).
-        # Runs for ALL download sources — streaming APIs can return wrong versions
-        # (live, remix, cover) despite downloading by track ID.
-        _skip_acoustid = False
-
-        try:
-            from core.acoustid_verification import AcoustIDVerification, VerificationResult
-
-            verifier = AcoustIDVerification()
-            available, available_reason = verifier.quick_check_available()
-
-            if available and not _skip_acoustid:
-                # Extract expected track info from context
-                track_info = context.get('track_info', {})
-                original_search = context.get('original_search_result', {})
-                spotify_artist = context.get('spotify_artist', {})
-
-                expected_track = (
-                    original_search.get('spotify_clean_title') or
-                    track_info.get('name') or
-                    original_search.get('title', '')
-                )
-
-                # Use track-level artist for verification, NOT album artist.
-                # For compilations, spotify_artist is "Various Artists" which
-                # will never match AcoustID's actual track artist.
-                expected_artist = ''
-                track_artists = track_info.get('artists', [])
-                if track_artists:
-                    first = track_artists[0]
-                    if isinstance(first, dict):
-                        expected_artist = first.get('name', '')
-                    elif isinstance(first, str):
-                        expected_artist = first
-                # Fallback to album artist if no track artists available
-                if not expected_artist:
-                    expected_artist = spotify_artist.get('name', '')
-
-                if expected_track and expected_artist:
-                    logger.info(f"Running AcoustID verification for: '{expected_track}' by '{expected_artist}'")
-                    verification_result, verification_msg = verifier.verify_audio_file(
-                        file_path,
-                        expected_track,
-                        expected_artist,
-                        context
-                    )
-                    logger.info(f"AcoustID verification result: {verification_result.value} - {verification_msg}")
-                    context['_acoustid_result'] = verification_result.value
-
-                    if verification_result == VerificationResult.FAIL:
-                        # Move to quarantine instead of Transfer
-                        try:
-                            quarantine_path = _move_to_quarantine(file_path, context, verification_msg)
-                            logger.error(f"File quarantined due to verification failure: {quarantine_path}")
-                        except Exception as quarantine_error:
-                            # Quarantine failed — delete the known-wrong file instead
-                            # NEVER save a file we've confirmed is wrong
-                            logger.error(f"Quarantine failed ({quarantine_error}), deleting wrong file: {file_path}")
-                            logger.error(f"Quarantine failed, deleting wrong file: {file_path}")
-                            try:
-                                os.remove(file_path)
-                            except Exception as del_error:
-                                logger.error(f"Could not delete wrong file either: {del_error}")
-
-                        # These always execute for FAIL — whether quarantine succeeded or not
-                        context['_acoustid_quarantined'] = True
-                        context['_acoustid_failure_msg'] = verification_msg
-
-                        # Clean up context
-                        with matched_context_lock:
-                            if context_key in matched_downloads_context:
-                                del matched_downloads_context[context_key]
-
-                        # Mark as failed in download tasks if we have task info
-                        task_id = context.get('task_id')
-                        batch_id = context.get('batch_id')
-                        if task_id:
-                            with tasks_lock:
-                                if task_id in download_tasks:
-                                    download_tasks[task_id]['status'] = 'failed'
-                                    download_tasks[task_id]['error_message'] = f"AcoustID verification failed: {verification_msg}"
-
-                        # Call completion callback with failure
-                        if task_id and batch_id:
-                            _on_download_completed(batch_id, task_id, success=False)
-
-                        return  # NEVER continue processing a known-wrong file
-                else:
-                    logger.warning("AcoustID verification skipped: missing track/artist info")
-                    context['_acoustid_result'] = 'skip'
-            else:
-                logger.info(f"ℹ️ AcoustID verification not available: {available_reason}")
-                context['_acoustid_result'] = 'disabled'
-        except Exception as verify_error:
-            # Any verification error should NOT block the download - fail open
-            logger.error(f"AcoustID verification error (continuing normally): {verify_error}")
-            context['_acoustid_result'] = 'error'
-        # --- END ACOUSTID VERIFICATION ---
-
-        # --- SIMPLE DOWNLOAD HANDLING ---
-        # Check if this is a simple download (search page "Download ⬇" button only)
-        search_result = context.get('search_result', {})
-        is_simple_download = search_result.get('is_simple_download', False)
-
-        if is_simple_download:
-            # Simple transfer: move to Transfer folder, no metadata enhancement
-            logger.info(f"Processing simple download (no metadata enhancement): {file_path}")
-
-            transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-
-            # Check if this download has album info (from path or search result)
-            album_name = None
-            original_filename = search_result.get('filename', '')
-
-            if '/' in original_filename or '\\' in original_filename:
-                # Get parent directory as album name
-                path_parts = original_filename.replace('\\', '/').split('/')
-                if len(path_parts) >= 2:
-                    album_name = path_parts[-2]  # Parent directory
-
-            # If no album from path, check search result
-            if not album_name:
-                album_name = search_result.get('album')
-
-            # Determine destination
-            filename = Path(file_path).name
-
-            if album_name and album_name.lower() not in ['unknown', 'unknown album', '']:
-                # Has album info - create album folder
-                import re
-                album_name = re.sub(r'[<>:"/\\|?*]', '_', album_name).strip()
-                album_folder = Path(transfer_path) / album_name
-                album_folder.mkdir(parents=True, exist_ok=True)
-                destination = album_folder / filename
-                logger.info(f"Moving to album folder: {album_name}")
-            else:
-                # No album info - move directly to Transfer root (singles)
-                Path(transfer_path).mkdir(parents=True, exist_ok=True)
-                destination = Path(transfer_path) / filename
-                logger.info("Moving to Transfer root (single track)")
-
-            _safe_move_file(file_path, destination)
-            logger.info(f"Moved simple download to: {destination}")
-
-            # Clean up context
-            with matched_context_lock:
-                if context_key in matched_downloads_context:
-                    del matched_downloads_context[context_key]
-
-            # Trigger library scan (using correct method name)
-            if web_scan_manager:
-                threading.Thread(
-                    target=lambda: web_scan_manager.request_scan("Simple download completed"),
-                    daemon=True
-                ).start()
-
-            add_activity_item("", "Download Complete", f"{album_name}/{filename}", "Now")
-            logger.info(f"Simple download post-processing complete: {album_name}/{filename}")
-
-            # Set flag in context so verification function knows this was fully handled
-            context['_simple_download_completed'] = True
-            context['_final_path'] = str(destination)
-            _emit_track_downloaded(context)
-            _record_library_history_download(context)
-            _record_download_provenance(context)
-            return
-        # --- END SIMPLE DOWNLOAD HANDLING ---
-
-        logger.info(f"Starting robust post-processing for: {context_key}")
-
-        spotify_artist = context.get("spotify_artist")
-        if not spotify_artist:
-            logger.error("Post-processing failed: Missing spotify_artist context.")
-            return
-
-        # ── UNKNOWN ARTIST GUARD ──
-        # If artist name is junk, attempt to resolve from track metadata before proceeding.
-        # This prevents files from landing in "Unknown Artist/" folders.
-        _junk_artist_names = {'', 'unknown', 'unknown artist', 'various artists', 'none', 'null'}
-        _artist_name = (spotify_artist.get('name', '') if isinstance(spotify_artist, dict) else '').strip()
-        if _artist_name.lower() in _junk_artist_names:
-            logger.info(f"[Unknown Artist Guard] Artist name is '{_artist_name}' — attempting to resolve")
-            _resolved = False
-            track_info_guard = context.get("track_info", {}) or {}
-            original_search_guard = context.get("original_search_result", {}) or {}
-
-            # Try 1: Pull artist from track_info.artists
-            _ti_artists = track_info_guard.get('artists', [])
-            if isinstance(_ti_artists, list) and _ti_artists:
-                _first = _ti_artists[0]
-                _name = _first.get('name', '') if isinstance(_first, dict) else str(_first)
-                if _name and _name.strip().lower() not in _junk_artist_names:
-                    spotify_artist['name'] = _name.strip()
-                    logger.info(f"[Unknown Artist Guard] Resolved from track_info.artists: '{_name}'")
-                    _resolved = True
-
-            # Try 2: Pull from original_search_result
-            if not _resolved:
-                _os_artist = original_search_guard.get('artist') or original_search_guard.get('artist_name') or ''
-                if isinstance(_os_artist, str) and _os_artist.strip().lower() not in _junk_artist_names:
-                    spotify_artist['name'] = _os_artist.strip()
-                    logger.info(f"[Unknown Artist Guard] Resolved from original_search_result: '{_os_artist}'")
-                    _resolved = True
-
-            # Try 3: Re-fetch from metadata source using track ID
-            if not _resolved:
-                _track_id = track_info_guard.get('id') or track_info_guard.get('track_id') or ''
-                if _track_id:
-                    try:
-                        _fb_client = _get_metadata_fallback_client()
-                        if hasattr(_fb_client, 'get_track_details'):
-                            _details = _fb_client.get_track_details(str(_track_id))
-                            if _details and isinstance(_details, dict):
-                                _d_artists = _details.get('artists', [])
-                                if isinstance(_d_artists, list) and _d_artists:
-                                    _d_first = _d_artists[0]
-                                    _d_name = _d_first.get('name', '') if isinstance(_d_first, dict) else str(_d_first)
-                                    if _d_name and _d_name.strip().lower() not in _junk_artist_names:
-                                        spotify_artist['name'] = _d_name.strip()
-                                        logger.info(f"[Unknown Artist Guard] Resolved from metadata API: '{_d_name}'")
-                                        _resolved = True
-                    except Exception as _guard_err:
-                        logger.error(f"[Unknown Artist Guard] Metadata re-fetch failed: {_guard_err}")
-
-            if not _resolved:
-                logger.error(f"[Unknown Artist Guard] Could not resolve artist — proceeding with '{_artist_name}'")
-
-            context['spotify_artist'] = spotify_artist
-        # ── END UNKNOWN ARTIST GUARD ──
-
-        # Check if playlist folder mode is enabled (sync page playlists only)
-        track_info = context.get("track_info", {})
-        playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
-
-        logger.debug(f"[Debug] Post-processing - track_info type: {type(track_info)}, is None: {track_info is None}, is empty: {not track_info}")
-        logger.debug(f"[Debug] Post-processing - playlist_folder_mode: {playlist_folder_mode}")
-        if track_info:
-            logger.debug(f"[Debug] Post-processing - track_info keys: {list(track_info.keys())}")
-
-        if playlist_folder_mode:
-            # Use shared path builder for playlist mode
-            playlist_name = track_info.get("_playlist_name", "Unknown Playlist")
-            logger.info(f"[Playlist Folder Mode] Organizing in playlist folder: {playlist_name}")
-
-            file_ext = os.path.splitext(file_path)[1]
-
-            # Build final path FIRST so we can check for already-processed files
-            final_path, _ = _build_final_path_for_track(context, spotify_artist, None, file_ext)
-            logger.info(f"Playlist mode final path: '{final_path}'")
-
-            # RACE CONDITION GUARD: If source file is gone but destination exists,
-            # another thread (stream processor or verification worker) already moved it.
-            # Return early to avoid deleting the successfully processed file.
-            if not os.path.exists(file_path):
-                if os.path.exists(final_path):
-                    logger.info(f"[Playlist Folder Mode] Source gone but destination exists — already processed by another thread: {os.path.basename(final_path)}")
-                    context['_final_processed_path'] = final_path
-                    return
-                else:
-                    pp_logger.info(f"[inner] EXCEPTION in post-processing for {context_key}: Source file not found and destination does not exist: {file_path}")
-                    raise FileNotFoundError(f"Source file not found and destination does not exist: {file_path}")
-
-            context['_audio_quality'] = _get_audio_quality_string(file_path)
-            if context['_audio_quality']:
-                logger.info(f"Audio quality detected: {context['_audio_quality']}")
-
-            # FLAC bit depth filter
-            if _check_flac_bit_depth(file_path, context, context_key):
-                return
-
-            # Enhance metadata before moving
-            try:
-                logger.warning(f"[Metadata Input] Playlist mode - artist: '{spotify_artist.get('name', 'MISSING')}' (id: {spotify_artist.get('id', 'MISSING')})")
-                _enhance_file_metadata(file_path, context, spotify_artist, None)
-            except Exception as meta_err:
-                import traceback
-                pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
-                _wipe_source_tags(file_path)
-
-            # Move file to playlist folder
-            logger.info(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
-            _safe_move_file(file_path, final_path)
-
-            # Store final path for verification wrapper (before conversions may override)
-            context['_final_processed_path'] = final_path
-
-            # ReplayGain analysis — write track-level gain tags if enabled
-            if config_manager.get('post_processing.replaygain_enabled', False):
-                try:
-                    from core.replaygain import analyze_track as _rg_analyze, write_replaygain_tags as _rg_write, is_ffmpeg_available as _rg_ffmpeg_ok, RG_REFERENCE_LUFS as _RG_REF
-                    if _rg_ffmpeg_ok():
-                        lufs, peak_dbfs = _rg_analyze(final_path)
-                        gain_db = _RG_REF - lufs
-                        _rg_write(final_path, gain_db, peak_dbfs)
-                        pp_logger.info(f"ReplayGain: {gain_db:+.2f} dB — {os.path.basename(final_path)}")
-                except Exception as rg_err:
-                    pp_logger.debug(f"ReplayGain analysis skipped: {rg_err}")
-
-            # Downsample hi-res FLAC to CD quality if enabled (must run before lossy copy)
-            downsampled_path = _downsample_hires_flac(final_path, context)
-            if downsampled_path:
-                final_path = downsampled_path
-                context['_final_processed_path'] = final_path
-
-            # Lossy copy: create MP3 version if enabled
-            blasphemy_path = _create_lossy_copy(final_path)
-            if blasphemy_path:
-                context['_final_processed_path'] = blasphemy_path
-
-            # Clean up empty directories in downloads folder
-            downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
-            _cleanup_empty_directories(downloads_path, file_path)
-
-            logger.info(f"[Playlist Folder Mode] Post-processing complete: {final_path}")
-
-            # WISHLIST REMOVAL: Check if this track should be removed from wishlist
-            try:
-                _check_and_remove_from_wishlist(context)
-            except Exception as wishlist_error:
-                logger.error(f"[Playlist Folder] Error checking wishlist removal: {wishlist_error}")
-
-            _emit_track_downloaded(context)
-            _record_library_history_download(context)
-            _record_download_provenance(context)
-
-            # Mark as stream processed so the verification worker doesn't search
-            # for the file by its original Soulseek name (which no longer exists after rename)
-            task_id = context.get('task_id')
-            batch_id = context.get('batch_id')
-            if task_id and batch_id:
-                with tasks_lock:
-                    if task_id in download_tasks:
-                        download_tasks[task_id]['stream_processed'] = True
-                        download_tasks[task_id]['status'] = 'completed'
-                        logger.info(f"[Playlist Folder Mode] Marked task {task_id} as completed")
-                _on_download_completed(batch_id, task_id, success=True)
-
-            return  # Skip normal album/artist folder structure processing
-
-        is_album_download = context.get("is_album_download", False)
-        has_clean_spotify_data = context.get("has_clean_spotify_data", False)
-
-        if is_album_download and has_clean_spotify_data:
-            # Build album_info directly from clean Spotify metadata (GUI PARITY)
-            logger.info("Album context with clean Spotify data found - using direct album info")
-            original_search = context.get("original_search_result", {})
-            spotify_album = context.get("spotify_album", {})
-            
-            # Use clean Spotify metadata (matches GUI's SpotifyBasedSearchResult approach)
-            clean_track_name = original_search.get('spotify_clean_title', 'Unknown Track')
-            clean_album_name = original_search.get('spotify_clean_album', 'Unknown Album')
-            
-            logger.debug(
-                "Path 1 - Clean Spotify data path: keys=%s has_track_number=%s track_number=%s",
-                list(original_search.keys()),
-                'track_number' in original_search,
-                original_search.get('track_number', 'NOT_FOUND'),
-            )
-            
-            album_info = {
-                'is_album': True,
-                'album_name': clean_album_name,  # Use clean Spotify album name
-                'track_number': original_search.get('track_number', 1),
-                'disc_number': original_search.get('disc_number', 1),
-                'clean_track_name': clean_track_name,
-                'album_image_url': spotify_album.get('image_url'),
-                'confidence': 1.0,  # High confidence since we have clean Spotify data
-                'source': 'clean_spotify_metadata'
-            }
-
-            logger.info(f"Using clean Spotify album: '{clean_album_name}' for track: '{clean_track_name}'")
-        elif is_album_download:
-            # CRITICAL FIX: Album context without clean Spotify data - still force album treatment
-            logger.warning("Album context found but no clean Spotify data - using enhanced fallback")
-            original_search = context.get("original_search_result", {})
-            spotify_album = context.get("spotify_album", {})
-            clean_track_name = original_search.get('spotify_clean_title') or original_search.get('title', 'Unknown Track')
-            
-            logger.debug(
-                "Path 2 - Enhanced fallback album context path: keys=%s has_track_number=%s track_number=%s spotify_album=%s",
-                list(original_search.keys()),
-                'track_number' in original_search,
-                original_search.get('track_number', 'NOT_FOUND'),
-                spotify_album.get('name', 'NOT_FOUND'),
-            )
-            
-            # ENHANCEMENT: Use spotify_clean_album if available for consistency 
-            album_name = (original_search.get('spotify_clean_album') or 
-                         spotify_album.get('name') or 
-                         'Unknown Album')
-            
-            album_info = {
-                'is_album': True,  # FORCE TRUE - user explicitly selected album for download
-                'album_name': album_name,
-                'track_number': original_search.get('track_number', 1),
-                'disc_number': original_search.get('disc_number', 1),
-                'clean_track_name': clean_track_name,
-                'album_image_url': spotify_album.get('image_url'),
-                'confidence': 0.9,  # Higher confidence - user explicitly chose album
-                'source': 'enhanced_fallback_album_context'
-            }
-            logger.info(f"[FORCED ALBUM] Using album: '{album_name}' for track: '{clean_track_name}'")
-        else:
-            # For singles, we still need to detect if they belong to an album.
-            logger.info("Single track download - attempting album detection")
-            album_info = _detect_album_info_web(context, spotify_artist)
-
-        # --- Album grouping resolution ---
-        # Only run smart grouping for singles/auto-detected albums.
-        # Explicit album downloads already have the correct Spotify album name —
-        # re-grouping would mangle names like "(Reworked and Remastered)" into "(Deluxe Edition)".
-        if album_info and album_info['is_album'] and not is_album_download:
-            logger.info(
-                "SMART ALBUM GROUPING for track=%r original_album=%r",
-                album_info.get('clean_track_name', 'Unknown'),
-                album_info.get('album_name', 'None'),
-            )
-
-            # Get original album name from context if available
-            original_album = None
-            if context.get("original_search_result", {}).get("album"):
-                original_album = context["original_search_result"]["album"]
-
-            # Use the GUI's smart album grouping algorithm
-            consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album)
-            album_info['album_name'] = consistent_album_name
-
-            logger.info("Album grouping complete: final_album=%r", consistent_album_name)
-        elif album_info and album_info['is_album'] and is_album_download:
-            logger.info(
-                "EXPLICIT ALBUM DOWNLOAD - preserving Spotify album name=%r; skipping smart grouping",
-                album_info.get('album_name', 'None'),
-            )
-
-        # 1. Get transfer path (directory creation handled by _build_final_path_for_track)
-        file_ext = os.path.splitext(file_path)[1]
-        context['_audio_quality'] = _get_audio_quality_string(file_path)
-        if context['_audio_quality']:
-            logger.info(f"Audio quality detected: {context['_audio_quality']}")
-
-        # FLAC bit depth filter
-        if _check_flac_bit_depth(file_path, context, context_key):
-            return
-
-        # 2. Build the final path using GUI-style track naming with multiple fallback sources
-        if album_info and album_info['is_album']:
-            album_name_sanitized = _sanitize_filename(album_info['album_name'])
-            
-            # --- GUI PARITY: Use multiple sources for clean track name ---
-            original_search = context.get("original_search_result", {})
-            clean_track_name = album_info['clean_track_name']
-            
-            # Priority 1: Spotify clean title from context
-            if original_search.get('spotify_clean_title'):
-                clean_track_name = original_search['spotify_clean_title']
-                logger.info(f"Using Spotify clean title: '{clean_track_name}'")
-            # Priority 2: Album info clean name
-            elif album_info.get('clean_track_name'):
-                clean_track_name = album_info['clean_track_name']
-                logger.info(f"Using album info clean name: '{clean_track_name}'")
-            # Priority 3: Original title as fallback
-            else:
-                clean_track_name = original_search.get('title', 'Unknown Track')
-                logger.warning(f"Using original title as fallback: '{clean_track_name}'")
-            
-            final_track_name_sanitized = _sanitize_filename(clean_track_name)
-            track_number = album_info['track_number']
-            
-            logger.debug(
-                "Final track_number processing: source=%s album_info_track_number=%s track_number=%s",
-                album_info.get('source', 'unknown'),
-                album_info.get('track_number', 'NOT_FOUND'),
-                track_number,
-            )
-            
-            # Fix: Handle None track_number
-            if track_number is None:
-                track_number = _extract_track_number_from_filename(file_path)
-                logger.info(
-                    "Track number was None; extracted from filename=%r -> %s",
-                    os.path.basename(file_path),
-                    track_number,
-                )
-            
-            # Ensure track_number is valid
-            if not isinstance(track_number, int) or track_number < 1:
-                logger.error(f"Invalid track number ({track_number}), defaulting to 1")
-                track_number = 1
-                
-            logger.debug(f"FINAL track_number used for filename: {track_number}")
-            
-            # CRITICAL FIX: Update album_info with corrected track_number for metadata enhancement
-            album_info['track_number'] = track_number
-            album_info['clean_track_name'] = clean_track_name  # Ensure clean name is in album_info
-            logger.info(f"[FIX] Updated album_info track_number to {track_number} for consistent metadata")
-
-            # Use shared path builder for album mode
-            final_path, _ = _build_final_path_for_track(context, spotify_artist, album_info, file_ext)
-            logger.info(f"Album path: '{final_path}'")
-        else:
-            # Single track structure: Transfer/ARTIST/ARTIST - SINGLE/SINGLE.ext
-            # --- GUI PARITY: Use multiple sources for clean track name ---
-            original_search = context.get("original_search_result", {})
-            clean_track_name = album_info['clean_track_name']
-            
-            # Priority 1: Spotify clean title from context  
-            if original_search.get('spotify_clean_title'):
-                clean_track_name = original_search['spotify_clean_title']
-                logger.info(f"Using Spotify clean title: '{clean_track_name}'")
-            # Priority 2: Album info clean name
-            elif album_info and album_info.get('clean_track_name'):
-                clean_track_name = album_info['clean_track_name']
-                logger.info(f"Using album info clean name: '{clean_track_name}'")
-            # Priority 3: Original title as fallback
-            else:
-                clean_track_name = original_search.get('title', 'Unknown Track')
-                logger.warning(f"Using original title as fallback: '{clean_track_name}'")
-            
-            # Ensure clean name is in album_info for path builder
-            if album_info:
-                album_info['clean_track_name'] = clean_track_name
-
-            # Use shared path builder for single mode
-            final_path, _ = _build_final_path_for_track(context, spotify_artist, album_info, file_ext)
-            logger.info(f"Single path: '{final_path}'")
-
-        # Store the actual computed path so verification uses this exact path
-        # instead of recomputing independently (which can produce mismatches)
-        context['_final_processed_path'] = final_path
-
-        # 3. Enhance metadata, move file, download art, and cleanup
-        try:
-            logger.warning(f"[Metadata Input] artist: '{spotify_artist.get('name', 'MISSING')}' (id: {spotify_artist.get('id', 'MISSING')})")
-            if album_info:
-                logger.warning(f"[Metadata Input] album: '{album_info.get('album_name', 'MISSING')}', track#: {album_info.get('track_number', 'MISSING')}, disc#: {album_info.get('disc_number', 'MISSING')}, source: {album_info.get('source', 'unknown')}")
-            else:
-                logger.info("[Metadata Input] album_info: None (single track)")
-            _enhance_file_metadata(file_path, context, spotify_artist, album_info)
-        except Exception as meta_err:
-            import traceback
-            pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
-            # Wipe source tags even though enhancement failed — prevents Soulseek
-            # uploader's MusicBrainz IDs from causing album splits in Navidrome
-            _wipe_source_tags(file_path)
-
-        # Detect enhance mode from track context
-        _enhance_source_info = context.get('track_info', {}).get('source_info') or {}
-        if isinstance(_enhance_source_info, str):
-            try:
-                _enhance_source_info = json.loads(_enhance_source_info)
-            except (json.JSONDecodeError, TypeError):
-                _enhance_source_info = {}
-        is_enhance_download = _enhance_source_info.get('enhance', False)
-
-        logger.info(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
-        if os.path.exists(final_path):
-            # PROTECTION: If destination already exists, check before overwriting
-            # If the source file is gone, another thread already handled this - don't delete the destination
-            if not os.path.exists(file_path):
-                logger.info(f"[Protection] Destination exists and source already gone - file already transferred: {os.path.basename(final_path)}")
-                return
-            try:
-                from mutagen import File as MutagenFile
-                existing_file = MutagenFile(final_path)
-                has_metadata = existing_file is not None and len(existing_file.tags or {}) > 2  # More than basic tags
-
-                if has_metadata and not is_enhance_download:
-                    # Check if incoming file is higher quality and setting is enabled
-                    _replace_lower = config_manager.get('import.replace_lower_quality', False)
-                    if _replace_lower:
-                        _existing_tier = _get_quality_tier_from_extension(final_path)
-                        _incoming_tier = _get_quality_tier_from_extension(file_path)
-                        if _incoming_tier[1] < _existing_tier[1]:
-                            # Incoming is higher quality (lower tier number) — replace
-                            logger.info(f"[Quality Replace] Replacing {_existing_tier[0]} with {_incoming_tier[0]}: {os.path.basename(final_path)}")
-                            try:
-                                os.remove(final_path)
-                            except Exception as e:
-                                logger.error(f"[Quality Replace] Could not remove existing file: {e}")
-                        else:
-                            logger.info(f"[Protection] Existing file is same or better quality ({_existing_tier[0]} vs {_incoming_tier[0]}) - skipping: {os.path.basename(final_path)}")
-                            try:
-                                os.remove(file_path)
-                            except FileNotFoundError:
-                                pass
-                            except Exception as e:
-                                logger.error(f"[Protection] Error removing redundant file: {e}")
-                            return
-                    else:
-                        logger.info(f"[Protection] Existing file already has metadata enhancement - skipping overwrite: {os.path.basename(final_path)}")
-                        logger.info(f"[Protection] Removing redundant download file: {os.path.basename(file_path)}")
-                        try:
-                            os.remove(file_path)
-                        except FileNotFoundError:
-                            logger.error(f"[Protection] Could not remove redundant file (already gone): {file_path}")
-                        except Exception as e:
-                            logger.error(f"[Protection] Error removing redundant file: {e}")
-                        return  # Don't overwrite the good file
-                elif is_enhance_download:
-                    # ENHANCE BYPASS: Allow overwrite — backup original, then remove to allow move
-                    logger.info(f"[Enhance] Quality enhance mode — replacing existing file: {os.path.basename(final_path)}")
-                    try:
-                        os.remove(final_path)
-                    except Exception as e:
-                        logger.error(f"[Enhance] Could not remove existing file for replacement: {e}")
-                else:
-                    logger.info(f"[Protection] Existing file lacks metadata - safe to overwrite: {os.path.basename(final_path)}")
-                    try:
-                        os.remove(final_path)
-                    except FileNotFoundError:
-                        pass # It was just there, but now gone?
-            except Exception as check_error:
-                logger.error(f"[Protection] Error checking existing file metadata, proceeding with overwrite: {check_error}")
-                try:
-                    if os.path.exists(final_path):
-                        os.remove(final_path)
-                except Exception as e:
-                    logger.error(f"[Protection] Failed to remove existing file for overwrite: {e}")
-
-        # --- PRE-MOVE SOURCE CHECK ---
-        # Right before moving, verify the source file still exists.
-        # Another thread (Stream Processor or Verification Worker) may have
-        # already moved this file during the sleep + metadata enhancement window.
-        if not os.path.exists(file_path):
-            if os.path.exists(final_path):
-                logger.info(f"[Pre-Move] Source already gone and destination exists - another thread completed transfer: {os.path.basename(final_path)}")
-                # Still do cover art + lyrics since the other thread might not have finished those
-                _download_cover_art(album_info, os.path.dirname(final_path), context)
-                _generate_lrc_file(final_path, context, spotify_artist, album_info)
-                return
-            else:
-                # Source gone, exact destination not found — check if stream processor already
-                # moved it with a quality tag (e.g. "track [FLAC 24bit].flac" vs "track.flac")
-                expected_dir = os.path.dirname(final_path)
-                expected_stem = os.path.splitext(os.path.basename(final_path))[0]
-                expected_ext = os.path.splitext(final_path)[1]
-                found_variant = None
-                # Also check for lossy output if Blasphemy Mode may have deleted the .flac
-                check_exts = {expected_ext}
-                if expected_ext == '.flac' and config_manager.get('lossy_copy.enabled', False) and config_manager.get('lossy_copy.delete_original', False):
-                    _lossy_ext_map = {'mp3': '.mp3', 'opus': '.opus', 'aac': '.m4a'}
-                    _lossy_codec = config_manager.get('lossy_copy.codec', 'mp3')
-                    check_exts.add(_lossy_ext_map.get(_lossy_codec, '.mp3'))
-                if os.path.exists(expected_dir):
-                    for f in os.listdir(expected_dir):
-                        # Match files that start with the expected stem and have a matching extension
-                        # This catches "01 - track [FLAC 24bit].flac" when expecting "01 - track.flac"
-                        # and "01 - track [MP3-320].mp3" when Blasphemy Mode deleted the FLAC
-                        f_ext = os.path.splitext(f)[1].lower()
-                        if f_ext in check_exts and os.path.splitext(f)[0].startswith(expected_stem):
-                            found_variant = os.path.join(expected_dir, f)
-                            break
-                if found_variant:
-                    logger.debug(f"[Pre-Move] Source gone but found variant in destination (stream processor handled it): {os.path.basename(found_variant)}")
-                    context['_final_processed_path'] = found_variant
-                    _download_cover_art(album_info, expected_dir, context)
-                    _generate_lrc_file(found_variant, context, spotify_artist, album_info)
-                    return
-                else:
-                    logger.warning(f"[Pre-Move] Source file gone and no matching file in destination: {os.path.basename(file_path)}")
-                    raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
-
-        _safe_move_file(file_path, final_path)
-
-        # ENHANCE CLEANUP: If format changed (e.g. MP3→FLAC), remove old-format file
-        if is_enhance_download and _enhance_source_info.get('original_file_path'):
-            original_enhance_path = _enhance_source_info['original_file_path']
-            if os.path.normpath(original_enhance_path) != os.path.normpath(final_path) and os.path.exists(original_enhance_path):
-                try:
-                    os.remove(original_enhance_path)
-                    old_fmt = os.path.splitext(original_enhance_path)[1]
-                    new_fmt = os.path.splitext(final_path)[1]
-                    logger.info(f"[Enhance] Upgraded {old_fmt} → {new_fmt}: {os.path.basename(final_path)}")
-                except Exception as e:
-                    logger.error(f"[Enhance] Could not remove old-format file: {e}")
-            elif is_enhance_download:
-                old_fmt = _enhance_source_info.get('original_format', 'unknown')
-                new_fmt = os.path.splitext(final_path)[1]
-                logger.info(f"[Enhance] Replaced in-place ({old_fmt} → {new_fmt}): {os.path.basename(final_path)}")
-
-        _download_cover_art(album_info, os.path.dirname(final_path), context)
-
-        # 4. Generate LRC lyrics file at final location (elegant addition)
-        _generate_lrc_file(final_path, context, spotify_artist, album_info)
-
-        # 5. ReplayGain analysis — write track-level gain tags if enabled
-        if config_manager.get('post_processing.replaygain_enabled', False):
-            try:
-                from core.replaygain import analyze_track as _rg_analyze, write_replaygain_tags as _rg_write, is_ffmpeg_available as _rg_ffmpeg_ok, RG_REFERENCE_LUFS as _RG_REF
-                if _rg_ffmpeg_ok():
-                    lufs, peak_dbfs = _rg_analyze(final_path)
-                    gain_db = _RG_REF - lufs
-                    _rg_write(final_path, gain_db, peak_dbfs)
-                    pp_logger.info(f"ReplayGain: {gain_db:+.2f} dB, peak {peak_dbfs:.2f} dBFS — {os.path.basename(final_path)}")
-            except Exception as rg_err:
-                pp_logger.debug(f"ReplayGain analysis skipped: {rg_err}")
-
-        # Downsample hi-res FLAC to CD quality if enabled (must run before lossy copy)
-        downsampled_path = _downsample_hires_flac(final_path, context)
-        if downsampled_path:
-            final_path = downsampled_path
-            context['_final_processed_path'] = final_path
-
-        # Lossy copy: create MP3 version if enabled
-        blasphemy_path = _create_lossy_copy(final_path)
-        if blasphemy_path:
-            context['_final_processed_path'] = blasphemy_path
-
-        downloads_path = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
-        _cleanup_empty_directories(downloads_path, file_path)
-
-        logger.info(f"Post-processing complete for: {context.get('_final_processed_path', final_path)}")
-
-        _emit_track_downloaded(context)
-        _record_library_history_download(context)
-        _record_download_provenance(context)
-        _record_soulsync_library_entry(context, spotify_artist, album_info)
-
-        # RETAG DATA CAPTURE: Record completed album/single downloads for retag tool
-        try:
-            if not playlist_folder_mode:
-                completed_path = context.get('_final_processed_path', final_path)
-                _record_retag_download(context, spotify_artist, album_info, completed_path)
-        except Exception as retag_err:
-            logger.error(f"[Post-Process] Retag data capture failed (non-fatal): {retag_err}")
-
-        # REPAIR: Register album folder for repair scanning when batch completes
-        try:
-            completed_path = context.get('_final_processed_path', final_path)
-            batch_id_for_repair = context.get('batch_id')
-            if completed_path and batch_id_for_repair and repair_worker:
-                album_folder = os.path.dirname(str(completed_path))
-                if album_folder:
-                    repair_worker.register_folder(batch_id_for_repair, album_folder)
-        except Exception as repair_err:
-            logger.error(f"[Post-Process] Repair folder registration failed: {repair_err}")
-
-        # ALBUM CONSISTENCY: Register completed file for post-batch MB tag reconciliation
-        try:
-            completed_path = context.get('_final_processed_path', final_path)
-            batch_id_for_consistency = context.get('batch_id')
-            if completed_path and batch_id_for_consistency and album_info and album_info.get('is_album'):
-                _original_search = context.get('original_search_result', {})
-                _file_info = {
-                    'path': str(completed_path),
-                    'track_number': album_info.get('track_number', 1),
-                    'disc_number': album_info.get('disc_number', 1),
-                    'title': _original_search.get('spotify_clean_title', '') or album_info.get('clean_track_name', ''),
-                }
-                with tasks_lock:
-                    if batch_id_for_consistency in download_batches:
-                        download_batches[batch_id_for_consistency].setdefault('_consistency_files', []).append(_file_info)
-        except Exception as cons_err:
-            logger.error(f"[Post-Process] Album consistency registration failed: {cons_err}")
-
-        # WISHLIST REMOVAL: Check if this track should be removed from wishlist after successful download
-        try:
-            _check_and_remove_from_wishlist(context)
-        except Exception as wishlist_error:
-            logger.error(f"[Post-Process] Error checking wishlist removal: {wishlist_error}")
-
-        # Call completion callback for missing downloads tasks to start next batch
-        task_id = context.get('task_id')
-        batch_id = context.get('batch_id')
-        if task_id and batch_id:
-            logger.info(f"[Post-Process] Calling completion callback for task {task_id} in batch {batch_id}")
-            
-            # Mark task as stream processed and set terminal status so
-            # _validate_worker_counts won't count this task as active
-            # (prevents active_count inflation race).
-            # NOTE: Only set status here — don't call _mark_task_completed() because
-            # _run_post_processing_worker will call it later with the session counter
-            # increment. Calling it here too would double-count the download.
-            with tasks_lock:
-                if task_id in download_tasks:
-                    download_tasks[task_id]['stream_processed'] = True
-                    download_tasks[task_id]['status'] = 'completed'
-                    logger.info(f"[Post-Process] Marked task {task_id} as completed")
-            
-            _on_download_completed(batch_id, task_id, success=True)
-
-    except Exception as e:
-        import traceback
-        pp_logger.info(f"[inner] EXCEPTION in post-processing for {context_key}: {e}")
-        pp_logger.info(traceback.format_exc())
-        logger.error(f"\nCRITICAL ERROR in post-processing for {context_key}: {e}")
-        traceback.print_exc()
-
-        # Only retry if the source file still exists - otherwise retrying is pointless
-        # and creates an infinite loop of failures
-        import os as _os
-        source_exists = _os.path.exists(file_path) if file_path else False
-        if source_exists:
-            # Remove from processed set so it can be retried
-            if context_key in _processed_download_ids:
-                _processed_download_ids.remove(context_key)
-                logger.warning(f"Removed {context_key} from processed set - will retry on next check")
-
-            # Re-add to matched context for retry
-            with matched_context_lock:
-                if context_key not in matched_downloads_context:
-                    matched_downloads_context[context_key] = context
-                    logger.warning(f"Re-added {context_key} to context for retry")
-        else:
-            logger.warning(f"Source file gone, not retrying: {context_key}")
-    finally:
-        file_lock.release()
-        # Clean up the lock entry to prevent unbounded memory growth
-        with _post_process_locks_lock:
-            _post_process_locks.pop(context_key, None)
+    from core.import_pipeline import post_process_matched_download
+    return post_process_matched_download(context_key, context, file_path, _build_import_pipeline_runtime())
 
 # Keep track of processed downloads to avoid re-processing
 _processed_download_ids = set()
@@ -22236,95 +18330,12 @@ _processed_download_ids = set()
 # so we only log the warning once per key instead of spamming every poll cycle
 _stale_transfer_keys = set()
 
-# Per-context-key locks to prevent two threads from processing the same file simultaneously.
-# Without this, the Stream Processor and Verification Worker race to move the same source file,
-# and the loser gets a FileNotFoundError because the winner already moved it.
-_post_process_locks = {}  # {context_key: threading.Lock()}
-_post_process_locks_lock = threading.Lock()  # protects the dict itself
-
 # --- File Discovery Retry System ---
 # Prevents race condition where slskd reports completion before file is written to disk
 # Tracks retry attempts per download to give files time to finish writing
 _download_retry_attempts = {}  # {context_key: {'count': N, 'first_attempt': timestamp}}
 _download_retry_max = 10  # Max retries before giving up (10 seconds with 1s poll interval)
 _download_retry_lock = threading.Lock()
-
-def _record_retag_download(context, spotify_artist, album_info, final_path):
-    """Record a completed download in the retag tables for later re-tagging."""
-    from database.music_database import get_database
-    db = get_database()
-
-    # Extract artist name
-    if isinstance(spotify_artist, dict):
-        artist_name = spotify_artist.get('name', 'Unknown Artist')
-    else:
-        artist_name = getattr(spotify_artist, 'name', 'Unknown Artist')
-
-    spotify_album = context.get('spotify_album', {})
-    original_search = context.get('original_search_result', {})
-    track_info = context.get('track_info', {})
-
-    is_album = album_info and album_info.get('is_album', False)
-    group_type = 'album' if is_album else 'single'
-    album_name = album_info.get('album_name', '') if album_info else (
-        original_search.get('spotify_clean_title', 'Unknown'))
-
-    # Determine album IDs (Spotify vs iTunes) — skip beatport_ prefixed IDs
-    spotify_album_id = None
-    itunes_album_id = None
-    if spotify_album:
-        album_id_raw = str(spotify_album.get('id', ''))
-        if album_id_raw and album_id_raw.isdigit():
-            itunes_album_id = album_id_raw
-        elif album_id_raw and not album_id_raw.startswith('beatport_'):
-            spotify_album_id = album_id_raw
-
-    image_url = album_info.get('album_image_url') if album_info else None
-    total_tracks = spotify_album.get('total_tracks', 1) if spotify_album else 1
-    release_date = spotify_album.get('release_date', '') if spotify_album else ''
-
-    # Find or create group (avoid duplicating for multi-track albums)
-    group_id = db.find_retag_group(artist_name, album_name)
-    if group_id is None:
-        group_id = db.add_retag_group(
-            group_type=group_type, artist_name=artist_name, album_name=album_name,
-            image_url=image_url, spotify_album_id=spotify_album_id,
-            itunes_album_id=itunes_album_id, total_tracks=total_tracks,
-            release_date=release_date
-        )
-    if group_id is None:
-        return
-
-    # Track details
-    track_number = album_info.get('track_number', 1) if album_info else 1
-    disc_number = original_search.get('disc_number') or (
-        album_info.get('disc_number', 1) if album_info else 1)
-    title = original_search.get('spotify_clean_title') or (
-        album_info.get('clean_track_name', 'Unknown Track') if album_info else 'Unknown Track')
-    file_format = os.path.splitext(str(final_path))[1].lstrip('.').lower()
-
-    # Track IDs (Spotify vs iTunes) — skip beatport_ prefixed IDs
-    spotify_track_id = None
-    itunes_track_id = None
-    if track_info and track_info.get('id'):
-        tid = str(track_info['id'])
-        if tid.isdigit():
-            itunes_track_id = tid
-        elif not tid.startswith('beatport_'):
-            spotify_track_id = tid
-
-    # Avoid duplicate track entries
-    if not db.retag_track_exists(group_id, str(final_path)):
-        db.add_retag_track(
-            group_id=group_id, track_number=track_number, disc_number=disc_number,
-            title=title, file_path=str(final_path), file_format=file_format,
-            spotify_track_id=spotify_track_id, itunes_track_id=itunes_track_id
-        )
-        logger.info(f"[Retag] Recorded track for retag: '{title}' in '{album_name}'")
-
-    # Cap retag groups at 100, remove oldest
-    db.trim_retag_groups(100)
-
 
 def _execute_retag(group_id, album_id):
     """Execute a retag operation: re-tag files in a group with metadata from a new album match."""
@@ -27449,7 +23460,7 @@ def _on_download_completed(batch_id, task_id, success=True):
                                     artist_name=_cons_artist_name,
                                     mb_service=_cons_mb_svc,
                                     total_discs=_cons_album.get('total_discs', 1),
-                                    file_lock_fn=_get_file_lock,
+                                    file_lock_fn=get_file_lock,
                                 )
                                 if _cons_result.get('success'):
                                     logger.info(f"[Album Consistency] {_cons_result['tags_written']}/{_cons_result['total_files']} files "
@@ -27533,7 +23544,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                         if release and release.get('id'):
                             release_mbid = release['id']
                             _artist_key = artist_name_pf.lower().strip()
-                            _rc_key_norm = (_normalize_album_cache_key(album_name_pf), _artist_key)
+                            _rc_key_norm = (normalize_album_cache_key(album_name_pf), _artist_key)
                             _rc_key_exact = (album_name_pf.lower().strip(), _artist_key)
                             with _mb_release_cache_lock:
                                 _mb_release_cache[_rc_key_norm] = release_mbid
@@ -28123,19 +24134,19 @@ def _run_post_processing_worker(task_id, batch_id):
                 original_search = context.get("original_search_result", {})
                 logger.info(f"[Post-Processing] original_search keys: {list(original_search.keys())}")
                 
-                spotify_clean_title = original_search.get('spotify_clean_title')
+                clean_title = get_import_clean_title(context, default=original_search.get('title', ''))
                 track_number = original_search.get('track_number')
                 
-                logger.info(f"[Post-Processing] spotify_clean_title: '{spotify_clean_title}', track_number: {track_number}")
+                logger.info(f"[Post-Processing] clean_title: '{clean_title}', track_number: {track_number}")
                 
-                if spotify_clean_title and track_number:
+                if clean_title and track_number:
                     # Generate expected final filename that stream processor would create
                     # Pattern: f"{track_number:02d} - {clean_title}.flac"
-                    sanitized_title = spotify_clean_title.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+                    sanitized_title = clean_title.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
                     expected_final_filename = f"{track_number:02d} - {sanitized_title}.flac"
                     logger.info(f"[Post-Processing] Generated expected final filename: {expected_final_filename}")
                 else:
-                    logger.warning(f"[Post-Processing] Missing required data - spotify_clean_title: {bool(spotify_clean_title)}, track_number: {bool(track_number)}")
+                    logger.warning(f"[Post-Processing] Missing required data - clean_title: {bool(clean_title)}, track_number: {bool(track_number)}")
             except Exception as e:
                 logger.error(f"[Post-Processing] Error generating expected filename: {e}")
                 import traceback
@@ -28160,19 +24171,19 @@ def _run_post_processing_worker(task_id, batch_id):
                     original_search = context.get("original_search_result", {})
                     logger.info(f"[Post-Processing] fuzzy context original_search keys: {list(original_search.keys())}")
                     
-                    spotify_clean_title = original_search.get('spotify_clean_title')
+                    clean_title = get_import_clean_title(context, default=original_search.get('title', ''))
                     track_number = original_search.get('track_number')
                     
-                    logger.info(f"[Post-Processing] fuzzy context spotify_clean_title: '{spotify_clean_title}', track_number: {track_number}")
+                    logger.info(f"[Post-Processing] fuzzy context clean_title: '{clean_title}', track_number: {track_number}")
                     
-                    if spotify_clean_title and track_number:
+                    if clean_title and track_number:
                         # Generate expected final filename that stream processor would create
                         # Pattern: f"{track_number:02d} - {clean_title}.flac"
-                        sanitized_title = spotify_clean_title.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+                        sanitized_title = clean_title.replace('/', '_').replace('\\', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
                         expected_final_filename = f"{track_number:02d} - {sanitized_title}.flac"
                         logger.info(f"[Post-Processing] Generated expected final filename from fuzzy match: {expected_final_filename}")
                     else:
-                        logger.warning(f"[Post-Processing] Missing required data from fuzzy match - spotify_clean_title: {bool(spotify_clean_title)}, track_number: {bool(track_number)}")
+                        logger.warning(f"[Post-Processing] Missing required data from fuzzy match - clean_title: {bool(clean_title)}, track_number: {bool(track_number)}")
                 except Exception as e:
                     logger.error(f"[Post-Processing] Error generating expected filename from fuzzy match: {e}")
                     import traceback
@@ -28312,22 +24323,22 @@ def _run_post_processing_worker(task_id, batch_id):
                 # Attempt to complete metadata enhancement using context
                 if context and expected_final_filename:
                     try:
+                        context = normalize_import_context(context)
                         # Extract required data from context
-                        original_search = context.get("original_search_result", {})
-                        spotify_artist = context.get("spotify_artist")
-                        spotify_album = context.get("spotify_album")
+                        original_search = get_import_original_search(context)
+                        artist_context = get_import_context_artist(context)
+                        album_context = get_import_context_album(context)
                         
-                        if spotify_artist and spotify_album:
+                        if artist_context and album_context:
                             # CRITICAL FIX: Create album_info dict with proper structure for metadata enhancement
                             # This must match the format used in main stream processor to ensure consistency
                             
                             # Extract track number from context (should be available from fuzzy match)
-                            original_search = context.get("original_search_result", {})
                             track_number = original_search.get('track_number', 1)
                             
                             # If no track number in context, extract from filename 
                             if track_number == 1 and found_file:
-                                track_number = _extract_track_number_from_filename(found_file)
+                                track_number = extract_track_number_from_filename(found_file)
                                 logger.warning(
                                     "[Verification] missing track_number; extracted from filename=%r -> %s",
                                     os.path.basename(found_file),
@@ -28339,17 +24350,22 @@ def _run_post_processing_worker(task_id, batch_id):
                                 logger.error(f"[Verification] Invalid track number ({track_number}), defaulting to 1")
                                 track_number = 1
                             
-                            # Get clean track name 
-                            clean_track_name = (original_search.get('spotify_clean_title') or 
-                                              original_search.get('title', 'Unknown Track'))
+                            # Get clean track name
+                            clean_track_name = get_import_clean_title(context, default=original_search.get('title', 'Unknown Track'))
+                            album_name = get_import_clean_album(context, default=album_context.get('name', 'Unknown Album'))
+                            album_image_url = album_context.get('image_url')
+                            if not album_image_url and album_context.get('images'):
+                                album_images = album_context.get('images', [])
+                                if album_images and isinstance(album_images[0], dict):
+                                    album_image_url = album_images[0].get('url')
                             
                             album_info = {
                                 'is_album': True,  # CRITICAL: Mark as album track
-                                'album_name': spotify_album.get('name', 'Unknown Album'),  # CORRECT KEY
+                                'album_name': album_name,
                                 'track_number': track_number,  # CORRECTED TRACK NUMBER
                                 'disc_number': original_search.get('disc_number', 1),
                                 'clean_track_name': clean_track_name,
-                                'album_image_url': spotify_album.get('images', [{}])[0].get('url') if spotify_album.get('images') else None,
+                                'album_image_url': album_image_url,
                                 'confidence': 0.9,
                                 'source': 'verification_worker_corrected'
                             }
@@ -28366,19 +24382,19 @@ def _run_post_processing_worker(task_id, batch_id):
                                         original_album_ctx = raw_album_ctx['name']
                                     else:
                                         original_album_ctx = None
-                                    consistent_album_name = _resolve_album_group(spotify_artist, album_info, original_album_ctx)
+                                    consistent_album_name = _resolve_album_group(artist_context, album_info, original_album_ctx)
                                     album_info['album_name'] = consistent_album_name
                                 except Exception as group_err:
                                     logger.error(f"[Verification] Album grouping failed, using raw name: {group_err}")
                             else:
-                                logger.info(f"[Verification] Explicit album download - preserving Spotify album name: '{album_info['album_name']}'")
+                                logger.info(f"[Verification] Explicit album download - preserving album name: '{album_info['album_name']}'")
 
                             logger.info(f"[Verification] Created proper album_info - track_number: {track_number}, album: {album_info['album_name']}")
 
                             logger.info(f"[Post-Processing] Attempting metadata enhancement for: {found_file}")
-                            logger.warning(f"[Metadata Input] Verification worker - artist: '{spotify_artist.get('name', 'MISSING')}' (id: {spotify_artist.get('id', 'MISSING')})")
+                            logger.warning(f"[Metadata Input] Verification worker - artist: '{artist_context.get('name', 'MISSING')}' (id: {artist_context.get('id', 'MISSING')})")
                             logger.warning(f"[Metadata Input] Verification worker - album: '{album_info.get('album_name', 'MISSING')}', track#: {album_info.get('track_number', 'MISSING')}, source: {album_info.get('source', 'unknown')}")
-                            enhancement_success = _enhance_file_metadata(found_file, context, spotify_artist, album_info)
+                            enhancement_success = _enhance_file_metadata(found_file, context, artist_context, album_info)
 
                             if enhancement_success:
                                 with tasks_lock:
@@ -28388,8 +24404,8 @@ def _run_post_processing_worker(task_id, batch_id):
                             else:
                                 logger.info(f"[Post-Processing] Metadata enhancement returned False for: {os.path.basename(found_file)}")
                         else:
-                            logger.warning("[Post-Processing] Missing spotify_artist or spotify_album in context")
-                            logger.info(f"[Post-Processing] spotify_artist: {spotify_artist is not None}, spotify_album: {spotify_album is not None}")
+                            logger.warning("[Post-Processing] Missing artist or album in context")
+                            logger.info(f"[Post-Processing] artist_context: {artist_context is not None}, album_context: {album_context is not None}")
                             # Wipe source tags even without full enhancement — prevents
                             # Soulseek uploader's MusicBrainz IDs from causing album splits
                             if found_file and os.path.exists(found_file):
@@ -28465,7 +24481,6 @@ def _run_post_processing_worker(task_id, batch_id):
                 download_tasks[task_id]['status'] = 'failed'
                 download_tasks[task_id]['error_message'] = f"Critical post-processing error: {str(e)}"
         _on_download_completed(batch_id, task_id, success=False)
-
 
 def _download_track_worker(task_id, batch_id=None):
     """
@@ -29126,7 +25141,7 @@ def _get_staging_file_cache(batch_id):
         if batch_id in _staging_cache:
             return _staging_cache[batch_id]
 
-    staging_path = _get_staging_path()
+    staging_path = get_staging_path()
     if not os.path.isdir(staging_path):
         with _staging_cache_lock:
             _staging_cache[batch_id] = []
@@ -30654,7 +26669,7 @@ def _check_batch_completion_v2(batch_id):
                                     artist_name=_cons_artist_name,
                                     mb_service=_cons_mb_svc,
                                     total_discs=_cons_album.get('total_discs', 1),
-                                    file_lock_fn=_get_file_lock,
+                                    file_lock_fn=get_file_lock,
                                 )
                                 if _cons_result.get('success'):
                                     logger.info(f"[Album Consistency V2] {_cons_result['tags_written']}/{_cons_result['total_files']} files "
@@ -45808,142 +41823,6 @@ def cancel_listenbrainz_sync(playlist_mbid):
         logger.error(f"Error cancelling ListenBrainz sync: {e}")
         return jsonify({"error": str(e)}), 500
 
-
-# OLD ENDPOINT - REMOVE ALL THE CODE BELOW FOR THE OLD IMPLEMENTATION
-def _old_get_listenbrainz_playlist_tracks_DEPRECATED(playlist_mbid):
-    """DEPRECATED - Old implementation that fetches from API"""
-    try:
-        from core.listenbrainz_client import ListenBrainzClient
-
-        client = ListenBrainzClient()
-
-        playlist = client.get_playlist_details(playlist_mbid, fetch_metadata=True)
-
-        if not playlist:
-            return jsonify({
-                "success": False,
-                "error": "Playlist not found or not accessible"
-            }), 404
-
-        # Extract tracks from JSPF format
-        jspf_tracks = playlist.get('track', [])
-
-        # Convert to our standard format - prepare tracks first without cover art
-        tracks = []
-        logger.info(f"Processing {len(jspf_tracks)} tracks from playlist")
-
-        # First pass: extract all track data without cover art
-        track_data_list = []
-        for idx, track in enumerate(jspf_tracks):
-            # Get recording MBID from identifier
-            recording_mbid = None
-            identifiers = track.get('identifier', [])
-            for identifier in identifiers:
-                if 'musicbrainz.org/recording/' in identifier:
-                    recording_mbid = identifier.split('/')[-1]
-                    break
-
-            # Get extension data (has MusicBrainz metadata)
-            extension = track.get('extension', {})
-            mb_data = extension.get('https://musicbrainz.org/doc/jspf#track', {})
-
-            if idx == 0:
-                logger.debug(f"Sample track extension data: {extension}")
-                logger.debug(f"Sample mb_data keys: {mb_data.keys() if mb_data else 'None'}")
-
-            # Extract release MBID for cover art
-            release_mbid = None
-            if mb_data:
-                # Check in additional_metadata first
-                additional_metadata = mb_data.get('additional_metadata', {})
-                if 'caa_release_mbid' in additional_metadata:
-                    release_mbid = additional_metadata['caa_release_mbid']
-                # Fallback to top-level release_mbid
-                elif 'release_mbid' in mb_data:
-                    release_mbid = mb_data['release_mbid']
-
-            if idx == 0:
-                logger.debug(f"🆔 First track release_mbid: {release_mbid}")
-
-            track_data = {
-                'track_name': track.get('title', 'Unknown Track'),
-                'artist_name': track.get('creator', 'Unknown Artist'),
-                'album_name': track.get('album', 'Unknown Album'),
-                'duration_ms': track.get('duration', 0),
-                'mbid': recording_mbid,
-                'release_mbid': release_mbid,
-                'album_cover_url': None,  # Will be fetched in parallel
-                'additional_metadata': mb_data
-            }
-
-            track_data_list.append(track_data)
-
-        # Second pass: fetch cover art in parallel using threading (much faster)
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        import time
-
-        def fetch_cover_art(track_data):
-            """Fetch cover art for a single track"""
-            release_mbid = track_data.get('release_mbid')
-            if not release_mbid:
-                return None
-
-            try:
-                cover_art_url = f"https://coverartarchive.org/release/{release_mbid}"
-                cover_response = requests.get(cover_art_url, timeout=3)
-
-                if cover_response.status_code == 200:
-                    cover_data = cover_response.json()
-                    images = cover_data.get('images', [])
-
-                    # Get front cover
-                    for img in images:
-                        if img.get('front'):
-                            return img.get('thumbnails', {}).get('small') or img.get('image')
-
-                    # Fallback to first image
-                    if images:
-                        return images[0].get('thumbnails', {}).get('small') or images[0].get('image')
-            except:
-                pass
-
-            return None
-
-        logger.info(f"Fetching cover art for {len(track_data_list)} tracks in parallel...")
-        start_time = time.time()
-
-        # Fetch up to 10 covers at a time
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_track = {executor.submit(fetch_cover_art, track): idx
-                             for idx, track in enumerate(track_data_list)}
-
-            for future in as_completed(future_to_track):
-                idx = future_to_track[future]
-                try:
-                    cover_url = future.result()
-                    if cover_url:
-                        track_data_list[idx]['album_cover_url'] = cover_url
-                except Exception as e:
-                    pass
-
-        elapsed = time.time() - start_time
-        covers_found = sum(1 for t in track_data_list if t.get('album_cover_url'))
-        logger.info(f"Fetched {covers_found}/{len(track_data_list)} covers in {elapsed:.2f}s")
-
-        tracks = track_data_list
-
-        return jsonify({
-            "success": True,
-            "tracks": tracks,
-            "track_count": len(tracks)
-        })
-
-    except Exception as e:
-        logger.error(f"Error getting ListenBrainz playlist tracks: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
-
 @app.route('/api/metadata/start', methods=['POST'])
 def start_metadata_update():
     """Start the metadata update process - EXACT copy of dashboard.py logic"""
@@ -52006,17 +47885,11 @@ def repair_job_progress():
 
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif', '.ape'}
 
-def _get_staging_path():
-    """Get the resolved staging folder path."""
-    raw = config_manager.get('import.staging_path', './Staging')
-    return docker_resolve_path(raw)
-
-
 @app.route('/api/import/staging/files', methods=['GET'])
 def import_staging_files():
     """Scan the staging folder and return audio files with tag metadata."""
     try:
-        staging_path = _get_staging_path()
+        staging_path = get_staging_path()
         os.makedirs(staging_path, exist_ok=True)
 
         files = []
@@ -52028,7 +47901,7 @@ def import_staging_files():
                 full_path = os.path.join(root, fname)
                 rel_path = os.path.relpath(full_path, staging_path)
 
-                meta = _read_staging_file_metadata(full_path, rel_path)
+                meta = read_staging_file_metadata(full_path, rel_path)
 
                 files.append({
                     'filename': fname,
@@ -52058,7 +47931,7 @@ def import_staging_groups():
     the same album+artist combo. Returns groups sorted by file count descending.
     """
     try:
-        staging_path = _get_staging_path()
+        staging_path = get_staging_path()
         if not os.path.isdir(staging_path):
             return jsonify({'success': True, 'groups': []})
 
@@ -52072,7 +47945,7 @@ def import_staging_groups():
                 full_path = os.path.join(root, fname)
                 rel_path = os.path.relpath(full_path, staging_path)
 
-                meta = _read_staging_file_metadata(full_path, rel_path)
+                meta = read_staging_file_metadata(full_path, rel_path)
                 album = meta['album']
                 artist = meta['albumartist'] or meta['artist']
                 if not album or not artist:
@@ -52118,7 +47991,7 @@ def import_staging_groups():
 def import_staging_hints():
     """Extract album search hints from staging folder (tags + folder names). Fast — no Spotify calls."""
     try:
-        staging_path = _get_staging_path()
+        staging_path = get_staging_path()
         if not os.path.isdir(staging_path):
             return jsonify({'success': True, 'hints': []})
 
@@ -52182,34 +48055,20 @@ def import_staging_hints():
 
 @app.route('/api/import/search/albums', methods=['GET'])
 def import_search_albums():
-    """Search for albums via Spotify for import matching."""
+    """Search for albums using the active metadata provider."""
     try:
         query = request.args.get('q', '').strip()
         if not query:
             return jsonify({'success': False, 'error': 'Missing query parameter'}), 400
 
         limit = min(int(request.args.get('limit', 12)), 50)
+        from core.metadata_service import get_primary_source
 
-        if _is_hydrabase_active():
-            albums = hydrabase_client.search_albums(query, limit=limit)
-        else:
-            if hydrabase_worker and dev_mode_enabled:
-                hydrabase_worker.enqueue(query, 'albums')
-            albums = spotify_client.search_albums(query, limit=limit)
+        if get_primary_source() == 'hydrabase' and hydrabase_worker and dev_mode_enabled:
+            hydrabase_worker.enqueue(query, 'albums')
 
-        results = []
-        for a in albums:
-            results.append({
-                'id': a.id,
-                'name': a.name,
-                'artist': ', '.join(a.artists) if a.artists else 'Unknown Artist',
-                'release_date': a.release_date or '',
-                'total_tracks': a.total_tracks,
-                'image_url': a.image_url,
-                'album_type': a.album_type or 'album'
-            })
-
-        return jsonify({'success': True, 'albums': results})
+        albums = search_import_albums(query, limit=limit)
+        return jsonify({'success': True, 'albums': albums})
     except Exception as e:
         logger.error(f"Error searching albums for import: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -52219,204 +48078,24 @@ def import_search_albums():
 def import_album_match():
     """Match staging files to an album's tracklist."""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         album_id = data.get('album_id')
         album_name = data.get('album_name', '')
         album_artist = data.get('album_artist', '')
+        source = str(data.get('source') or '').strip().lower()
         # Optional: only match specific files (from auto-group selection)
         filter_file_paths = set(data.get('file_paths', []))
         if not album_id:
             return jsonify({'success': False, 'error': 'Missing album_id'}), 400
 
-        spotify_tracks = None
-        album_info = None
-
-        # Try Hydrabase first when active — look up by album soul_id
-        if _is_hydrabase_active():
-            try:
-                hydra_tracks = hydrabase_client.get_album_tracks(album_id, limit=50)
-                if hydra_tracks:
-                    spotify_tracks = []
-                    for t in hydra_tracks:
-                        artist_list = t.artists if isinstance(t.artists, list) else [t.artists] if t.artists else []
-                        spotify_tracks.append({
-                            'name': t.name,
-                            'track_number': t.track_number or 0,
-                            'disc_number': t.disc_number or 1,
-                            'duration_ms': t.duration_ms,
-                            'id': t.id,
-                            'artists': [{'name': a} if isinstance(a, str) else a for a in artist_list],
-                            'uri': ''
-                        })
-                    album_info = {
-                        'id': album_id,
-                        'name': album_name or hydra_tracks[0].album or '',
-                        'artist': album_artist,
-                        'artists': [album_artist] if album_artist else [],
-                        'release_date': '',
-                        'total_tracks': len(spotify_tracks),
-                        'image_url': None,
-                        'genres': []
-                    }
-                    logger.info(f"Hydrabase album_tracks returned {len(spotify_tracks)} tracks for album_id '{album_id}'")
-            except Exception as e:
-                logger.warning(f"Hydrabase album_tracks failed, falling back to Spotify: {e}")
-                spotify_tracks = None
-
-        # Fall back to Spotify
-        if spotify_tracks is None:
-            album_data = spotify_client.get_album(album_id)
-            if not album_data:
-                return jsonify({'success': False, 'error': 'Album not found'}), 404
-
-            tracks_data = spotify_client.get_album_tracks(album_id)
-            if not tracks_data or 'items' not in tracks_data:
-                return jsonify({'success': False, 'error': 'Could not get album tracks'}), 500
-
-            spotify_tracks = tracks_data['items']
-
-            # Build album summary
-            album_artists = [a['name'] for a in album_data.get('artists', [])]
-            album_info = {
-                'id': album_id,
-                'name': album_data.get('name', 'Unknown Album'),
-                'artist': ', '.join(album_artists),
-                'artists': album_artists,
-                'release_date': album_data.get('release_date', ''),
-                'total_tracks': album_data.get('total_tracks', len(spotify_tracks)),
-                'image_url': (album_data.get('images', [{}])[0].get('url') if album_data.get('images') else None),
-                'genres': album_data.get('genres', [])
-            }
-
-            # Get artist info for context building later
-            if album_data.get('artists'):
-                primary_artist = album_data['artists'][0]
-                album_info['artist_id'] = primary_artist.get('id', '')
-
-        # Scan staging files
-        staging_path = _get_staging_path()
-        staging_files = []
-        for root, _dirs, filenames in os.walk(staging_path):
-            for fname in filenames:
-                ext = os.path.splitext(fname)[1].lower()
-                if ext not in AUDIO_EXTENSIONS:
-                    continue
-                full_path = os.path.join(root, fname)
-
-                meta = _read_staging_file_metadata(full_path, fname)
-
-                staging_files.append({
-                    'filename': fname,
-                    'full_path': full_path,
-                    'title': meta['title'],
-                    'artist': meta['albumartist'] or meta['artist'],
-                    'album': meta['album'],
-                    'track_number': meta['track_number'],
-                    'disc_number': meta['disc_number'],
-                })
-
-        # Filter to specific files if requested (auto-group selection)
-        if filter_file_paths:
-            staging_files = [sf for sf in staging_files if sf['full_path'] in filter_file_paths]
-
-        # Match each Spotify track to the best staging file
-        matches = []
-        used_files = set()
-        album_name_for_match = album_info.get('name', '')
-
-        for sp_track in spotify_tracks:
-            sp_name = sp_track.get('name', '')
-            sp_number = sp_track.get('track_number', 0)
-            sp_disc = sp_track.get('disc_number', 1)
-            sp_artists = sp_track.get('artists', [])
-            sp_artist_name = sp_artists[0]['name'] if sp_artists and isinstance(sp_artists[0], dict) else (sp_artists[0] if sp_artists else '')
-
-            best_match = None
-            best_score = 0.0
-
-            for i, sf in enumerate(staging_files):
-                if i in used_files:
-                    continue
-
-                score = 0.0
-
-                # Title similarity (weight 0.45)
-                title_sim = matching_engine.similarity_score(
-                    matching_engine.normalize_string(sp_name),
-                    matching_engine.normalize_string(sf['title'] or '')
-                )
-                score += title_sim * 0.45
-
-                # Artist similarity (weight 0.15)
-                sf_artist = sf.get('artist') or ''
-                if sf_artist and sp_artist_name:
-                    artist_sim = matching_engine.similarity_score(
-                        matching_engine.normalize_string(sp_artist_name),
-                        matching_engine.normalize_string(sf_artist)
-                    )
-                    score += artist_sim * 0.15
-                else:
-                    score += 0.075  # neutral when no artist data
-
-                # Track number match (weight 0.30)
-                if sf['track_number'] and sp_number:
-                    if sf['track_number'] == sp_number:
-                        score += 0.30
-                    elif abs(sf['track_number'] - sp_number) <= 1:
-                        score += 0.12
-
-                # Album tag bonus (weight 0.10) — reward files whose album tag matches
-                sf_album = sf.get('album') or ''
-                if sf_album and album_name_for_match:
-                    album_sim = matching_engine.similarity_score(
-                        matching_engine.normalize_string(sf_album),
-                        matching_engine.normalize_string(album_name_for_match)
-                    )
-                    score += album_sim * 0.10
-
-                if score > best_score and score >= 0.4:
-                    best_score = score
-                    best_match = i
-
-            if best_match is not None:
-                used_files.add(best_match)
-                matches.append({
-                    'spotify_track': {
-                        'name': sp_name,
-                        'track_number': sp_number,
-                        'disc_number': sp_disc,
-                        'duration_ms': sp_track.get('duration_ms', 0),
-                        'id': sp_track.get('id', ''),
-                        'artists': [a['name'] for a in sp_track.get('artists', [])],
-                        'uri': sp_track.get('uri', '')
-                    },
-                    'staging_file': staging_files[best_match],
-                    'confidence': round(best_score, 2)
-                })
-            else:
-                matches.append({
-                    'spotify_track': {
-                        'name': sp_name,
-                        'track_number': sp_number,
-                        'disc_number': sp_disc,
-                        'duration_ms': sp_track.get('duration_ms', 0),
-                        'id': sp_track.get('id', ''),
-                        'artists': [a['name'] for a in sp_track.get('artists', [])],
-                        'uri': sp_track.get('uri', '')
-                    },
-                    'staging_file': None,
-                    'confidence': 0
-                })
-
-        # Unmatched staging files
-        unmatched_files = [sf for i, sf in enumerate(staging_files) if i not in used_files]
-
-        return jsonify({
-            'success': True,
-            'album': album_info,
-            'matches': matches,
-            'unmatched_files': unmatched_files
-        })
+        payload = build_album_import_match_payload(
+            album_id,
+            album_name=album_name,
+            album_artist=album_artist,
+            file_paths=filter_file_paths,
+            source=source or None,
+        )
+        return jsonify(payload)
     except Exception as e:
         logger.error(f"Error matching album for import: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -52426,7 +48105,7 @@ def import_album_match():
 def import_album_process():
     """Process matched album files through the post-processing pipeline."""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         album = data.get('album', {})
         matches = data.get('matches', [])
 
@@ -52435,34 +48114,25 @@ def import_album_process():
 
         processed = 0
         errors = []
-        album_name = album.get('name', 'Unknown Album')
-        artist_name = album.get('artist', 'Unknown Artist')
-        artist_id = album.get('artist_id', '')
-        album_id = album.get('id', '')
+        album_name = album.get('name', album.get('album_name', 'Unknown Album'))
+        artist_name = album.get('artist', album.get('artist_name', 'Unknown Artist'))
+        album_id = album.get('id', album.get('album_id', ''))
+        source = str(album.get('source') or data.get('source') or '').strip().lower()
 
-        # Get artist genres from Spotify if possible
-        artist_genres = album.get('genres', [])
-        if not artist_genres and artist_id and not _spotify_rate_limited():
-            try:
-                from core.api_call_tracker import api_call_tracker
-                if hasattr(spotify_client, 'sp') and spotify_client.sp:
-                    api_call_tracker.record_call('spotify', endpoint='artist')
-                sp_artist = spotify_client.sp.artist(artist_id) if hasattr(spotify_client, 'sp') and spotify_client.sp else None
-                if sp_artist:
-                    artist_genres = sp_artist.get('genres', [])
-            except Exception:
-                pass
-
-        # Compute total_discs across all matched tracks for multi-disc subfolder support
         total_discs = max(
-            (m['spotify_track'].get('disc_number', 1) for m in matches if m.get('spotify_track')),
-            default=1
+            (
+                match.get('track', {}).get('disc_number', 1)
+                for match in matches
+                if match.get('track')
+            ),
+            default=1,
         )
+        artist_context = resolve_album_artist_context(album, source=source)
 
         for match in matches:
             staging_file = match.get('staging_file')
-            spotify_track = match.get('spotify_track')
-            if not staging_file or not spotify_track:
+            track = match.get('track') or {}
+            if not staging_file or not track:
                 continue
 
             file_path = staging_file.get('full_path', '')
@@ -52470,49 +48140,18 @@ def import_album_process():
                 errors.append(f"File not found: {staging_file.get('filename', '?')}")
                 continue
 
-            track_name = spotify_track.get('name', 'Unknown Track')
-            track_number = spotify_track.get('track_number', 1)
-            disc_number = spotify_track.get('disc_number', 1)
-            track_artists = spotify_track.get('artists', [artist_name])
+            track_name = track.get('name', 'Unknown Track')
+            track_number = track.get('track_number', 1)
+            disc_number = track.get('disc_number', 1)
 
             context_key = f"import_album_{album_id}_{track_number}_{uuid.uuid4().hex[:8]}"
-            context = {
-                'spotify_artist': {
-                    'name': artist_name,
-                    'id': artist_id,
-                    'genres': artist_genres
-                },
-                'spotify_album': {
-                    'id': album_id,
-                    'name': album_name,
-                    'release_date': album.get('release_date', ''),
-                    'total_tracks': album.get('total_tracks', len(matches)),
-                    'total_discs': total_discs,
-                    'image_url': album.get('image_url', '')
-                },
-                'track_info': {
-                    'name': track_name,
-                    'id': spotify_track.get('id', ''),
-                    'track_number': track_number,
-                    'disc_number': disc_number,
-                    'duration_ms': spotify_track.get('duration_ms', 0),
-                    'artists': [{'name': a} if isinstance(a, str) else a for a in track_artists],
-                    'uri': spotify_track.get('uri', '')
-                },
-                'original_search_result': {
-                    'title': track_name,
-                    'artist': artist_name,
-                    'album': album_name,
-                    'track_number': track_number,
-                    'disc_number': disc_number,
-                    'spotify_clean_title': track_name,
-                    'spotify_clean_album': album_name,
-                    'artists': [{'name': a} if isinstance(a, str) else a for a in track_artists]
-                },
-                'is_album_download': True,
-                'has_clean_spotify_data': True,
-                'has_full_spotify_metadata': True
-            }
+            context = build_album_import_context(
+                album,
+                track,
+                artist_context=artist_context,
+                total_discs=total_discs,
+                source=source,
+            )
 
             try:
                 _post_process_matched_download(context_key, context, file_path)
@@ -52561,35 +48200,18 @@ def import_album_process():
 
 @app.route('/api/import/search/tracks', methods=['GET'])
 def import_search_tracks():
-    """Search Spotify for individual tracks (used for manual singles identification)."""
+    """Search tracks using the configured metadata provider priority order."""
     try:
         query = request.args.get('q', '').strip()
         if not query:
             return jsonify({'success': False, 'error': 'Missing query parameter'}), 400
 
         limit = min(int(request.args.get('limit', 10)), 30)
+        if get_primary_source() == 'hydrabase' and hydrabase_worker and dev_mode_enabled:
+            hydrabase_worker.enqueue(query, 'tracks')
 
-        if _is_hydrabase_active():
-            tracks = hydrabase_client.search_tracks(query, limit=limit)
-        else:
-            if hydrabase_worker and dev_mode_enabled:
-                hydrabase_worker.enqueue(query, 'tracks')
-            tracks = spotify_client.search_tracks(query, limit=limit)
-
-        results = []
-        for t in tracks:
-            results.append({
-                'id': t.id,
-                'name': t.name,
-                'artist': ', '.join(t.artists) if hasattr(t, 'artists') and t.artists else 'Unknown Artist',
-                'album': t.album if hasattr(t, 'album') else '',
-                'album_id': t.album_id if hasattr(t, 'album_id') else '',
-                'duration_ms': t.duration_ms if hasattr(t, 'duration_ms') else 0,
-                'image_url': t.image_url if hasattr(t, 'image_url') else '',
-                'track_number': t.track_number if hasattr(t, 'track_number') else 1,
-            })
-
-        return jsonify({'success': True, 'tracks': results})
+        tracks = search_import_tracks(query, limit=limit)
+        return jsonify({'success': True, 'tracks': tracks})
     except Exception as e:
         logger.error(f"Error searching tracks for import: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -52616,180 +48238,51 @@ def import_singles_process():
 
             title = file_info.get('title', '')
             artist = file_info.get('artist', '')
-            spotify_override = file_info.get('spotify_override', None)
+            manual_match = file_info.get('manual_match')
+            if manual_match is not None and not isinstance(manual_match, dict):
+                manual_match = None
+
+            manual_match_source = ''
+            manual_match_id = None
+            if manual_match:
+                manual_match_source = str(manual_match.get('source') or '').strip().lower()
+                manual_match_id = str(manual_match.get('id') or '').strip()
+                if not manual_match_id or not manual_match_source:
+                    errors.append(f"Malformed manual match for file: {file_info.get('filename', '?')}")
+                    continue
 
             # Fallback to filename parsing if no metadata
-            if not title and not spotify_override:
-                parsed = _parse_filename_metadata(file_info.get('filename', ''))
-                title = parsed.get('title', os.path.splitext(file_info.get('filename', 'Unknown'))[0])
+            if not title and not manual_match:
+                parsed = parse_filename_metadata(file_info.get('filename', ''))
+                title = parsed.get('title') or os.path.splitext(file_info.get('filename', 'Unknown'))[0]
                 if not artist:
                     artist = parsed.get('artist', '')
 
-            # Search Spotify for rich metadata
-            spotify_track_data = None
-            spotify_artist_data = None
-            spotify_album_data = None
+            from core.metadata_service import get_single_track_import_context
 
-            # If a manual spotify_override is provided, look up that specific track
-            if spotify_override and spotify_override.get('id'):
-                try:
-                    override_id = spotify_override['id']
-                    sp_track = None
-                    if hasattr(spotify_client, 'sp') and spotify_client.sp and not _spotify_rate_limited():
-                        from core.api_call_tracker import api_call_tracker
-                        api_call_tracker.record_call('spotify', endpoint='track')
-                        sp_track = spotify_client.sp.track(override_id)
-                    if sp_track:
-                        sp_track_artists = sp_track.get('artists', [])
-                        spotify_track_data = {
-                            'name': sp_track.get('name', ''),
-                            'id': override_id,
-                            'track_number': sp_track.get('track_number', 1),
-                            'disc_number': sp_track.get('disc_number', 1),
-                            'duration_ms': sp_track.get('duration_ms', 0),
-                            'artists': [{'name': a.get('name', '')} for a in sp_track_artists],
-                            'uri': sp_track.get('uri', f"spotify:track:{override_id}")
-                        }
-                        title = sp_track.get('name', title)
-                        artist = sp_track_artists[0].get('name', artist) if sp_track_artists else artist
-                        # Get album info
-                        sp_album_info = sp_track.get('album', {})
-                        if sp_album_info:
-                            spotify_album_data = {
-                                'id': sp_album_info.get('id', ''),
-                                'name': sp_album_info.get('name', ''),
-                                'release_date': sp_album_info.get('release_date', ''),
-                                'total_tracks': sp_album_info.get('total_tracks', 1),
-                                'image_url': (sp_album_info.get('images', [{}])[0].get('url') if sp_album_info.get('images') else ''),
-                                'album_type': sp_album_info.get('album_type', 'album'),
-                            }
-                            album_artists = sp_album_info.get('artists', [])
-                            if album_artists:
-                                spotify_artist_data = {
-                                    'name': album_artists[0].get('name', artist),
-                                    'id': album_artists[0].get('id', ''),
-                                    'genres': []
-                                }
-                                try:
-                                    sp_a = None
-                                    if hasattr(spotify_client, 'sp') and spotify_client.sp and not _spotify_rate_limited():
-                                        from core.api_call_tracker import api_call_tracker
-                                        api_call_tracker.record_call('spotify', endpoint='artist')
-                                        sp_a = spotify_client.sp.artist(album_artists[0]['id'])
-                                    if sp_a:
-                                        spotify_artist_data['genres'] = sp_a.get('genres', [])
-                                except Exception:
-                                    pass
-                except Exception as override_err:
-                    logger.warning(f"Spotify override lookup failed for track {spotify_override.get('id')}: {override_err}")
-
-            if not spotify_track_data and title:
-                try:
-                    search_q = f"{title} {artist}" if artist else title
-                    tracks = spotify_client.search_tracks(search_q, limit=1)
-                    if tracks:
-                        t = tracks[0]
-                        spotify_track_data = {
-                            'name': t.name,
-                            'id': t.id,
-                            'track_number': t.track_number if hasattr(t, 'track_number') else 1,
-                            'disc_number': 1,
-                            'duration_ms': t.duration_ms if hasattr(t, 'duration_ms') else 0,
-                            'artists': [{'name': a} for a in (t.artists if hasattr(t, 'artists') else [artist])],
-                            'uri': f"spotify:track:{t.id}"
-                        }
-                        # Get album info from the track's album
-                        if hasattr(t, 'album_id') and t.album_id:
-                            sp_album = spotify_client.get_album(t.album_id)
-                            if sp_album:
-                                spotify_album_data = {
-                                    'id': t.album_id,
-                                    'name': sp_album.get('name', ''),
-                                    'release_date': sp_album.get('release_date', ''),
-                                    'total_tracks': sp_album.get('total_tracks', 1),
-                                    'image_url': (sp_album.get('images', [{}])[0].get('url') if sp_album.get('images') else ''),
-                                    'album_type': sp_album.get('album_type', 'album'),
-                                }
-                                # Get artist genres
-                                sp_artists = sp_album.get('artists', [])
-                                if sp_artists:
-                                    spotify_artist_data = {
-                                        'name': sp_artists[0].get('name', artist),
-                                        'id': sp_artists[0].get('id', ''),
-                                        'genres': []
-                                    }
-                                    try:
-                                        sp_a = None
-                                        if hasattr(spotify_client, 'sp') and spotify_client.sp and not _spotify_rate_limited():
-                                            from core.api_call_tracker import api_call_tracker
-                                            api_call_tracker.record_call('spotify', endpoint='artist')
-                                            sp_a = spotify_client.sp.artist(sp_artists[0]['id'])
-                                        if sp_a:
-                                            spotify_artist_data['genres'] = sp_a.get('genres', [])
-                                    except Exception:
-                                        pass
-
-                        # Fallback artist data from track
-                        if not spotify_artist_data:
-                            track_artists = t.artists if hasattr(t, 'artists') else [artist]
-                            spotify_artist_data = {
-                                'name': track_artists[0] if track_artists else artist,
-                                'id': '',
-                                'genres': []
-                            }
-
-                        # Fallback album data
-                        if not spotify_album_data:
-                            spotify_album_data = {
-                                'id': '',
-                                'name': t.album if hasattr(t, 'album') else '',
-                                'release_date': '',
-                                'total_tracks': 1,
-                                'image_url': t.image_url if hasattr(t, 'image_url') else '',
-                                'album_type': t.album_type if hasattr(t, 'album_type') else 'album',
-                            }
-                except Exception as sp_err:
-                    logger.warning(f"Spotify lookup failed for '{title}': {sp_err}")
-
-            # Build context — use Spotify data if found, else use file metadata
-            if not spotify_artist_data:
-                spotify_artist_data = {'name': artist or 'Unknown Artist', 'id': '', 'genres': []}
-            if not spotify_album_data:
-                spotify_album_data = {'id': '', 'name': '', 'release_date': '', 'total_tracks': 1, 'image_url': '', 'album_type': 'album'}
-            if not spotify_track_data:
-                spotify_track_data = {
-                    'name': title, 'id': '', 'track_number': 1, 'disc_number': 1,
-                    'duration_ms': 0, 'artists': [{'name': artist or 'Unknown Artist'}], 'uri': ''
-                }
-
-            final_title = spotify_track_data.get('name', title)
-            final_artist = spotify_artist_data.get('name', artist)
-            final_album = spotify_album_data.get('name', '')
+            resolved = get_single_track_import_context(
+                title,
+                artist,
+                override_id=manual_match_id,
+                override_source=manual_match_source,
+            )
+            context = normalize_import_context(resolved['context'])
+            artist_data = get_import_context_artist(context)
+            track_data = get_import_track_info(context)
+            final_title = track_data.get('name', title)
+            final_artist = artist_data.get('name', artist)
 
             context_key = f"import_single_{uuid.uuid4().hex[:8]}"
-            context = {
-                'spotify_artist': spotify_artist_data,
-                'spotify_album': spotify_album_data,
-                'track_info': spotify_track_data,
-                'original_search_result': {
-                    'title': final_title,
-                    'artist': final_artist,
-                    'album': final_album,
-                    'track_number': spotify_track_data.get('track_number', 1),
-                    'disc_number': 1,
-                    'spotify_clean_title': final_title,
-                    'spotify_clean_album': final_album,
-                    'artists': spotify_track_data.get('artists', [{'name': final_artist}])
-                },
-                'is_album_download': False,
-                'has_clean_spotify_data': bool(spotify_track_data.get('id')),
-                'has_full_spotify_metadata': bool(spotify_track_data.get('id'))
-            }
 
             try:
                 _post_process_matched_download(context_key, context, file_path)
                 processed += 1
-                logger.info(f"Import single processed: {final_title} by {final_artist}")
+                logger.info(
+                    "Import single processed: %s by %s (source=%s)",
+                    final_title,
+                    final_artist,
+                    resolved.get('source') or 'local',
+                )
             except Exception as proc_err:
                 err_msg = f"{title}: {str(proc_err)}"
                 errors.append(err_msg)
@@ -52829,126 +48322,6 @@ def import_singles_process():
     except Exception as e:
         logger.error(f"Error processing singles import: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
-
-# --- Import Suggestion Cache (server-side background builder) ---
-
-_import_suggestions_cache = {
-    'suggestions': [],
-    'building': False,
-    'built': False,
-}
-
-def _build_import_suggestions_background():
-    """Background thread: extract hints from staging folder, search Spotify, cache results."""
-    cache = _import_suggestions_cache
-    if cache['building']:
-        return
-    cache['building'] = True
-
-    try:
-        staging_path = _get_staging_path()
-        if not os.path.isdir(staging_path):
-            cache['suggestions'] = []
-            cache['built'] = True
-            cache['building'] = False
-            return
-
-        # Reuse the hint extraction logic
-        tag_albums = {}
-        folder_hints = {}
-
-        for root, _dirs, filenames in os.walk(staging_path):
-            audio_files = [f for f in filenames if os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
-            if not audio_files:
-                continue
-            rel_dir = os.path.relpath(root, staging_path)
-            if rel_dir != '.':
-                top_folder = rel_dir.split(os.sep)[0]
-                folder_hints[top_folder] = folder_hints.get(top_folder, 0) + len(audio_files)
-            for fname in audio_files:
-                full_path = os.path.join(root, fname)
-                try:
-                    from mutagen import File as MutagenFile
-                    tags = MutagenFile(full_path, easy=True)
-                    if tags:
-                        album = (tags.get('album') or [None])[0]
-                        artist = (tags.get('artist') or (tags.get('albumartist') or [None]))[0]
-                        if album:
-                            key = (album.strip(), (artist or '').strip())
-                            tag_albums[key] = tag_albums.get(key, 0) + 1
-                except Exception:
-                    pass
-
-        queries = []
-        seen_lower = set()
-        for (album, artist), _ in sorted(tag_albums.items(), key=lambda x: -x[1]):
-            q = f"{album} {artist}".strip() if artist else album
-            if q.lower() not in seen_lower:
-                seen_lower.add(q.lower())
-                queries.append(q)
-        for folder, _ in sorted(folder_hints.items(), key=lambda x: -x[1]):
-            q = folder.replace('_', ' ')
-            if q.lower() not in seen_lower:
-                seen_lower.add(q.lower())
-                queries.append(q)
-        queries = queries[:5]
-
-        if not queries:
-            cache['suggestions'] = []
-            cache['built'] = True
-            cache['building'] = False
-            return
-
-        suggestions = []
-        seen_ids = set()
-        for q in queries:
-            try:
-                if not spotify_client:
-                    break
-                albums = spotify_client.search_albums(q, limit=2)
-                for a in albums:
-                    if a.id not in seen_ids:
-                        seen_ids.add(a.id)
-                        suggestions.append({
-                            'id': a.id,
-                            'name': a.name,
-                            'artist': ', '.join(a.artists) if a.artists else 'Unknown Artist',
-                            'release_date': a.release_date or '',
-                            'total_tracks': a.total_tracks,
-                            'image_url': a.image_url,
-                            'album_type': a.album_type or 'album',
-                        })
-            except Exception as e:
-                logger.warning(f"Import suggestion search failed for '{q}': {e}")
-
-        cache['suggestions'] = suggestions[:8]
-        cache['built'] = True
-        logger.info(f"Import suggestions cache built: {len(cache['suggestions'])} suggestions from {len(queries)} hints")
-    except Exception as e:
-        logger.error(f"Error building import suggestions cache: {e}")
-        cache['suggestions'] = []
-        cache['built'] = True
-    finally:
-        cache['building'] = False
-
-
-def start_import_suggestions_cache():
-    """Start building the import suggestions cache in a background thread (called on server startup)."""
-    threading.Thread(
-        target=_build_import_suggestions_background,
-        daemon=True,
-        name='import-suggestions-cache'
-    ).start()
-
-
-def refresh_import_suggestions_cache():
-    """Invalidate and rebuild the suggestions cache (called after imports change staging contents)."""
-    _import_suggestions_cache['built'] = False
-    threading.Thread(
-        target=_build_import_suggestions_background,
-        daemon=True,
-        name='import-suggestions-cache'
-    ).start()
 
 
 # ── Auto-Import Worker ──
@@ -53089,7 +48462,7 @@ def auto_import_clear_completed():
 @app.route('/api/import/staging/suggestions', methods=['GET'])
 def import_staging_suggestions():
     """Return cached import suggestions. If cache isn't built yet, returns partial/empty with a flag."""
-    cache = _import_suggestions_cache
+    cache = get_import_suggestions_cache()
     return jsonify({
         'success': True,
         'suggestions': cache['suggestions'],
