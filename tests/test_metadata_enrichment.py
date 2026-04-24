@@ -1,9 +1,8 @@
-import logging
 import types
 
-import pytest
-
 from core import metadata_enrichment as me
+from core import metadata_artwork as ma
+from core import metadata_source as ms
 
 
 class _Config:
@@ -110,20 +109,9 @@ def _fake_symbols(audio):
     )
 
 
-def test_extract_source_metadata_keeps_neutral_fields_and_skips_itunes_fallback_for_non_itunes_sources():
-    class _ItunesClient:
-        def __init__(self):
-            self.called = False
-
-        def resolve_primary_artist(self, artist_id):
-            self.called = True
-            raise AssertionError("itunes fallback should not run for non-itunes sources")
-
-    runtime = types.SimpleNamespace(
-        logger=logging.getLogger("test.metadata_enrichment"),
-        config_manager=_Config({"file_organization.collab_artist_mode": "first"}),
-        itunes_enrichment_worker=types.SimpleNamespace(client=_ItunesClient()),
-    )
+def test_extract_source_metadata_keeps_neutral_fields_and_skips_itunes_fallback_for_non_itunes_sources(monkeypatch):
+    monkeypatch.setattr(ms, "_get_config_manager", lambda: _Config({"file_organization.collab_artist_mode": "first"}))
+    monkeypatch.setattr(ms, "_get_itunes_client", lambda: (_ for _ in ()).throw(AssertionError("itunes fallback should not run for non-itunes sources")))
 
     context = {
         "source": "spotify",
@@ -156,7 +144,6 @@ def test_extract_source_metadata_keeps_neutral_fields_and_skips_itunes_fallback_
         context,
         context["artist"],
         {"is_album": True, "album_name": "Album One", "track_number": 3, "disc_number": 2, "album_image_url": "https://img.example/album.jpg"},
-        runtime=runtime,
     )
 
     assert metadata["source"] == "spotify"
@@ -168,27 +155,14 @@ def test_extract_source_metadata_keeps_neutral_fields_and_skips_itunes_fallback_
     assert metadata["total_tracks"] == 12
     assert metadata["disc_number"] == 2
     assert metadata["album_art_url"] == "https://img.example/album.jpg"
-    assert runtime.itunes_enrichment_worker.client.called is False
 
 
 def test_embed_source_ids_uses_current_source_ids_and_legacy_fallback(monkeypatch):
-    runtime = types.SimpleNamespace(
-        logger=logging.getLogger("test.metadata_enrichment"),
-        config_manager=_Config(),
-        mb_worker=None,
-        deezer_worker=None,
-        audiodb_worker=None,
-        tidal_client=None,
-        qobuz_enrichment_worker=None,
-        lastfm_worker=None,
-        genius_worker=None,
-        itunes_enrichment_worker=None,
-        get_database=lambda: None,
-    )
-
     audio = _FakeAudio()
     symbols = _fake_symbols(audio)
-    monkeypatch.setattr(me, "_get_mutagen_symbols", lambda runtime=None: symbols)
+    monkeypatch.setattr(ms, "_get_config_manager", lambda: _Config())
+    monkeypatch.setattr(ms, "_get_mutagen_symbols", lambda: symbols)
+    monkeypatch.setattr(ms, "_get_database", lambda: None)
 
     current_metadata = {
         "source": "deezer",
@@ -200,7 +174,7 @@ def test_embed_source_ids_uses_current_source_ids_and_legacy_fallback(monkeypatc
         "album_artist": "Artist One",
         "album": "Album One",
     }
-    me.embed_source_ids(audio, current_metadata, context={"track_info": {}, "original_search_result": {}}, runtime=runtime)
+    me.embed_source_ids(audio, current_metadata, context={"track_info": {}, "original_search_result": {}})
 
     current_descs = [frame.kwargs.get("desc") for frame in audio.tags.added if frame.kind == "TXXX"]
     assert "DEEZER_TRACK_ID" in current_descs
@@ -208,7 +182,7 @@ def test_embed_source_ids_uses_current_source_ids_and_legacy_fallback(monkeypatc
 
     audio = _FakeAudio()
     symbols = _fake_symbols(audio)
-    monkeypatch.setattr(me, "_get_mutagen_symbols", lambda runtime=None: symbols)
+    monkeypatch.setattr(ms, "_get_mutagen_symbols", lambda: symbols)
 
     legacy_metadata = {
         "source": "",
@@ -223,7 +197,7 @@ def test_embed_source_ids_uses_current_source_ids_and_legacy_fallback(monkeypatc
         "album_artist": "Artist One",
         "album": "Album One",
     }
-    me.embed_source_ids(audio, legacy_metadata, context={"track_info": {}, "original_search_result": {}}, runtime=runtime)
+    me.embed_source_ids(audio, legacy_metadata, context={"track_info": {}, "original_search_result": {}})
 
     legacy_descs = [frame.kwargs.get("desc") for frame in audio.tags.added if frame.kind == "TXXX"]
     assert "SPOTIFY_TRACK_ID" in legacy_descs
@@ -237,35 +211,25 @@ def test_embed_source_ids_uses_current_source_ids_and_legacy_fallback(monkeypatc
 def test_enhance_file_metadata_writes_tags_and_propagates_release_id(monkeypatch):
     audio = _FakeAudio()
     symbols = _fake_symbols(audio)
-    runtime = types.SimpleNamespace(
-        logger=logging.getLogger("test.metadata_enrichment"),
-        config_manager=_Config(
-            {
-                "metadata_enhancement.enabled": True,
-                "metadata_enhancement.embed_album_art": False,
-                "metadata_enhancement.tags.write_multi_artist": False,
-            }
-        ),
-        mb_worker=None,
-        deezer_worker=None,
-        audiodb_worker=None,
-        tidal_client=None,
-        qobuz_enrichment_worker=None,
-        lastfm_worker=None,
-        genius_worker=None,
-        itunes_enrichment_worker=None,
-        get_database=lambda: None,
-    )
-
     strip_calls = []
     verify_calls = []
 
-    monkeypatch.setattr(me, "_get_mutagen_symbols", lambda runtime=None: symbols)
-    monkeypatch.setattr(me, "_strip_all_non_audio_tags", lambda file_path, runtime=None: strip_calls.append(file_path) or {"apev2_stripped": False, "apev2_tag_count": 0})
+    monkeypatch.setattr(me, "_get_config_manager", lambda: _Config(
+        {
+            "metadata_enhancement.enabled": True,
+            "metadata_enhancement.embed_album_art": False,
+            "metadata_enhancement.tags.write_multi_artist": False,
+        }
+    ))
+    monkeypatch.setattr(ms, "_get_config_manager", lambda: _Config())
+    monkeypatch.setattr(me, "_get_mutagen_symbols", lambda: symbols)
+    monkeypatch.setattr(ms, "_get_mutagen_symbols", lambda: symbols)
+    monkeypatch.setattr(ms, "_get_database", lambda: None)
+    monkeypatch.setattr(me, "_strip_all_non_audio_tags", lambda file_path: strip_calls.append(file_path) or {"apev2_stripped": False, "apev2_tag_count": 0})
     monkeypatch.setattr(
         me,
         "extract_source_metadata",
-        lambda context, artist, album_info, runtime=None: {
+        lambda context, artist, album_info: {
             "source": "deezer",
             "source_track_id": "dz-track",
             "source_artist_id": "dz-artist",
@@ -283,7 +247,7 @@ def test_enhance_file_metadata_writes_tags_and_propagates_release_id(monkeypatch
         },
     )
     monkeypatch.setattr(me, "embed_album_art_metadata", lambda *args, **kwargs: None)
-    monkeypatch.setattr(me, "_verify_metadata_written", lambda file_path, runtime=None: verify_calls.append(file_path) or True)
+    monkeypatch.setattr(me, "_verify_metadata_written", lambda file_path: verify_calls.append(file_path) or True)
 
     album_info = {}
     result = me.enhance_file_metadata(
@@ -291,7 +255,6 @@ def test_enhance_file_metadata_writes_tags_and_propagates_release_id(monkeypatch
         {"_audio_quality": ""},
         {"name": "Artist One"},
         album_info,
-        runtime=runtime,
     )
 
     assert result is True
@@ -306,17 +269,14 @@ def test_enhance_file_metadata_writes_tags_and_propagates_release_id(monkeypatch
 
 
 def test_download_cover_art_uses_album_context_image_url(tmp_path, monkeypatch):
-    runtime = types.SimpleNamespace(
-        logger=logging.getLogger("test.metadata_enrichment"),
-        config_manager=_Config(
-            {
-                "metadata_enhancement.cover_art_download": True,
-                "metadata_enhancement.prefer_caa_art": False,
-            }
-        ),
-    )
+    monkeypatch.setattr(ma, "_get_config_manager", lambda: _Config(
+        {
+            "metadata_enhancement.cover_art_download": True,
+            "metadata_enhancement.prefer_caa_art": False,
+        }
+    ))
 
-    monkeypatch.setattr(me.urllib.request, "urlopen", lambda *args, **kwargs: _FakeResponse(b"cover-bytes"))
+    monkeypatch.setattr(ma.urllib.request, "urlopen", lambda *args, **kwargs: _FakeResponse(b"cover-bytes"))
 
     target_dir = tmp_path / "Album One"
     target_dir.mkdir()
@@ -325,7 +285,6 @@ def test_download_cover_art_uses_album_context_image_url(tmp_path, monkeypatch):
         {},
         str(target_dir),
         {"album": {"image_url": "https://img.example/album.jpg"}},
-        runtime=runtime,
     )
 
     cover_path = target_dir / "cover.jpg"
