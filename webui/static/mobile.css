@@ -329,11 +329,6 @@
         width: 100%;
     }
 
-    .enhanced-search-bar-container button {
-        width: 100%;
-        min-height: 44px;
-    }
-
     .filter-group {
         flex-wrap: wrap;
     }

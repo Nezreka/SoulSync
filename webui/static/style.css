@@ -33338,38 +33338,6 @@ div.artist-hero-badge {
     color: #fff;
 }
 
-.enhanced-search-btn {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    padding: 10px 20px;
-    color: rgba(255, 255, 255, 0.8);
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-}
-
-.enhanced-search-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
-    transform: none;
-    box-shadow: none;
-}
-
-.enhanced-search-btn:active {
-    transform: scale(0.97);
-}
-
-.btn-icon {
-    font-size: 14px;
-}
-
 /* Enhanced Search Status */
 .enhanced-search-status {
     display: flex;
@@ -33576,12 +33544,6 @@ div.artist-hero-badge {
         gap: 8px;
     }
 
-    .enhanced-search-btn {
-        width: 100%;
-        justify-content: center;
-        padding: 10px 16px;
-    }
-
     #enhanced-search-input {
         font-size: 14px;
     }
@@ -33600,11 +33562,6 @@ div.artist-hero-badge {
     .enhanced-search-icon {
         font-size: 16px;
         margin-right: 6px;
-    }
-
-    .enhanced-search-btn {
-        padding: 9px 14px;
-        font-size: 12px;
     }
 
     /* Better album/track results on mobile */

@@ -35,11 +35,18 @@ function initializeSearch() {
 // ===============================
 
 let searchModeToggleInitialized = false;
+// Set by the closure on first init; called by subsequent invocations to
+// re-display the search dropdown from the controller's cached state.
+// Solves the "results vanish on navigate-back" UX issue — a sidebar nav
+// click is treated as outside-click and dismisses the dropdown, so when
+// the user returns to /search we need to re-render whatever was cached.
+let _searchPageRestoreOnEnter = null;
 
 function initializeSearchModeToggle() {
-    // Only initialize once to prevent duplicate event listeners
+    // Subsequent invocations: just re-display cached results so they don't
+    // vanish on navigate-back. Skip the duplicate-listener setup.
     if (searchModeToggleInitialized) {
-        console.log('Search mode toggle already initialized, skipping...');
+        if (_searchPageRestoreOnEnter) _searchPageRestoreOnEnter();
         return;
     }
 
@@ -61,7 +68,6 @@ function initializeSearchModeToggle() {
     // the controller up with Search-page-specific DOM + callbacks.
 
     const enhancedInput = document.getElementById('enhanced-search-input');
-    const enhancedSearchBtn = document.getElementById('enhanced-search-btn');
     const enhancedCancelBtn = document.getElementById('enhanced-cancel-btn');
     const enhancedDropdown = document.getElementById('enhanced-dropdown');
     const loadingState = document.getElementById('enhanced-loading');
@@ -202,6 +208,12 @@ function initializeSearchModeToggle() {
     });
     searchController.init();
 
+    // Expose a re-render hook so navigate-back to /search restores cached
+    // results instead of leaving the dropdown hidden.
+    _searchPageRestoreOnEnter = () => {
+        if (searchController.state.query) _renderFromState(searchController.state);
+    };
+
     // Live search with debouncing
     if (enhancedInput) {
         enhancedInput.addEventListener('input', (e) => {
@@ -234,35 +246,6 @@ function initializeSearchModeToggle() {
                     clearTimeout(debounceTimer);
                     searchController.submitQuery(query);
                 }
-            }
-        });
-    }
-
-    if (enhancedSearchBtn) {
-        enhancedSearchBtn.addEventListener('click', (e) => {
-            // Prevent click from bubbling to document (which would close the dropdown)
-            e.stopPropagation();
-
-            // Get fresh references (in case we navigated away and back)
-            const dropdown = document.getElementById('enhanced-dropdown');
-            const results = document.getElementById('enhanced-results-container');
-
-            if (!dropdown) return;
-
-            // Toggle the dropdown visibility to show/hide previous search results
-            if (dropdown.classList.contains('hidden')) {
-                // Check if there are results to show by looking for actual content
-                const hasResults = results &&
-                    !results.classList.contains('hidden') &&
-                    results.children.length > 0;
-
-                if (hasResults) {
-                    showDropdown();
-                } else {
-                    showToast('No previous results to show. Type to search!', 'info');
-                }
-            } else {
-                hideDropdown();
             }
         });
     }
@@ -1017,10 +1000,7 @@ function initializeSearchModeToggle() {
 
     function showDropdown() {
         const dropdown = document.getElementById('enhanced-dropdown');
-        if (dropdown) {
-            dropdown.classList.remove('hidden');
-            updateToggleButtonState();
-        }
+        if (dropdown) dropdown.classList.remove('hidden');
         // Hide the page header + source picker to reclaim space
         const header = document.querySelector('#search-page .downloads-header');
         const modeToggle = document.querySelector('.search-source-picker-container');
@@ -1032,10 +1012,7 @@ function initializeSearchModeToggle() {
 
     function hideDropdown() {
         const dropdown = document.getElementById('enhanced-dropdown');
-        if (dropdown) {
-            dropdown.classList.add('hidden');
-            updateToggleButtonState();
-        }
+        if (dropdown) dropdown.classList.add('hidden');
         // Restore hidden elements
         const header = document.querySelector('#search-page .downloads-header');
         const modeToggle = document.querySelector('.search-source-picker-container');
@@ -1043,27 +1020,6 @@ function initializeSearchModeToggle() {
         if (header) header.classList.remove('enh-results-active-hide');
         if (modeToggle) modeToggle.classList.remove('enh-results-active-hide');
         if (slskdPlaceholder) slskdPlaceholder.classList.remove('enh-results-active-hide');
-    }
-
-    function updateToggleButtonState() {
-        // Get fresh references
-        const btn = document.getElementById('enhanced-search-btn');
-        const dropdown = document.getElementById('enhanced-dropdown');
-
-        if (!btn || !dropdown) return;
-
-        const btnIcon = btn.querySelector('.btn-icon');
-        const btnText = btn.querySelector('.btn-text');
-
-        if (dropdown.classList.contains('hidden')) {
-            // Dropdown is hidden - button should say "Show Results"
-            if (btnIcon) btnIcon.textContent = '👁️';
-            if (btnText) btnText.textContent = 'Show Results';
-        } else {
-            // Dropdown is visible - button should say "Hide Results"
-            if (btnIcon) btnIcon.textContent = '🙈';
-            if (btnText) btnText.textContent = 'Hide Results';
-        }
     }
 }
 
