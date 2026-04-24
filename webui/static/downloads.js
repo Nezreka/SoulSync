@@ -5181,10 +5181,24 @@ function _gsNavigateToSearchPage(query, src) {
     _gsDeactivate();
     if (typeof navigateToPage !== 'function') return;
     navigateToPage('search');
-    // After the page mounts, mirror the query into the enhanced input so the
-    // user doesn't have to retype it. The Search page's source picker will
-    // pick up `src` via its own default-source flow.
+    // After the page mounts, mirror the query into whichever input drives the
+    // requested source. Soulseek goes through the basic-search file flow, not
+    // the enhanced metadata flow — without this branch the Search page would
+    // run /api/enhanced-search instead of /api/search and the user would get
+    // metadata results when they clicked the Soulseek icon.
     setTimeout(() => {
+        if (src === 'soulseek') {
+            // Pre-fill the basic input first, then click the Search page's
+            // Soulseek icon. The icon's click triggers the controller's
+            // onSoulseekSelected callback, which owns the section swap and
+            // re-runs performDownloadsSearch with whatever's in the basic
+            // input (i.e., the value we just wrote).
+            const basicInput = document.getElementById('downloads-search-input');
+            if (basicInput && query) basicInput.value = query;
+            const soulseekIcon = document.querySelector('#enh-source-row [data-source="soulseek"]');
+            if (soulseekIcon) soulseekIcon.click();
+            return;
+        }
         const input = document.getElementById('enhanced-search-input');
         if (input && query) {
             input.value = query;

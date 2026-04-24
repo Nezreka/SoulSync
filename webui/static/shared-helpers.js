@@ -172,6 +172,13 @@ function createSearchController({
     for (const src of SOURCE_ORDER) state.configuredSources[src] = true;
 
     let abortCtrl = null;
+    // Monotonic request token. Each _fetchSource call captures the next
+    // value; settle/error blocks bail before mutating shared state if a
+    // newer request has superseded them. Without this, a fast retype lets
+    // the in-flight fetch's catch (or settle) clear loadingSources / write
+    // stale data into state.sources, causing a flash of empty/error UI
+    // while the new query's fetch is still running.
+    let _requestSeq = 0;
 
     function _notify() { if (onStateChange) onStateChange(state); }
 
@@ -305,6 +312,8 @@ function createSearchController({
         const query = state.query;
         if (!query) return;
 
+        const requestId = ++_requestSeq;
+
         state.loadingSources.add(src);
         renderSourceRow();
         _notify();
@@ -314,12 +323,14 @@ function createSearchController({
 
         try {
             if (src === 'youtube_videos') {
-                await _fetchYouTubeVideos(query, abortCtrl.signal);
+                await _fetchYouTubeVideos(query, abortCtrl.signal, requestId);
             } else {
                 const data = await enhancedSearchFetch(query, {
                     source: src,
                     signal: abortCtrl.signal,
                 });
+                // Bail without writing if a newer query has superseded us.
+                if (requestId !== _requestSeq) return;
                 state.sources[src] = {
                     artists: data.spotify_artists || [],
                     albums: data.spotify_albums || [],
@@ -331,10 +342,15 @@ function createSearchController({
                 if (served && served !== src) state.fallbacks[src] = served;
             }
 
+            // Only the latest request gets to clear loadingSources + notify.
+            // A stale completion would otherwise wipe the spinner the new
+            // request just set.
+            if (requestId !== _requestSeq) return;
             state.loadingSources.delete(src);
             renderSourceRow();
             _notify();
         } catch (err) {
+            if (requestId !== _requestSeq) return;
             state.loadingSources.delete(src);
             renderSourceRow();
             _notify();
@@ -344,7 +360,7 @@ function createSearchController({
         }
     }
 
-    async function _fetchYouTubeVideos(query, signal) {
+    async function _fetchYouTubeVideos(query, signal, requestId) {
         const res = await fetch('/api/enhanced-search/source/youtube_videos', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -352,6 +368,9 @@ function createSearchController({
             signal,
         });
         if (!res.ok) throw new Error(`YouTube search failed: ${res.status}`);
+
+        // Bail before allocating cache entry if superseded by a newer request.
+        if (requestId !== _requestSeq) return;
 
         state.sources['youtube_videos'] = {
             artists: [], albums: [], tracks: [], videos: [], db_artists: [],
@@ -364,6 +383,9 @@ function createSearchController({
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
+            // Mid-stream supersession check — abort cleanly without writing
+            // additional chunks into stale cache.
+            if (requestId !== _requestSeq) return;
             buffer += decoder.decode(value, { stream: true });
             let idx;
             while ((idx = buffer.indexOf('\n')) !== -1) {
