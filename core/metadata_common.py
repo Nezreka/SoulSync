@@ -7,10 +7,24 @@ import threading
 from types import SimpleNamespace
 from typing import Any, Dict
 
-from utils.logging_config import get_logger
+from utils.logging_config import get_logger as _create_logger
 
 
-logger = get_logger("metadata_enrichment")
+logger = _create_logger("metadata_common")
+
+__all__ = [
+    "get_logger",
+    "get_config_manager",
+    "get_mutagen_symbols",
+    "get_file_lock",
+    "is_ogg_opus",
+    "is_vorbis_like",
+    "save_audio_file",
+    "get_image_dimensions",
+    "strip_all_non_audio_tags",
+    "verify_metadata_written",
+    "wipe_source_tags",
+]
 
 _FILE_LOCKS: Dict[str, threading.Lock] = {}
 _FILE_LOCKS_LOCK = threading.Lock()
@@ -21,11 +35,11 @@ class _NullConfigManager:
         return default
 
 
-def _get_logger():
+def get_logger():
     return logger
 
 
-def _get_config_manager():
+def get_config_manager():
     try:
         from config.settings import config_manager as settings_config_manager
 
@@ -34,33 +48,7 @@ def _get_config_manager():
         return _NullConfigManager()
 
 
-def _get_database():
-    try:
-        from database.music_database import get_database
-
-        return get_database()
-    except Exception:
-        return None
-
-
-def _get_itunes_client():
-    try:
-        from core.metadata_service import get_itunes_client
-
-        return get_itunes_client()
-    except Exception:
-        return None
-
-
-def _extract_artist_name(artist: Any) -> str:
-    if isinstance(artist, dict):
-        return str(artist.get("name", "") or "")
-    if hasattr(artist, "name"):
-        return str(getattr(artist, "name") or "")
-    return str(artist) if artist else ""
-
-
-def _get_mutagen_symbols():
+def get_mutagen_symbols():
     """Lazy mutagen import so tests can monkeypatch this without the package installed."""
     try:
         from mutagen import File as MutagenFile
@@ -128,7 +116,7 @@ def _get_mutagen_symbols():
     )
 
 
-def _get_file_lock(file_path: str) -> threading.Lock:
+def get_file_lock(file_path: str) -> threading.Lock:
     with _FILE_LOCKS_LOCK:
         lock = _FILE_LOCKS.get(file_path)
         if lock is None:
@@ -137,21 +125,21 @@ def _get_file_lock(file_path: str) -> threading.Lock:
         return lock
 
 
-def _is_ogg_opus(audio_file: Any) -> bool:
+def is_ogg_opus(audio_file: Any) -> bool:
     return type(audio_file).__name__ == "OggOpus"
 
 
-def _is_vorbis_like(audio_file: Any, symbols: Any) -> bool:
+def is_vorbis_like(audio_file: Any, symbols: Any) -> bool:
     vorbis_classes = tuple(
         cls for cls in (
             getattr(symbols, "FLAC", None),
             getattr(symbols, "OggVorbis", None),
         ) if cls is not None
     )
-    return bool(vorbis_classes) and isinstance(audio_file, vorbis_classes) or _is_ogg_opus(audio_file)
+    return bool(vorbis_classes) and isinstance(audio_file, vorbis_classes) or is_ogg_opus(audio_file)
 
 
-def _save_audio_file(audio_file: Any, symbols: Any) -> None:
+def save_audio_file(audio_file: Any, symbols: Any) -> None:
     if isinstance(audio_file.tags, symbols.ID3):
         audio_file.save(v1=0, v2_version=4)
     elif isinstance(audio_file, symbols.FLAC):
@@ -160,7 +148,7 @@ def _save_audio_file(audio_file: Any, symbols: Any) -> None:
         audio_file.save()
 
 
-def _get_image_dimensions(data: bytes):
+def get_image_dimensions(data: bytes):
     try:
         if data[:8] == b"\x89PNG\r\n\x1a\n":
             import struct
@@ -185,12 +173,12 @@ def _get_image_dimensions(data: bytes):
     return None, None
 
 
-def _strip_all_non_audio_tags(file_path: str) -> dict:
+def strip_all_non_audio_tags(file_path: str) -> dict:
     summary = {"apev2_stripped": False, "apev2_tag_count": 0}
     if os.path.splitext(file_path)[1].lower() != ".mp3":
         return summary
 
-    symbols = _get_mutagen_symbols()
+    symbols = get_mutagen_symbols()
     if not symbols:
         return summary
 
@@ -209,8 +197,8 @@ def _strip_all_non_audio_tags(file_path: str) -> dict:
     return summary
 
 
-def _verify_metadata_written(file_path: str) -> bool:
-    symbols = _get_mutagen_symbols()
+def verify_metadata_written(file_path: str) -> bool:
+    symbols = get_mutagen_symbols()
     if not symbols:
         return False
 
@@ -231,7 +219,7 @@ def _verify_metadata_written(file_path: str) -> bool:
                 return False
             except symbols.APENoHeaderError:
                 pass
-        elif _is_vorbis_like(check, symbols):
+        elif is_vorbis_like(check, symbols):
             title_found = bool(check.get("title"))
             artist_found = bool(check.get("artist"))
         elif isinstance(check, symbols.MP4):
@@ -251,8 +239,8 @@ def _verify_metadata_written(file_path: str) -> bool:
 
 def wipe_source_tags(file_path: str) -> bool:
     try:
-        _strip_all_non_audio_tags(file_path)
-        symbols = _get_mutagen_symbols()
+        strip_all_non_audio_tags(file_path)
+        symbols = get_mutagen_symbols()
         if not symbols:
             return False
 
@@ -267,7 +255,7 @@ def wipe_source_tags(file_path: str) -> bool:
         else:
             audio.add_tags()
             tag_count = 0
-        _save_audio_file(audio, symbols)
+        save_audio_file(audio, symbols)
         if tag_count > 0:
             logger.info("[Tag Wipe] Stripped %s source tags from: %s", tag_count, os.path.basename(file_path))
         return True

@@ -8,17 +8,22 @@ import urllib.request
 
 from core.import_context import get_import_context_album
 from core.metadata_common import (
-    _get_config_manager,
-    _get_image_dimensions,
-    _get_logger,
-    _get_mutagen_symbols,
+    get_config_manager,
+    get_image_dimensions,
+    get_logger,
+    get_mutagen_symbols,
 )
+
+__all__ = [
+    "embed_album_art_metadata",
+    "download_cover_art",
+]
 
 
 def embed_album_art_metadata(audio_file, metadata: dict):
-    cfg = _get_config_manager()
-    logger_ = _get_logger()
-    symbols = _get_mutagen_symbols()
+    cfg = get_config_manager()
+    logger_ = get_logger()
+    symbols = get_mutagen_symbols()
     if not symbols:
         return
 
@@ -59,7 +64,7 @@ def embed_album_art_metadata(audio_file, metadata: dict):
             picture.data = image_data
             picture.type = 3
             picture.mime = mime_type
-            width, height = _get_image_dimensions(image_data)
+            width, height = get_image_dimensions(image_data)
             picture.width = width or 640
             picture.height = height or 640
             picture.depth = 24
@@ -74,8 +79,8 @@ def embed_album_art_metadata(audio_file, metadata: dict):
 
 
 def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
-    cfg = _get_config_manager()
-    logger_ = _get_logger()
+    cfg = get_config_manager()
+    logger_ = get_logger()
     if cfg.get("metadata_enhancement.cover_art_download", True) is False:
         return
 

@@ -9,12 +9,16 @@ from core.import_context import (
     get_import_original_search,
     normalize_import_context,
 )
-from core.metadata_common import _get_config_manager, _get_logger
+from core.metadata_common import get_config_manager, get_logger
+
+__all__ = [
+    "generate_lrc_file",
+]
 
 
 def generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
-    cfg = _get_config_manager()
-    logger_ = _get_logger()
+    cfg = get_config_manager()
+    logger_ = get_logger()
     if cfg.get("metadata_enhancement.lrclib_enabled", True) is False:
         return False
 
