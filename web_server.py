@@ -18,7 +18,7 @@ import sqlite3
 import types
 import collections
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, redirect, send_file, Response, session, g, abort
@@ -11127,7 +11127,7 @@ def maintain_search_history():
         return jsonify({"success": False, "error": str(e)}), 500
 
 def fix_artist_image_url(thumb_url):
-    """Convert localhost URLs to proper server URLs using config"""
+    """Convert media-server image URLs into browser-safe URLs."""
     if not thumb_url:
         return None
 
@@ -11136,6 +11136,11 @@ def fix_artist_image_url(thumb_url):
         needs_fixing = (
             thumb_url.startswith('http://localhost:') or
             thumb_url.startswith('https://localhost:') or
+            thumb_url.startswith('http://127.0.0.1:') or
+            thumb_url.startswith('https://127.0.0.1:') or
+            thumb_url.startswith('http://host.docker.internal:') or
+            thumb_url.startswith('https://host.docker.internal:') or
+            (thumb_url.startswith('http://') and _is_internal_image_host(thumb_url)) or
             thumb_url.startswith('/library/') or  # Plex relative paths
             thumb_url.startswith('/Items/') or    # Jellyfin relative paths
             thumb_url.startswith('/api/') or      # Old Navidrome API paths
@@ -11166,7 +11171,7 @@ def fix_artist_image_url(thumb_url):
                     # Construct proper Plex URL with token
                     fixed_url = f"{plex_base_url.rstrip('/')}{path}?X-Plex-Token={plex_token}"
                     logger.info(f"Fixed URL: {fixed_url}")
-                    return fixed_url
+                    return _browser_safe_image_url(fixed_url)
 
             elif active_server == 'jellyfin':
                 jellyfin_config = config_manager.get_jellyfin_config()
@@ -11192,7 +11197,7 @@ def fix_artist_image_url(thumb_url):
                     else:
                         fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}"
                     logger.info(f"Fixed URL: {fixed_url}")
-                    return fixed_url
+                    return _browser_safe_image_url(fixed_url)
 
             elif active_server == 'navidrome':
                 navidrome_config = config_manager.get_navidrome_config()
@@ -11225,16 +11230,57 @@ def fix_artist_image_url(thumb_url):
                     # Construct proper Navidrome Subsonic URL
                     fixed_url = f"{navidrome_base_url.rstrip('/')}{path}{separator}{auth_params}"
                     logger.info(f"Fixed URL: {fixed_url}")
-                    return fixed_url
+                    return _browser_safe_image_url(fixed_url)
 
             logger.warning(f"No configuration found for {active_server} or unsupported server type")
 
-        # Return original URL if no fixing needed/possible
-        return thumb_url
+        # Return a browser-safe URL even if no server-specific rebuild was possible.
+        return _browser_safe_image_url(thumb_url)
 
     except Exception as e:
         logger.error(f"Error fixing image URL '{thumb_url}': {e}")
-        return thumb_url
+        return _browser_safe_image_url(thumb_url)
+
+
+def _is_internal_image_host(url: str) -> bool:
+    """Return True when an image URL points at a host the browser likely cannot reach directly."""
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or '').strip('[]').lower()
+        if not host:
+            return False
+
+        if host in {'localhost', '127.0.0.1', '::1', 'host.docker.internal'}:
+            return True
+
+        # Single-label hosts are usually Docker service names or local LAN aliases.
+        if '.' not in host:
+            return True
+
+        try:
+            ip = ipaddress.ip_address(host)
+            return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved
+        except ValueError:
+            return False
+    except Exception:
+        return False
+
+
+def _browser_safe_image_url(url: str) -> str:
+    """Return a browser-safe image URL, proxying internal hosts through SoulSync."""
+    if not url:
+        return url
+
+    if url.startswith('/api/image-proxy?url='):
+        return url
+
+    if url.startswith('http://') or url.startswith('https://'):
+        if _is_internal_image_host(url):
+            return f"/api/image-proxy?url={quote(url, safe='')}"
+        return url
+
+    # Relative media-server paths should already have been expanded before this point.
+    return url
 
 @app.route('/api/library/history')
 def get_library_history():
@@ -45220,8 +45266,7 @@ def image_proxy():
     url = request.args.get('url', '')
     if not url or not url.startswith('http'):
         return '', 400
-    # Only allow known image CDNs
-    from urllib.parse import urlparse
+
     host = urlparse(url).hostname or ''
     allowed_hosts = [
         'i.scdn.co', 'mosaic.scdn.co',  # Spotify
@@ -45230,8 +45275,9 @@ def image_proxy():
         'is1-ssl.mzstatic.com', 'is2-ssl.mzstatic.com', 'is3-ssl.mzstatic.com',
         'is4-ssl.mzstatic.com', 'is5-ssl.mzstatic.com',  # iTunes/Apple
         'img.discogs.com', 'i.discogs.com',  # Discogs
+        'localhost', '127.0.0.1', 'host.docker.internal',  # Local/Docker media servers
     ]
-    if not any(host == h or host.endswith('.' + h) for h in allowed_hosts):
+    if not any(host == h or host.endswith('.' + h) for h in allowed_hosts) and not _is_internal_image_host(url):
         return '', 403
     try:
         resp = requests.get(url, timeout=10, stream=True, headers={
