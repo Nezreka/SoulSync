@@ -59593,134 +59593,197 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     line-height: 1.4;
 }
 
+/* ─────────────────────────────────────────────────────────────────────── */
+/* SoulSync Discover cards — grid layout mirroring server-pl-card pattern */
+/* ─────────────────────────────────────────────────────────────────────── */
+
+.discover-sync-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+    padding: 4px;
+}
+
 .discover-sync-card {
-    background: rgba(255, 255, 255, 0.04);
+    position: relative;
+    background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    margin: 3px 6px;
-    padding: 8px 14px;
+    border-radius: 14px;
+    padding: 14px 14px 12px;
     display: flex;
-    align-items: center;
-    gap: 10px;
-    transition: all 0.25s ease;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 260px;
+    overflow: hidden;
+    transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease;
 }
 
 .discover-sync-card:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(167, 139, 250, 0.2);
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: hsla(var(--card-hue, 260), 80%, 70%, 0.35);
+}
+
+.discover-sync-card-glow {
+    position: absolute;
+    top: -40%;
+    right: -20%;
+    width: 160px;
+    height: 160px;
+    background: radial-gradient(circle,
+        hsla(var(--card-hue, 260), 80%, 60%, 0.22) 0%,
+        hsla(var(--card-hue, 260), 80%, 60%, 0) 70%);
+    pointer-events: none;
+    z-index: 0;
+    transition: opacity 0.25s ease;
+}
+
+.discover-sync-card:hover .discover-sync-card-glow {
+    opacity: 1.4;
+}
+
+.discover-sync-card > *:not(.discover-sync-card-glow) {
+    position: relative;
+    z-index: 1;
+}
+
+/* ── Top row: icon + source badge ── */
+.discover-sync-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
 }
 
 .discover-sync-card-icon {
-    font-size: 20px;
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
+    font-size: 22px;
+    width: 40px;
+    height: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
+    background: linear-gradient(135deg,
+        hsla(var(--card-hue, 260), 70%, 55%, 0.2),
+        hsla(var(--card-hue, 260), 70%, 40%, 0.1));
+    border: 1px solid hsla(var(--card-hue, 260), 70%, 60%, 0.2);
+    border-radius: 10px;
+    flex-shrink: 0;
 }
 
-.discover-sync-card-info {
+.discover-sync-source-badge {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 3px 8px;
+    border-radius: 5px;
+    color: hsla(var(--card-hue, 260), 80%, 80%, 1);
+    background: hsla(var(--card-hue, 260), 70%, 55%, 0.12);
+    border: 1px solid hsla(var(--card-hue, 260), 70%, 60%, 0.25);
+    white-space: nowrap;
+}
+
+/* ── Body: name + meta line + last-synced ── */
+.discover-sync-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
     flex: 1;
     min-width: 0;
 }
 
 .discover-sync-card-name {
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 700;
     color: #fff;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-.discover-sync-card-meta-inline {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    font-weight: 400;
-    color: rgba(255, 255, 255, 0.4);
-}
-
-.discover-sync-source-badge {
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    padding: 1px 7px;
-    border-radius: 4px;
-    color: rgb(var(--accent-light-rgb));
-    background: rgba(var(--accent-rgb), 0.1);
-    border: 1px solid rgba(var(--accent-rgb), 0.2);
-}
-
-.discover-sync-card-desc {
-    display: none;
+    line-height: 1.25;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    word-break: break-word;
 }
 
 .discover-sync-card-meta {
-    display: none;
-    color: rgba(255, 255, 255, 0.4);
-}
-
-.discover-sync-separator {
-    opacity: 0.4;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11.5px;
+    font-weight: 500;
+    margin-top: 2px;
 }
 
 .discover-sync-track-count {
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(255, 255, 255, 0.6);
 }
 
 .discover-sync-status {
-    font-weight: 500;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    letter-spacing: 0.2px;
 }
 
 .discover-sync-status.synced {
-    color: #22c55e;
+    color: #4ade80;
+    background: rgba(34, 197, 94, 0.12);
 }
 
 .discover-sync-status.syncing {
-    color: #facc15;
+    color: #fde047;
+    background: rgba(250, 204, 21, 0.14);
 }
 
 .discover-sync-status.not-synced {
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .discover-sync-last-synced {
-    color: rgba(255, 255, 255, 0.35);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 2px;
 }
 
-.discover-sync-card-actions {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-shrink: 0;
-}
-
-.discover-sync-toggle-wrapper {
+/* ── Toggles (stacked rows of label + switch) ── */
+.discover-sync-card-toggles {
     display: flex;
     flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+}
+
+.discover-sync-toggle-row {
+    display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: space-between;
+    gap: 10px;
+    cursor: pointer;
+    min-height: 22px;
+}
+
+.discover-sync-toggle-row.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 .discover-sync-toggle-label {
-    font-size: 10.5px;
-    color: rgba(255, 255, 255, 0.4);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.65);
     white-space: nowrap;
 }
 
 .discover-sync-toggle {
     position: relative;
     display: inline-block;
-    width: 40px;
-    height: 22px;
-    cursor: pointer;
+    width: 34px;
+    height: 18px;
+    flex-shrink: 0;
 }
 
 .discover-sync-toggle input {
@@ -59736,56 +59799,65 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     right: 0;
     bottom: 0;
     background: rgba(255, 255, 255, 0.12);
-    border-radius: 22px;
+    border-radius: 18px;
     transition: all 0.25s ease;
 }
 
 .discover-sync-toggle-slider::before {
     content: '';
     position: absolute;
-    width: 16px;
-    height: 16px;
-    left: 3px;
-    bottom: 3px;
+    width: 14px;
+    height: 14px;
+    left: 2px;
+    bottom: 2px;
     background: #fff;
     border-radius: 50%;
     transition: all 0.25s ease;
 }
 
 .discover-sync-toggle input:checked + .discover-sync-toggle-slider {
-    background: #a78bfa;
+    background: hsla(var(--card-hue, 260), 75%, 60%, 1);
 }
 
 .discover-sync-toggle input:checked + .discover-sync-toggle-slider::before {
-    transform: translateX(18px);
+    transform: translateX(16px);
 }
 
-.discover-sync-btn {
-    padding: 8px 16px;
-    background: linear-gradient(135deg, #a78bfa, #7c3aed);
+/* ── Primary action button ── */
+/* Kept as a flat-text button (no nested children) because the sync-poll
+   code writes `btn.textContent = 'Syncing…'` / `'⟳ Sync Now'` on state
+   transitions — any child elements would be wiped on every toggle. */
+.discover-sync-card-action {
+    display: block;
+    width: 100%;
+    padding: 10px 14px;
+    background: linear-gradient(135deg,
+        hsla(var(--card-hue, 260), 70%, 55%, 0.85),
+        hsla(var(--card-hue, 260), 70%, 42%, 0.85));
     color: #fff;
-    border: none;
-    border-radius: 8px;
+    border: 1px solid hsla(var(--card-hue, 260), 70%, 65%, 0.35);
+    border-radius: 10px;
     font-size: 12.5px;
     font-weight: 600;
     cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.25s ease;
+    text-align: center;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+    margin-top: auto;
 }
 
-.discover-sync-btn:hover:not(:disabled) {
+.discover-sync-card-action:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(167, 139, 250, 0.35);
+    filter: brightness(1.08);
+    box-shadow: 0 6px 18px hsla(var(--card-hue, 260), 70%, 50%, 0.35);
 }
 
-.discover-sync-btn:disabled {
-    opacity: 0.4;
+.discover-sync-card-action:disabled {
+    opacity: 0.45;
     cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
+    filter: grayscale(30%);
 }
 
-/* Empty-state styling */
+/* ── Empty / highlight states ── */
 .discover-sync-card-empty {
     opacity: 0.55;
 }
@@ -59794,16 +59866,22 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     opacity: 0.4;
 }
 
-/* Deep-link highlight animation */
 .discover-sync-card-highlight {
     animation: discover-card-glow 2.5s ease-out;
 }
 
 @keyframes discover-card-glow {
-    0% { border-color: rgba(167, 139, 250, 0.7); box-shadow: 0 0 20px rgba(167, 139, 250, 0.3); }
-    100% { border-color: rgba(255, 255, 255, 0.08); box-shadow: none; }
+    0% {
+        border-color: hsla(var(--card-hue, 260), 80%, 70%, 0.9);
+        box-shadow: 0 0 24px hsla(var(--card-hue, 260), 80%, 60%, 0.4);
+    }
+    100% {
+        border-color: rgba(255, 255, 255, 0.08);
+        box-shadow: none;
+    }
 }
 
+/* ── Existing empty-state hint + source info (unchanged) ── */
 .discover-sync-empty-hint {
     background: rgba(255, 193, 7, 0.08);
     border: 1px solid rgba(255, 193, 7, 0.25);
@@ -59839,14 +59917,14 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
 }
 
 @media (max-width: 768px) {
-    .discover-sync-card {
-        flex-wrap: wrap;
+    .discover-sync-grid {
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
         gap: 12px;
     }
 
-    .discover-sync-card-actions {
-        width: 100%;
-        justify-content: flex-end;
+    .discover-sync-card {
+        min-height: 240px;
+        padding: 12px;
     }
 }
 

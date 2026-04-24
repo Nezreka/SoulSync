@@ -9077,78 +9077,104 @@ async function loadDiscoverSyncPlaylists() {
     }
 }
 
+// Grid container lazy-init — we wrap cards in a .discover-sync-grid div so
+// the vertical scroll container holds a proper grid. Only one grid per
+// container; subsequent calls append to the existing grid.
+function _getOrCreateDiscoverSyncGrid(container) {
+    let grid = container.querySelector(':scope > .discover-sync-grid');
+    if (!grid) {
+        grid = document.createElement('div');
+        grid.className = 'discover-sync-grid';
+        container.appendChild(grid);
+    }
+    return grid;
+}
+
+// Deterministic hue per playlist type — same playlist always gets the same
+// gradient-glow color across reloads. Mirrors the i*37+200 formula used by
+// server-pl-card for color-wheel spread.
+function _discoverSyncHue(playlistType) {
+    let hash = 0;
+    const s = String(playlistType || '');
+    for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) | 0;
+    return ((hash % 360) + 360) % 360;
+}
+
 function renderDiscoverSyncCard(playlist, container, sourceLabel) {
+    const grid = _getOrCreateDiscoverSyncGrid(container);
     const card = document.createElement('div');
     const isEmpty = playlist.track_count === 0;
     card.className = `discover-sync-card${isEmpty ? ' discover-sync-card-empty' : ''}`;
     card.id = `discover-sync-card-${playlist.type}`;
+    card.style.setProperty('--card-hue', _discoverSyncHue(playlist.type));
 
     const lastSyncedText = playlist.last_synced
-        ? `Last synced ${timeAgo(playlist.last_synced)}`
+        ? `Synced ${timeAgo(playlist.last_synced)}`
         : 'Never synced';
 
     const statusClass = playlist.sync_status === 'syncing' ? 'syncing' :
                          playlist.sync_status === 'synced' ? 'synced' : 'not-synced';
+    // Text format mirrors the strings the sync-poll code writes back into
+    // this element on transitions (see pollDiscoverBatchFromTab) — keeping
+    // them aligned means the user sees consistent text across the
+    // render → syncing → synced lifecycle.
     let statusText = playlist.sync_status === 'syncing' ? 'Syncing...' :
                      playlist.sync_status === 'synced' ? 'Synced' : 'Not synced';
 
-    // Show matched/total counts if available (only when matched > 0, meaning completion was recorded)
     if (playlist.sync_status === 'synced' && playlist.matched_tracks > 0 && playlist.total_sync_tracks > 0) {
         statusText = `Synced ${playlist.matched_tracks}/${playlist.total_sync_tracks}`;
     }
 
     const trackLabel = isEmpty ? 'No tracks yet' : `${playlist.track_count} tracks`;
+    const safePlaylistName = (playlist.name || '').replace(/'/g, "\\'");
 
     card.innerHTML = `
-        <div class="discover-sync-card-icon">${playlist.icon}</div>
-        <div class="discover-sync-card-info">
-            <div class="discover-sync-card-name">${playlist.name}
-                <span class="discover-sync-card-meta-inline">
-                    <span class="discover-sync-source-badge">${sourceLabel || 'unknown'}</span>
-                    <span class="discover-sync-separator">\u00b7</span>
-                    <span class="discover-sync-track-count">${trackLabel}</span>
-                    <span class="discover-sync-separator">\u00b7</span>
-                    <span class="discover-sync-status ${statusClass}">${statusText}</span>
-                    <span class="discover-sync-separator">\u00b7</span>
-                    <span class="discover-sync-last-synced">${lastSyncedText}</span>
-                </span>
-            </div>
+        <div class="discover-sync-card-glow"></div>
+        <div class="discover-sync-card-top">
+            <div class="discover-sync-card-icon">${playlist.icon || '🎵'}</div>
+            <div class="discover-sync-source-badge">${sourceLabel || 'unknown'}</div>
         </div>
-        <div class="discover-sync-card-actions">
-            <div class="discover-sync-toggle-wrapper" title="${isEmpty ? 'No tracks available — visit Discover first' : 'Keep this playlist updated automatically'}">
-                <label class="discover-sync-toggle-label">Keep updated</label>
-                <label class="discover-sync-toggle">
+        <div class="discover-sync-card-body">
+            <div class="discover-sync-card-name">${playlist.name}</div>
+            <div class="discover-sync-card-meta">
+                <span class="discover-sync-track-count">${trackLabel}</span>
+                <span class="discover-sync-status ${statusClass}">${statusText}</span>
+            </div>
+            <div class="discover-sync-last-synced">${lastSyncedText}</div>
+        </div>
+        <div class="discover-sync-card-toggles">
+            <label class="discover-sync-toggle-row" title="${isEmpty ? 'No tracks available — visit Discover first' : 'Keep this playlist updated automatically'}">
+                <span class="discover-sync-toggle-label">Keep updated</span>
+                <span class="discover-sync-toggle">
                     <input type="checkbox" ${playlist.auto_update ? 'checked' : ''} ${isEmpty ? 'disabled' : ''}
                            onchange="toggleDiscoverAutoUpdate('${playlist.type}', this.checked)">
                     <span class="discover-sync-toggle-slider"></span>
-                </label>
-            </div>
-            <div class="discover-sync-toggle-wrapper" title="Coming soon: download any available quality for this batch, even if it's below your global quality profile. Useful for rotating discover playlists where quantity matters more than quality.">
-                <label class="discover-sync-toggle-label" style="opacity:0.5">Any Quality</label>
-                <label class="discover-sync-toggle" style="opacity:0.5;cursor:not-allowed">
+                </span>
+            </label>
+            <label class="discover-sync-toggle-row disabled" title="Coming soon: download any available quality for this batch, even if it's below your global quality profile. Useful for rotating discover playlists where quantity matters more than quality.">
+                <span class="discover-sync-toggle-label">Any Quality</span>
+                <span class="discover-sync-toggle">
                     <input type="checkbox" id="discover-any-quality-${playlist.type}" disabled>
                     <span class="discover-sync-toggle-slider"></span>
-                </label>
-            </div>
-            <button class="discover-sync-btn" id="discover-sync-btn-${playlist.type}"
-                    onclick="syncDiscoverPlaylistFromTab('${playlist.type}', '${playlist.name}')"
-                    ${playlist.sync_status === 'syncing' || isEmpty ? 'disabled' : ''}>
-                \u27f3 Sync Now
-            </button>
+                </span>
+            </label>
         </div>
+        <button class="discover-sync-card-action" id="discover-sync-btn-${playlist.type}"
+                onclick="event.stopPropagation(); syncDiscoverPlaylistFromTab('${playlist.type}', '${safePlaylistName}')"
+                ${playlist.sync_status === 'syncing' || isEmpty ? 'disabled' : ''}>⟳ Sync Now</button>
     `;
 
-    // Make the icon + info area clickable to view tracks
+    // Clicking the top (icon + badge) or body (name + meta) opens the track list.
+    // The Sync Now button stops propagation so it doesn't double-trigger.
     if (!isEmpty) {
-        const clickArea = card.querySelector('.discover-sync-card-info');
-        const iconArea = card.querySelector('.discover-sync-card-icon');
-        [clickArea, iconArea].forEach(el => {
+        const openTracks = () => openDiscoverPlaylistModal(playlist.type, playlist.name, playlist.icon);
+        card.querySelectorAll('.discover-sync-card-top, .discover-sync-card-body').forEach(el => {
             el.style.cursor = 'pointer';
-            el.addEventListener('click', () => openDiscoverPlaylistModal(playlist.type, playlist.name, playlist.icon));
+            el.addEventListener('click', openTracks);
         });
     }
 
-    container.appendChild(card);
+    grid.appendChild(card);
 }
 
 async function toggleDiscoverAutoUpdate(playlistType, enabled) {
