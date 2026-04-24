@@ -44263,7 +44263,7 @@ def get_discover_synced_playlists():
         try:
             with database._get_connection() as conn:
                 pool_count = conn.execute(
-                    "SELECT COUNT(*) FROM discovery_pool WHERE source = ?", (active_source,)
+                    "SELECT COUNT(*) FROM discovery_pool WHERE source = ? AND profile_id = ?", (active_source, pid)
                 ).fetchone()[0]
         except Exception:
             pool_count = 0
