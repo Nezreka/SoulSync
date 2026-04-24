@@ -3,10 +3,10 @@ import types
 
 from core.import_file_ops import (
     cleanup_empty_directories,
-    extract_track_number_from_filename,
     safe_move_file,
-    read_staging_file_metadata,
 )
+from core.import_filename import extract_track_number_from_filename
+from core.import_staging import read_staging_file_metadata
 
 
 def test_extract_track_number_from_filename_handles_common_patterns():

@@ -1,3 +1,4 @@
+import core.import_album_naming as album_naming
 import core.import_paths as import_paths
 
 
@@ -73,8 +74,7 @@ def test_get_file_path_from_template_raw_handles_quality_and_disc_placeholders(m
 
 
 def test_resolve_album_group_upgrades_standard_to_deluxe():
-    import_paths._album_name_cache.clear()
-    import_paths._album_editions.clear()
+    album_naming.clear_album_grouping_cache()
 
     artist_context = {"name": "Cache Artist"}
     standard_album = {"album_name": "Cache Album"}
