@@ -175,13 +175,20 @@ function createSearchController({
     for (const src of SOURCE_ORDER) state.configuredSources[src] = true;
 
     let abortCtrl = null;
-    // Monotonic request token. Each _fetchSource call captures the next
-    // value; settle/error blocks bail before mutating shared state if a
-    // newer request has superseded them. Without this, a fast retype lets
-    // the in-flight fetch's catch (or settle) clear loadingSources / write
-    // stale data into state.sources, causing a flash of empty/error UI
-    // while the new query's fetch is still running.
+    // Per-source request tokens. Each _fetchSource call increments the
+    // monotonic _requestSeq and stamps it into _sourceRequestIds[src].
+    // Settle/error blocks bail before mutating shared state if their
+    // requestId no longer matches the latest id for THAT source —
+    // protecting against the fast-retype race (same-source supersession)
+    // without dropping cleanup for cross-source supersession.
+    //
+    // A single global token would mishandle cross-source: switching
+    // Spotify → Deezer aborts Spotify's fetch, but Spotify's catch needs
+    // to clear 'spotify' from loadingSources (Deezer's request hasn't
+    // touched it). Per-source tracking lets each source's catch own its
+    // own loadingSources entry.
     let _requestSeq = 0;
+    const _sourceRequestIds = Object.create(null);
 
     function _notify() { if (onStateChange) onStateChange(state); }
 
@@ -316,6 +323,7 @@ function createSearchController({
         if (!query) return;
 
         const requestId = ++_requestSeq;
+        _sourceRequestIds[src] = requestId;
 
         state.loadingSources.add(src);
         renderSourceRow();
@@ -332,8 +340,11 @@ function createSearchController({
                     source: src,
                     signal: abortCtrl.signal,
                 });
-                // Bail without writing if a newer query has superseded us.
-                if (requestId !== _requestSeq) return;
+                // Bail without writing if a newer request for THIS source
+                // has superseded us. Cross-source supersession (different
+                // src entirely) is handled by the loadingSources cleanup
+                // below — each source's catch owns its own entry.
+                if (_sourceRequestIds[src] !== requestId) return;
                 state.sources[src] = {
                     artists: data.spotify_artists || [],
                     albums: data.spotify_albums || [],
@@ -345,18 +356,20 @@ function createSearchController({
                 if (served && served !== src) state.fallbacks[src] = served;
             }
 
-            // Only the latest request gets to clear loadingSources + notify.
-            // A stale completion would otherwise wipe the spinner the new
-            // request just set.
-            if (requestId !== _requestSeq) return;
+            if (_sourceRequestIds[src] !== requestId) return;
             state.loadingSources.delete(src);
             renderSourceRow();
             _notify();
         } catch (err) {
-            if (requestId !== _requestSeq) return;
-            state.loadingSources.delete(src);
-            renderSourceRow();
-            _notify();
+            // Only clear loadingSources if no newer request for THIS source
+            // is in flight. Cross-source supersession (e.g. user switched
+            // Spotify → Deezer) still falls through here so Spotify's
+            // spinner gets cleared on its own AbortError.
+            if (_sourceRequestIds[src] === requestId) {
+                state.loadingSources.delete(src);
+                renderSourceRow();
+                _notify();
+            }
             if (err.name !== 'AbortError') {
                 console.debug(`Source fetch failed for ${src}:`, err);
             }
@@ -372,8 +385,9 @@ function createSearchController({
         });
         if (!res.ok) throw new Error(`YouTube search failed: ${res.status}`);
 
-        // Bail before allocating cache entry if superseded by a newer request.
-        if (requestId !== _requestSeq) return;
+        // Bail before allocating cache entry if a newer YouTube request
+        // has superseded us.
+        if (_sourceRequestIds['youtube_videos'] !== requestId) return;
 
         state.sources['youtube_videos'] = {
             artists: [], albums: [], tracks: [], videos: [], db_artists: [],
@@ -386,9 +400,7 @@ function createSearchController({
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            // Mid-stream supersession check — abort cleanly without writing
-            // additional chunks into stale cache.
-            if (requestId !== _requestSeq) return;
+            if (_sourceRequestIds['youtube_videos'] !== requestId) return;
             buffer += decoder.decode(value, { stream: true });
             let idx;
             while ((idx = buffer.indexOf('\n')) !== -1) {
@@ -399,7 +411,6 @@ function createSearchController({
                     const chunk = JSON.parse(line);
                     if (chunk.type === 'videos') {
                         cache.videos = chunk.data;
-                        // Live-render if still the active source.
                         if (state.activeSource === 'youtube_videos') _notify();
                     }
                 } catch (_) { /* best-effort NDJSON parse */ }
@@ -413,6 +424,15 @@ function createSearchController({
             state.sources = {};
             state.fallbacks = {};
             state.loadingSources = new Set();
+            // Invalidate every in-flight per-source token. Without this, a
+            // settle that arrives AFTER a query reset (e.g. user typed 'a',
+            // fetch started, then user cleared the input) would still
+            // pass the per-source token check and write stale data back
+            // into the just-cleared state.sources. Setting fresh tokens
+            // when each new _fetchSource fires re-stamps as needed.
+            for (const k in _sourceRequestIds) delete _sourceRequestIds[k];
+            // Abort the active fetch — its results are useless now.
+            if (abortCtrl) { abortCtrl.abort(); abortCtrl = null; }
             renderSourceRow();
         }
 

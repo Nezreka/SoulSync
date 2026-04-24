@@ -41,6 +41,11 @@ let searchModeToggleInitialized = false;
 // click is treated as outside-click and dismisses the dropdown, so when
 // the user returns to /search we need to re-render whatever was cached.
 let _searchPageRestoreOnEnter = null;
+// Exposed so the global-search widget's Soulseek handoff can sync the
+// controller's state.query to the widget's query before clicking the
+// Soulseek icon — otherwise onSoulseekSelected fires with whatever the
+// user last typed on /search and overwrites the basic input.
+let _searchPageController = null;
 
 function initializeSearchModeToggle() {
     // Subsequent invocations: just re-display cached results so they don't
@@ -207,6 +212,7 @@ function initializeSearchModeToggle() {
         },
     });
     searchController.init();
+    _searchPageController = searchController;
 
     // Expose a re-render hook so navigate-back to /search restores cached
     // results instead of leaving the dropdown hidden. Deferred to the next
