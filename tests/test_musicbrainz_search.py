@@ -1,0 +1,351 @@
+"""Tests for the MusicBrainz search adapter (core/musicbrainz_search.py).
+
+Covers the behavior changes from the search-overhaul PR:
+- Artist search is re-enabled and score-filtered
+- Bare name queries route through artist-first → browse
+- Structured 'Artist - Title' queries stay on text search
+- Top-artist resolution is memoized per instance
+- Cover Art URLs are constructed, not probed
+"""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from core.musicbrainz_search import (
+    MusicBrainzSearchClient,
+    _cover_art_url,
+)
+
+
+# ---------------------------------------------------------------------------
+# Cover art URL construction
+# ---------------------------------------------------------------------------
+
+def test_cover_art_url_release_scope():
+    assert _cover_art_url('abc-123') == 'https://coverartarchive.org/release/abc-123/front-250'
+
+
+def test_cover_art_url_release_group_scope():
+    assert _cover_art_url('abc-123', scope='release-group') == \
+        'https://coverartarchive.org/release-group/abc-123/front-250'
+
+
+def test_cover_art_url_empty_mbid_returns_none():
+    assert _cover_art_url('') is None
+    assert _cover_art_url(None) is None
+
+
+def test_cover_art_url_unknown_scope_falls_back_to_release():
+    assert _cover_art_url('abc', scope='garbage') == 'https://coverartarchive.org/release/abc/front-250'
+
+
+# ---------------------------------------------------------------------------
+# Structured query splitting
+# ---------------------------------------------------------------------------
+
+def test_split_structured_query_hyphen():
+    client = MusicBrainzSearchClient()
+    assert client._split_structured_query('Metallica - Master of Puppets') == ('Metallica', 'Master of Puppets')
+
+
+def test_split_structured_query_en_dash():
+    client = MusicBrainzSearchClient()
+    assert client._split_structured_query('Metallica – One') == ('Metallica', 'One')
+
+
+def test_split_structured_query_em_dash():
+    client = MusicBrainzSearchClient()
+    assert client._split_structured_query('Metallica — Battery') == ('Metallica', 'Battery')
+
+
+def test_split_structured_query_bare_name():
+    client = MusicBrainzSearchClient()
+    assert client._split_structured_query('metallica') == (None, 'metallica')
+
+
+def test_split_structured_query_no_separator_with_hyphens_in_word():
+    # A hyphen inside a word (no surrounding spaces) should not split.
+    client = MusicBrainzSearchClient()
+    assert client._split_structured_query('t-pain') == (None, 't-pain')
+
+
+# ---------------------------------------------------------------------------
+# Artist search — score filtering and shape
+# ---------------------------------------------------------------------------
+
+def _mk_artist(name, mbid, score=100, tags=None):
+    return {
+        'id': mbid,
+        'name': name,
+        'score': score,
+        'tags': tags or [],
+    }
+
+
+def test_search_artists_filters_by_score_threshold():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [
+        _mk_artist('Metallica', 'mb-real', score=100),
+        _mk_artist('Metallica Tribute', 'mb-tribute', score=60),
+        _mk_artist('Metallica Jam', 'mb-jam', score=58),
+    ]
+    results = client.search_artists('metallica', limit=10)
+    assert len(results) == 1
+    assert results[0].name == 'Metallica'
+    assert results[0].id == 'mb-real'
+
+
+def test_search_artists_uses_strict_false_for_fuzzy_match():
+    """The adapter must use strict=False so MusicBrainz searches
+    alias+artist+sortname together — strict mode would miss aliased names."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = []
+    client.search_artists('metallica')
+    client._client.search_artist.assert_called_once_with('metallica', limit=10, strict=False)
+
+
+def test_search_artists_returns_empty_on_exception():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.side_effect = RuntimeError('network down')
+    assert client.search_artists('metallica') == []
+
+
+def test_search_artists_extracts_tags_as_genres():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [
+        _mk_artist('Metallica', 'mb-real', score=100,
+                   tags=[{'name': 'thrash metal', 'count': 20},
+                         {'name': 'heavy metal', 'count': 15}]),
+    ]
+    results = client.search_artists('metallica')
+    assert results[0].genres == ['thrash metal', 'heavy metal']
+
+
+def test_search_artists_skips_entries_without_mbid_or_name():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [
+        {'id': 'mb-1', 'name': 'Good', 'score': 100},
+        {'id': '', 'name': 'Missing MBID', 'score': 100},
+        {'id': 'mb-2', 'name': '', 'score': 100},
+    ]
+    results = client.search_artists('x')
+    assert [r.name for r in results] == ['Good']
+
+
+# ---------------------------------------------------------------------------
+# Top-artist resolution — memoization
+# ---------------------------------------------------------------------------
+
+def test_resolve_top_artist_memoizes_by_normalized_query():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Metallica', 'mb-1', score=100)]
+
+    first = client._resolve_top_artist('metallica')
+    second = client._resolve_top_artist('  Metallica  ')  # Whitespace / case variant
+
+    assert first is not None
+    assert first['id'] == 'mb-1'
+    assert first is second
+    # HTTP call happens once despite two resolve calls.
+    assert client._client.search_artist.call_count == 1
+
+
+def test_resolve_top_artist_returns_none_below_threshold():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Tribute', 'mb-trib', score=50)]
+    assert client._resolve_top_artist('obscure') is None
+
+
+def test_resolve_top_artist_caches_negative_result():
+    """After a lookup finds no good match, subsequent calls don't refetch."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = []
+    first = client._resolve_top_artist('nonexistent band')
+    second = client._resolve_top_artist('nonexistent band')
+    assert first is None
+    assert second is None
+    assert client._client.search_artist.call_count == 1
+
+
+def test_resolve_top_artist_empty_query_returns_none_without_http():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    assert client._resolve_top_artist('') is None
+    client._client.search_artist.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Album search — routing
+# ---------------------------------------------------------------------------
+
+def test_search_albums_bare_query_uses_browse_path():
+    """When a bare name resolves to an artist, we browse their release-groups
+    instead of text-searching release titles."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Metallica', 'mb-1', score=100)]
+    client._client.browse_artist_release_groups.return_value = [
+        {'id': 'rg-1', 'title': 'Master of Puppets', 'primary-type': 'Album',
+         'first-release-date': '1986-03-03', 'secondary-types': []},
+        {'id': 'rg-2', 'title': 'Ride the Lightning', 'primary-type': 'Album',
+         'first-release-date': '1984-07-27', 'secondary-types': []},
+    ]
+
+    albums = client.search_albums('metallica', limit=10)
+
+    client._client.browse_artist_release_groups.assert_called_once()
+    # Text-search path must NOT be taken.
+    client._client.search_release.assert_not_called()
+    # Browse results come back, newest first.
+    assert [a.name for a in albums] == ['Master of Puppets', 'Ride the Lightning']
+    assert all(a.artists == ['Metallica'] for a in albums)
+
+
+def test_search_albums_structured_query_uses_text_path():
+    """'Artist - Title' shape should text-search the title rather than
+    browsing all of the artist's discography."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_release.return_value = [
+        {'id': 'rel-1', 'title': 'Master of Puppets', 'score': 100,
+         'date': '1986', 'media': [{'track-count': 8}],
+         'release-group': {'id': 'rg-1', 'primary-type': 'Album'},
+         'artist-credit': [{'name': 'Metallica'}]},
+    ]
+
+    albums = client.search_albums('Metallica - Master of Puppets', limit=10)
+
+    client._client.search_release.assert_called_once()
+    # Artist-first path must NOT be taken.
+    client._client.search_artist.assert_not_called()
+    client._client.browse_artist_release_groups.assert_not_called()
+    assert len(albums) == 1
+    assert albums[0].name == 'Master of Puppets'
+
+
+def test_search_albums_falls_back_to_text_when_no_artist_match():
+    """No artist above threshold → text-search the whole query."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    # Artist lookup returns nothing above threshold.
+    client._client.search_artist.return_value = [_mk_artist('X', 'mb-x', score=40)]
+    client._client.search_release.return_value = []
+
+    client.search_albums('very obscure band')
+
+    client._client.search_release.assert_called_once_with('very obscure band', artist_name=None, limit=10)
+    client._client.browse_artist_release_groups.assert_not_called()
+
+
+def test_search_albums_text_path_filters_by_score():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    # Force text-search path by using a structured query.
+    client._client.search_release.return_value = [
+        {'id': 'rel-good', 'title': 'Good', 'score': 95,
+         'release-group': {'id': 'rg-1', 'primary-type': 'Album'},
+         'artist-credit': [{'name': 'Foo'}]},
+        {'id': 'rel-bad', 'title': 'Bad', 'score': 40,
+         'release-group': {'id': 'rg-2', 'primary-type': 'Album'},
+         'artist-credit': [{'name': 'Foo'}]},
+    ]
+
+    albums = client.search_albums('Foo - Good', limit=10)
+
+    titles = [a.name for a in albums]
+    assert 'Good' in titles
+    assert 'Bad' not in titles
+
+
+# ---------------------------------------------------------------------------
+# Track search — routing
+# ---------------------------------------------------------------------------
+
+def test_search_tracks_bare_query_uses_browse_path():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Metallica', 'mb-1', score=100)]
+    client._client.browse_artist_recordings.return_value = [
+        {'id': 'rec-1', 'title': 'One', 'length': 446000,
+         'releases': [{'id': 'rel-1', 'title': '...And Justice for All', 'date': '1988',
+                       'release-group': {'id': 'rg-1', 'primary-type': 'Album'}}],
+         'artist-credit': [{'name': 'Metallica'}]},
+        {'id': 'rec-2', 'title': 'Battery', 'length': 312000,
+         'releases': [{'id': 'rel-2', 'title': 'Master of Puppets', 'date': '1986',
+                       'release-group': {'id': 'rg-2', 'primary-type': 'Album'}}],
+         'artist-credit': [{'name': 'Metallica'}]},
+    ]
+
+    tracks = client.search_tracks('metallica', limit=10)
+
+    client._client.browse_artist_recordings.assert_called_once()
+    client._client.search_recording.assert_not_called()
+    assert len(tracks) == 2
+    assert {t.name for t in tracks} == {'One', 'Battery'}
+
+
+def test_search_tracks_dedupes_by_title():
+    """MusicBrainz has many live/compilation variants of the same song.
+    Browse results should be deduped by normalized title so we don't show
+    'One' three times."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Metallica', 'mb-1', score=100)]
+    client._client.browse_artist_recordings.return_value = [
+        {'id': 'rec-1', 'title': 'One', 'length': 446000,
+         'releases': [{'id': 'rel-1', 'title': '...And Justice for All', 'date': '1988'}],
+         'artist-credit': [{'name': 'Metallica'}]},
+        {'id': 'rec-1-live', 'title': 'One', 'length': 490000,
+         'releases': [{'id': 'rel-live', 'title': 'Live Shit', 'date': '1993'}],
+         'artist-credit': [{'name': 'Metallica'}]},
+    ]
+
+    tracks = client.search_tracks('metallica', limit=10)
+
+    assert len(tracks) == 1
+    assert tracks[0].name == 'One'
+
+
+def test_search_tracks_structured_query_uses_text_path():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_recording.return_value = [
+        {'id': 'rec-1', 'title': 'One', 'score': 100,
+         'releases': [{'id': 'rel-1', 'title': '...And Justice for All', 'date': '1988'}],
+         'artist-credit': [{'name': 'Metallica'}]},
+    ]
+
+    tracks = client.search_tracks('Metallica - One', limit=10)
+
+    client._client.search_recording.assert_called_once()
+    client._client.search_artist.assert_not_called()
+    client._client.browse_artist_recordings.assert_not_called()
+    assert len(tracks) == 1
+
+
+def test_search_tracks_text_path_filters_by_score():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_recording.return_value = [
+        {'id': 'rec-good', 'title': 'Good', 'score': 95,
+         'releases': [{'id': 'rel-1', 'title': 'X', 'date': '2020'}],
+         'artist-credit': [{'name': 'Foo'}]},
+        {'id': 'rec-bad', 'title': 'Bad', 'score': 40,
+         'releases': [{'id': 'rel-2', 'title': 'Y', 'date': '2021'}],
+         'artist-credit': [{'name': 'Foo'}]},
+    ]
+
+    tracks = client.search_tracks('Foo - Good', limit=10)
+
+    titles = [t.name for t in tracks]
+    assert 'Good' in titles
+    assert 'Bad' not in titles
