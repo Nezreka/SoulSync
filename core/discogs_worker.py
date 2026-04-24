@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.discogs_client import DiscogsClient
-from core.worker_utils import interruptible_sleep
+from core.worker_utils import interruptible_sleep, set_album_api_track_count
 
 logger = get_logger("discogs_worker")
 
@@ -453,6 +453,18 @@ class DiscogsWorker:
                     UPDATE albums SET thumb_url = ?
                     WHERE id = ? AND (thumb_url IS NULL OR thumb_url = '')
                 """, (image_url, album_id))
+
+            # Cache the authoritative expected track count for the Album
+            # Completeness repair job. Discogs tracklists mix actual tracks
+            # with section headings and index entries — only type_=='track'
+            # rows are real songs, so filter before counting. (Helper can't
+            # do this filter for us; it's Discogs-specific shape.)
+            tracklist = data.get('tracklist') or []
+            set_album_api_track_count(
+                cursor,
+                album_id,
+                sum(1 for t in tracklist if t.get('type_') == 'track'),
+            )
 
             conn.commit()
 

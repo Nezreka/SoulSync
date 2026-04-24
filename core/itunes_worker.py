@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.itunes_client import iTunesClient
-from core.worker_utils import interruptible_sleep
+from core.worker_utils import interruptible_sleep, set_album_api_track_count
 
 logger = get_logger("itunes_worker")
 
@@ -668,6 +668,10 @@ class iTunesWorker:
                         UPDATE albums SET year = ?
                         WHERE id = ? AND (year IS NULL OR year = '' OR year = '0')
                     """, (year, album_id))
+
+            # Cache the authoritative expected track count for the Album
+            # Completeness repair job (see set_album_api_track_count docstring).
+            set_album_api_track_count(cursor, album_id, getattr(album_obj, 'total_tracks', 0))
 
             conn.commit()
         except Exception as e:
