@@ -9229,18 +9229,21 @@ async function _doSyncDiscoverPlaylist(playlistType, playlistName) {
     }
 
     try {
-        let tracksResponse;
-
-        // Use unified URL helper (handles ListenBrainz + standard discover types)
-        const apiUrl = _discoverPlaylistApiUrl(playlistType);
-        if (apiUrl) {
-            tracksResponse = await fetch(apiUrl);
-        }
-
         let tracks = [];
-        if (tracksResponse && tracksResponse.ok) {
-            const data = await tracksResponse.json();
-            tracks = data.tracks || [];
+
+        if (playlistType === 'build_playlist') {
+            // Build Playlist tracks are assembled client-side; no API endpoint.
+            tracks = (typeof buildPlaylistTracks !== 'undefined' && buildPlaylistTracks) || [];
+        } else {
+            // Use unified URL helper (handles ListenBrainz + standard discover types)
+            const apiUrl = _discoverPlaylistApiUrl(playlistType);
+            if (apiUrl) {
+                const tracksResponse = await fetch(apiUrl);
+                if (tracksResponse.ok) {
+                    const data = await tracksResponse.json();
+                    tracks = data.tracks || [];
+                }
+            }
         }
 
         if (!tracks.length) {

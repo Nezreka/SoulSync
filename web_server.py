@@ -28923,20 +28923,8 @@ def _on_download_completed(batch_id, task_id, success=True):
                     except Exception:
                         pass
 
-                # Push playlists to media server after downloads complete
+                # Push is handled in _check_batch_completion_v2 (once per batch).
                 playlist_id = batch.get('playlist_id')
-                _push_prefixes = (
-                    'discover_', 'auto_mirror_', 'youtube_mirrored_',
-                    'youtube_', 'tidal_', 'deezer_', 'spotify_public_',
-                    'listenbrainz_', 'beatport_',
-                )
-                if playlist_id and playlist_id.startswith(_push_prefixes):
-                    get_database().update_sync_history_push_status(batch_id, 'pending')
-                    threading.Thread(
-                        target=_push_playlist_to_server,
-                        args=(batch_id, batch),
-                        daemon=True
-                    ).start()
 
                 # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
                 if playlist_id and playlist_id.startswith('youtube_'):
@@ -32679,9 +32667,9 @@ def _record_sync_history_completion(batch_id, batch):
         completed_count = 0
         failed_count = len(batch.get('permanently_failed_tracks', []))
 
-        logger.warning(f"[SyncHistory] Recording completion for batch {batch_id}: "
-                      f"analysis_results={len(analysis_results)}, tracks_found={tracks_found}, "
-                      f"queue_len={len(queue)}, failed={failed_count}")
+        logger.info(f"[SyncHistory] Recording completion for batch {batch_id}: "
+                     f"analysis_results={len(analysis_results)}, tracks_found={tracks_found}, "
+                     f"queue_len={len(queue)}, failed={failed_count}")
 
         # Build download status map: track_index → status
         download_status_map = {}
@@ -32693,8 +32681,8 @@ def _record_sync_history_completion(batch_id, batch):
             if task.get('status') == 'completed':
                 completed_count += 1
 
-        logger.warning(f"[SyncHistory] Batch {batch_id}: completed_downloads={completed_count}, "
-                      f"download_status_map_size={len(download_status_map)}")
+        logger.info(f"[SyncHistory] Batch {batch_id}: completed_downloads={completed_count}, "
+                     f"download_status_map_size={len(download_status_map)}")
 
         # Build per-track results from analysis
         track_results = []
@@ -32736,12 +32724,12 @@ def _record_sync_history_completion(batch_id, batch):
 
         db = MusicDatabase()
         updated = db.update_sync_history_completion(batch_id, tracks_found, completed_count, failed_count)
-        logger.warning(f"[SyncHistory] DB update for batch {batch_id}: updated={updated}")
+        logger.info(f"[SyncHistory] DB update for batch {batch_id}: updated={updated}")
 
         # Save per-track results
         if track_results:
             tr_updated = db.update_sync_history_track_results(batch_id, json.dumps(track_results))
-            logger.warning(f"[SyncHistory] Track results saved for batch {batch_id}: updated={tr_updated}, count={len(track_results)}")
+            logger.info(f"[SyncHistory] Track results saved for batch {batch_id}: updated={tr_updated}, count={len(track_results)}")
 
     except Exception as e:
         logger.warning(f"Failed to record sync history completion: {e}")
