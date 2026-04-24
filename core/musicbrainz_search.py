@@ -116,7 +116,10 @@ class MusicBrainzSearchClient:
 
     def __init__(self):
         from core.musicbrainz_client import MusicBrainzClient
-        self._client = MusicBrainzClient("SoulSync", "2.3")
+        # Client defaults to the project URL as its User-Agent contact,
+        # which is what MusicBrainz wants. Version stays generic ("2") —
+        # the exact UI minor version would add noise to every request.
+        self._client = MusicBrainzClient("SoulSync", "2")
         self._art_cache: Dict[str, Optional[str]] = {}  # mbid -> url
 
     def _cached_art(self, release_mbid: str, release_group_mbid: str = '') -> Optional[str]:
