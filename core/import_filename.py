@@ -14,6 +14,25 @@ _TRACK_PATTERNS = (
 )
 
 
+def extract_track_number_from_filename(filename: str, title: str = None) -> int:
+    """Extract track number from a filename. Returns 1 if not found."""
+    basename = os.path.splitext(os.path.basename(filename))[0].strip()
+
+    match = re.match(r"^\d[\-\.](\d{1,2})\s*[\-\.]\s*", basename)
+    if match:
+        num = int(match.group(1))
+        if 1 <= num <= 99:
+            return num
+
+    match = re.match(r"^\(?(\d{1,3})\)?\s*[\-\.)\]]\s*", basename)
+    if match:
+        num = int(match.group(1))
+        if 1 <= num <= 999:
+            return num
+
+    return 1
+
+
 def parse_filename_metadata(filename: str) -> Dict[str, Any]:
     """Extract artist/title/album hints from a loose filename."""
     raw_path = str(filename or "")

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from core.import_context import normalize_import_context
-from core.import_file_ops import read_staging_file_metadata
-from core.import_staging import AUDIO_EXTENSIONS, get_staging_path
+from core.import_staging import collect_staging_files
 from utils.logging_config import get_logger
 
 
@@ -136,41 +134,6 @@ def _coerce_track_int(value: Any, default: int = 1) -> int:
         return int(str(value).split("/")[0].strip() or default)
     except (TypeError, ValueError):
         return default
-
-
-def _collect_staging_files(file_paths: Optional[Iterable[str]] = None) -> List[Dict[str, Any]]:
-    staging_path = get_staging_path()
-    file_filter: Optional[Set[str]] = set(file_paths) if file_paths else None
-    staging_files: List[Dict[str, Any]] = []
-
-    if not os.path.isdir(staging_path):
-        return staging_files
-
-    for root, _dirs, filenames in os.walk(staging_path):
-        for filename in filenames:
-            ext = os.path.splitext(filename)[1].lower()
-            if ext not in AUDIO_EXTENSIONS:
-                continue
-
-            full_path = os.path.join(root, filename)
-            if file_filter is not None and full_path not in file_filter:
-                continue
-
-            meta = read_staging_file_metadata(full_path, filename)
-            staging_files.append(
-                {
-                    "filename": filename,
-                    "full_path": full_path,
-                    "title": meta.get("title", ""),
-                    "artist": meta.get("albumartist") or meta.get("artist") or "",
-                    "album": meta.get("album", ""),
-                    "albumartist": meta.get("albumartist") or meta.get("artist") or "",
-                    "track_number": meta.get("track_number", 1),
-                    "disc_number": meta.get("disc_number", 1),
-                }
-            )
-
-    return staging_files
 
 
 def _normalize_match_track(track: Dict[str, Any], source: str, album: Dict[str, Any]) -> Dict[str, Any]:
@@ -472,7 +435,7 @@ def build_album_import_match_payload(
             "resolved_album_id": album_response.get("resolved_album_id") or album_id,
         }
 
-    staging_files = _collect_staging_files(file_paths)
+    staging_files = collect_staging_files(file_paths)
     album_name_for_match = album.get("name") or album_name or ""
     matches: List[Dict[str, Any]] = []
     used_files: Set[int] = set()
