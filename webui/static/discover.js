@@ -9110,17 +9110,17 @@ function renderDiscoverSyncCard(playlist, container, sourceLabel) {
     const trackLabel = isEmpty ? 'No tracks yet' : `${playlist.track_count} tracks`;
 
     card.innerHTML = `
-        <div class="discover-sync-card-icon">${playlist.icon}</div>
+        <div class="discover-sync-card-icon">${_esc(playlist.icon)}</div>
         <div class="discover-sync-card-info">
-            <div class="discover-sync-card-name">${playlist.name}
+            <div class="discover-sync-card-name">${_esc(playlist.name)}
                 <span class="discover-sync-card-meta-inline">
-                    <span class="discover-sync-source-badge">${sourceLabel || 'unknown'}</span>
+                    <span class="discover-sync-source-badge">${_esc(sourceLabel || 'unknown')}</span>
                     <span class="discover-sync-separator">\u00b7</span>
-                    <span class="discover-sync-track-count">${trackLabel}</span>
+                    <span class="discover-sync-track-count">${_esc(trackLabel)}</span>
                     <span class="discover-sync-separator">\u00b7</span>
-                    <span class="discover-sync-status ${statusClass}">${statusText}</span>
+                    <span class="discover-sync-status ${statusClass}">${_esc(statusText)}</span>
                     <span class="discover-sync-separator">\u00b7</span>
-                    <span class="discover-sync-last-synced">${lastSyncedText}</span>
+                    <span class="discover-sync-last-synced">${_esc(lastSyncedText)}</span>
                 </span>
             </div>
         </div>
@@ -9128,25 +9128,42 @@ function renderDiscoverSyncCard(playlist, container, sourceLabel) {
             <div class="discover-sync-toggle-wrapper" title="${isEmpty ? 'No tracks available — visit Discover first' : 'Keep this playlist updated automatically'}">
                 <label class="discover-sync-toggle-label">Keep updated</label>
                 <label class="discover-sync-toggle">
-                    <input type="checkbox" ${playlist.auto_update ? 'checked' : ''} ${isEmpty ? 'disabled' : ''}
-                           onchange="toggleDiscoverAutoUpdate('${playlist.type}', this.checked)">
+                    <input type="checkbox" class="discover-auto-update-toggle" ${playlist.auto_update ? 'checked' : ''} ${isEmpty ? 'disabled' : ''}>
                     <span class="discover-sync-toggle-slider"></span>
                 </label>
             </div>
             <div class="discover-sync-toggle-wrapper" title="Coming soon: download any available quality for this batch, even if it's below your global quality profile. Useful for rotating discover playlists where quantity matters more than quality.">
                 <label class="discover-sync-toggle-label" style="opacity:0.5">Any Quality</label>
                 <label class="discover-sync-toggle" style="opacity:0.5;cursor:not-allowed">
-                    <input type="checkbox" id="discover-any-quality-${playlist.type}" disabled>
+                    <input type="checkbox" class="discover-any-quality-toggle" disabled>
                     <span class="discover-sync-toggle-slider"></span>
                 </label>
             </div>
-            <button class="discover-sync-btn" id="discover-sync-btn-${playlist.type}"
-                    onclick="syncDiscoverPlaylistFromTab('${playlist.type}', '${playlist.name}')"
+            <button class="discover-sync-btn"
                     ${playlist.sync_status === 'syncing' || isEmpty ? 'disabled' : ''}>
                 \u27f3 Sync Now
             </button>
         </div>
     `;
+
+    // Bind event listeners instead of inline handlers (avoids XSS from playlist names)
+    const autoUpdateToggle = card.querySelector('.discover-auto-update-toggle');
+    if (autoUpdateToggle) {
+        autoUpdateToggle.addEventListener('change', function() {
+            toggleDiscoverAutoUpdate(playlist.type, this.checked);
+        });
+    }
+
+    const anyQualityToggle = card.querySelector('.discover-any-quality-toggle');
+    if (anyQualityToggle) {
+        anyQualityToggle.id = `discover-any-quality-${playlist.type}`;
+    }
+
+    const syncButton = card.querySelector('.discover-sync-btn');
+    if (syncButton) {
+        syncButton.id = `discover-sync-btn-${playlist.type}`;
+        syncButton.addEventListener('click', () => syncDiscoverPlaylistFromTab(playlist.type, playlist.name));
+    }
 
     // Make the icon + info area clickable to view tracks
     if (!isEmpty) {

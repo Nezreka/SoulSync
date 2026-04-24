@@ -32773,6 +32773,8 @@ def _push_playlist_to_server(batch_id, batch):
         playlist_id = batch.get('playlist_id', '')
         playlist_name = batch.get('playlist_name', '')
         if not playlist_name:
+            logger.info(f"[PlaylistPush] No playlist_name for batch {batch_id} - skipping server push")
+            database.update_sync_history_push_status(batch_id, 'skipped')
             return
 
         database.update_sync_history_push_status(batch_id, 'pushing')
@@ -44211,10 +44213,7 @@ def get_discover_synced_playlists():
                     track_count = 0
             else:
                 # Personalized playlists come from the discovery pool
-                # familiar_favorites is not implemented — always report 0
-                if ptype == 'familiar_favorites':
-                    track_count = 0
-                elif pool_count > 0:
+                if pool_count > 0:
                     track_count = min(50, pool_count)
                 else:
                     track_count = 0
@@ -44310,9 +44309,12 @@ def manage_discover_auto_update():
                     settings[key] = bool(val)
         return jsonify({"success": True, "settings": settings})
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     playlist_type = data.get('playlist_type')
     enabled = data.get('enabled', False)
+
+    if not playlist_type:
+        return jsonify({"success": False, "error": "Missing playlist_type"}), 400
 
     is_lb_type = playlist_type and playlist_type.startswith('listenbrainz_')
     if playlist_type not in valid_types and not is_lb_type:
