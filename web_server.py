@@ -11735,10 +11735,15 @@ def get_artist_image(artist_id):
 
         source_override = request.args.get('source', '').strip().lower() or None
         plugin = request.args.get('plugin', '').strip().lower() or None
+        # `name` is optional but required for sources that don't store
+        # artist images directly (MusicBrainz) — the resolver falls back
+        # to searching iTunes/Deezer by name.
+        artist_name = request.args.get('name', '').strip() or None
         image_url = _get_artist_image_url(
             artist_id,
             source_override=source_override,
             plugin=plugin,
+            artist_name=artist_name,
         )
         return jsonify({"success": True, "image_url": image_url})
     except Exception as e:
