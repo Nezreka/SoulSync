@@ -16,11 +16,15 @@ if 'tidalapi' not in sys.modules:
     _fake = types.ModuleType('tidalapi')
 
     class _FakeQuality:
-        low_96k = 'low_96k'
-        low_320k = 'low_320k'
-        high_lossless = 'high_lossless'
-        hi_res = 'hi_res'
-        hi_res_lossless = 'hi_res_lossless'
+        # Values mirror the real tidalapi Quality enum (the strings the
+        # Tidal API returns in `audioQuality`). Keeping these honest
+        # lets sibling tests that actually compare quality values rely
+        # on the same stub regardless of pytest collection order.
+        low_96k = 'LOW'
+        low_320k = 'HIGH'
+        high_lossless = 'LOSSLESS'
+        hi_res = 'HI_RES'
+        hi_res_lossless = 'HI_RES_LOSSLESS'
 
     _fake.Quality = _FakeQuality
     _fake.media = types.SimpleNamespace(Track=object)
