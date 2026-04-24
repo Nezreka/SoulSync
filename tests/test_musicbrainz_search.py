@@ -205,8 +205,9 @@ def test_search_albums_bare_query_uses_browse_path():
     client._client.browse_artist_release_groups.assert_called_once()
     # Text-search path must NOT be taken.
     client._client.search_release.assert_not_called()
-    # Browse results come back, newest first.
-    assert [a.name for a in albums] == ['Master of Puppets', 'Ride the Lightning']
+    # Chronological ASC — debut first, so the album list reads like a
+    # standard discography (Wikipedia-style: earliest release on top).
+    assert [a.name for a in albums] == ['Ride the Lightning', 'Master of Puppets']
     assert all(a.artists == ['Metallica'] for a in albums)
 
 
@@ -244,6 +245,113 @@ def test_search_albums_falls_back_to_text_when_no_artist_match():
 
     client._client.search_release.assert_called_once_with('very obscure band', artist_name=None, limit=10)
     client._client.browse_artist_release_groups.assert_not_called()
+
+
+def test_search_albums_filters_live_and_compilation_secondary_types():
+    """Mega-artists' browse results are dominated by live bootlegs and
+    best-of compilations — they should be filtered out so the studio
+    discography surfaces."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Metallica', 'mb-1', score=100)]
+    client._client.browse_artist_release_groups.return_value = [
+        {'id': 'rg-live-1', 'title': 'Live Bootleg 2019', 'primary-type': 'Album',
+         'first-release-date': '2019-01-01', 'secondary-types': ['Live']},
+        {'id': 'rg-studio-1', 'title': 'Kill Em All', 'primary-type': 'Album',
+         'first-release-date': '1983-07-25', 'secondary-types': []},
+        {'id': 'rg-comp-1', 'title': 'Greatest Hits', 'primary-type': 'Album',
+         'first-release-date': '2010-01-01', 'secondary-types': ['Compilation']},
+        {'id': 'rg-studio-2', 'title': 'Master of Puppets', 'primary-type': 'Album',
+         'first-release-date': '1986-03-03', 'secondary-types': []},
+    ]
+
+    albums = client.search_albums('metallica', limit=10)
+
+    titles = [a.name for a in albums]
+    assert titles == ['Kill Em All', 'Master of Puppets']
+    assert 'Live Bootleg 2019' not in titles
+    assert 'Greatest Hits' not in titles
+
+
+def test_search_albums_falls_back_to_all_when_no_studio():
+    """Niche live-only artist: if no studio releases exist, show live ones
+    rather than returning empty."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('LiveBand', 'mb-1', score=100)]
+    client._client.browse_artist_release_groups.return_value = [
+        {'id': 'rg-live-1', 'title': 'Live at X', 'primary-type': 'Album',
+         'first-release-date': '2019-01-01', 'secondary-types': ['Live']},
+        {'id': 'rg-live-2', 'title': 'Live at Y', 'primary-type': 'Album',
+         'first-release-date': '2020-01-01', 'secondary-types': ['Live']},
+    ]
+
+    albums = client.search_albums('liveband', limit=10)
+
+    assert len(albums) == 2
+
+
+def test_search_tracks_prefers_studio_release_in_album_field():
+    """When a recording has both a studio release and a live release, the
+    Track.album should reflect the studio release (canonical album),
+    regardless of the order MB returned them in."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Metallica', 'mb-1', score=100)]
+    client._client.search_recordings_by_artist_mbid.return_value = [
+        {
+            'id': 'rec-master',
+            'title': 'Master of Puppets',
+            'length': 516000,
+            'artist-credit': [{'name': 'Metallica'}],
+            # Live release first (what MB often returns), studio second.
+            'releases': [
+                {'id': 'rel-live', 'title': 'Live Bootleg', 'date': '2023-01-01',
+                 'release-group': {'id': 'rg-live', 'primary-type': 'Album',
+                                   'secondary-types': ['Live']}},
+                {'id': 'rel-studio', 'title': 'Master of Puppets', 'date': '1986-03-03',
+                 'release-group': {'id': 'rg-studio', 'primary-type': 'Album',
+                                   'secondary-types': []}},
+            ],
+        },
+    ]
+
+    tracks = client.search_tracks('metallica', limit=10)
+
+    assert len(tracks) == 1
+    # Album must be the studio release, not the live bootleg.
+    assert tracks[0].album == 'Master of Puppets'
+    assert tracks[0].release_date == '1986-03-03'
+
+
+def test_search_tracks_filters_recordings_without_studio_releases():
+    """A recording that only exists on live/compilation releases should be
+    dropped when we have studio alternatives."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('Metallica', 'mb-1', score=100)]
+    client._client.search_recordings_by_artist_mbid.return_value = [
+        {'id': 'rec-studio', 'title': 'Seek and Destroy', 'length': 390000,
+         'artist-credit': [{'name': 'Metallica'}],
+         'releases': [
+             {'id': 'rel-studio', 'title': 'Kill Em All', 'date': '1983-07-25',
+              'release-group': {'id': 'rg-studio', 'primary-type': 'Album',
+                                'secondary-types': []}},
+         ]},
+        {'id': 'rec-live-only', 'title': 'Fight Fire With Fire', 'length': 450000,
+         'artist-credit': [{'name': 'Metallica'}],
+         'releases': [
+             {'id': 'rel-live', 'title': 'Live Shit', 'date': '1993-01-01',
+              'release-group': {'id': 'rg-live', 'primary-type': 'Album',
+                                'secondary-types': ['Live']}},
+         ]},
+    ]
+
+    tracks = client.search_tracks('metallica', limit=10)
+
+    titles = [t.name for t in tracks]
+    assert 'Seek and Destroy' in titles
+    assert 'Fight Fire With Fire' not in titles
 
 
 def test_search_albums_text_path_filters_by_score():

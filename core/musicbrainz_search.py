@@ -219,6 +219,41 @@ class MusicBrainzSearchClient:
             self._artist_mbid_cache[key] = top
         return top
 
+    # Secondary-type tags on MB release-groups that indicate NOT a studio
+    # release. Used by both the album browse (filter out) and the track
+    # browse (prefer studio release for album context).
+    _NON_STUDIO_SECONDARY_TYPES = {
+        'Live', 'Compilation', 'Soundtrack', 'Remix', 'Demo',
+        'Mixtape/Street', 'Interview', 'Audiobook', 'Audio drama',
+    }
+
+    def _release_preference_key(self, rel: Dict[str, Any]):
+        """Sort key: studio releases first, then by date ASC.
+
+        Recordings in MB often have 10+ releases (studio album, live, best-of,
+        reissues, anniversary editions). The first one in the API response is
+        arbitrary — it's often a recent live bootleg because MB users add new
+        live recordings all the time. Re-sorting before `_recording_to_track`
+        reads the first release means tracks show their canonical studio
+        album, not a random live compilation.
+        """
+        rg = rel.get('release-group') or {}
+        secs = set(rg.get('secondary-types') or [])
+        is_studio = 0 if not (secs & self._NON_STUDIO_SECONDARY_TYPES) else 1
+        date = (rel.get('date') or '')[:4]
+        year = int(date) if date.isdigit() else 9999
+        return (is_studio, year)
+
+    def _has_studio_release(self, recording: Dict[str, Any]) -> bool:
+        """True when at least one of the recording's releases is on a
+        release-group with no non-studio secondary type."""
+        for rel in (recording.get('releases') or []):
+            rg = rel.get('release-group') or {}
+            secs = set(rg.get('secondary-types') or [])
+            if not (secs & self._NON_STUDIO_SECONDARY_TYPES):
+                return True
+        return False
+
     def _release_group_to_album(self, rg: Dict[str, Any], artist_name: str) -> Album:
         """Project a MusicBrainz release-group into our Album dataclass."""
         rg_mbid = rg.get('id', '')
@@ -270,17 +305,42 @@ class MusicBrainzSearchClient:
                 tname = top.get('name', '') or query
                 rgs = self._client.browse_artist_release_groups(
                     mbid,
-                    release_types=['album', 'ep', 'single', 'compilation'],
+                    # 'compilation' is a SECONDARY type, not a primary type
+                    # — including it in the OR filter causes MB to return
+                    # only 82 matches instead of the actual 1076 because
+                    # the filter silently breaks. Actual compilations
+                    # (primary-type=Album with secondary-types=[Compilation])
+                    # are handled by the studio-preference filter below.
+                    release_types=['album', 'ep', 'single'],
                     limit=100,
                 )
-                # Sort by first-release-date desc (newest first), then by
-                # primary-type priority (album > ep > single > compilation)
-                # so the top of the list is a credible "what to explore."
+
+                # Prefer studio releases — MusicBrainz tags live bootlegs
+                # and best-of compilations with secondary-types. For mega-
+                # artists like Metallica, 83 of 100 browse results are live
+                # broadcast bootlegs; the 12 studio albums are buried. A
+                # release-group with no secondary-types (or an explicit
+                # studio-only type) is the "original studio" shape users
+                # expect to see first.
+                def _is_studio(rg):
+                    secs = set((rg.get('secondary-types') or []))
+                    return not (secs & {'Live', 'Compilation', 'Soundtrack',
+                                         'Remix', 'Demo', 'Mixtape/Street',
+                                         'Interview', 'Audiobook', 'Audio drama'})
+                studio = [rg for rg in rgs if _is_studio(rg)]
+                # If filtering leaves us empty (niche live-only artist),
+                # fall back to the unfiltered list — better than no results.
+                rgs = studio or rgs
+
+                # Sort by primary-type priority first (album > ep > single >
+                # compilation), then chronologically ASC — the standard way
+                # discographies are listed ("their debut was X, then Y, then Z").
                 type_priority = {'album': 0, 'ep': 1, 'single': 2, 'compilation': 3}
                 def _sort_key(rg):
                     pt = (rg.get('primary-type') or '').lower()
                     date = rg.get('first-release-date') or ''
-                    return (type_priority.get(pt, 9), -int(date[:4]) if date[:4].isdigit() else 0)
+                    year = int(date[:4]) if date[:4].isdigit() else 9999
+                    return (type_priority.get(pt, 9), year)
                 rgs.sort(key=_sort_key)
                 albums = [self._release_group_to_album(rg, tname) for rg in rgs[:limit]]
                 return albums
@@ -438,10 +498,29 @@ class MusicBrainzSearchClient:
                 # so we use the fielded Lucene search arid:<mbid> instead —
                 # that returns recordings with release context inline.
                 recs = self._client.search_recordings_by_artist_mbid(mbid, limit=100)
-                # Browse returns recordings unsorted. Dedupe by normalized
-                # title (MB has many live/compilation variants of the same
-                # song), then sort by release date desc so "newest" tracks
-                # surface first — matches how the other source tabs look.
+
+                # Re-order each recording's releases to prefer studio over
+                # live/compilation. Without this, the first release (which
+                # the adapter uses for album info + date) is often a random
+                # live bootleg — Metallica has 10+ live versions of "One"
+                # ranked ahead of the studio release. Mutates in place so
+                # `_recording_to_track` sees the preferred release first.
+                for r in recs:
+                    rels = r.get('releases') or []
+                    if not rels:
+                        continue
+                    rels.sort(key=self._release_preference_key)
+                    r['releases'] = rels
+
+                # Prefer recordings that have at least one studio release.
+                # Falls back to the full set if the artist is live-only.
+                studio = [r for r in recs if self._has_studio_release(r)]
+                recs = studio or recs
+
+                # Dedupe by normalized title (MB has many versions of the
+                # same song — live, remaster, re-recording, etc.). Because
+                # we sorted releases above, `_recording_to_track` will pick
+                # the studio release for album info on the first keeper.
                 seen = set()
                 deduped = []
                 for r in recs:
@@ -451,10 +530,17 @@ class MusicBrainzSearchClient:
                     seen.add(key)
                     deduped.append(r)
 
+                # Sort by studio-release year ASC so classic tracks surface
+                # first. For a user typing "metallica", this means "Seek
+                # and Destroy" (1983) before "Atlas, Rise!" (2016) — which
+                # matches how most discography views order by release.
                 def _track_sort_key(r):
-                    rel = (r.get('releases') or [{}])[0]
-                    date = (rel.get('date') or '')[:4]
-                    return -int(date) if date.isdigit() else 0
+                    rels = r.get('releases') or []
+                    for rel in rels:
+                        date = (rel.get('date') or '')[:4]
+                        if date.isdigit():
+                            return int(date)
+                    return 9999
                 deduped.sort(key=_track_sort_key)
 
                 tracks = []
