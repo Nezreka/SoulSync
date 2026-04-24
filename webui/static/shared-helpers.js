@@ -537,6 +537,11 @@ function renderCompactSection(sectionId, listId, countId, items, mapItem) {
             if (item.id) {
                 elem.dataset.artistId = item.id;
                 elem.dataset.needsImage = config.image ? 'false' : 'true';
+                // Stash the artist name so the lazy-loader can pass it to
+                // the backend. Needed for sources that don't store artist
+                // images directly (MusicBrainz) — backend resolves the
+                // image by looking up the name on a fallback source.
+                if (config.name) elem.dataset.artistName = config.name;
             }
         } else if (isAlbum) {
             elem.className = 'enh-compact-item album-card';

@@ -15,6 +15,7 @@ import pytest
 from core.musicbrainz_search import (
     MusicBrainzSearchClient,
     _cover_art_url,
+    _extract_title_hint,
 )
 
 
@@ -518,6 +519,164 @@ def test_get_album_falls_back_to_release_lookup_on_rg_miss():
     client._client.get_release.assert_called_once()
     assert album is not None
     assert album['id'] == 'rel-abc'  # Falls back to release MBID since rg lookup missed.
+
+
+# ---------------------------------------------------------------------------
+# Title-hint extraction — for "Artist Album Title" bare queries
+# ---------------------------------------------------------------------------
+
+def test_extract_title_hint_basic():
+    assert _extract_title_hint('The Beatles Abbey Road', 'The Beatles') == 'Abbey Road'
+
+
+def test_extract_title_hint_case_insensitive():
+    assert _extract_title_hint('the beatles abbey road', 'The Beatles') == 'abbey road'
+
+
+def test_extract_title_hint_preserves_original_casing():
+    # Query slicing should return the original casing of the title portion.
+    assert _extract_title_hint('The Beatles Abbey Road', 'The Beatles') == 'Abbey Road'
+
+
+def test_extract_title_hint_whitespace_tolerant():
+    assert _extract_title_hint('The Beatles   Abbey Road', 'The Beatles') == 'Abbey Road'
+
+
+def test_extract_title_hint_bare_artist_returns_none():
+    assert _extract_title_hint('The Beatles', 'The Beatles') is None
+
+
+def test_extract_title_hint_artist_not_prefix_returns_none():
+    # Query where the artist name isn't the prefix — nothing to extract.
+    assert _extract_title_hint('Abbey Road', 'The Beatles') is None
+
+
+def test_extract_title_hint_word_boundary_required():
+    # "Metallicasomething" shouldn't split as artist=Metallica + hint=something
+    assert _extract_title_hint('Metallicasomething', 'Metallica') is None
+
+
+def test_search_albums_filters_browse_results_by_title_hint():
+    """Regression: 'The Beatles Abbey Road' used to return the whole
+    discography; should now narrow to Abbey Road specifically."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('The Beatles', 'mb-1', score=100)]
+    client._client.browse_artist_release_groups.return_value = [
+        {'id': 'rg-abbey', 'title': 'Abbey Road', 'primary-type': 'Album',
+         'first-release-date': '1969-09-26', 'secondary-types': []},
+        {'id': 'rg-white', 'title': 'The Beatles', 'primary-type': 'Album',
+         'first-release-date': '1968-11-22', 'secondary-types': []},
+        {'id': 'rg-revolver', 'title': 'Revolver', 'primary-type': 'Album',
+         'first-release-date': '1966-08-05', 'secondary-types': []},
+    ]
+
+    albums = client.search_albums('The Beatles Abbey Road', limit=10)
+
+    # Filtered to only the album whose title matches the hint.
+    assert [a.name for a in albums] == ['Abbey Road']
+
+
+def test_search_albums_falls_back_to_text_when_hint_matches_nothing():
+    """If the title hint doesn't match any browse result, fall back to
+    text-search rather than returning the full discography or nothing."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('The Beatles', 'mb-1', score=100)]
+    # Browse returns albums that don't match the hint.
+    client._client.browse_artist_release_groups.return_value = [
+        {'id': 'rg-1', 'title': 'Some Other Album', 'primary-type': 'Album',
+         'first-release-date': '1965-01-01', 'secondary-types': []},
+    ]
+    # Text-search fallback (_search_albums_text → search_release) returns the album.
+    client._client.search_release.return_value = [
+        {'id': 'rel-abbey', 'title': 'Abbey Road', 'score': 100,
+         'release-group': {'id': 'rg-abbey', 'primary-type': 'Album'},
+         'artist-credit': [{'name': 'The Beatles'}]},
+    ]
+
+    albums = client.search_albums('The Beatles Totally Fake Album Name', limit=10)
+
+    # Browse had no hit for the title hint, then fallback kicks in when
+    # the filter results are also empty (after studio-pref filter etc.).
+    # NOTE: in this test the hint filter returns empty, so we fall through
+    # to search_release.
+    client._client.search_release.assert_called_once()
+    assert any(a.name == 'Abbey Road' for a in albums)
+
+
+def test_search_albums_bare_artist_no_hint_no_filter():
+    """Bare artist name (no title hint) returns full discography — the
+    filter only kicks in when the user types extra words."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [_mk_artist('The Beatles', 'mb-1', score=100)]
+    client._client.browse_artist_release_groups.return_value = [
+        {'id': 'rg-abbey', 'title': 'Abbey Road', 'primary-type': 'Album',
+         'first-release-date': '1969-09-26', 'secondary-types': []},
+        {'id': 'rg-revolver', 'title': 'Revolver', 'primary-type': 'Album',
+         'first-release-date': '1966-08-05', 'secondary-types': []},
+    ]
+
+    albums = client.search_albums('the beatles', limit=10)
+
+    # No filter — full discography.
+    titles = {a.name for a in albums}
+    assert 'Abbey Road' in titles
+    assert 'Revolver' in titles
+
+
+def test_recording_to_track_total_tracks_matches_media_count():
+    """Regression: total_tracks was initialized at 1 and summed with media
+    track-counts, producing an off-by-one. An 11-track album reported 12."""
+    client = MusicBrainzSearchClient()
+    recording = {
+        'id': 'rec-1',
+        'title': 'Song',
+        'length': 300000,
+        'artist-credit': [{'name': 'Band'}],
+        'releases': [{
+            'id': 'rel-1',
+            'title': 'Album',
+            'date': '2020-01-01',
+            'release-group': {'id': 'rg-1', 'primary-type': 'Album', 'secondary-types': []},
+            'media': [{'track-count': 11}],
+        }],
+    }
+    track = client._recording_to_track(recording, 'Band')
+    assert track is not None
+    assert track.total_tracks == 11
+
+
+def test_recording_to_track_multi_disc_sums_media():
+    """Two-disc album with 14 tracks total should report 14, not 15 (off by one)
+    or 3 (missing the sum)."""
+    client = MusicBrainzSearchClient()
+    recording = {
+        'id': 'rec-1',
+        'title': 'Song',
+        'artist-credit': [{'name': 'Band'}],
+        'releases': [{
+            'id': 'rel-1', 'title': 'Album',
+            'release-group': {'id': 'rg-1', 'primary-type': 'Album'},
+            'media': [{'track-count': 7}, {'track-count': 7}],
+        }],
+    }
+    track = client._recording_to_track(recording, 'Band')
+    assert track.total_tracks == 14
+
+
+def test_recording_to_track_no_release_defaults_total_tracks_to_one():
+    """A recording with no release info is a standalone track — report 1."""
+    client = MusicBrainzSearchClient()
+    recording = {
+        'id': 'rec-1',
+        'title': 'Standalone',
+        'artist-credit': [{'name': 'Band'}],
+        'releases': [],
+    }
+    track = client._recording_to_track(recording, 'Band')
+    assert track.total_tracks == 1
 
 
 def test_pick_representative_release_prefers_official_with_media():

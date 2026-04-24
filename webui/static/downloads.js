@@ -5339,7 +5339,7 @@ function _gsRenderFromState(state) {
 
     if (artists.length) {
         h += `<div class="gsearch-section-header">🎤 Artists <span class="gsearch-source-badge">${srcLabel}</span></div><div class="gsearch-grid" id="gsearch-artists-grid">`;
-        h += artists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escAttr(a.name)}', false)" ${!a.image_url ? `data-artist-id="${a.id}" data-needs-image="true"` : ''}><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div></div></div>`).join('');
+        h += artists.map(a => `<div class="gsearch-item" onclick="_gsClickArtist('${a.id}', '${_escAttr(a.name)}', false)" ${!a.image_url ? `data-artist-id="${a.id}" data-needs-image="true" data-artist-name="${_escAttr(a.name)}"` : ''}><div class="gsearch-item-art">${a.image_url ? `<img src="${a.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'">` : '🎤'}</div><div class="gsearch-item-info"><div class="gsearch-item-title">${_escToast(a.name)}</div></div></div>`).join('');
         h += '</div>';
     }
 
@@ -5398,11 +5398,15 @@ async function _gsLazyLoadArtistImages() {
         const artistId = card.dataset.artistId;
         if (!artistId) continue;
         try {
-            const res = await fetch(`/api/artist/${artistId}/image?source=${activeSrc}`);
+            // Pass the artist name so MusicBrainz lookups (which have no
+            // artist art) can resolve the image by name on a fallback source.
+            const params = new URLSearchParams({ source: activeSrc });
+            if (card.dataset.artistName) params.set('name', card.dataset.artistName);
+            const res = await fetch(`/api/artist/${artistId}/image?${params}`);
             const data = await res.json();
             if (data.success && data.image_url) {
                 const artDiv = card.querySelector('.gsearch-item-art');
-                if (artDiv) artDiv.innerHTML = `<img src="${data.image_url}" loading="lazy">`;
+                if (artDiv) artDiv.innerHTML = `<img src="${data.image_url}" loading="lazy" onerror="this.parentElement.textContent='🎤'">`;
                 card.removeAttribute('data-needs-image');
             }
         } catch (e) { /* ignore */ }

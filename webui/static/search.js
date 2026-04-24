@@ -575,9 +575,16 @@ function initializeSearchModeToggle() {
 
                 try {
                     const activeSource = searchController.state.activeSource;
-                    const imgUrl = activeSource && activeSource !== 'spotify'
-                        ? `/api/artist/${artistId}/image?source=${activeSource}`
-                        : `/api/artist/${artistId}/image`;
+                    // Pass the artist name so the backend can look up images
+                    // for sources that don't store them (e.g. MusicBrainz —
+                    // it only has MBIDs, not artist art, so the resolver
+                    // falls back to iTunes/Deezer keyed by name).
+                    const artistName = card.dataset.artistName || '';
+                    const params = new URLSearchParams();
+                    if (activeSource && activeSource !== 'spotify') params.set('source', activeSource);
+                    if (artistName) params.set('name', artistName);
+                    const qs = params.toString();
+                    const imgUrl = `/api/artist/${artistId}/image${qs ? '?' + qs : ''}`;
                     const response = await fetch(imgUrl);
                     const data = await response.json();
 
