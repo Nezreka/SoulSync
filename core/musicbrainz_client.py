@@ -44,28 +44,31 @@ def rate_limited(func):
 
 class MusicBrainzClient:
     """Client for interacting with MusicBrainz API"""
-    
+
     BASE_URL = "https://musicbrainz.org/ws/2"
-    
+    # MusicBrainz mandates a meaningful User-Agent with contact info. Falling back
+    # to a bare name/version risks IP blocking under load — include the project
+    # URL so MB operators have a way to reach us if we misbehave.
+    DEFAULT_CONTACT = "https://github.com/Nezreka/SoulSync"
+
     def __init__(self, app_name: str = "SoulSync", app_version: str = "1.0", contact_email: str = ""):
         """
         Initialize MusicBrainz client
-        
+
         Args:
             app_name: Name of the application
             app_version: Version of the application
-            contact_email: Contact email (optional but recommended)
+            contact_email: Contact email or URL (defaults to project URL when empty)
         """
-        self.user_agent = f"{app_name}/{app_version}"
-        if contact_email:
-            self.user_agent += f" ( {contact_email} )"
-        
+        contact = contact_email or self.DEFAULT_CONTACT
+        self.user_agent = f"{app_name}/{app_version} ( {contact} )"
+
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': self.user_agent,
             'Accept': 'application/json'
         })
-        
+
         logger.info(f"MusicBrainz client initialized with user agent: {self.user_agent}")
     
     @rate_limited
