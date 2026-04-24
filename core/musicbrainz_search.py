@@ -7,7 +7,6 @@ Album art is fetched from Cover Art Archive (free, linked by release MBID).
 """
 
 import threading
-import requests
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -60,29 +59,24 @@ class Album:
     external_urls: Optional[Dict[str, str]] = None
 
 
-def _get_cover_art_url(release_mbid: str) -> Optional[str]:
-    """Fetch album art URL from Cover Art Archive. Returns None if not available."""
-    try:
-        # CAA redirects to the actual image URL — just get the front image URL
-        url = f"{COVER_ART_ARCHIVE_URL}/release/{release_mbid}/front-250"
-        resp = requests.head(url, timeout=3, allow_redirects=True)
-        if resp.status_code == 200:
-            return resp.url  # The redirect target is the actual image
-        return None
-    except Exception:
-        return None
+def _cover_art_url(mbid: str, scope: str = 'release') -> Optional[str]:
+    """Build a Cover Art Archive URL without hitting the network.
 
+    CAA URLs are deterministic from the MBID: the endpoint either 307-redirects
+    to the image or returns 404. Previously we fired `requests.head(timeout=3)`
+    per result during search — 10 results × 3s worst-case = up to 30s of
+    blocking HEAD calls before a search returned. The frontend's <img> tag
+    handles the 404 case via onerror fallback, so the HEAD round-trip was
+    pure overhead.
 
-def _get_release_group_art(release_group_mbid: str) -> Optional[str]:
-    """Fetch album art from release group (covers all editions)."""
-    try:
-        url = f"{COVER_ART_ARCHIVE_URL}/release-group/{release_group_mbid}/front-250"
-        resp = requests.head(url, timeout=3, allow_redirects=True)
-        if resp.status_code == 200:
-            return resp.url
+    `scope` is 'release' (most specific) or 'release-group' (covers all
+    editions — better hit rate).
+    """
+    if not mbid:
         return None
-    except Exception:
-        return None
+    if scope not in ('release', 'release-group'):
+        scope = 'release'
+    return f"{COVER_ART_ARCHIVE_URL}/{scope}/{mbid}/front-250"
 
 
 def _extract_artist_credit(artist_credit) -> List[str]:
@@ -121,7 +115,6 @@ class MusicBrainzSearchClient:
         # which is what MusicBrainz wants. Version stays generic ("2") —
         # the exact UI minor version would add noise to every request.
         self._client = MusicBrainzClient("SoulSync", "2")
-        self._art_cache: Dict[str, Optional[str]] = {}  # mbid -> url
         # Per-instance cache for "top artist MBID for this query". The
         # backend fires artists/albums/tracks searches in parallel against
         # one client instance, and albums+tracks both need the same artist
@@ -133,15 +126,17 @@ class MusicBrainzSearchClient:
         self._artist_mbid_lock = threading.Lock()
 
     def _cached_art(self, release_mbid: str, release_group_mbid: str = '') -> Optional[str]:
-        """Get cover art with caching. Tries release first, then release group."""
-        if release_mbid in self._art_cache:
-            return self._art_cache[release_mbid]
+        """Build a Cover Art Archive URL for a release / release-group MBID.
 
-        url = _get_cover_art_url(release_mbid)
-        if not url and release_group_mbid:
-            url = _get_release_group_art(release_group_mbid)
-        self._art_cache[release_mbid] = url
-        return url
+        Prefers release-group scope when provided — better hit rate because
+        it covers all editions of the same album. No network call; the
+        frontend's <img onerror> fallback handles 404s.
+        """
+        preferred = release_group_mbid or release_mbid
+        if not preferred:
+            return None
+        scope = 'release-group' if release_group_mbid else 'release'
+        return _cover_art_url(preferred, scope=scope)
 
     # Score threshold for user-facing search results. MusicBrainz returns a
     # Lucene score 0-100 on every match; exact name/alias hits score 100,
