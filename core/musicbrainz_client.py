@@ -72,40 +72,57 @@ class MusicBrainzClient:
         logger.info(f"MusicBrainz client initialized with user agent: {self.user_agent}")
     
     @rate_limited
-    def search_artist(self, artist_name: str, limit: int = 10) -> List[Dict[str, Any]]:
+    def search_artist(self, artist_name: str, limit: int = 10, strict: bool = True) -> List[Dict[str, Any]]:
         """
-        Search for artists by name
-        
+        Search for artists by name.
+
         Args:
             artist_name: Name of the artist to search for
             limit: Maximum number of results to return
-            
+            strict: When True (default), builds a phrase-match query against
+                the `artist` field only — correct for enrichment flows that
+                already know the exact name. When False, sends a bare query
+                which MusicBrainz matches against the alias, artist, AND
+                sortname indexes — the right behavior for user-facing fuzzy
+                search (finds "Metallica" from typing "metalica", matches
+                aliased names, etc.).
+
         Returns:
-            List of artist results with id, name, score, etc.
+            List of artist results with id, name, score, etc. MusicBrainz
+            assigns each result a `score` 0-100; the list is pre-sorted
+            score-descending by the server.
         """
         try:
             # Escape quotes and backslashes for Lucene query
             safe_name = artist_name.replace('\\', '\\\\').replace('"', '\\"')
-            
+
+            if strict:
+                query = f'artist:"{safe_name}"'
+            else:
+                # Bare query hits alias/artist/sortname indexes — much better
+                # recall for user typing. Still Lucene-escaped via the API's
+                # query parser.
+                query = safe_name
+
             params = {
-                'query': f'artist:"{safe_name}"',
+                'query': query,
                 'fmt': 'json',
                 'limit': limit
             }
-            
+
             response = self.session.get(
                 f"{self.BASE_URL}/artist",
                 params=params,
                 timeout=10
             )
             response.raise_for_status()
-            
+
             data = response.json()
             artists = data.get('artists', [])
-            
+
             logger.debug(f"Found {len(artists)} artists for query: {artist_name}")
             return artists
-            
+
         except Exception as e:
             logger.error(f"Error searching for artist '{artist_name}': {e}")
             return []

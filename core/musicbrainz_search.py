@@ -133,9 +133,57 @@ class MusicBrainzSearchClient:
         self._art_cache[release_mbid] = url
         return url
 
+    # Score threshold for user-facing search results. MusicBrainz returns a
+    # Lucene score 0-100 on every match; exact name/alias hits score 100,
+    # partial/typo matches trend lower, and tribute bands / random
+    # lookalikes score 40-65. 80 is the cutoff that keeps the true artist
+    # and close variants while dropping unrelated noise.
+    _MIN_SCORE = 80
+
     def search_artists(self, query: str, limit: int = 10) -> List[Artist]:
-        """MusicBrainz search tab doesn't show artists — only albums and tracks."""
-        return []
+        """Search MusicBrainz for artists by name.
+
+        Uses a bare Lucene query (no field prefix) so MusicBrainz searches
+        the alias, artist, AND sortname indexes together — much better
+        recall than strict `artist:"..."` phrase matching. Results are
+        filtered by score (>= 80) to drop tribute bands and unrelated
+        lookalikes.
+        """
+        try:
+            raw = self._client.search_artist(query, limit=limit, strict=False)
+            artists = []
+            for a in raw:
+                score = a.get('score', 0) or 0
+                if score < self._MIN_SCORE:
+                    continue
+
+                mbid = a.get('id', '')
+                name = a.get('name', '')
+                if not mbid or not name:
+                    continue
+
+                # Genres from MB tags (user-applied categorical labels). Each
+                # tag has {name, count}; keep the top-weighted ones.
+                tags = a.get('tags', []) or []
+                genres = [t.get('name') for t in tags if t.get('name')][:5]
+
+                external_urls = {
+                    'musicbrainz': f'https://musicbrainz.org/artist/{mbid}'
+                }
+
+                artists.append(Artist(
+                    id=mbid,
+                    name=name,
+                    popularity=score,  # Reuse score as popularity (0-100)
+                    genres=genres,
+                    followers=0,  # MusicBrainz doesn't track followers
+                    image_url=None,  # MB doesn't store artist images directly
+                    external_urls=external_urls,
+                ))
+            return artists
+        except Exception as e:
+            logger.warning(f"MusicBrainz artist search failed: {e}")
+            return []
 
     def search_albums(self, query: str, limit: int = 10) -> List[Album]:
         """Search MusicBrainz for releases (albums)."""
