@@ -4455,6 +4455,12 @@ SERVICE_CONFIG_REGISTRY = {
     'acoustid':     {'required': ['api_key']},
     'listenbrainz': {'required': ['token']},
     'hydrabase':    {'required': ['url', 'api_key']},
+    # Soulseek (slskd) needs a base URL. Used by the search source picker
+    # to dim Soulseek and redirect to Settings when the user has no slskd
+    # configured — clicking it would otherwise fire searches that always
+    # fail. URL field lives on Settings → Downloads, gated behind the
+    # download-source-mode dropdown.
+    'soulseek':     {'required': ['slskd_url']},
 }
 
 
