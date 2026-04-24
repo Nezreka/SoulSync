@@ -92,6 +92,28 @@ def _extract_artist_credit(artist_credit) -> List[str]:
     return [n for n in names if n]
 
 
+def _extract_title_hint(query: str, artist_name: str) -> Optional[str]:
+    """If `query` starts with `artist_name` followed by more words, return
+    the trailing portion. Used to pick out the album/track title the user
+    typed after the artist name (e.g. "The Beatles Abbey Road" → "Abbey
+    Road"). Returns None when the query is just the artist name.
+
+    Case-insensitive prefix match on whitespace-normalized versions of
+    both strings, so "the beatles   abbey road" → "abbey road" and
+    "The Beatles" → None.
+    """
+    if not query or not artist_name:
+        return None
+    q_norm = ' '.join(query.split()).lower()
+    a_norm = ' '.join(artist_name.split()).lower()
+    if q_norm == a_norm:
+        return None
+    # Require a word boundary between the artist name and the trailing bit.
+    if q_norm.startswith(a_norm + ' '):
+        return query[len(artist_name):].strip() or None
+    return None
+
+
 def _map_release_type(primary_type: str, secondary_types: List[str] = None) -> str:
     """Map MusicBrainz release group type to standard album_type."""
     pt = (primary_type or '').lower()
@@ -303,6 +325,13 @@ class MusicBrainzSearchClient:
             if top:
                 mbid = top.get('id', '')
                 tname = top.get('name', '') or query
+                # If the query has words beyond the artist name (e.g. "The
+                # Beatles Abbey Road"), extract the leftover as a title hint.
+                # We'll use it below to narrow browse results to the specific
+                # album the user typed rather than dumping the full back
+                # catalogue. kettui flagged the regression — bare-name browse
+                # was burying a specific-album query inside a discography list.
+                title_hint = _extract_title_hint(query, tname)
                 rgs = self._client.browse_artist_release_groups(
                     mbid,
                     # 'compilation' is a SECONDARY type, not a primary type
@@ -331,6 +360,25 @@ class MusicBrainzSearchClient:
                 # If filtering leaves us empty (niche live-only artist),
                 # fall back to the unfiltered list — better than no results.
                 rgs = studio or rgs
+
+                # Narrow to the title-hint if the user gave one ("The Beatles
+                # Abbey Road" → filter to RGs whose title contains "abbey
+                # road"). If no RG matches, fall back to text-search so the
+                # user finds the specific album instead of either seeing the
+                # full discography or getting zero results. (kettui flagged
+                # this regression — artist-first alone was burying specific-
+                # album queries inside the unfiltered discography list.)
+                if title_hint:
+                    hint_lower = title_hint.lower()
+                    matched = [rg for rg in rgs if hint_lower in (rg.get('title') or '').lower()]
+                    if matched:
+                        rgs = matched
+                    else:
+                        fallback = self._search_albums_text(title_hint, tname, limit)
+                        if fallback:
+                            return fallback
+                        # Text-search also missed — fall through and show the
+                        # full (unfiltered) discography rather than nothing.
 
                 # Sort by primary-type priority first (album > ep > single >
                 # compilation), then chronologically ASC — the standard way
@@ -440,7 +488,10 @@ class MusicBrainzSearchClient:
         release_date = ''
         image_url = None
         album_type = 'single'
-        total_tracks = 1
+        # Initialized to 0 and summed from the release's media track-counts.
+        # Previously initialized to 1, which made every track-with-release
+        # report one more than the album actually has (kettui caught this).
+        total_tracks = 0
 
         releases = r.get('releases', []) or []
         if releases:
@@ -459,6 +510,12 @@ class MusicBrainzSearchClient:
 
             rg_mbid = rg.get('id', '') or ''
             image_url = self._cached_art(album_id, rg_mbid) if album_id else None
+
+        # Tracks with no release info are standalone recordings — give them
+        # total_tracks=1 (the track itself). Keeps the old shape for that
+        # edge case but fixes the off-by-one for every normal case.
+        if not releases:
+            total_tracks = 1
 
         return Track(
             id=mbid,
