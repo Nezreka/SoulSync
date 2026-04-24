@@ -2955,9 +2955,6 @@ class WatchlistScanner:
                                     }
 
                                     track_data = {
-                                        'spotify_track_id': track['id'],
-                                        'spotify_album_id': album_data['id'],
-                                        'spotify_artist_id': artist.spotify_artist_id,
                                         'track_name': track['name'],
                                         'artist_name': artist.artist_name,
                                         'album_name': album_data.get('name', 'Unknown Album'),

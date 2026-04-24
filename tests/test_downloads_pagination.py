@@ -7,7 +7,6 @@ and `status` query params and includes a `total` count.
 """
 
 import sys
-import threading
 import types
 from unittest.mock import patch
 
@@ -45,6 +44,7 @@ _install_flask_limiter_stub()
 from flask import Flask, Blueprint  # noqa: E402
 
 from api import downloads as downloads_mod  # noqa: E402
+import core.import_runtime_state as runtime_state  # noqa: E402
 
 
 def _make_task(status="downloading", when=None):
@@ -63,11 +63,10 @@ def _make_task(status="downloading", when=None):
 
 def _make_app_with_tasks(tasks_dict):
     """Create a minimal Flask app with the downloads blueprint mounted and
-    a fake `web_server` module exposing the given download_tasks dict."""
-    fake_ws = types.ModuleType("web_server")
-    fake_ws.download_tasks = tasks_dict
-    fake_ws.tasks_lock = threading.RLock()
-    sys.modules["web_server"] = fake_ws
+    the shared import runtime state populated with the given download_tasks dict."""
+    original_tasks = dict(runtime_state.download_tasks)
+    runtime_state.download_tasks.clear()
+    runtime_state.download_tasks.update(tasks_dict)
 
     # Bypass API key auth for tests.
     def _passthrough(f):
@@ -83,6 +82,7 @@ def _make_app_with_tasks(tasks_dict):
         downloads_mod.register_routes(bp)
 
     app.register_blueprint(bp)
+    app._original_download_tasks = original_tasks
     return app
 
 
@@ -96,8 +96,12 @@ def client():
         for i in range(25)
     }
     app = _make_app_with_tasks(tasks)
-    with app.test_client() as c:
-        yield c
+    try:
+        with app.test_client() as c:
+            yield c
+    finally:
+        runtime_state.download_tasks.clear()
+        runtime_state.download_tasks.update(app._original_download_tasks)
 
 
 def test_default_limit_applied(client):
