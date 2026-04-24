@@ -59939,6 +59939,7 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
 
 #artist-detail-page .release-card.album-card .mb-card-icon:hover {
     opacity: 1;
+}
 
 /* ── SoulSync Discover Sync Tab ───────────────────────────────────────── */
 
@@ -59969,7 +59970,6 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 10px;
     margin: 3px 6px;
-}
     padding: 8px 14px;
     display: flex;
     align-items: center;
