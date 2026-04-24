@@ -5336,6 +5336,38 @@ body.helper-mode-active #dashboard-activity-feed:hover {
    GLOBAL SEARCH BAR — Spotlight-style search from anywhere
    ================================================================================== */
 
+/* Ambient glow under the global search bar — a radial gradient that emanates
+   from the bar's position and tapers out toward the window corners. Pointer
+   events disabled so it never intercepts clicks; hidden on /search where the
+   bar itself is hidden. */
+.gsearch-aura {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 260px;
+    pointer-events: none;
+    z-index: 99990; /* below the bar (99998) but above most page content */
+    opacity: 0.55;
+    transition: opacity 0.4s ease, background 0.4s ease;
+    background:
+        radial-gradient(ellipse 620px 230px at 50% 100%,
+            rgba(var(--accent-rgb), 0.22) 0%,
+            rgba(var(--accent-rgb), 0.10) 32%,
+            rgba(var(--accent-rgb), 0.03) 62%,
+            transparent 85%);
+}
+.gsearch-aura.hidden { display: none; }
+.gsearch-aura.active {
+    opacity: 1;
+    background:
+        radial-gradient(ellipse 820px 280px at 50% 100%,
+            rgba(var(--accent-rgb), 0.40) 0%,
+            rgba(var(--accent-rgb), 0.18) 28%,
+            rgba(var(--accent-rgb), 0.05) 58%,
+            transparent 85%);
+}
+
 .gsearch-bar {
     position: fixed;
     bottom: 24px;
@@ -5478,6 +5510,195 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 .gsearch-tab.active { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); border-color: rgba(var(--accent-rgb), 0.2); }
 .gsearch-tab:hover:not(.active) { background: rgba(255,255,255,0.06); }
+
+/* Source icon row in the global widget. The popover itself is already a
+   glass panel, so this row is just a transparent flex strip — no double
+   border/background. justify-content: center keeps the chips grouped
+   instead of drifting to the left when they don't fill the popover width. */
+.gsearch-source-row {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: visible;
+    justify-content: center;
+    gap: 6px;
+    padding: 12px 14px 8px;
+    flex-shrink: 0;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.gsearch-source-row::-webkit-scrollbar { height: 4px; }
+.gsearch-source-row::-webkit-scrollbar-track { background: transparent; }
+.gsearch-source-row::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 2px; }
+
+.gsearch-source-icon {
+    position: relative;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 72px;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease,
+                color 0.18s ease, box-shadow 0.18s ease;
+}
+.gsearch-source-icon:hover {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.04) 100%);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.18);
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+}
+.gsearch-source-icon:active { transform: translateY(0) scale(0.97); }
+
+.gsearch-source-icon-glyph {
+    font-size: 20px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.25));
+}
+.gsearch-source-icon-glyph img {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+    display: block;
+}
+.gsearch-source-icon-label { font-size: 10px; letter-spacing: 0.02em; font-weight: 600; }
+.gsearch-source-icon.active .gsearch-source-icon-label { font-weight: 700; }
+
+.gsearch-source-icon.active {
+    transform: scale(1.04);
+    border-color: currentColor;
+}
+.gsearch-source-icon[data-source="spotify"].active {
+    color: #1db954;
+    background: linear-gradient(180deg, rgba(29, 185, 84, 0.28) 0%, rgba(29, 185, 84, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(29, 185, 84, 0.35), 0 4px 16px rgba(29, 185, 84, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="itunes"].active {
+    color: #fc3c44;
+    background: linear-gradient(180deg, rgba(252, 60, 68, 0.28) 0%, rgba(252, 60, 68, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(252, 60, 68, 0.35), 0 4px 16px rgba(252, 60, 68, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="deezer"].active {
+    color: #a238ff;
+    background: linear-gradient(180deg, rgba(162, 56, 255, 0.28) 0%, rgba(162, 56, 255, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(162, 56, 255, 0.35), 0 4px 16px rgba(162, 56, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="discogs"].active {
+    color: #D4A574;
+    background: linear-gradient(180deg, rgba(212, 165, 116, 0.28) 0%, rgba(212, 165, 116, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(212, 165, 116, 0.35), 0 4px 16px rgba(212, 165, 116, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="hydrabase"].active {
+    color: #00b4d8;
+    background: linear-gradient(180deg, rgba(0, 180, 216, 0.28) 0%, rgba(0, 180, 216, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(0, 180, 216, 0.35), 0 4px 16px rgba(0, 180, 216, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="musicbrainz"].active {
+    color: #BA3358;
+    background: linear-gradient(180deg, rgba(186, 51, 88, 0.28) 0%, rgba(186, 51, 88, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(186, 51, 88, 0.35), 0 4px 16px rgba(186, 51, 88, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="youtube_videos"].active {
+    color: #ff4444;
+    background: linear-gradient(180deg, rgba(255, 0, 0, 0.28) 0%, rgba(255, 0, 0, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(255, 0, 0, 0.35), 0 4px 16px rgba(255, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon[data-source="soulseek"].active {
+    color: #fff;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 100%);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.32), 0 4px 16px rgba(255, 255, 255, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.gsearch-source-icon.cached::after {
+    content: '';
+    position: absolute;
+    top: 5px;
+    right: 6px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 4px currentColor;
+    animation: gsearch-source-cache-pulse 2.4s ease-in-out infinite;
+}
+@keyframes gsearch-source-cache-pulse {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50%      { opacity: 1;   transform: scale(1.15); }
+}
+.gsearch-source-icon.loading .gsearch-source-icon-glyph {
+    animation: gsearch-source-loading-spin 1.2s linear infinite;
+    opacity: 0.7;
+}
+@keyframes gsearch-source-loading-spin {
+    from { transform: rotate(0); }
+    to   { transform: rotate(360deg); }
+}
+.gsearch-source-icon.fallback-warning {
+    border-color: rgba(250, 176, 5, 0.5);
+    box-shadow: 0 0 0 1px rgba(250, 176, 5, 0.25);
+}
+
+/* Same unconfigured treatment as the Search page icons. */
+.gsearch-source-icon.unconfigured {
+    opacity: 0.42;
+    filter: grayscale(0.7);
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.5);
+}
+.gsearch-source-icon.unconfigured:hover {
+    opacity: 0.75;
+    filter: grayscale(0.35);
+    transform: none;
+    box-shadow: none;
+    border-color: rgba(255, 255, 255, 0.12);
+}
+.gsearch-source-icon.unconfigured.active {
+    background: rgba(255, 255, 255, 0.02);
+    box-shadow: none;
+    transform: none;
+}
+
+/* Flash highlight on the Settings service card after scrolling to it via
+   the picker. Two and a half seconds of gentle accent pulse so the user's
+   eye catches the card. */
+.stg-service.stg-service-flash {
+    animation: stg-service-flash-anim 2.2s ease-out;
+}
+@keyframes stg-service-flash-anim {
+    0%   { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.55); }
+    35%  { box-shadow: 0 0 0 6px rgba(var(--accent-rgb), 0.25); }
+    100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0); }
+}
+
+.gsearch-fallback-banner {
+    padding: 6px 14px;
+    margin: 0 12px 6px;
+    border-radius: 6px;
+    background: rgba(250, 176, 5, 0.12);
+    border: 1px solid rgba(250, 176, 5, 0.3);
+    color: #fab005;
+    font-size: 10.5px;
+    font-weight: 500;
+}
 
 /* Section headers */
 .gsearch-section-header {
@@ -22865,6 +23086,39 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     max-width: 400px;
 }
 
+/* Hand-off CTA shown in the library empty state when the user's search
+   returns no library matches — offers to run the same query against the
+   configured metadata source on the /search page. */
+.library-empty-search-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.22), rgba(var(--accent-rgb), 0.08));
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    border-radius: 10px;
+    color: rgb(var(--accent-light-rgb, var(--accent-rgb)));
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.library-empty-search-cta:hover {
+    transform: translateY(-1px);
+    border-color: rgba(var(--accent-rgb), 0.55);
+    box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.22);
+}
+.library-empty-search-cta:active { transform: translateY(0); }
+.library-empty-search-cta-icon { font-size: 16px; }
+.library-empty-search-cta-arrow {
+    font-weight: 700;
+    transition: transform 0.15s ease;
+}
+.library-empty-search-cta:hover .library-empty-search-cta-arrow { transform: translateX(3px); }
+#library-empty-search-cta-query { color: #fff; }
+
 /* Pagination */
 .library-pagination {
     display: flex;
@@ -33084,38 +33338,6 @@ div.artist-hero-badge {
     color: #fff;
 }
 
-.enhanced-search-btn {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    padding: 10px 20px;
-    color: rgba(255, 255, 255, 0.8);
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-}
-
-.enhanced-search-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
-    transform: none;
-    box-shadow: none;
-}
-
-.enhanced-search-btn:active {
-    transform: scale(0.97);
-}
-
-.btn-icon {
-    font-size: 14px;
-}
-
 /* Enhanced Search Status */
 .enhanced-search-status {
     display: flex;
@@ -33322,12 +33544,6 @@ div.artist-hero-badge {
         gap: 8px;
     }
 
-    .enhanced-search-btn {
-        width: 100%;
-        justify-content: center;
-        padding: 10px 16px;
-    }
-
     #enhanced-search-input {
         font-size: 14px;
     }
@@ -33346,11 +33562,6 @@ div.artist-hero-badge {
     .enhanced-search-icon {
         font-size: 16px;
         margin-right: 6px;
-    }
-
-    .enhanced-search-btn {
-        padding: 9px 14px;
-        font-size: 12px;
     }
 
     /* Better album/track results on mobile */
@@ -33512,6 +33723,212 @@ div.artist-hero-badge {
 .enh-source-tab.enh-tab-hydrabase.active { background: rgba(0, 180, 216, 0.2); color: #00b4d8; }
 .enh-source-tab.enh-tab-youtube.active { background: rgba(255, 0, 0, 0.2); color: #ff4444; }
 .enh-source-tab.enh-tab-musicbrainz.active { background: rgba(186, 51, 88, 0.2); color: #BA3358; }
+
+/* ── Source picker icon row (replaces dropdown + post-search tabs) ── */
+.enh-source-row {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: visible;
+    gap: 10px;
+    padding: 12px 14px;
+    margin: 10px 0 14px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+    /* Frosted-glass panel that holds the icons together visually. */
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.015) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 10px rgba(0, 0, 0, 0.15);
+    /* Don't compress when the parent flex container is tight. */
+    flex-shrink: 0;
+}
+.enh-source-row::-webkit-scrollbar { height: 6px; }
+.enh-source-row::-webkit-scrollbar-track { background: transparent; }
+.enh-source-row::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 3px; }
+
+.enh-source-icon {
+    position: relative;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 90px;
+    padding: 12px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+    color: rgba(255, 255, 255, 0.65);
+    cursor: pointer;
+    transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease,
+                color 0.18s ease, box-shadow 0.18s ease;
+    font-family: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.enh-source-icon:hover {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.04) 100%);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.18);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+.enh-source-icon:active { transform: translateY(0) scale(0.97); }
+
+.enh-source-icon-glyph {
+    font-size: 26px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.25));
+}
+.enh-source-icon-glyph img {
+    width: 30px;
+    height: 30px;
+    object-fit: contain;
+    display: block;
+}
+.enh-source-icon-label {
+    font-size: 11.5px;
+    letter-spacing: 0.02em;
+    font-weight: 600;
+}
+.enh-source-icon.active .enh-source-icon-label { font-weight: 700; }
+
+/* Active state — brand-coloured gradient + outer glow. Each source gets its
+   own palette. `transform: scale(1.03)` lifts the chip slightly above its
+   siblings. */
+.enh-source-icon.active {
+    transform: scale(1.03);
+    border-color: currentColor;
+}
+.enh-source-icon[data-source="spotify"].active {
+    color: #1db954;
+    background: linear-gradient(180deg, rgba(29, 185, 84, 0.28) 0%, rgba(29, 185, 84, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(29, 185, 84, 0.35), 0 6px 22px rgba(29, 185, 84, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="itunes"].active {
+    color: #fc3c44;
+    background: linear-gradient(180deg, rgba(252, 60, 68, 0.28) 0%, rgba(252, 60, 68, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(252, 60, 68, 0.35), 0 6px 22px rgba(252, 60, 68, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="deezer"].active {
+    color: #a238ff;
+    background: linear-gradient(180deg, rgba(162, 56, 255, 0.28) 0%, rgba(162, 56, 255, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(162, 56, 255, 0.35), 0 6px 22px rgba(162, 56, 255, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="discogs"].active {
+    color: #D4A574;
+    background: linear-gradient(180deg, rgba(212, 165, 116, 0.28) 0%, rgba(212, 165, 116, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(212, 165, 116, 0.35), 0 6px 22px rgba(212, 165, 116, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="hydrabase"].active {
+    color: #00b4d8;
+    background: linear-gradient(180deg, rgba(0, 180, 216, 0.28) 0%, rgba(0, 180, 216, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(0, 180, 216, 0.35), 0 6px 22px rgba(0, 180, 216, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="musicbrainz"].active {
+    color: #BA3358;
+    background: linear-gradient(180deg, rgba(186, 51, 88, 0.28) 0%, rgba(186, 51, 88, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(186, 51, 88, 0.35), 0 6px 22px rgba(186, 51, 88, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="youtube_videos"].active {
+    color: #ff4444;
+    background: linear-gradient(180deg, rgba(255, 0, 0, 0.28) 0%, rgba(255, 0, 0, 0.08) 100%);
+    box-shadow: 0 0 0 1px rgba(255, 0, 0, 0.35), 0 6px 22px rgba(255, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.enh-source-icon[data-source="soulseek"].active {
+    color: #fff;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 100%);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.32), 0 6px 22px rgba(255, 255, 255, 0.15),
+                inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+/* Cache dot — brand-coloured pulse on icons that have results cached for
+   the current query. */
+.enh-source-icon.cached::after {
+    content: '';
+    position: absolute;
+    top: 7px;
+    right: 9px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 6px currentColor;
+    animation: enh-source-cache-pulse 2.4s ease-in-out infinite;
+}
+@keyframes enh-source-cache-pulse {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50%      { opacity: 1;   transform: scale(1.15); }
+}
+
+.enh-source-icon.loading .enh-source-icon-glyph {
+    animation: enh-source-loading-spin 1.2s linear infinite;
+    opacity: 0.7;
+}
+@keyframes enh-source-loading-spin {
+    from { transform: rotate(0); }
+    to   { transform: rotate(360deg); }
+}
+
+.enh-source-icon.fallback-warning {
+    border-color: rgba(250, 176, 5, 0.5);
+    box-shadow: 0 0 0 1px rgba(250, 176, 5, 0.25);
+}
+
+/* Unconfigured — no credentials saved for this source. The chip still
+   clicks (redirects to Settings → Connections), but looks muted so the
+   user's eye is drawn to the sources that actually work. */
+.enh-source-icon.unconfigured {
+    opacity: 0.42;
+    filter: grayscale(0.7);
+    background: rgba(255, 255, 255, 0.02);
+    border-color: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.5);
+}
+.enh-source-icon.unconfigured:hover {
+    opacity: 0.75;
+    filter: grayscale(0.35);
+    transform: none;
+    box-shadow: none;
+    border-color: rgba(255, 255, 255, 0.12);
+}
+/* Kill brand glow / active gradient if an unconfigured source is somehow
+   marked active (defensive — setActiveSource bails before this normally). */
+.enh-source-icon.unconfigured.active {
+    background: rgba(255, 255, 255, 0.02);
+    box-shadow: none;
+    transform: none;
+}
+
+/* Rate-limit fallback banner above the enhanced results. */
+.enh-fallback-banner {
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    background: rgba(250, 176, 5, 0.12);
+    border: 1px solid rgba(250, 176, 5, 0.3);
+    color: #fab005;
+    font-size: 12px;
+    font-weight: 500;
+}
+.enh-fallback-banner.hidden { display: none; }
 
 /* Music Video Grid */
 .enh-video-grid {

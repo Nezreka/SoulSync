@@ -917,32 +917,29 @@ const HELPER_CONTENT = {
         description: 'Search for music across your configured metadata sources and download from Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer.',
         docsId: 'search'
     },
-    '.search-source-picker-container': {
-        title: 'Search From',
-        description: 'Pick which metadata source to search. "All sources (Auto)" keeps the multi-source fan-out behavior; any specific source hits only that provider. "Soulseek (raw files)" switches to raw P2P file search with quality filters.',
+    '#enh-source-row': {
+        title: 'Search Source Icons',
+        description: 'Each icon is a metadata source. The highlighted one is what your next search will target — defaults to your configured primary source on page load. Click a different icon to search or switch to that source; a small dot on the icon marks sources that already have cached results for the current query.',
         tips: [
-            'Auto: searches your configured primary source plus library matches',
-            'Spotify / Apple Music / Deezer / Discogs / Hydrabase / MusicBrainz: metadata-only results for that provider',
-            'Soulseek: raw file results with format, bitrate, size, uploader — same as the old Basic Search'
+            'Typing searches only the highlighted source — no more silent fan-out across every provider',
+            'Switching to an already-cached source is instant, no re-fetch',
+            'The Soulseek icon routes to the raw-file search (same as the old Basic Search)',
+            'Music Videos queries YouTube for downloadable music video files',
+            'An amber border on a source means the backend fell back to a different provider for you (usually because Spotify is rate-limited)'
         ],
         docsId: 'search-enhanced'
     },
 
     // Enhanced Search
     '.enhanced-search-input-wrapper': {
-        title: 'Enhanced Search',
-        description: 'Type an artist, album, or track name. Results appear in categorized sections: Library Artists, Artists, Albums, Singles & EPs, and Tracks. Results come from your active metadata source.',
+        title: 'Search Bar',
+        description: 'Type an artist, album, or track name. Results appear in categorized sections: Library Artists, Artists, Albums, Singles & EPs, and Tracks. Only the source highlighted in the icon row above is queried — click another icon to switch.',
         tips: [
             'Click an album to open the download modal',
             'Click a track to search your download source',
             'Play button previews tracks from your download source',
-            'Multi-source tabs compare results across Spotify, iTunes, and Deezer'
+            'Switch sources via the icon row above — results are cached per query'
         ],
-        docsId: 'search-enhanced'
-    },
-    '.enh-source-tabs': {
-        title: 'Source Tabs',
-        description: 'Switch between metadata sources to see results from Spotify, iTunes, or Deezer. Each source has its own catalog — tracks missing on one may be found on another.',
         docsId: 'search-enhanced'
     },
     '#enh-db-artists-section': {
@@ -1291,11 +1288,8 @@ const HELPER_CONTENT = {
         title: 'Similar Artist',
         description: 'An artist similar to the one you\'re viewing. Click to load their discography and browse their releases.',
     },
-    '.search-source-picker-container': {
-        title: 'Search Source',
-        description: 'Pick which metadata source the Search page queries. "All sources (Auto)" fans out across configured providers (the legacy default); pick a specific source to constrain the lookup. "Soulseek (raw files)" routes to the file-search pipeline that used to be the Basic mode.',
-        docsId: 'search'
-    },
+    // (Search source picker annotation lives under `#enh-source-row` above —
+    //  the old `.search-source-picker-container` dropdown is gone.)
 
     // ─── AUTOMATIONS PAGE ─────────────────────────────────────────────
 
@@ -2408,7 +2402,7 @@ const HELPER_TOURS = {
         description: 'Step-by-step guide to downloading your first album.',
         icon: '⬇️',
         steps: [
-            { page: 'search', selector: '.search-source-picker-container', title: 'Pick a Search Source', description: '"All sources (Auto)" fans out across every provider. Pick a specific one (Spotify, Apple Music, Deezer, etc.) to get results from just that catalog. "Soulseek (raw files)" is the old Basic mode — raw P2P file results with quality filters.' },
+            { page: 'search', selector: '#enh-source-row', title: 'Pick a Search Source', description: 'Each icon is a metadata source. The highlighted one is where your next search goes — defaults to your configured primary source. Click a different icon to switch to Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, Music Videos, or Soulseek (raw P2P files). A small dot marks sources you\'ve already searched for the current query.' },
             { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Search for Music', description: 'Type an artist or album name here. Results appear in categorized sections — Artists, Albums, Singles/EPs, and Tracks. Try searching for your favorite artist now!' },
             { page: 'search', selector: '#enh-results-container', title: 'Search Results', description: 'After searching, results appear organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
             { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Downloading an Album', description: 'Click any album card to open the download modal. You\'ll see the tracklist, quality options, and a big "Download Album" button. Individual tracks have a play button to preview before downloading.' },
@@ -3449,7 +3443,10 @@ const WHATS_NEW = {
     '2.40': [
         // --- Search & Artists unification (in progress, not yet released) ---
         { date: 'Unreleased — Search & Artists unification', unreleased: true },
-        { title: 'Search Source Picker', desc: 'The Search page\'s Enhanced/Basic toggle is replaced by a single "Search from" dropdown at the top — pick All sources (Auto), Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, or Soulseek (raw files). Auto keeps today\'s multi-source fan-out; picking a specific source hits only that provider so there are no more surprise Spotify rate-limit hits from flows that didn\'t need Spotify. "Soulseek" routes to the raw-file search (what "Basic" used to do), so one picker now covers both old modes. Loading text reflects the selected source', page: 'search', unreleased: true },
+        { title: 'Search Source Picker Icon Row', desc: 'The Search page now has a row of source icons above the search bar — one per source (Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, Music Videos, Soulseek). Typing searches only the currently-selected source instead of fanning out to every one by default. Click a different icon to switch; results come back on demand. The default icon on page load is your configured primary metadata source. Replaces the short-lived "Search from" dropdown that preceded this', page: 'search', unreleased: true },
+        { title: 'Per-Query Source Cache (No More Re-Fetching)', desc: 'Once you\'ve searched a source for a given query, switching back to it is instant — results are cached for the current query. A small dot on each source icon shows which ones already have cached results this query. Type a new query and the whole cache resets. Same behavior in the sidebar global search popover. Net effect: roughly 6-7x fewer API calls per search compared to the old default fan-out', page: 'search', unreleased: true },
+        { title: 'Global Search Widget Source Parity', desc: 'The sidebar Cmd+K / "/" search popover gained the same source icon row as the full Search page. Pick your source up front, see cache dots for already-fetched sources this query, and the rate-limit fallback banner appears if the backend substituted a different source than the one you clicked. Clicking the Soulseek icon hands off to the full Search page (raw file results need more room than the popover provides)', page: 'search', unreleased: true },
+        { title: 'Rate-Limit Fallback Banner', desc: 'If you click Spotify but the backend auto-fell back to Deezer because Spotify was rate-limited, the search results now lead with a small amber banner ("Spotify unavailable — showing Deezer.") and the Spotify icon gets an amber border. Previously results just silently showed as the fallback source with no signal that anything unusual happened', page: 'search', unreleased: true },
         { title: 'Explicit Source Selection on /api/enhanced-search', desc: 'The enhanced-search endpoint now accepts an optional `source` body param (spotify, itunes, deezer, discogs, hydrabase, musicbrainz, auto). When a specific source is chosen, only that provider is queried and db_artists (local library matches) still come back. Cache keys isolate per-source so single-source and multi-source results don\'t collide. Omitted or `auto` preserves the old multi-source fan-out behavior unchanged — nothing breaks for existing callers', page: 'search', unreleased: true },
         { title: 'Shared Enhanced-Search Fetch Helper', desc: 'Internal refactor — the Search page dropdown and the global search widget now route through one shared enhancedSearchFetch helper in search.js instead of duplicating the POST boilerplate. Zero UX change, but it means any future source-picker tweak only needs wiring in one place', page: 'search', unreleased: true },
         { title: 'Search Page Renamed to /search', desc: 'The Search page\'s internal id is now "search" instead of the confusing "downloads" (which clashed with the actual Downloads page). Sidebar label unchanged. URL is now /search; /downloads still resolves so old bookmarks keep working. Profile ACL "Page Access" now saves as "search"; existing profiles with "downloads" in allowed_pages still resolve through a legacy-compat check', page: 'search', unreleased: true },
@@ -3457,6 +3454,13 @@ const WHATS_NEW = {
         { title: 'Artists Sidebar Entry Retired — Use Search Instead', desc: 'Cin flagged that "Artists" in the sidebar read like a library section but was actually a dedicated artist-search page, duplicating what the unified Search already does. The sidebar entry is gone. New flow: Sidebar → Search → type artist name → click their result. "Browse Artists" on the empty Watchlist page and "View artist from Wishlist" now open Search pre-filled with the artist\'s name. Removed "Artists" from profile Home Page + Page Access options. Deep link to /artists still resolves so old bookmarks keep working — the page just isn\'t promoted anywhere', page: 'search', unreleased: true },
         { title: 'Artist Detail Back Button Fallback', desc: 'The back button on the Artists-page inline detail view used to dump users on an empty "Search for an artist..." screen when they arrived from outside the Artists page — a dead end now that Artists isn\'t in the sidebar. If you searched inside the Artists page, back still returns to your results list. Otherwise (arriving from Search, Discover, Watchlist, etc.), back uses the browser history to land you on whichever page you came from. Falls back to the Search page only when there\'s no browser history to go back to (the natural place to find another artist)', page: 'search', unreleased: true },
         { title: 'Interactive Help Updated for Unified Search', desc: 'The click-for-help annotations and the "Your First Download" guided tour were rewritten for the new Search page. Stale annotations pointing at removed elements (Basic/Enhanced toggle button, side-panel queues, download-manager controls) are deleted. The first-download tour now runs on /search and opens with the source picker. PAGE_TOUR_MAP accepts both "search" and the legacy "downloads" id so old bookmarks still match a tour. Retired the standalone "Browse Artists" tour', page: 'help', unreleased: true },
+        { title: 'Unified Source-Picker Controller (Search Page + Global Widget)', desc: 'Internal refactor — the source picker state machine (query, active source, per-query cache, fallbacks, loading state, configured-source discovery) is now a single createSearchController factory in shared-helpers.js. Both the full Search page and the sidebar global search popover consume the same controller with per-surface wiring (DOM elements, Soulseek handoff, unconfigured-source click). About 380 lines of near-duplicated state + fetch + render code consolidated into one implementation, so a bug fix or behavior tweak to the picker lands everywhere at once. Zero UX change — every keystroke, icon click, cache hit, rate-limit fallback, and unconfigured-source redirect behaves identically to before', page: 'search', unreleased: true },
+        { title: 'Fix Clean Search History Automation Failing with AttributeError', desc: 'The hourly Clean Search History maintenance automation was crashing with "DownloadOrchestrator object has no attribute base_url". Root cause: the check `soulseek_client.base_url` was written before the orchestrator refactor — `soulseek_client` is now a DownloadOrchestrator that wraps individual download clients, with the real Soulseek client at `.soulseek`. Two other call sites in web_server.py already used the correct `soulseek_client.soulseek.base_url` pattern; this one was missed. Now matches the same getattr-guarded pattern and the hourly cleanup runs again', page: 'stats' },
+        { title: 'Search Results Always Visible — Show/Hide Button Removed', desc: 'The "Show Results / Hide Results" toggle next to the search bar is gone. There was nothing else on the page worth seeing instead of results, so toggling visibility never made sense. Cin flagged it during PR review. Dropdown visibility is now a pure function of query state — empty input hides it, results show it', page: 'search', unreleased: true },
+        { title: 'Cached Search Results Restore on Navigate-Back', desc: 'Previously, navigating away from /search via a sidebar link dismissed the dropdown (the click registered as outside-click). When you came back, the input still held your query but the results were hidden until you typed again or clicked Show Results. Now the per-query cache renders automatically when you re-enter /search, so your results are right where you left them. Cin flagged the round-trip during PR review', page: 'search', unreleased: true },
+        { title: 'Fix Soulseek Handoff from Global Search Going Through Metadata Flow', desc: 'When you clicked the Soulseek icon in the sidebar global search popover, it navigated to /search and wrote the query into the enhanced-search input — which then ran the metadata flow against whatever your default source was (Spotify, Deezer, etc.) instead of the raw Soulseek file search you actually wanted. Cin flagged it during PR review. Now the handoff pre-fills the basic-search input directly and clicks the Search page\'s Soulseek icon so the controller\'s onSoulseekSelected callback owns the section swap and runs performDownloadsSearch with the right query', page: 'search', unreleased: true },
+        { title: 'Stale Search Requests No Longer Flash Empty Results on Fast Retype', desc: 'Cin flagged a race in createSearchController: when you typed a query then quickly re-typed before the first fetch returned, the first fetch\'s catch block (firing on AbortError after the second submitQuery aborted it) cleared loadingSources and notified the UI, causing a brief flash of empty/error state while the new query\'s fetch was still mid-flight. Added a monotonic _requestSeq token — each fetch captures the next value, and stale completions bail before mutating shared state. The controller still aborts in-flight fetches on supersession; this just keeps the abort-cleanup of the old request from clobbering the new one\'s spinner', page: 'search', unreleased: true },
+        { title: 'Source Picker Dims Soulseek When slskd Isn\'t Configured', desc: 'Cin pointed out that the Soulseek icon was always rendered as configured, so users without slskd set up could click it and fire searches that would never succeed. Soulseek is now in the backend config-status registry as `required: [slskd_url]` and removed from the frontend\'s always-configured set. Without slskd, the icon dims and clicking it routes to Settings → Downloads tab (where the slskd URL field lives, gated behind the download-source dropdown) instead of Settings → Connections', page: 'search', unreleased: true },
     ],
     '2.39': [
         // --- April 22, 2026 ---
