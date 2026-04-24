@@ -278,6 +278,12 @@ function displayDiscoverHeroArtist(artist) {
     if (discographyBtn && artistId) {
         discographyBtn.setAttribute('data-artist-id', artistId);
         discographyBtn.setAttribute('data-artist-name', artist.artist_name);
+        // Source the click handler will pass to navigateToArtistDetail. Without
+        // this, source-only hero artists (which is the typical case — they
+        // come from discover similar-artists, not the library) get looked up
+        // as library IDs and 404. Backend always includes artist.source.
+        if (artist.source) discographyBtn.setAttribute('data-source', artist.source);
+        else discographyBtn.removeAttribute('data-source');
         // Also store both IDs for cross-source operations
         if (artist.spotify_artist_id) discographyBtn.setAttribute('data-spotify-id', artist.spotify_artist_id);
         if (artist.itunes_artist_id) discographyBtn.setAttribute('data-itunes-id', artist.itunes_artist_id);
@@ -815,14 +821,18 @@ async function viewDiscoverHeroDiscography() {
 
     const artistId = button.getAttribute('data-artist-id');
     const artistName = button.getAttribute('data-artist-name');
+    // Pass the source so /api/artist-detail knows to synthesize from that
+    // metadata provider instead of doing a local DB lookup. Hero similar
+    // artists are almost always source-only (not in the library).
+    const source = button.getAttribute('data-source') || null;
 
     if (!artistId || !artistName) {
         console.error('No artist data found for discography view');
         return;
     }
 
-    console.log(`🎵 Navigating to artist detail for: ${artistName}`);
-    navigateToArtistDetail(artistId, artistName);
+    console.log(`🎵 Navigating to artist detail for: ${artistName} (source: ${source || 'library'})`);
+    navigateToArtistDetail(artistId, artistName, source);
 }
 
 function showDiscoverHeroEmpty() {
