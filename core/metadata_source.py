@@ -8,6 +8,7 @@ import time
 from typing import Any, Dict
 
 from core.import_context import (
+    extract_artist_name,
     get_import_clean_artist,
     get_import_clean_title,
     get_import_context_album,
@@ -18,15 +19,19 @@ from core.import_context import (
     get_source_tag_names,
     normalize_import_context,
 )
+from core.metadata_service import get_itunes_client
+from database.music_database import get_database
 from core.metadata_common import (
-    _extract_artist_name,
-    _get_config_manager,
-    _get_database,
-    _get_itunes_client,
-    _get_logger,
-    _get_mutagen_symbols,
-    _is_vorbis_like,
+    get_config_manager,
+    get_logger,
+    get_mutagen_symbols,
+    is_vorbis_like,
 )
+
+__all__ = [
+    "extract_source_metadata",
+    "embed_source_ids",
+]
 
 
 _MB_RELEASE_CACHE: Dict[tuple, str] = {}
@@ -48,7 +53,7 @@ _EDITION_BARE_RE = re.compile(
 )
 
 
-def _normalize_album_cache_key(album_name: str) -> str:
+def normalize_album_cache_key(album_name: str) -> str:
     result = _EDITION_PAREN_RE.sub("", album_name or "")
     result = _EDITION_BARE_RE.sub("", result)
     return result.lower().strip()
@@ -58,8 +63,8 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     if album_info is None:
         album_info = {}
 
-    cfg = _get_config_manager()
-    logger_ = _get_logger()
+    cfg = get_config_manager()
+    logger_ = get_logger()
     context = normalize_import_context(context)
     original_search = get_import_original_search(context)
     album_ctx = get_import_context_album(context)
@@ -68,7 +73,7 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     source_ids = get_import_source_ids(context)
 
     artist_dict = artist if isinstance(artist, dict) else {
-        "name": _extract_artist_name(artist),
+        "name": extract_artist_name(artist),
         "id": getattr(artist, "id", ""),
         "genres": list(getattr(artist, "genres", []) or []),
     }
@@ -135,7 +140,7 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
             artist_id = str(artist_dict.get("id", ""))
             if source == "itunes" and artist_id.isdigit():
                 try:
-                    itunes_client = _get_itunes_client()
+                    itunes_client = get_itunes_client()
                     if itunes_client and hasattr(itunes_client, "resolve_primary_artist"):
                         resolved = itunes_client.resolve_primary_artist(artist_id)
                         if resolved and resolved != raw_album_artist:
@@ -199,9 +204,9 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
 
 
 def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=None):
-    cfg = _get_config_manager()
-    logger_ = _get_logger()
-    symbols = _get_mutagen_symbols()
+    cfg = get_config_manager()
+    logger_ = get_logger()
+    symbols = get_mutagen_symbols()
     if not symbols:
         return
 
@@ -323,7 +328,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if not isinstance(source_order, list) or not source_order:
             source_order = ["musicbrainz", "deezer", "audiodb", "tidal", "qobuz", "lastfm", "genius"]
 
-        db = _get_database()
+        db = get_database()
 
         for source_name in source_order:
             if source_name == "musicbrainz":
@@ -723,7 +728,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
                 key = f"----:com.apple.iTunes:{mp4_tag_map.get(tag_name, tag_name)}"
                 audio_file[key] = [symbols.MP4FreeForm(str(value).encode("utf-8"))]
                 written.append(key)
-        elif _is_vorbis_like(audio_file, symbols):
+        elif is_vorbis_like(audio_file, symbols):
             for tag_name, value in filtered_tags.items():
                 audio_file[vorbis_tag_map.get(tag_name, tag_name)] = [str(value)]
                 written.append(vorbis_tag_map.get(tag_name, tag_name))
@@ -737,7 +742,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             metadata["date"] = release_year
             if isinstance(audio_file.tags, symbols.ID3):
                 audio_file.tags.add(symbols.TDRC(encoding=3, text=[release_year]))
-            elif _is_vorbis_like(audio_file, symbols):
+            elif is_vorbis_like(audio_file, symbols):
                 audio_file["date"] = [release_year]
             elif isinstance(audio_file, symbols.MP4):
                 audio_file["\xa9day"] = [release_year]
@@ -747,7 +752,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             bpm_int = int(pp["deezer_bpm"])
             if isinstance(audio_file.tags, symbols.ID3):
                 audio_file.tags.add(symbols.TBPM(encoding=3, text=[str(bpm_int)]))
-            elif _is_vorbis_like(audio_file, symbols):
+            elif is_vorbis_like(audio_file, symbols):
                 audio_file["BPM"] = [str(bpm_int)]
             elif isinstance(audio_file, symbols.MP4):
                 audio_file["tmpo"] = [bpm_int]
@@ -756,7 +761,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if _tag_enabled("audiodb.tags.mood") and pp["audiodb_mood"]:
             if isinstance(audio_file.tags, symbols.ID3):
                 audio_file.tags.add(symbols.TXXX(encoding=3, desc="MOOD", text=[pp["audiodb_mood"]]))
-            elif _is_vorbis_like(audio_file, symbols):
+            elif is_vorbis_like(audio_file, symbols):
                 audio_file["MOOD"] = [pp["audiodb_mood"]]
             elif isinstance(audio_file, symbols.MP4):
                 audio_file["----:com.apple.iTunes:MOOD"] = [symbols.MP4FreeForm(pp["audiodb_mood"].encode("utf-8"))]
@@ -764,7 +769,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if _tag_enabled("audiodb.tags.style") and pp["audiodb_style"]:
             if isinstance(audio_file.tags, symbols.ID3):
                 audio_file.tags.add(symbols.TXXX(encoding=3, desc="STYLE", text=[pp["audiodb_style"]]))
-            elif _is_vorbis_like(audio_file, symbols):
+            elif is_vorbis_like(audio_file, symbols):
                 audio_file["STYLE"] = [pp["audiodb_style"]]
             elif isinstance(audio_file, symbols.MP4):
                 audio_file["----:com.apple.iTunes:STYLE"] = [symbols.MP4FreeForm(pp["audiodb_style"].encode("utf-8"))]
@@ -795,7 +800,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
                     genre_string = ", ".join(merged)
                     if isinstance(audio_file.tags, symbols.ID3):
                         audio_file.tags.add(symbols.TCON(encoding=3, text=[genre_string]))
-                    elif _is_vorbis_like(audio_file, symbols):
+                    elif is_vorbis_like(audio_file, symbols):
                         audio_file["GENRE"] = [genre_string]
                     elif isinstance(audio_file, symbols.MP4):
                         audio_file["\xa9gen"] = [genre_string]
@@ -814,7 +819,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             isrc_source, final_isrc = isrc_candidates[0]
             if isinstance(audio_file.tags, symbols.ID3):
                 audio_file.tags.add(symbols.TSRC(encoding=3, text=[final_isrc]))
-            elif _is_vorbis_like(audio_file, symbols):
+            elif is_vorbis_like(audio_file, symbols):
                 audio_file["ISRC"] = [final_isrc]
             elif isinstance(audio_file, symbols.MP4):
                 audio_file["----:com.apple.iTunes:ISRC"] = [symbols.MP4FreeForm(final_isrc.encode("utf-8"))]
@@ -829,7 +834,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             copyright_source, final_copyright = copyright_candidates[0]
             if isinstance(audio_file.tags, symbols.ID3):
                 audio_file.tags.add(symbols.TCOP(encoding=3, text=[final_copyright]))
-            elif _is_vorbis_like(audio_file, symbols):
+            elif is_vorbis_like(audio_file, symbols):
                 audio_file["COPYRIGHT"] = [final_copyright]
             elif isinstance(audio_file, symbols.MP4):
                 audio_file["cprt"] = [final_copyright]
@@ -838,7 +843,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if _tag_enabled("qobuz.tags.label") and pp["qobuz_label"]:
             if isinstance(audio_file.tags, symbols.ID3):
                 audio_file.tags.add(symbols.TPUB(encoding=3, text=[pp["qobuz_label"]]))
-            elif _is_vorbis_like(audio_file, symbols):
+            elif is_vorbis_like(audio_file, symbols):
                 audio_file["LABEL"] = [pp["qobuz_label"]]
             elif isinstance(audio_file, symbols.MP4):
                 audio_file["----:com.apple.iTunes:LABEL"] = [symbols.MP4FreeForm(pp["qobuz_label"].encode("utf-8"))]
@@ -846,7 +851,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if _tag_enabled("lastfm.tags.url") and pp["lastfm_url"]:
             if isinstance(audio_file.tags, symbols.ID3):
                 audio_file.tags.add(symbols.TXXX(encoding=3, desc="LASTFM_URL", text=[pp["lastfm_url"]]))
-            elif _is_vorbis_like(audio_file, symbols):
+            elif is_vorbis_like(audio_file, symbols):
                 audio_file["LASTFM_URL"] = [pp["lastfm_url"]]
             elif isinstance(audio_file, symbols.MP4):
                 audio_file["----:com.apple.iTunes:LASTFM_URL"] = [symbols.MP4FreeForm(pp["lastfm_url"].encode("utf-8"))]
@@ -854,7 +859,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if _tag_enabled("genius.tags.url") and pp["genius_url"]:
             if isinstance(audio_file.tags, symbols.ID3):
                 audio_file.tags.add(symbols.TXXX(encoding=3, desc="GENIUS_URL", text=[pp["genius_url"]]))
-            elif _is_vorbis_like(audio_file, symbols):
+            elif is_vorbis_like(audio_file, symbols):
                 audio_file["GENIUS_URL"] = [pp["genius_url"]]
             elif isinstance(audio_file, symbols.MP4):
                 audio_file["----:com.apple.iTunes:GENIUS_URL"] = [symbols.MP4FreeForm(pp["genius_url"].encode("utf-8"))]
