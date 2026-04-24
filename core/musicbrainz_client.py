@@ -264,30 +264,35 @@ class MusicBrainzClient:
             return []
 
     @rate_limited
-    def browse_artist_recordings(self, artist_mbid: str,
-                                 limit: int = 100,
-                                 offset: int = 0,
-                                 includes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-        """Browse recordings (tracks) linked to an artist MBID.
+    def search_recordings_by_artist_mbid(self, artist_mbid: str,
+                                         limit: int = 100) -> List[Dict[str, Any]]:
+        """Search for recordings linked to an artist via Lucene `arid:` query.
 
-        Counterpart to `browse_artist_release_groups` — text search on
-        `/recording?query=...` matches recording TITLES, while browse follows
-        the artist→recording link directly.
+        This is the counterpart to `browse_artist_release_groups` for tracks.
+        The proper "browse" endpoint (`/recording?artist=<mbid>`) rejects
+        `inc=releases`, so we can't get album context per recording from
+        browse — only the track title/length/MBID. Without release info the
+        user would see tracks with no album, which is useless.
+
+        The search endpoint with a fielded `arid:<mbid>` query returns
+        recordings with the `releases` array already embedded (including
+        release-group, date, and media info), which is what the search-tab
+        UI needs.
 
         Args:
             artist_mbid: Artist's MusicBrainz ID
             limit: 1-100 (MB hard cap)
-            offset: Pagination offset
-            includes: e.g. ['releases', 'artist-credits'] to embed linked entities
 
         Returns:
-            List of recording dicts with `id`, `title`, `length`, `disambiguation`,
-            and optionally `releases` / `artist-credit` per includes.
+            List of recording dicts with `id`, `title`, `length`, `score`,
+            `artist-credit`, and `releases` (each with release-group + date).
         """
         try:
-            params = {'artist': artist_mbid, 'fmt': 'json', 'limit': min(limit, 100), 'offset': offset}
-            if includes:
-                params['inc'] = '+'.join(includes)
+            params = {
+                'query': f'arid:{artist_mbid}',
+                'fmt': 'json',
+                'limit': min(limit, 100),
+            }
 
             response = self.session.get(
                 f"{self.BASE_URL}/recording",
@@ -298,10 +303,10 @@ class MusicBrainzClient:
 
             data = response.json()
             recs = data.get('recordings', [])
-            logger.debug(f"Browsed {len(recs)} recordings for artist {artist_mbid}")
+            logger.debug(f"Found {len(recs)} recordings for artist {artist_mbid}")
             return recs
         except Exception as e:
-            logger.error(f"Error browsing recordings for artist {artist_mbid}: {e}")
+            logger.error(f"Error searching recordings for artist {artist_mbid}: {e}")
             return []
 
     @rate_limited

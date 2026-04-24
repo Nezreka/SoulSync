@@ -429,16 +429,15 @@ class MusicBrainzSearchClient:
             if artist_name:
                 return self._search_tracks_text(title, artist_name, limit)
 
-            # Bare name → artist-first → browse.
+            # Bare name → artist-first → arid: search.
             top = self._resolve_top_artist(query)
             if top:
                 mbid = top.get('id', '')
                 tname = top.get('name', '') or query
-                recs = self._client.browse_artist_recordings(
-                    mbid,
-                    limit=100,
-                    includes=['releases', 'artist-credits'],
-                )
+                # /recording?artist=<mbid> (browse) rejects inc=releases,
+                # so we use the fielded Lucene search arid:<mbid> instead —
+                # that returns recordings with release context inline.
+                recs = self._client.search_recordings_by_artist_mbid(mbid, limit=100)
                 # Browse returns recordings unsorted. Dedupe by normalized
                 # title (MB has many live/compilation variants of the same
                 # song), then sort by release date desc so "newest" tracks

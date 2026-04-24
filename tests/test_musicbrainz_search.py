@@ -274,7 +274,7 @@ def test_search_tracks_bare_query_uses_browse_path():
     client = MusicBrainzSearchClient()
     client._client = MagicMock()
     client._client.search_artist.return_value = [_mk_artist('Metallica', 'mb-1', score=100)]
-    client._client.browse_artist_recordings.return_value = [
+    client._client.search_recordings_by_artist_mbid.return_value = [
         {'id': 'rec-1', 'title': 'One', 'length': 446000,
          'releases': [{'id': 'rel-1', 'title': '...And Justice for All', 'date': '1988',
                        'release-group': {'id': 'rg-1', 'primary-type': 'Album'}}],
@@ -287,7 +287,7 @@ def test_search_tracks_bare_query_uses_browse_path():
 
     tracks = client.search_tracks('metallica', limit=10)
 
-    client._client.browse_artist_recordings.assert_called_once()
+    client._client.search_recordings_by_artist_mbid.assert_called_once()
     client._client.search_recording.assert_not_called()
     assert len(tracks) == 2
     assert {t.name for t in tracks} == {'One', 'Battery'}
@@ -300,7 +300,7 @@ def test_search_tracks_dedupes_by_title():
     client = MusicBrainzSearchClient()
     client._client = MagicMock()
     client._client.search_artist.return_value = [_mk_artist('Metallica', 'mb-1', score=100)]
-    client._client.browse_artist_recordings.return_value = [
+    client._client.search_recordings_by_artist_mbid.return_value = [
         {'id': 'rec-1', 'title': 'One', 'length': 446000,
          'releases': [{'id': 'rel-1', 'title': '...And Justice for All', 'date': '1988'}],
          'artist-credit': [{'name': 'Metallica'}]},
@@ -328,7 +328,7 @@ def test_search_tracks_structured_query_uses_text_path():
 
     client._client.search_recording.assert_called_once()
     client._client.search_artist.assert_not_called()
-    client._client.browse_artist_recordings.assert_not_called()
+    client._client.search_recordings_by_artist_mbid.assert_not_called()
     assert len(tracks) == 1
 
 
