@@ -4,53 +4,30 @@ from __future__ import annotations
 
 import os
 
-from core.metadata_artwork import (
-    download_cover_art as _download_cover_art_impl,
-    embed_album_art_metadata,
-)
+from core.metadata_artwork import embed_album_art_metadata
 from core.metadata_common import (
-    _get_config_manager,
-    _get_file_lock,
-    _get_image_dimensions as _common_get_image_dimensions,
-    _get_logger,
-    _get_mutagen_symbols,
-    _is_ogg_opus as _common_is_ogg_opus,
-    _is_vorbis_like,
-    _save_audio_file,
-    _strip_all_non_audio_tags,
-    _verify_metadata_written,
-    wipe_source_tags as _common_wipe_source_tags,
+    get_config_manager,
+    get_file_lock,
+    get_logger,
+    get_mutagen_symbols,
+    is_vorbis_like,
+    save_audio_file,
+    strip_all_non_audio_tags,
+    verify_metadata_written,
 )
-from core.metadata_lyrics import generate_lrc_file as _generate_lrc_file_impl
 from core.metadata_source import embed_source_ids, extract_source_metadata
 
 
-logger = _get_logger()
-
-
-def _get_image_dimensions(data: bytes):
-    return _common_get_image_dimensions(data)
-
-
-def _is_ogg_opus(audio_file):
-    return _common_is_ogg_opus(audio_file)
-
-
-def wipe_source_tags(file_path: str) -> bool:
-    return _common_wipe_source_tags(file_path)
-
-
-def generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
-    return _generate_lrc_file_impl(file_path, context, artist, album_info)
-
-
-def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
-    return _download_cover_art_impl(album_info, target_dir, context)
+__all__ = [
+    "enhance_file_metadata",
+    "extract_source_metadata",
+    "embed_source_ids",
+]
 
 
 def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
-    cfg = _get_config_manager()
-    logger_ = _get_logger()
+    cfg = get_config_manager()
+    logger_ = get_logger()
     if cfg.get("metadata_enhancement.enabled", True) is False:
         logger_.warning("Metadata enhancement disabled in config.")
         return True
@@ -58,16 +35,16 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
     if album_info is None:
         album_info = {}
 
-    symbols = _get_mutagen_symbols()
+    symbols = get_mutagen_symbols()
     if not symbols:
         logger_.error("Mutagen is unavailable, cannot enhance metadata.")
         return False
 
-    file_lock = _get_file_lock(file_path)
+    file_lock = get_file_lock(file_path)
     with file_lock:
         logger_.info("Enhancing metadata for: %s", os.path.basename(file_path))
         try:
-            _strip_all_non_audio_tags(file_path)
+            strip_all_non_audio_tags(file_path)
             audio_file = symbols.File(file_path)
             if audio_file is None:
                 logger_.error("Could not load audio file with Mutagen: %s", file_path)
@@ -84,12 +61,12 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             else:
                 audio_file.add_tags()
 
-            _save_audio_file(audio_file, symbols)
+            save_audio_file(audio_file, symbols)
 
             metadata = extract_source_metadata(context, artist, album_info)
             if not metadata:
                 logger_.error("Could not extract source metadata, saving with cleared tags.")
-                _save_audio_file(audio_file, symbols)
+                save_audio_file(audio_file, symbols)
                 return True
 
             track_num_str = f"{metadata.get('track_number', 1)}/{metadata.get('total_tracks', 1)}"
@@ -114,7 +91,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 audio_file.tags.add(symbols.TRCK(encoding=3, text=[track_num_str]))
                 if metadata.get("disc_number"):
                     audio_file.tags.add(symbols.TPOS(encoding=3, text=[str(metadata["disc_number"])]))
-            elif _is_vorbis_like(audio_file, symbols):
+            elif is_vorbis_like(audio_file, symbols):
                 if metadata.get("title"):
                     audio_file["title"] = [metadata["title"]]
                 if metadata.get("artist"):
@@ -161,14 +138,14 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             if quality and cfg.get("metadata_enhancement.tags.quality_tag", True) is not False:
                 if isinstance(audio_file.tags, symbols.ID3):
                     audio_file.tags.add(symbols.TXXX(encoding=3, desc="QUALITY", text=[quality]))
-                elif _is_vorbis_like(audio_file, symbols):
+                elif is_vorbis_like(audio_file, symbols):
                     audio_file["quality"] = [quality]
                 elif isinstance(audio_file, symbols.MP4):
                     audio_file["----:com.apple.iTunes:QUALITY"] = [symbols.MP4FreeForm(quality.encode("utf-8"))]
 
-            _save_audio_file(audio_file, symbols)
+            save_audio_file(audio_file, symbols)
 
-            verified = _verify_metadata_written(file_path)
+            verified = verify_metadata_written(file_path)
             if verified:
                 logger_.info("Metadata enhanced successfully.")
             else:

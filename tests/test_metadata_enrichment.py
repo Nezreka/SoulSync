@@ -110,8 +110,8 @@ def _fake_symbols(audio):
 
 
 def test_extract_source_metadata_keeps_neutral_fields_and_skips_itunes_fallback_for_non_itunes_sources(monkeypatch):
-    monkeypatch.setattr(ms, "_get_config_manager", lambda: _Config({"file_organization.collab_artist_mode": "first"}))
-    monkeypatch.setattr(ms, "_get_itunes_client", lambda: (_ for _ in ()).throw(AssertionError("itunes fallback should not run for non-itunes sources")))
+    monkeypatch.setattr(ms, "get_config_manager", lambda: _Config({"file_organization.collab_artist_mode": "first"}))
+    monkeypatch.setattr(ms, "get_itunes_client", lambda: (_ for _ in ()).throw(AssertionError("itunes fallback should not run for non-itunes sources")))
 
     context = {
         "source": "spotify",
@@ -160,9 +160,9 @@ def test_extract_source_metadata_keeps_neutral_fields_and_skips_itunes_fallback_
 def test_embed_source_ids_uses_current_source_ids_and_legacy_fallback(monkeypatch):
     audio = _FakeAudio()
     symbols = _fake_symbols(audio)
-    monkeypatch.setattr(ms, "_get_config_manager", lambda: _Config())
-    monkeypatch.setattr(ms, "_get_mutagen_symbols", lambda: symbols)
-    monkeypatch.setattr(ms, "_get_database", lambda: None)
+    monkeypatch.setattr(ms, "get_config_manager", lambda: _Config())
+    monkeypatch.setattr(ms, "get_mutagen_symbols", lambda: symbols)
+    monkeypatch.setattr(ms, "get_database", lambda: None)
 
     current_metadata = {
         "source": "deezer",
@@ -182,7 +182,7 @@ def test_embed_source_ids_uses_current_source_ids_and_legacy_fallback(monkeypatc
 
     audio = _FakeAudio()
     symbols = _fake_symbols(audio)
-    monkeypatch.setattr(ms, "_get_mutagen_symbols", lambda: symbols)
+    monkeypatch.setattr(ms, "get_mutagen_symbols", lambda: symbols)
 
     legacy_metadata = {
         "source": "",
@@ -214,18 +214,18 @@ def test_enhance_file_metadata_writes_tags_and_propagates_release_id(monkeypatch
     strip_calls = []
     verify_calls = []
 
-    monkeypatch.setattr(me, "_get_config_manager", lambda: _Config(
+    monkeypatch.setattr(me, "get_config_manager", lambda: _Config(
         {
             "metadata_enhancement.enabled": True,
             "metadata_enhancement.embed_album_art": False,
             "metadata_enhancement.tags.write_multi_artist": False,
         }
     ))
-    monkeypatch.setattr(ms, "_get_config_manager", lambda: _Config())
-    monkeypatch.setattr(me, "_get_mutagen_symbols", lambda: symbols)
-    monkeypatch.setattr(ms, "_get_mutagen_symbols", lambda: symbols)
-    monkeypatch.setattr(ms, "_get_database", lambda: None)
-    monkeypatch.setattr(me, "_strip_all_non_audio_tags", lambda file_path: strip_calls.append(file_path) or {"apev2_stripped": False, "apev2_tag_count": 0})
+    monkeypatch.setattr(ms, "get_config_manager", lambda: _Config())
+    monkeypatch.setattr(me, "get_mutagen_symbols", lambda: symbols)
+    monkeypatch.setattr(ms, "get_mutagen_symbols", lambda: symbols)
+    monkeypatch.setattr(ms, "get_database", lambda: None)
+    monkeypatch.setattr(me, "strip_all_non_audio_tags", lambda file_path: strip_calls.append(file_path) or {"apev2_stripped": False, "apev2_tag_count": 0})
     monkeypatch.setattr(
         me,
         "extract_source_metadata",
@@ -247,7 +247,7 @@ def test_enhance_file_metadata_writes_tags_and_propagates_release_id(monkeypatch
         },
     )
     monkeypatch.setattr(me, "embed_album_art_metadata", lambda *args, **kwargs: None)
-    monkeypatch.setattr(me, "_verify_metadata_written", lambda file_path: verify_calls.append(file_path) or True)
+    monkeypatch.setattr(me, "verify_metadata_written", lambda file_path: verify_calls.append(file_path) or True)
 
     album_info = {}
     result = me.enhance_file_metadata(
@@ -269,7 +269,7 @@ def test_enhance_file_metadata_writes_tags_and_propagates_release_id(monkeypatch
 
 
 def test_download_cover_art_uses_album_context_image_url(tmp_path, monkeypatch):
-    monkeypatch.setattr(ma, "_get_config_manager", lambda: _Config(
+    monkeypatch.setattr(ma, "get_config_manager", lambda: _Config(
         {
             "metadata_enhancement.cover_art_download": True,
             "metadata_enhancement.prefer_caa_art": False,
@@ -281,7 +281,7 @@ def test_download_cover_art_uses_album_context_image_url(tmp_path, monkeypatch):
     target_dir = tmp_path / "Album One"
     target_dir.mkdir()
 
-    me.download_cover_art(
+    ma.download_cover_art(
         {},
         str(target_dir),
         {"album": {"image_url": "https://img.example/album.jpg"}},
