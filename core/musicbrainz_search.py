@@ -177,17 +177,42 @@ class MusicBrainzSearchClient:
         lookalikes.
         """
         try:
-            raw = self._client.search_artist(query, limit=limit, strict=False)
-            artists = []
+            # Fetch extra so dedup below has enough to pick from. For
+            # common names (Michael Jackson, John Williams, etc.) MB returns
+            # many same-named people; without a larger pool, capping at
+            # `limit` before dedup can leave us with fewer results than
+            # requested.
+            raw = self._client.search_artist(query, limit=max(limit * 3, 10), strict=False)
+
+            # Dedupe by normalized name. MusicBrainz has many different
+            # people with the same canonical name (7 entries for "Michael
+            # Jackson" — the singer + poet + photographer + didgeridoo
+            # player + ...), all scoring 80+ on exact-name match. Rendered
+            # as identical cards since the fallback image lookup hits the
+            # same fallback-source result for each. Keep the highest-
+            # scoring entry per normalized name so the user sees one card
+            # per distinct artist.
+            seen = {}
             for a in raw:
                 score = a.get('score', 0) or 0
                 if score < self._MIN_SCORE:
                     continue
-
                 mbid = a.get('id', '')
                 name = a.get('name', '')
                 if not mbid or not name:
                     continue
+                key = name.lower().strip()
+                if key not in seen or (seen[key].get('score', 0) or 0) < score:
+                    seen[key] = a
+
+            # Sort the survivors score-descending and cap at the caller's
+            # limit. `seen` only holds top-per-name, so ordering is stable.
+            top = sorted(seen.values(), key=lambda r: -(r.get('score', 0) or 0))[:limit]
+
+            artists = []
+            for a in top:
+                mbid = a.get('id', '')
+                name = a.get('name', '')
 
                 # Genres from MB tags (user-applied categorical labels). Each
                 # tag has {name, count}; keep the top-weighted ones.
@@ -201,7 +226,7 @@ class MusicBrainzSearchClient:
                 artists.append(Artist(
                     id=mbid,
                     name=name,
-                    popularity=score,  # Reuse score as popularity (0-100)
+                    popularity=a.get('score', 0) or 0,  # Reuse score as popularity (0-100)
                     genres=genres,
                     followers=0,  # MusicBrainz doesn't track followers
                     image_url=None,  # MB doesn't store artist images directly

@@ -100,12 +100,66 @@ def test_search_artists_filters_by_score_threshold():
 
 def test_search_artists_uses_strict_false_for_fuzzy_match():
     """The adapter must use strict=False so MusicBrainz searches
-    alias+artist+sortname together — strict mode would miss aliased names."""
+    alias+artist+sortname together — strict mode would miss aliased names.
+
+    Adapter fetches `limit * 3` (min 10) so dedup-by-name below has enough
+    candidates to pick from.
+    """
     client = MusicBrainzSearchClient()
     client._client = MagicMock()
     client._client.search_artist.return_value = []
     client.search_artists('metallica')
-    client._client.search_artist.assert_called_once_with('metallica', limit=10, strict=False)
+    client._client.search_artist.assert_called_once_with('metallica', limit=30, strict=False)
+
+
+def test_search_artists_dedupes_same_named_homonyms():
+    """MusicBrainz has many different PEOPLE sharing a canonical name
+    (7 Michael Jacksons: singer, poet, photographer, mashup artist, ...).
+    Since they all render as "Michael Jackson" with the same fallback image,
+    dedupe to the highest-scoring entry per name."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [
+        {'id': 'mb-king', 'name': 'Michael Jackson', 'score': 100,
+         'tags': [{'name': 'pop'}]},
+        {'id': 'mb-poet', 'name': 'Michael Jackson', 'score': 81},
+        {'id': 'mb-mashup', 'name': 'Michael Jackson', 'score': 80},
+        {'id': 'mb-photog', 'name': 'Michael Jackson', 'score': 80},
+        {'id': 'mb-other', 'name': 'Michael Jackson', 'score': 80},
+    ]
+
+    results = client.search_artists('michael jackson', limit=10)
+
+    # Should collapse to one entry — the highest-scoring one.
+    assert len(results) == 1
+    assert results[0].id == 'mb-king'
+    assert results[0].popularity == 100
+
+
+def test_search_artists_dedup_normalized_case_and_whitespace():
+    """Dedup key is case-insensitive and whitespace-normalized."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [
+        {'id': 'mb-1', 'name': 'The Band', 'score': 100},
+        {'id': 'mb-2', 'name': 'THE BAND', 'score': 85},
+        {'id': 'mb-3', 'name': 'the band', 'score': 82},
+    ]
+    results = client.search_artists('the band', limit=5)
+    assert len(results) == 1
+    assert results[0].id == 'mb-1'
+
+
+def test_search_artists_keeps_distinct_names():
+    """Dedup only collapses identical normalized names, not similar names."""
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.search_artist.return_value = [
+        {'id': 'mb-1', 'name': 'The Beatles', 'score': 100},
+        {'id': 'mb-2', 'name': 'The Beatles Revival', 'score': 85},
+    ]
+    results = client.search_artists('the beatles', limit=5)
+    assert {r.name for r in results} == {'The Beatles', 'The Beatles Revival'}
 
 
 def test_search_artists_returns_empty_on_exception():
