@@ -201,6 +201,93 @@ class MusicBrainzClient:
             return []
     
     @rate_limited
+    def browse_artist_release_groups(self, artist_mbid: str,
+                                     release_types: Optional[List[str]] = None,
+                                     limit: int = 100,
+                                     offset: int = 0) -> List[Dict[str, Any]]:
+        """Browse release-groups linked to an artist MBID.
+
+        This is the correct MusicBrainz pattern for "give me this artist's
+        discography" — text-based `/release?query=...` search would look at
+        release TITLES (matching unrelated releases literally titled after
+        the artist name), while browse walks the artist→release-group link
+        directly.
+
+        Args:
+            artist_mbid: Artist's MusicBrainz ID
+            release_types: Filter by primary type — any of 'album', 'single',
+                'ep', 'compilation', 'soundtrack', 'live', etc. Combined with
+                `|` per MB spec, e.g. `['album', 'ep']` → `type=album|ep`.
+                None returns all types.
+            limit: 1-100 (MB hard cap)
+            offset: Pagination offset
+
+        Returns:
+            List of release-group dicts. Each has `id`, `title`, `primary-type`,
+            `secondary-types`, `first-release-date`, `disambiguation`.
+        """
+        try:
+            params = {'artist': artist_mbid, 'fmt': 'json', 'limit': min(limit, 100), 'offset': offset}
+            if release_types:
+                params['type'] = '|'.join(release_types)
+
+            response = self.session.get(
+                f"{self.BASE_URL}/release-group",
+                params=params,
+                timeout=10
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            rgs = data.get('release-groups', [])
+            logger.debug(f"Browsed {len(rgs)} release-groups for artist {artist_mbid}")
+            return rgs
+        except Exception as e:
+            logger.error(f"Error browsing release-groups for artist {artist_mbid}: {e}")
+            return []
+
+    @rate_limited
+    def browse_artist_recordings(self, artist_mbid: str,
+                                 limit: int = 100,
+                                 offset: int = 0,
+                                 includes: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """Browse recordings (tracks) linked to an artist MBID.
+
+        Counterpart to `browse_artist_release_groups` — text search on
+        `/recording?query=...` matches recording TITLES, while browse follows
+        the artist→recording link directly.
+
+        Args:
+            artist_mbid: Artist's MusicBrainz ID
+            limit: 1-100 (MB hard cap)
+            offset: Pagination offset
+            includes: e.g. ['releases', 'artist-credits'] to embed linked entities
+
+        Returns:
+            List of recording dicts with `id`, `title`, `length`, `disambiguation`,
+            and optionally `releases` / `artist-credit` per includes.
+        """
+        try:
+            params = {'artist': artist_mbid, 'fmt': 'json', 'limit': min(limit, 100), 'offset': offset}
+            if includes:
+                params['inc'] = '+'.join(includes)
+
+            response = self.session.get(
+                f"{self.BASE_URL}/recording",
+                params=params,
+                timeout=10
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            recs = data.get('recordings', [])
+            logger.debug(f"Browsed {len(recs)} recordings for artist {artist_mbid}")
+            return recs
+        except Exception as e:
+            logger.error(f"Error browsing recordings for artist {artist_mbid}: {e}")
+            return []
+
+    @rate_limited
     def get_artist(self, mbid: str, includes: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
         """
         Get full artist details by MusicBrainz ID
