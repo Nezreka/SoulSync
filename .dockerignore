@@ -1,5 +1,8 @@
 # Docker ignore file for SoulSync WebUI
 
+# Hidden folders and files
+.*
+
 # Git
 .git
 .gitignore
