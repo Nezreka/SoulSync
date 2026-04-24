@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import shutil
 import subprocess
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+# Backward-compatible re-exports; canonical homes are core.import_filename
+# and core.import_staging.
+from core.import_filename import extract_track_number_from_filename
+from core.import_staging import read_staging_file_metadata
 
 logger = logging.getLogger("import_file_ops")
 
@@ -83,106 +87,6 @@ def safe_move_file(src, dst):
                 logger.error(f"Fallback copy also failed: {fallback_error}")
                 raise
         raise
-
-
-def extract_track_number_from_filename(filename: str, title: str = None) -> int:
-    """Extract track number from a filename. Returns 1 if not found."""
-    basename = os.path.splitext(os.path.basename(filename))[0].strip()
-
-    match = re.match(r"^\d[\-\.](\d{1,2})\s*[\-\.]\s*", basename)
-    if match:
-        num = int(match.group(1))
-        if 1 <= num <= 99:
-            return num
-
-    match = re.match(r"^\(?(\d{1,3})\)?\s*[\-\.)\]]\s*", basename)
-    if match:
-        num = int(match.group(1))
-        if 1 <= num <= 999:
-            return num
-
-    return 1
-
-
-def _coerce_tag_number(value: Any, default: int = 1) -> int:
-    if value in (None, ""):
-        return default
-
-    if isinstance(value, (list, tuple)):
-        value = value[0] if value else None
-
-    if value in (None, ""):
-        return default
-
-    text = str(value).strip()
-    if not text:
-        return default
-
-    match = re.match(r"^(\d+)", text)
-    if match:
-        try:
-            return int(match.group(1))
-        except ValueError:
-            return default
-
-    try:
-        return int(text)
-    except (TypeError, ValueError):
-        return default
-
-
-def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -> Dict[str, Any]:
-    """Read common audio tag metadata from a staging file."""
-    try:
-        from mutagen import File as MutagenFile
-
-        tags = MutagenFile(file_path, easy=True)
-    except Exception:
-        tags = None
-
-    filename = filename or os.path.basename(file_path)
-    stem = os.path.splitext(os.path.basename(filename))[0]
-
-    def _first_tag(*keys: str) -> str:
-        if not tags:
-            return ""
-        for key in keys:
-            try:
-                value = tags.get(key)  # type: ignore[attr-defined]
-            except Exception:
-                value = None
-            if value:
-                if isinstance(value, (list, tuple)):
-                    value = value[0] if value else ""
-                text = str(value).strip()
-                if text:
-                    return text
-        return ""
-
-    title = _first_tag("title")
-    artist = _first_tag("artist")
-    albumartist = _first_tag("albumartist")
-    album = _first_tag("album")
-
-    if not title:
-        title = stem
-    if not albumartist:
-        albumartist = artist
-
-    track_number = _coerce_tag_number(_first_tag("tracknumber", "track_number"), default=0)
-    if not track_number:
-        track_number = extract_track_number_from_filename(filename or file_path)
-
-    disc_number = _coerce_tag_number(_first_tag("discnumber", "disc_number"), default=1)
-
-    return {
-        "title": title,
-        "artist": artist,
-        "albumartist": albumartist,
-        "album": album,
-        "track_number": track_number,
-        "disc_number": disc_number,
-    }
 
 
 def cleanup_empty_directories(download_path, moved_file_path):

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from core.import_paths import docker_resolve_path
+from core.import_filename import extract_track_number_from_filename
 from utils.logging_config import get_logger
 
 logger = get_logger("import_staging")
@@ -62,6 +63,71 @@ def get_client_for_source(source: str):
     from core.metadata_service import get_client_for_source as _get_client_for_source
 
     return _get_client_for_source(source)
+
+
+def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -> Dict[str, Any]:
+    """Read common audio tag metadata from a staging file."""
+    try:
+        from mutagen import File as MutagenFile
+
+        tags = MutagenFile(file_path, easy=True)
+    except Exception:
+        tags = None
+
+    filename = filename or os.path.basename(file_path)
+    stem = os.path.splitext(os.path.basename(filename))[0]
+
+    def _first_tag(*keys: str) -> str:
+        if not tags:
+            return ""
+        for key in keys:
+            try:
+                value = tags.get(key)  # type: ignore[attr-defined]
+            except Exception:
+                value = None
+            if value:
+                if isinstance(value, (list, tuple)):
+                    value = value[0] if value else ""
+                text = str(value).strip()
+                if text:
+                    return text
+        return ""
+
+    title = _first_tag("title")
+    artist = _first_tag("artist")
+    albumartist = _first_tag("albumartist")
+    album = _first_tag("album")
+
+    if not title:
+        title = stem
+    if not albumartist:
+        albumartist = artist
+
+    track_number = extract_track_number_from_filename(filename or file_path)
+    try:
+        # Preserve tag-based numbers when present, but still fall back to the filename parser.
+        tag_track_number = _first_tag("tracknumber", "track_number")
+        if tag_track_number:
+            track_number = int(str(tag_track_number).split("/")[0].strip() or track_number)
+    except (TypeError, ValueError):
+        pass
+
+    disc_number = 1
+    try:
+        tag_disc_number = _first_tag("discnumber", "disc_number")
+        if tag_disc_number:
+            disc_number = int(str(tag_disc_number).split("/")[0].strip() or 1)
+    except (TypeError, ValueError):
+        pass
+
+    return {
+        "title": title,
+        "artist": artist,
+        "albumartist": albumartist,
+        "album": album,
+        "track_number": track_number,
+        "disc_number": disc_number,
+    }
 
 
 def _search_albums_for_source(source: str, client: Any, query: str, limit: int = 5):
@@ -452,3 +518,39 @@ def refresh_import_suggestions_cache():
     with _import_suggestions_cache_lock:
         _import_suggestions_cache["built"] = False
     start_import_suggestions_cache()
+
+
+def collect_staging_files(file_paths: Optional[Iterable[str]] = None) -> List[Dict[str, Any]]:
+    """Collect audio files from the staging area with normalized metadata."""
+    staging_path = get_staging_path()
+    file_filter: Optional[set[str]] = set(file_paths) if file_paths else None
+    staging_files: List[Dict[str, Any]] = []
+
+    if not os.path.isdir(staging_path):
+        return staging_files
+
+    for root, _dirs, filenames in os.walk(staging_path):
+        for filename in filenames:
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in AUDIO_EXTENSIONS:
+                continue
+
+            full_path = os.path.join(root, filename)
+            if file_filter is not None and full_path not in file_filter:
+                continue
+
+            meta = read_staging_file_metadata(full_path, filename)
+            staging_files.append(
+                {
+                    "filename": filename,
+                    "full_path": full_path,
+                    "title": meta.get("title", ""),
+                    "artist": meta.get("albumartist") or meta.get("artist") or "",
+                    "album": meta.get("album", ""),
+                    "albumartist": meta.get("albumartist") or meta.get("artist") or "",
+                    "track_number": meta.get("track_number", 1),
+                    "disc_number": meta.get("disc_number", 1),
+                }
+            )
+
+    return staging_files

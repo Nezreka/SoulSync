@@ -87,19 +87,22 @@ def test_build_album_import_match_payload_uses_generic_track_keys(monkeypatch, t
     staging_root.mkdir()
     (staging_root / "Song One.flac").write_text("fake")
 
-    monkeypatch.setattr(import_album, "get_staging_path", lambda: str(staging_root))
     monkeypatch.setattr(import_album, "_get_matching_engine", lambda: _FakeEngine())
     monkeypatch.setattr(
         import_album,
-        "read_staging_file_metadata",
-        lambda file_path, filename=None: {
-            "title": "Song One",
-            "artist": "Artist One",
-            "albumartist": "Artist One",
-            "album": "Album One",
-            "track_number": 1,
-            "disc_number": 1,
-        },
+        "collect_staging_files",
+        lambda file_paths=None: [
+            {
+                "filename": "Song One.flac",
+                "full_path": str(staging_root / "Song One.flac"),
+                "title": "Song One",
+                "artist": "Artist One",
+                "album": "Album One",
+                "albumartist": "Artist One",
+                "track_number": 1,
+                "disc_number": 1,
+            }
+        ],
     )
     monkeypatch.setattr(
         import_album,

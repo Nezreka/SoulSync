@@ -12,7 +12,6 @@ from core.import_file_ops import (
     cleanup_empty_directories,
     create_lossy_copy,
     downsample_hires_flac,
-    extract_track_number_from_filename,
     get_audio_quality_string,
     get_quality_tier_from_extension,
     safe_move_file,
@@ -29,6 +28,7 @@ from core.import_context import (
     get_import_track_info,
     normalize_import_context,
 )
+from core.import_filename import extract_track_number_from_filename
 from core.import_guards import check_flac_bit_depth, move_to_quarantine
 from core.import_side_effects import (
     check_and_remove_from_wishlist,
@@ -61,8 +61,8 @@ from core.import_paths import (
     build_final_path_for_track,
     build_simple_download_destination,
     docker_resolve_path,
-    resolve_album_group,
 )
+from core.import_album_naming import resolve_album_group
 from database.music_database import get_database
 from utils.logging_config import get_logger
 
