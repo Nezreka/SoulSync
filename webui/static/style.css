@@ -5466,6 +5466,22 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 .gsearch-results.visible { display: flex; animation: gsearchSlideUp 0.2s ease; }
 
+/* Stable results-panel structure built by downloads.js _doInit: the source
+   row and fallback banner keep their natural height; #gsearch-body grows
+   to fill what's left of the 60vh cap and scrolls when content overflows.
+   Without the flex:1 + overflow on #gsearch-body, content past the cap
+   was clipped with no scrollbar — the source-picker refactor introduced
+   the structure but not the accompanying CSS. */
+#gsearch-source-row { flex-shrink: 0; }
+#gsearch-fallback-banner { flex-shrink: 0; }
+#gsearch-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+#gsearch-body::-webkit-scrollbar { width: 4px; }
+#gsearch-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+
 @keyframes gsearchSlideUp {
     from { opacity: 0; transform: translateX(-50%) translateY(10px); }
     to { opacity: 1; transform: translateX(-50%) translateY(0); }
