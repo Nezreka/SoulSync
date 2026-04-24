@@ -5188,15 +5188,35 @@ function _gsNavigateToSearchPage(query, src) {
     // metadata results when they clicked the Soulseek icon.
     setTimeout(() => {
         if (src === 'soulseek') {
-            // Pre-fill the basic input first, then click the Search page's
-            // Soulseek icon. The icon's click triggers the controller's
-            // onSoulseekSelected callback, which owns the section swap and
-            // re-runs performDownloadsSearch with whatever's in the basic
-            // input (i.e., the value we just wrote).
             const basicInput = document.getElementById('downloads-search-input');
             if (basicInput && query) basicInput.value = query;
+
+            // Sync the Search page controller's state.query to the widget's
+            // query BEFORE clicking the Soulseek icon. Otherwise the icon
+            // click fires onSoulseekSelected(state.query) where state.query
+            // is whatever the user last typed on /search (often stale), and
+            // the callback would overwrite basicInput.value with that stale
+            // value before running performDownloadsSearch.
+            if (typeof _searchPageController !== 'undefined' && _searchPageController) {
+                _searchPageController.state.query = query || '';
+            }
+
             const soulseekIcon = document.querySelector('#enh-source-row [data-source="soulseek"]');
-            if (soulseekIcon) soulseekIcon.click();
+            if (soulseekIcon) {
+                soulseekIcon.click();
+                return;
+            }
+            // Fallback: controller hasn't initialized yet (slow /api/settings
+            // fetches at first /search visit). Run the search directly + swap
+            // sections so the user still gets results. Icon row will catch up
+            // visually on the next render.
+            const basicSection = document.getElementById('basic-search-section');
+            const enhancedSection = document.getElementById('enhanced-search-section');
+            if (basicSection) basicSection.classList.add('active');
+            if (enhancedSection) enhancedSection.classList.remove('active');
+            if (basicInput && basicInput.value && typeof performDownloadsSearch === 'function') {
+                performDownloadsSearch();
+            }
             return;
         }
         const input = document.getElementById('enhanced-search-input');
