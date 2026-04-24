@@ -209,9 +209,13 @@ function initializeSearchModeToggle() {
     searchController.init();
 
     // Expose a re-render hook so navigate-back to /search restores cached
-    // results instead of leaving the dropdown hidden.
+    // results instead of leaving the dropdown hidden. Deferred to the next
+    // tick so the render happens AFTER the nav-button click finishes
+    // bubbling to the document outside-click handler — otherwise that
+    // handler sees the just-shown dropdown and immediately dismisses it.
     _searchPageRestoreOnEnter = () => {
-        if (searchController.state.query) _renderFromState(searchController.state);
+        if (!searchController.state.query) return;
+        setTimeout(() => _renderFromState(searchController.state), 0);
     };
 
     // Live search with debouncing
