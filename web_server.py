@@ -1631,7 +1631,10 @@ def _register_automation_handlers():
         hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
         soulseek_active = (dl_mode == 'soulseek' or
                           (dl_mode == 'hybrid' and 'soulseek' in hybrid_order))
-        if not soulseek_active or not soulseek_client or not soulseek_client.base_url:
+        # soulseek_client is a DownloadOrchestrator; the real client lives on
+        # .soulseek. Match the getattr pattern used at the other call sites.
+        slskd = getattr(soulseek_client, 'soulseek', None) if soulseek_client else None
+        if not soulseek_active or not slskd or not slskd.base_url:
             _update_automation_progress(automation_id,
                 log_line='Soulseek not active — skipped', log_type='skip')
             return {'status': 'skipped'}
