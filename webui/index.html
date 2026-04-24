@@ -1859,23 +1859,10 @@
                             </div>
                         </div>
 
-                        <!-- Search Source Picker (replaces Enhanced/Basic toggle) -->
-                        <div class="search-source-picker-container">
-                            <label for="search-source-select" class="search-source-picker-label">Search from</label>
-                            <div class="search-source-picker-wrapper">
-                                <select id="search-source-select" class="search-source-picker-select">
-                                    <option value="auto" selected>All sources (Auto)</option>
-                                    <option value="spotify">Spotify</option>
-                                    <option value="itunes">Apple Music</option>
-                                    <option value="deezer">Deezer</option>
-                                    <option value="discogs">Discogs</option>
-                                    <option value="hydrabase">Hydrabase</option>
-                                    <option value="musicbrainz">MusicBrainz</option>
-                                    <option value="soulseek">Soulseek (raw files)</option>
-                                </select>
-                                <span class="search-source-picker-caret">▾</span>
-                            </div>
-                        </div>
+                        <!-- Search source picker — icon row populated by search.js.
+                             Each icon triggers a single-source fetch (no fan-out);
+                             results are cached per (query, source) pair. -->
+                        <div id="enh-source-row" class="enh-source-row" role="tablist" aria-label="Search source"></div>
 
                         <!-- Basic Search Section (Current) -->
                         <div id="basic-search-section" class="search-section">
@@ -1988,10 +1975,6 @@
                                             placeholder="Search for artists, albums, or tracks...">
                                         <button id="enhanced-cancel-btn" class="enhanced-cancel-btn hidden">✕</button>
                                     </div>
-                                    <button id="enhanced-search-btn" class="enhanced-search-btn">
-                                        <span class="btn-icon">👁️</span>
-                                        <span class="btn-text">Show Results</span>
-                                    </button>
                                 </div>
 
                                 <!-- Enhanced Search Dropdown (Overlay Panel) -->
@@ -2017,8 +2000,9 @@
                                         <!-- Results Container -->
                                         <div id="enhanced-results-container" class="enhanced-results-container hidden">
 
-                                            <!-- Source Tabs -->
-                                            <div id="enh-source-tabs" class="enh-source-tabs hidden"></div>
+                                            <!-- Fallback banner — shown when user clicked Spotify but backend
+                                                 served Deezer due to rate-limit, etc. Populated by search.js. -->
+                                            <div id="enh-fallback-banner" class="enh-fallback-banner hidden"></div>
 
                                             <!-- Artists Container (Side by Side) -->
                                             <div class="enh-artists-wrapper">
@@ -2319,11 +2303,19 @@
                             <!-- Artist cards will be populated here -->
                         </div>
 
-                        <!-- Empty State -->
+                        <!-- Empty State — populated by showLibraryEmpty() in library.js.
+                             Shows a generic "no artists" message by default; when the
+                             user's search has no library matches, it switches to a
+                             search-online CTA that hands off to the /search page. -->
                         <div class="library-empty hidden" id="library-empty">
-                            <div class="empty-icon">🎵</div>
-                            <div class="empty-title">No artists found</div>
-                            <div class="empty-subtitle">Try adjusting your search or filters</div>
+                            <div class="empty-icon" id="library-empty-icon">🎵</div>
+                            <div class="empty-title" id="library-empty-title">No artists found</div>
+                            <div class="empty-subtitle" id="library-empty-subtitle">Try adjusting your search or filters</div>
+                            <button class="library-empty-search-cta hidden" id="library-empty-search-cta">
+                                <span class="library-empty-search-cta-icon">🔍</span>
+                                <span class="library-empty-search-cta-text">Search online for <span id="library-empty-search-cta-query"></span></span>
+                                <span class="library-empty-search-cta-arrow">→</span>
+                            </button>
                         </div>
 
                         <!-- Pagination -->
@@ -7890,6 +7882,11 @@
     <script src="{{ url_for('static', filename='pages-extra.js') }}"></script>
     <script src="{{ url_for('static', filename='init.js') }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->
+    <!-- Ambient glow under the global search bar. Radial gradient, brightest
+         directly under the bar, tapering out toward the window corners.
+         Purely decorative (pointer-events: none). Visibility follows the bar
+         via _gsUpdateVisibility(). -->
+    <div class="gsearch-aura" id="gsearch-aura"></div>
     <!-- Global Search Bar — Spotlight-style search from anywhere -->
     <div class="gsearch-bar" id="gsearch-bar">
         <div class="gsearch-icon">
