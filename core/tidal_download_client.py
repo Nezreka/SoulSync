@@ -265,8 +265,16 @@ class TidalDownloadClient:
 
             login, future = self.session.login_oauth()
             self._device_auth_future = future
+            # tidalapi returns `verification_uri_complete` as a schemeless
+            # string like `link.tidal.com/ABCDE`. Passing that straight to
+            # an <a href> makes the browser treat it as a relative URL and
+            # route it back to the SoulSync origin, so normalize to a
+            # full https:// URL here.
+            raw_uri = login.verification_uri_complete or f"link.tidal.com/{login.user_code}"
+            if not raw_uri.startswith(('http://', 'https://')):
+                raw_uri = f"https://{raw_uri}"
             self._device_auth_link = {
-                'verification_uri': login.verification_uri_complete or f"https://link.tidal.com/{login.user_code}",
+                'verification_uri': raw_uri,
                 'user_code': login.user_code,
             }
             logger.info(f"Tidal device auth started — code: {login.user_code}")
