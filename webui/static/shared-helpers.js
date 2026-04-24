@@ -87,7 +87,10 @@ const SOURCE_ORDER = [
 
 // Sources the config-status endpoint doesn't cover because they don't need
 // user-supplied credentials — they always render as "configured" in the picker.
-const _ALWAYS_CONFIGURED_SOURCES = new Set(['musicbrainz', 'youtube_videos', 'soulseek']);
+// Soulseek IS configurable (needs slskd URL), so it's intentionally not here:
+// /api/settings/config-status reports its real state and the picker dims it
+// when no slskd is set up, redirecting clicks to Settings → Downloads.
+const _ALWAYS_CONFIGURED_SOURCES = new Set(['musicbrainz', 'youtube_videos']);
 
 // Fetch /api/settings/config-status and return a map { src -> bool }
 // covering every source in SOURCE_ORDER. Sources not present in the backend
@@ -438,22 +441,32 @@ function createSearchController({
 }
 
 
-// Navigate to Settings → Connections tab and scroll to the service card that
+// Navigate to Settings → relevant tab and scroll to the service card that
 // matches the picker's source id. Called when a user clicks an unconfigured
-// source icon.
+// source icon. Soulseek is special-cased to land on the Downloads tab where
+// its slskd URL field lives (gated behind the download-source-mode select);
+// every other source has a card on Connections.
 function openSettingsForSource(src) {
     if (typeof navigateToPage !== 'function') return;
     navigateToPage('settings');
+    const targetTab = src === 'soulseek' ? 'downloads' : 'connections';
     setTimeout(() => {
         try {
-            if (typeof switchSettingsTab === 'function') switchSettingsTab('connections');
+            if (typeof switchSettingsTab === 'function') switchSettingsTab(targetTab);
         } catch (_) { /* best-effort */ }
         setTimeout(() => {
-            const card = document.querySelector(`#settings-page .stg-service[data-service="${src}"]`);
-            if (card) {
-                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                card.classList.add('stg-service-flash');
-                setTimeout(() => card.classList.remove('stg-service-flash'), 2200);
+            // Soulseek doesn't have a .stg-service card — scroll to the
+            // slskd URL input instead so the user lands on the right field.
+            const target = src === 'soulseek'
+                ? document.querySelector('#settings-page #soulseek-url')
+                : document.querySelector(`#settings-page .stg-service[data-service="${src}"]`);
+            if (!target) return;
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (src === 'soulseek') {
+                try { target.focus(); } catch (_) { /* best-effort */ }
+            } else {
+                target.classList.add('stg-service-flash');
+                setTimeout(() => target.classList.remove('stg-service-flash'), 2200);
             }
         }, 120);
     }, 60);
