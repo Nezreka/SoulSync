@@ -9097,43 +9097,108 @@ function renderDiscoverSyncCard(playlist, container, sourceLabel) {
 
     const trackLabel = isEmpty ? 'No tracks yet' : `${playlist.track_count} tracks`;
 
-    card.innerHTML = `
-        <div class="discover-sync-card-icon">${playlist.icon}</div>
-        <div class="discover-sync-card-info">
-            <div class="discover-sync-card-name">${playlist.name}
-                <span class="discover-sync-card-meta-inline">
-                    <span class="discover-sync-source-badge">${sourceLabel || 'unknown'}</span>
-                    <span class="discover-sync-separator">\u00b7</span>
-                    <span class="discover-sync-track-count">${trackLabel}</span>
-                    <span class="discover-sync-separator">\u00b7</span>
-                    <span class="discover-sync-status ${statusClass}">${statusText}</span>
-                    <span class="discover-sync-separator">\u00b7</span>
-                    <span class="discover-sync-last-synced">${lastSyncedText}</span>
-                </span>
-            </div>
-        </div>
-        <div class="discover-sync-card-actions">
-            <div class="discover-sync-toggle-wrapper" title="${isEmpty ? 'No tracks available — visit Discover first' : 'Keep this playlist updated automatically'}">
-                <label class="discover-sync-toggle-label">Keep updated</label>
-                <label class="discover-sync-toggle">
-                    <input type="checkbox" ${playlist.auto_update ? 'checked' : ''} ${isEmpty ? 'disabled' : ''}
-                           onchange="toggleDiscoverAutoUpdate('${playlist.type}', this.checked)">
-                    <span class="discover-sync-toggle-slider"></span>
-                </label>
-            </div>
-            <button class="discover-sync-btn" id="discover-sync-btn-${playlist.type}"
-                    onclick="syncDiscoverPlaylistFromTab('${playlist.type}', '${playlist.name}')"
-                    ${playlist.sync_status === 'syncing' || isEmpty ? 'disabled' : ''}>
-                \u27f3 Sync Now
-            </button>
-        </div>
-    `;
+    // Build card using DOM nodes to avoid XSS from unescaped external data
+    const iconArea = document.createElement('div');
+    iconArea.className = 'discover-sync-card-icon';
+    iconArea.textContent = playlist.icon || '';
+
+    const infoArea = document.createElement('div');
+    infoArea.className = 'discover-sync-card-info';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'discover-sync-card-name';
+    nameEl.appendChild(document.createTextNode(playlist.name || ''));
+
+    const metaInline = document.createElement('span');
+    metaInline.className = 'discover-sync-card-meta-inline';
+
+    const sourceBadge = document.createElement('span');
+    sourceBadge.className = 'discover-sync-source-badge';
+    sourceBadge.textContent = sourceLabel || 'unknown';
+
+    const sep1 = document.createElement('span');
+    sep1.className = 'discover-sync-separator';
+    sep1.textContent = '\u00b7';
+
+    const trackCountEl = document.createElement('span');
+    trackCountEl.className = 'discover-sync-track-count';
+    trackCountEl.textContent = trackLabel;
+
+    const sep2 = document.createElement('span');
+    sep2.className = 'discover-sync-separator';
+    sep2.textContent = '\u00b7';
+
+    const statusEl = document.createElement('span');
+    statusEl.className = `discover-sync-status ${statusClass}`;
+    statusEl.textContent = statusText;
+
+    const sep3 = document.createElement('span');
+    sep3.className = 'discover-sync-separator';
+    sep3.textContent = '\u00b7';
+
+    const lastSyncedEl = document.createElement('span');
+    lastSyncedEl.className = 'discover-sync-last-synced';
+    lastSyncedEl.textContent = lastSyncedText;
+
+    metaInline.appendChild(sourceBadge);
+    metaInline.appendChild(sep1);
+    metaInline.appendChild(trackCountEl);
+    metaInline.appendChild(sep2);
+    metaInline.appendChild(statusEl);
+    metaInline.appendChild(sep3);
+    metaInline.appendChild(lastSyncedEl);
+    nameEl.appendChild(metaInline);
+    infoArea.appendChild(nameEl);
+
+    const actions = document.createElement('div');
+    actions.className = 'discover-sync-card-actions';
+
+    const toggleWrapper = document.createElement('div');
+    toggleWrapper.className = 'discover-sync-toggle-wrapper';
+    toggleWrapper.title = isEmpty
+        ? 'No tracks available \u2014 visit Discover first'
+        : 'Keep this playlist updated automatically';
+
+    const toggleLabel = document.createElement('label');
+    toggleLabel.className = 'discover-sync-toggle-label';
+    toggleLabel.textContent = 'Keep updated';
+
+    const toggle = document.createElement('label');
+    toggle.className = 'discover-sync-toggle';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = !!playlist.auto_update;
+    checkbox.disabled = !!isEmpty;
+    checkbox.addEventListener('change', function () {
+        toggleDiscoverAutoUpdate(playlist.type, this.checked);
+    });
+
+    const slider = document.createElement('span');
+    slider.className = 'discover-sync-toggle-slider';
+
+    toggle.appendChild(checkbox);
+    toggle.appendChild(slider);
+    toggleWrapper.appendChild(toggleLabel);
+    toggleWrapper.appendChild(toggle);
+
+    const syncButton = document.createElement('button');
+    syncButton.className = 'discover-sync-btn';
+    syncButton.id = `discover-sync-btn-${playlist.type}`;
+    syncButton.disabled = playlist.sync_status === 'syncing' || isEmpty;
+    syncButton.textContent = '\u27f3 Sync Now';
+    syncButton.addEventListener('click', () => syncDiscoverPlaylistFromTab(playlist.type, playlist.name));
+
+    actions.appendChild(toggleWrapper);
+    actions.appendChild(syncButton);
+
+    card.appendChild(iconArea);
+    card.appendChild(infoArea);
+    card.appendChild(actions);
 
     // Make the icon + info area clickable to view tracks
     if (!isEmpty) {
-        const clickArea = card.querySelector('.discover-sync-card-info');
-        const iconArea = card.querySelector('.discover-sync-card-icon');
-        [clickArea, iconArea].forEach(el => {
+        [infoArea, iconArea].forEach(el => {
             el.style.cursor = 'pointer';
             el.addEventListener('click', () => openDiscoverPlaylistModal(playlist.type, playlist.name, playlist.icon));
         });

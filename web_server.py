@@ -2546,7 +2546,8 @@ def _get_file_lock(file_path):
 # Thread-safe state tracking for modal download functionality with batch management
 missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="MissingTrackWorker")
 # Separate executor for analysis to prevent starvation when download workers are busy
-analysis_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="AnalysisWorker")
+MAX_CONCURRENT_ANALYSIS = 3
+analysis_executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_ANALYSIS, thread_name_prefix="AnalysisWorker")
 download_tasks = {}  # task_id -> task state dict
 download_batches = {}  # batch_id -> {queue, active_count, max_concurrent}
 tasks_lock = threading.Lock()
@@ -28987,11 +28988,11 @@ def _on_download_completed(batch_id, task_id, success=True):
 
 
 def _submit_or_queue_batch(batch_id, playlist_id, tracks):
-    """Submit a batch for analysis, or queue it if 3 analysis slots are full."""
+    """Submit a batch for analysis, or queue it if all analysis slots are full."""
     with tasks_lock:
         active_analysis_count = sum(1 for b in download_batches.values()
                                     if b.get('phase') == 'analysis')
-        if active_analysis_count >= 3:
+        if active_analysis_count >= MAX_CONCURRENT_ANALYSIS:
             download_batches[batch_id]['phase'] = 'queued'
             download_batches[batch_id]['_queued_tracks'] = tracks
             download_batches[batch_id]['_queued_playlist_id'] = playlist_id
@@ -29006,7 +29007,7 @@ def _promote_queued_batches():
     with tasks_lock:
         active_analysis_count = sum(1 for b in download_batches.values()
                                     if b.get('phase') == 'analysis')
-        if active_analysis_count >= 3:
+        if active_analysis_count >= MAX_CONCURRENT_ANALYSIS:
             return
         # Find batches waiting in queue, ordered by creation (dict insertion order)
         for bid, batch in list(download_batches.items()):
@@ -29018,7 +29019,7 @@ def _promote_queued_batches():
                 logger.info(f"[Queue] Promoting batch {bid} ('{batch.get('playlist_name')}') from queued -> analysis")
                 analysis_executor.submit(_run_full_missing_tracks_process, bid, queued_pid, queued_tracks)
                 active_analysis_count += 1
-                if active_analysis_count >= 3:
+                if active_analysis_count >= MAX_CONCURRENT_ANALYSIS:
                     break
 
 
@@ -32652,9 +32653,9 @@ def _record_sync_history_completion(batch_id, batch):
         completed_count = 0
         failed_count = len(batch.get('permanently_failed_tracks', []))
 
-        logger.warning(f"[SyncHistory] Recording completion for batch {batch_id}: "
-                      f"analysis_results={len(analysis_results)}, tracks_found={tracks_found}, "
-                      f"queue_len={len(queue)}, failed={failed_count}")
+        logger.info(f"[SyncHistory] Recording completion for batch {batch_id}: "
+                     f"analysis_results={len(analysis_results)}, tracks_found={tracks_found}, "
+                     f"queue_len={len(queue)}, failed={failed_count}")
 
         # Build download status map: track_index → status
         download_status_map = {}
@@ -32666,8 +32667,8 @@ def _record_sync_history_completion(batch_id, batch):
             if task.get('status') == 'completed':
                 completed_count += 1
 
-        logger.warning(f"[SyncHistory] Batch {batch_id}: completed_downloads={completed_count}, "
-                      f"download_status_map_size={len(download_status_map)}")
+        logger.info(f"[SyncHistory] Batch {batch_id}: completed_downloads={completed_count}, "
+                     f"download_status_map_size={len(download_status_map)}")
 
         # Build per-track results from analysis
         track_results = []
@@ -32709,12 +32710,12 @@ def _record_sync_history_completion(batch_id, batch):
 
         db = MusicDatabase()
         updated = db.update_sync_history_completion(batch_id, tracks_found, completed_count, failed_count)
-        logger.warning(f"[SyncHistory] DB update for batch {batch_id}: updated={updated}")
+        logger.info(f"[SyncHistory] DB update for batch {batch_id}: updated={updated}")
 
         # Save per-track results
         if track_results:
             tr_updated = db.update_sync_history_track_results(batch_id, json.dumps(track_results))
-            logger.warning(f"[SyncHistory] Track results saved for batch {batch_id}: updated={tr_updated}, count={len(track_results)}")
+            logger.info(f"[SyncHistory] Track results saved for batch {batch_id}: updated={tr_updated}, count={len(track_results)}")
 
     except Exception as e:
         logger.warning(f"Failed to record sync history completion: {e}")

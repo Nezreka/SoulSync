@@ -59492,8 +59492,6 @@ body.reduce-effects *::after {
 .discover-sync-card-meta {
     display: none;
 }
-    color: rgba(255, 255, 255, 0.4);
-}
 
 .discover-sync-separator {
     opacity: 0.4;
