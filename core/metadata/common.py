@@ -10,7 +10,7 @@ from typing import Any, Dict
 from utils.logging_config import get_logger as _create_logger
 
 
-logger = _create_logger("metadata_common")
+logger = _create_logger("metadata.common")
 
 __all__ = [
     "get_logger",

@@ -21,7 +21,7 @@ from core.imports.context import (
 )
 from core.metadata_service import get_itunes_client
 from database.music_database import get_database
-from core.metadata_common import (
+from core.metadata.common import (
     get_config_manager,
     get_mutagen_symbols,
     is_vorbis_like,

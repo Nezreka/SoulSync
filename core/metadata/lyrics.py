@@ -9,16 +9,19 @@ from core.imports.context import (
     get_import_original_search,
     normalize_import_context,
 )
-from core.metadata_common import get_config_manager, get_logger
+from core.metadata.common import get_config_manager
+from utils.logging_config import get_logger as _create_logger
 
 __all__ = [
     "generate_lrc_file",
 ]
 
 
+logger = _create_logger("metadata.lyrics")
+
+
 def generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
     cfg = get_config_manager()
-    logger_ = get_logger()
     if cfg.get("metadata_enhancement.lrclib_enabled", True) is False:
         return False
 
@@ -58,10 +61,10 @@ def generate_lrc_file(file_path: str, context: dict, artist: dict, album_info: d
         )
 
         if success:
-            logger_.info("LRC file generated for: %s", track_name)
+            logger.info("LRC file generated for: %s", track_name)
         else:
-            logger_.warning("No lyrics found for: %s", track_name)
+            logger.warning("No lyrics found for: %s", track_name)
         return success
     except Exception as exc:
-        logger_.error("Error generating LRC file for %s: %s", file_path, exc)
+        logger.error("Error generating LRC file for %s: %s", file_path, exc)
         return False
