@@ -76,6 +76,86 @@ if tidalapi is not None:
     QUALITY_MAP['hires']['tidal_quality'] = tidalapi.Quality.hi_res_lossless
 
 
+# Ordering of Tidal's audioQuality values, worst to best. Used to accept
+# tier upgrades (Tidal serving higher than the user asked) while still
+# rejecting downgrades. Values are the strings tidalapi's `Quality` enum
+# exposes — and the strings Tidal's API returns in the `audioQuality`
+# field. `HI_RES` (legacy MQA) isn't in the modern `Quality` enum but
+# may still come back for old catalog tracks; we rank it below
+# `HI_RES_LOSSLESS` so it's treated as a downgrade when the user asked
+# for true HiRes lossless.
+_QUALITY_RANK = {
+    'LOW': 1,
+    'HIGH': 2,
+    'LOSSLESS': 3,
+    'HI_RES': 4,
+    'HI_RES_LOSSLESS': 5,
+}
+
+
+def _verify_stream_tier(stream, q_info: dict, q_key: str) -> Tuple[bool, Optional[str]]:
+    """Return ``(True, None)`` when the tier Tidal actually served is
+    acceptable (same as requested, or a higher tier), ``(False, reason)``
+    when Tidal silently downgraded.
+
+    Tidal's API degrades quality without raising: ask for HI_RES_LOSSLESS
+    on a track that's only in LOW_320K and you get LOW_320K back with no
+    error. The downloader used to accept that and write the resulting
+    AAC file, which defeated "HiRes only" with no fallback and made the
+    worker's fallback chain ineffective (every tier "succeeded" at the
+    first one that returned anything).
+
+    We accept upgrades because Tidal occasionally serves a higher tier
+    than requested on tracks flagged as such in its catalog — rejecting
+    a higher quality than asked for would be user-hostile.
+
+    Defensive paths:
+    - No ``audio_quality`` on the stream (older tidalapi builds): pass
+      through, let the pre-existing codec / file-size guards decide.
+    - QUALITY_MAP entry without ``tidal_quality`` (tidalapi wasn't
+      importable at module load): pass through for the same reason.
+    - Unrecognized served quality value (new Tidal tier we haven't
+      mapped yet): reject, surfacing a "can't verify" reason so the
+      next tier gets a chance or the final diagnostic names the
+      unknown value.
+    """
+    served = getattr(stream, 'audio_quality', None)
+    expected = q_info.get('tidal_quality')
+    if served is None or expected is None:
+        return True, None
+
+    # Both sides may be enum instances (str subclass) or plain strings;
+    # coerce to str to compare values only.
+    served_str = str(served)
+    expected_str = str(expected)
+
+    if served_str == expected_str:
+        return True, None
+
+    served_rank = _QUALITY_RANK.get(served_str)
+    expected_rank = _QUALITY_RANK.get(expected_str)
+
+    if expected_rank is None:
+        # Shouldn't happen — every entry in QUALITY_MAP resolves to a
+        # known tier. If it does, don't reject valid downloads.
+        return True, None
+
+    if served_rank is None:
+        return False, (
+            f"{q_key}: Tidal returned unrecognized audioQuality "
+            f"'{served_str}' — can't verify the tier matches '{expected_str}'"
+        )
+
+    if served_rank >= expected_rank:
+        return True, None
+
+    return False, (
+        f"{q_key}: Tidal served '{served_str}' instead of "
+        f"'{expected_str}' — account tier, track licensing, "
+        f"or region doesn't permit {q_key} for this track"
+    )
+
+
 class TidalDownloadClient:
     """
     Tidal download client using tidalapi.
@@ -185,8 +265,16 @@ class TidalDownloadClient:
 
             login, future = self.session.login_oauth()
             self._device_auth_future = future
+            # tidalapi returns `verification_uri_complete` as a schemeless
+            # string like `link.tidal.com/ABCDE`. Passing that straight to
+            # an <a href> makes the browser treat it as a relative URL and
+            # route it back to the SoulSync origin, so normalize to a
+            # full https:// URL here.
+            raw_uri = login.verification_uri_complete or f"link.tidal.com/{login.user_code}"
+            if not raw_uri.startswith(('http://', 'https://')):
+                raw_uri = f"https://{raw_uri}"
             self._device_auth_link = {
-                'verification_uri': login.verification_uri_complete or f"https://link.tidal.com/{login.user_code}",
+                'verification_uri': raw_uri,
                 'user_code': login.user_code,
             }
             logger.info(f"Tidal device auth started — code: {login.user_code}")
@@ -654,6 +742,13 @@ class TidalDownloadClient:
                         logger.warning(f"Quality {q_key} returned no stream, trying next")
                         quality_error_reasons.append(reason)
                         continue
+
+                    ok, reason = _verify_stream_tier(stream, q_info, q_key)
+                    if not ok:
+                        logger.warning(reason)
+                        quality_error_reasons.append(reason)
+                        continue
+
                     logger.info(f"Got Tidal stream at quality: {q_key}")
                 except Exception as e:
                     reason = f"{q_key}: {type(e).__name__}: {e}"
@@ -672,7 +767,8 @@ class TidalDownloadClient:
 
                 download_url = urls[0]
 
-                # Determine file extension from manifest
+                # Determine file extension from manifest codec (HiRes FLAC
+                # can arrive wrapped in MP4 — unwrapped at Step 4).
                 codec = manifest.get_codecs()
                 if codec and 'flac' in codec.lower():
                     extension = 'flac'
@@ -682,20 +778,6 @@ class TidalDownloadClient:
                     extension = 'm4a'
                 else:
                     extension = q_info.get('extension', 'flac')
-
-                # Verify quality wasn't silently downgraded: if HiRes was requested but the
-                # codec/manifest points to standard FLAC, log a clear warning.
-                if q_key == 'hires' and codec:
-                    codec_lower = codec.lower()
-                    if 'flac' in codec_lower or 'alac' in codec_lower:
-                        # HiRes should be 24-bit — we can't confirm bit-depth from the codec
-                        # string alone, but we log the received codec so users can diagnose.
-                        logger.info(f"HiRes stream codec: {codec} (verify file bit-depth after download)")
-                    elif 'mp4a' in codec_lower or 'aac' in codec_lower:
-                        logger.warning(
-                            f"HiRes requested but received AAC stream (codec: {codec}) — "
-                            f"account may not have HiRes subscription or track isn't available in HiRes"
-                        )
 
                 # Build output filename
                 safe_name = re.sub(r'[<>:"/\\|?*]', '_', display_name)
