@@ -22,7 +22,7 @@ from urllib.parse import quote, urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, redirect, send_file, Response, session, g, abort
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO, join_room, leave_room
 from utils.logging_config import get_logger, setup_logging
 from utils.async_helpers import run_async
 from mutagen.flac import FLAC
@@ -93,23 +93,14 @@ from core.tidal_client import TidalClient # Added import for Tidal
 from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker
 from core.web_scan_manager import WebScanManager
-from core.lyrics_client import lyrics_client
 from core.metadata_cache import get_metadata_cache
 from core.imports.context import (
-    build_import_album_info,
     get_import_clean_album,
-    get_import_clean_artist,
     get_import_clean_title,
     get_import_context_album,
     get_import_context_artist,
-    get_import_has_clean_metadata,
-    get_import_has_full_metadata,
     get_import_original_search,
-    get_import_source,
-    get_import_source_ids,
     get_import_track_info,
-    get_library_source_id_columns,
-    get_source_tag_names,
     normalize_import_context,
 )
 from core.imports.album import (
@@ -2292,20 +2283,6 @@ try:
 except Exception as e:
     logger.error(f"Public REST API v1 failed to register: {e}")
 
-# --- Global Streaming State Management ---
-# Thread-safe state tracking for streaming functionality
-
-# --- Global OAuth State Management ---
-# Store PKCE values for Tidal OAuth flow
-
-
-# Quality Scanner state
-
-# Duplicate Cleaner state
-
-# --- Retag Tool Globals ---
-
-# --- Sync Page Globals ---
 
 # --- Automation Progress Tracking ---
 automation_progress_states = {}   # automation_id (int) -> state dict
@@ -49830,7 +49807,7 @@ def import_singles_process():
 
             title = file_info.get('title', '')
             artist = file_info.get('artist', '')
-            manual_match = file_info.get('manual_match') or file_info.get('spotify_override')
+            manual_match = file_info.get('manual_match')
             if manual_match is not None and not isinstance(manual_match, dict):
                 manual_match = None
 
