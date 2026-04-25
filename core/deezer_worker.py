@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.deezer_client import DeezerClient
-from core.worker_utils import interruptible_sleep
+from core.worker_utils import interruptible_sleep, set_album_api_track_count
 
 logger = get_logger("deezer_worker")
 
@@ -578,6 +578,17 @@ class DeezerWorker:
                             UPDATE albums SET genres = ?
                             WHERE id = ? AND (genres IS NULL OR genres = '' OR genres = '[]')
                         """, (json.dumps(genre_names), album_id))
+
+            # Cache the authoritative expected track count for the Album
+            # Completeness repair job. Deezer's field is `nb_tracks`; prefer
+            # full_data over search_data so we pick up the richer count when
+            # the full album lookup ran. Helper handles the int conversion
+            # and skip-on-missing semantics.
+            set_album_api_track_count(
+                cursor,
+                album_id,
+                (full_data.get('nb_tracks') if full_data else None) or search_data.get('nb_tracks'),
+            )
 
             conn.commit()
 
