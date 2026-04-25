@@ -3122,6 +3122,19 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN soul_id TEXT DEFAULT NULL")
                 logger.info("Added soul_id column to albums table")
 
+            # Albums: api_track_count — cached expected track count from the
+            # metadata provider, separate from track_count which is the
+            # OBSERVED count written by server syncs (Plex leafCount,
+            # SoulSync standalone len(tracks)). Without a separate column,
+            # the Album Completeness job can't tell apart "you have all the
+            # tracks" from "Plex says this album has N tracks and you have
+            # N tracks" — the latter looks complete but might be missing
+            # material the metadata source knows about. NULL = not yet
+            # looked up; the repair job fills it as it runs.
+            if 'api_track_count' not in album_cols:
+                cursor.execute("ALTER TABLE albums ADD COLUMN api_track_count INTEGER DEFAULT NULL")
+                logger.info("Added api_track_count column to albums table")
+
             # Tracks: soul_id (song-level) + album_soul_id (release-specific)
             cursor.execute("PRAGMA table_info(tracks)")
             track_cols = [c[1] for c in cursor.fetchall()]
@@ -4715,6 +4728,10 @@ class MusicDatabase:
                         'audiodb_id', 'audiodb_match_status', 'audiodb_last_attempted',
                         'style', 'mood', 'label', 'explicit', 'record_type',
                         'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
+                        # api_track_count is metadata-source-derived enrichment cache;
+                        # losing it on a ratingKey rekey would force the next
+                        # completeness scan back to live API lookups (kettui PR #374).
+                        'api_track_count',
                     ]
 
                     # Read enrichment data from old album
