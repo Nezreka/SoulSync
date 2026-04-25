@@ -25,7 +25,7 @@ __all__ = [
 ]
 
 
-def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
+def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict, runtime=None) -> bool:
     cfg = get_config_manager()
     logger_ = get_logger()
     if cfg.get("metadata_enhancement.enabled", True) is False:
@@ -126,7 +126,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 if metadata.get("disc_number"):
                     audio_file["disk"] = [(metadata["disc_number"], 0)]
 
-            embed_source_ids(audio_file, metadata, context)
+            embed_source_ids(audio_file, metadata, context, runtime=runtime)
 
             if album_info is not None and metadata.get("musicbrainz_release_id"):
                 album_info["musicbrainz_release_id"] = metadata["musicbrainz_release_id"]

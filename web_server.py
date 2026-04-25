@@ -19760,8 +19760,14 @@ import urllib.request
 def _wipe_source_tags(file_path: str) -> bool:
     return metadata_enrichment.wipe_source_tags(file_path)
 
-def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
-    return metadata_enrichment.enhance_file_metadata(file_path, context, artist, album_info)
+def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict, runtime=None) -> bool:
+    return metadata_enrichment.enhance_file_metadata(
+        file_path,
+        context,
+        artist,
+        album_info,
+        runtime=runtime or _build_import_pipeline_runtime(),
+    )
 
 
 def _download_cover_art(album_info: dict, target_dir: str, context: dict = None):
@@ -19863,6 +19869,15 @@ def _build_import_pipeline_runtime():
         on_download_completed=_on_download_completed,
         web_scan_manager=web_scan_manager,
         repair_worker=repair_worker,
+        mb_worker=mb_worker,
+        deezer_worker=deezer_worker,
+        audiodb_worker=audiodb_worker,
+        tidal_client=tidal_client,
+        qobuz_enrichment_worker=qobuz_enrichment_worker,
+        lastfm_worker=lastfm_worker,
+        genius_worker=genius_worker,
+        spotify_enrichment_worker=spotify_enrichment_worker,
+        itunes_enrichment_worker=itunes_enrichment_worker,
     )
 
 
@@ -19979,18 +19994,28 @@ def _build_import_pipeline_runtime():
         on_download_completed=_on_download_completed,
         web_scan_manager=web_scan_manager,
         repair_worker=repair_worker,
+        mb_worker=mb_worker,
+        deezer_worker=deezer_worker,
+        audiodb_worker=audiodb_worker,
+        tidal_client=tidal_client,
+        qobuz_enrichment_worker=qobuz_enrichment_worker,
+        lastfm_worker=lastfm_worker,
+        genius_worker=genius_worker,
+        spotify_enrichment_worker=spotify_enrichment_worker,
+        itunes_enrichment_worker=itunes_enrichment_worker,
     )
 
 def _wipe_source_tags(file_path: str) -> bool:
     return metadata_enrichment.wipe_source_tags(file_path)
 
 
-def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict) -> bool:
+def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict, runtime=None) -> bool:
     return metadata_enrichment.enhance_file_metadata(
         file_path,
         context,
         artist,
         album_info,
+        runtime=runtime or _build_import_pipeline_runtime(),
     )
 
 
