@@ -324,3 +324,49 @@ def build_import_album_info(
         "album_type": album_type,
         "total_tracks": int(total_tracks) if str(total_tracks).isdigit() else total_tracks,
     }
+
+
+def detect_album_info_web(context, artist_context=None):
+    """Best-effort album detection for single-track downloads."""
+    context = normalize_import_context(context)
+    if artist_context is None:
+        artist_context = context.get("artist") or {}
+
+    album_info = build_import_album_info(context)
+    if album_info.get("is_album"):
+        return album_info
+
+    album_ctx = get_import_context_album(context)
+    track_info = get_import_track_info(context)
+    original_search = get_import_original_search(context)
+
+    album_name = (
+        album_ctx.get("name")
+        or track_info.get("album")
+        or original_search.get("album")
+        or ""
+    )
+    track_name = (
+        track_info.get("name")
+        or original_search.get("title")
+        or ""
+    )
+    artist_name = extract_artist_name(artist_context) or get_import_clean_artist(context, default="")
+
+    if album_name and track_name and album_name.strip().lower() not in {
+        track_name.strip().lower(),
+        artist_name.strip().lower(),
+    }:
+        return build_import_album_info(
+            context,
+            album_info={
+                "album_name": album_name,
+                "track_number": track_info.get("track_number", 1),
+                "disc_number": track_info.get("disc_number", 1),
+                "album_image_url": album_ctx.get("image_url", ""),
+                "confidence": 0.5,
+            },
+            force_album=True,
+        )
+
+    return None

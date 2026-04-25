@@ -55,7 +55,7 @@ def register_routes(bp):
     def system_activity():
         """Recent activity feed."""
         try:
-            from core.imports.runtime_state import activity_feed
+            from core.runtime_state import activity_feed
             items = list(activity_feed) if activity_feed else []
             return api_success({"activities": items})
         except Exception as e:
@@ -74,7 +74,7 @@ def register_routes(bp):
             # Active download count
             download_count = 0
             try:
-                from core.imports.runtime_state import download_tasks, tasks_lock
+                from core.runtime_state import download_tasks, tasks_lock
                 with tasks_lock:
                     download_count = sum(
                         1 for t in download_tasks.values()

@@ -18,6 +18,7 @@ from core.imports.file_ops import (
 )
 from core.imports.context import (
     build_import_album_info,
+    detect_album_info_web,
     extract_artist_name,
     get_import_clean_artist,
     get_import_clean_title,
@@ -38,17 +39,16 @@ from core.imports.side_effects import (
     record_retag_download,
     record_soulsync_library_entry,
 )
-from core.imports.runtime_state import (
+from core.runtime_state import (
     add_activity_item,
-    detect_album_info_web,
     download_batches,
     download_tasks,
     matched_context_lock,
     matched_downloads_context,
     mark_task_completed as _mark_task_completed,
-    _post_process_locks,
-    _post_process_locks_lock,
-    _processed_download_ids,
+    post_process_locks,
+    post_process_locks_lock,
+    processed_download_ids,
     tasks_lock,
 )
 from core.metadata_artwork import download_cover_art
@@ -79,10 +79,10 @@ def post_process_matched_download(context_key, context, file_path, runtime):
         if on_download_completed:
             on_download_completed(batch_id, task_id, success=success)
 
-    with _post_process_locks_lock:
-        if context_key not in _post_process_locks:
-            _post_process_locks[context_key] = threading.Lock()
-        file_lock = _post_process_locks[context_key]
+    with post_process_locks_lock:
+        if context_key not in post_process_locks:
+            post_process_locks[context_key] = threading.Lock()
+        file_lock = post_process_locks[context_key]
 
     file_lock.acquire()
     try:
@@ -747,8 +747,8 @@ def post_process_matched_download(context_key, context, file_path, runtime):
 
         source_exists = os.path.exists(file_path) if file_path else False
         if source_exists:
-            if context_key in _processed_download_ids:
-                _processed_download_ids.remove(context_key)
+            if context_key in processed_download_ids:
+                processed_download_ids.remove(context_key)
                 logger.warning(f"Removed {context_key} from processed set - will retry on next check")
             with matched_context_lock:
                 if context_key not in matched_downloads_context:
@@ -758,8 +758,8 @@ def post_process_matched_download(context_key, context, file_path, runtime):
             logger.warning(f"Source file gone, not retrying: {context_key}")
     finally:
         file_lock.release()
-        with _post_process_locks_lock:
-            _post_process_locks.pop(context_key, None)
+        with post_process_locks_lock:
+            post_process_locks.pop(context_key, None)
 
 
 def post_process_matched_download_with_verification(context_key, context, file_path, task_id, batch_id, runtime):

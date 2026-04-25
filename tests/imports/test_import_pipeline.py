@@ -4,7 +4,7 @@ import types
 
 import core.imports.pipeline as import_pipeline
 import core.imports.paths as import_paths
-import core.imports.runtime_state as runtime_state
+import core.runtime_state as runtime_state
 
 
 class _Config:
@@ -63,14 +63,14 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     original_matched_context = dict(runtime_state.matched_downloads_context)
     original_download_tasks = dict(runtime_state.download_tasks)
     original_download_batches = dict(runtime_state.download_batches)
-    original_processed_ids = set(runtime_state._processed_download_ids)
-    original_post_process_locks = dict(runtime_state._post_process_locks)
+    original_processed_ids = set(runtime_state.processed_download_ids)
+    original_post_locks = dict(runtime_state.post_process_locks)
 
     runtime_state.matched_downloads_context.clear()
     runtime_state.download_tasks.clear()
     runtime_state.download_batches.clear()
-    runtime_state._processed_download_ids.clear()
-    runtime_state._post_process_locks.clear()
+    runtime_state.processed_download_ids.clear()
+    runtime_state.post_process_locks.clear()
 
     runtime = types.SimpleNamespace(
         automation_engine=None,
@@ -122,7 +122,7 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
         runtime_state.download_tasks.update(original_download_tasks)
         runtime_state.download_batches.clear()
         runtime_state.download_batches.update(original_download_batches)
-        runtime_state._processed_download_ids.clear()
-        runtime_state._processed_download_ids.update(original_processed_ids)
-        runtime_state._post_process_locks.clear()
-        runtime_state._post_process_locks.update(original_post_process_locks)
+        runtime_state.processed_download_ids.clear()
+        runtime_state.processed_download_ids.update(original_processed_ids)
+        runtime_state.post_process_locks.clear()
+        runtime_state.post_process_locks.update(original_post_locks)
