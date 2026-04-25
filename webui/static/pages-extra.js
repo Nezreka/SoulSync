@@ -2163,14 +2163,14 @@ let _adlFilterBatchId = null; // When set, main list shows only this batch
 const _batchColorMap = {};
 const _batchCompletedAt = {}; // batch_id -> timestamp when first seen as complete
 let _batchColorNext = 0;
+const _BATCH_COLOR_COUNT = 16;
 
 function _getBatchColor(batchId) {
     if (!batchId) return -1;
     if (_batchColorMap[batchId] === undefined) {
-        // Deterministic color from batch_id hash for consistency across reloads
-        let hash = 0;
-        for (let i = 0; i < batchId.length; i++) hash = ((hash << 5) - hash + batchId.charCodeAt(i)) | 0;
-        _batchColorMap[batchId] = Math.abs(hash) % 8;
+        // Assign colors sequentially so no duplicates until all 16 are used
+        _batchColorMap[batchId] = _batchColorNext % _BATCH_COLOR_COUNT;
+        _batchColorNext++;
     }
     return _batchColorMap[batchId];
 }
@@ -2488,6 +2488,10 @@ function _adlRenderBatchPanel() {
         const hasFailed = batch.failed > 0;
         const isTerminal = batch.phase === 'complete' || batch.phase === 'cancelled' || batch.phase === 'error';
         const isActive = batch.phase === 'downloading' && batch.active > 0;
+        const isAnalyzing = batch.phase === 'analysis';
+        const analysisTotal = batch.analysis_total || 0;
+        const analysisProcessed = batch.analysis_processed || 0;
+        const analysisPct = analysisTotal > 0 ? Math.round((analysisProcessed / analysisTotal) * 100) : 0;
 
         // Fade progress for completing batches
         let fadeStyle = '';
@@ -2507,14 +2511,22 @@ function _adlRenderBatchPanel() {
         // Phase label with icon
         let phaseText = '';
         let phaseIcon = '';
-        if (batch.phase === 'analysis') {
-            phaseText = 'Analyzing...';
+        if (batch.phase === 'queued') {
+            phaseText = 'Queued';
+            phaseIcon = '<span style="color:#eab308;margin-right:4px">⏳</span>';
+        } else if (batch.phase === 'analysis') {
+            phaseText = analysisTotal > 0 ? `Analyzing ${analysisProcessed}/${analysisTotal}...` : 'Analyzing...';
             phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
         } else if (batch.phase === 'downloading') {
             phaseText = `${batch.completed}/${total} tracks`;
             if (batch.active > 0) phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
         } else if (batch.phase === 'complete') {
-            phaseText = `Done \u2014 ${batch.completed} tracks`;
+            const analysisTotal = batch.analysis_total || 0;
+            const alreadyOwned = analysisTotal > 0 ? analysisTotal - total : 0;
+            let parts = [`${batch.completed} downloaded`];
+            if (alreadyOwned > 0) parts.push(`${alreadyOwned} owned`);
+            if (batch.failed > 0) parts.push(`${batch.failed} failed`);
+            phaseText = parts.join(', ');
             phaseIcon = '<span style="color:#22c55e;margin-right:4px">\u2713</span>';
         } else if (batch.phase === 'cancelled') {
             phaseText = 'Cancelled';
@@ -2602,7 +2614,7 @@ function _adlRenderBatchPanel() {
                 </div>
             </div>
             <div class="adl-batch-progress">
-                <div class="adl-batch-progress-fill${hasFailed ? ' has-failed' : ''}" style="width:${pct}%"></div>
+                <div class="adl-batch-progress-fill${hasFailed ? ' has-failed' : ''}" style="width:${isAnalyzing ? analysisPct : pct}%"></div>
             </div>
             <div class="adl-batch-tracks">${tracksHtml}</div>
         </div>`;
@@ -2816,10 +2828,21 @@ function _adlRenderBatchHistory() {
     list.innerHTML = _adlBatchHistory.map(h => {
         const name = _adlEsc(h.playlist_name || 'Unknown');
         const downloaded = h.tracks_downloaded || 0;
+        const found = h.tracks_found || 0;
         const failed = h.tracks_failed || 0;
         const total = h.total_tracks || 0;
-        const statsParts = [`${downloaded}/${total}`];
-        if (failed > 0) statsParts.push(`<span style="color:#ef4444">${failed} failed</span>`);
+
+        // Build stats line: "X owned · X new · X failed · X missing"
+        const statsParts = [];
+        if (found > 0 || downloaded > 0) {
+            const owned = found - downloaded;  // already in library before this sync
+            if (owned > 0) statsParts.push(`<span style="color:rgba(74,222,128,0.7)" title="Already in library">${owned} owned</span>`);
+            if (downloaded > 0) statsParts.push(`<span style="color:rgba(96,165,250,0.7)" title="Newly downloaded">${downloaded} new</span>`);
+        }
+        if (failed > 0) statsParts.push(`<span style="color:#ef4444" title="Failed to download">${failed} failed</span>`);
+        const notFound = total - found - failed;
+        if (notFound > 0) statsParts.push(`<span title="Not found on any source">${notFound} missing</span>`);
+        if (statsParts.length === 0) statsParts.push(`${total} tracks`);
 
         let dateText = '';
         if (h.completed_at) {
@@ -2836,18 +2859,66 @@ function _adlRenderBatchHistory() {
             }
         }
 
-        const sourceLabel = h.source_page ? `<span class="adl-batch-card-source" style="font-size:0.6rem;padding:0 4px">${_adlEsc(h.source_page)}</span>` : '';
+        // Use source (spotify, mirrored, discover, etc.) for badge when available, fall back to source_page
+        const badgeLabel = h.source || h.source_page || '';
+        const sourceLabel = badgeLabel ? `<span class="adl-batch-card-source" style="font-size:0.6rem;padding:0 4px">${_adlEsc(badgeLabel)}</span>` : '';
 
-        // Source type color dot
-        const sourceColors = { wishlist: '168, 85, 247', sync: '59, 130, 246', album: '16, 185, 129' };
-        const dotColor = sourceColors[h.source_page] || '255, 255, 255';
-        const histDot = `<span class="adl-batch-history-dot" style="background:rgba(${dotColor}, 0.6)"></span>`;
+        // Source type color dot - expanded palette
+        const sourceColors = {
+            wishlist: '168, 85, 247', sync: '59, 130, 246', album: '16, 185, 129',
+            discover: '251, 191, 36', mirrored: '236, 72, 153', spotify: '30, 215, 96',
+            youtube: '255, 0, 0', tidal: '0, 255, 255', deezer: '162, 73, 255',
+            beatport: '148, 252, 19', listenbrainz: '255, 134, 0'
+        };
+        const dotSource = h.source || h.source_page || '';
+        const dotColor = sourceColors[dotSource] || '255, 255, 255';
+        const dotTip = dotSource ? `Source: ${dotSource}` : 'Unknown source';
+        const histDot = `<span class="adl-batch-history-dot" style="background:rgba(${dotColor}, 0.6)" title="${dotTip}"></span>`;
+
+        // Thumbnail with playlist-type icon fallback
+        let placeholderIcon = '♫';
+        const pName = (h.playlist_name || '').toLowerCase();
+        if (pName.includes('fresh tape') || pName.includes('release radar')) placeholderIcon = '🎵';
+        else if (pName.includes('archives') || pName.includes('discovery weekly')) placeholderIcon = '📚';
+        else if (pName.includes('seasonal')) placeholderIcon = '🌿';
+        else if (pName.includes('popular picks')) placeholderIcon = '🔥';
+        else if (pName.includes('hidden gems')) placeholderIcon = '💎';
+        else if (pName.includes('discovery shuffle')) placeholderIcon = '🔀';
+        else if (pName.includes('familiar fav')) placeholderIcon = '❤️';
+        else if (pName.includes('jam')) placeholderIcon = '🎸';
+        else if (pName.includes('explor')) placeholderIcon = '🔭';
+        else if (dotSource === 'mirrored' || dotSource === 'youtube') placeholderIcon = '🔗';
+        else if (dotSource === 'wishlist') placeholderIcon = '⭐';
+        else if (dotSource === 'album') placeholderIcon = '💿';
+        const thumb = h.thumb_url
+            ? `<img src="${_adlEsc(h.thumb_url)}" class="adl-batch-history-thumb" loading="lazy" data-icon="${placeholderIcon}" onerror="var s=document.createElement('span');s.className='adl-batch-history-thumb adl-batch-history-thumb-placeholder';s.textContent=this.dataset.icon;this.parentNode.replaceChild(s,this)">`
+            : `<span class="adl-batch-history-thumb adl-batch-history-thumb-placeholder">${placeholderIcon}</span>`;
+
+        // Server push status indicator
+        let pushBadge = '';
+        if (h.server_push_status) {
+            const pushIcons = {
+                pending: ['⏳', 'rgba(251,191,36,0.7)', 'Waiting to push to server'],
+                pushing: ['⬆', 'rgba(96,165,250,0.7)', 'Pushing to server...'],
+                success: ['✓', 'rgba(74,222,128,0.7)', 'Pushed to server'],
+                failed: ['✗', 'rgba(239,68,68,0.7)', 'Server push failed'],
+                skipped: ['—', 'rgba(255,255,255,0.2)', 'Server push skipped'],
+            };
+            const [icon, color, tip] = pushIcons[h.server_push_status] || ['?', 'rgba(255,255,255,0.3)', h.server_push_status];
+            pushBadge = ` · <span style="color:${color}" title="${tip}">${icon} server</span>`;
+        }
 
         return `<div class="adl-batch-history-item">
-            ${histDot}
-            <div class="adl-batch-history-name">${name} ${sourceLabel}</div>
-            <div class="adl-batch-history-stats">${statsParts.join(' ')}</div>
-            <div class="adl-batch-history-date">${dateText}</div>
+            ${thumb}
+            <div class="adl-batch-history-content">
+                <div class="adl-batch-history-row1">
+                    ${histDot}
+                    <span class="adl-batch-history-name">${name}</span>
+                    ${sourceLabel}
+                    <span class="adl-batch-history-date">${dateText}</span>
+                </div>
+                <div class="adl-batch-history-row2">${statsParts.join(' · ')}${pushBadge}</div>
+            </div>
         </div>`;
     }).join('');
 }
