@@ -131,7 +131,7 @@ from core.imports.staging import (
 )
 from core.imports.paths import build_final_path_for_track as _build_final_path_for_track
 from core.metadata_common import get_file_lock
-from core.imports.runtime_state import (
+from core.runtime_state import (
     activity_feed,
     activity_feed_lock,
     add_activity_item,
@@ -140,6 +140,7 @@ from core.imports.runtime_state import (
     matched_context_lock,
     matched_downloads_context,
     mark_task_completed as _core_mark_task_completed,
+    processed_download_ids,
     set_activity_toast_emitter,
     tasks_lock,
 )
@@ -622,7 +623,7 @@ retag_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="RetagWork
 
 # Download Missing Tracks Modal State Management
 # Thread-safe state tracking for modal download functionality.
-# Shared task/batch state now lives in core.imports.runtime_state.
+# Shared task/batch state now lives in core.runtime_state.
 missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="MissingTrackWorker")
 
 # Automatic Wishlist / Watchlist Processing Flags
@@ -882,7 +883,6 @@ session_completed_downloads = 0
 session_stats_lock = threading.Lock()
 
 batch_locks = {}
-_processed_download_ids = set()
 _orphaned_download_keys = set()
 
 _mb_release_cache = {}
@@ -1815,7 +1815,7 @@ def get_download_status():
         return jsonify({"transfers": []})
 
     try:
-        global _processed_download_ids
+        global processed_download_ids
         transfers_data = run_async(soulseek_client._make_request('GET', 'transfers/downloads'))
         all_transfers = []
         completed_matched_downloads = []
@@ -1869,7 +1869,7 @@ def get_download_status():
                                                 _orphaned_download_keys.discard(context_key)
                                             continue
 
-                                    if context_key in _processed_download_ids:
+                                    if context_key in processed_download_ids:
                                         continue
 
                                     with matched_context_lock:
@@ -1900,7 +1900,7 @@ def get_download_status():
                                                     _download_retry_attempts[context_key]['count'] += 1
                                                     retry_count = _download_retry_attempts[context_key]['count']
                                                     if retry_count >= _download_retry_max:
-                                                        _processed_download_ids.add(context_key)
+                                                        processed_download_ids.add(context_key)
                                                         del _download_retry_attempts[context_key]
         if completed_matched_downloads:
             def process_completed_downloads():
@@ -1917,7 +1917,7 @@ def get_download_status():
                         thread = threading.Thread(target=_pp_target, args=_pp_args)
                         thread.daemon = True
                         thread.start()
-                        _processed_download_ids.add(context_key)
+                        processed_download_ids.add(context_key)
                     except Exception as e:
                         print(f"Error starting post-processing thread for {context_key}: {e}")
             processing_thread = threading.Thread(target=process_completed_downloads)
@@ -3842,7 +3842,7 @@ def _update_automation_progress(automation_id, **kwargs):
                 pass
 
 # --- Global Matched Downloads Context Management ---
-# Shared with core.imports.runtime_state so the refactored pipeline and web
+# Shared with core.runtime_state so the refactored pipeline and web
 # server operate on the same context registry.
 _orphaned_download_keys = set()  # Context keys of downloads abandoned during retry
 
@@ -11607,7 +11607,7 @@ def get_download_status():
         return jsonify({"transfers": []})
 
     try:
-        global _processed_download_ids
+        global processed_download_ids
         # Skip slskd API call if Soulseek is already known to be disconnected
         soulseek_known_down = not _status_cache.get('soulseek', {}).get('connected', True)
         transfers_data = None
@@ -11687,7 +11687,7 @@ def get_download_status():
                                             continue  # Skip normal post-processing either way
 
                                     # Skip downloads we've already processed (prevents log spam)
-                                    if context_key in _processed_download_ids:
+                                    if context_key in processed_download_ids:
                                         continue
 
                                     with matched_context_lock:
@@ -11717,7 +11717,7 @@ def get_download_status():
                                                 _files_claimed_this_cycle.add(_norm_path)
                                                 logger.info(f"Found completed matched file on disk: {found_path}")
                                                 completed_matched_downloads.append((context_key, context, found_path))
-                                                # Don't add to _processed_download_ids yet - wait until thread starts successfully
+                                                # Don't add to processed_download_ids yet - wait until thread starts successfully
 
                                                 # Clean up retry tracking if file was found after retries
                                                 with _download_retry_lock:
@@ -11746,7 +11746,7 @@ def get_download_status():
                                                     if retry_count >= _download_retry_max:
                                                         # Max retries reached, give up
                                                         logger.error(f"CRITICAL: Could not find '{os.path.basename(filename_from_api)}' after {retry_count} attempts over {elapsed:.1f}s. Giving up.")
-                                                        _processed_download_ids.add(context_key)
+                                                        processed_download_ids.add(context_key)
                                                         # Clean up retry tracking
                                                         del _download_retry_attempts[context_key]
                                                     else:
@@ -11773,7 +11773,7 @@ def get_download_status():
                         thread.start()
 
                         # Only mark as processed AFTER thread starts successfully
-                        _processed_download_ids.add(context_key)
+                        processed_download_ids.add(context_key)
                         logger.info(f"Marked as processed: {context_key}")
 
                         # DON'T remove context immediately - verification worker needs it
@@ -11820,7 +11820,7 @@ def get_download_status():
                         with matched_context_lock:
                             context = matched_downloads_context.get(context_key)
 
-                        if context and context_key not in _processed_download_ids:
+                        if context and context_key not in processed_download_ids:
                             download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
                             found_result = _find_completed_file_robust(download_dir, download.filename)
                             found_path = found_result[0] if found_result and found_result[0] else None
@@ -11849,7 +11849,7 @@ def get_download_status():
                                         thread = threading.Thread(target=_st_target, args=_st_args)
                                         thread.daemon = True
                                         thread.start()
-                                        _processed_download_ids.add(_ctx_key)
+                                        processed_download_ids.add(_ctx_key)
                                         logger.info(f"[{_label}] Marked as processed: {_ctx_key}")
                                     except Exception as e:
                                         logger.error(f"[{_label}] Error starting post-processing thread for {_ctx_key}: {e}")
@@ -11860,7 +11860,7 @@ def get_download_status():
                             else:
                                 # File not found - likely already processed and moved to library
                                 # Mark as processed to prevent infinite checking
-                                _processed_download_ids.add(context_key)
+                                processed_download_ids.add(context_key)
         except Exception as streaming_error:
             import traceback
             logger.error(f"Could not fetch YouTube/Tidal downloads for status: {streaming_error}")
@@ -18712,7 +18712,7 @@ def _search_track_in_album_context_web(context: dict, spotify_artist: dict) -> d
                 if similarity > threshold:
                     logger.info(f"FOUND: '{track_name}' (track #{track_number}) matches '{clean_track}' (similarity: {similarity:.2f})")
 
-                    # Classify as album vs single using same logic as _detect_album_info_web
+                    # Classify as album vs single using the shared detect_album_info_web helper
                     ctx_album_type = getattr(album, 'album_type', 'album') or 'album'
                     ctx_total_tracks = getattr(album, 'total_tracks', 1) or 1
                     ctx_is_album = (
