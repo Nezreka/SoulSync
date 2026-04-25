@@ -364,7 +364,7 @@ def post_process_matched_download(context_key, context, file_path, runtime):
                     f"[Metadata Input] Playlist mode - artist: '{artist_context.get('name', 'MISSING')}' "
                     f"(id: {artist_context.get('id', 'MISSING')})"
                 )
-                enhance_file_metadata(file_path, context, artist_context, None)
+                enhance_file_metadata(file_path, context, artist_context, None, runtime=runtime)
             except Exception as meta_err:
                 import traceback
                 pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
@@ -529,7 +529,7 @@ def post_process_matched_download(context_key, context, file_path, runtime):
                 )
             else:
                 logger.info("[Metadata Input] album_info: None (single track)")
-            enhance_file_metadata(file_path, context, artist_context, album_info)
+            enhance_file_metadata(file_path, context, artist_context, album_info, runtime=runtime)
         except Exception as meta_err:
             import traceback
             pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
