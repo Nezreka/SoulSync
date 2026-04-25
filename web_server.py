@@ -48267,7 +48267,7 @@ def import_singles_process():
                 if not artist:
                     artist = parsed.get('artist', '')
 
-            from core.metadata_service import get_single_track_import_context
+            from core.imports.resolution import get_single_track_import_context
 
             resolved = get_single_track_import_context(
                 title,

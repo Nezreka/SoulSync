@@ -49,11 +49,12 @@ def normalize_import_context(context: Optional[Dict[str, Any]]) -> Dict[str, Any
     album = _as_dict(context.get("album") or context.get("spotify_album"))
     track_info = _as_dict(context.get("track_info"))
     original_search = _as_dict(context.get("original_search_result"))
+    search_result = _as_dict(context.get("search_result"))
 
     context["artist"] = artist
     context["album"] = album
     context["track_info"] = track_info
-    context["original_search_result"] = original_search
+    context["original_search_result"] = original_search or search_result
     context.pop("spotify_artist", None)
     context.pop("spotify_album", None)
 
@@ -100,6 +101,12 @@ def get_import_original_search(context: Optional[Dict[str, Any]]) -> Dict[str, A
     if not isinstance(context, dict):
         return {}
     return _as_dict(context.get("original_search_result"))
+
+
+def get_import_search_result(context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(context, dict):
+        return {}
+    return _as_dict(context.get("search_result"))
 
 
 def get_import_source(context: Optional[Dict[str, Any]]) -> str:
@@ -199,6 +206,7 @@ def get_import_has_full_metadata(context: Optional[Dict[str, Any]]) -> bool:
 def get_import_source_ids(context: Optional[Dict[str, Any]]) -> Dict[str, str]:
     track_info = get_import_track_info(context)
     original_search = get_import_original_search(context)
+    search_result = get_import_search_result(context)
     artist = get_import_context_artist(context)
     album = get_import_context_album(context)
 
@@ -208,12 +216,16 @@ def get_import_source_ids(context: Optional[Dict[str, Any]]) -> Dict[str, str]:
             _first_value(track_info, "spotify_track_id", "itunes_track_id", "deezer_id", "deezer_track_id", "discogs_id", "soul_id", default=""),
             _first_value(original_search, "id", "track_id", "source_track_id", default=""),
             _first_value(original_search, "spotify_track_id", "itunes_track_id", "deezer_id", "deezer_track_id", "discogs_id", "soul_id", default=""),
+            _first_value(search_result, "id", "track_id", "source_track_id", default=""),
+            _first_value(search_result, "spotify_track_id", "itunes_track_id", "deezer_id", "deezer_track_id", "discogs_id", "soul_id", default=""),
         ),
         "artist_id": _first_id_value(
             _first_value(artist, "id", "artist_id", "source_artist_id", default=""),
             _first_value(artist, "spotify_artist_id", "itunes_artist_id", "deezer_id", "deezer_artist_id", "discogs_id", "soul_id", default=""),
             _first_value(original_search, "artist_id", "source_artist_id", default=""),
             _first_value(original_search, "spotify_artist_id", "itunes_artist_id", "deezer_id", "deezer_artist_id", "discogs_id", "soul_id", default=""),
+            _first_value(search_result, "artist_id", "source_artist_id", default=""),
+            _first_value(search_result, "spotify_artist_id", "itunes_artist_id", "deezer_id", "deezer_artist_id", "discogs_id", "soul_id", default=""),
         ),
         "album_id": _first_id_value(
             _first_value(album, "id", "album_id", "collectionId", "source_album_id", default=""),
@@ -222,6 +234,8 @@ def get_import_source_ids(context: Optional[Dict[str, Any]]) -> Dict[str, str]:
             _first_value(original_search, "spotify_album_id", "itunes_album_id", "deezer_id", "deezer_album_id", "discogs_id", "soul_id", "album_soul_id", "hydrabase_album_id", default=""),
             _first_value(track_info, "album_id", "source_album_id", default=""),
             _first_value(track_info, "spotify_album_id", "itunes_album_id", "deezer_id", "deezer_album_id", "discogs_id", "soul_id", "album_soul_id", "hydrabase_album_id", default=""),
+            _first_value(search_result, "album_id", "source_album_id", default=""),
+            _first_value(search_result, "spotify_album_id", "itunes_album_id", "deezer_id", "deezer_album_id", "discogs_id", "soul_id", "album_soul_id", "hydrabase_album_id", default=""),
         ),
     }
 
