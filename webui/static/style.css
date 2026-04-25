@@ -46230,6 +46230,19 @@ textarea.enhanced-meta-field-input {
 .reorganize-template-input:focus {
     border-color: rgba(100, 149, 237, 0.5);
 }
+/* `<select>` shares the .reorganize-template-input class but its dropdown
+   options are rendered by the OS, so they don't inherit page colors —
+   explicitly style options dark so they're visible against the OS's
+   default white dropdown background.*/
+select.reorganize-template-input,
+.reorganize-template-input option {
+    background: #1f1f1f;
+    color: #e0e0e0;
+}
+.reorganize-template-input:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
 .reorganize-variables {
     padding-bottom: 12px;
     border-bottom: 1px solid rgba(255,255,255,0.06);
