@@ -23,6 +23,29 @@ from core.worker_utils import interruptible_sleep, set_album_api_track_count
 logger = get_logger("discogs_worker")
 
 
+def count_discogs_real_tracks(tracklist) -> int:
+    """Count actual songs in a Discogs tracklist response.
+
+    Discogs tracklists interleave real tracks with section headings
+    (``type_=='heading'``), index markers (``type_=='index'``),
+    and sub-tracks (``type_=='sub_track'``) that aren't themselves
+    songs. We count anything that's explicitly typed as ``'track'`` OR
+    has an empty/missing ``type_`` field — matching exactly what
+    :meth:`core.discogs_client.DiscogsClient.get_album_tracks` itself
+    treats as a real track (`type_ in ('track', '')`). Counting any
+    narrower set silently disagrees with the repair job's fallback
+    `_get_expected_total` path, which calls `get_album_tracks_for_source`
+    under the hood and therefore uses the client's count.
+
+    Reported by kettui on PR #374 — original filter only counted
+    ``type_=='track'`` and undercounted releases where the discogs
+    response left ``type_`` empty for some real tracks.
+    """
+    if not tracklist:
+        return 0
+    return sum(1 for t in tracklist if (t.get('type_') or '') in ('track', ''))
+
+
 class DiscogsWorker:
     """Background worker for enriching library artists and albums with Discogs metadata."""
 
@@ -455,15 +478,13 @@ class DiscogsWorker:
                 """, (image_url, album_id))
 
             # Cache the authoritative expected track count for the Album
-            # Completeness repair job. Discogs tracklists mix actual tracks
-            # with section headings and index entries — only type_=='track'
-            # rows are real songs, so filter before counting. (Helper can't
-            # do this filter for us; it's Discogs-specific shape.)
-            tracklist = data.get('tracklist') or []
+            # Completeness repair job. See `count_discogs_real_tracks`
+            # for why we accept both `type_ == 'track'` and empty `type_`
+            # (kettui's PR #374 review — narrower filter undercounted).
             set_album_api_track_count(
                 cursor,
                 album_id,
-                sum(1 for t in tracklist if t.get('type_') == 'track'),
+                count_discogs_real_tracks(data.get('tracklist')),
             )
 
             conn.commit()
