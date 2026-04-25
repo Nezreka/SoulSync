@@ -208,6 +208,60 @@ def test_embed_source_ids_uses_current_source_ids_and_legacy_fallback(monkeypatc
     assert "ITUNES_ALBUM_ID" in legacy_descs
 
 
+def test_enhance_file_metadata_forwards_runtime_to_source_embedding(monkeypatch):
+    audio = _FakeAudio()
+    symbols = _fake_symbols(audio)
+    seen = {}
+    runtime = types.SimpleNamespace(marker="runtime")
+
+    monkeypatch.setattr(me, "get_config_manager", lambda: _Config(
+        {
+            "metadata_enhancement.enabled": True,
+            "metadata_enhancement.embed_album_art": False,
+            "metadata_enhancement.tags.write_multi_artist": False,
+        }
+    ))
+    monkeypatch.setattr(me, "get_mutagen_symbols", lambda: symbols)
+    monkeypatch.setattr(me, "strip_all_non_audio_tags", lambda file_path: {"apev2_stripped": False, "apev2_tag_count": 0})
+    monkeypatch.setattr(
+        me,
+        "extract_source_metadata",
+        lambda context, artist, album_info: {
+            "source": "deezer",
+            "source_track_id": "dz-track",
+            "source_artist_id": "dz-artist",
+            "source_album_id": "dz-album",
+            "title": "Song One",
+            "artist": "Artist One",
+            "album_artist": "Artist One",
+            "album": "Album One",
+            "track_number": 3,
+            "total_tracks": 12,
+            "disc_number": 2,
+            "date": "2024",
+            "genre": "Rock",
+        },
+    )
+    monkeypatch.setattr(
+        me,
+        "embed_source_ids",
+        lambda audio_file, metadata, context, runtime=None: seen.setdefault("runtime", runtime),
+    )
+    monkeypatch.setattr(me, "embed_album_art_metadata", lambda *args, **kwargs: None)
+    monkeypatch.setattr(me, "verify_metadata_written", lambda file_path: True)
+
+    result = me.enhance_file_metadata(
+        "song.flac",
+        {"_audio_quality": ""},
+        {"name": "Artist One"},
+        {},
+        runtime=runtime,
+    )
+
+    assert result is True
+    assert seen["runtime"] is runtime
+
+
 def test_enhance_file_metadata_writes_tags_and_propagates_release_id(monkeypatch):
     audio = _FakeAudio()
     symbols = _fake_symbols(audio)
