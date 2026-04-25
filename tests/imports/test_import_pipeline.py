@@ -126,3 +126,84 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
         runtime_state.processed_download_ids.update(original_processed_ids)
         runtime_state.post_process_locks.clear()
         runtime_state.post_process_locks.update(original_post_locks)
+
+
+def test_post_process_matched_download_forwards_separate_metadata_runtime(tmp_path, monkeypatch):
+    source_path = tmp_path / "source.flac"
+    source_path.write_bytes(b"audio")
+    target_path = tmp_path / "Album Folder" / "track.flac"
+
+    runtime = types.SimpleNamespace(
+        automation_engine=None,
+        on_download_completed=None,
+        web_scan_manager=None,
+        repair_worker=None,
+    )
+    metadata_runtime = types.SimpleNamespace(marker="metadata-runtime")
+    seen = {}
+
+    monkeypatch.setattr(import_pipeline, "config_manager", types.SimpleNamespace(
+        get=lambda key, default=None: {
+            "post_processing.replaygain_enabled": False,
+            "lossy_copy.enabled": False,
+            "lossy_copy.delete_original": False,
+            "import.replace_lower_quality": False,
+            "soulseek.download_path": str(tmp_path / "downloads"),
+        }.get(key, default)
+    ))
+    monkeypatch.setattr(import_pipeline, "normalize_import_context", lambda context: context)
+    monkeypatch.setattr(import_pipeline, "get_import_track_info", lambda context: {"_playlist_folder_mode": True, "_playlist_name": "Playlist"})
+    monkeypatch.setattr(import_pipeline, "get_import_original_search", lambda context: {"title": "Track", "album": "Album"})
+    monkeypatch.setattr(import_pipeline, "get_import_context_artist", lambda context: {"name": "Artist"})
+    monkeypatch.setattr(import_pipeline, "get_import_has_clean_metadata", lambda context: True)
+    monkeypatch.setattr(
+        import_pipeline,
+        "build_import_album_info",
+        lambda context, force_album=False: {
+            "is_album": True,
+            "album_name": "Album",
+            "track_number": 1,
+            "disc_number": 1,
+            "clean_track_name": "Track",
+            "source": "spotify",
+        },
+    )
+    monkeypatch.setattr(import_pipeline, "resolve_album_group", lambda artist_context, album_info, original_album: album_info["album_name"])
+    monkeypatch.setattr(import_pipeline, "get_import_clean_title", lambda *args, **kwargs: "Track")
+    monkeypatch.setattr(import_pipeline, "get_audio_quality_string", lambda file_path: "")
+    monkeypatch.setattr(import_pipeline, "check_flac_bit_depth", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "build_final_path_for_track", lambda *args, **kwargs: (str(target_path), None))
+
+    def _capture_enhance(file_path, context, artist, album_info, runtime=None):
+        seen["runtime"] = runtime
+        return True
+
+    monkeypatch.setattr(import_pipeline, "enhance_file_metadata", _capture_enhance)
+    monkeypatch.setattr(import_pipeline, "safe_move_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "download_cover_art", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "generate_lrc_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "downsample_hires_flac", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "create_lossy_copy", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "cleanup_empty_directories", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "emit_track_downloaded", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "record_library_history_download", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "record_download_provenance", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "record_soulsync_library_entry", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "record_retag_download", lambda *args, **kwargs: None)
+
+    context = {
+        "track_info": {"_playlist_folder_mode": True, "_playlist_name": "Playlist"},
+        "original_search_result": {"title": "Track", "album": "Album"},
+        "is_album_download": False,
+    }
+
+    import_pipeline.post_process_matched_download(
+        "ctx-1",
+        context,
+        str(source_path),
+        runtime,
+        metadata_runtime=metadata_runtime,
+    )
+
+    assert seen["runtime"] is metadata_runtime

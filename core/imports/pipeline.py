@@ -6,6 +6,8 @@ import json
 import os
 import threading
 import time
+from types import SimpleNamespace
+from typing import Any
 
 from config.settings import config_manager
 from core.imports.file_ops import (
@@ -68,12 +70,35 @@ from utils.logging_config import get_logger
 logger = get_logger("imports.pipeline")
 pp_logger = get_logger("post_processing")
 
+__all__ = [
+    "build_import_pipeline_runtime",
+    "post_process_matched_download",
+    "post_process_matched_download_with_verification",
+]
 
-def post_process_matched_download(context_key, context, file_path, runtime):
+
+def build_import_pipeline_runtime(
+    *,
+    automation_engine: Any | None = None,
+    on_download_completed: Any | None = None,
+    web_scan_manager: Any | None = None,
+    repair_worker: Any | None = None,
+) -> SimpleNamespace:
+    """Build the runtime object consumed by core.imports.pipeline."""
+    return SimpleNamespace(
+        automation_engine=automation_engine,
+        on_download_completed=on_download_completed,
+        web_scan_manager=web_scan_manager,
+        repair_worker=repair_worker,
+    )
+
+
+def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
     on_download_completed = getattr(runtime, "on_download_completed", None)
     automation_engine = getattr(runtime, "automation_engine", None)
     web_scan_manager = getattr(runtime, "web_scan_manager", None)
     repair_worker = getattr(runtime, "repair_worker", None)
+    metadata_runtime = metadata_runtime or runtime
 
     def _notify_download_completed(batch_id, task_id, success=True):
         if on_download_completed:
@@ -364,7 +389,7 @@ def post_process_matched_download(context_key, context, file_path, runtime):
                     f"[Metadata Input] Playlist mode - artist: '{artist_context.get('name', 'MISSING')}' "
                     f"(id: {artist_context.get('id', 'MISSING')})"
                 )
-                enhance_file_metadata(file_path, context, artist_context, None, runtime=runtime)
+                enhance_file_metadata(file_path, context, artist_context, None, runtime=metadata_runtime)
             except Exception as meta_err:
                 import traceback
                 pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
@@ -529,7 +554,7 @@ def post_process_matched_download(context_key, context, file_path, runtime):
                 )
             else:
                 logger.info("[Metadata Input] album_info: None (single track)")
-            enhance_file_metadata(file_path, context, artist_context, album_info, runtime=runtime)
+            enhance_file_metadata(file_path, context, artist_context, album_info, runtime=metadata_runtime)
         except Exception as meta_err:
             import traceback
             pp_logger.info(f"[inner] Metadata enhancement FAILED for {context_key}: {meta_err}\n{traceback.format_exc()}")
@@ -762,7 +787,7 @@ def post_process_matched_download(context_key, context, file_path, runtime):
             post_process_locks.pop(context_key, None)
 
 
-def post_process_matched_download_with_verification(context_key, context, file_path, task_id, batch_id, runtime):
+def post_process_matched_download_with_verification(context_key, context, file_path, task_id, batch_id, runtime, metadata_runtime=None):
     on_download_completed = getattr(runtime, "on_download_completed", None)
 
     def _notify_download_completed(batch_id, task_id, success=True):
@@ -773,7 +798,7 @@ def post_process_matched_download_with_verification(context_key, context, file_p
     try:
         original_task_id = context.pop('task_id', None)
         original_batch_id = context.pop('batch_id', None)
-        post_process_matched_download(context_key, context, file_path, runtime)
+        post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=metadata_runtime)
         if original_task_id:
             context['task_id'] = original_task_id
         if original_batch_id:
