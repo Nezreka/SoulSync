@@ -18707,32 +18707,43 @@ def _check_and_remove_from_wishlist(context):
     """
     try:
         from core.wishlist_service import get_wishlist_service
+        from core.imports.context import get_import_source, get_import_source_ids
         wishlist_service = get_wishlist_service()
         
-        # Try to extract Spotify track ID from various sources in the context
+        # Try to extract a source-aware track ID from the context
         spotify_track_id = None
         # Populated lazily by Method 3 or Method 4. Initialized here so Method 4's
         # `if not wishlist_tracks` guard doesn't UnboundLocalError when Methods 1/2
         # found nothing and Method 3 never ran (no wishlist_id in track_info).
         wishlist_tracks = []
 
-        # Method 1: Direct track_info with id
+        # Method 1: Source-specific track lookup from track_info / source_ids
         track_info = context.get('track_info', {})
-        if track_info.get('id'):
-            spotify_track_id = track_info['id']
-            logger.info(f"[Wishlist] Found Spotify ID from track_info: {spotify_track_id}")
+        source = get_import_source(context)
+        source_ids = get_import_source_ids(context)
+        source_label = {
+            'spotify': 'Spotify',
+            'itunes': 'iTunes',
+            'deezer': 'Deezer',
+            'discogs': 'Discogs',
+            'hydrabase': 'Hydrabase',
+        }.get(source, 'Source')
+
+        if source == 'spotify' and source_ids.get('track_id'):
+            spotify_track_id = source_ids['track_id']
+            logger.info(f"[Wishlist] Found {source_label} track ID from source_ids: {spotify_track_id}")
         
-        # Method 2: From original search result
-        elif context.get('original_search_result', {}).get('id'):
+        # Method 2: Fallback to the original search result for source-specific IDs
+        elif source == 'spotify' and context.get('original_search_result', {}).get('id'):
             spotify_track_id = context['original_search_result']['id']
-            logger.info(f"[Wishlist] Found Spotify ID from original_search_result: {spotify_track_id}")
+            logger.info(f"[Wishlist] Found {source_label} track ID from original_search_result: {spotify_track_id}")
         
         # Method 3: Check if this is a wishlist download (context has wishlist_id)
         elif 'wishlist_id' in track_info:
             wishlist_id = track_info['wishlist_id']
             logger.info(f"[Wishlist] Found wishlist_id in context: {wishlist_id}")
             
-            # Get the Spotify track ID from the wishlist entry (search all profiles)
+            # Get the track ID from the wishlist entry (search all profiles)
             database = get_database()
             all_profiles = database.get_all_profiles()
             wishlist_tracks = []
@@ -18741,16 +18752,16 @@ def _check_and_remove_from_wishlist(context):
             for wl_track in wishlist_tracks:
                 if wl_track.get('wishlist_id') == wishlist_id:
                     spotify_track_id = wl_track.get('spotify_track_id') or wl_track.get('id')
-                    logger.info(f"[Wishlist] Found Spotify ID from wishlist entry: {spotify_track_id}")
+                    logger.info(f"[Wishlist] Found track ID from wishlist entry: {spotify_track_id}")
                     break
 
-        # Method 4: Try to construct ID from track metadata for fuzzy matching
+        # Method 4: Try to construct a track ID from metadata for fuzzy matching
         if not spotify_track_id:
             track_name = track_info.get('name') or context.get('original_search_result', {}).get('title', '')
             artist_name = _get_track_artist_name(track_info) or _get_track_artist_name(context.get('original_search_result', {}))
 
             if track_name and artist_name:
-                logger.warning(f"[Wishlist] No Spotify ID found, checking for fuzzy match: '{track_name}' by '{artist_name}'")
+                logger.warning(f"[Wishlist] No track ID found, checking for fuzzy match: '{track_name}' by '{artist_name}'")
 
                 # Get all wishlist tracks and find potential matches (search all profiles)
                 if not wishlist_tracks:
@@ -18774,10 +18785,10 @@ def _check_and_remove_from_wishlist(context):
                     # Simple fuzzy matching
                     if (wl_name == track_name.lower() and wl_artist_name == artist_name.lower()):
                         spotify_track_id = wl_track.get('spotify_track_id') or wl_track.get('id')
-                        logger.info(f"[Wishlist] Found fuzzy match - Spotify ID: {spotify_track_id}")
+                        logger.info(f"[Wishlist] Found fuzzy match - track ID: {spotify_track_id}")
                         break
         
-        # If we found a Spotify track ID, remove it from wishlist
+        # If we found a track ID, remove it from wishlist
         if spotify_track_id:
             logger.info(f"[Wishlist] Attempting to remove track from wishlist: {spotify_track_id}")
             removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
@@ -18786,7 +18797,7 @@ def _check_and_remove_from_wishlist(context):
             else:
                 logger.warning(f"ℹ️ [Wishlist] Track not found in wishlist or already removed: {spotify_track_id}")
         else:
-            logger.warning("ℹ️ [Wishlist] No Spotify track ID found for wishlist removal check")
+            logger.warning("ℹ️ [Wishlist] No track ID found for wishlist removal check")
             
     except Exception as e:
         logger.error(f"[Wishlist] Error in wishlist removal check: {e}")
@@ -49819,7 +49830,7 @@ def import_singles_process():
 
             title = file_info.get('title', '')
             artist = file_info.get('artist', '')
-            manual_match = file_info.get('manual_match')
+            manual_match = file_info.get('manual_match') or file_info.get('spotify_override')
             if manual_match is not None and not isinstance(manual_match, dict):
                 manual_match = None
 

@@ -1214,6 +1214,9 @@ function importPageRenderMatchList() {
     // Build rows
     let matchedCount = 0;
     const rows = data.matches.map((m, idx) => {
+        const track = m.track || m.spotify_track || {};
+        const trackNumber = track.track_number ?? track.trackNumber;
+        const displayTrackNumber = trackNumber ? trackNumber : (idx + 1);
         let file = null;
         let confidence = m.confidence;
         let isOverride = false;
@@ -1253,8 +1256,8 @@ function importPageRenderMatchList() {
             <div class="import-page-match-row ${file ? 'matched' : ''}"
                  ondragover="importPageHandleDragOver(event)" ondragleave="this.classList.remove('drag-over')" ondrop="importPageHandleDrop(event, ${idx})"
                  onclick="importPageTapAssign(${idx})">
-                <span class="import-page-match-num">${m.spotify_track.track_number}</span>
-                <span class="import-page-match-track">${_esc(m.spotify_track.name)}</span>
+                <span class="import-page-match-num">${displayTrackNumber}</span>
+                <span class="import-page-match-track">${_esc(track.name || track.title || 'Unknown Track')}</span>
                 <span class="import-page-match-file ${file ? 'has-file' : ''}">
                     ${file
                 ? `<span class="import-page-match-file-name">${_esc(file.filename)}</span>
@@ -1622,7 +1625,7 @@ function importPageProcessSingles() {
         const f = importPageState.stagingFiles[i];
         const manualMatch = importPageState.singlesManualMatches[i];
         if (manualMatch) {
-            return { ...f, spotify_override: manualMatch };
+            return { ...f, manual_match: manualMatch };
         }
         return f;
     });
@@ -7608,4 +7611,3 @@ window.updateEnhanceSelectedCount = updateEnhanceSelectedCount;
 window.submitEnhanceQuality = submitEnhanceQuality;
 
 // ===== END ENHANCE QUALITY MODAL =====
-
