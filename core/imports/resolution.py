@@ -119,7 +119,7 @@ def _pick_best_track_match(search_results: List[Any], title: str, artist: str = 
     return search_results[0]
 
 
-def _search_tracks_for_source(source: str, client: Any, query: str, limit: int = 1) -> List[Any]:
+def search_tracks_for_source(source: str, client: Any, query: str, limit: int = 1) -> List[Any]:
     if not client or not hasattr(client, 'search_tracks'):
         return []
 
@@ -366,11 +366,11 @@ def get_single_track_import_context(
         if not search_query:
             continue
 
-        search_results = _search_tracks_for_source(source, client, search_query, limit=5)
+        search_results = search_tracks_for_source(source, client, search_query, limit=5)
         if not search_results and search_query != title:
-            search_results = _search_tracks_for_source(source, client, title, limit=5)
+            search_results = search_tracks_for_source(source, client, title, limit=5)
         if not search_results and artist and search_query != artist:
-            search_results = _search_tracks_for_source(source, client, artist, limit=5)
+            search_results = search_tracks_for_source(source, client, artist, limit=5)
 
         if not search_results:
             continue
