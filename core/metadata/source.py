@@ -31,13 +31,17 @@ from core.metadata_common import (
 __all__ = [
     "extract_source_metadata",
     "embed_source_ids",
+    "normalize_album_cache_key",
+    "mb_release_cache",
+    "mb_release_cache_lock",
+    "mb_release_detail_cache",
+    "mb_release_detail_cache_lock",
 ]
 
-
-_MB_RELEASE_CACHE: Dict[tuple, str] = {}
-_MB_RELEASE_CACHE_LOCK = threading.RLock()
-_MB_RELEASE_DETAIL_CACHE: Dict[str, Dict[str, Any]] = {}
-_MB_RELEASE_DETAIL_CACHE_LOCK = threading.RLock()
+mb_release_cache: Dict[tuple, str] = {}
+mb_release_cache_lock = threading.RLock()
+mb_release_detail_cache: Dict[str, Dict[str, Any]] = {}
+mb_release_detail_cache_lock = threading.RLock()
 
 _EDITION_PAREN_RE = re.compile(
     r'\s*[\(\[]\s*(?:deluxe|expanded|remaster(?:ed)?|anniversary|special|collector|'
@@ -365,10 +369,10 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
                         artist_key = (pp.get("batch_artist_name") or artist_name).lower().strip()
                         rc_key_norm = (_normalize_album_cache_key(album_name_for_mb), artist_key)
                         rc_key_exact = (album_name_for_mb.lower().strip(), artist_key)
-                        with _MB_RELEASE_CACHE_LOCK:
-                            cached = _MB_RELEASE_CACHE.get(rc_key_norm)
+                        with mb_release_cache_lock:
+                            cached = mb_release_cache.get(rc_key_norm)
                             if cached is None:
-                                cached = _MB_RELEASE_CACHE.get(rc_key_exact)
+                                cached = mb_release_cache.get(rc_key_exact)
                             if cached is not None:
                                 pp["release_mbid"] = cached
                             else:
@@ -377,21 +381,21 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
                                     pp["release_mbid"] = rc_result.get("mbid", "") if rc_result else ""
                                 except Exception:
                                     pp["release_mbid"] = ""
-                                _MB_RELEASE_CACHE[rc_key_norm] = pp["release_mbid"]
-                                _MB_RELEASE_CACHE[rc_key_exact] = pp["release_mbid"]
+                                mb_release_cache[rc_key_norm] = pp["release_mbid"]
+                                mb_release_cache[rc_key_exact] = pp["release_mbid"]
                         if pp["release_mbid"]:
                             pp["id_tags"]["MUSICBRAINZ_RELEASE_ID"] = pp["release_mbid"]
 
                     if pp["release_mbid"]:
-                        with _MB_RELEASE_DETAIL_CACHE_LOCK:
-                            release_detail = _MB_RELEASE_DETAIL_CACHE.get(pp["release_mbid"])
+                        with mb_release_detail_cache_lock:
+                            release_detail = mb_release_detail_cache.get(pp["release_mbid"])
                         if release_detail is None:
                             release_detail = mb_service.mb_client.get_release(
                                 pp["release_mbid"],
                                 includes=["release-groups", "labels", "media", "artist-credits", "recordings"],
                             ) or {}
-                            with _MB_RELEASE_DETAIL_CACHE_LOCK:
-                                _MB_RELEASE_DETAIL_CACHE[pp["release_mbid"]] = release_detail
+                            with mb_release_detail_cache_lock:
+                                mb_release_detail_cache[pp["release_mbid"]] = release_detail
                         if release_detail:
                             rg = release_detail.get("release-group", {})
                             if rg.get("id"):

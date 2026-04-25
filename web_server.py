@@ -133,6 +133,13 @@ from core.imports.staging import (
 )
 from core.imports.paths import build_final_path_for_track as _build_final_path_for_track
 from core.metadata_common import get_file_lock
+from core.metadata.source import (
+    mb_release_cache,
+    mb_release_cache_lock,
+    mb_release_detail_cache,
+    mb_release_detail_cache_lock,
+    normalize_album_cache_key,
+)
 from core.runtime_state import (
     activity_feed,
     activity_feed_lock,
@@ -146,8 +153,7 @@ from core.runtime_state import (
     set_activity_toast_emitter,
     tasks_lock,
 )
-from core import metadata_enrichment
-from core.metadata_source import normalize_album_cache_key
+from core.metadata import enrichment as metadata_enrichment
 from database.music_database import get_database, MusicDatabase
 from services.sync_service import PlaylistSyncService
 
@@ -1009,11 +1015,6 @@ session_stats_lock = threading.Lock()
 
 batch_locks = {}
 _orphaned_download_keys = set()
-
-_mb_release_cache = {}
-_mb_release_cache_lock = threading.Lock()
-_mb_release_detail_cache = {}
-_mb_release_detail_cache_lock = threading.Lock()
 
 _enrichment_activity_log = {}
 _idle_since = {}
@@ -5422,16 +5423,6 @@ album_groups = {}  # album_key -> final_album_name
 album_artists = {}  # album_key -> artist_name  
 album_editions = {}  # album_key -> "standard" or "deluxe"
 album_name_cache = {}  # album_key -> cached_final_name
-
-# Thread-safe cache for MusicBrainz release MBID lookups.
-# Prevents concurrent post-processing threads from getting different
-# release IDs for the same album, which causes players like Navidrome
-# to split one album into multiple entries.
-_mb_release_cache = {}  # (album_lower, artist_lower) -> mbid_string_or_empty
-_mb_release_cache_lock = threading.Lock()
-_mb_release_detail_cache = {}  # mbid -> release detail dict from get_release()
-_mb_release_detail_cache_lock = threading.Lock()
-
 
 # Regexes to strip edition suffixes for cache key normalization.
 # Prevents Navidrome splitting albums when tracks get different MusicBrainz release IDs.
@@ -17817,11 +17808,11 @@ def _start_enhanced_album_download(enhanced_tracks, unmatched_tracks, spotify_ar
             if _pf_release and _pf_release.get('id'):
                 _pf_mbid = _pf_release['id']
                 _pf_artist_key = spotify_artist['name'].lower().strip()
-                with _mb_release_cache_lock:
-                    _mb_release_cache[(normalize_album_cache_key(spotify_album['name']), _pf_artist_key)] = _pf_mbid
-                    _mb_release_cache[(spotify_album['name'].lower().strip(), _pf_artist_key)] = _pf_mbid
-                with _mb_release_detail_cache_lock:
-                    _mb_release_detail_cache[_pf_mbid] = _pf_release
+                with mb_release_cache_lock:
+                    mb_release_cache[(normalize_album_cache_key(spotify_album['name']), _pf_artist_key)] = _pf_mbid
+                    mb_release_cache[(spotify_album['name'].lower().strip(), _pf_artist_key)] = _pf_mbid
+                with mb_release_detail_cache_lock:
+                    mb_release_detail_cache[_pf_mbid] = _pf_release
                 logger.info(f"[Preflight] Pre-cached MB release for '{spotify_album['name']}': "
                       f"'{_pf_release.get('title', '')}' ({_pf_mbid[:8]}...)")
     except Exception as pf_err:
@@ -17958,11 +17949,11 @@ def _start_album_download_tasks(album_result, spotify_artist, spotify_album):
             if _pf_release and _pf_release.get('id'):
                 _pf_mbid = _pf_release['id']
                 _pf_artist_key = spotify_artist['name'].lower().strip()
-                with _mb_release_cache_lock:
-                    _mb_release_cache[(normalize_album_cache_key(spotify_album['name']), _pf_artist_key)] = _pf_mbid
-                    _mb_release_cache[(spotify_album['name'].lower().strip(), _pf_artist_key)] = _pf_mbid
-                with _mb_release_detail_cache_lock:
-                    _mb_release_detail_cache[_pf_mbid] = _pf_release
+                with mb_release_cache_lock:
+                    mb_release_cache[(normalize_album_cache_key(spotify_album['name']), _pf_artist_key)] = _pf_mbid
+                    mb_release_cache[(spotify_album['name'].lower().strip(), _pf_artist_key)] = _pf_mbid
+                with mb_release_detail_cache_lock:
+                    mb_release_detail_cache[_pf_mbid] = _pf_release
                 logger.info(f"[Preflight] Pre-cached MB release for '{spotify_album['name']}': "
                       f"'{_pf_release.get('title', '')}' ({_pf_mbid[:8]}...)")
     except Exception as pf_err:
@@ -25148,12 +25139,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
                             _artist_key = artist_name_pf.lower().strip()
                             _rc_key_norm = (normalize_album_cache_key(album_name_pf), _artist_key)
                             _rc_key_exact = (album_name_pf.lower().strip(), _artist_key)
-                            with _mb_release_cache_lock:
-                                _mb_release_cache[_rc_key_norm] = release_mbid
-                                _mb_release_cache[_rc_key_exact] = release_mbid
+                            with mb_release_cache_lock:
+                                mb_release_cache[_rc_key_norm] = release_mbid
+                                mb_release_cache[_rc_key_exact] = release_mbid
                             # Also cache the full release detail for tag extraction
-                            with _mb_release_detail_cache_lock:
-                                _mb_release_detail_cache[release_mbid] = release
+                            with mb_release_detail_cache_lock:
+                                mb_release_detail_cache[release_mbid] = release
                             logger.info(f"[Preflight] Pre-cached MB release for '{album_name_pf}': "
                                   f"'{release.get('title', '')}' ({release_mbid[:8]}...)")
                         else:
