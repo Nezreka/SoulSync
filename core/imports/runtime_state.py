@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
-from core.import_context import (
+from core.imports.context import (
     build_import_album_info,
     extract_artist_name,
     get_import_clean_artist,

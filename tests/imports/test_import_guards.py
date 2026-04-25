@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from core import import_guards as guards
+from core.imports import guards
 
 
 class _FakeDB:

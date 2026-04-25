@@ -6,7 +6,7 @@ import os
 import re
 import urllib.request
 
-from core.import_context import get_import_context_album
+from core.imports.context import get_import_context_album
 from core.metadata_common import (
     get_config_manager,
     get_image_dimensions,
