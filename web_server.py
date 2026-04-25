@@ -130,7 +130,7 @@ from core.imports.staging import (
     start_import_suggestions_cache,
 )
 from core.imports.paths import build_final_path_for_track as _build_final_path_for_track
-from core.metadata_common import get_file_lock
+from core.metadata.common import get_file_lock
 from core.metadata.source import (
     mb_release_cache,
     mb_release_cache_lock,

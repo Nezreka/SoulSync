@@ -52,7 +52,7 @@ from core.runtime_state import (
     tasks_lock,
 )
 from core.metadata.artwork import download_cover_art
-from core.metadata_common import wipe_source_tags
+from core.metadata.common import wipe_source_tags
 from core.metadata.enrichment import enhance_file_metadata
 from core.imports.paths import (
     build_final_path_for_track,
