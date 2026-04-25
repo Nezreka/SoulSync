@@ -2,9 +2,7 @@ import sys
 import types
 from datetime import datetime, timedelta
 
-
 _RECENT_RELEASE_DATE = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
-
 
 if "spotipy" not in sys.modules:
     spotipy = types.ModuleType("spotipy")
@@ -1045,6 +1043,10 @@ def test_update_discovery_pool_incremental_uses_source_priority(monkeypatch):
 
     assert scanner.database.discovery_pool_calls
     assert scanner.database.discovery_pool_calls[0][1] == "deezer"
+    assert scanner.database.discovery_pool_calls[0][0]["deezer_track_id"] == "dz-track-1"
+    assert scanner.database.discovery_pool_calls[0][0]["deezer_album_id"] == "dz-release-1"
+    assert scanner.database.discovery_pool_calls[0][0]["deezer_artist_id"] == "dz-artist"
+    assert scanner.database.discovery_pool_calls[0][0].get("spotify_track_id") is None
     assert deezer_client.search_calls == [("Incremental Artist", 1, {})]
     assert deezer_client.album_calls
     assert spotify_client.search_calls == []

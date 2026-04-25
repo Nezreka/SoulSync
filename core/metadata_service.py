@@ -1,5 +1,5 @@
 """
-Metadata Service - Centralized metadata source selection
+Metadata Service - Centralized metadata source selection and provider access.
 
 ALL metadata source decisions flow through this module. Other files import
 get_primary_source() and get_primary_client() instead of reimplementing
@@ -98,6 +98,35 @@ def get_source_priority(preferred_source: str):
             ordered.append(source)
 
     return ordered
+
+
+def _get_source_chain_for_lookup(options: MetadataLookupOptions) -> List[str]:
+    primary_source = get_primary_source()
+    source_chain = list(get_source_priority(primary_source))
+    override = (options.source_override or '').strip().lower()
+
+    if override:
+        source_chain = [override] + [source for source in source_chain if source != override]
+
+    if not options.allow_fallback:
+        source_chain = source_chain[:1]
+
+    return source_chain
+
+
+def _extract_lookup_value(value: Any, *names: str, default: Any = None) -> Any:
+    if value is None:
+        return default
+
+    for name in names:
+        if isinstance(value, dict):
+            if name in value and value[name] is not None:
+                return value[name]
+        else:
+            candidate = getattr(value, name, None)
+            if candidate is not None:
+                return candidate
+    return default
 
 
 def get_client_for_source(source: str):
@@ -233,35 +262,6 @@ def get_artist_albums_for_source(
         return resolved
     except Exception:
         return None
-
-
-def _get_source_chain_for_lookup(options: MetadataLookupOptions) -> List[str]:
-    primary_source = get_primary_source()
-    source_chain = list(get_source_priority(primary_source))
-    override = (options.source_override or '').strip().lower()
-
-    if override:
-        source_chain = [override] + [source for source in source_chain if source != override]
-
-    if not options.allow_fallback:
-        source_chain = source_chain[:1]
-
-    return source_chain
-
-
-def _extract_lookup_value(value: Any, *names: str, default: Any = None) -> Any:
-    if value is None:
-        return default
-
-    for name in names:
-        if isinstance(value, dict):
-            if name in value and value[name] is not None:
-                return value[name]
-        else:
-            candidate = getattr(value, name, None)
-            if candidate is not None:
-                return candidate
-    return default
 
 
 def _normalize_artist_name(value: Any) -> str:
@@ -719,6 +719,23 @@ def _build_album_info(album_data: Any, album_id: str, album_name: str = '', arti
     if not isinstance(images, list):
         images = list(images) if images else []
 
+    artists = _normalize_context_artists(_extract_lookup_value(album_data, 'artists', default=[]))
+    if not artists and artist_name:
+        artists = [{'name': artist_name}]
+
+    primary_artist = artists[0] if artists else {}
+    resolved_artist_name = (
+        _extract_lookup_value(primary_artist, 'name', default='')
+        or artist_name
+        or _extract_lookup_value(album_data, 'artist_name', 'artist', default='')
+        or ''
+    )
+    resolved_artist_id = str(
+        _extract_lookup_value(primary_artist, 'id', default='')
+        or _extract_lookup_value(album_data, 'artist_id', default='')
+        or ''
+    ).strip()
+
     image_url = None
     if images:
         image_url = _extract_lookup_value(images[0], 'url')
@@ -728,12 +745,15 @@ def _build_album_info(album_data: Any, album_id: str, album_name: str = '', arti
     return {
         'id': _extract_lookup_value(album_data, 'id', 'album_id', 'collectionId', 'release_id', default=album_id) or album_id,
         'name': _extract_lookup_value(album_data, 'name', 'title', default=album_name or album_id) or album_name or album_id,
+        'artist': resolved_artist_name or '',
+        'artist_name': resolved_artist_name or '',
+        'artist_id': resolved_artist_id,
+        'artists': artists,
         'image_url': image_url,
         'images': images,
         'release_date': _extract_lookup_value(album_data, 'release_date', default='') or '',
         'album_type': _extract_lookup_value(album_data, 'album_type', default='album') or 'album',
         'total_tracks': _extract_lookup_value(album_data, 'total_tracks', 'track_count', default=0) or 0,
-        'artist_name': artist_name or _extract_lookup_value(album_data, 'artist_name', default='') or '',
     }
 
 
@@ -754,6 +774,8 @@ def _build_album_track_entry(track_item: Any, album_info: Dict[str, Any], source
         'external_urls': _extract_lookup_value(track_item, 'external_urls', default={}) or {},
         'uri': _extract_lookup_value(track_item, 'uri', default='') or '',
         'album': album_info,
+        'source': source,
+        'provider': source,
         '_source': source,
     }
 
@@ -767,6 +789,9 @@ def _build_album_tracks_payload(
     artist_name: str = '',
 ) -> Dict[str, Any]:
     album_info = _build_album_info(album_data, album_id, album_name=album_name, artist_name=artist_name)
+    album_info['source'] = source
+    album_info['_source'] = source
+    album_info['provider'] = source
     track_items = _extract_album_track_items(album_data, tracks_data)
     tracks = [_build_album_track_entry(track, album_info, source) for track in track_items]
 
@@ -776,6 +801,44 @@ def _build_album_tracks_payload(
         'tracks': tracks,
         'source': source,
     }
+
+
+def _normalize_context_artists(artists: Any) -> List[Dict[str, Any]]:
+    if not artists:
+        return []
+
+    if isinstance(artists, (str, bytes)):
+        artists = [artists]
+    elif isinstance(artists, dict):
+        artists = [artists]
+    else:
+        try:
+            artists = list(artists)
+        except TypeError:
+            artists = [artists]
+
+    normalized: List[Dict[str, Any]] = []
+    for artist in artists:
+        if isinstance(artist, dict):
+            name = _extract_lookup_value(artist, 'name', 'artist_name', 'title', default='') or ''
+            artist_id = _extract_lookup_value(artist, 'id', 'artist_id', default='') or ''
+            entry: Dict[str, Any] = {}
+            if name:
+                entry['name'] = str(name)
+            if artist_id:
+                entry['id'] = str(artist_id)
+            genres = _extract_lookup_value(artist, 'genres', default=None)
+            if genres is not None:
+                entry['genres'] = genres
+            if entry:
+                normalized.append(entry)
+            continue
+
+        name = str(artist).strip()
+        if name:
+            normalized.append({'name': name})
+
+    return normalized
 
 
 def resolve_album_reference(
