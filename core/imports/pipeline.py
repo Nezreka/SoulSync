@@ -51,16 +51,16 @@ from core.runtime_state import (
     processed_download_ids,
     tasks_lock,
 )
-from core.metadata_artwork import download_cover_art
+from core.metadata.artwork import download_cover_art
 from core.metadata_common import wipe_source_tags
-from core.metadata_enrichment import enhance_file_metadata
+from core.metadata.enrichment import enhance_file_metadata
 from core.imports.paths import (
     build_final_path_for_track,
     build_simple_download_destination,
     docker_resolve_path,
 )
 from core.imports.album_naming import resolve_album_group
-from core.metadata_lyrics import generate_lrc_file
+from core.metadata.lyrics import generate_lrc_file
 from database.music_database import get_database
 from utils.logging_config import get_logger
 

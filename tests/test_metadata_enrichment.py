@@ -1,8 +1,8 @@
 import types
 
-from core import metadata_enrichment as me
-from core import metadata_artwork as ma
-from core import metadata_source as ms
+from core.metadata import enrichment as me
+from core.metadata import artwork as ma
+from core.metadata import source as ms
 
 
 class _Config:

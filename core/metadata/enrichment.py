@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from core.metadata_artwork import embed_album_art_metadata
+from core.metadata.artwork import embed_album_art_metadata
 from core.metadata_common import (
     get_config_manager,
     get_file_lock,
@@ -15,7 +15,7 @@ from core.metadata_common import (
     strip_all_non_audio_tags,
     verify_metadata_written,
 )
-from core.metadata_source import embed_source_ids, extract_source_metadata
+from core.metadata.source import embed_source_ids, extract_source_metadata
 
 
 __all__ = [
