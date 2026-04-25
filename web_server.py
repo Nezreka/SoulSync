@@ -97,7 +97,7 @@ from core.database_update_worker import DatabaseUpdateWorker
 from core.web_scan_manager import WebScanManager
 from core.lyrics_client import lyrics_client
 from core.metadata_cache import get_metadata_cache
-from core.import_context import (
+from core.imports.context import (
     build_import_album_info,
     get_import_clean_album,
     get_import_clean_artist,
@@ -114,14 +114,14 @@ from core.import_context import (
     get_source_tag_names,
     normalize_import_context,
 )
-from core.import_album import (
+from core.imports.album import (
     build_album_import_context,
     build_album_import_match_payload,
     resolve_album_artist_context,
 )
-from core.import_album_naming import resolve_album_group as _resolve_album_group
-from core.import_filename import extract_track_number_from_filename, parse_filename_metadata
-from core.import_staging import (
+from core.imports.album_naming import resolve_album_group as _resolve_album_group
+from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
+from core.imports.staging import (
     get_import_suggestions_cache,
     get_primary_source,
     get_staging_path,
@@ -131,9 +131,9 @@ from core.import_staging import (
     search_import_tracks,
     start_import_suggestions_cache,
 )
-from core.import_paths import build_final_path_for_track as _build_final_path_for_track
+from core.imports.paths import build_final_path_for_track as _build_final_path_for_track
 from core.metadata_common import get_file_lock
-from core.import_runtime_state import (
+from core.imports.runtime_state import (
     activity_feed,
     activity_feed_lock,
     add_activity_item,
@@ -747,7 +747,7 @@ retag_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="RetagWork
 
 # Download Missing Tracks Modal State Management
 # Thread-safe state tracking for modal download functionality.
-# Shared task/batch state now lives in core.import_runtime_state.
+# Shared task/batch state now lives in core.imports.runtime_state.
 missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="MissingTrackWorker")
 
 # Automatic Wishlist / Watchlist Processing Flags
@@ -845,7 +845,7 @@ def _regenerate_batch_m3u(batch, tracks):
         except ImportError:
             _unidecode = lambda x: x
 
-        from core.import_paths import sanitize_filename as _sanitize_filename
+        from core.imports.paths import sanitize_filename as _sanitize_filename
 
         def _norm(text):
             return _unidecode(text).lower().strip() if text else ''
@@ -965,7 +965,7 @@ def _sanitize_filename(filename: str) -> str:
 
 def _compute_m3u_folder(transfer_dir, context_type, playlist_name, artist_name='', album_name='', year=''):
     """Compute the target folder for an M3U file using the template system."""
-    from core.import_paths import get_file_path_from_template
+    from core.imports.paths import get_file_path_from_template
 
     if context_type == 'album' and artist_name and album_name:
         template_context = {
@@ -3967,7 +3967,7 @@ def _update_automation_progress(automation_id, **kwargs):
                 pass
 
 # --- Global Matched Downloads Context Management ---
-# Shared with core.import_runtime_state so the refactored pipeline and web
+# Shared with core.imports.runtime_state so the refactored pipeline and web
 # server operate on the same context registry.
 _orphaned_download_keys = set()  # Context keys of downloads abandoned during retry
 
@@ -19773,7 +19773,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
     NEW VERIFICATION WORKFLOW: Enhanced post-processing with file verification.
     Only sets task status to 'completed' after successful file verification and move operation.
     """
-    from core.import_pipeline import post_process_matched_download_with_verification
+    from core.imports.pipeline import post_process_matched_download_with_verification
     return post_process_matched_download_with_verification(
         context_key,
         context,
@@ -19896,11 +19896,11 @@ def _post_process_matched_download(context_key, context, file_path):
     Also handles simple downloads (from search page "Download" button) which
     just move files to /Transfer without metadata enhancement.
     """
-    from core.import_pipeline import post_process_matched_download
+    from core.imports.pipeline import post_process_matched_download
     return post_process_matched_download(context_key, context, file_path, _build_import_pipeline_runtime())
 
 def _build_import_pipeline_runtime():
-    """Collect the live controller dependencies needed by core.import_pipeline."""
+    """Collect the live controller dependencies needed by core.imports.pipeline."""
     return types.SimpleNamespace(
         automation_engine=automation_engine,
         on_download_completed=_on_download_completed,

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-import core.import_staging as import_staging
+import core.imports.staging as import_staging
 
 
 class FakeClient:

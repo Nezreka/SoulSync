@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from core.import_context import (
+from core.imports.context import (
     get_import_clean_artist,
     get_import_clean_title,
     get_import_context_artist,
@@ -16,12 +16,12 @@ from core.import_context import (
     get_import_track_info,
     normalize_import_context,
 )
-from core.import_file_ops import safe_move_file
+from core.imports.file_ops import safe_move_file
 from database.music_database import MusicDatabase
 from utils.logging_config import get_logger
 
 
-logger = get_logger("import_guards")
+logger = get_logger("imports.guards")
 
 
 def _get_config_manager():

@@ -1,7 +1,7 @@
 import sqlite3
 from types import SimpleNamespace
 
-from core import import_side_effects as side_effects
+from core.imports import side_effects
 
 
 class _FakeDB:

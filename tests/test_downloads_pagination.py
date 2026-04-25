@@ -44,7 +44,7 @@ _install_flask_limiter_stub()
 from flask import Flask, Blueprint  # noqa: E402
 
 from api import downloads as downloads_mod  # noqa: E402
-import core.import_runtime_state as runtime_state  # noqa: E402
+import core.imports.runtime_state as runtime_state  # noqa: E402
 
 
 def _make_task(status="downloading", when=None):

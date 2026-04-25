@@ -9,10 +9,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-# Album grouping lives in core.import_album_naming; this module keeps the
+# Album grouping lives in core.imports.album_naming; this module keeps the
 # imported helper because the path builder still needs it.
-from core.import_album_naming import resolve_album_group
-from core.import_context import (
+from core.imports.album_naming import resolve_album_group
+from core.imports.context import (
     extract_artist_name,
     get_import_clean_title,
     get_import_context_album,
@@ -22,7 +22,7 @@ from core.import_context import (
     normalize_import_context,
 )
 
-logger = logging.getLogger("import_paths")
+logger = logging.getLogger("imports.paths")
 
 
 def _get_config_manager():

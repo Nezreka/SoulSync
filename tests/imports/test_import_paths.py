@@ -1,5 +1,5 @@
-import core.import_album_naming as album_naming
-import core.import_paths as import_paths
+import core.imports.album_naming as album_naming
+import core.imports.paths as import_paths
 
 
 class _Config:

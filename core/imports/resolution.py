@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from utils.logging_config import get_logger
 
 
-logger = get_logger("import_resolution")
+logger = get_logger("imports.resolution")
 
 
 def _get_metadata_service():
