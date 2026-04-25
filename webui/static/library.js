@@ -6310,7 +6310,10 @@ async function executeReorganize() {
         if (!result.success) throw new Error(result.error);
 
         closeReorganizeModal();
-        showToast(`Reorganizing ${result.total} tracks...`, 'info');
+        // /reorganize no longer returns `total` (track count is determined
+        // server-side after planning runs); use the message from the
+        // backend instead. kettui PR #377 review.
+        showToast(result.message || 'Reorganization started', 'info');
         _pollReorganizeStatus();
 
     } catch (error) {
@@ -6320,6 +6323,42 @@ async function executeReorganize() {
             applyBtn.textContent = 'Apply';
         }
     }
+}
+
+// kettui PR #377 review: distinguish 'completed' from non-completed
+// outcomes so zero-failure skips (no_source_id, no_album, no_tracks,
+// setup_failed, error) don't get a green checkmark.
+function _classifyReorganizeOutcome(state) {
+    const status = state.result_status;
+    if (status && status !== 'completed') return 'warning';
+    if (state.failed && state.failed > 0) return 'warning';
+    return 'success';
+}
+
+function _formatReorganizeResultMessage(state) {
+    const status = state.result_status;
+    if (status === 'no_source_id') {
+        return 'Reorganize skipped — album has no metadata source ID. Run enrichment first.';
+    }
+    if (status === 'no_album') {
+        return 'Reorganize skipped — album not found in DB.';
+    }
+    if (status === 'no_tracks') {
+        return 'Reorganize skipped — album has no tracks.';
+    }
+    if (status === 'setup_failed') {
+        return 'Reorganize failed — couldn\'t create staging directory.';
+    }
+    if (status === 'error') {
+        return 'Reorganize failed — see server logs for details.';
+    }
+    let msg = `Reorganized: ${state.moved || 0} moved`;
+    if (state.skipped > 0) msg += `, ${state.skipped} skipped`;
+    if (state.failed > 0) msg += `, ${state.failed} failed`;
+    if (state.failed > 0 && state.errors && state.errors.length > 0) {
+        msg += ` (${state.errors[0].error})`;
+    }
+    return msg;
 }
 
 function _pollReorganizeStatus() {
@@ -6335,13 +6374,7 @@ function _pollReorganizeStatus() {
                 showToast(`Reorganizing: ${state.processed}/${state.total} (${pct}%) — ${state.current_track}`, 'info');
                 _reorganizePollTimer = setTimeout(poll, 800);
             } else if (state.status === 'done') {
-                let msg = `Reorganized: ${state.moved} moved`;
-                if (state.skipped > 0) msg += `, ${state.skipped} skipped`;
-                if (state.failed > 0) msg += `, ${state.failed} failed`;
-                if (state.failed > 0 && state.errors && state.errors.length > 0) {
-                    msg += ` (${state.errors[0].error})`;
-                }
-                showToast(msg, state.failed > 0 ? 'warning' : 'success');
+                showToast(_formatReorganizeResultMessage(state), _classifyReorganizeOutcome(state));
                 _reorganizePollTimer = null;
 
                 // Refresh the enhanced view to show updated paths
@@ -6466,7 +6499,7 @@ async function _executeReorganizeAll() {
     // Source picker is captured ONCE before the loop — same source for every album
     const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
 
-    let succeeded = 0, failed = 0;
+    let succeeded = 0, skipped = 0, failed = 0;
 
     for (let i = 0; i < total; i++) {
         const album = albums[i];
@@ -6485,9 +6518,21 @@ async function _executeReorganizeAll() {
                 continue;
             }
 
-            // Wait for this album to finish
-            await _waitForReorganizeComplete();
-            succeeded++;
+            // kettui PR #377 review: don't count any HTTP-success as
+            // "succeeded" — check the final state's result_status.
+            // Albums with no source ID, no tracks, etc. complete the
+            // request but aren't actually reorganized.
+            const finalState = await _waitForReorganizeComplete();
+            if (finalState && finalState.result_status === 'completed' && (finalState.failed || 0) === 0) {
+                succeeded++;
+            } else if (finalState && finalState.result_status && finalState.result_status !== 'completed') {
+                skipped++;
+                showToast(`Skipped: ${album.title} — ${_formatReorganizeResultMessage(finalState)}`, 'warning');
+            } else {
+                // result_status === 'completed' but failed > 0 → partial
+                failed++;
+                showToast(`Partial: ${album.title} — ${_formatReorganizeResultMessage(finalState || {})}`, 'warning');
+            }
         } catch (err) {
             showToast(`Error: ${album.title} — ${err.message}`, 'error');
             failed++;
@@ -6495,8 +6540,9 @@ async function _executeReorganizeAll() {
     }
 
     let msg = `Reorganized ${succeeded} of ${total} album${total !== 1 ? 's' : ''}`;
-    if (failed > 0) msg += ` (${failed} failed)`;
-    showToast(msg, failed > 0 ? 'warning' : 'success');
+    if (skipped > 0) msg += `, ${skipped} skipped`;
+    if (failed > 0) msg += `, ${failed} failed`;
+    showToast(msg, (failed > 0 || skipped > 0) ? 'warning' : 'success');
 
     _reorganizeAllRunning = false;
     if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = 'Reorganize All'; }
@@ -6508,6 +6554,9 @@ async function _executeReorganizeAll() {
 }
 
 function _waitForReorganizeComplete() {
+    // Resolves with the final state object so the caller can inspect
+    // result_status / failed / errors instead of treating every
+    // completion as success (kettui PR #377 review).
     return new Promise(resolve => {
         const poll = setInterval(async () => {
             try {
@@ -6515,11 +6564,11 @@ function _waitForReorganizeComplete() {
                 const state = await resp.json();
                 if (state.status === 'done' || state.status === 'idle') {
                     clearInterval(poll);
-                    resolve();
+                    resolve(state);
                 }
             } catch {
                 clearInterval(poll);
-                resolve();
+                resolve(null);
             }
         }, 800);
     });

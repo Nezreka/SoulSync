@@ -1025,25 +1025,29 @@ def _run_post_process_for_track(ctx: _RunContext, track_id, title, api_track, st
     return new_path
 
 
-def _finalize_track(ctx: _RunContext, track_id, resolved_src, new_path) -> None:
+def _finalize_track(ctx: _RunContext, track_id, resolved_src, new_path) -> bool:
     """Update the DB row, then remove the original (in that order — DB
     failure leaves the file at both locations, recoverable by library
     scan; the reverse would orphan the row). Records src/dst dirs for
-    end-of-run cleanup, deletes per-track sidecars."""
-    db_updated = True
+    end-of-run cleanup, deletes per-track sidecars.
+
+    Returns ``True`` if the track is fully landed (DB row points to
+    ``new_path`` AND the original is dealt with), ``False`` if DB
+    update failed. Caller MUST treat False as a failure for counting
+    purposes — the file is at both locations, the DB still points to
+    the old path, and counting it as "moved" overstates how many
+    tracks the user can actually find via the UI."""
     if ctx.update_track_path_fn:
         try:
             ctx.update_track_path_fn(track_id, new_path)
         except Exception as db_err:
-            db_updated = False
             logger.warning(
                 f"[Reorganize] DB path update failed for {track_id}: {db_err} "
                 f"— leaving original at {resolved_src} so the library scan can recover."
             )
-    if not db_updated:
-        return
+            return False
     if os.path.normpath(resolved_src) == os.path.normpath(new_path):
-        return  # in-place edit; nothing more to do
+        return True  # in-place edit; DB already correct, nothing to remove
     with ctx.state_lock:
         ctx.src_dirs_touched.add(os.path.dirname(resolved_src))
         ctx.dst_dirs_touched.add(os.path.dirname(new_path))
@@ -1052,6 +1056,7 @@ def _finalize_track(ctx: _RunContext, track_id, resolved_src, new_path) -> None:
     except OSError as rm_err:
         logger.warning(f"[Reorganize] Couldn't remove original {resolved_src}: {rm_err}")
     _delete_track_sidecars(resolved_src)
+    return True
 
 
 def _process_one_track(ctx: _RunContext, plan_item: dict) -> None:
@@ -1085,7 +1090,21 @@ def _process_one_track(ctx: _RunContext, plan_item: dict) -> None:
     if new_path is None:
         return
 
-    _finalize_track(ctx, track_id, resolved_src, new_path)
+    finalized = _finalize_track(ctx, track_id, resolved_src, new_path)
+    if not finalized:
+        # File landed at new_path but DB row + original-removal didn't.
+        # User can still find the track (library scan will re-index from
+        # new_path), but we can't honestly count it as "moved" — that
+        # would overstate how many tracks the UI knows are at their new
+        # locations. Surfacing as failed lets the user see something
+        # needs attention (per kettui's PR #377 review).
+        ctx.record_error(
+            track_id, title,
+            'Track landed at new location but DB update failed — '
+            'file is at both old and new paths until library scan re-indexes.',
+            kind='failed',
+        )
+        return
 
     with ctx.state_lock:
         ctx.summary['moved'] += 1
