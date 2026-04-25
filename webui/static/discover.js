@@ -2314,8 +2314,17 @@ function startDecadeSyncPolling(decade, virtualPlaylistId) {
                 delete _syncProgressCallbacks[virtualPlaylistId];
                 const syncButton = el(`decade-${decade}-sync-btn`);
                 if (syncButton) { syncButton.disabled = false; syncButton.style.opacity = '1'; syncButton.style.cursor = 'pointer'; }
-                showToast(`${decade}s Classics sync complete!`, 'success');
-                setTimeout(() => { const sd = el(`decade-${decade}-sync-status`); if (sd) sd.style.display = 'none'; }, 3000);
+                const _m2 = progress.matched_tracks || matched || 0;
+                const _t2 = progress.total_tracks || total || 0;
+                const _miss2 = _t2 - _m2;
+                if (_miss2 > 0) {
+                    showToast(`${decade}s Classics: ${_m2}/${_t2} matched, ${_miss2} missing`, 'warning');
+                } else {
+                    showToast(`${decade}s Classics: all ${_t2} tracks matched!`, 'success');
+                }
+                if (el(`decade-${decade}-sync-percentage`)) el(`decade-${decade}-sync-percentage`).textContent = '100';
+                if (el(`decade-${decade}-sync-pending`)) el(`decade-${decade}-sync-pending`).textContent = '0';
+                setTimeout(() => { const sd = el(`decade-${decade}-sync-status`); if (sd) sd.style.display = 'none'; }, 5000);
             }
         };
     }
@@ -2357,12 +2366,19 @@ function startDecadeSyncPolling(decade, virtualPlaylistId) {
                     syncButton.style.cursor = 'pointer';
                 }
 
-                showToast(`${decade}s Classics sync complete!`, 'success');
+                const missing = total - matched;
+                if (missing > 0) {
+                    showToast(`${decade}s Classics: ${matched}/${total} matched, ${missing} missing`, 'warning');
+                } else {
+                    showToast(`${decade}s Classics: all ${total} tracks matched!`, 'success');
+                }
 
+                if (percentageEl) percentageEl.textContent = '100';
+                if (pendingEl) pendingEl.textContent = '0';
                 setTimeout(() => {
                     const statusDisplay = document.getElementById(`decade-${decade}-sync-status`);
                     if (statusDisplay) statusDisplay.style.display = 'none';
-                }, 3000);
+                }, 5000);
             }
         } catch (error) {
             console.error(`Error polling sync status for decade ${decade}:`, error);
@@ -2715,8 +2731,17 @@ function startGenreSyncPolling(genreName, genreId, virtualPlaylistId) {
                 delete _syncProgressCallbacks[virtualPlaylistId];
                 const syncButton = el(`genre-${genreId}-sync-btn`);
                 if (syncButton) { syncButton.disabled = false; syncButton.style.opacity = '1'; syncButton.style.cursor = 'pointer'; }
-                showToast(`${capitalizeGenre(genreName)} Mix sync complete!`, 'success');
-                setTimeout(() => { const sd = el(`genre-${genreId}-sync-status`); if (sd) sd.style.display = 'none'; }, 3000);
+                const _m3 = progress.matched_tracks || matched || 0;
+                const _t3 = progress.total_tracks || total || 0;
+                const _miss3 = _t3 - _m3;
+                if (_miss3 > 0) {
+                    showToast(`${capitalizeGenre(genreName)} Mix: ${_m3}/${_t3} matched, ${_miss3} missing`, 'warning');
+                } else {
+                    showToast(`${capitalizeGenre(genreName)} Mix: all ${_t3} tracks matched!`, 'success');
+                }
+                if (el(`genre-${genreId}-sync-percentage`)) el(`genre-${genreId}-sync-percentage`).textContent = '100';
+                if (el(`genre-${genreId}-sync-pending`)) el(`genre-${genreId}-sync-pending`).textContent = '0';
+                setTimeout(() => { const sd = el(`genre-${genreId}-sync-status`); if (sd) sd.style.display = 'none'; }, 5000);
             }
         };
     }
@@ -2758,12 +2783,19 @@ function startGenreSyncPolling(genreName, genreId, virtualPlaylistId) {
                     syncButton.style.cursor = 'pointer';
                 }
 
-                showToast(`${capitalizeGenre(genreName)} Mix sync complete!`, 'success');
+                const missing = total - matched;
+                if (missing > 0) {
+                    showToast(`${capitalizeGenre(genreName)} Mix: ${matched}/${total} matched, ${missing} missing`, 'warning');
+                } else {
+                    showToast(`${capitalizeGenre(genreName)} Mix: all ${total} tracks matched!`, 'success');
+                }
 
+                if (percentageEl) percentageEl.textContent = '100';
+                if (pendingEl) pendingEl.textContent = '0';
                 setTimeout(() => {
                     const statusDisplay = document.getElementById(`genre-${genreId}-sync-status`);
                     if (statusDisplay) statusDisplay.style.display = 'none';
-                }, 3000);
+                }, 5000);
             }
         } catch (error) {
             console.error(`Error polling sync status for genre ${genreName}:`, error);
@@ -7977,8 +8009,18 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
                     'hidden_gems': 'Hidden Gems', 'discovery_shuffle': 'Discovery Shuffle',
                     'familiar_favorites': 'Familiar Favorites', 'build_playlist': 'Custom Playlist'
                 };
-                showToast(`${playlistNames[playlistType] || playlistType} sync complete!`, 'success');
-                setTimeout(() => { const sd = el(`${prefix}-sync-status`); if (sd) sd.style.display = 'none'; }, 3000);
+                const dn = playlistNames[playlistType] || playlistType;
+                const _m = progress.matched_tracks || matched || 0;
+                const _t = progress.total_tracks || total || 0;
+                const _miss = _t - _m;
+                if (_miss > 0) {
+                    showToast(`${dn}: ${_m}/${_t} matched, ${_miss} missing`, 'warning');
+                } else {
+                    showToast(`${dn}: all ${_t} tracks matched!`, 'success');
+                }
+                if (el(`${prefix}-sync-percentage`)) el(`${prefix}-sync-percentage`).textContent = '100';
+                if (el(`${prefix}-sync-pending`)) el(`${prefix}-sync-pending`).textContent = '0';
+                setTimeout(() => { const sd = el(`${prefix}-sync-status`); if (sd) sd.style.display = 'none'; }, 5000);
             }
         };
     }
@@ -8045,15 +8087,22 @@ function startDiscoverSyncPolling(playlistType, virtualPlaylistId) {
                     'build_playlist': 'Custom Playlist'
                 };
                 const displayName = playlistNames[playlistType] || playlistType;
-                showToast(`${displayName} sync complete!`, 'success');
+                const missing = total - matched;
+                if (missing > 0) {
+                    showToast(`${displayName}: ${matched}/${total} matched, ${missing} missing`, 'warning');
+                } else {
+                    showToast(`${displayName}: all ${total} tracks matched!`, 'success');
+                }
 
-                // Hide status display after 3 seconds
+                // Update status display to show final result, then hide after 5s
+                if (percentageEl) percentageEl.textContent = '100';
+                if (pendingEl) pendingEl.textContent = '0';
                 setTimeout(() => {
                     const statusDisplay = document.getElementById(`${prefix}-sync-status`);
                     if (statusDisplay) {
                         statusDisplay.style.display = 'none';
                     }
-                }, 3000);
+                }, 5000);
             }
 
         } catch (error) {
@@ -8903,3 +8952,611 @@ if (document.readyState === 'loading') {
 
 // ============================================================================
 
+
+// ── SoulSync Discover Sync Tab ─────────────────────────────────────────
+
+async function loadDiscoverSyncPlaylists() {
+    if (discoverSyncPlaylistsLoaded) return;
+    discoverSyncPlaylistsLoaded = true;
+    const container = document.getElementById('discover-sync-playlist-container');
+    if (!container) return;
+    container.innerHTML = '<div class="playlist-placeholder">Loading Discover playlists...</div>';
+
+    try {
+        const response = await fetch('/api/discover/synced-playlists');
+        const data = await response.json();
+
+        if (!data.success || !data.playlists || data.playlists.length === 0) {
+            container.innerHTML = '<div class="playlist-placeholder">No Discover playlists available. Visit the Discover page to generate playlists first.</div>';
+            return;
+        }
+
+        container.innerHTML = '';
+
+        // Show source info and empty-state hint if no playlists have data
+        if (!data.has_data) {
+            const hint = document.createElement('div');
+            hint.className = 'discover-sync-empty-hint';
+            hint.innerHTML = `
+                <p>Your Discover playlists don't have any tracks yet.</p>
+                <p>Go to the <strong>Discover</strong> page and let it build your playlist pool — it uses your <strong>${data.source_label || 'configured source'}</strong> data and watchlist to generate personalized playlists.</p>
+            `;
+            container.appendChild(hint);
+        }
+
+        data.playlists.forEach(playlist => {
+            renderDiscoverSyncCard(playlist, container, data.source_label || data.source);
+            // Resume polling if there's an active batch for this playlist
+            if (playlist.active_batch_id && playlist.sync_status === 'syncing') {
+                const btn = document.getElementById(`discover-sync-btn-${playlist.type}`);
+                if (btn) { btn.disabled = true; btn.textContent = 'Syncing...'; }
+                pollDiscoverBatchFromTab(playlist.type, playlist.active_batch_id, playlist.name);
+            }
+        });
+
+        // Also fetch ListenBrainz playlists and add them
+        try {
+            // Fetch saved auto-update settings so LB toggles persist across restarts
+            let lbAutoSettings = {};
+            try {
+                const settingsRes = await fetch('/api/discover/auto-update');
+                if (settingsRes.ok) {
+                    const settingsData = await settingsRes.json();
+                    if (settingsData.success) lbAutoSettings = settingsData.settings || {};
+                }
+            } catch (_) {}
+
+            const lbRes = await fetch('/api/discover/listenbrainz/created-for');
+            if (lbRes.ok) {
+                const lbData = await lbRes.json();
+                if (lbData.success && lbData.playlists && lbData.playlists.length > 0) {
+                    // Fetch sync history once for all LB playlists
+                    let historyEntries = [];
+                    try {
+                        const histRes = await fetch('/api/sync/history?source=discover&limit=50');
+                        if (histRes.ok) {
+                            const histData = await histRes.json();
+                            historyEntries = histData.entries || [];
+                        }
+                    } catch (_) {}
+
+                    // Deduplicate by base name — only show the latest of each type
+                    const seen = new Map();
+                    for (const p of lbData.playlists) {
+                        const pl = p.playlist || p;
+                        const rawTitle = pl.title || 'ListenBrainz Playlist';
+                        // Strip ", week of YYYY-MM-DD ..." suffix for a stable display name
+                        const baseName = rawTitle.replace(/,\s*week of .+$/i, '').trim();
+                        // Keep only the first (latest) for each base name
+                        if (!seen.has(baseName)) seen.set(baseName, { pl, rawTitle, baseName });
+                    }
+
+                    for (const { pl, rawTitle, baseName } of seen.values()) {
+                        const identifier = pl.identifier || '';
+                        const mbid = identifier.split('/').pop();
+                        const trackCount = pl.track_count || (pl.track || []).length;
+                        // Determine icon from title
+                        let icon = '🧠';
+                        if (rawTitle.toLowerCase().includes('jam')) icon = '🎸';
+                        else if (rawTitle.toLowerCase().includes('explor')) icon = '🔭';
+
+                        const lbType = `listenbrainz_${mbid}`;
+
+                        // Check sync history for this playlist by matching the base name
+                        let syncStatus = 'never';
+                        let lastSynced = null;
+                        let matchedTracks = 0;
+                        let totalSyncTracks = 0;
+                        for (const entry of historyEntries) {
+                            const eName = entry.playlist_name || '';
+                            if (eName === baseName || eName.startsWith(baseName)) {
+                                syncStatus = 'synced';
+                                lastSynced = entry.completed_at || entry.started_at || entry.created_at;
+                                matchedTracks = entry.tracks_found || 0;
+                                totalSyncTracks = entry.total_tracks || 0;
+                                break;
+                            }
+                        }
+
+                        renderDiscoverSyncCard({
+                            type: lbType,
+                            name: baseName,
+                            description: '',
+                            icon: icon,
+                            track_count: trackCount,
+                            sync_status: syncStatus,
+                            last_synced: lastSynced,
+                            matched_tracks: matchedTracks,
+                            total_sync_tracks: totalSyncTracks,
+                            auto_update: !!lbAutoSettings[lbType],
+                            virtual_id: `discover_listenbrainz_${mbid}`,
+                            _lb_mbid: mbid,
+                        }, container, 'ListenBrainz');
+                    }
+                }
+            }
+        } catch (lbErr) {
+            console.warn('Could not load ListenBrainz playlists for discover sync tab:', lbErr);
+        }
+
+    } catch (error) {
+        console.error('Error loading discover sync playlists:', error);
+        container.innerHTML = '<div class="playlist-placeholder">Error loading Discover playlists.</div>';
+    }
+}
+
+function renderDiscoverSyncCard(playlist, container, sourceLabel) {
+    const card = document.createElement('div');
+    const isEmpty = playlist.track_count === 0;
+    card.className = `discover-sync-card${isEmpty ? ' discover-sync-card-empty' : ''}`;
+    card.id = `discover-sync-card-${playlist.type}`;
+
+    const lastSyncedText = playlist.last_synced
+        ? `Last synced ${timeAgo(playlist.last_synced)}`
+        : 'Never synced';
+
+    const statusClass = playlist.sync_status === 'syncing' ? 'syncing' :
+                         playlist.sync_status === 'synced' ? 'synced' : 'not-synced';
+    let statusText = playlist.sync_status === 'syncing' ? 'Syncing...' :
+                     playlist.sync_status === 'synced' ? 'Synced' : 'Not synced';
+
+    // Show matched/total counts if available (only when matched > 0, meaning completion was recorded)
+    if (playlist.sync_status === 'synced' && playlist.matched_tracks > 0 && playlist.total_sync_tracks > 0) {
+        statusText = `Synced ${playlist.matched_tracks}/${playlist.total_sync_tracks}`;
+    }
+
+    const trackLabel = isEmpty ? 'No tracks yet' : `${playlist.track_count} tracks`;
+
+    // Build card using DOM nodes to avoid XSS from unescaped external data
+    const iconArea = document.createElement('div');
+    iconArea.className = 'discover-sync-card-icon';
+    iconArea.textContent = playlist.icon || '';
+
+    const infoArea = document.createElement('div');
+    infoArea.className = 'discover-sync-card-info';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'discover-sync-card-name';
+    nameEl.appendChild(document.createTextNode(playlist.name || ''));
+
+    const metaInline = document.createElement('span');
+    metaInline.className = 'discover-sync-card-meta-inline';
+
+    const sourceBadge = document.createElement('span');
+    sourceBadge.className = 'discover-sync-source-badge';
+    sourceBadge.textContent = sourceLabel || 'unknown';
+
+    const sep1 = document.createElement('span');
+    sep1.className = 'discover-sync-separator';
+    sep1.textContent = '\u00b7';
+
+    const trackCountEl = document.createElement('span');
+    trackCountEl.className = 'discover-sync-track-count';
+    trackCountEl.textContent = trackLabel;
+
+    const sep2 = document.createElement('span');
+    sep2.className = 'discover-sync-separator';
+    sep2.textContent = '\u00b7';
+
+    const statusEl = document.createElement('span');
+    statusEl.className = `discover-sync-status ${statusClass}`;
+    statusEl.textContent = statusText;
+
+    const sep3 = document.createElement('span');
+    sep3.className = 'discover-sync-separator';
+    sep3.textContent = '\u00b7';
+
+    const lastSyncedEl = document.createElement('span');
+    lastSyncedEl.className = 'discover-sync-last-synced';
+    lastSyncedEl.textContent = lastSyncedText;
+
+    metaInline.appendChild(sourceBadge);
+    metaInline.appendChild(sep1);
+    metaInline.appendChild(trackCountEl);
+    metaInline.appendChild(sep2);
+    metaInline.appendChild(statusEl);
+    metaInline.appendChild(sep3);
+    metaInline.appendChild(lastSyncedEl);
+    nameEl.appendChild(metaInline);
+    infoArea.appendChild(nameEl);
+
+    const actions = document.createElement('div');
+    actions.className = 'discover-sync-card-actions';
+
+    const toggleWrapper = document.createElement('div');
+    toggleWrapper.className = 'discover-sync-toggle-wrapper';
+    toggleWrapper.title = isEmpty
+        ? 'No tracks available \u2014 visit Discover first'
+        : 'Keep this playlist updated automatically';
+
+    const toggleLabel = document.createElement('label');
+    toggleLabel.className = 'discover-sync-toggle-label';
+    toggleLabel.textContent = 'Keep updated';
+
+    const toggle = document.createElement('label');
+    toggle.className = 'discover-sync-toggle';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = !!playlist.auto_update;
+    checkbox.disabled = !!isEmpty;
+    checkbox.addEventListener('change', function () {
+        toggleDiscoverAutoUpdate(playlist.type, this.checked);
+    });
+
+    const slider = document.createElement('span');
+    slider.className = 'discover-sync-toggle-slider';
+
+    toggle.appendChild(checkbox);
+    toggle.appendChild(slider);
+    toggleWrapper.appendChild(toggleLabel);
+    toggleWrapper.appendChild(toggle);
+
+    const syncButton = document.createElement('button');
+    syncButton.className = 'discover-sync-btn';
+    syncButton.id = `discover-sync-btn-${playlist.type}`;
+    syncButton.disabled = playlist.sync_status === 'syncing' || isEmpty;
+    syncButton.textContent = '\u27f3 Sync Now';
+    syncButton.addEventListener('click', () => syncDiscoverPlaylistFromTab(playlist.type, playlist.name));
+
+    actions.appendChild(toggleWrapper);
+    actions.appendChild(syncButton);
+
+    card.appendChild(iconArea);
+    card.appendChild(infoArea);
+    card.appendChild(actions);
+
+    // Make the icon + info area clickable to view tracks
+    if (!isEmpty) {
+        [infoArea, iconArea].forEach(el => {
+            el.style.cursor = 'pointer';
+            el.addEventListener('click', () => openDiscoverPlaylistModal(playlist.type, playlist.name, playlist.icon));
+        });
+    }
+
+    container.appendChild(card);
+}
+
+async function toggleDiscoverAutoUpdate(playlistType, enabled) {
+    try {
+        const response = await fetch('/api/discover/auto-update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ playlist_type: playlistType, enabled: enabled })
+        });
+        const data = await response.json();
+        if (data.success) {
+            showToast(`Auto-update ${enabled ? 'enabled' : 'disabled'} for ${playlistType.replace(/_/g, ' ')}`, 'success');
+        } else {
+            showToast(`Failed to update setting: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error toggling auto-update:', error);
+        showToast('Failed to update setting', 'error');
+    }
+}
+
+const _discoverSyncQueue = [];
+let _discoverSyncRunning = false;
+
+async function syncDiscoverPlaylistFromTab(playlistType, playlistName) {
+    // Serialize sync operations to avoid concurrent backend contention
+    return new Promise((resolve) => {
+        _discoverSyncQueue.push({ playlistType, playlistName, resolve });
+        _processDiscoverSyncQueue();
+    });
+}
+
+async function _processDiscoverSyncQueue() {
+    if (_discoverSyncRunning || _discoverSyncQueue.length === 0) return;
+    _discoverSyncRunning = true;
+    const { playlistType, playlistName, resolve } = _discoverSyncQueue.shift();
+    try {
+        await _doSyncDiscoverPlaylist(playlistType, playlistName);
+    } finally {
+        _discoverSyncRunning = false;
+        resolve();
+        _processDiscoverSyncQueue();
+    }
+}
+
+async function _doSyncDiscoverPlaylist(playlistType, playlistName) {
+    const btn = document.getElementById(`discover-sync-btn-${playlistType}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Syncing...';
+    }
+
+    try {
+        let tracksResponse;
+
+        // Use unified URL helper (handles ListenBrainz + standard discover types)
+        const apiUrl = _discoverPlaylistApiUrl(playlistType);
+        if (apiUrl) {
+            tracksResponse = await fetch(apiUrl);
+        }
+
+        let tracks = [];
+        if (tracksResponse && tracksResponse.ok) {
+            const data = await tracksResponse.json();
+            tracks = data.tracks || [];
+        }
+
+        if (!tracks.length) {
+            showToast(`No tracks available for ${playlistName}. Visit the Discover page first.`, 'warning');
+            if (btn) { btn.disabled = false; btn.textContent = '\u27f3 Sync Now'; }
+            return;
+        }
+
+        const syncTracks = tracks.map(track => {
+            if (track.track_data_json) {
+                const t = track.track_data_json;
+                if (t.artists && Array.isArray(t.artists)) {
+                    t.artists = t.artists.map(a => a.name || a);
+                }
+                return t;
+            }
+            return {
+                id: track.spotify_track_id || track.track_id || '',
+                name: track.track_name || track.name || '',
+                artists: [track.artist_name || 'Unknown Artist'],
+                album: track.album_name || '',
+                duration_ms: track.duration_ms || 0,
+                image_url: track.album_cover_url || track.image_url || ''
+            };
+        });
+
+        const virtualPlaylistId = `discover_${playlistType}`;
+
+        // Use the download batch endpoint directly so the batch is labeled
+        // as "Discover" instead of going through sync → wishlist → "Wishlist" batch.
+        // Omit force_download_all so it checks the library first and only downloads missing tracks.
+        const batchResponse = await fetch(`/api/playlists/${virtualPlaylistId}/start-missing-process`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tracks: syncTracks,
+                playlist_name: playlistName
+            })
+        });
+
+        const result = await batchResponse.json();
+        if (result.success) {
+            showToast(`Downloading ${playlistName} (${syncTracks.length} tracks)...`, 'info');
+            const card = document.getElementById(`discover-sync-card-${playlistType}`);
+            if (card) {
+                const statusEl = card.querySelector('.discover-sync-status');
+                if (statusEl) {
+                    statusEl.className = 'discover-sync-status syncing';
+                    statusEl.textContent = 'Downloading...';
+                }
+            }
+            // Poll the download batch status
+            pollDiscoverBatchFromTab(playlistType, result.batch_id, playlistName);
+        } else {
+            showToast(`Download failed: ${result.error || 'Unknown error'}`, 'error');
+            if (btn) { btn.disabled = false; btn.textContent = '\u27f3 Sync Now'; }
+        }
+    } catch (error) {
+        console.error(`Error syncing ${playlistName}:`, error);
+        showToast(`Failed to sync ${playlistName}`, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '\u27f3 Sync Now'; }
+    }
+}
+
+function pollDiscoverSyncFromTab(playlistType, virtualPlaylistId, playlistName) {
+    const pollInterval = setInterval(async () => {
+        try {
+            const resp = await fetch(`/api/sync/status/${virtualPlaylistId}`);
+            if (!resp.ok) { clearInterval(pollInterval); return; }
+            const data = await resp.json();
+
+            if (data.status === 'finished' || data.status === 'error') {
+                clearInterval(pollInterval);
+                const btn = document.getElementById(`discover-sync-btn-${playlistType}`);
+                if (btn) { btn.disabled = false; btn.textContent = '\u27f3 Sync Now'; }
+
+                const card = document.getElementById(`discover-sync-card-${playlistType}`);
+                if (card) {
+                    const statusEl = card.querySelector('.discover-sync-status');
+                    if (statusEl) {
+                        if (data.status === 'finished') {
+                            const progress = data.progress || data.result || {};
+                            const matched = progress.matched_tracks || 0;
+                            const total = progress.total_tracks || 0;
+                            statusEl.className = 'discover-sync-status synced';
+                            statusEl.textContent = matched > 0 && total > 0 ? `Synced ${matched}/${total}` : 'Synced';
+                        } else {
+                            statusEl.className = 'discover-sync-status not-synced';
+                            statusEl.textContent = 'Failed';
+                        }
+                    }
+                    const lastSyncedEl = card.querySelector('.discover-sync-last-synced');
+                    if (lastSyncedEl && data.status === 'finished') {
+                        lastSyncedEl.textContent = 'Last synced just now';
+                    }
+                }
+
+                if (data.status === 'finished') {
+                    showToast(`${playlistName} synced successfully!`, 'success');
+                } else {
+                    showToast(`${playlistName} sync failed`, 'error');
+                }
+            }
+        } catch (error) {
+            clearInterval(pollInterval);
+        }
+    }, 2000);
+}
+
+function pollDiscoverBatchFromTab(playlistType, batchId, playlistName) {
+    const pollInterval = setInterval(async () => {
+        try {
+            const resp = await fetch(`/api/playlists/${batchId}/download_status`);
+            if (!resp.ok) { clearInterval(pollInterval); return; }
+            const data = await resp.json();
+            const phase = data.phase || data.status;
+
+            if (phase === 'complete' || phase === 'error' || phase === 'cancelled') {
+                clearInterval(pollInterval);
+                const btn = document.getElementById(`discover-sync-btn-${playlistType}`);
+                if (btn) { btn.disabled = false; btn.textContent = '\u27f3 Sync Now'; }
+
+                // Extract matched/total from analysis_results
+                const analysisResults = data.analysis_results || [];
+                const totalTracks = analysisResults.length;
+                const matchedTracks = analysisResults.filter(r => r.found).length;
+                const tasks = data.tasks || [];
+                const downloaded = tasks.filter(t => t.status === 'completed').length;
+                const failed = tasks.filter(t => t.status === 'failed' || t.status === 'not_found').length;
+
+                const card = document.getElementById(`discover-sync-card-${playlistType}`);
+                const syncedCount = matchedTracks + downloaded;
+                if (card) {
+                    const statusEl = card.querySelector('.discover-sync-status');
+                    if (statusEl) {
+                        statusEl.className = `discover-sync-status ${phase === 'complete' ? 'synced' : 'not-synced'}`;
+                        if (phase === 'complete' && totalTracks > 0) {
+                            statusEl.textContent = `Synced ${syncedCount}/${totalTracks}`;
+                        } else {
+                            statusEl.textContent = phase === 'complete' ? 'Synced' : (phase === 'cancelled' ? 'Cancelled' : 'Failed');
+                        }
+                    }
+                    const lastSyncedEl = card.querySelector('.discover-sync-last-synced');
+                    if (lastSyncedEl && phase === 'complete') {
+                        lastSyncedEl.textContent = 'Last synced just now';
+                    }
+                }
+
+                if (phase === 'complete') {
+                    if (totalTracks > 0) {
+                        const missing = totalTracks - syncedCount;
+                        let msg = `${playlistName}: ${syncedCount}/${totalTracks} in library`;
+                        if (downloaded > 0) msg += `, ${downloaded} downloaded`;
+                        if (failed > 0) msg += `, ${failed} failed`;
+                        if (missing === 0) msg += ' - all owned!';
+                        showToast(msg, 'success');
+                    } else {
+                        showToast(`${playlistName} download complete!`, 'success');
+                    }
+                } else if (phase !== 'cancelled') {
+                    showToast(`${playlistName} download failed`, 'error');
+                }
+            }
+        } catch (error) {
+            clearInterval(pollInterval);
+        }
+    }, 3000);
+}
+
+/**
+ * Map a discover playlist type to its API endpoint for fetching tracks.
+ */
+function _discoverPlaylistApiUrl(playlistType) {
+    // ListenBrainz playlists
+    if (playlistType.startsWith('listenbrainz_')) {
+        const mbid = playlistType.replace('listenbrainz_', '');
+        return `/api/discover/listenbrainz/playlist/${mbid}`;
+    }
+    const map = {
+        release_radar: '/api/discover/release-radar',
+        discovery_weekly: '/api/discover/weekly',
+        seasonal_playlist: '/api/discover/seasonal/current-playlist',
+        popular_picks: '/api/discover/personalized/popular-picks',
+        hidden_gems: '/api/discover/personalized/hidden-gems',
+        discovery_shuffle: '/api/discover/personalized/discovery-shuffle',
+        familiar_favorites: '/api/discover/personalized/familiar-favorites',
+    };
+    return map[playlistType] || null;
+}
+
+/**
+ * Open a modal showing all tracks in a Discover playlist (mirrored-modal style).
+ */
+async function openDiscoverPlaylistModal(playlistType, playlistName, icon) {
+    const apiUrl = _discoverPlaylistApiUrl(playlistType);
+    if (!apiUrl) { showToast('Unknown playlist type', 'error'); return; }
+
+    showLoadingOverlay(`Loading ${playlistName}...`);
+    try {
+        const res = await fetch(apiUrl);
+        const data = await res.json();
+        const tracks = data.tracks || [];
+
+        hideLoadingOverlay();
+
+        if (!tracks.length) {
+            showToast(`No tracks in ${playlistName}. Visit the Discover page first.`, 'warning');
+            return;
+        }
+
+        // Remove any existing modal
+        const old = document.getElementById('discover-playlist-modal');
+        if (old) old.remove();
+
+        const overlay = document.createElement('div');
+        overlay.id = 'discover-playlist-modal';
+        overlay.className = 'mirrored-modal-overlay';
+
+        const trackRows = tracks.map((t, idx) => {
+            const name = t.track_name || t.name || '';
+            const artist = t.artist_name || (t.artists ? (Array.isArray(t.artists) ? t.artists.map(a => a.name || a).join(', ') : t.artists) : '');
+            const album = t.album_name || t.album || '';
+            const dur = t.duration_ms ? `${Math.floor(t.duration_ms / 60000)}:${String(Math.floor((t.duration_ms % 60000) / 1000)).padStart(2, '0')}` : '';
+            const coverUrl = t.album_cover_url || '';
+            const coverHtml = coverUrl
+                ? `<img src="${_escAttr(coverUrl)}" alt="" class="discover-modal-track-img" loading="lazy">`
+                : `<div class="discover-modal-track-img-placeholder"></div>`;
+            return `<div class="mirrored-track-row">
+                <span class="track-pos">${idx + 1}</span>
+                <span class="track-cover">${coverHtml}</span>
+                <span class="track-title">${_esc(name)}</span>
+                <span class="track-artist">${_esc(artist)}</span>
+                <span class="track-album">${_esc(album)}</span>
+                <span class="track-duration">${dur}</span>
+            </div>`;
+        }).join('');
+
+        overlay.innerHTML = `
+            <div class="mirrored-modal">
+                <div class="mirrored-modal-header">
+                    <div class="mirrored-modal-hero">
+                        <div class="mirrored-modal-hero-icon discover">${icon || '🎵'}</div>
+                        <div class="mirrored-modal-hero-info">
+                            <h2 class="mirrored-modal-hero-title">${_esc(playlistName)}</h2>
+                            <div class="mirrored-modal-hero-subtitle">
+                                <span class="mirrored-modal-hero-badge">discover</span>
+                                <span>${tracks.length} tracks</span>
+                            </div>
+                        </div>
+                    </div>
+                    <span class="mirrored-modal-close" onclick="closeDiscoverPlaylistModal()">&times;</span>
+                </div>
+                <div class="mirrored-modal-tracks">
+                    <div class="mirrored-track-header">
+                        <span>#</span><span></span><span>Track</span><span>Artist</span><span>Album</span><span style="text-align:right">Time</span>
+                    </div>
+                    ${trackRows}
+                </div>
+                <div class="mirrored-modal-footer">
+                    <div class="mirrored-modal-footer-left"></div>
+                    <div class="mirrored-modal-footer-right" style="display:flex;gap:10px;">
+                        <button class="mirrored-btn-close" onclick="closeDiscoverPlaylistModal()">Close</button>
+                        <button class="mirrored-btn-discover" onclick="closeDiscoverPlaylistModal(); syncDiscoverPlaylistFromTab('${_escAttr(playlistType)}', '${_escAttr(playlistName)}')">Sync Now</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        overlay.addEventListener('click', e => { if (e.target === overlay) closeDiscoverPlaylistModal(); });
+        document.body.appendChild(overlay);
+    } catch (err) {
+        hideLoadingOverlay();
+        showToast(`Error loading ${playlistName}: ${err.message}`, 'error');
+    }
+}
+
+function closeDiscoverPlaylistModal() {
+    const m = document.getElementById('discover-playlist-modal');
+    if (m) m.remove();
+}

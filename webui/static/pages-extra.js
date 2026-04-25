@@ -2163,14 +2163,14 @@ let _adlFilterBatchId = null; // When set, main list shows only this batch
 const _batchColorMap = {};
 const _batchCompletedAt = {}; // batch_id -> timestamp when first seen as complete
 let _batchColorNext = 0;
+const _BATCH_COLOR_COUNT = 16;
 
 function _getBatchColor(batchId) {
     if (!batchId) return -1;
     if (_batchColorMap[batchId] === undefined) {
-        // Deterministic color from batch_id hash for consistency across reloads
-        let hash = 0;
-        for (let i = 0; i < batchId.length; i++) hash = ((hash << 5) - hash + batchId.charCodeAt(i)) | 0;
-        _batchColorMap[batchId] = Math.abs(hash) % 8;
+        // Assign colors sequentially so no duplicates until all 16 are used
+        _batchColorMap[batchId] = _batchColorNext % _BATCH_COLOR_COUNT;
+        _batchColorNext++;
     }
     return _batchColorMap[batchId];
 }
@@ -2507,14 +2507,22 @@ function _adlRenderBatchPanel() {
         // Phase label with icon
         let phaseText = '';
         let phaseIcon = '';
-        if (batch.phase === 'analysis') {
+        if (batch.phase === 'queued') {
+            phaseText = 'Queued';
+            phaseIcon = '<span style="color:#eab308;margin-right:4px">⏳</span>';
+        } else if (batch.phase === 'analysis') {
             phaseText = 'Analyzing...';
             phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
         } else if (batch.phase === 'downloading') {
             phaseText = `${batch.completed}/${total} tracks`;
             if (batch.active > 0) phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
         } else if (batch.phase === 'complete') {
-            phaseText = `Done \u2014 ${batch.completed} tracks`;
+            const analysisTotal = batch.analysis_total || 0;
+            const alreadyOwned = analysisTotal > 0 ? analysisTotal - total : 0;
+            let parts = [`${batch.completed} downloaded`];
+            if (alreadyOwned > 0) parts.push(`${alreadyOwned} owned`);
+            if (batch.failed > 0) parts.push(`${batch.failed} failed`);
+            phaseText = parts.join(', ');
             phaseIcon = '<span style="color:#22c55e;margin-right:4px">\u2713</span>';
         } else if (batch.phase === 'cancelled') {
             phaseText = 'Cancelled';
