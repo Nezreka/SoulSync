@@ -7,12 +7,12 @@ import re
 import urllib.request
 
 from core.imports.context import get_import_context_album
-from core.metadata_common import (
+from core.metadata.common import (
     get_config_manager,
     get_image_dimensions,
-    get_logger,
     get_mutagen_symbols,
 )
+from utils.logging_config import get_logger as _create_logger
 
 __all__ = [
     "embed_album_art_metadata",
@@ -20,9 +20,11 @@ __all__ = [
 ]
 
 
+logger = _create_logger("metadata.artwork")
+
+
 def embed_album_art_metadata(audio_file, metadata: dict):
     cfg = get_config_manager()
-    logger_ = get_logger()
     symbols = get_mutagen_symbols()
     if not symbols:
         return
@@ -47,14 +49,14 @@ def embed_album_art_metadata(audio_file, metadata: dict):
         if not image_data:
             art_url = metadata.get("album_art_url")
             if not art_url:
-                logger_.warning("No album art URL available for embedding.")
+                logger.warning("No album art URL available for embedding.")
                 return
             with urllib.request.urlopen(art_url, timeout=10) as response:
                 image_data = response.read()
                 mime_type = response.info().get_content_type() or "image/jpeg"
 
         if not image_data:
-            logger_.error("Failed to download album art data.")
+            logger.error("Failed to download album art data.")
             return
 
         if isinstance(audio_file.tags, symbols.ID3):
@@ -73,14 +75,13 @@ def embed_album_art_metadata(audio_file, metadata: dict):
             fmt = symbols.MP4Cover.FORMAT_JPEG if "jpeg" in mime_type else symbols.MP4Cover.FORMAT_PNG
             audio_file["covr"] = [symbols.MP4Cover(image_data, imageformat=fmt)]
 
-        logger_.info("Album art successfully embedded.")
+        logger.info("Album art successfully embedded.")
     except Exception as exc:
-        logger_.error("Error embedding album art: %s", exc)
+        logger.error("Error embedding album art: %s", exc)
 
 
 def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
     cfg = get_config_manager()
-    logger_ = get_logger()
     if cfg.get("metadata_enhancement.cover_art_download", True) is False:
         return
 
@@ -117,7 +118,7 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
                 image_data = None
 
         if is_upgrade and not image_data:
-            logger_.error("CAA upgrade failed - keeping existing cover.jpg")
+            logger.error("CAA upgrade failed - keeping existing cover.jpg")
             return
 
         if not image_data:
@@ -130,7 +131,7 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
                     if images and isinstance(images[0], dict):
                         art_url = images[0].get("url", "")
                 if art_url:
-                    logger_.info("Using cover art URL from album context")
+                    logger.info("Using cover art URL from album context")
             if art_url and "i.scdn.co" in art_url:
                 try:
                     from core.spotify_client import _upgrade_spotify_image_url
@@ -141,7 +142,7 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
             elif art_url and "mzstatic.com" in art_url:
                 art_url = re.sub(r"\d+x\d+bb", "3000x3000bb", art_url)
             if not art_url:
-                logger_.warning("No cover art URL available for download.")
+                logger.warning("No cover art URL available for download.")
                 return
             with urllib.request.urlopen(art_url, timeout=10) as response:
                 image_data = response.read()
@@ -151,6 +152,6 @@ def download_cover_art(album_info: dict, target_dir: str, context: dict = None):
 
         with open(cover_path, "wb") as handle:
             handle.write(image_data)
-        logger_.info("Cover art downloaded to: %s", cover_path)
+        logger.info("Cover art downloaded to: %s", cover_path)
     except Exception as exc:
-        logger_.error("Error downloading cover.jpg: %s", exc)
+        logger.error("Error downloading cover.jpg: %s", exc)

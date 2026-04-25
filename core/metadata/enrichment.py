@@ -5,10 +5,9 @@ from __future__ import annotations
 import os
 
 from core.metadata.artwork import embed_album_art_metadata
-from core.metadata_common import (
+from core.metadata.common import (
     get_config_manager,
     get_file_lock,
-    get_logger,
     get_mutagen_symbols,
     is_vorbis_like,
     save_audio_file,
@@ -16,6 +15,7 @@ from core.metadata_common import (
     verify_metadata_written,
 )
 from core.metadata.source import embed_source_ids, extract_source_metadata
+from utils.logging_config import get_logger as _create_logger
 
 
 __all__ = [
@@ -25,11 +25,13 @@ __all__ = [
 ]
 
 
+logger = _create_logger("metadata.enrichment")
+
+
 def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict, runtime=None) -> bool:
     cfg = get_config_manager()
-    logger_ = get_logger()
     if cfg.get("metadata_enhancement.enabled", True) is False:
-        logger_.warning("Metadata enhancement disabled in config.")
+        logger.warning("Metadata enhancement disabled in config.")
         return True
 
     if album_info is None:
@@ -37,17 +39,17 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
 
     symbols = get_mutagen_symbols()
     if not symbols:
-        logger_.error("Mutagen is unavailable, cannot enhance metadata.")
+        logger.error("Mutagen is unavailable, cannot enhance metadata.")
         return False
 
     file_lock = get_file_lock(file_path)
     with file_lock:
-        logger_.info("Enhancing metadata for: %s", os.path.basename(file_path))
+        logger.info("Enhancing metadata for: %s", os.path.basename(file_path))
         try:
             strip_all_non_audio_tags(file_path)
             audio_file = symbols.File(file_path)
             if audio_file is None:
-                logger_.error("Could not load audio file with Mutagen: %s", file_path)
+                logger.error("Could not load audio file with Mutagen: %s", file_path)
                 return False
 
             if hasattr(audio_file, "clear_pictures"):
@@ -56,7 +58,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             if audio_file.tags is not None:
                 if len(audio_file.tags) > 0:
                     tag_keys = list(audio_file.tags.keys())[:15]
-                    logger_.info("Clearing %s existing tags: %s", len(audio_file.tags), ", ".join(str(k) for k in tag_keys))
+                    logger.info("Clearing %s existing tags: %s", len(audio_file.tags), ", ".join(str(k) for k in tag_keys))
                 audio_file.tags.clear()
             else:
                 audio_file.add_tags()
@@ -65,7 +67,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
 
             metadata = extract_source_metadata(context, artist, album_info)
             if not metadata:
-                logger_.error("Could not extract source metadata, saving with cleared tags.")
+                logger.error("Could not extract source metadata, saving with cleared tags.")
                 save_audio_file(audio_file, symbols)
                 return True
 
@@ -147,17 +149,17 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
 
             verified = verify_metadata_written(file_path)
             if verified:
-                logger_.info("Metadata enhanced successfully.")
+                logger.info("Metadata enhanced successfully.")
             else:
-                logger_.info("Metadata saved but verification found issues (see above).")
+                logger.info("Metadata saved but verification found issues (see above).")
             return True
         except Exception as exc:
             import traceback
 
-            logger_.error("Error enhancing metadata for %s: %s", file_path, exc)
-            logger_.error("[Metadata Debug] Exception type: %s", type(exc).__name__)
-            logger_.info("[Metadata Debug] File exists: %s", os.path.exists(file_path))
-            logger_.warning("[Metadata Debug] Artist: %s", artist.get("name", "MISSING") if artist else "None")
-            logger_.warning("[Metadata Debug] Album info: %s", album_info.get("album_name", "MISSING") if album_info else "None")
-            logger_.error("[Metadata Debug] Traceback:\n%s", traceback.format_exc())
+            logger.error("Error enhancing metadata for %s: %s", file_path, exc)
+            logger.error("[Metadata Debug] Exception type: %s", type(exc).__name__)
+            logger.info("[Metadata Debug] File exists: %s", os.path.exists(file_path))
+            logger.warning("[Metadata Debug] Artist: %s", artist.get("name", "MISSING") if artist else "None")
+            logger.warning("[Metadata Debug] Album info: %s", album_info.get("album_name", "MISSING") if album_info else "None")
+            logger.error("[Metadata Debug] Traceback:\n%s", traceback.format_exc())
             return False
