@@ -15,6 +15,7 @@ from core.imports.context import (
     get_import_context_album,
     get_import_context_artist,
     get_import_original_search,
+    get_import_search_result,
     get_import_source,
     get_import_source_ids,
     get_import_track_info,
@@ -522,7 +523,8 @@ def check_and_remove_from_wishlist(context: Dict[str, Any]) -> None:
             "discogs": "Discogs",
             "hydrabase": "Hydrabase",
         }.get(source, "Source")
-        track_info = context.get("track_info", {})
+        track_info = get_import_track_info(context) or get_import_search_result(context)
+        search_result = get_import_original_search(context) or get_import_search_result(context)
         track_id = None
 
         if source == "spotify":
@@ -540,8 +542,8 @@ def check_and_remove_from_wishlist(context: Dict[str, Any]) -> None:
                     break
 
         if not track_id:
-            track_name = track_info.get("name") or context.get("original_search_result", {}).get("title", "")
-            artist_name = _primary_track_artist_name(track_info) or _primary_track_artist_name(context.get("original_search_result", {}))
+            track_name = track_info.get("name") or search_result.get("title", "")
+            artist_name = _primary_track_artist_name(track_info) or _primary_track_artist_name(search_result)
 
             if track_name and artist_name:
                 logger.warning("[Wishlist] No track ID found, checking for fuzzy match: '%s' by '%s'", track_name, artist_name)

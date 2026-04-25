@@ -841,25 +841,6 @@ def _normalize_context_artists(artists: Any) -> List[Dict[str, Any]]:
     return normalized
 
 
-def get_single_track_import_context(
-    title: str,
-    artist: str = '',
-    override_id: Optional[str] = None,
-    override_source: str = 'spotify',
-    source_override: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Compatibility wrapper for the single-track import resolver."""
-    from core.imports.resolution import get_single_track_import_context as _get_single_track_import_context
-
-    return _get_single_track_import_context(
-        title,
-        artist=artist,
-        override_id=override_id,
-        override_source=override_source,
-        source_override=source_override,
-    )
-
-
 def resolve_album_reference(
     album_id: str,
     preferred_source: Optional[str] = None,

@@ -257,6 +257,10 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             emit_track_downloaded(context, automation_engine)
             record_library_history_download(context)
             record_download_provenance(context)
+            try:
+                check_and_remove_from_wishlist(context)
+            except Exception as wishlist_error:
+                logger.error(f"[Simple Download] Error checking wishlist removal: {wishlist_error}")
             return
 
         logger.info(f"Starting robust post-processing for: {context_key}")

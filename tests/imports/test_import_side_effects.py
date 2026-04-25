@@ -12,6 +12,19 @@ class _FakeDB:
         return self._conn
 
 
+class _FakeWishlistService:
+    def __init__(self, tracks):
+        self.tracks = tracks
+        self.removed = []
+
+    def get_wishlist_tracks_for_download(self, profile_id=1):
+        return list(self.tracks)
+
+    def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1):
+        self.removed.append((spotify_track_id, success, error_message, profile_id))
+        return True
+
+
 def _make_soulsync_db():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -142,3 +155,33 @@ def test_record_soulsync_library_entry_writes_artist_album_and_track(tmp_path, m
     assert track_row["track_artist"] == "Guest Artist"
     assert track_row["album_id"] == album_row["id"]
     assert track_row["file_path"] == str(final_path)
+
+
+def test_check_and_remove_from_wishlist_uses_search_result_fallback(monkeypatch):
+    fake_db = SimpleNamespace(get_all_profiles=lambda: [{"id": 1}])
+    wishlist_service = _FakeWishlistService([
+        {
+            "wishlist_id": 11,
+            "spotify_track_id": "sp-track-1",
+            "id": "sp-track-1",
+            "name": "Song One",
+            "artists": [{"name": "Artist One"}],
+        }
+    ])
+
+    monkeypatch.setattr(side_effects, "get_database", lambda: fake_db)
+    monkeypatch.setattr(side_effects, "get_wishlist_service", lambda: wishlist_service)
+
+    context = {
+        "search_result": {
+            "title": "Song One",
+            "artist": "Artist One",
+            "album": "Album One",
+        },
+        "track_info": {},
+        "original_search_result": {},
+    }
+
+    side_effects.check_and_remove_from_wishlist(context)
+
+    assert wishlist_service.removed == [("sp-track-1", True, None, 1)]

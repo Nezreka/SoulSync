@@ -59,6 +59,7 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     completion_calls = []
     scan_calls = []
     activity_calls = []
+    wishlist_calls = []
 
     original_matched_context = dict(runtime_state.matched_downloads_context)
     original_download_tasks = dict(runtime_state.download_tasks)
@@ -89,6 +90,7 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     monkeypatch.setattr(import_pipeline, "emit_track_downloaded", lambda *args, **kwargs: None)
     monkeypatch.setattr(import_pipeline, "record_library_history_download", lambda *args, **kwargs: None)
     monkeypatch.setattr(import_pipeline, "record_download_provenance", lambda *args, **kwargs: None)
+    monkeypatch.setattr(import_pipeline, "check_and_remove_from_wishlist", lambda context: wishlist_calls.append(dict(context)))
     monkeypatch.setattr(import_pipeline, "_mark_task_completed", lambda task, track_info: mark_calls.append((task, track_info)))
     monkeypatch.setattr(import_pipeline.threading, "Thread", _ImmediateThread)
 
@@ -114,6 +116,7 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
         assert completion_calls == [(batch_id, task_id, True)]
         assert context_key not in runtime_state.matched_downloads_context
         assert scan_calls == ["Simple download completed"]
+        assert wishlist_calls and wishlist_calls[0]["search_result"]["is_simple_download"] is True
         assert activity_calls
     finally:
         runtime_state.matched_downloads_context.clear()
