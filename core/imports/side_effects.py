@@ -484,10 +484,10 @@ def record_retag_download(context: Dict[str, Any], artist_context: Dict[str, Any
         )
         file_format = os.path.splitext(str(final_path))[1].lstrip(".").lower()
 
-        spotify_track_id = None
+        source_track_id = None
         itunes_track_id = None
         if source == "spotify":
-            spotify_track_id = source_ids.get("track_id", "") or None
+            source_track_id = source_ids.get("track_id", "") or None
         elif source == "itunes":
             itunes_track_id = source_ids.get("track_id", "") or None
 
@@ -499,7 +499,7 @@ def record_retag_download(context: Dict[str, Any], artist_context: Dict[str, Any
                 title=title,
                 file_path=str(final_path),
                 file_format=file_format,
-                spotify_track_id=spotify_track_id,
+                spotify_track_id=source_track_id,
                 itunes_track_id=itunes_track_id,
             )
             logger.info("[Retag] Recorded track for retag: '%s' in '%s'", title, album_name)
@@ -513,31 +513,38 @@ def check_and_remove_from_wishlist(context: Dict[str, Any]) -> None:
     """Check whether a successful download should be removed from the wishlist."""
     try:
         wishlist_service = get_wishlist_service()
-        spotify_track_id = None
-
+        source = get_import_source(context)
+        source_ids = get_import_source_ids(context)
+        source_label = {
+            "spotify": "Spotify",
+            "itunes": "iTunes",
+            "deezer": "Deezer",
+            "discogs": "Discogs",
+            "hydrabase": "Hydrabase",
+        }.get(source, "Source")
         track_info = context.get("track_info", {})
-        if track_info.get("id"):
-            spotify_track_id = track_info["id"]
-            logger.info("[Wishlist] Found Spotify ID from track_info: %s", spotify_track_id)
-        elif context.get("original_search_result", {}).get("id"):
-            spotify_track_id = context["original_search_result"]["id"]
-            logger.info("[Wishlist] Found Spotify ID from original_search_result: %s", spotify_track_id)
+        track_id = None
+
+        if source == "spotify":
+            track_id = source_ids.get("track_id") or None
+            if track_id:
+                logger.info("[Wishlist] Found %s track ID from source_ids: %s", source_label, track_id)
         elif "wishlist_id" in track_info:
             wishlist_id = track_info["wishlist_id"]
             logger.info("[Wishlist] Found wishlist_id in context: %s", wishlist_id)
             wishlist_tracks = _all_profile_wishlist_tracks(wishlist_service)
             for wishlist_track in wishlist_tracks:
                 if wishlist_track.get("wishlist_id") == wishlist_id:
-                    spotify_track_id = wishlist_track.get("spotify_track_id") or wishlist_track.get("id")
-                    logger.info("[Wishlist] Found Spotify ID from wishlist entry: %s", spotify_track_id)
+                    track_id = wishlist_track.get("spotify_track_id") or wishlist_track.get("id")
+                    logger.info("[Wishlist] Found track ID from wishlist entry: %s", track_id)
                     break
 
-        if not spotify_track_id:
+        if not track_id:
             track_name = track_info.get("name") or context.get("original_search_result", {}).get("title", "")
             artist_name = _primary_track_artist_name(track_info) or _primary_track_artist_name(context.get("original_search_result", {}))
 
             if track_name and artist_name:
-                logger.warning("[Wishlist] No Spotify ID found, checking for fuzzy match: '%s' by '%s'", track_name, artist_name)
+                logger.warning("[Wishlist] No track ID found, checking for fuzzy match: '%s' by '%s'", track_name, artist_name)
 
                 wishlist_tracks = _all_profile_wishlist_tracks(wishlist_service)
                 for wishlist_track in wishlist_tracks:
@@ -550,18 +557,18 @@ def check_and_remove_from_wishlist(context: Dict[str, Any]) -> None:
                         else:
                             wl_artist_name = str(wl_artists[0]).lower()
                     if wl_name == track_name.lower() and wl_artist_name == artist_name.lower():
-                        spotify_track_id = wishlist_track.get("spotify_track_id") or wishlist_track.get("id")
-                        logger.info("[Wishlist] Found fuzzy match - Spotify ID: %s", spotify_track_id)
+                        track_id = wishlist_track.get("spotify_track_id") or wishlist_track.get("id")
+                        logger.info("[Wishlist] Found fuzzy match - track ID: %s", track_id)
                         break
 
-        if spotify_track_id:
-            logger.info("[Wishlist] Attempting to remove track from wishlist: %s", spotify_track_id)
-            removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
+        if track_id:
+            logger.info("[Wishlist] Attempting to remove track from wishlist: %s", track_id)
+            removed = wishlist_service.mark_track_download_result(track_id, success=True)
             if removed:
-                logger.info("[Wishlist] Successfully removed track from wishlist: %s", spotify_track_id)
+                logger.info("[Wishlist] Successfully removed track from wishlist: %s", track_id)
             else:
-                logger.warning("ℹ️ [Wishlist] Track not found in wishlist or already removed: %s", spotify_track_id)
+                logger.warning("ℹ️ [Wishlist] Track not found in wishlist or already removed: %s", track_id)
         else:
-            logger.warning("ℹ️ [Wishlist] No Spotify track ID found for wishlist removal check")
+            logger.warning("ℹ️ [Wishlist] No track ID found for wishlist removal check")
     except Exception as exc:
         logger.error("[Wishlist] Error in wishlist removal check: %s", exc)

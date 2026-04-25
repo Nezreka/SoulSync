@@ -137,9 +137,9 @@ def _search_albums_for_source(source: str, client: Any, query: str, limit: int =
 
 
 def _search_tracks_for_source(source: str, client: Any, query: str, limit: int = 5):
-    from core.metadata_service import _search_tracks_for_source as _metadata_search_tracks_for_source
+    from core.imports.resolution import search_tracks_for_source
 
-    return _metadata_search_tracks_for_source(source, client, query, limit=limit)
+    return search_tracks_for_source(source, client, query, limit=limit)
 
 
 def _extract_value(value: Any, *names: str, default: Any = None) -> Any:
