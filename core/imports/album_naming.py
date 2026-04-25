@@ -6,11 +6,11 @@ import re
 import threading
 from typing import Any, Dict
 
-from core.import_context import extract_artist_name
+from core.imports.context import extract_artist_name
 from utils.logging_config import get_logger
 
 
-logger = get_logger("import_album_naming")
+logger = get_logger("imports.album_naming")
 
 _album_cache_lock = threading.Lock()
 _album_editions: dict[str, str] = {}

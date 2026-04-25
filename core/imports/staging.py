@@ -6,11 +6,11 @@ import os
 import threading
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from core.import_paths import docker_resolve_path
-from core.import_filename import extract_track_number_from_filename
+from core.imports.paths import docker_resolve_path
+from core.imports.filename import extract_track_number_from_filename
 from utils.logging_config import get_logger
 
-logger = get_logger("import_staging")
+logger = get_logger("imports.staging")
 
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".wav", ".wma", ".aiff", ".aif", ".ape"}
 

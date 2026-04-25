@@ -1,4 +1,4 @@
-"""Shared file and path helpers for import processing."""
+"""File operation helpers for the import flow."""
 
 from __future__ import annotations
 
@@ -8,14 +8,8 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
 
-# Backward-compatible re-exports; canonical homes are core.import_filename
-# and core.import_staging.
-from core.import_filename import extract_track_number_from_filename
-from core.import_staging import read_staging_file_metadata
-
-logger = logging.getLogger("import_file_ops")
+logger = logging.getLogger("imports.file_ops")
 
 
 def _get_config_manager():

@@ -1,6 +1,6 @@
 import pytest
 
-from core.import_filename import parse_filename_metadata
+from core.imports.filename import parse_filename_metadata
 
 
 @pytest.mark.parametrize(

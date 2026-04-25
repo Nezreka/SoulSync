@@ -5,7 +5,7 @@ Download management endpoints — list, cancel active downloads.
 from flask import request, current_app
 from .auth import require_api_key
 from .helpers import api_success, api_error
-from core.import_runtime_state import download_tasks, tasks_lock
+from core.imports.runtime_state import download_tasks, tasks_lock
 
 
 def _serialize_download(task_id, task):

@@ -8,7 +8,7 @@ import threading
 import time
 
 from config.settings import config_manager
-from core.import_file_ops import (
+from core.imports.file_ops import (
     cleanup_empty_directories,
     create_lossy_copy,
     downsample_hires_flac,
@@ -16,7 +16,7 @@ from core.import_file_ops import (
     get_quality_tier_from_extension,
     safe_move_file,
 )
-from core.import_context import (
+from core.imports.context import (
     build_import_album_info,
     extract_artist_name,
     get_import_clean_artist,
@@ -28,9 +28,9 @@ from core.import_context import (
     get_import_track_info,
     normalize_import_context,
 )
-from core.import_filename import extract_track_number_from_filename
-from core.import_guards import check_flac_bit_depth, move_to_quarantine
-from core.import_side_effects import (
+from core.imports.filename import extract_track_number_from_filename
+from core.imports.guards import check_flac_bit_depth, move_to_quarantine
+from core.imports.side_effects import (
     check_and_remove_from_wishlist,
     emit_track_downloaded,
     record_download_provenance,
@@ -38,7 +38,7 @@ from core.import_side_effects import (
     record_retag_download,
     record_soulsync_library_entry,
 )
-from core.import_runtime_state import (
+from core.imports.runtime_state import (
     add_activity_item,
     detect_album_info_web,
     download_batches,
@@ -54,18 +54,18 @@ from core.import_runtime_state import (
 from core.metadata_artwork import download_cover_art
 from core.metadata_common import wipe_source_tags
 from core.metadata_enrichment import enhance_file_metadata
-from core.import_paths import (
+from core.imports.paths import (
     build_final_path_for_track,
     build_simple_download_destination,
     docker_resolve_path,
 )
-from core.import_album_naming import resolve_album_group
+from core.imports.album_naming import resolve_album_group
 from core.metadata_lyrics import generate_lrc_file
 from database.music_database import get_database
 from utils.logging_config import get_logger
 
 
-logger = get_logger("import_pipeline")
+logger = get_logger("imports.pipeline")
 pp_logger = get_logger("post_processing")
 
 

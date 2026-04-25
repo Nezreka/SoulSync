@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from utils.logging_config import get_logger
 from config.settings import config_manager
-from core.import_filename import parse_filename_metadata
+from core.imports.filename import parse_filename_metadata
 
 logger = get_logger("soulseek_client")
 

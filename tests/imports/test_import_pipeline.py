@@ -2,9 +2,9 @@ import logging
 import sys
 import types
 
-import core.import_pipeline as import_pipeline
-import core.import_paths as import_paths
-import core.import_runtime_state as runtime_state
+import core.imports.pipeline as import_pipeline
+import core.imports.paths as import_paths
+import core.imports.runtime_state as runtime_state
 
 
 class _Config:

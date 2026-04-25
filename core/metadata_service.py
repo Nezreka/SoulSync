@@ -849,7 +849,7 @@ def get_single_track_import_context(
     source_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Compatibility wrapper for the single-track import resolver."""
-    from core.import_resolution import get_single_track_import_context as _get_single_track_import_context
+    from core.imports.resolution import get_single_track_import_context as _get_single_track_import_context
 
     return _get_single_track_import_context(
         title,

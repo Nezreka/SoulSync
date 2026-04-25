@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Set
 
-from core.import_context import normalize_import_context
-from core.import_staging import collect_staging_files
+from core.imports.context import normalize_import_context
+from core.imports.staging import collect_staging_files
 from utils.logging_config import get_logger
 
 
-logger = get_logger("import_album")
+logger = get_logger("imports.album")
 
 def get_client_for_source(source: str):
     from core.metadata_service import get_client_for_source as _get_client_for_source

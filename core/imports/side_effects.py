@@ -7,7 +7,7 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-from core.import_context import (
+from core.imports.context import (
     extract_artist_name,
     get_import_clean_album,
     get_import_clean_artist,
@@ -26,7 +26,7 @@ from database.music_database import get_database
 from utils.logging_config import get_logger
 
 
-logger = get_logger("import_side_effects")
+logger = get_logger("imports.side_effects")
 
 
 def _get_config_manager():

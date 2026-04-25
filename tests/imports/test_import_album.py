@@ -1,4 +1,4 @@
-import core.import_album as import_album
+import core.imports.album as import_album
 
 
 class _FakeEngine:
