@@ -867,7 +867,7 @@ def test_db_update_failure_leaves_original_in_place(monkeypatch, tmpdirs):
     def update_path_explodes(track_id, new_path):
         raise RuntimeError("simulated DB failure")
 
-    library_reorganize.reorganize_album(
+    summary = library_reorganize.reorganize_album(
         album_id='alb-1', db=db, staging_root=str(staging),
         resolve_file_path_fn=lambda p: p, post_process_fn=pp,
         update_track_path_fn=update_path_explodes,
@@ -875,6 +875,12 @@ def test_db_update_failure_leaves_original_in_place(monkeypatch, tmpdirs):
 
     assert os.path.exists(src), "Original must still exist when DB update failed"
     assert os.path.exists(final_path), "New path file should also exist (post-process succeeded)"
+    # kettui PR #377 review: a DB-update failure must NOT increment
+    # `moved` — that would overstate how many tracks the UI knows are
+    # at their new locations. Track is reported as failed instead.
+    assert summary['moved'] == 0
+    assert summary['failed'] == 1
+    assert any('DB update failed' in e['error'] for e in summary['errors'])
 
 
 def test_successful_run_removes_original_and_updates_db(monkeypatch, tmpdirs):

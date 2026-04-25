@@ -13691,6 +13691,11 @@ def reorganize_album_files(album_id):
             _reorganize_state.update({
                 'total': 0, 'processed': 0, 'moved': 0, 'skipped': 0,
                 'failed': 0, 'current_track': '', 'errors': [],
+                # Set after the run from the orchestrator's summary so the
+                # frontend can distinguish 'completed' from 'no_source_id'
+                # / 'no_album' / 'no_tracks' / 'setup_failed' (otherwise
+                # zero-failure skips look green to the user).
+                'result_status': None, 'result_source': None,
             })
 
         download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
@@ -13745,8 +13750,13 @@ def reorganize_album_files(album_id):
                     f"(source={summary.get('source')}, moved={summary['moved']}, "
                     f"skipped={summary['skipped']}, failed={summary['failed']})"
                 )
+                with _reorganize_lock:
+                    _reorganize_state['result_status'] = summary.get('status')
+                    _reorganize_state['result_source'] = summary.get('source')
             except Exception as run_err:
                 logger.error(f"[Reorganize] Background error: {run_err}", exc_info=True)
+                with _reorganize_lock:
+                    _reorganize_state['result_status'] = 'error'
             finally:
                 with _reorganize_lock:
                     _reorganize_state['status'] = 'done'
