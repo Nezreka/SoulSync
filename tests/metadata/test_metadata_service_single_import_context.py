@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from core import metadata_service
+from core.imports import resolution
 
 
 class FakeClient:
@@ -74,7 +75,7 @@ def test_get_single_track_import_context_uses_primary_source_priority(monkeypatc
         lambda source: {"deezer": deezer_client, "spotify": spotify_client, "itunes": None}.get(source),
     )
 
-    result = metadata_service.get_single_track_import_context("Song One", "Artist One")
+    result = resolution.get_single_track_import_context("Song One", "Artist One")
 
     assert result["success"] is True
     assert result["source"] == "deezer"
@@ -108,7 +109,7 @@ def test_get_single_track_import_context_falls_back_to_next_source(monkeypatch):
         lambda source: {"deezer": deezer_client, "spotify": spotify_client, "itunes": None}.get(source),
     )
 
-    result = metadata_service.get_single_track_import_context("Song Two", "Artist Two")
+    result = resolution.get_single_track_import_context("Song Two", "Artist Two")
 
     assert result["success"] is True
     assert result["source"] == "spotify"
@@ -141,7 +142,7 @@ def test_get_single_track_import_context_uses_explicit_override_first(monkeypatc
         lambda source: {"deezer": deezer_client, "spotify": spotify_client, "itunes": None}.get(source),
     )
 
-    result = metadata_service.get_single_track_import_context(
+    result = resolution.get_single_track_import_context(
         "Ignored Title",
         "Ignored Artist",
         override_id="override-track-1",
@@ -174,7 +175,7 @@ def test_get_single_track_import_context_uses_explicit_override_source(monkeypat
         lambda source: {"deezer": deezer_client, "spotify": spotify_client, "itunes": itunes_client}.get(source),
     )
 
-    result = metadata_service.get_single_track_import_context(
+    result = resolution.get_single_track_import_context(
         "Ignored Title",
         "Ignored Artist",
         override_id="override-track-2",
