@@ -132,7 +132,9 @@ from core.imports.staging import (
     start_import_suggestions_cache,
 )
 from core.imports.paths import build_final_path_for_track as _build_final_path_for_track
+from core.imports.pipeline import build_import_pipeline_runtime as _build_import_pipeline_runtime
 from core.metadata.common import get_file_lock
+from core.metadata.enrichment import build_metadata_enrichment_runtime as _build_metadata_enrichment_runtime
 from core.metadata.source import (
     mb_release_cache,
     mb_release_cache_lock,
@@ -19678,13 +19680,13 @@ import urllib.request
 def _wipe_source_tags(file_path: str) -> bool:
     return metadata_enrichment.wipe_source_tags(file_path)
 
-def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict, runtime=None) -> bool:
+def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict, metadata_runtime=None) -> bool:
     return metadata_enrichment.enhance_file_metadata(
         file_path,
         context,
         artist,
         album_info,
-        runtime=runtime or _build_import_pipeline_runtime(),
+        runtime=metadata_runtime or _build_metadata_enrichment_runtime(),
     )
 
 
@@ -19778,24 +19780,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         task_id,
         batch_id,
         _build_import_pipeline_runtime(),
-    )
-
-def _build_import_pipeline_runtime():
-    """Collect live controller dependencies for the shared import pipeline."""
-    return types.SimpleNamespace(
-        automation_engine=automation_engine,
-        on_download_completed=_on_download_completed,
-        web_scan_manager=web_scan_manager,
-        repair_worker=repair_worker,
-        mb_worker=mb_worker,
-        deezer_worker=deezer_worker,
-        audiodb_worker=audiodb_worker,
-        tidal_client=tidal_client,
-        qobuz_enrichment_worker=qobuz_enrichment_worker,
-        lastfm_worker=lastfm_worker,
-        genius_worker=genius_worker,
-        spotify_enrichment_worker=spotify_enrichment_worker,
-        itunes_enrichment_worker=itunes_enrichment_worker,
+        _build_metadata_enrichment_runtime(),
     )
 
 
@@ -19903,45 +19888,12 @@ def _post_process_matched_download(context_key, context, file_path):
     just move files to /Transfer without metadata enhancement.
     """
     from core.imports.pipeline import post_process_matched_download
-    return post_process_matched_download(context_key, context, file_path, _build_import_pipeline_runtime())
-
-def _build_import_pipeline_runtime():
-    """Collect the live controller dependencies needed by core.imports.pipeline."""
-    return types.SimpleNamespace(
-        automation_engine=automation_engine,
-        on_download_completed=_on_download_completed,
-        web_scan_manager=web_scan_manager,
-        repair_worker=repair_worker,
-        mb_worker=mb_worker,
-        deezer_worker=deezer_worker,
-        audiodb_worker=audiodb_worker,
-        tidal_client=tidal_client,
-        qobuz_enrichment_worker=qobuz_enrichment_worker,
-        lastfm_worker=lastfm_worker,
-        genius_worker=genius_worker,
-        spotify_enrichment_worker=spotify_enrichment_worker,
-        itunes_enrichment_worker=itunes_enrichment_worker,
-    )
-
-def _wipe_source_tags(file_path: str) -> bool:
-    return metadata_enrichment.wipe_source_tags(file_path)
-
-
-def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict, runtime=None) -> bool:
-    return metadata_enrichment.enhance_file_metadata(
+    return post_process_matched_download(
+        context_key,
+        context,
         file_path,
-        context,
-        artist,
-        album_info,
-        runtime=runtime or _build_import_pipeline_runtime(),
-    )
-
-
-def _download_cover_art(album_info: dict, target_dir: str, context: dict = None):
-    return metadata_enrichment.download_cover_art(
-        album_info,
-        target_dir,
-        context,
+        _build_import_pipeline_runtime(),
+        metadata_runtime=_build_metadata_enrichment_runtime(),
     )
 
 # Track stale transfer keys (completed in slskd but no context — e.g., from before app restart)

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
+from typing import Any
 
 from core.metadata.artwork import embed_album_art_metadata
 from core.metadata.common import (
@@ -19,6 +21,7 @@ from utils.logging_config import get_logger as _create_logger
 
 
 __all__ = [
+    "build_metadata_enrichment_runtime",
     "enhance_file_metadata",
     "extract_source_metadata",
     "embed_source_ids",
@@ -26,6 +29,32 @@ __all__ = [
 
 
 logger = _create_logger("metadata.enrichment")
+
+
+def build_metadata_enrichment_runtime(
+    *,
+    mb_worker: Any | None = None,
+    deezer_worker: Any | None = None,
+    audiodb_worker: Any | None = None,
+    tidal_client: Any | None = None,
+    qobuz_enrichment_worker: Any | None = None,
+    lastfm_worker: Any | None = None,
+    genius_worker: Any | None = None,
+    spotify_enrichment_worker: Any | None = None,
+    itunes_enrichment_worker: Any | None = None,
+) -> SimpleNamespace:
+    """Build the runtime object consumed by core.metadata.enrichment/source."""
+    return SimpleNamespace(
+        mb_worker=mb_worker,
+        deezer_worker=deezer_worker,
+        audiodb_worker=audiodb_worker,
+        tidal_client=tidal_client,
+        qobuz_enrichment_worker=qobuz_enrichment_worker,
+        lastfm_worker=lastfm_worker,
+        genius_worker=genius_worker,
+        spotify_enrichment_worker=spotify_enrichment_worker,
+        itunes_enrichment_worker=itunes_enrichment_worker,
+    )
 
 
 def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict, runtime=None) -> bool:
