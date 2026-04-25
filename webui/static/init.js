@@ -2152,7 +2152,13 @@ function navigateToPage(pageId, options = {}) {
     // Artists page, now replaced by clicking artists from the unified Search.
     if (pageId === 'downloads' || pageId === 'artists') pageId = 'search';
 
-    if (pageId === currentPage) return;
+    if (pageId === currentPage) {
+        // Already on this page — still process pending sync tab actions
+        if (pageId === 'sync' && window._pendingSyncTabAction && typeof _applySyncTabAction === 'function') {
+            _applySyncTabAction();
+        }
+        return;
+    }
 
     // Permission guard — redirect to home page if not allowed
     if (!isPageAllowed(pageId)) {
@@ -2237,6 +2243,15 @@ async function loadPageData(pageId) {
         if (typeof _stopNebulaLivePolling === 'function') _stopNebulaLivePolling();
         if (pageId !== 'sync') {
             cleanupBeatportContent();
+            // Clear any discover sync tab pollers when leaving the sync page
+            if (typeof discoverSyncPollers === 'object') {
+                for (const key of Object.keys(discoverSyncPollers)) {
+                    clearInterval(discoverSyncPollers[key]);
+                    delete discoverSyncPollers[key];
+                }
+            }
+            // Reset so discover tab refetches on next visit
+            discoverSyncPlaylistsLoaded = false;
         }
         switch (pageId) {
             case 'dashboard':
@@ -2246,6 +2261,10 @@ async function loadPageData(pageId) {
             case 'sync':
                 initializeSyncPage();
                 await loadSyncData();
+                // Process any pending deep-link tab switch (e.g. from Discover page)
+                if (window._pendingSyncTabAction && typeof _applySyncTabAction === 'function') {
+                    _applySyncTabAction();
+                }
                 break;
             case 'search':
                 initializeSearch();

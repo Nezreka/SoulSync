@@ -636,7 +636,8 @@ class MusicDatabase:
                     playlist_folder_mode INTEGER DEFAULT 0,
                     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     completed_at TIMESTAMP,
-                    track_results TEXT
+                    track_results TEXT,
+                    server_push_status TEXT
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sh_started_at ON sync_history (started_at DESC)")
@@ -659,6 +660,16 @@ class MusicDatabase:
                 try:
                     cursor.execute("ALTER TABLE sync_history ADD COLUMN source_page TEXT")
                     logger.info("Added source_page column to sync_history table")
+                except Exception:
+                    pass
+
+            # Migration: add server_push_status column to sync_history
+            try:
+                cursor.execute("SELECT server_push_status FROM sync_history LIMIT 1")
+            except Exception:
+                try:
+                    cursor.execute("ALTER TABLE sync_history ADD COLUMN server_push_status TEXT")
+                    logger.info("Added server_push_status column to sync_history table")
                 except Exception:
                     pass
 
@@ -10514,6 +10525,20 @@ class MusicDatabase:
             logger.debug(f"Error updating sync history track results: {e}")
             return False
 
+    def update_sync_history_push_status(self, batch_id, status):
+        """Update the server push status for a sync_history entry."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE sync_history SET server_push_status = ? WHERE batch_id = ?
+            """, (status, batch_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug(f"Error updating sync history push status: {e}")
+            return False
+
     def refresh_sync_history_entry(self, entry_id, tracks_found=0, tracks_downloaded=0, tracks_failed=0):
         """Update an existing sync_history entry with new stats and reset timestamps to move it to the top."""
         try:
@@ -10628,7 +10653,8 @@ class MusicDatabase:
             cursor.execute("""
                 SELECT id, batch_id, playlist_name, source, sync_type, source_page,
                        total_tracks, tracks_found, tracks_downloaded, tracks_failed,
-                       thumb_url, is_album_download, started_at, completed_at
+                       thumb_url, is_album_download, started_at, completed_at,
+                       server_push_status
                 FROM sync_history
                 WHERE completed_at IS NOT NULL
                   AND started_at >= datetime('now', ? || ' days')
