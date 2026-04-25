@@ -4728,6 +4728,10 @@ class MusicDatabase:
                         'audiodb_id', 'audiodb_match_status', 'audiodb_last_attempted',
                         'style', 'mood', 'label', 'explicit', 'record_type',
                         'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
+                        # api_track_count is metadata-source-derived enrichment cache;
+                        # losing it on a ratingKey rekey would force the next
+                        # completeness scan back to live API lookups (kettui PR #374).
+                        'api_track_count',
                     ]
 
                     # Read enrichment data from old album
