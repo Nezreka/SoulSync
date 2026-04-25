@@ -2805,7 +2805,7 @@ function renderArtistMetaPanel(artist) {
     const reorgAllBtn = document.createElement('button');
     reorgAllBtn.className = 'enhanced-sync-btn';
     reorgAllBtn.innerHTML = '&#128193; Reorganize All';
-    reorgAllBtn.title = 'Reorganize all albums for this artist using path template';
+    reorgAllBtn.title = 'Reorganize all albums for this artist using your configured download template';
     reorgAllBtn.onclick = () => _showReorganizeAllModal();
     headerRight.appendChild(reorgAllBtn);
 
@@ -3271,7 +3271,7 @@ function renderExpandedAlbumHeader(album) {
         const reorganizeBtn = document.createElement('button');
         reorganizeBtn.className = 'enhanced-reorganize-album-btn';
         reorganizeBtn.innerHTML = '&#128193; Reorganize';
-        reorganizeBtn.title = 'Reorganize album files using a custom path template';
+        reorganizeBtn.title = 'Reorganize album files using your configured download template';
         reorganizeBtn.onclick = (e) => { e.stopPropagation(); showReorganizeModal(album.id); };
         enrichRow.appendChild(reorganizeBtn);
 
@@ -6132,51 +6132,18 @@ async function showReorganizeModal(albumId) {
         applyBtn.onclick = () => executeReorganize();
     }
 
-    // Build modal content
-    const variables = [
-        { var: '$artist', desc: 'Track artist', example: artistName || 'Artist' },
-        { var: '$albumartist', desc: 'Album artist', example: artistName || 'Album Artist' },
-        { var: '$artistletter', desc: 'First letter of artist', example: (artistName || 'A')[0].toUpperCase() },
-        { var: '$album', desc: 'Album title', example: albumData ? albumData.title : 'Album' },
-        { var: '$albumtype', desc: 'Album/EP/Single', example: 'Album' },
-        { var: '$title', desc: 'Track title', example: 'Track Name' },
-        { var: '$track', desc: 'Track number (zero-padded)', example: '01' },
-        { var: '$disc', desc: 'Disc number (filename only)', example: '01' },
-        { var: '$cdnum', desc: 'CD label — "CD01" on multi-disc, empty otherwise', example: 'CD01' },
-        { var: '$year', desc: 'Release year', example: albumData && albumData.year ? String(albumData.year) : '2024' },
-        { var: '$quality', desc: 'Audio quality (filename only)', example: 'FLAC 16bit/44kHz' },
-    ];
-
     let html = '<div class="reorganize-content">';
 
-    // Template input
-    html += '<div class="reorganize-template-section">';
-    html += '<label class="reorganize-label">Path Template</label>';
-    html += '<div class="reorganize-template-hint">Use <code>/</code> to separate folders. The last segment becomes the filename.</div>';
-    // Load saved template from settings, fall back to default
-    let savedTemplate = '$albumartist/$albumartist - $album/$track - $title';
-    try {
-        const settingsResp = await fetch('/api/settings');
-        if (settingsResp.ok) {
-            const settings = await settingsResp.json();
-            savedTemplate = settings.file_organization?.templates?.album_path || savedTemplate;
-        }
-    } catch (_) { }
-    html += '<input type="text" id="reorganize-template-input" class="reorganize-template-input" ';
-    html += `value="${savedTemplate.replace(/"/g, '&quot;')}" `;
-    html += 'placeholder="$albumartist/$album/$track - $title" spellcheck="false">';
+    // Metadata source picker — populated from /reorganize/sources.
+    // Empty value = use configured primary (with fallback chain).
+    // Specific source = strict mode, that source only.
+    html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Metadata Source</label>';
+    html += '<div class="reorganize-template-hint">Pick which source to read the album\'s tracklist from. Defaults to your configured primary. Reorganize uses your global download template, same as fresh downloads.</div>';
+    html += '<select id="reorganize-source-select" class="reorganize-template-input">';
+    html += '<option value="">Use configured primary (auto)</option>';
+    html += '</select>';
     html += '</div>';
-
-    // Variables reference
-    html += '<div class="reorganize-variables">';
-    html += '<label class="reorganize-label">Available Variables</label>';
-    html += '<div class="reorganize-var-grid">';
-    variables.forEach(v => {
-        html += `<div class="reorganize-var-chip" onclick="insertReorganizeVar('${v.var}')" title="${escapeHtml(v.desc)} — e.g. ${escapeHtml(v.example)}">`;
-        html += `<code>${v.var}</code><span class="reorganize-var-desc">${v.desc}</span>`;
-        html += '</div>';
-    });
-    html += '</div></div>';
 
     // Preview area
     html += '<div class="reorganize-preview-section">';
@@ -6192,31 +6159,34 @@ async function showReorganizeModal(albumId) {
     body.innerHTML = html;
     overlay.classList.remove('hidden');
 
-    // Wire up live preview on enter key
-    setTimeout(() => {
-        const input = document.getElementById('reorganize-template-input');
-        if (input) {
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    loadReorganizePreview();
-                }
-            });
-            input.focus();
-        }
-    }, 50);
+    // Populate source picker after the modal mounts
+    setTimeout(() => _populateReorganizeSources(_reorganizeAlbumId), 50);
 }
 
-function insertReorganizeVar(varName) {
-    const input = document.getElementById('reorganize-template-input');
-    if (!input) return;
-    const start = input.selectionStart;
-    const end = input.selectionEnd;
-    const val = input.value;
-    input.value = val.substring(0, start) + varName + val.substring(end);
-    input.focus();
-    const newPos = start + varName.length;
-    input.setSelectionRange(newPos, newPos);
+async function _populateReorganizeSources(albumId) {
+    const select = document.getElementById('reorganize-source-select');
+    if (!select || !albumId) return;
+    try {
+        const resp = await fetch(`/api/library/album/${albumId}/reorganize/sources`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const sources = data.sources || [];
+        // Keep the "auto" default option, append concrete sources beneath it.
+        sources.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.source;
+            opt.textContent = s.label || s.source;
+            select.appendChild(opt);
+        });
+        if (sources.length === 0) {
+            const opt = document.createElement('option');
+            opt.disabled = true;
+            opt.textContent = 'No sources available — run enrichment first';
+            select.appendChild(opt);
+        }
+    } catch (err) {
+        console.error('Failed to load reorganize sources:', err);
+    }
 }
 
 function closeReorganizeModal() {
@@ -6226,19 +6196,19 @@ function closeReorganizeModal() {
 }
 
 async function loadReorganizePreview() {
-    const template = document.getElementById('reorganize-template-input')?.value?.trim();
     const previewBody = document.getElementById('reorganize-preview-body');
     const applyBtn = document.getElementById('reorganize-apply-btn');
-    if (!template || !previewBody || !_reorganizeAlbumId) return;
+    if (!previewBody || !_reorganizeAlbumId) return;
 
     if (applyBtn) applyBtn.disabled = true;
     previewBody.innerHTML = '<div class="reorganize-preview-loading">Loading preview...</div>';
 
     try {
+        const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
         const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize/preview`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ template })
+            body: JSON.stringify({ source: chosenSource })
         });
         const result = await response.json();
         if (!result.success) {
@@ -6262,31 +6232,52 @@ async function loadReorganizePreview() {
             const unchanged = t.unchanged;
             const noFile = !t.file_exists;
             const collision = t.collision;
-            if (!unchanged && t.file_exists) hasChanges = true;
+            const unmatched = (t.matched === false);
+            const missingPath = !unmatched && !noFile && !t.new_path;  // matched but path-build failed
+            if (!unchanged && t.file_exists && !unmatched && !missingPath) hasChanges = true;
             if (collision) hasCollisions = true;
 
-            const rowClass = collision ? 'reorganize-row-collision' : noFile ? 'reorganize-row-missing' : unchanged ? 'reorganize-row-unchanged' : 'reorganize-row-changed';
+            let rowClass;
+            if (collision) rowClass = 'reorganize-row-collision';
+            else if (noFile || unmatched || missingPath) rowClass = 'reorganize-row-missing';
+            else if (unchanged) rowClass = 'reorganize-row-unchanged';
+            else rowClass = 'reorganize-row-changed';
+
+            const arrow = collision ? '!!'
+                : unchanged ? '='
+                : (noFile || unmatched || missingPath) ? '⊘'
+                : '→';
+
+            const newCell = noFile ? ''
+                : unmatched ? `<em>${escapeHtml(t.reason || 'Not in selected source\'s tracklist')}</em>`
+                : missingPath ? `<em>${escapeHtml(t.reason || 'Couldn\'t compute destination path')}</em>`
+                : (escapeHtml(t.new_path) + (collision ? ' <em>(collision)</em>' : ''));
+
             html += `<tr class="${rowClass}">`;
             html += `<td>${t.track_number || ''}</td>`;
             html += `<td>${escapeHtml(t.title)}</td>`;
             html += `<td class="reorganize-path">${noFile ? '<em>File not found</em>' : escapeHtml(t.current_path)}</td>`;
-            html += `<td class="reorganize-arrow">${collision ? '!!' : unchanged ? '=' : noFile ? '' : '→'}</td>`;
-            html += `<td class="reorganize-path">${noFile ? '' : escapeHtml(t.new_path)}${collision ? ' <em>(collision)</em>' : ''}</td>`;
+            html += `<td class="reorganize-arrow">${arrow}</td>`;
+            html += `<td class="reorganize-path">${newCell}</td>`;
             html += '</tr>';
         });
 
         html += '</tbody></table>';
 
-        const changedCount = tracks.filter(t => !t.unchanged && t.file_exists && !t.collision).length;
+        const changedCount = tracks.filter(t => !t.unchanged && t.file_exists && !t.collision && t.matched !== false && t.new_path).length;
         const skippedCount = tracks.filter(t => t.unchanged).length;
         const missingCount = tracks.filter(t => !t.file_exists).length;
         const collisionCount = tracks.filter(t => t.collision).length;
+        const unmatchedCount = tracks.filter(t => t.file_exists && t.matched === false).length;
+        const noPathCount = tracks.filter(t => t.file_exists && t.matched !== false && !t.new_path && !t.collision).length;
 
         let summary = `<div class="reorganize-preview-summary">`;
         if (changedCount > 0) summary += `<span class="reorganize-stat changed">${changedCount} will move</span>`;
         if (skippedCount > 0) summary += `<span class="reorganize-stat unchanged">${skippedCount} unchanged</span>`;
-        if (missingCount > 0) summary += `<span class="reorganize-stat missing">${missingCount} missing</span>`;
-        if (collisionCount > 0) summary += `<span class="reorganize-stat collision">${collisionCount} collision${collisionCount !== 1 ? 's' : ''} — add $track or $disc to fix</span>`;
+        if (unmatchedCount > 0) summary += `<span class="reorganize-stat missing">${unmatchedCount} not in source — try a different source</span>`;
+        if (noPathCount > 0) summary += `<span class="reorganize-stat missing">${noPathCount} couldn't compute destination</span>`;
+        if (missingCount > 0) summary += `<span class="reorganize-stat missing">${missingCount} missing on disk</span>`;
+        if (collisionCount > 0) summary += `<span class="reorganize-stat collision">${collisionCount} collision${collisionCount !== 1 ? 's' : ''} — likely a source data issue</span>`;
         summary += '</div>';
 
         previewBody.innerHTML = summary + html;
@@ -6300,8 +6291,7 @@ async function loadReorganizePreview() {
 }
 
 async function executeReorganize() {
-    const template = document.getElementById('reorganize-template-input')?.value?.trim();
-    if (!template || !_reorganizeAlbumId) return;
+    if (!_reorganizeAlbumId) return;
 
     const applyBtn = document.getElementById('reorganize-apply-btn');
     if (applyBtn) {
@@ -6310,16 +6300,20 @@ async function executeReorganize() {
     }
 
     try {
+        const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
         const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ template })
+            body: JSON.stringify({ source: chosenSource })
         });
         const result = await response.json();
         if (!result.success) throw new Error(result.error);
 
         closeReorganizeModal();
-        showToast(`Reorganizing ${result.total} tracks...`, 'info');
+        // /reorganize no longer returns `total` (track count is determined
+        // server-side after planning runs); use the message from the
+        // backend instead. kettui PR #377 review.
+        showToast(result.message || 'Reorganization started', 'info');
         _pollReorganizeStatus();
 
     } catch (error) {
@@ -6329,6 +6323,42 @@ async function executeReorganize() {
             applyBtn.textContent = 'Apply';
         }
     }
+}
+
+// kettui PR #377 review: distinguish 'completed' from non-completed
+// outcomes so zero-failure skips (no_source_id, no_album, no_tracks,
+// setup_failed, error) don't get a green checkmark.
+function _classifyReorganizeOutcome(state) {
+    const status = state.result_status;
+    if (status && status !== 'completed') return 'warning';
+    if (state.failed && state.failed > 0) return 'warning';
+    return 'success';
+}
+
+function _formatReorganizeResultMessage(state) {
+    const status = state.result_status;
+    if (status === 'no_source_id') {
+        return 'Reorganize skipped — album has no metadata source ID. Run enrichment first.';
+    }
+    if (status === 'no_album') {
+        return 'Reorganize skipped — album not found in DB.';
+    }
+    if (status === 'no_tracks') {
+        return 'Reorganize skipped — album has no tracks.';
+    }
+    if (status === 'setup_failed') {
+        return 'Reorganize failed — couldn\'t create staging directory.';
+    }
+    if (status === 'error') {
+        return 'Reorganize failed — see server logs for details.';
+    }
+    let msg = `Reorganized: ${state.moved || 0} moved`;
+    if (state.skipped > 0) msg += `, ${state.skipped} skipped`;
+    if (state.failed > 0) msg += `, ${state.failed} failed`;
+    if (state.failed > 0 && state.errors && state.errors.length > 0) {
+        msg += ` (${state.errors[0].error})`;
+    }
+    return msg;
 }
 
 function _pollReorganizeStatus() {
@@ -6344,13 +6374,7 @@ function _pollReorganizeStatus() {
                 showToast(`Reorganizing: ${state.processed}/${state.total} (${pct}%) — ${state.current_track}`, 'info');
                 _reorganizePollTimer = setTimeout(poll, 800);
             } else if (state.status === 'done') {
-                let msg = `Reorganized: ${state.moved} moved`;
-                if (state.skipped > 0) msg += `, ${state.skipped} skipped`;
-                if (state.failed > 0) msg += `, ${state.failed} failed`;
-                if (state.failed > 0 && state.errors && state.errors.length > 0) {
-                    msg += ` (${state.errors[0].error})`;
-                }
-                showToast(msg, state.failed > 0 ? 'warning' : 'success');
+                showToast(_formatReorganizeResultMessage(state), _classifyReorganizeOutcome(state));
                 _reorganizePollTimer = null;
 
                 // Refresh the enhanced view to show updated paths
@@ -6392,23 +6416,17 @@ async function _showReorganizeAllModal() {
 
     title.textContent = `Reorganize All Albums — ${artistName}`;
 
-    // Load saved template
-    let savedTemplate = '$albumartist/$albumartist - $album/$track - $title';
-    try {
-        const settingsResp = await fetch('/api/settings');
-        if (settingsResp.ok) {
-            const settings = await settingsResp.json();
-            savedTemplate = settings.file_organization?.templates?.album_path || savedTemplate;
-        }
-    } catch (_) { }
-
     let html = '<div class="reorganize-content">';
 
-    // Template input
-    html += '<div class="reorganize-template-section">';
-    html += '<label class="reorganize-label">Path Template</label>';
-    html += '<div class="reorganize-template-hint">This template will be applied to all albums below. Use <code>/</code> to separate folders.</div>';
-    html += `<input type="text" id="reorganize-template-input" class="reorganize-template-input" value="${savedTemplate.replace(/"/g, '&quot;')}" placeholder="$albumartist/$album/$track - $title" spellcheck="false">`;
+    // Source picker — applies to ALL albums in this run. Albums without
+    // an ID for the chosen source will be skipped at the backend with
+    // a clear status. Auto = use configured primary with fallback chain.
+    html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Metadata Source (applies to all albums)</label>';
+    html += '<div class="reorganize-template-hint">Pick which source to read tracklists from. Albums without an ID for that source will be skipped. Reorganize uses your global download template, same as fresh downloads.</div>';
+    html += '<select id="reorganize-source-select" class="reorganize-template-input">';
+    html += '<option value="">Use configured primary (auto)</option>';
+    html += '</select>';
     html += '</div>';
 
     // Album list
@@ -6434,17 +6452,29 @@ async function _showReorganizeAllModal() {
     }
 
     overlay.classList.remove('hidden');
+
+    // Populate the source dropdown from the global authed-sources endpoint
+    setTimeout(async () => {
+        const select = document.getElementById('reorganize-source-select');
+        if (!select) return;
+        try {
+            const resp = await fetch('/api/library/reorganize/sources');
+            if (!resp.ok) return;
+            const data = await resp.json();
+            (data.sources || []).forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.source;
+                opt.textContent = s.label || s.source;
+                select.appendChild(opt);
+            });
+        } catch (err) {
+            console.error('Failed to load reorganize sources:', err);
+        }
+    }, 50);
 }
 
 async function _executeReorganizeAll() {
     if (_reorganizeAllRunning) return;
-
-    const templateInput = document.getElementById('reorganize-template-input');
-    const template = templateInput ? templateInput.value.trim() : '';
-    if (!template) {
-        showToast('Template cannot be empty', 'error');
-        return;
-    }
 
     const albums = artistDetailPageState.enhancedData.albums || [];
     const total = albums.length;
@@ -6452,7 +6482,7 @@ async function _executeReorganizeAll() {
 
     const confirmed = await showConfirmDialog({
         title: 'Reorganize All Albums',
-        message: `This will reorganize ${total} album${total !== 1 ? 's' : ''} for ${artistName} using the template:\n\n${template}\n\nFiles will be moved and renamed. This cannot be undone.`,
+        message: `This will reorganize ${total} album${total !== 1 ? 's' : ''} for ${artistName} using your configured download template. Files will be moved and renamed. This cannot be undone.`,
         confirmText: 'Reorganize All',
         destructive: false,
     });
@@ -6466,7 +6496,10 @@ async function _executeReorganizeAll() {
     const overlay = document.getElementById('reorganize-overlay');
     if (overlay) overlay.classList.add('hidden');
 
-    let succeeded = 0, failed = 0;
+    // Source picker is captured ONCE before the loop — same source for every album
+    const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
+
+    let succeeded = 0, skipped = 0, failed = 0;
 
     for (let i = 0; i < total; i++) {
         const album = albums[i];
@@ -6476,7 +6509,7 @@ async function _executeReorganizeAll() {
             const resp = await fetch(`/api/library/album/${album.id}/reorganize`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ template }),
+                body: JSON.stringify({ source: chosenSource }),
             });
             const result = await resp.json();
             if (!result.success) {
@@ -6485,9 +6518,21 @@ async function _executeReorganizeAll() {
                 continue;
             }
 
-            // Wait for this album to finish
-            await _waitForReorganizeComplete();
-            succeeded++;
+            // kettui PR #377 review: don't count any HTTP-success as
+            // "succeeded" — check the final state's result_status.
+            // Albums with no source ID, no tracks, etc. complete the
+            // request but aren't actually reorganized.
+            const finalState = await _waitForReorganizeComplete();
+            if (finalState && finalState.result_status === 'completed' && (finalState.failed || 0) === 0) {
+                succeeded++;
+            } else if (finalState && finalState.result_status && finalState.result_status !== 'completed') {
+                skipped++;
+                showToast(`Skipped: ${album.title} — ${_formatReorganizeResultMessage(finalState)}`, 'warning');
+            } else {
+                // result_status === 'completed' but failed > 0 → partial
+                failed++;
+                showToast(`Partial: ${album.title} — ${_formatReorganizeResultMessage(finalState || {})}`, 'warning');
+            }
         } catch (err) {
             showToast(`Error: ${album.title} — ${err.message}`, 'error');
             failed++;
@@ -6495,8 +6540,9 @@ async function _executeReorganizeAll() {
     }
 
     let msg = `Reorganized ${succeeded} of ${total} album${total !== 1 ? 's' : ''}`;
-    if (failed > 0) msg += ` (${failed} failed)`;
-    showToast(msg, failed > 0 ? 'warning' : 'success');
+    if (skipped > 0) msg += `, ${skipped} skipped`;
+    if (failed > 0) msg += `, ${failed} failed`;
+    showToast(msg, (failed > 0 || skipped > 0) ? 'warning' : 'success');
 
     _reorganizeAllRunning = false;
     if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = 'Reorganize All'; }
@@ -6508,6 +6554,9 @@ async function _executeReorganizeAll() {
 }
 
 function _waitForReorganizeComplete() {
+    // Resolves with the final state object so the caller can inspect
+    // result_status / failed / errors instead of treating every
+    // completion as success (kettui PR #377 review).
     return new Promise(resolve => {
         const poll = setInterval(async () => {
             try {
@@ -6515,11 +6564,11 @@ function _waitForReorganizeComplete() {
                 const state = await resp.json();
                 if (state.status === 'done' || state.status === 'idle') {
                     clearInterval(poll);
-                    resolve();
+                    resolve(state);
                 }
             } catch {
                 clearInterval(poll);
-                resolve();
+                resolve(null);
             }
         }, 800);
     });
