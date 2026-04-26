@@ -2710,6 +2710,10 @@ function renderArtistMetaPanel(artist) {
     const headerRight = document.createElement('div');
     headerRight.className = 'enhanced-artist-meta-actions';
 
+    // Live reorganize-queue status — sits first so the user sees what's
+    // happening before any of the action buttons.
+    mountReorganizeStatusPanel(headerRight, String(artist.id));
+
     if (isEnhancedAdmin()) {
         const editToggle = document.createElement('button');
         editToggle.className = 'enhanced-meta-edit-toggle';
@@ -3272,6 +3276,7 @@ function renderExpandedAlbumHeader(album) {
         reorganizeBtn.className = 'enhanced-reorganize-album-btn';
         reorganizeBtn.innerHTML = '&#128193; Reorganize';
         reorganizeBtn.title = 'Reorganize album files using your configured download template';
+        reorganizeBtn.dataset.albumId = String(album.id);
         reorganizeBtn.onclick = (e) => { e.stopPropagation(); showReorganizeModal(album.id); };
         enrichRow.appendChild(reorganizeBtn);
 
@@ -6104,11 +6109,27 @@ function _pollBatchRgStatus() {
 }
 
 // ── Reorganize Album Files ──
+//
+// Click → enqueue → close modal. The reorganize queue worker (server-
+// side) processes items FIFO. The Reorganize Status panel mounted at
+// the top of the artist's enhanced-actions section is what surfaces
+// live progress — buttons no longer wait or lock.
 
 let _reorganizeAlbumId = null;
-let _reorganizePollTimer = null;
 
 async function showReorganizeModal(albumId) {
+    // Short-circuit if this album is already queued or running — opening
+    // the modal would be misleading (the apply click would just dedupe).
+    const queuedState = _reorganizeStateForAlbum(albumId);
+    if (queuedState) {
+        const label = queuedState === 'running' ? 'Reorganize already running for this album' : 'Album already queued for reorganize';
+        showToast(label, 'info');
+        if (typeof refreshReorganizeStatusPanel === 'function') {
+            refreshReorganizeStatusPanel();
+        }
+        return;
+    }
+
     _reorganizeAlbumId = albumId;
     const overlay = document.getElementById('reorganize-overlay');
     const body = document.getElementById('reorganize-modal-body');
@@ -6203,6 +6224,13 @@ async function loadReorganizePreview() {
     if (applyBtn) applyBtn.disabled = true;
     previewBody.innerHTML = '<div class="reorganize-preview-loading">Loading preview...</div>';
 
+    // Final apply-button state: only enable when the preview actually
+    // produced movable tracks AND no collisions blocked it. Any error
+    // path or empty result keeps it disabled. We compute it as we go and
+    // commit it in finally so an early return / throw can't leave the
+    // button stuck disabled forever.
+    let canApply = false;
+
     try {
         const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
         const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize/preview`, {
@@ -6282,11 +6310,12 @@ async function loadReorganizePreview() {
 
         previewBody.innerHTML = summary + html;
 
-        // Block apply if collisions exist
-        if (applyBtn) applyBtn.disabled = !hasChanges || hasCollisions;
+        canApply = hasChanges && !hasCollisions;
 
     } catch (error) {
         previewBody.innerHTML = `<div class="reorganize-preview-error">Error: ${escapeHtml(error.message)}</div>`;
+    } finally {
+        if (applyBtn) applyBtn.disabled = !canApply;
     }
 }
 
@@ -6296,8 +6325,11 @@ async function executeReorganize() {
     const applyBtn = document.getElementById('reorganize-apply-btn');
     if (applyBtn) {
         applyBtn.disabled = true;
-        applyBtn.textContent = 'Reorganizing...';
+        applyBtn.textContent = 'Queueing...';
     }
+
+    const albumTitle = document.getElementById('reorganize-modal-title')?.textContent
+        ?.replace(/^Reorganize:\s*/, '') || 'album';
 
     try {
         const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
@@ -6310,12 +6342,21 @@ async function executeReorganize() {
         if (!result.success) throw new Error(result.error);
 
         closeReorganizeModal();
-        // /reorganize no longer returns `total` (track count is determined
-        // server-side after planning runs); use the message from the
-        // backend instead. kettui PR #377 review.
-        showToast(result.message || 'Reorganization started', 'info');
-        _pollReorganizeStatus();
 
+        if (result.queued) {
+            const posLabel = result.position && result.position > 1 ? ` (#${result.position} in queue)` : '';
+            showToast(`Queued: ${albumTitle}${posLabel}`, 'info');
+        } else if (result.reason === 'already_queued') {
+            showToast(`Already queued: ${albumTitle}`, 'info');
+        } else {
+            showToast('Reorganize queued', 'info');
+        }
+
+        // Wake the status panel so the user sees the new item land
+        // immediately rather than waiting for the next poll tick.
+        if (typeof refreshReorganizeStatusPanel === 'function') {
+            refreshReorganizeStatusPanel();
+        }
     } catch (error) {
         showToast(`Reorganize failed: ${error.message}`, 'error');
         if (applyBtn) {
@@ -6361,39 +6402,7 @@ function _formatReorganizeResultMessage(state) {
     return msg;
 }
 
-function _pollReorganizeStatus() {
-    if (_reorganizePollTimer) clearTimeout(_reorganizePollTimer);
-
-    async function poll() {
-        try {
-            const response = await fetch('/api/library/album/reorganize/status');
-            const state = await response.json();
-
-            if (state.status === 'running') {
-                const pct = state.total > 0 ? Math.round(state.processed / state.total * 100) : 0;
-                showToast(`Reorganizing: ${state.processed}/${state.total} (${pct}%) — ${state.current_track}`, 'info');
-                _reorganizePollTimer = setTimeout(poll, 800);
-            } else if (state.status === 'done') {
-                showToast(_formatReorganizeResultMessage(state), _classifyReorganizeOutcome(state));
-                _reorganizePollTimer = null;
-
-                // Refresh the enhanced view to show updated paths
-                if (artistDetailPageState.currentArtistId && artistDetailPageState.enhancedView) {
-                    loadEnhancedViewData(artistDetailPageState.currentArtistId);
-                }
-            }
-        } catch (error) {
-            console.error('Poll reorganize status failed:', error);
-            _reorganizePollTimer = null;
-        }
-    }
-
-    _reorganizePollTimer = setTimeout(poll, 600);
-}
-
 // ── Reorganize All Albums for Artist ──
-
-let _reorganizeAllRunning = false;
 
 async function _showReorganizeAllModal() {
     if (!artistDetailPageState.enhancedData) {
@@ -6474,105 +6483,516 @@ async function _showReorganizeAllModal() {
 }
 
 async function _executeReorganizeAll() {
-    if (_reorganizeAllRunning) return;
-
-    const albums = artistDetailPageState.enhancedData.albums || [];
+    const albums = artistDetailPageState.enhancedData?.albums || [];
     const total = albums.length;
-    const artistName = artistDetailPageState.enhancedData.artist?.name || 'this artist';
+    const artistName = artistDetailPageState.enhancedData?.artist?.name || 'this artist';
+    const artistId = artistDetailPageState.currentArtistId;
+    if (!artistId) return;
 
     const confirmed = await showConfirmDialog({
         title: 'Reorganize All Albums',
-        message: `This will reorganize ${total} album${total !== 1 ? 's' : ''} for ${artistName} using your configured download template. Files will be moved and renamed. This cannot be undone.`,
-        confirmText: 'Reorganize All',
+        message: `This will queue ${total} album${total !== 1 ? 's' : ''} for ${artistName} using your configured download template. Files will be moved and renamed. This cannot be undone.`,
+        confirmText: 'Queue All',
         destructive: false,
     });
     if (!confirmed) return;
 
-    _reorganizeAllRunning = true;
     const applyBtn = document.getElementById('reorganize-apply-btn');
-    if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Working...'; }
+    if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Queueing...'; }
 
-    // Close modal
     const overlay = document.getElementById('reorganize-overlay');
     if (overlay) overlay.classList.add('hidden');
 
-    // Source picker is captured ONCE before the loop — same source for every album
+    // One source pick applies to every album in the batch.
     const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
 
-    let succeeded = 0, skipped = 0, failed = 0;
+    try {
+        const resp = await fetch(`/api/library/artist/${artistId}/reorganize-all`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: chosenSource }),
+        });
+        const result = await resp.json();
+        if (!result.success) throw new Error(result.error || 'Queue request failed');
 
-    for (let i = 0; i < total; i++) {
-        const album = albums[i];
-        showToast(`Reorganizing album ${i + 1}/${total}: ${album.title}`, 'info');
+        const enqueued = result.enqueued || 0;
+        const already = result.already_queued || 0;
+        if (enqueued > 0 && already > 0) {
+            showToast(`Queued ${enqueued} album${enqueued !== 1 ? 's' : ''}; ${already} already in queue`, 'info');
+        } else if (enqueued > 0) {
+            showToast(`Queued ${enqueued} album${enqueued !== 1 ? 's' : ''} for ${artistName}`, 'info');
+        } else if (already > 0) {
+            showToast(`All ${already} album${already !== 1 ? 's' : ''} already in queue`, 'info');
+        } else {
+            showToast('No albums to queue', 'warning');
+        }
 
-        try {
-            const resp = await fetch(`/api/library/album/${album.id}/reorganize`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source: chosenSource }),
+        if (typeof refreshReorganizeStatusPanel === 'function') {
+            refreshReorganizeStatusPanel();
+        }
+    } catch (err) {
+        showToast(`Reorganize-all failed: ${err.message}`, 'error');
+    } finally {
+        if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = 'Reorganize All'; }
+    }
+}
+
+
+// ── Reorganize Status Panel ──
+//
+// Lives at the start of `.enhanced-artist-meta-actions`. Polls the
+// queue snapshot endpoint and renders an at-a-glance summary plus an
+// expandable card list. Only visible when there's something to show
+// (active item, queued items, or recent completions).
+//
+// Cross-artist hint: items belonging to a different artist than the
+// page's current one are flagged so the user understands progress they
+// see refers to a separate batch.
+
+let _reorgPanelEl = null;
+let _reorgPanelArtistId = null;
+let _reorgPanelExpanded = false;
+let _reorgPanelTimer = null;
+let _reorgPanelLastSnapshot = null;
+let _reorgPanelInflight = false;
+
+const _REORG_PANEL_FAST_MS = 1500;
+const _REORG_PANEL_SLOW_MS = 8000;
+
+function mountReorganizeStatusPanel(container, artistId) {
+    if (!container) return;
+    // Tear down any panel left over from a previous artist view.
+    _stopReorganizeStatusPolling();
+
+    const panel = document.createElement('div');
+    panel.className = 'reorganize-status-panel hidden';
+    panel.id = 'reorganize-status-panel';
+    container.insertBefore(panel, container.firstChild);
+
+    _reorgPanelEl = panel;
+    _reorgPanelArtistId = artistId || null;
+    _reorgPanelExpanded = false;
+    _reorgPanelLastSnapshot = null;
+
+    // Defer the initial refresh: the caller (renderArtistMetaPanel) is
+    // still building the header in memory, so neither this panel nor
+    // its ancestor headerRight has been attached to document.body yet.
+    // refreshReorganizeStatusPanel guards on document.body.contains,
+    // so a synchronous call here would bail and kill polling forever.
+    // setTimeout 0 lets the call stack unwind so the parent appendChild
+    // runs before we check connectivity.
+    setTimeout(() => {
+        if (!_reorgPanelEl || !document.body.contains(_reorgPanelEl)) return;
+        refreshReorganizeStatusPanel();
+    }, 0);
+}
+
+function _stopReorganizeStatusPolling() {
+    if (_reorgPanelTimer) {
+        clearTimeout(_reorgPanelTimer);
+        _reorgPanelTimer = null;
+    }
+    _reorgPanelEl = null;
+    _reorgPanelLastSnapshot = null;
+}
+
+function _scheduleReorganizeStatusPoll(delayMs) {
+    if (_reorgPanelTimer) clearTimeout(_reorgPanelTimer);
+    _reorgPanelTimer = setTimeout(() => {
+        _reorgPanelTimer = null;
+        refreshReorganizeStatusPanel();
+    }, delayMs);
+}
+
+async function refreshReorganizeStatusPanel() {
+    // The panel may have been unmounted (user navigated away from
+    // enhanced view); detect by checking it's still in the document.
+    if (!_reorgPanelEl || !document.body.contains(_reorgPanelEl)) {
+        _stopReorganizeStatusPolling();
+        return;
+    }
+    if (_reorgPanelInflight) return;
+    _reorgPanelInflight = true;
+
+    let snapshot = null;
+    try {
+        const resp = await fetch('/api/library/reorganize/queue');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.success !== false) snapshot = data;
+        } else {
+            console.warn('Reorganize queue snapshot HTTP', resp.status);
+        }
+    } catch (err) {
+        // Network blip — keep showing the last snapshot, retry slowly.
+        console.warn('Reorganize queue snapshot failed:', err);
+    } finally {
+        _reorgPanelInflight = false;
+    }
+
+    if (snapshot) _reorgPanelLastSnapshot = snapshot;
+    _renderReorganizeStatusPanel(_reorgPanelLastSnapshot);
+
+    // Reschedule. Fast cadence while there's actually work in flight,
+    // slow when the queue is empty so we're not hammering the endpoint.
+    if (_reorgPanelEl && document.body.contains(_reorgPanelEl)) {
+        const active = _reorgPanelLastSnapshot?.active;
+        const queued = _reorgPanelLastSnapshot?.queued?.length || 0;
+        const next = (active || queued > 0) ? _REORG_PANEL_FAST_MS : _REORG_PANEL_SLOW_MS;
+        _scheduleReorganizeStatusPoll(next);
+    }
+}
+
+function _renderReorganizeStatusPanel(snapshot) {
+    const panel = _reorgPanelEl;
+    if (!panel) return;
+    if (!snapshot) {
+        panel.classList.add('hidden');
+        return;
+    }
+    const active = snapshot.active;
+    const queued = snapshot.queued || [];
+    const recent = snapshot.recent || [];
+
+    // Show if anything is active/queued, OR a recent completion landed
+    // within the last 20 seconds (so the user sees the result).
+    const cutoffSec = (Date.now() / 1000) - 20;
+    const recentVisible = recent.filter(r => (r.finished_at || 0) >= cutoffSec);
+
+    if (!active && queued.length === 0 && recentVisible.length === 0) {
+        panel.classList.add('hidden');
+        panel.innerHTML = '';
+        _paintQueuedAlbumButtons(snapshot);
+        return;
+    }
+    panel.classList.remove('hidden');
+
+    // Compact summary (always visible). Click to toggle expand.
+    let html = '<div class="reorg-panel-compact" onclick="toggleReorganizeStatusPanel()">';
+    html += '<div class="reorg-panel-compact-left">';
+
+    if (active) {
+        const total = active.progress_total || 0;
+        const done = active.progress_processed || 0;
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        const trackBit = active.current_track ? ` — ${escapeHtml(active.current_track)}` : '';
+        const albumLabel = _reorgPanelDisplayLabel(active);
+        html += `<span class="reorg-panel-spinner"></span>`;
+        html += `<span class="reorg-panel-active-text">Reorganizing <strong>${escapeHtml(albumLabel)}</strong>`;
+        if (total > 0) html += ` (${done}/${total} · ${pct}%)`;
+        html += `${trackBit}</span>`;
+    } else if (queued.length > 0) {
+        html += `<span class="reorg-panel-spinner"></span>`;
+        html += `<span class="reorg-panel-active-text">Reorganize queue starting…</span>`;
+    } else {
+        // Only recent items remain — give a quick wrap-up summary.
+        const failed = recentVisible.filter(r => r.status === 'failed').length;
+        const done = recentVisible.filter(r => r.status === 'done').length;
+        const cls = failed > 0 ? 'recent-warn' : 'recent-ok';
+        html += `<span class="reorg-panel-recent-icon ${cls}"></span>`;
+        const parts = [];
+        if (done > 0) parts.push(`${done} reorganized`);
+        if (failed > 0) parts.push(`${failed} failed`);
+        html += `<span class="reorg-panel-active-text">${parts.join(', ') || 'Recent activity'}</span>`;
+    }
+    html += '</div>';
+
+    // Right: queue count badge + expand chevron.
+    html += '<div class="reorg-panel-compact-right">';
+    if (queued.length > 0) {
+        html += `<span class="reorg-panel-queue-badge" title="${queued.length} waiting in queue">+${queued.length} queued</span>`;
+    }
+    const chev = _reorgPanelExpanded ? '▾' : '▸';
+    html += `<span class="reorg-panel-chevron">${chev}</span>`;
+    html += '</div>';
+    html += '</div>';
+
+    if (_reorgPanelExpanded) {
+        html += '<div class="reorg-panel-expanded">';
+
+        // Active card
+        if (active) {
+            html += _reorgPanelRenderActiveCard(active);
+        }
+
+        // Queued list
+        if (queued.length > 0) {
+            html += '<div class="reorg-panel-section-header">';
+            html += `<span>Queued (${queued.length})</span>`;
+            html += `<button class="reorg-panel-clear-btn" onclick="clearReorganizeQueue(event)">Cancel All</button>`;
+            html += '</div>';
+            html += '<div class="reorg-panel-list">';
+            queued.forEach((item, idx) => {
+                html += _reorgPanelRenderQueuedRow(item, idx + 1);
             });
-            const result = await resp.json();
-            if (!result.success) {
-                showToast(`Failed: ${album.title} — ${result.error || 'unknown error'}`, 'error');
-                failed++;
-                continue;
-            }
+            html += '</div>';
+        }
 
-            // kettui PR #377 review: don't count any HTTP-success as
-            // "succeeded" — check the final state's result_status.
-            // Albums with no source ID, no tracks, etc. complete the
-            // request but aren't actually reorganized.
-            const finalState = await _waitForReorganizeComplete();
-            if (finalState && finalState.result_status === 'completed' && (finalState.failed || 0) === 0) {
-                succeeded++;
-            } else if (finalState && finalState.result_status && finalState.result_status !== 'completed') {
-                skipped++;
-                showToast(`Skipped: ${album.title} — ${_formatReorganizeResultMessage(finalState)}`, 'warning');
-            } else {
-                // result_status === 'completed' but failed > 0 → partial
-                failed++;
-                showToast(`Partial: ${album.title} — ${_formatReorganizeResultMessage(finalState || {})}`, 'warning');
+        // Recent
+        if (recentVisible.length > 0) {
+            html += `<div class="reorg-panel-section-header"><span>Recent</span></div>`;
+            html += '<div class="reorg-panel-list">';
+            recentVisible.slice(0, 6).forEach(item => {
+                html += _reorgPanelRenderRecentRow(item);
+            });
+            html += '</div>';
+        }
+
+        html += '</div>';
+    }
+
+    panel.innerHTML = html;
+
+    // Mark per-album reorganize buttons so users see at-a-glance which
+    // albums are already in the queue without opening the modal.
+    _paintQueuedAlbumButtons(snapshot);
+
+    // If the active item just transitioned to a recent done/failed
+    // entry, refresh the enhanced view so the new on-disk paths show.
+    _maybeReloadEnhancedAfterCompletion(snapshot);
+}
+
+function _reorganizeStateForAlbum(albumId) {
+    const snap = _reorgPanelLastSnapshot;
+    if (!snap) return null;
+    const id = String(albumId);
+    if (snap.active && String(snap.active.album_id) === id) return 'running';
+    if ((snap.queued || []).some(q => String(q.album_id) === id)) return 'queued';
+    return null;
+}
+
+function _paintQueuedAlbumButtons(snapshot) {
+    const queuedIds = new Set();
+    const runningIds = new Set();
+    if (snapshot?.active) runningIds.add(String(snapshot.active.album_id));
+    (snapshot?.queued || []).forEach(q => queuedIds.add(String(q.album_id)));
+
+    document.querySelectorAll('.enhanced-reorganize-album-btn[data-album-id]').forEach(btn => {
+        const id = btn.dataset.albumId;
+        if (runningIds.has(id)) {
+            btn.classList.add('reorg-state-running');
+            btn.classList.remove('reorg-state-queued');
+            btn.title = 'Reorganize already running for this album';
+        } else if (queuedIds.has(id)) {
+            btn.classList.add('reorg-state-queued');
+            btn.classList.remove('reorg-state-running');
+            btn.title = 'Album already queued for reorganize';
+        } else {
+            btn.classList.remove('reorg-state-queued', 'reorg-state-running');
+            btn.title = 'Reorganize album files using your configured download template';
+        }
+    });
+}
+
+function _reorgPanelDisplayLabel(item) {
+    if (!item) return '';
+    if (_reorgPanelArtistId && item.artist_id && String(item.artist_id) !== _reorgPanelArtistId) {
+        return `${item.album_title || 'Unknown album'} (${item.artist_name || 'other artist'})`;
+    }
+    return item.album_title || 'Unknown album';
+}
+
+function _reorgPanelRenderActiveCard(active) {
+    const total = active.progress_total || 0;
+    const done = active.progress_processed || 0;
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    const crossArtist = _reorgPanelArtistId && active.artist_id && String(active.artist_id) !== _reorgPanelArtistId;
+
+    let h = '<div class="reorg-panel-active-card">';
+    h += `<div class="reorg-panel-active-title">${escapeHtml(active.album_title || 'Unknown album')}`;
+    if (crossArtist) {
+        h += ` <span class="reorg-panel-cross-artist">${escapeHtml(active.artist_name || 'other artist')}</span>`;
+    }
+    h += '</div>';
+    h += '<div class="reorg-panel-progress-track">';
+    h += `<div class="reorg-panel-progress-fill" style="width:${pct}%"></div>`;
+    h += '</div>';
+    h += '<div class="reorg-panel-active-meta">';
+    if (total > 0) {
+        h += `<span>${done}/${total}</span>`;
+    }
+    if (active.current_track) {
+        h += `<span class="reorg-panel-current-track">${escapeHtml(active.current_track)}</span>`;
+    }
+    h += '<span class="reorg-panel-counters">';
+    h += `<span class="ok">${active.moved || 0} moved</span>`;
+    if ((active.skipped || 0) > 0) h += `<span class="warn">${active.skipped} skipped</span>`;
+    if ((active.failed || 0) > 0) h += `<span class="fail">${active.failed} failed</span>`;
+    h += '</span>';
+    h += '</div>';
+    h += '</div>';
+    return h;
+}
+
+function _reorgPanelRenderQueuedRow(item, position) {
+    const crossArtist = _reorgPanelArtistId && item.artist_id && String(item.artist_id) !== _reorgPanelArtistId;
+    let h = '<div class="reorg-panel-row queued-row">';
+    h += `<span class="reorg-panel-row-pos">#${position}</span>`;
+    h += '<div class="reorg-panel-row-body">';
+    h += `<div class="reorg-panel-row-title">${escapeHtml(item.album_title || 'Unknown album')}</div>`;
+    if (crossArtist) {
+        h += `<div class="reorg-panel-row-sub">${escapeHtml(item.artist_name || 'other artist')}</div>`;
+    } else if (item.source) {
+        h += `<div class="reorg-panel-row-sub">via ${escapeHtml(item.source)}</div>`;
+    }
+    h += '</div>';
+    h += `<button class="reorg-panel-cancel-btn" title="Cancel" onclick="cancelReorganizeQueueItem('${item.queue_id}', event)">×</button>`;
+    h += '</div>';
+    return h;
+}
+
+function _reorgPanelRenderRecentRow(item) {
+    const crossArtist = _reorgPanelArtistId && item.artist_id && String(item.artist_id) !== _reorgPanelArtistId;
+    const tone = _classifyReorganizeOutcome({
+        result_status: item.result_status,
+        failed: item.failed,
+    });
+    const cls = item.status === 'cancelled' ? 'cancelled' : tone;
+    let h = `<div class="reorg-panel-row recent-row ${cls}">`;
+    h += `<span class="reorg-panel-row-icon ${cls}"></span>`;
+    h += '<div class="reorg-panel-row-body">';
+    h += `<div class="reorg-panel-row-title">${escapeHtml(item.album_title || 'Unknown album')}</div>`;
+    let sub;
+    if (item.status === 'cancelled') {
+        sub = 'Cancelled';
+    } else {
+        sub = _formatReorganizeResultMessage({
+            result_status: item.result_status,
+            moved: item.moved,
+            skipped: item.skipped,
+            failed: item.failed,
+            errors: item.error ? [{ error: item.error }] : [],
+        });
+    }
+    if (crossArtist) sub = `${escapeHtml(item.artist_name || 'other artist')} — ${sub}`;
+    h += `<div class="reorg-panel-row-sub">${escapeHtml(sub)}</div>`;
+    h += '</div></div>';
+    return h;
+}
+
+function toggleReorganizeStatusPanel() {
+    _reorgPanelExpanded = !_reorgPanelExpanded;
+    _renderReorganizeStatusPanel(_reorgPanelLastSnapshot);
+}
+
+async function cancelReorganizeQueueItem(queueId, event) {
+    if (event) event.stopPropagation();
+    if (!queueId) return;
+    try {
+        const resp = await fetch(`/api/library/reorganize/queue/${encodeURIComponent(queueId)}/cancel`, {
+            method: 'POST',
+        });
+        const data = await resp.json();
+        if (data.cancelled) {
+            showToast('Cancelled queued item', 'info');
+        } else if (data.reason === 'running_cant_cancel') {
+            showToast('Already running — too late to cancel', 'warning');
+        } else {
+            showToast('Could not cancel item', 'warning');
+        }
+    } catch (err) {
+        showToast(`Cancel failed: ${err.message}`, 'error');
+    }
+    refreshReorganizeStatusPanel();
+}
+
+async function clearReorganizeQueue(event) {
+    if (event) event.stopPropagation();
+    const queued = _reorgPanelLastSnapshot?.queued?.length || 0;
+    if (queued === 0) return;
+    const confirmed = await showConfirmDialog({
+        title: 'Cancel All Queued',
+        message: `Cancel ${queued} queued reorganize${queued !== 1 ? 's' : ''}? The currently-running item will continue.`,
+        confirmText: 'Cancel All',
+        destructive: true,
+    });
+    if (!confirmed) return;
+    try {
+        const resp = await fetch('/api/library/reorganize/queue/clear', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(`Cancelled ${data.cancelled} queued item${data.cancelled !== 1 ? 's' : ''}`, 'info');
+        }
+    } catch (err) {
+        showToast(`Clear failed: ${err.message}`, 'error');
+    }
+    refreshReorganizeStatusPanel();
+}
+
+let _reorgPanelLastActiveId = null;
+let _reorgPanelPendingReload = false;
+let _reorgPanelReloadTimer = null;
+
+function _maybeReloadEnhancedAfterCompletion(snapshot) {
+    // When an item completes for the artist on screen, the moved file
+    // paths need to be re-rendered in the enhanced view. Two failure
+    // modes to avoid:
+    //   1. Reloading mid-batch — a 20-album "Reorganize All" would
+    //      otherwise fire 20 sequential /api/library/artist/X/enhanced
+    //      calls + 20 full re-renders, hammering the server.
+    //   2. Never reloading — if we wait for queue idle but more items
+    //      keep arriving, the user never sees the freshly-moved paths.
+    //
+    // Strategy: mark a reload as pending whenever a completion lands
+    // for our artist. Defer the reload until the queue is fully idle
+    // for that artist (no active item, nothing queued) — that's the
+    // natural "batch finished" boundary. Use a 1.5s timer reset on
+    // every snapshot so we don't fire while the worker is still
+    // between items.
+    const active = snapshot?.active;
+    const recent = snapshot?.recent || [];
+    const queued = snapshot?.queued || [];
+
+    // Detect a fresh completion (recent-top is a new queue_id we
+    // hadn't seen as 'active' before) for our artist.
+    if (active) {
+        _reorgPanelLastActiveId = active.queue_id;
+    } else if (_reorgPanelLastActiveId && recent.length > 0) {
+        const recentTop = recent[0];
+        if (recentTop.queue_id === _reorgPanelLastActiveId) {
+            const finishedRecently = (recentTop.finished_at || 0) >= ((Date.now() / 1000) - 10);
+            const sameArtist = _reorgPanelArtistId &&
+                recentTop.artist_id && String(recentTop.artist_id) === _reorgPanelArtistId;
+            if (finishedRecently && sameArtist) {
+                _reorgPanelPendingReload = true;
             }
-        } catch (err) {
-            showToast(`Error: ${album.title} — ${err.message}`, 'error');
-            failed++;
+            _reorgPanelLastActiveId = null;
         }
     }
 
-    let msg = `Reorganized ${succeeded} of ${total} album${total !== 1 ? 's' : ''}`;
-    if (skipped > 0) msg += `, ${skipped} skipped`;
-    if (failed > 0) msg += `, ${failed} failed`;
-    showToast(msg, (failed > 0 || skipped > 0) ? 'warning' : 'success');
+    if (!_reorgPanelPendingReload) return;
 
-    _reorganizeAllRunning = false;
-    if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = 'Reorganize All'; }
+    // Hold the reload until the queue is fully idle for our artist.
+    const stillBusyForOurArtist = active &&
+        _reorgPanelArtistId &&
+        active.artist_id && String(active.artist_id) === _reorgPanelArtistId;
+    const queuedForOurArtist = queued.some(q =>
+        _reorgPanelArtistId && q.artist_id && String(q.artist_id) === _reorgPanelArtistId
+    );
 
-    // Refresh enhanced view
-    if (artistDetailPageState.currentArtistId && artistDetailPageState.enhancedView) {
-        loadEnhancedViewData(artistDetailPageState.currentArtistId);
+    if (stillBusyForOurArtist || queuedForOurArtist) {
+        // More work coming for this artist — keep the pending flag,
+        // don't reload yet. Cancel any already-armed timer.
+        if (_reorgPanelReloadTimer) {
+            clearTimeout(_reorgPanelReloadTimer);
+            _reorgPanelReloadTimer = null;
+        }
+        return;
     }
+
+    // Queue is idle for our artist. Arm a debounced reload — the
+    // 1.5s gap absorbs the brief window between worker items so a
+    // back-to-back batch doesn't trigger mid-flight.
+    if (_reorgPanelReloadTimer) clearTimeout(_reorgPanelReloadTimer);
+    _reorgPanelReloadTimer = setTimeout(() => {
+        _reorgPanelReloadTimer = null;
+        _reorgPanelPendingReload = false;
+        if (artistDetailPageState.currentArtistId && artistDetailPageState.enhancedView) {
+            loadEnhancedViewData(artistDetailPageState.currentArtistId);
+        }
+    }, 1500);
 }
 
-function _waitForReorganizeComplete() {
-    // Resolves with the final state object so the caller can inspect
-    // result_status / failed / errors instead of treating every
-    // completion as success (kettui PR #377 review).
-    return new Promise(resolve => {
-        const poll = setInterval(async () => {
-            try {
-                const resp = await fetch('/api/library/album/reorganize/status');
-                const state = await resp.json();
-                if (state.status === 'done' || state.status === 'idle') {
-                    clearInterval(poll);
-                    resolve(state);
-                }
-            } catch {
-                clearInterval(poll);
-                resolve(null);
-            }
-        }, 800);
-    });
-}
 
 async function playLibraryTrack(track, albumTitle, artistName) {
     if (!track.file_path) {

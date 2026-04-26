@@ -5,10 +5,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>SoulSync - Music Sync & Manager</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css') }}">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
 </head>
 
 <body>
@@ -7860,27 +7860,27 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/socket.io.min.js', v=static_v) }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-    <script src="{{ url_for('static', filename='setup-wizard.js') }}"></script>
+    <script src="{{ url_for('static', filename='setup-wizard.js', v=static_v) }}"></script>
     <!-- Split modules (was: script.js) — core.js must load first, init.js last -->
-    <script src="{{ url_for('static', filename='core.js') }}"></script>
-    <script src="{{ url_for('static', filename='shared-helpers.js') }}"></script>
-    <script src="{{ url_for('static', filename='media-player.js') }}"></script>
-    <script src="{{ url_for('static', filename='settings.js') }}"></script>
-    <script src="{{ url_for('static', filename='search.js') }}"></script>
-    <script src="{{ url_for('static', filename='sync-spotify.js') }}"></script>
-    <script src="{{ url_for('static', filename='downloads.js') }}"></script>
-    <script src="{{ url_for('static', filename='wishlist-tools.js') }}"></script>
-    <script src="{{ url_for('static', filename='sync-services.js') }}"></script>
-    <script src="{{ url_for('static', filename='api-monitor.js') }}"></script>
-    <script src="{{ url_for('static', filename='library.js') }}"></script>
-    <script src="{{ url_for('static', filename='beatport-ui.js') }}"></script>
-    <script src="{{ url_for('static', filename='discover.js') }}"></script>
-    <script src="{{ url_for('static', filename='enrichment.js') }}"></script>
-    <script src="{{ url_for('static', filename='stats-automations.js') }}"></script>
-    <script src="{{ url_for('static', filename='pages-extra.js') }}"></script>
-    <script src="{{ url_for('static', filename='init.js') }}"></script>
+    <script src="{{ url_for('static', filename='core.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='shared-helpers.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='media-player.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='settings.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='search.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='sync-spotify.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='library.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='discover.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='enrichment.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='stats-automations.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->
     <!-- Ambient glow under the global search bar. Radial gradient, brightest
          directly under the bar, tapering out toward the window corners.
@@ -7963,10 +7963,10 @@
         <span>?</span>
     </button>
 
-    <script src="{{ url_for('static', filename='docs.js') }}"></script>
-    <script src="{{ url_for('static', filename='helper.js') }}"></script>
-    <script src="{{ url_for('static', filename='particles.js') }}"></script>
-    <script src="{{ url_for('static', filename='worker-orbs.js') }}"></script>
+    <script src="{{ url_for('static', filename='docs.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='helper.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='particles.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='worker-orbs.js', v=static_v) }}"></script>
 </body>
 
 </html>
