@@ -996,6 +996,11 @@ async function loadSettingsData() {
             const requirePin = settings.security?.require_pin_on_launch || false;
             document.getElementById('security-require-pin').checked = requirePin;
 
+            // CORS origins — stored verbatim as the user typed (string).
+            const corsOrigins = settings.security?.cors_origins || '';
+            const corsField = document.getElementById('security-cors-origins');
+            if (corsField) corsField.value = corsOrigins;
+
             // Check if admin has a PIN set
             const profilesRes = await fetch('/api/profiles');
             const profilesData = await profilesRes.json();
@@ -2587,6 +2592,7 @@ async function saveSettings(quiet = false) {
         },
         security: {
             require_pin_on_launch: document.getElementById('security-require-pin')?.checked || false,
+            cors_origins: document.getElementById('security-cors-origins')?.value?.trim() || '',
         }
     };
 

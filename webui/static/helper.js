@@ -3441,6 +3441,11 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.4.1': [
+        // --- post-2.4.0 dev work — entries hidden by _getLatestWhatsNewVersion until the build version bumps ---
+        { date: 'Unreleased — 2.4.1 dev cycle' },
+        { title: 'Lock Down Socket.IO CORS', desc: 'socket.io was accepting websocket connections from any origin (cors=*). now defaults to same-origin only. if your websocket fails after updating, the server logs a clear warning with the rejected origin — add it to settings → security → allowed websocket origins.', page: 'settings' },
+    ],
     '2.4.0': [
         // --- April 26, 2026 — Search & Artists unification + reorganize queue ---
         { date: 'April 26, 2026 — 2.4.0 release' },
