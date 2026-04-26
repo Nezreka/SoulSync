@@ -187,29 +187,9 @@ function applyReduceEffects(enabled) {
 // ── Profile System ─────────────────────────────────────────────
 let currentProfile = null;
 
-// Normalize legacy allowed_pages entries so the profile edit forms (which are
-// built from the new pageLabels map containing 'search') don't drop access
-// when saving a profile that was stored before the Search page rename.
-// 'downloads' was the old Search id, 'artists' was the retired inline page.
-function _normalizeLegacyAllowedPages(pages) {
-    if (!Array.isArray(pages)) return pages;
-    const mapped = pages.map(id => (id === 'downloads' || id === 'artists') ? 'search' : id);
-    return [...new Set(mapped)];
-}
-
-function _normalizeLegacyHomePage(homePage) {
-    if (homePage === 'downloads' || homePage === 'artists') return 'search';
-    return homePage;
-}
-
 function getProfileHomePage() {
     if (!currentProfile) return 'dashboard';
-    // Legacy profiles stored the Search page as either 'downloads' (the old id
-    // before the rename) or 'artists' (the retired inline Artists page).
-    // Both fold into the unified Search page now.
-    let home = currentProfile.home_page;
-    if (home === 'downloads' || home === 'artists') home = 'search';
-    if (home) return home;
+    if (currentProfile.home_page) return currentProfile.home_page;
     return currentProfile.is_admin ? 'dashboard' : 'discover';
 }
 
@@ -219,22 +199,13 @@ function isPageAllowed(pageId) {
     if (pageId === 'help' || pageId === 'issues') return true;
     if (pageId === 'settings') return currentProfile.is_admin;
     if (pageId === 'artist-detail') {
-        // artist-detail is reachable from both Library and Search results, so
-        // either grant unlocks it. Without this, a Search-only profile couldn't
-        // open a source artist, and a legacy artists-only profile would hit the
-        // home-redirect recursion path below.
         const ap = currentProfile.allowed_pages;
         if (!ap) return true;
-        return ap.includes('library') || ap.includes('search')
-            || ap.includes('downloads') || ap.includes('artists');
+        return ap.includes('library') || ap.includes('search');
     }
     const ap = currentProfile.allowed_pages;
     if (!ap) return true; // null = all pages
     if (ap.includes(pageId)) return true;
-    // Legacy compat: 'downloads' (old Search id) and 'artists' (retired inline
-    // Artists page) both fold into the unified 'search' page.
-    if (pageId === 'search' && (ap.includes('downloads') || ap.includes('artists'))) return true;
-    if ((pageId === 'downloads' || pageId === 'artists') && ap.includes('search')) return true;
     return false;
 }
 
@@ -243,6 +214,136 @@ function canDownload() {
     if (currentProfile.id === 1) return true;
     return currentProfile.can_download !== false && currentProfile.can_download !== 0;
 }
+
+function getCurrentProfileContext() {
+    if (!currentProfile) return null;
+    return {
+        profileId: currentProfile.id,
+        isAdmin: !!currentProfile.is_admin,
+    };
+}
+
+function getWebRouter() {
+    return window.SoulSyncWebRouter ?? null;
+}
+
+function showLegacyPage(pageId) {
+    document.querySelectorAll('.page').forEach(page => {
+        page.classList.remove('active');
+    });
+    const page = document.getElementById(`${pageId}-page`);
+    if (page) {
+        page.classList.add('active');
+    }
+    const reactHost = document.getElementById('webui-react-root');
+    if (reactHost) {
+        reactHost.classList.remove('active');
+    }
+}
+
+function setActivePageChrome(pageId) {
+    document.querySelectorAll('.nav-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const navButton = document.querySelector(`[data-page="${pageId}"]`);
+    if (navButton) {
+        navButton.classList.add('active');
+    } else if (pageId === 'artist-detail') {
+        // Artist detail is a Library context, so keep the sidebar anchored there.
+        const libraryBtn = document.querySelector('[data-page="library"]');
+        if (libraryBtn) {
+            libraryBtn.classList.add('active');
+        }
+    }
+    currentPage = pageId;
+    if (typeof _updateSidebarLibraryBreadcrumb === 'function') _updateSidebarLibraryBreadcrumb();
+    if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
+    const downloadSidebar = document.getElementById('discover-download-sidebar');
+    if (downloadSidebar) {
+        if (pageId === 'discover') {
+            const activeDownloads = typeof discoverDownloads !== 'undefined'
+                ? Object.keys(discoverDownloads).length
+                : 0;
+            if (activeDownloads > 0 && typeof updateDiscoverDownloadBar === 'function') {
+                updateDiscoverDownloadBar();
+            }
+        } else {
+            downloadSidebar.classList.add('hidden');
+        }
+    }
+    if (window.pageParticles && window._particlesEnabled !== false) window.pageParticles.setPage(pageId);
+    if (window.workerOrbs) window.workerOrbs.setPage(pageId);
+}
+
+function showReactHost(pageId) {
+    document.querySelectorAll('.page').forEach(page => {
+        page.classList.remove('active');
+    });
+    const host = document.getElementById('webui-react-root');
+    if (host) {
+        host.classList.add('active');
+    }
+    currentPage = pageId;
+    if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
+    if (window.pageParticles && window._particlesEnabled !== false) window.pageParticles.setPage(pageId);
+    if (window.workerOrbs) window.workerOrbs.setPage(pageId);
+}
+
+function activatePage(pageId, options = {}) {
+    const forceReload = options.forceReload === true;
+    const pageElement = document.getElementById(`${pageId}-page`);
+    const isPageVisible = pageElement ? pageElement.classList.contains('active') : false;
+
+    if (!forceReload && pageId === currentPage && isPageVisible) return;
+
+    showLegacyPage(pageId);
+    setActivePageChrome(pageId);
+    loadPageData(pageId);
+}
+
+function activateLegacyPath(pathname) {
+    const router = getWebRouter();
+    const targetPage = router?.resolvePageId?.(pathname) || _getPageFromPath(pathname);
+    if (!targetPage) return;
+
+    if (!isPageAllowed(targetPage)) {
+        const home = getProfileHomePage();
+        if (home !== targetPage) {
+            navigateToPage(home, { replace: true });
+        }
+        return;
+    }
+
+    activatePage(targetPage, { forceReload: true });
+}
+
+const SHELL_BRIDGE_READY_EVENT = 'ss:webui-shell-bridge-ready';
+
+window.SoulSyncWebShellBridge = {
+    getCurrentPageId() {
+        return currentPage || getWebRouter()?.resolvePageId?.(window.location.pathname) || _getPageFromPath();
+    },
+    getCurrentProfileContext() {
+        return getCurrentProfileContext();
+    },
+    isPageAllowed(pageId) {
+        return isPageAllowed(pageId);
+    },
+    getProfileHomePage() {
+        return getProfileHomePage();
+    },
+    setActivePageChrome(pageId) {
+        setActivePageChrome(pageId);
+    },
+    activateLegacyPath(pathname) {
+        activateLegacyPath(pathname);
+    },
+    showReactHost(pageId) {
+        showReactHost(pageId);
+    },
+};
+
+window.dispatchEvent(new CustomEvent(SHELL_BRIDGE_READY_EVENT));
 
 function renderProfileAvatar(el, profile) {
     // Renders avatar as image (if avatar_url set) or colored initial fallback
@@ -1597,8 +1698,6 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     const isAdmin = currentProfile && currentProfile.is_admin;
     const isEditingAdmin = profileSettings.is_admin;
     const editColors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#14b8a6'];
-    // 'search' replaces the legacy 'downloads'/'artists' ids; legacy values are
-    // normalized on read below so saving a legacy profile upgrades it.
     const pageLabels = {
         dashboard: 'Dashboard', sync: 'Sync', search: 'Search', discover: 'Discover',
         automations: 'Automations', library: 'Library', stats: 'Listening Stats',
@@ -1653,10 +1752,8 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     defaultOpt.value = '';
     defaultOpt.textContent = isEditingAdmin ? 'Default (Dashboard)' : 'Default (Discover)';
     homeSelect.appendChild(defaultOpt);
-    // Normalize legacy ids so the form shows the right options/selection for
-    // profiles saved before the Search page rename.
-    const allowedSet = _normalizeLegacyAllowedPages(profileSettings.allowed_pages);
-    const normalizedHome = _normalizeLegacyHomePage(profileSettings.home_page);
+    const allowedSet = profileSettings.allowed_pages;
+    const normalizedHome = profileSettings.home_page;
     Object.entries(pageLabels).forEach(([id, label]) => {
         if (allowedSet && !allowedSet.includes(id)) return; // Skip non-permitted
         const opt = document.createElement('option');
@@ -1787,8 +1884,6 @@ function showSelfEditForm() {
     const existing = document.getElementById('self-edit-form');
     if (existing) existing.remove();
 
-    // 'search' replaces the legacy 'downloads'/'artists' ids; legacy values are
-    // normalized on read below so saving a legacy profile upgrades it.
     const pageLabels = {
         dashboard: 'Dashboard', sync: 'Sync', search: 'Search', discover: 'Discover',
         automations: 'Automations', library: 'Library', stats: 'Listening Stats',
@@ -1826,10 +1921,8 @@ function showSelfEditForm() {
     defaultOpt.value = '';
     defaultOpt.textContent = 'Default (Discover)';
     homeSelect.appendChild(defaultOpt);
-    // Normalize legacy ids so the form shows the right options/selection for
-    // profiles saved before the Search page rename.
-    const ap = _normalizeLegacyAllowedPages(currentProfile.allowed_pages);
-    const normalizedHome = _normalizeLegacyHomePage(currentProfile.home_page);
+    const ap = currentProfile.allowed_pages;
+    const normalizedHome = currentProfile.home_page;
     Object.entries(pageLabels).forEach(([id, label]) => {
         if (ap && !ap.includes(id)) return;
         const opt = document.createElement('option');
@@ -2037,22 +2130,20 @@ function initializeNavigation() {
         });
     });
 
-    window.addEventListener('popstate', (event) => {
-        const page = (event.state && event.state.page) || _getPageFromPath();
-        if (page && page !== currentPage) {
-            navigateToPage(page, { skipPushState: true });
-        }
-    });
 }
 
 const _DEEPLINK_VALID_PAGES = new Set([
-    'dashboard', 'sync', 'search', 'downloads', 'discover', 'artists', 'automations',
+    'dashboard', 'sync', 'search', 'discover', 'automations',
     'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
     'hydrabase', 'tools'
 ]);
 
 function _getPageFromPath() {
+    const router = getWebRouter();
+    const resolved = router?.resolvePageId?.(window.location.pathname);
+    if (resolved) return resolved;
+
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
     if (!path) return 'dashboard';
     const basePage = path.split('/')[0];
@@ -2163,95 +2254,38 @@ function initializeWatchlist() {
 }
 
 function navigateToPage(pageId, options = {}) {
-    // Backwards-compat aliases — both legacy ids fold into the unified Search page.
-    // 'downloads' was the Search page's old id; 'artists' was the retired inline
-    // Artists page, now replaced by clicking artists from the unified Search.
-    if (pageId === 'downloads' || pageId === 'artists') pageId = 'search';
-
-    if (pageId === currentPage) return;
+    if (!options.forceReload && pageId === currentPage) return;
 
     // Permission guard — redirect to home page if not allowed
     if (!isPageAllowed(pageId)) {
         const home = getProfileHomePage();
         if (home !== currentPage && isPageAllowed(home)) {
-            navigateToPage(home);
+            navigateToPage(home, options);
         }
         return;
     }
 
-    // Update navigation buttons (only if there's a nav button for this page).
-    // Pages reachable from many surfaces (artist-detail, playlist-explorer)
-    // intentionally have no [data-page] match here — the sidebar shouldn't
-    // imply a section the user didn't actually navigate via.
-    document.querySelectorAll('.nav-button').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    const navButton = document.querySelector(`[data-page="${pageId}"]`);
-    if (navButton) {
-        navButton.classList.add('active');
-    } else if (pageId === 'artist-detail') {
-        // Artist-detail is a "pseudo-page" reachable from Library, Search,
-        // or the global search popover — it has no [data-page] match. Treat
-        // it as a Library context so the sidebar still anchors the user
-        // somewhere instead of showing a blank active state.
-        const libraryBtn = document.querySelector('[data-page="library"]');
-        if (libraryBtn) libraryBtn.classList.add('active');
+    const router = getWebRouter();
+    if (router && !options.skipRouteChange) {
+        return router.navigateToPage(pageId, { replace: options.replace === true });
     }
 
-    // Update pages
-    document.querySelectorAll('.page').forEach(page => {
-        page.classList.remove('active');
-    });
-    document.getElementById(`${pageId}-page`).classList.add('active');
-
-    currentPage = pageId;
-
-    // Refresh the Library button label so artist-detail shows a breadcrumb
-    // ("Library / Artist Name") and other pages show plain "Library".
-    if (typeof _updateSidebarLibraryBreadcrumb === 'function') {
-        _updateSidebarLibraryBreadcrumb();
-    }
+    // Fallback path for initial bootstrap or environments without TanStack routing.
+    activatePage(pageId, { forceReload: options.forceReload === true });
 
     if (!options.skipPushState) {
         const urlPath = pageId === 'dashboard' ? '/' : '/' + pageId;
         if (window.location.pathname !== urlPath) {
-            history.pushState({ page: pageId }, '', urlPath);
-        }
-    }
-
-    // Show/hide global search bar (hide on search page where the unified search lives)
-    if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
-
-    // Show/hide discover download sidebar based on page
-    const downloadSidebar = document.getElementById('discover-download-sidebar');
-    if (downloadSidebar) {
-        if (pageId === 'discover') {
-            // Show sidebar on discover page if there are active downloads
-            const activeDownloads = Object.keys(discoverDownloads || {}).length;
-            console.log(`📊 [NAVIGATE] Discover page - ${activeDownloads} active downloads`);
-            if (activeDownloads > 0) {
-                // Update the sidebar UI to render the bubbles
-                console.log(`🔄 [NAVIGATE] Updating discover download bar UI`);
-                updateDiscoverDownloadBar();
+            if (options.replace === true) {
+                history.replaceState({ page: pageId }, '', urlPath);
+            } else {
+                history.pushState({ page: pageId }, '', urlPath);
             }
-        } else {
-            // Always hide sidebar on other pages
-            downloadSidebar.classList.add('hidden');
         }
     }
 
-    // Load page-specific data
-    loadPageData(pageId);
-
-    // Update page background particles
-    if (window.pageParticles && window._particlesEnabled !== false) window.pageParticles.setPage(pageId);
-
-    // Update worker orbs
-    if (window.workerOrbs) window.workerOrbs.setPage(pageId);
+    return true;
 }
-
-// REPLACE your old loadPageData function with this one:
-// REPLACE your old loadPageData function with this corrected one
 
 async function loadPageData(pageId) {
     try {
@@ -2281,7 +2315,6 @@ async function loadPageData(pageId) {
                 initializeSearchModeToggle();
                 initializeFilters();
                 break;
-            // 'artists' page retired — aliased to 'search' at the top of navigateToPage
             case 'active-downloads':
                 loadActiveDownloadsPage();
                 break;
@@ -2376,14 +2409,3 @@ async function loadPageData(pageId) {
         showToast(`Failed to load ${pageId} data`, 'error');
     }
 }
-
-// ===============================
-// SERVICE STATUS MONITORING
-// ===============================
-
-// Legacy function - now handled by fetchAndUpdateServiceStatus
-// Keeping this for compatibility but it's no longer actively used
-
-// Old updateStatusIndicator function removed - replaced by updateSidebarServiceStatus
-
-// ===============================

@@ -1177,13 +1177,10 @@ async function loadInitialData() {
             ? urlPage
             : homePage;
 
-        history.replaceState({ page: targetPage }, '', (targetPage === 'dashboard' ? '/' : '/' + targetPage) + window.location.search + window.location.hash);
-
-        if (targetPage !== 'dashboard') {
-            navigateToPage(targetPage, { skipPushState: true });
-        } else {
-            await loadDashboardData();
-            loadDashboardSyncHistory();
+        // If the TanStack router bridge is not available yet, fall back to the
+        // legacy shell activator so the page still renders.
+        if (!window.SoulSyncWebRouter) {
+            navigateToPage(targetPage, { skipRouteChange: true, forceReload: true });
         }
     } catch (error) {
         console.error('Error loading initial data:', error);
@@ -1218,4 +1215,3 @@ async function loadDashboardData() {
 }
 
 // ===========================================
-
