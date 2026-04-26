@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
 
 import {
+  Button,
   FormActions,
   FormError,
   FormField,
@@ -10,6 +11,7 @@ import {
   OptionButtonGroup,
   OptionCard,
   OptionCardGroup,
+  Select,
   TextArea,
   TextInput,
 } from './form';
@@ -19,6 +21,7 @@ function FormDemo() {
   const [details, setDetails] = useState('');
   const [category, setCategory] = useState<'wrong_cover' | 'wrong_metadata'>('wrong_cover');
   const [priority, setPriority] = useState<'low' | 'normal' | 'high'>('normal');
+  const [status, setStatus] = useState('open');
 
   return (
     <form>
@@ -71,11 +74,23 @@ function FormDemo() {
         </OptionButtonGroup>
       </FormField>
 
+      <FormField label="Status" helperText="Shared select primitive" htmlFor="status-select">
+        <Select
+          id="status-select"
+          value={status}
+          onChange={(event) => setStatus(event.target.value)}
+        >
+          <option value="open">Open</option>
+          <option value="in_progress">In Progress</option>
+          <option value="resolved">Resolved</option>
+        </Select>
+      </FormField>
+
       <FormError message="Validation failed" />
 
       <FormActions>
-        <button type="button">Cancel</button>
-        <button type="submit">Save</button>
+        <Button type="button">Cancel</Button>
+        <Button type="submit">Save</Button>
       </FormActions>
     </form>
   );
@@ -89,6 +104,9 @@ describe('form primitives', () => {
     expect(screen.getByLabelText('Details')).toHaveAttribute('placeholder', 'Enter details');
     expect(screen.getByText('Short summary')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Validation failed');
+    expect(screen.getByLabelText('Status')).toHaveValue('open');
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'resolved' } });
+    expect(screen.getByLabelText('Status')).toHaveValue('resolved');
 
     const wrongCover = screen.getByRole('button', { name: /wrong cover/i });
     const wrongMetadata = screen.getByRole('button', { name: /wrong metadata/i });
@@ -102,5 +120,8 @@ describe('form primitives', () => {
     expect(highPriority).toHaveAttribute('aria-pressed', 'false');
     fireEvent.click(highPriority);
     expect(highPriority).toHaveAttribute('aria-pressed', 'true');
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
   });
 });

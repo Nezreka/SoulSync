@@ -2,6 +2,7 @@ import {
   forwardRef,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
+  type SelectHTMLAttributes,
   type ReactNode,
   type TextareaHTMLAttributes,
 } from 'react';
@@ -63,6 +64,15 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(function 
   ref,
 ) {
   return <textarea ref={ref} className={mergeClassNames(styles.textArea, className)} {...props} />;
+});
+
+export type SelectProps = SelectHTMLAttributes<HTMLSelectElement>;
+
+export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
+  { className, ...props },
+  ref,
+) {
+  return <select ref={ref} className={mergeClassNames(styles.select, className)} {...props} />;
 });
 
 export function OptionCardGroup({
@@ -145,6 +155,15 @@ export const OptionButton = forwardRef<HTMLButtonElement, OptionButtonProps>(fun
       {children}
     </button>
   );
+});
+
+export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement>;
+
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { className, type = 'button', ...props },
+  ref,
+) {
+  return <button ref={ref} className={mergeClassNames(styles.button, className)} type={type} {...props} />;
 });
 
 export function FormError({ className, message }: { className?: string; message?: ReactNode }) {

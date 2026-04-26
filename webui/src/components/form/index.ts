@@ -1,4 +1,5 @@
 export {
+  Button,
   FormActions,
   FormError,
   FormField,
@@ -6,6 +7,7 @@ export {
   OptionButtonGroup,
   OptionCard,
   OptionCardGroup,
+  Select,
   TextArea,
   TextInput,
 } from './form';

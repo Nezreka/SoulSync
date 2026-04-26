@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 
 import { getShellProfileContext } from "@/platform/shell/bridge";
 import {
+  Button,
   FormActions,
   FormError,
   FormField,
@@ -325,13 +326,13 @@ function ReportIssueModal({
         </div>
 
         <FormActions className={styles.modalFooter}>
-          <button
+          <Button
             className={`${styles.modalButton} ${styles.modalButtonSecondary}`}
             type="button"
             onClick={onClose}
           >
             Cancel
-          </button>
+          </Button>
           <form.Subscribe
             selector={(state) => ({
               category: state.values.category,
@@ -342,13 +343,13 @@ function ReportIssueModal({
             {(state) => {
               const isSubmitting = state.isSubmitting || createMutation.isPending;
               return (
-                <button
+                <Button
                   className={`${styles.modalButton} ${styles.modalButtonPrimary}`}
                   type="submit"
                   disabled={!state.category || !state.title.trim() || isSubmitting}
                 >
                   {isSubmitting ? "Submitting..." : "Submit Issue"}
-                </button>
+                </Button>
               );
             }}
           </form.Subscribe>
