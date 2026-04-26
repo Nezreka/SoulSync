@@ -180,10 +180,26 @@ describe('issues route', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /wrong cover art/i }));
     const titleInput = screen.getByLabelText(/title/i);
+    const descriptionInput = screen.getByLabelText(/details/i);
+    const submitButton = screen.getByRole('button', { name: /submit issue/i });
+    const form = submitButton.closest('form');
+
     expect(titleInput).toHaveValue('Wrong Cover Art: Album Name');
+    fireEvent.change(titleInput, { target: { value: '' } });
+    expect(submitButton).toBeDisabled();
+    fireEvent.submit(form!);
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Please provide a title for the issue');
+    });
+
     fireEvent.change(titleInput, { target: { value: 'Custom report title' } });
-    fireEvent.click(screen.getByRole('button', { name: /missing tracks/i }));
+    fireEvent.blur(titleInput);
+    fireEvent.change(descriptionInput, { target: { value: 'Detailed reproduction notes' } });
+    fireEvent.click(screen.getByRole('button', { name: /high/i }));
+    fireEvent.click(screen.getByRole('button', { name: /wrong metadata/i }));
     expect(titleInput).toHaveValue('Custom report title');
+    expect(descriptionInput).toHaveValue('Detailed reproduction notes');
+    expect(screen.getByRole('button', { name: /high/i })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: /submit issue/i }));
 
     await waitFor(() => {

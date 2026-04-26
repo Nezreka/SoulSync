@@ -828,6 +828,14 @@
     padding: 18px;
   }
 
+  .issuesHeaderRight {
+    width: 100%;
+  }
+
+  .issuesFilters {
+    width: 100%;
+  }
+
   .issuesFilterSelect {
     min-width: 100%;
     width: 100%;
