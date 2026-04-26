@@ -2,6 +2,14 @@ import sys
 import types
 
 
+class _DummyConfigManager:
+    def get(self, key, default=None):
+        return default
+
+    def get_active_media_server(self):
+        return "plex"
+
+
 if "spotipy" not in sys.modules:
     spotipy = types.ModuleType("spotipy")
 
@@ -25,13 +33,6 @@ if "spotipy" not in sys.modules:
 if "config.settings" not in sys.modules:
     config_pkg = types.ModuleType("config")
     settings_mod = types.ModuleType("config.settings")
-
-    class _DummyConfigManager:
-        def get(self, key, default=None):
-            return default
-
-        def get_active_media_server(self):
-            return "plex"
 
     settings_mod.config_manager = _DummyConfigManager()
     config_pkg.settings = settings_mod
