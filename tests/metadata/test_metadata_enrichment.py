@@ -1,4 +1,5 @@
 import types
+import sqlite3
 
 from core.metadata import enrichment as me
 from core.metadata import artwork as ma
@@ -71,6 +72,16 @@ class _FakeResponse:
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+
+class _FileDB:
+    def __init__(self, db_path):
+        self.db_path = db_path
+
+    def _get_connection(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 def _fake_symbols(audio):
@@ -206,6 +217,137 @@ def test_embed_source_ids_uses_current_source_ids_and_legacy_fallback(monkeypatc
     assert "ITUNES_TRACK_ID" in legacy_descs
     assert "ITUNES_ARTIST_ID" in legacy_descs
     assert "ITUNES_ALBUM_ID" in legacy_descs
+
+
+def test_embed_source_ids_skips_disabled_source_specific_tags(monkeypatch):
+    audio = _FakeAudio()
+    symbols = _fake_symbols(audio)
+
+    monkeypatch.setattr(
+        ms,
+        "get_config_manager",
+        lambda: _Config({"deezer.embed_tags": False}),
+    )
+    monkeypatch.setattr(ms, "get_mutagen_symbols", lambda: symbols)
+    monkeypatch.setattr(ms, "get_database", lambda: None)
+
+    metadata = {
+        "source": "deezer",
+        "source_track_id": "dz-track",
+        "source_artist_id": "dz-artist",
+        "source_album_id": "dz-album",
+        "title": "Song One",
+        "artist": "Artist One",
+        "album_artist": "Artist One",
+        "album": "Album One",
+    }
+
+    me.embed_source_ids(audio, metadata, context={"track_info": {}, "original_search_result": {}})
+
+    assert audio.tags.added == []
+
+
+def test_embed_source_ids_writes_musicbrainz_release_year_and_updates_album_year(tmp_path, monkeypatch):
+    db_path = tmp_path / "music.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT)")
+    conn.execute("CREATE TABLE albums (id TEXT PRIMARY KEY, artist_id TEXT, title TEXT, year INTEGER)")
+    conn.execute("INSERT INTO artists (id, name) VALUES (?, ?)", ("artist-1", "Artist One"))
+    conn.execute(
+        "INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)",
+        ("album-1", "artist-1", "Album One", None),
+    )
+    conn.commit()
+    conn.close()
+
+    class _FakeMBClient:
+        def get_recording(self, mbid, includes=None):
+            return {
+                "isrcs": ["ISRC-123"],
+                "genres": [{"name": "Post Rock", "count": 10}],
+            }
+
+        def get_release(self, mbid, includes=None):
+            return {
+                "release-group": {
+                    "id": "rg-1",
+                    "primary-type": "album",
+                    "first-release-date": "2021-09-17",
+                },
+                "artist-credit": [{"artist": {"id": "artist-mb-1"}}],
+                "status": "Official",
+                "country": "US",
+                "barcode": "1234567890",
+                "media": [{"format": "CD", "tracks": [{"position": 1, "id": "reltrack-1", "recording": {"id": "rec-1"}}]}],
+                "label-info": [{"catalog-number": "CAT-1"}],
+                "text-representation": {"script": "Latn"},
+                "asin": "ASIN1",
+            }
+
+    class _FakeMBService:
+        def __init__(self):
+            self.mb_client = _FakeMBClient()
+
+        def match_recording(self, title, artist):
+            return {"mbid": "rec-mbid"}
+
+        def match_artist(self, artist):
+            return {"mbid": "artist-mbid"}
+
+        def match_release(self, album, artist):
+            return {"mbid": "release-mbid"}
+
+    audio = _FakeAudio()
+    symbols = _fake_symbols(audio)
+    runtime = types.SimpleNamespace(mb_worker=types.SimpleNamespace(mb_service=_FakeMBService()))
+
+    monkeypatch.setattr(
+        ms,
+        "get_config_manager",
+        lambda: _Config(
+            {
+                "metadata_enhancement.enabled": True,
+                "metadata_enhancement.embed_album_art": False,
+                "metadata_enhancement.tags.write_multi_artist": False,
+                "musicbrainz.embed_tags": True,
+            }
+        ),
+    )
+    monkeypatch.setattr(ms, "get_mutagen_symbols", lambda: symbols)
+    monkeypatch.setattr(ms, "get_database", lambda: _FileDB(str(db_path)))
+
+    metadata = {
+        "source": "musicbrainz",
+        "title": "Song One",
+        "artist": "Artist One",
+        "album_artist": "Artist One",
+        "album": "Album One",
+        "track_number": 1,
+        "total_tracks": 12,
+        "disc_number": 1,
+    }
+
+    me.embed_source_ids(audio, metadata, context={"track_info": {}, "original_search_result": {}}, runtime=runtime)
+
+    assert metadata["musicbrainz_release_id"] == "release-mbid"
+    assert metadata["date"] == "2021"
+    assert any(frame.kind == "TDRC" for frame in audio.tags.added)
+    assert any(frame.kind == "TSRC" for frame in audio.tags.added)
+
+    check = sqlite3.connect(db_path)
+    check.row_factory = sqlite3.Row
+    row = check.execute(
+        """
+        SELECT albums.year
+        FROM albums
+        JOIN artists ON artists.id = albums.artist_id
+        WHERE albums.title = ? AND artists.name = ?
+        """,
+        ("Album One", "Artist One"),
+    ).fetchone()
+    check.close()
+
+    assert row["year"] == 2021
 
 
 def test_enhance_file_metadata_forwards_runtime_to_source_embedding(monkeypatch):

@@ -2,6 +2,7 @@ import pytest
 
 from core.imports.context import (
     build_import_album_info,
+    detect_album_info_web,
     get_import_clean_album,
     get_import_clean_artist,
     get_import_clean_title,
@@ -77,6 +78,33 @@ def test_normalize_import_context_promotes_legacy_source_alias():
     assert normalized["source"] == "spotify"
     assert "_source" not in normalized
     assert get_import_source(normalized) == "spotify"
+
+
+def test_normalize_import_context_promotes_search_result_when_original_search_missing():
+    context = {
+        "source": "spotify",
+        "track_info": {"name": "Song One", "id": "track-1"},
+        "search_result": {
+            "title": "Song One",
+            "album": "Album One",
+            "artist": "Artist One",
+            "spotify_clean_title": "Song One",
+            "spotify_clean_album": "Album One",
+            "spotify_clean_artist": "Artist One",
+        },
+    }
+
+    normalized = normalize_import_context(context)
+
+    assert normalized["original_search_result"]["clean_title"] == "Song One"
+    assert normalized["original_search_result"]["clean_album"] == "Album One"
+    assert normalized["original_search_result"]["clean_artist"] == "Artist One"
+    assert "spotify_clean_title" not in normalized["original_search_result"]
+    assert "spotify_clean_album" not in normalized["original_search_result"]
+    assert "spotify_clean_artist" not in normalized["original_search_result"]
+    assert get_import_clean_title(normalized) == "Song One"
+    assert get_import_clean_album(normalized) == "Album One"
+    assert get_import_clean_artist(normalized) == "Artist One"
 
 
 def test_neutral_import_context_helpers_work_without_legacy_aliases():
@@ -216,3 +244,68 @@ def test_build_import_album_info_uses_normalized_album_context():
     assert album_info["clean_track_name"] == "Song One"
     assert album_info["album_image_url"] == "https://img.example/album.jpg"
     assert album_info["source"] == "deezer"
+
+
+@pytest.mark.parametrize(
+    "album_name,track_name,artist_name",
+    [
+        ("Song One", "Song One", "Artist One"),
+        ("Artist One", "Different Song", "Artist One"),
+    ],
+)
+def test_detect_album_info_web_returns_none_for_ambiguous_album_names(album_name, track_name, artist_name):
+    context = normalize_import_context(
+        {
+            "source": "deezer",
+            "artist": {"name": artist_name},
+            "album": {"name": album_name, "total_tracks": 12, "album_type": "album"},
+            "track_info": {"name": track_name, "track_number": 4, "disc_number": 1},
+            "original_search_result": {
+                "title": track_name,
+                "clean_title": track_name,
+                "clean_album": album_name,
+                "clean_artist": artist_name,
+            },
+        }
+    )
+
+    assert detect_album_info_web(context) is None
+
+
+def test_detect_album_info_web_forces_album_when_track_and_artist_differ():
+    context = normalize_import_context(
+        {
+            "source": "deezer",
+            "artist": {"name": "Artist One"},
+            "album": {
+                "name": "Album One",
+                "image_url": "https://img.example/album.jpg",
+                "release_date": "2024-05-01",
+                "total_tracks": 1,
+                "album_type": "album",
+            },
+            "track_info": {
+                "name": "Song One",
+                "track_number": 4,
+                "disc_number": 2,
+                "duration_ms": 240000,
+                "artists": [{"name": "Artist One"}],
+            },
+            "original_search_result": {
+                "title": "Song One",
+                "album": "Album One",
+                "clean_title": "Song One",
+                "clean_album": "Album One",
+                "clean_artist": "Artist One",
+            },
+        }
+    )
+
+    album_info = detect_album_info_web(context)
+
+    assert album_info is not None
+    assert album_info["is_album"] is True
+    assert album_info["confidence"] == 0.5
+    assert album_info["album_name"] == "Album One"
+    assert album_info["track_number"] == 4
+    assert album_info["disc_number"] == 2
