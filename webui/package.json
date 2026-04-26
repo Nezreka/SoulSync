@@ -10,31 +10,33 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@tanstack/react-form": "^1.28.6",
-    "@tanstack/react-query": "^5.96.2",
-    "@tanstack/react-router": "^1.168.10",
-    "ky": "^2.0.0-0",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "@tanstack/react-form": "^1.29.1",
+    "@tanstack/react-query": "^5.100.5",
+    "@tanstack/react-router": "^1.168.24",
+    "ky": "^2.0.2",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "@tanstack/router-plugin": "^1.167.12",
+    "@tanstack/router-plugin": "^1.167.27",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
-    "@types/node": "^24.3.1",
+    "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@voidzero-dev/vite-plus-core": "^0.1.19",
+    "@voidzero-dev/vite-plus-test": "^0.1.19",
     "@vitejs/plugin-react": "^6.0.1",
-    "jsdom": "^29.0.1",
-    "typescript": "^6.0.2",
-    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
-    "vite-plus": "latest",
-    "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
+    "jsdom": "^29.0.2",
+    "typescript": "^6.0.3",
+    "vite": "npm:@voidzero-dev/vite-plus-core@^0.1.19",
+    "vite-plus": "^0.1.19",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@^0.1.19"
   },
-  "packageManager": "npm@11.12.1",
+  "packageManager": "npm@11.13.0",
   "overrides": {
-    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
-    "vitest": "npm:@voidzero-dev/vite-plus-test@latest"
+    "vite": "npm:@voidzero-dev/vite-plus-core@^0.1.19",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@^0.1.19"
   }
 }
