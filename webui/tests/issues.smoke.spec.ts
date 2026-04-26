@@ -2,6 +2,14 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { shellRouteManifest, type ShellPageId } from '../src/platform/shell/route-manifest';
 
+async function selectProfile(page: Page, baseURL: string, profileId = 1) {
+  const response = await page.request.post(new URL('/api/profiles/select', baseURL).toString(), {
+    data: { profile_id: profileId },
+  });
+
+  expect(response.ok()).toBe(true);
+}
+
 async function waitForShellRoute(page: Page, pageId: string) {
   if (pageId === 'issues') {
     await expect
@@ -21,7 +29,7 @@ async function waitForShellRoute(page: Page, pageId: string) {
 
 function getExpectedNavPage(pageId: ShellPageId): string {
   if (pageId === 'artist-detail') {
-    return 'library';
+    return '';
   }
 
   return pageId;
@@ -56,14 +64,21 @@ test('direct load activates all known top-level routes', async ({ page, baseURL 
     return;
   }
 
-  for (const route of shellRouteManifest) {
-    await page.goto(new URL(route.path, baseURL).toString(), { waitUntil: 'domcontentloaded' });
-    await waitForShellRoute(page, route.pageId);
-    await expect(page).toHaveURL(expectedUrlPattern(route.path));
-    await expectNavHighlight(page, route.pageId);
+  await selectProfile(page, baseURL);
 
-    if (route.pageId === 'issues') {
-      await verifyIssuesRoute(page);
+  for (const route of shellRouteManifest) {
+    const routePage = await page.context().newPage();
+    try {
+      await routePage.goto(new URL(route.path, baseURL).toString(), { waitUntil: 'domcontentloaded' });
+      await waitForShellRoute(routePage, route.pageId);
+      await expect(routePage).toHaveURL(expectedUrlPattern(route.path));
+      await expectNavHighlight(routePage, route.pageId);
+
+      if (route.pageId === 'issues') {
+        await verifyIssuesRoute(routePage);
+      }
+    } finally {
+      await routePage.close();
     }
   }
 });
@@ -73,6 +88,8 @@ test('browser history restores top-level routes', async ({ page, baseURL }) => {
     test.skip();
     return;
   }
+
+  await selectProfile(page, baseURL);
 
   await page.goto(new URL('/discover', baseURL).toString(), { waitUntil: 'domcontentloaded' });
   await waitForShellRoute(page, 'discover');

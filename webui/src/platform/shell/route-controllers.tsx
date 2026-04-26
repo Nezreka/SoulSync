@@ -5,23 +5,26 @@ import { getProfileHomePath, getShellBridge, type ShellPageId } from './bridge';
 
 export const ROUTER_ROOT_ID = 'webui-react-root';
 export const SHELL_BRIDGE_READY_EVENT = 'ss:webui-shell-bridge-ready';
+export const SHELL_PROFILE_CONTEXT_CHANGED_EVENT = 'ss:webui-profile-context-changed';
 
 export function useShellBridge() {
-  const [ready, setReady] = useState(() => Boolean(getShellBridge()));
+  const [, setRevision] = useState(0);
 
   useEffect(() => {
-    const handleReady = () => {
-      setReady(Boolean(getShellBridge()));
+    const handleContextChange = () => {
+      setRevision((value) => value + 1);
     };
 
-    handleReady();
-    window.addEventListener(SHELL_BRIDGE_READY_EVENT, handleReady);
+    handleContextChange();
+    window.addEventListener(SHELL_BRIDGE_READY_EVENT, handleContextChange);
+    window.addEventListener(SHELL_PROFILE_CONTEXT_CHANGED_EVENT, handleContextChange);
     return () => {
-      window.removeEventListener(SHELL_BRIDGE_READY_EVENT, handleReady);
+      window.removeEventListener(SHELL_BRIDGE_READY_EVENT, handleContextChange);
+      window.removeEventListener(SHELL_PROFILE_CONTEXT_CHANGED_EVENT, handleContextChange);
     };
   }, []);
 
-  return ready ? getShellBridge() : null;
+  return getShellBridge();
 }
 
 export function LegacyRouteController({ pathname }: { pathname: string }) {
