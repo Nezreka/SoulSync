@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 
 import { getShellProfileContext } from '@/platform/shell/bridge';
+import { Select } from '@/components/form';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { IssueCounts, IssueRecord, IssueStatus } from '../-issues.types';
@@ -158,7 +159,7 @@ function IssueBoard({
         </div>
         <div className={styles.issuesHeaderRight}>
           <div className={styles.issuesFilters} id="issues-filters">
-            <select
+            <Select
               id="issues-filter-status"
               className={styles.issuesFilterSelect}
               aria-label="Status"
@@ -170,8 +171,8 @@ function IssueBoard({
               <option value="in_progress">In Progress</option>
               <option value="resolved">Resolved</option>
               <option value="dismissed">Dismissed</option>
-            </select>
-            <select
+            </Select>
+            <Select
               id="issues-filter-category"
               className={styles.issuesFilterSelect}
               aria-label="Category"
@@ -195,7 +196,7 @@ function IssueBoard({
                 <option value="wrong_metadata">Wrong Metadata</option>
                 <option value="other">Other</option>
               </optgroup>
-            </select>
+            </Select>
           </div>
         </div>
       </div>
