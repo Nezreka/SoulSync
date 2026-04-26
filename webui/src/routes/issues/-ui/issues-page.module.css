@@ -45,34 +45,7 @@
 }
 
 .issuesFilterSelect {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #fff;
-  padding: 7px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.2s;
-  appearance: none;
-  -webkit-appearance: none;
-  color-scheme: dark;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='%23888'%3E%3Cpath d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  padding-right: 28px;
   min-width: 130px;
-}
-
-.issuesFilterSelect:focus {
-  border-color: rgba(var(--accent-light-rgb), 0.5);
-  box-shadow: 0 0 0 3px rgba(var(--accent-light-rgb), 0.12);
-}
-
-.issuesFilterSelect option,
-.issuesFilterSelect optgroup {
-  background: #1a1a2e;
-  color: #fff;
 }
 
 .issuesStats {
