@@ -90,3 +90,37 @@ def test_read_staging_file_metadata_falls_back_to_filename_track_number(monkeypa
     assert metadata["title"] == "07 - Song Two"
     assert metadata["track_number"] == 7
     assert metadata["disc_number"] == 1
+
+
+def test_read_staging_file_metadata_uses_filename_fallbacks_when_tags_are_invalid(monkeypatch, tmp_path):
+    file_path = tmp_path / "02 - Song Three.flac"
+    file_path.write_text("fake")
+
+    class DummyTags:
+        def __init__(self):
+            self.values = {
+                "title": [""],
+                "artist": "Artist One",
+                "albumartist": "",
+                "album": ["Album One"],
+                "tracknumber": ["not-a-number"],
+                "discnumber": ["bad/disc"],
+            }
+
+        def get(self, key, default=None):
+            return self.values.get(key, default)
+
+    fake_mutagen = types.ModuleType("mutagen")
+    fake_mutagen.File = lambda path, easy=True: DummyTags()
+    monkeypatch.setitem(sys.modules, "mutagen", fake_mutagen)
+
+    metadata = read_staging_file_metadata(str(file_path), file_path.name)
+
+    assert metadata == {
+        "title": "02 - Song Three",
+        "artist": "Artist One",
+        "albumartist": "Artist One",
+        "album": "Album One",
+        "track_number": 2,
+        "disc_number": 1,
+    }

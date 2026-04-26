@@ -192,3 +192,26 @@ def test_get_single_track_import_context_uses_explicit_override_source(monkeypat
     ]
     assert deezer_client.calls == []
     assert spotify_client.calls == []
+
+
+def test_get_single_track_import_context_returns_fallback_payload_when_no_source_matches(monkeypatch):
+    deezer_client = FakeClient()
+    spotify_client = FakeClient()
+    itunes_client = FakeClient()
+
+    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(
+        metadata_service,
+        "get_client_for_source",
+        lambda source: {"deezer": deezer_client, "spotify": spotify_client, "itunes": itunes_client}.get(source),
+    )
+
+    result = resolution.get_single_track_import_context("Missing Song", "Missing Artist")
+
+    assert result["success"] is False
+    assert result["source"] is None
+    assert result["context"]["artist"]["name"] == "Missing Artist"
+    assert result["context"]["track_info"]["name"] == "Missing Song"
+    assert result["context"]["original_search_result"]["clean_title"] == "Missing Song"
+    assert result["context"]["original_search_result"]["clean_artist"] == "Missing Artist"

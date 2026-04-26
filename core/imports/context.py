@@ -51,13 +51,14 @@ def normalize_import_context(context: Optional[Dict[str, Any]]) -> Dict[str, Any
     track_info = _as_dict(context.get("track_info"))
     original_search = _as_dict(context.get("original_search_result"))
     search_result = _as_dict(context.get("search_result"))
+    normalized_search = original_search or search_result
 
     if source:
         context["source"] = source
     context["artist"] = artist
     context["album"] = album
     context["track_info"] = track_info
-    context["original_search_result"] = original_search or search_result
+    context["original_search_result"] = normalized_search
     context.pop("_source", None)
     context.pop("spotify_artist", None)
     context.pop("spotify_album", None)
@@ -67,11 +68,11 @@ def normalize_import_context(context: Optional[Dict[str, Any]]) -> Dict[str, Any
         ("clean_album", "spotify_clean_album"),
         ("clean_artist", "spotify_clean_artist"),
     ):
-        if clean_key not in original_search or original_search.get(clean_key) in (None, ""):
-            legacy_value = original_search.get(legacy_key)
+        if clean_key not in normalized_search or normalized_search.get(clean_key) in (None, ""):
+            legacy_value = normalized_search.get(legacy_key)
             if legacy_value not in (None, ""):
-                original_search[clean_key] = legacy_value
-        original_search.pop(legacy_key, None)
+                normalized_search[clean_key] = legacy_value
+        normalized_search.pop(legacy_key, None)
 
     has_clean = bool(context.get("has_clean_metadata", context.get("has_clean_spotify_data", False)))
     has_full = bool(context.get("has_full_metadata", context.get("has_full_spotify_metadata", False)))

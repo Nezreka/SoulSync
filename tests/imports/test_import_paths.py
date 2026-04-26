@@ -159,3 +159,72 @@ def test_build_final_path_for_track_uses_template_and_disc_folder(monkeypatch, t
         tmp_path / "Transfer" / "Artist One" / "Artist One - Album One" / "Disc 1" / "04 - Song One.flac"
     )
     assert (tmp_path / "Transfer" / "Artist One" / "Artist One - Album One" / "Disc 1").is_dir()
+
+
+def test_build_final_path_for_track_uses_track_disc_number_without_provider_lookup(monkeypatch, tmp_path):
+    config = _Config(
+        {
+            "soulseek.transfer_path": str(tmp_path / "Transfer"),
+            "file_organization.enabled": True,
+            "file_organization.templates": {
+                "album_path": "$albumartist/$albumartist - $album/$track - $title",
+                "single_path": "$artist/$artist - $title",
+            },
+            "file_organization.collab_artist_mode": "first",
+            "file_organization.disc_label": "Disc",
+        }
+    )
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: config)
+
+    calls = []
+    monkeypatch.setattr(
+        import_paths,
+        "_get_album_tracks_for_source",
+        lambda source, album_id: calls.append((source, album_id)) or None,
+    )
+
+    context = {
+        "artist": {"name": "Artist One"},
+        "album": {
+            "name": "Album One",
+            "id": "album-1",
+            "release_date": "2026-01-01",
+            "total_tracks": 12,
+            "album_type": "album",
+            "artists": [{"name": "Artist One"}],
+        },
+        "track_info": {
+            "name": "Song Two",
+            "id": "track-2",
+            "track_number": 4,
+            "disc_number": 2,
+            "artists": [{"name": "Artist One"}],
+        },
+        "original_search_result": {
+            "title": "Song Two",
+            "clean_title": "Song Two",
+            "clean_album": "Album One",
+            "clean_artist": "Artist One",
+            "artists": [{"name": "Artist One"}],
+        },
+        "source": "deezer",
+        "is_album_download": False,
+    }
+
+    final_path, created = import_paths.build_final_path_for_track(
+        context,
+        {"name": "Artist One"},
+        {
+            "is_album": True,
+            "album_name": "Album One",
+            "track_number": 4,
+            "disc_number": 2,
+        },
+        ".flac",
+    )
+
+    assert created is True
+    assert calls == []
+    assert final_path == str(
+        tmp_path / "Transfer" / "Artist One" / "Artist One - Album One" / "Disc 2" / "04 - Song Two.flac"
+    )
