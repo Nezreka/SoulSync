@@ -4795,6 +4795,69 @@ class MusicDatabase:
             logger.error(f"Error inserting/updating {server_source} album {getattr(album_obj, 'title', 'Unknown')}: {e}")
             return False
     
+    def get_album_display_meta(self, album_id) -> Optional[Dict[str, Any]]:
+        """Return ``{album_title, artist_id, artist_name}`` for an album row.
+
+        Used by the reorganize queue enqueue endpoint to capture display
+        strings at submission time so the status panel can render
+        without a DB lookup per poll. Returns None if the album does
+        not exist.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT al.title AS album_title,
+                           ar.id    AS artist_id,
+                           ar.name  AS artist_name
+                    FROM albums al
+                    JOIN artists ar ON al.artist_id = ar.id
+                    WHERE al.id = ?
+                    """,
+                    (str(album_id),),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                return {
+                    'album_title': row['album_title'] or 'Unknown Album',
+                    'artist_id': str(row['artist_id']) if row['artist_id'] is not None else None,
+                    'artist_name': row['artist_name'] or 'Unknown Artist',
+                }
+        except Exception as e:
+            logger.error(f"Album display-meta fetch failed for {album_id}: {e}")
+            return None
+
+    def get_artist_albums_for_reorganize(self, artist_id) -> List[Dict[str, Any]]:
+        """Return ``[{album_id, album_title, artist_id, artist_name}, ...]``
+        for every album owned by ``artist_id``, ordered by year then
+        title. Used by the bulk Reorganize-All endpoint to pull the
+        full tracklist server-side instead of trusting whatever the
+        frontend cached. Returns an empty list when the artist has no
+        albums or when the query errors.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT al.id    AS album_id,
+                           al.title AS album_title,
+                           ar.id    AS artist_id,
+                           ar.name  AS artist_name
+                    FROM albums al
+                    JOIN artists ar ON al.artist_id = ar.id
+                    WHERE ar.id = ?
+                    ORDER BY al.year ASC, al.title ASC
+                    """,
+                    (str(artist_id),),
+                )
+                return [dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Artist albums (reorganize) fetch failed for {artist_id}: {e}")
+            return []
+
     def get_albums_by_artist(self, artist_id: int) -> List[DatabaseAlbum]:
         """Get all albums by artist ID"""
         try:
