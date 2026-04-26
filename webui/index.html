@@ -202,7 +202,7 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></span>
                     <span class="nav-text">Sync</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'search' %} active{% endif %}" data-page="search">
+                <button class="nav-button" data-page="search">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><polyline points="8 11 11 14 14 11"/></svg></span>
                     <span class="nav-text">Search</span>
                 </button>
@@ -214,42 +214,42 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="12" x2="5" y2="18"/><line x1="12" y1="12" x2="19" y2="18"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="12" x2="12" y2="18"/><circle cx="12" cy="19" r="2"/></svg></span>
                     <span class="nav-text">Explorer</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'watchlist' %} active{% endif %}" data-page="watchlist">
+                <button class="nav-button" data-page="watchlist">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>
                     <span class="nav-text">Watchlist</span>
                     <span class="dl-nav-badge hidden" id="watchlist-nav-badge">0</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'wishlist' %} active{% endif %}" data-page="wishlist">
+                <button class="nav-button" data-page="wishlist">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>
                     <span class="nav-text">Wishlist</span>
                     <span class="dl-nav-badge hidden" id="wishlist-nav-badge">0</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'automations' %} active{% endif %}" data-page="automations">
+                <button class="nav-button" data-page="automations">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
                     <span class="nav-text">Automations</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'active-downloads' %} active{% endif %}" data-page="active-downloads">
+                <button class="nav-button" data-page="active-downloads">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
                     <span class="nav-text">Downloads</span>
                     <span class="dl-nav-badge hidden" id="dl-nav-badge">0</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'import' %} active{% endif %}" data-page="import">
+                <button class="nav-button" data-page="import">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
                     <span class="nav-text">Import</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'library' %} active{% endif %}" data-page="library">
+                <button class="nav-button" data-page="library">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="14" y2="11"/></svg></span>
                     <span class="nav-text">Library</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'tools' %} active{% endif %}" data-page="tools">
+                <button class="nav-button" data-page="tools">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
                     <span class="nav-text">Tools</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'stats' %} active{% endif %}" data-page="stats">
+                <button class="nav-button" data-page="stats">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg></span>
                     <span class="nav-text">Stats</span>
                 </button>
-                <button class="nav-button{% if initial_nav_page == 'settings' %} active{% endif %}" data-page="settings">
+                <button class="nav-button" data-page="settings">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
                     <span class="nav-text">Settings</span>
                 </button>
@@ -1851,7 +1851,7 @@
             </div>
 
             <!-- Search Page -->
-            <div class="page{% if initial_client_page == 'search' %} active{% endif %}" id="search-page">
+            <div class="page" id="search-page">
                 <!-- 
                 This top-level container replicates the QSplitter from downloads.py,
                 creating the two-panel layout for the page.
@@ -2149,7 +2149,7 @@
             </div>
 
             <!-- Active Downloads Page -->
-            <div class="page{% if initial_client_page == 'active-downloads' %} active{% endif %}" id="active-downloads-page">
+            <div class="page" id="active-downloads-page">
                 <div class="adl-layout">
                     <!-- Left: download list -->
                     <div class="adl-main">
@@ -6171,7 +6171,7 @@
             <!-- ═══════════════════════════════════════════════════════════════════
                  TOOLS PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
-            <div class="page{% if initial_client_page == 'tools' %} active{% endif %}" id="tools-page">
+            <div class="page" id="tools-page">
                 <div class="tools-page-container">
                     <div class="tools-page-header">
                         <div class="tools-page-header-left">
@@ -6608,7 +6608,7 @@
             <!-- ═══════════════════════════════════════════════════════════════════
                  WATCHLIST PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
-            <div class="page{% if initial_client_page == 'watchlist' %} active{% endif %}" id="watchlist-page">
+            <div class="page" id="watchlist-page">
                 <div class="watchlist-page-container">
                     <!-- Header -->
                     <div class="watchlist-page-header">
@@ -6724,7 +6724,7 @@
             <!-- ═══════════════════════════════════════════════════════════════════
                  WISHLIST PAGE
                  ═══════════════════════════════════════════════════════════════════ -->
-            <div class="page{% if initial_client_page == 'wishlist' %} active{% endif %}" id="wishlist-page">
+            <div class="page" id="wishlist-page">
                 <div class="wishlist-page-container">
                     <!-- Header -->
                     <div class="wishlist-page-header">
