@@ -134,4 +134,22 @@ describe('createAppRouter', () => {
 
     expect(history.location.pathname).toBe('/discover');
   });
+
+  it('redirects the root route to the profile home page', async () => {
+    window.SoulSyncWebShellBridge = createShellBridge({
+      getProfileHomePage: vi.fn<() => ShellPageId>(() => 'search'),
+    });
+
+    const queryClient = createAppQueryClient();
+    const history = createMemoryHistory({ initialEntries: ['/'] });
+    const router = createAppRouter({ history, queryClient });
+
+    render(<AppRouterProvider router={router} queryClient={queryClient} />);
+
+    await waitFor(() => {
+      expect(window.SoulSyncWebShellBridge?.activateLegacyPath).toHaveBeenCalledWith('/search');
+    });
+
+    expect(history.location.pathname).toBe('/search');
+  });
 });
