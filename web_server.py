@@ -370,47 +370,6 @@ _webui_vite_dev = os.environ.get('SOULSYNC_WEBUI_VITE_DEV', '').lower() in ('1',
 _webui_vite_url = os.environ.get('SOULSYNC_WEBUI_VITE_URL', 'http://127.0.0.1:5173').rstrip('/')
 _webui_vite_base = '/static/dist/'
 
-_webui_client_route_map = {
-    '/dashboard': 'dashboard',
-    '/sync': 'sync',
-    '/search': 'search',
-    '/discover': 'discover',
-    '/playlist-explorer': 'playlist-explorer',
-    '/watchlist': 'watchlist',
-    '/wishlist': 'wishlist',
-    '/automations': 'automations',
-    '/active-downloads': 'active-downloads',
-    '/library': 'library',
-    '/tools': 'tools',
-    '/artist-detail': 'artist-detail',
-    '/stats': 'stats',
-    '/import': 'import',
-    '/settings': 'settings',
-    '/issues': 'issues',
-    '/help': 'help',
-    '/hydrabase': 'hydrabase',
-}
-_webui_react_page_ids = {'issues'}
-
-
-def _resolve_webui_initial_page(pathname: str) -> str | None:
-    normalized = pathname.rstrip('/') or '/'
-    return _webui_client_route_map.get(normalized)
-
-
-def _resolve_webui_initial_nav_page(page_id: str | None) -> str | None:
-    if page_id is None:
-        return None
-    if page_id == 'artist-detail':
-        return 'library'
-    return page_id
-
-
-def _resolve_webui_initial_react_page(page_id: str | None) -> str | None:
-    if page_id in _webui_react_page_ids:
-        return page_id
-    return None
-
 def _should_serve_webui_spa(pathname: str) -> bool:
     normalized = pathname.rstrip('/') or '/'
     excluded_exact_paths = {'/callback', '/status'}
