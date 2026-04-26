@@ -1,5 +1,5 @@
 import { useRouter } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 
 import { getProfileHomePath, getShellBridge, type ShellPageId } from './bridge';
 
@@ -42,6 +42,14 @@ export function useReactPageShell(pageId: ShellPageId) {
   const bridge = useShellBridge();
   const router = useRouter();
 
+  useLayoutEffect(() => {
+    if (!bridge) return;
+    if (!bridge.isPageAllowed(pageId)) return;
+
+    bridge.setActivePageChrome(pageId);
+    bridge.showReactHost(pageId);
+  }, [bridge, pageId]);
+
   useEffect(() => {
     if (!bridge) return;
 
@@ -49,9 +57,6 @@ export function useReactPageShell(pageId: ShellPageId) {
       void router.navigate({ href: getProfileHomePath(bridge), replace: true });
       return;
     }
-
-    bridge.setActivePageChrome(pageId);
-    bridge.showReactHost(pageId);
   }, [bridge, pageId, router]);
 
   return bridge;
