@@ -20,7 +20,7 @@ function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
     getCurrentProfileContext: vi.fn(() => ({ profileId: 2, isAdmin: true })),
     isPageAllowed: vi.fn(() => true),
     getProfileHomePage: vi.fn<() => ShellPageId>(() => 'discover'),
-    resolveLegacyPath: vi.fn<(pathname: string) => ShellPageId | null>(() => 'downloads'),
+    resolveLegacyPath: vi.fn<(pathname: string) => ShellPageId | null>(() => 'search'),
     setActivePageChrome: vi.fn(),
     activateLegacyPath: vi.fn(),
     showReactHost: vi.fn(),
