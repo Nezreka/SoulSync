@@ -1482,6 +1482,93 @@ function _invalidateListenBrainzCache() {
     }
 }
 
+const PROFILE_PAGE_LABELS = {
+    dashboard: 'Dashboard',
+    sync: 'Sync',
+    search: 'Search',
+    discover: 'Discover',
+    watchlist: 'Watchlist',
+    wishlist: 'Wishlist',
+    automations: 'Automations',
+    'active-downloads': 'Downloads',
+    library: 'Library',
+    stats: 'Listening Stats',
+    'playlist-explorer': 'Playlist Explorer',
+    import: 'Import',
+    tools: 'Tools',
+    hydrabase: 'Hydrabase',
+    issues: 'Issues',
+    help: 'Help & Docs',
+    settings: 'Settings',
+    'artist-detail': 'Artist Detail',
+};
+
+function getProfilePageLabel(pageId) {
+    return PROFILE_PAGE_LABELS[pageId] || pageId.split('-').map(part => part ? part[0].toUpperCase() + part.slice(1) : part).join(' ');
+}
+
+function getProfilePageSelectOptions(profileSettings = {}) {
+    const options = [];
+    const seen = new Set();
+    const homeSelect = document.getElementById('new-profile-home-page');
+
+    if (homeSelect) {
+        homeSelect.querySelectorAll('option').forEach(option => {
+            if (!option.value || seen.has(option.value)) return;
+            options.push({
+                value: option.value,
+                label: option.textContent?.trim() || getProfilePageLabel(option.value),
+            });
+            seen.add(option.value);
+        });
+    }
+
+    if (profileSettings.home_page && !seen.has(profileSettings.home_page)) {
+        options.push({
+            value: profileSettings.home_page,
+            label: getProfilePageLabel(profileSettings.home_page),
+        });
+        seen.add(profileSettings.home_page);
+    }
+
+    return options;
+}
+
+function getProfilePageAccessOptions(profileSettings = {}) {
+    const options = [];
+    const seen = new Set();
+    const allowedSet = Array.isArray(profileSettings.allowed_pages) ? new Set(profileSettings.allowed_pages) : null;
+    const accessContainer = document.getElementById('new-profile-allowed-pages');
+
+    if (accessContainer) {
+        accessContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            if (seen.has(cb.value)) return;
+            options.push({
+                value: cb.value,
+                label: cb.parentElement?.textContent?.trim() || getProfilePageLabel(cb.value),
+                checked: cb.disabled ? true : (allowedSet ? allowedSet.has(cb.value) : true),
+                disabled: cb.disabled,
+            });
+            seen.add(cb.value);
+        });
+    }
+
+    if (allowedSet) {
+        allowedSet.forEach(pageId => {
+            if (seen.has(pageId)) return;
+            options.push({
+                value: pageId,
+                label: getProfilePageLabel(pageId),
+                checked: true,
+                disabled: false,
+            });
+            seen.add(pageId);
+        });
+    }
+
+    return options;
+}
+
 function initProfileManagement() {
     const manageBtn = document.getElementById('manage-profiles-btn');
     const closeBtn = document.getElementById('profile-manage-close');
@@ -1698,11 +1785,8 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     const isAdmin = currentProfile && currentProfile.is_admin;
     const isEditingAdmin = profileSettings.is_admin;
     const editColors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#14b8a6'];
-    const pageLabels = {
-        dashboard: 'Dashboard', sync: 'Sync', search: 'Search', discover: 'Discover',
-        automations: 'Automations', library: 'Library', stats: 'Listening Stats',
-        'playlist-explorer': 'Playlist Explorer', import: 'Import', help: 'Help & Docs'
-    };
+    const pageSelectOptions = getProfilePageSelectOptions(profileSettings);
+    const pageAccessOptions = getProfilePageAccessOptions(profileSettings);
 
     const form = document.createElement('div');
     form.id = 'profile-edit-form';
@@ -1752,14 +1836,12 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     defaultOpt.value = '';
     defaultOpt.textContent = isEditingAdmin ? 'Default (Dashboard)' : 'Default (Discover)';
     homeSelect.appendChild(defaultOpt);
-    const allowedSet = profileSettings.allowed_pages;
     const normalizedHome = profileSettings.home_page;
-    Object.entries(pageLabels).forEach(([id, label]) => {
-        if (allowedSet && !allowedSet.includes(id)) return; // Skip non-permitted
+    pageSelectOptions.forEach(({ value, label }) => {
         const opt = document.createElement('option');
-        opt.value = id;
+        opt.value = value;
         opt.textContent = label;
-        if (id === normalizedHome) opt.selected = true;
+        if (value === normalizedHome) opt.selected = true;
         homeSelect.appendChild(opt);
     });
     form.appendChild(homeSelect);
@@ -1775,26 +1857,18 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
 
         const apContainer = document.createElement('div');
         apContainer.className = 'profile-page-checkboxes';
-        Object.entries(pageLabels).forEach(([id, label]) => {
+        pageAccessOptions.forEach(({ value, label, checked, disabled }) => {
             const lbl = document.createElement('label');
             const cb = document.createElement('input');
             cb.type = 'checkbox';
-            cb.value = id;
-            cb.checked = !allowedSet || allowedSet.includes(id);
+            cb.value = value;
+            cb.checked = checked;
+            cb.disabled = disabled;
             lbl.appendChild(cb);
             lbl.appendChild(document.createTextNode(' ' + label));
             apContainer.appendChild(lbl);
             pageCheckboxes.push(cb);
         });
-        // Always-on help
-        const helpLbl = document.createElement('label');
-        const helpCb = document.createElement('input');
-        helpCb.type = 'checkbox';
-        helpCb.checked = true;
-        helpCb.disabled = true;
-        helpLbl.appendChild(helpCb);
-        helpLbl.appendChild(document.createTextNode(' Help & Docs'));
-        apContainer.appendChild(helpLbl);
         form.appendChild(apContainer);
 
         const dlLabel = document.createElement('label');
@@ -1824,8 +1898,9 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
 
         // Admin-only fields
         if (isAdmin && !isEditingAdmin && pageCheckboxes.length) {
-            const allChecked = pageCheckboxes.every(cb => cb.checked);
-            payload.allowed_pages = allChecked ? null : pageCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
+            const editablePageCheckboxes = pageCheckboxes.filter(cb => !cb.disabled);
+            const allChecked = editablePageCheckboxes.every(cb => cb.checked);
+            payload.allowed_pages = allChecked ? null : editablePageCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
             payload.can_download = canDlCheckbox ? canDlCheckbox.checked : true;
         }
 
@@ -1921,14 +1996,12 @@ function showSelfEditForm() {
     defaultOpt.value = '';
     defaultOpt.textContent = 'Default (Discover)';
     homeSelect.appendChild(defaultOpt);
-    const ap = currentProfile.allowed_pages;
     const normalizedHome = currentProfile.home_page;
-    Object.entries(pageLabels).forEach(([id, label]) => {
-        if (ap && !ap.includes(id)) return;
+    getProfilePageSelectOptions({ home_page: normalizedHome }).forEach(({ value, label }) => {
         const opt = document.createElement('option');
-        opt.value = id;
+        opt.value = value;
         opt.textContent = label;
-        if (id === normalizedHome) opt.selected = true;
+        if (value === normalizedHome) opt.selected = true;
         homeSelect.appendChild(opt);
     });
     form.appendChild(homeSelect);
