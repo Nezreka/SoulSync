@@ -3669,6 +3669,315 @@ const WHATS_NEW = {
     ],
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// VERSION MODAL — curated highlight reel
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `WHATS_NEW` above is the per-version detailed log used by the "What's New"
+// helper-popover panel — short one-liners, internal page links, every entry
+// shown on every browse-back through versions.
+//
+// `VERSION_MODAL_SECTIONS` (this block) is the curated highlight reel shown
+// when the user clicks the version button in the sidebar. It's NOT a
+// mechanical view of WHATS_NEW — it's editorial curation: bigger-picture
+// sections, bullet-list expansions, optional "usage" hints at the bottom.
+// Some sections aggregate across multiple WHATS_NEW entries ("Recent Fixes",
+// "Earlier in v2.3"); some don't have a 1:1 WHATS_NEW counterpart at all.
+//
+// Both consts live here so a release editor only opens one file. At release
+// time:
+//   1. Add the per-version block to `WHATS_NEW` (one entry per shipped item).
+//   2. Promote any items worth a modal-section into `VERSION_MODAL_SECTIONS`
+//      at the top of the array (latest highlights lead).
+//   3. Roll older sections down or merge them into a "Recent Fixes" /
+//      "Earlier in vX.Y" aggregator section as they age out of the spotlight.
+//
+// Section shape: { title, description, features: [bullet strings],
+//                  usage_note?: 'optional hint shown at the bottom' }
+const VERSION_MODAL_SECTIONS = [
+    {
+        title: "Reorganize Queue: Race-Condition Hardening (kettui Review)",
+        description: "Three concurrency / dedupe issues kettui caught in his review of PR #377, plus two related polish items from the same pass.",
+        features: [
+            "• Worker pick + status flip is now atomic — fixes a window where a cancel() landing between 'pick next queued' and 'flip to running' could mark an item cancelled but the worker still ran it",
+            "• Replaced the lock + wakeup-event pair with a single threading.Condition so newly-queued items can't sleep up to 60s waiting for the next wakeup tick (the old pair had an empty-check / clear-event race)",
+            "• enqueue_many now holds the queue lock for the whole batch and tracks a per-batch seen set, so duplicate album_ids inside one bulk call are deduped against each other (not just against pre-existing items)",
+            "• Reorganize-preview Apply button no longer gets stuck disabled when an early return / network error skipped the re-enable line — moved into a finally",
+            "• DB helpers get_album_display_meta and get_artist_albums_for_reorganize now let exceptions bubble instead of swallowing them as 'not found' / empty list — a real DB outage now surfaces as a 500 to the user instead of looking like a missing album",
+        ],
+    },
+    {
+        title: "Reorganize Queue with Live Status Panel",
+        description: "Reorganizing albums is no longer a foreground operation that locks the page. Click → enqueue → keep working. A status panel surfaces live progress.",
+        features: [
+            "• Per-album Reorganize and Reorganize All both enqueue into a single FIFO queue with a backend worker that drains one item at a time",
+            "• Buttons stay clickable — spam-clicking the same album silently dedupes (returns 'already queued' instead of 409-ing)",
+            "• Status panel at the top of the artist actions bar shows: active item (progress bar, current track, moved/skipped/failed counts), queued count, and recently-finished items with success/warning indicators",
+            "• Click the panel to expand: full queue list with per-item cancel buttons; running item can't be cancelled mid-flight (Python threads aren't cleanly killable, post-process spawns subprocesses)",
+            "• 'Cancel All' button drops every queued item at once — the running one continues",
+            "• Items belonging to a different artist than the page you're on are flagged with the artist name so cross-artist progress is obvious",
+            "• Each queued item carries its own metadata source pick (Spotify / iTunes / Deezer / Discogs / Hydrabase) — switching modal selections per album works",
+            "• 'Reorganize All' is now one backend call instead of N JS-driven calls — the loop runs server-side and is much faster",
+            "• Continue-on-failure: a single failed album never stalls the queue; the worker logs and moves on",
+            "• Retired the old single-slot reorganize state endpoint plus the polling loops that depended on it",
+        ],
+    },
+    {
+        title: "Fix Wrong-Artist Tracks Silently Downloading",
+        description: "A critical bug where searching for a track could silently download a completely different artist's song with the same name",
+        features: [
+            "• Example: searching 'Maduk — Leave A Light On' on Tidal was downloading Tom Walker's unrelated song of the same name, then embedding Maduk's metadata into Tom Walker's audio",
+            "• Root cause 1: candidate artist gate used `< 0.4` similarity but Maduk/Tom Walker scored exactly 0.400, slipping past the fencepost — raised to `< 0.5`",
+            "• Root cause 2: AcoustID verification returned SKIP (accept) instead of FAIL (quarantine) when title matched but artist was clearly different — now FAILs when artist similarity is below 0.3",
+            "• Preserves SKIP for the ambiguous 0.3–0.6 range (covers, collabs, formatting differences) so legitimate tracks aren't falsely quarantined",
+            "• Both pre-download candidate validation AND post-download verification are now fixed — defense in depth",
+        ],
+    },
+    {
+        title: "Tidal Search Falls Back on Long Queries",
+        description: "Tidal's search chokes on long remix-credit queries — now retries with progressively-shortened variants when the original returns 0 results",
+        features: [
+            "• Example: 'maduk transformations remixed fire away fred v remix' returned 0; now falls back to shorter queries until Tidal finds the track",
+            "• Up to 4 shortened variants tried, capped total 5 requests, 100ms between attempts",
+            "• Qualifier-safe: Live/Remix/Acoustic/Extended searches only accept fallback results that still contain the qualifier — studio version never replaces a '(Live)' request",
+            "• Returns empty if no variant preserves qualifiers — same outcome as before",
+        ],
+    },
+    {
+        title: "Manual Discovery Fixes Persist Across Restart",
+        description: "When you manually fix a discovery match, the fix is now saved under your active metadata source instead of always 'spotify' — so Deezer/iTunes/Discogs/Hydrabase users' fixes actually survive restart and re-scan",
+        features: [
+            "• Affected Tidal, Deezer, Spotify Public, YouTube, and Discovery Pool manual fixes",
+            "• Symmetric with how the auto-discovery worker saves — no more mismatch",
+            "• Existing Spotify-primary users unaffected (the hardcoded value matched their source)",
+        ],
+    },
+    {
+        title: "Watchlist Content Filters Fixed",
+        description: "Global Override settings and live-version detection now behave the way the UI implies",
+        features: [
+            "• Scheduled auto-watchlist now honors Watchlist → Global Override (was bypassing it and using per-artist defaults)",
+            "• 'Live' detection tightened — no more false positives on titles like 'What We Live For' or 'Live Forever'",
+            "• Same fix applies to the Library Maintenance Live/Commentary Cleaner",
+            "• Still catches (Live), - Live, Live at/from/in/on/version/session/recording, Unplugged, In Concert",
+        ],
+    },
+    {
+        title: "Discography Backfill",
+        description: "New maintenance job that fills gaps in your library — scans each artist's full discography and finds what you're missing",
+        features: [
+            "• Scans each artist in your library against metadata source discographies",
+            "• Creates findings for missing tracks — review and click 'Add to Wishlist' to queue downloads",
+            "• Respects all content filters (live, remix, acoustic, compilation, instrumental)",
+            "• Release type filters (album, EP, single) with configurable defaults",
+            "• Optional 'auto-add to wishlist' setting — create findings AND push to wishlist in one pass",
+            "• 3-option fix prompt (Add to Wishlist / Just Clear / Cancel) for manual review",
+            "• Batched in-memory library matching — same fast path the Library pages use",
+            "• Opt-in, disabled by default — runs weekly, processes up to 50 artists per run",
+            "• Rate-limited to avoid hammering metadata APIs",
+        ],
+    },
+    {
+        title: "Repair 'Run Now' Honored While Paused",
+        description: "Force-running a repair job no longer stalls forever when the master repair worker is paused",
+        features: [
+            "• Jobs queued via 'Run Now' run to completion even if the master worker is paused",
+            "• Fixes silent stalls where Discography Backfill logged 'scanning 50 artists' then did nothing",
+            "• Master-pause still blocks scheduled runs — this only affects explicit user-triggered runs",
+        ],
+    },
+    {
+        title: "Multi-Artist Tagging",
+        description: "Enhanced control over how multiple artists are written to audio file tags",
+        features: [
+            "• Configurable artist separator: comma, semicolon, or slash",
+            "• Multi-value ARTISTS tag for Navidrome/Jellyfin multi-artist linking",
+            "• 'Move featured artists to title' mode — primary artist in ARTIST tag, others as (feat. ...) in title",
+            "• All opt-in with defaults matching current behavior",
+        ],
+    },
+    {
+        title: "Enriched Downloads Page",
+        description: "Download cards now show rich metadata instead of just filenames",
+        features: [
+            "• Album artwork thumbnail on each download card",
+            "• Artist name, album name, and source badge",
+            "• Quality badge appears after post-processing",
+            "• Falls back gracefully for transfers without metadata context",
+        ],
+    },
+    {
+        title: "Template Variable Delimiters",
+        description: "Use ${var} syntax to append literal text to template variables",
+        features: [
+            "• ${albumtype}s produces 'Albums', 'Singles', 'EPs'",
+            "• Both $var and ${var} syntaxes work in all templates",
+            "• Validation updated to accept delimited variables",
+        ],
+    },
+    {
+        title: "Reorganize All Albums",
+        description: "Bulk reorganize all albums for an artist from the enhanced library view",
+        features: [
+            "• New 'Reorganize All' button in the artist header",
+            "• Processes albums sequentially with progress toasts",
+            "• Continues on error — one failed album doesn't block the rest",
+            "• Uses the same template and endpoint as per-album reorganize",
+        ],
+    },
+    {
+        title: "SoulSync Standalone Library",
+        description: "Use SoulSync without Plex, Jellyfin, or Navidrome — manage your library directly",
+        features: [
+            "• New 'Standalone' server option in Settings → Connections",
+            "• Downloads and imports write artist/album/track to the library database immediately",
+            "• Pre-populated enrichment IDs (Spotify, Deezer, MusicBrainz) — workers skip re-discovery",
+            "• Deep scan finds untracked files in Transfer → moves to Staging for processing",
+            "• Deep scan removes stale DB records when files are deleted from disk",
+            "• Sync page and sync buttons hidden automatically in standalone mode",
+            "• Full library page, artist detail, discography, and enhanced view all work standalone",
+        ],
+        usage_note: "Go to Settings → Connections and click the 'Standalone' button. No media server needed.",
+    },
+    {
+        title: "Auto-Import",
+        description: "Background import folder watcher that automatically identifies and imports music into your library",
+        features: [
+            "• Recursive scan — any folder depth (Artist/Album/tracks, Album/tracks, loose files)",
+            "• Single file support — loose audio files identified via tags, filename, or AcoustID",
+            "• Tag-based identification preferred over weak metadata matches (85% confidence for tagged files)",
+            "• AcoustID fingerprinting fallback for untagged or ambiguous files",
+            "• Stats bar, filter pills (All/Review/Imported/Failed), Scan Now, Approve All, Clear History",
+            "• Expandable track match details with per-track confidence scores",
+            "• Race condition fix prevents duplicate processing during multi-track albums",
+        ],
+        usage_note: "Enable on the Import page Auto tab. Set your import folder in Settings.",
+    },
+    {
+        title: "Wishlist Nebula",
+        description: "Wishlist redesigned as an interactive artist orb visualization",
+        features: [
+            "• Each artist is a glowing orb with their photo — album fans and single moons orbit around them",
+            "• Click orbs to expand and see albums/singles, download directly from the nebula",
+            "• Processing state shows live progress with spinning ring animation",
+            "• Stats strip at top shows total artists, albums, singles, and tracks",
+        ],
+        usage_note: "Click Wishlist in the sidebar to see the Nebula view.",
+    },
+    {
+        title: "Automation Group Management",
+        description: "Organize and manage your automation groups with full control",
+        features: [
+            "• Rename, delete, and bulk-toggle automation groups from group headers",
+            "• Drag-and-drop automations between groups to reorganize",
+            "• Delete confirmation dialog with group name and automation count",
+        ],
+        usage_note: "Right-click or use the action buttons on group headers in the Automations page.",
+    },
+    {
+        title: "Bidirectional Artist Sync & Server Playlists",
+        description: "Artist sync now goes both ways, and server playlists show full coverage",
+        features: [
+            "• Artist Sync pulls new content from your media server AND removes stale library entries",
+            "• Deep scan mode fetches full metadata for newly discovered tracks",
+            "• Server playlist view shows all playlists with clear synced vs unsynced visual separation",
+        ],
+    },
+    {
+        title: "Provider-Agnostic Discovery",
+        description: "Discovery features work with any configured metadata source instead of requiring Spotify",
+        features: [
+            "• Similar artist matching, discovery pool, and incremental updates use source priority",
+            "• Falls back through Spotify, iTunes, and Deezer in configured order",
+            "• MusicMap URL encoding fixed for artists with special characters",
+            "• Freshness check simplified to age-based — backfill handles missing IDs separately",
+        ],
+    },
+    {
+        title: "Dashboard & Navigation",
+        description: "Dashboard improvements and sidebar navigation enhancements",
+        features: [
+            "• Library Status card on Dashboard — shows server state, track counts, scan buttons",
+            "• Tools page in sidebar — all maintenance tools moved from Dashboard modal",
+            "• Watchlist and Wishlist promoted to full sidebar pages with live count badges",
+            "• AcoustID scanner scans full library with actionable fix options (retag, redownload, delete)",
+        ],
+    },
+    {
+        title: "MusicBrainz & Metadata Fixes",
+        description: "Critical tag embedding fix and Picard-style album consistency",
+        features: [
+            "• Fix: source ID tags (Spotify, MusicBrainz, Deezer, AudioDB) were silently skipped on every download — now embed correctly",
+            "• Picard-style release preference scoring prevents Navidrome album splits",
+            "• Source tags wiped when metadata enhancement is skipped or fails",
+            "• Spotify API no longer called when Deezer/iTunes is the configured primary source",
+        ],
+    },
+    {
+        title: "Downloads & Soulseek Improvements",
+        description: "Better download management, search accuracy, and queue control",
+        features: [
+            "• Downloads batch panel — color-coded batch cards with progress, cancel, expand, and 7-day history",
+            "• Soulseek search queries now include album name — reduces wrong-artist downloads",
+            "• Reject Soulseek results from Various Artists/VA/Unknown Artist folders",
+            "• Clearing wishlist now cancels the active wishlist download batch",
+            "• Album delete with 'Delete Files Too' option on enhanced library page",
+            "• Fix download modal freezing mid-download — M3U auto-save was exhausting server threads",
+            "• Fix Unknown Artist when adding playlist tracks to wishlist",
+            "• Fix slskd timeout spam when Soulseek is not the active download source",
+        ],
+    },
+    {
+        title: "Recent Fixes",
+        description: "Bug fixes from recent releases and community reports",
+        features: [
+            "• Fix watchlist scan false failures — empty discography no longer reported as error",
+            "• Fix deezer_artist_id column error on enhanced library sync",
+            "• Fix wishlist button intermittently not navigating to page",
+            "• Fix worker orb tooltips rendering behind dashboard content",
+            "• Fix OAuth callback port hardcoding — custom ports now respected",
+            "• Fix allow duplicates setting not saving",
+            "• Fix wishlist dropping cross-album tracks when duplicates enabled",
+            "• Fix replace lower quality setting not persisting",
+            "• Fix Spotify enrichment worker infinite loop on pre-matched artists",
+            "• Reject Qobuz 30-second sample/preview downloads",
+            "• Fix library page crash on All filter — non-string soul_id broke card rendering",
+            "• Auto Wing It fallback for failed discovery — unmatched tracks download via Soulseek with raw metadata",
+            "• Lidarr download source now production-ready — full orchestrator integration",
+            "• Fix album track lookup hardcoded to Spotify — now uses configured primary source",
+            "• Fix M3U showing all tracks as missing — regenerate with real paths after post-processing",
+            "• Fix AcoustID retag not writing corrected tags to audio file",
+            "• Fix wishlist albums cycle stuck at 1 concurrent worker instead of configured value",
+            "• Fix downloads badge dropping to 300 after opening Downloads page",
+            "• Fix server playlist Find & Add inserting at wrong position on Plex",
+            "• Smarter Fix modal results — standard album versions sorted above live/remix/cover/soundtrack variants",
+            "• Unmatch discovery tracks — red ✕ button to remove bad matches from playlist discovery",
+            "• Customizable music video naming — path template with $artist, $title, $year variables",
+            "• Fix soulseek log spam when not configured as download source",
+        ],
+    },
+    {
+        title: "Earlier in v2.3",
+        description: "Major features from earlier in this release cycle",
+        features: [
+            "• Centralized Downloads page with live-updating list and filter pills",
+            "• First-Run Setup Wizard — 7-step guided configuration",
+            "• Music Videos — search and download from YouTube",
+            "• Inbound Music Request API for external tools (Discord bots, Home Assistant)",
+            "• Lidarr download source (development) — 7th source for Usenet/torrent via Lidarr",
+            "• Graceful shutdown — all workers respond to shutdown signals immediately",
+            "• Unknown Artist prevention with 3-tier metadata fallback",
+            "• Deezer multi-artist tagging using contributors field",
+            "• Artist Map — Watchlist Constellation, Genre Map, and Artist Explorer canvas modes",
+            "• Discogs integration — enrichment worker, fallback source, enhanced search tab",
+            "• Wing It mode, Global Search Bar, Redesigned Notifications",
+            "• Server Playlist Manager, Sync History Dashboard, Playlist Explorer",
+            "• Enhanced Library Manager with inline tag editing and write-to-file",
+            "• Automation Signals, Multi-Source Search Tabs, Rich Artist Profiles",
+        ],
+    },
+];
+
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
     return btn ? btn.textContent.trim().replace('v', '') : '2.4.0';
