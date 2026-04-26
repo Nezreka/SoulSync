@@ -84,6 +84,7 @@ SoulSync bridges streaming services to your music library with automated discove
 - Hi-Res FLAC downsampling to 16-bit/44.1kHz CD quality
 - Blasphemy Mode — delete original FLAC after conversion
 - Synchronized lyrics (LRC) via LRClib
+- ReplayGain analysis — optional track-level loudness tagging via ffmpeg, runs before lossy copy so both files get tagged
 - Picard-style album consistency — pre-flight MusicBrainz release lookup ensures all tracks get the same release ID
 
 ### Listening Stats & Scrobbling
@@ -117,8 +118,13 @@ SoulSync bridges streaming services to your music library with automated discove
 - Spotify auth still enables playlists, followed artists, and enrichment
 - MusicBrainz enrichment with Picard-style album consistency
 
+**Hydrabase** (optional P2P metadata network) — replaces iTunes as the metadata source when connected. Federated lookup with community-matched results, falls back automatically if disconnected. Dev-mode feature, enable in Settings → Connections.
+
+**Genre Whitelist** — filter junk genre tags (artist names, radio show names, playlist names) from all 10 enrichment sources. 272 curated default genres, fully customizable. Off by default for backward compatibility.
+
 **Post-Processing Tag Embedding**
 - Granular per-service tag toggles (18+ MusicBrainz tags, Spotify/iTunes/Deezer IDs, AudioDB mood/style, Tidal/Qobuz ISRCs, Last.fm tags, Genius URLs)
+- Multi-artist tagging options: configurable separator (comma/semicolon/slash), multi-value ARTISTS tag for Navidrome/Jellyfin multi-artist linking, optional "move featured artists to title" mode
 - Album art embedding, cover.jpg download
 - Spotify rate limit protection across all API calls
 
@@ -134,12 +140,13 @@ SoulSync bridges streaming services to your music library with automated discove
 ### Automation
 
 **Automation Engine** — Visual drag-and-drop builder for custom workflows
-- **Triggers**: Schedule, Daily/Weekly Time, Track Downloaded, Batch Complete, Playlist Changed, Discovery Complete, Signal Received, and 10+ more
-- **Actions**: Process Wishlist, Scan Watchlist, Refresh Mirrored, Discover Playlist, Sync Playlist, Scan Library, Database Update, Quality Scan, Full Cleanup, and more
-- **Then Actions**: Fire Signal (chain automations), Discord, Telegram, Pushbullet notifications
-- **Playlist Pipeline**: Single automation for full playlist lifecycle — refresh → discover → sync → download missing. No signal wiring needed.
-- **Pipelines**: Pre-built one-click pipeline deployments (New Music, Nightly Operations, etc.)
-- **Signal Chains**: playlist_id forwarded from events to action handlers for proper chain execution
+- **Triggers**: Schedule, Daily/Weekly Time, Track Downloaded, Batch Complete, Playlist Changed, Discovery Complete, Signal Received, Library Scan Complete, Watchlist Match, Wishlist Item Added, and more
+- **Actions**: Process Wishlist, Scan Watchlist, Refresh Mirrored, Discover Playlist, Sync Playlist, Scan Library, Database Update, Quality Scan, Full Cleanup, and 10+ more
+- **Then Actions** (up to 3 per automation): Fire Signal (chain to other automations), Discord/Telegram/Pushbullet notifications, audible chimes
+- **Signal Chains** — One automation fires `signal:foo`, another listens for it. Cycle detection + chain depth limit + cooldown prevent runaway chains.
+- **Playlist Pipeline** — Single automation for full playlist lifecycle: refresh → discover → sync → download missing. No manual signal wiring.
+- **Pipelines** — Pre-built one-click deployments (New Music, Nightly Operations, Full Library Maintenance, etc.) that install a linked group of automations at once
+- **Automation Groups** — Drag-and-drop organization, bulk enable/disable, rename, right-click context menus
 
 **Watchlist** — Monitor unlimited artists with per-artist configuration
 - Release type filters: Albums, EPs, Singles
@@ -149,8 +156,11 @@ SoulSync bridges streaming services to your music library with automated discove
 **Wishlist** — Failed downloads automatically queued for retry with auto-processing
 
 **Mirrored Playlists** — Mirror from Spotify, Tidal, YouTube, Deezer and keep synced
-- Automatic refresh detects changes, discovery pipeline matches metadata
-- Followed Spotify playlists with 403 errors fall back to public embed scraper
+- Auto-refresh detects source changes via URL/ID tracking in playlist metadata
+- Discovery pipeline matches source tracks to user's primary metadata source (Spotify/iTunes/Deezer/Discogs)
+- Auto Wing It fallback — tracks that fail all metadata APIs get stub metadata from the raw source title and flow through the normal download pipeline anyway
+- Followed Spotify playlists that hit 403 errors fall back to public embed scraper
+- Unmatch button on found tracks with DB persistence for mirrored playlists
 
 **Local Profiles** — Multiple configuration profiles with isolated settings, watchlists, and playlists
 
@@ -175,6 +185,8 @@ SoulSync bridges streaming services to your music library with automated discove
 - One-click Fix All with findings dashboard
 
 **Database Storage Visualization** — Donut chart showing per-table storage breakdown
+
+**Live Log Viewer** — Real-time terminal-style log viewer on Settings → Logs. Color-coded levels (DEBUG/INFO/WARNING/ERROR), live filter + search, switch between log files (app, post-processing, AcoustID, source reuse). Auto-scroll, copy, clear. Updates via WebSocket every 0.5s.
 
 **Import System** — Tag-first matching, auto-grouped album cards, staging folder workflow
 - Auto-Import worker: recursive scan, single file support, AcoustID fingerprinting fallback
@@ -213,6 +225,43 @@ docker-compose up -d
 # Access at http://localhost:8008
 ```
 
+### Release Channels
+
+SoulSync publishes two Docker image tracks so you can choose your level of stability.
+
+**Stable — `:latest`** (recommended for most users). Hand-promoted from the `dev` branch to `main` when a batch of changes is ready for release. Published to Docker Hub. Your `docker-compose.yml` pulls this by default — no changes needed.
+
+```bash
+docker pull boulderbadgedad/soulsync:latest
+```
+
+**Nightly — `:dev`**. Rebuilt every night from the `dev` branch (and on every push to dev). Published to GitHub Container Registry. Gets new features and bug fixes before they reach `:latest`, at the cost of occasional instability as changes settle. Good for early adopters, contributors validating their own merges, and anyone helping shake out bugs on Discord before a stable release.
+
+To switch, edit `docker-compose.yml`:
+
+```yaml
+image: ghcr.io/nezreka/soulsync:dev
+```
+
+Then run `docker-compose pull && docker-compose up -d`.
+
+Pinned dev builds are also published as `ghcr.io/nezreka/soulsync:dev-YYYYMMDD-<sha>` if you want to stick with an exact known-good snapshot.
+
+**Version-tagged releases** (e.g. `:2.3`, `:2.4`) are permanent tags published on both registries when a stable release is promoted:
+
+```bash
+docker pull boulderbadgedad/soulsync:2.4
+# or
+docker pull ghcr.io/nezreka/soulsync:2.4
+```
+
+| You are... | Use |
+|---|---|
+| A typical user who wants things to work | `:latest` |
+| Pinning to a specific version for stability | `:2.3`, `:2.4`, etc. |
+| An early adopter who wants new features early and is OK reporting bugs | `:dev` |
+| A contributor testing post-merge behavior | `:dev` or a pinned dev build |
+
 ### Unraid
 
 SoulSync is available as an Unraid template. Install from Community Applications or manually add the template from:
@@ -221,6 +270,8 @@ https://raw.githubusercontent.com/Nezreka/SoulSync/main/templates/soulsync.xml
 ```
 
 PUID/PGID are exposed in the template — set them to match your Unraid permissions (default: 99/100 for nobody/users).
+
+The template points at `boulderbadgedad/soulsync:latest` (stable) by default. To use the nightly `:dev` channel on Unraid, edit the container's **Repository** field to `ghcr.io/nezreka/soulsync:dev` after installing from the template.
 
 ### Python (No Docker)
 
@@ -343,3 +394,39 @@ Open SoulSync at `http://localhost:8008` and go to Settings.
 - **Album Consistency** — pre-flight MusicBrainz release lookup before album downloads
 - **Automation Engine** — event-driven workflows with signal chains and pipeline deployment
 - **SoulID System** — deterministic cross-instance artist/album/track identifiers via track-verified API lookup
+
+---
+
+## Contributing
+
+### Branch workflow
+
+SoulSync uses a `dev` → `main` flow:
+
+- **`main`** — release branch. `:latest` images auto-build from this. Only receives merges from `dev`.
+- **`dev`** — integration branch. Nightly `:dev` images build from here. PRs land here first for validation before being promoted to `main`.
+- **Feature branches** — branched from `dev`. PRs target `dev`.
+
+### Opening a PR
+
+1. Fork and clone the repo
+2. Branch off `dev`: `git checkout -b fix/your-change dev`
+3. Make your changes and commit
+4. Push and open a PR against **`dev`** (not `main`)
+5. CI (`build-and-test.yml`) runs ruff lint + compile + pytest on your branch — wait for green
+6. A maintainer reviews and merges
+
+### Running locally
+
+```bash
+pip install -r requirements-dev.txt
+python -m ruff check .       # must be 0 errors
+python -m pytest             # all tests must pass
+gunicorn -c gunicorn.dev.conf.py wsgi:application
+```
+
+Ruff config lives in `pyproject.toml`. The ruleset is intentionally lenient — it catches real bugs (undefined names, import shadowing, closure-in-loop) without style nits.
+
+### Reporting bugs / requesting features
+
+Open an issue on GitHub. For user-side support, the Discord community is the fastest place to ask.

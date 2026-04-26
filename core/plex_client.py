@@ -342,7 +342,7 @@ class PlexClient:
                 
                 if valid_tracks:
                     # Debug the track objects before creating playlist
-                    logger.debug(f"About to create playlist with tracks:")
+                    logger.debug("About to create playlist with tracks:")
                     for i, track in enumerate(valid_tracks):
                         logger.debug(f"  Track {i+1}: {track.title} (type: {type(track)}, ratingKey: {track.ratingKey})")
                     
@@ -378,7 +378,7 @@ class PlexClient:
                                     return True
                                 except Exception as final_error:
                                     logger.error(f"Final playlist creation attempt failed: {final_error}")
-                                    raise create_error
+                                    raise create_error from final_error
                 else:
                     logger.error(f"No valid tracks with ratingKeys for playlist '{name}'")
                     return False
@@ -464,9 +464,9 @@ class PlexClient:
                 logger.info(f"Creating backup playlist '{backup_name}' before sync")
                 
                 if self.copy_playlist(playlist_name, backup_name):
-                    logger.info(f"Backup created successfully")
+                    logger.info("Backup created successfully")
                 else:
-                    logger.warning(f"Failed to create backup, continuing with sync")
+                    logger.warning("Failed to create backup, continuing with sync")
             
             # Delete original and recreate
             existing_playlist.delete()

@@ -267,7 +267,12 @@ class ApiCallTracker:
 
 
     def save(self):
-        """Persist 24h minute history to disk. Call on shutdown."""
+        """Persist 24h minute history to disk. Call on shutdown.
+
+        Uses an atomic write (write to a sibling .tmp file, fsync, rename) so
+        a SIGINT/SIGTERM/crash mid-write can't leave the JSON file truncated.
+        Without this, an interrupted shutdown corrupts the history file and
+        the next startup loses 24h of metrics."""
         try:
             now = time.time()
             cutoff = now - 86400
@@ -283,10 +288,22 @@ class ApiCallTracker:
                     if entries:
                         data[key] = entries
                 events = [dict(e) for e in self._events if e['ts'] >= cutoff]
-            with open(_PERSIST_PATH, 'w') as f:
-                json.dump({'ts': now, 'history': data, 'events': events}, f)
+
+            payload = {'ts': now, 'history': data, 'events': events}
+            tmp_path = _PERSIST_PATH + '.tmp'
+            with open(tmp_path, 'w') as f:
+                json.dump(payload, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, _PERSIST_PATH)
         except Exception as e:
             logger.error(f"[ApiCallTracker] Failed to save history: {e}")
+            # Best-effort cleanup of stale tmp file from a failed write.
+            try:
+                if os.path.exists(_PERSIST_PATH + '.tmp'):
+                    os.remove(_PERSIST_PATH + '.tmp')
+            except Exception:
+                pass
 
     def _load(self):
         """Restore 24h minute history from disk. Called on init."""

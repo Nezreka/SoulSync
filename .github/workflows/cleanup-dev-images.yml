@@ -8,6 +8,7 @@ on:
 
 jobs:
   cleanup:
+    if: github.repository == 'Nezreka/SoulSync'
     runs-on: ubuntu-latest
     permissions:
       packages: write

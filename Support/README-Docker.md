@@ -1,5 +1,15 @@
 # SoulSync WebUI - Docker Deployment Guide
 
+## Release Channels
+
+SoulSync publishes two Docker image tracks:
+
+- **Stable — `boulderbadgedad/soulsync:latest`** (Docker Hub). Hand-promoted from the `dev` branch when a batch of changes is ready. Default in `docker-compose.yml`.
+- **Nightly — `ghcr.io/nezreka/soulsync:dev`** (GHCR). Rebuilt every night and on every push to `dev`. Faster access to new features at the cost of occasional instability.
+- **Version-tagged — `:2.3`, `:2.4`, etc.** on both registries for pinning to a specific release.
+
+To switch a running install to the nightly channel, edit the `image:` line in `docker-compose.yml` to `ghcr.io/nezreka/soulsync:dev` and run `docker-compose pull && docker-compose up -d`. See the [main README](../README.md#release-channels) for the full channel guide.
+
 ## 🐳 Quick Start
 
 ### Prerequisites

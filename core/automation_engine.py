@@ -270,7 +270,7 @@ class AutomationEngine:
         """Cancel all timers on shutdown."""
         self._running = False
         with self._lock:
-            for aid, timer in self._timers.items():
+            for _aid, timer in self._timers.items():
                 timer.cancel()
             count = len(self._timers)
             self._timers.clear()

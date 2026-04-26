@@ -26,8 +26,8 @@ from enum import Enum
 
 try:
     import yt_dlp
-except ImportError:
-    raise ImportError("yt-dlp is required. Install with: pip install yt-dlp")
+except ImportError as exc:
+    raise ImportError("yt-dlp is required. Install with: pip install yt-dlp") from exc
 
 from utils.logging_config import get_logger
 from core.matching_engine import MusicMatchingEngine
@@ -382,7 +382,7 @@ class YouTubeClient:
 
         # If we already have both locally, use them
         if ffmpeg_path.exists() and ffprobe_path.exists():
-            logger.info(f"Found ffmpeg and ffprobe in tools folder")
+            logger.info("Found ffmpeg and ffprobe in tools folder")
             # Add to PATH so yt-dlp can find them
             tools_dir_str = str(tools_dir.absolute())
             os.environ['PATH'] = tools_dir_str + os.pathsep + os.environ.get('PATH', '')
@@ -397,10 +397,10 @@ class YouTubeClient:
                 url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
                 zip_path = tools_dir / 'ffmpeg.zip'
 
-                logger.info(f"   Downloading from GitHub (this may take a minute)...")
+                logger.info("   Downloading from GitHub (this may take a minute)...")
                 urllib.request.urlretrieve(url, zip_path)
 
-                logger.info(f"   Extracting ffmpeg.exe and ffprobe.exe...")
+                logger.info("   Extracting ffmpeg.exe and ffprobe.exe...")
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                     # Extract ffmpeg.exe and ffprobe.exe from the bin folder
                     for file in zip_ref.namelist():
@@ -418,10 +418,10 @@ class YouTubeClient:
                 url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz'
                 tar_path = tools_dir / 'ffmpeg.tar.xz'
 
-                logger.info(f"   Downloading from GitHub (this may take a minute)...")
+                logger.info("   Downloading from GitHub (this may take a minute)...")
                 urllib.request.urlretrieve(url, tar_path)
 
-                logger.info(f"   Extracting ffmpeg and ffprobe...")
+                logger.info("   Extracting ffmpeg and ffprobe...")
                 with tarfile.open(tar_path, 'r:xz') as tar_ref:
                     for member in tar_ref.getmembers():
                         if member.name.endswith('bin/ffmpeg'):
@@ -437,17 +437,17 @@ class YouTubeClient:
 
             elif system == 'darwin':
                 # Download Mac ffmpeg and ffprobe (static builds)
-                logger.info(f"   Downloading ffmpeg from evermeet.cx...")
+                logger.info("   Downloading ffmpeg from evermeet.cx...")
                 ffmpeg_url = 'https://evermeet.cx/ffmpeg/getrelease/zip'
                 ffmpeg_zip = tools_dir / 'ffmpeg.zip'
                 urllib.request.urlretrieve(ffmpeg_url, ffmpeg_zip)
 
-                logger.info(f"   Downloading ffprobe from evermeet.cx...")
+                logger.info("   Downloading ffprobe from evermeet.cx...")
                 ffprobe_url = 'https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip'
                 ffprobe_zip = tools_dir / 'ffprobe.zip'
                 urllib.request.urlretrieve(ffprobe_url, ffprobe_zip)
 
-                logger.info(f"   Extracting ffmpeg and ffprobe...")
+                logger.info("   Extracting ffmpeg and ffprobe...")
                 with zipfile.ZipFile(ffmpeg_zip, 'r') as zip_ref:
                     zip_ref.extract('ffmpeg', tools_dir)
                 with zipfile.ZipFile(ffprobe_zip, 'r') as zip_ref:
@@ -473,10 +473,10 @@ class YouTubeClient:
 
         except Exception as e:
             logger.error(f"Failed to download ffmpeg: {e}")
-            logger.error(f"   Please install manually:")
-            logger.error(f"   Windows: scoop install ffmpeg")
-            logger.error(f"   Linux:   sudo apt install ffmpeg")
-            logger.error(f"   Mac:     brew install ffmpeg")
+            logger.error("   Please install manually:")
+            logger.error("   Windows: scoop install ffmpeg")
+            logger.error("   Linux:   sudo apt install ffmpeg")
+            logger.error("   Mac:     brew install ffmpeg")
             return False
 
     def _youtube_to_track_result(self, entry: dict, best_audio: Optional[dict] = None) -> TrackResult:
@@ -1057,7 +1057,7 @@ class YouTubeClient:
                     # Check if it's a 403 error
                     if '403' in error_msg or 'Forbidden' in error_msg:
                         if attempt < max_retries - 1:
-                            logger.info(f"Waiting 2 seconds before retry...")
+                            logger.info("Waiting 2 seconds before retry...")
                             import time
                             time.sleep(2)
                             continue  # Retry on 403
@@ -1148,7 +1148,7 @@ class YouTubeClient:
         download_statuses = []
 
         with self._download_lock:
-            for download_id, download_info in self.active_downloads.items():
+            for _download_id, download_info in self.active_downloads.items():
                 status = DownloadStatus(
                     id=download_info['id'],
                     filename=download_info['filename'],
@@ -1276,11 +1276,11 @@ class YouTubeClient:
             if audio.tags is not None:
                 # Delete ALL existing frames
                 audio.tags.clear()
-                logger.debug(f"   Cleared all existing tag frames")
+                logger.debug("   Cleared all existing tag frames")
             else:
                 # No tags exist, add them
                 audio.add_tags()
-                logger.debug(f"   Added new tag structure")
+                logger.debug("   Added new tag structure")
 
             if spotify_track:
                 # Use Spotify metadata
@@ -1304,7 +1304,7 @@ class YouTubeClient:
                 except:
                     pass
 
-                logger.debug(f"   Setting metadata tags...")
+                logger.debug("   Setting metadata tags...")
 
                 # Set ID3 tags (using setall to ensure they're set)
                 audio.tags.setall('TIT2', [TIT2(encoding=3, text=title)])
@@ -1337,7 +1337,7 @@ class YouTubeClient:
                 logger.debug(f"   Year: {year}")
 
                 # Fetch and embed album art from Spotify (via search)
-                logger.debug(f"   Fetching album art from Spotify...")
+                logger.debug("   Fetching album art from Spotify...")
                 album_art_url = self._get_spotify_album_art(spotify_track)
 
                 if album_art_url:
@@ -1367,11 +1367,11 @@ class YouTubeClient:
                     except Exception as art_error:
                         logger.warning(f"   Could not embed album art: {art_error}")
                 else:
-                    logger.warning(f"   No album art found on Spotify")
+                    logger.warning("   No album art found on Spotify")
 
             # Save all tags
             audio.save()
-            logger.info(f"Metadata enhanced successfully")
+            logger.info("Metadata enhanced successfully")
 
             # Return album art URL for cover.jpg creation
             return album_art_url
@@ -1415,10 +1415,10 @@ class YouTubeClient:
 
             # Don't overwrite existing cover art
             if cover_path.exists():
-                logger.debug(f"   ℹ️  cover.jpg already exists, skipping")
+                logger.debug("   ℹ️  cover.jpg already exists, skipping")
                 return
 
-            logger.debug(f"   Downloading cover.jpg...")
+            logger.debug("   Downloading cover.jpg...")
 
             response = requests.get(album_art_url, timeout=10)
             response.raise_for_status()
@@ -1440,10 +1440,10 @@ class YouTubeClient:
             from core.lyrics_client import lyrics_client
 
             if not lyrics_client.api:
-                logger.debug(f"   LRClib API not available - skipping lyrics")
+                logger.debug("   LRClib API not available - skipping lyrics")
                 return
 
-            logger.debug(f"   Fetching lyrics from LRClib...")
+            logger.debug("   Fetching lyrics from LRClib...")
 
             # Get track metadata
             artist_name = spotify_track.artists[0] if spotify_track.artists else "Unknown Artist"
@@ -1461,12 +1461,12 @@ class YouTubeClient:
             )
 
             if success:
-                logger.debug(f"   Created .lrc lyrics file")
+                logger.debug("   Created .lrc lyrics file")
             else:
-                logger.debug(f"   No lyrics found on LRClib")
+                logger.debug("   No lyrics found on LRClib")
 
         except ImportError:
-            logger.debug(f"   lyrics_client not available - skipping lyrics")
+            logger.debug("   lyrics_client not available - skipping lyrics")
         except Exception as e:
             logger.warning(f"   Could not create lyrics file: {e}")
 

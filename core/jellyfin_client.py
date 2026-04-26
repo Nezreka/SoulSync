@@ -1555,9 +1555,9 @@ class JellyfinClient:
                 logger.info(f"Creating backup playlist '{backup_name}' before sync")
                 
                 if self.copy_playlist(playlist_name, backup_name):
-                    logger.info(f"Backup created successfully")
+                    logger.info("Backup created successfully")
                 else:
-                    logger.warning(f"Failed to create backup, continuing with sync")
+                    logger.warning("Failed to create backup, continuing with sync")
             
             if existing_playlist:
                 # Delete existing playlist using DELETE request

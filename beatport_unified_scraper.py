@@ -1666,7 +1666,7 @@ class BeatportUnifiedScraper:
         release_urls = []
         urls_found = 0
 
-        for i, row in enumerate(table_rows):
+        for _i, row in enumerate(table_rows):
             # Look for release link in this row
             link_elem = row.select_one('a[href*="/release/"]')
             if link_elem and link_elem.get('href'):
@@ -1694,7 +1694,7 @@ class BeatportUnifiedScraper:
                 _beatport_log(f"   Found {len(tracks)} individual tracks")
                 all_individual_tracks.extend(tracks)
             else:
-                _beatport_log(f"   No tracks found")
+                _beatport_log("   No tracks found")
 
             # Add delay between requests to be respectful
             if i < len(release_urls) - 1:
@@ -1877,7 +1877,7 @@ class BeatportUnifiedScraper:
 
         # Convert to our standard format (with Hype Picks branding)
         converted_tracks = []
-        for i, track_data in enumerate(release_tracks):
+        for _i, track_data in enumerate(release_tracks):
             track = self.convert_hype_picks_json_to_track_format(track_data, release_url, len(converted_tracks) + 1)
             if track:
                 converted_tracks.append(track)
@@ -2631,7 +2631,7 @@ class BeatportUnifiedScraper:
         # Example: "Gods window, Pt. 1Thakzin,Thandazo,Xelimpilo"
         lines = [line.strip() for line in text.split('\n') if line.strip()]
 
-        for i, line in enumerate(lines):
+        for _i, line in enumerate(lines):
             # Look for lines that might contain title and artists
             if len(line) > 5 and '$' not in line and 'Music' in line:
                 # This might be a title line
@@ -2861,7 +2861,7 @@ class BeatportUnifiedScraper:
                 _beatport_log(f"   Found {len(tracks)} individual tracks")
                 all_individual_tracks.extend(tracks)
             else:
-                _beatport_log(f"   No tracks found")
+                _beatport_log("   No tracks found")
 
             # Add delay between requests to be respectful
             if i < len(release_urls) - 1:
@@ -2983,7 +2983,7 @@ class BeatportUnifiedScraper:
 
         # If no dedicated hype page found, try main genre page for hype content
         if not tracks:
-            _beatport_log(f"   No dedicated hype page found, looking for hype content on main page...")
+            _beatport_log("   No dedicated hype page found, looking for hype content on main page...")
             genre_url = f"{self.base_url}/genre/{genre['slug']}/{genre['id']}"
             soup = self.get_page(genre_url)
             if soup:
@@ -3048,7 +3048,7 @@ class BeatportUnifiedScraper:
         seen_urls = set()
 
         # Process ALL links but stop when we reach the limit of unique URLs (same as Latest Releases)
-        for i, link in enumerate(release_links):
+        for _i, link in enumerate(release_links):
             href = link.get('href')
             if href:
                 # Ensure full URL (same as Latest Releases)
@@ -3228,7 +3228,7 @@ class BeatportUnifiedScraper:
         if not soup:
             return tracks
 
-        _beatport_log(f"   Looking for HYPE labeled tracks on page...")
+        _beatport_log("   Looking for HYPE labeled tracks on page...")
 
         # Look for elements containing "HYPE" text
         hype_elements = soup.find_all(text=re.compile(r'HYPE', re.I))
@@ -3243,7 +3243,7 @@ class BeatportUnifiedScraper:
                 track_container = None
 
                 # Walk up the DOM tree to find a suitable container
-                for level in range(5):
+                for _level in range(5):
                     if parent:
                         # Look for track links in this container
                         track_links = parent.find_all('a', href=re.compile(r'/track/'))
@@ -3314,7 +3314,7 @@ class BeatportUnifiedScraper:
         if not soup:
             return tracks
 
-        _beatport_log(f"   Extracting hype tracks from Beatport page...")
+        _beatport_log("   Extracting hype tracks from Beatport page...")
 
         # Method 1: Extract from Hype Picks carousel (release cards with HYPE badges)
         hype_picks_tracks = self.extract_hype_picks_from_carousel(soup, list_name, limit)
@@ -3551,7 +3551,7 @@ class BeatportUnifiedScraper:
         seen_urls = set()
 
         # Process ALL links but stop when we reach the limit of unique URLs (same as Latest Releases)
-        for i, link in enumerate(release_links):
+        for _i, link in enumerate(release_links):
             href = link.get('href')
             if href:
                 # Ensure full URL (same as Latest Releases)
@@ -3627,7 +3627,7 @@ class BeatportUnifiedScraper:
         seen_urls = set()
 
         # Process ALL links but stop when we reach the limit of unique URLs (same as homepage)
-        for i, link in enumerate(release_links):
+        for _i, link in enumerate(release_links):
             href = link.get('href')
             if href:
                 # Ensure full URL (same as homepage)
@@ -3724,12 +3724,12 @@ class BeatportUnifiedScraper:
         """Extract tracks from Beatport chart table structure (tracks-table class)"""
         tracks = []
 
-        _beatport_log(f"   DEBUG: Looking for tracks-table container...")
+        _beatport_log("   DEBUG: Looking for tracks-table container...")
 
         # Look for the tracks table container
         tracks_table = soup.find(class_=re.compile(r'tracks-table'))
         if not tracks_table:
-            _beatport_log(f"   No tracks-table container found")
+            _beatport_log("   No tracks-table container found")
             # Debug: Let's see what table classes ARE available
             all_tables = soup.find_all(['table', 'div'], class_=re.compile(r'table|Table', re.I))
             _beatport_log(f"   DEBUG: Found {len(all_tables)} table-like elements")
@@ -3745,7 +3745,7 @@ class BeatportUnifiedScraper:
         track_rows_class = tracks_table.find_all(class_=re.compile(r'Table.*Row.*tracks-table'))
         track_rows_generic = tracks_table.find_all(class_=re.compile(r'Table.*Row'))
 
-        _beatport_log(f"   DEBUG: Track rows found:")
+        _beatport_log("   DEBUG: Track rows found:")
         _beatport_log(f"      - By data-testid='tracks-table-row': {len(track_rows_testid)}")
         _beatport_log(f"      - By class pattern 'Table.*Row.*tracks-table': {len(track_rows_class)}")
         _beatport_log(f"      - By generic 'Table.*Row': {len(track_rows_generic)}")
@@ -3754,7 +3754,7 @@ class BeatportUnifiedScraper:
         track_rows = track_rows_testid or track_rows_class or track_rows_generic
 
         if not track_rows:
-            _beatport_log(f"   No track rows found in any format")
+            _beatport_log("   No track rows found in any format")
             return tracks
 
         _beatport_log(f"   Using {len(track_rows)} track rows for extraction")
@@ -3836,7 +3836,7 @@ class BeatportUnifiedScraper:
 
         _beatport_log(f"   Found {len(table_rows)} potential table rows")
 
-        for i, row in enumerate(table_rows[:limit]):
+        for _i, row in enumerate(table_rows[:limit]):
             try:
                 # Skip header rows
                 if row.name == 'tr' and row.find('th'):
@@ -4361,7 +4361,7 @@ def test_dynamic_genre_discovery():
     _beatport_log("\nTEST 2: Genre Discovery with Images (Sample)")
     genres_with_images = scraper.discover_genres_with_images(include_images=True)
 
-    _beatport_log(f"\nSample genres with images:")
+    _beatport_log("\nSample genres with images:")
     for genre in genres_with_images[:3]:
         _beatport_log(f"   • {genre['name']}: {genre.get('image_url', 'No image')}")
 
@@ -4377,7 +4377,7 @@ def test_dynamic_genre_discovery():
             for track in tracks:
                 _beatport_log(f"      • {track['artist']} - {track['title']}")
         else:
-            _beatport_log(f"   No tracks found")
+            _beatport_log("   No tracks found")
 
     return genres
 
@@ -4392,7 +4392,7 @@ def test_improved_chart_sections():
     _beatport_log("\nTEST 1: Chart Section Discovery")
     chart_discovery = scraper.discover_chart_sections()
 
-    _beatport_log(f"\nDiscovery Results:")
+    _beatport_log("\nDiscovery Results:")
     summary = chart_discovery.get('summary', {})
     _beatport_log(f"   • Top Charts sections: {summary.get('top_charts_sections', 0)}")
     _beatport_log(f"   • Staff Picks sections: {summary.get('staff_picks_sections', 0)}")
@@ -4497,7 +4497,7 @@ def main():
     top_100 = scraper.scrape_top_100(limit=10)  # Test with 10 for now
 
     if top_100:
-        _beatport_log(f"\nTop 100 Sample (showing first 5):")
+        _beatport_log("\nTop 100 Sample (showing first 5):")
         for track in top_100[:5]:
             _beatport_log(f"   {track['position']}. {track['artist']} - {track['title']}")
 
@@ -4548,7 +4548,7 @@ def main():
     all_tracks = (top_100 or []) + [track for tracks in all_genre_results.values() for track in tracks]
     if all_tracks:
         overall_quality = scraper.test_data_quality(all_tracks)
-        _beatport_log(f"\nOVERALL DATA QUALITY")
+        _beatport_log("\nOVERALL DATA QUALITY")
         _beatport_log(f"• Quality Score: {overall_quality['quality_score']:.1f}%")
         _beatport_log(f"• Valid Tracks: {overall_quality['valid_tracks']}/{overall_quality['total_tracks']}")
 
@@ -4571,27 +4571,27 @@ def main():
     try:
         with open('beatport_unified_results.json', 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
-        _beatport_log(f"\nResults saved to beatport_unified_results.json")
+        _beatport_log("\nResults saved to beatport_unified_results.json")
     except Exception as e:
         _beatport_log(f"Failed to save results: {e}")
 
     # Virtual playlist possibilities
     if overall_quality['quality_score'] > 70:
-        _beatport_log(f"\nSUCCESS! Ready for virtual playlist creation")
-        _beatport_log(f"You can now create playlists for:")
-        _beatport_log(f"   • Beatport Top 100")
+        _beatport_log("\nSUCCESS! Ready for virtual playlist creation")
+        _beatport_log("You can now create playlists for:")
+        _beatport_log("   • Beatport Top 100")
         for genre_name in list(all_genre_results.keys())[:5]:
             _beatport_log(f"   • {genre_name} Top 100")
         if len(all_genre_results) > 5:
             _beatport_log(f"   • ...and {len(all_genre_results) - 5} more genres!")
 
-        _beatport_log(f"\nIntegration Notes:")
-        _beatport_log(f"   • Artist and title data is clean and ready")
+        _beatport_log("\nIntegration Notes:")
+        _beatport_log("   • Artist and title data is clean and ready")
         _beatport_log(f"   • {total_genres} genres confirmed working")
         _beatport_log(f"   • Data quality: {overall_quality['quality_score']:.1f}%")
     else:
         _beatport_log(f"\nData quality needs improvement ({overall_quality['quality_score']:.1f}%)")
-        _beatport_log(f"Consider refining extraction methods")
+        _beatport_log("Consider refining extraction methods")
 
 
 if __name__ == "__main__":

@@ -917,36 +917,29 @@ const HELPER_CONTENT = {
         description: 'Search for music across your configured metadata sources and download from Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer.',
         docsId: 'search'
     },
-    '#toggle-download-manager-btn': {
-        title: 'Toggle Download Manager',
-        description: 'Show or hide the download manager panel on the right side. The panel shows active downloads, finished downloads, and queue management.',
-        docsId: 'search-manager'
-    },
-    '.search-mode-toggle': {
-        title: 'Search Mode',
-        description: 'Switch between Enhanced Search (categorized metadata results with album art) and Basic Search (raw Soulseek results with detailed file info and filters).',
+    '#enh-source-row': {
+        title: 'Search Source Icons',
+        description: 'Each icon is a metadata source. The highlighted one is what your next search will target — defaults to your configured primary source on page load. Click a different icon to search or switch to that source; a small dot on the icon marks sources that already have cached results for the current query.',
         tips: [
-            'Enhanced: shows Artists, Albums, Singles, Tracks from your metadata source',
-            'Basic: shows raw Soulseek P2P results with format, bitrate, size, uploader info'
+            'Typing searches only the highlighted source — no more silent fan-out across every provider',
+            'Switching to an already-cached source is instant, no re-fetch',
+            'The Soulseek icon routes to the raw-file search (same as the old Basic Search)',
+            'Music Videos queries YouTube for downloadable music video files',
+            'An amber border on a source means the backend fell back to a different provider for you (usually because Spotify is rate-limited)'
         ],
         docsId: 'search-enhanced'
     },
 
     // Enhanced Search
     '.enhanced-search-input-wrapper': {
-        title: 'Enhanced Search',
-        description: 'Type an artist, album, or track name. Results appear in categorized sections: Library Artists, Artists, Albums, Singles & EPs, and Tracks. Results come from your active metadata source.',
+        title: 'Search Bar',
+        description: 'Type an artist, album, or track name. Results appear in categorized sections: Library Artists, Artists, Albums, Singles & EPs, and Tracks. Only the source highlighted in the icon row above is queried — click another icon to switch.',
         tips: [
             'Click an album to open the download modal',
             'Click a track to search your download source',
             'Play button previews tracks from your download source',
-            'Multi-source tabs compare results across Spotify, iTunes, and Deezer'
+            'Switch sources via the icon row above — results are cached per query'
         ],
-        docsId: 'search-enhanced'
-    },
-    '.enh-source-tabs': {
-        title: 'Source Tabs',
-        description: 'Switch between metadata sources to see results from Spotify, iTunes, or Deezer. Each source has its own catalog — tracks missing on one may be found on another.',
         docsId: 'search-enhanced'
     },
     '#enh-db-artists-section': {
@@ -955,7 +948,7 @@ const HELPER_CONTENT = {
     },
     '#enh-spotify-artists-section': {
         title: 'Artists',
-        description: 'Artists from your metadata source matching the search. Click to view their full discography on the Artists page.',
+        description: 'Artists from your metadata source matching the search. Click one to open their discography.',
     },
     '#enh-albums-section': {
         title: 'Albums',
@@ -1010,33 +1003,7 @@ const HELPER_CONTENT = {
         docsId: 'search-basic'
     },
 
-    // Download Manager Side Panel
-    '.downloads-side-panel': {
-        title: 'Download Manager',
-        description: 'Shows all active and completed downloads. Manage downloads, clear completed items, or cancel active transfers.',
-        docsId: 'search-manager'
-    },
-    '.controls-panel': {
-        title: 'Download Controls',
-        description: 'Overview of active and finished download counts. Clear Completed removes finished items from the list. Clear Current cancels all active downloads.',
-        docsId: 'search-manager'
-    },
-    '.controls-panel__clear-btn': {
-        title: 'Clear Completed',
-        description: 'Remove all finished downloads from the download manager list. Doesn\'t affect the downloaded files — they\'re already in your library.',
-    },
-    '.controls-panel__cancel-all-btn': {
-        title: 'Clear Current',
-        description: 'Cancel all active downloads in progress. Files that were partially downloaded will be cleaned up.',
-    },
-    '#active-queue': {
-        title: 'Download Queue',
-        description: 'Active downloads in progress. Each item shows track name, format, download speed, progress, and a cancel button.',
-    },
-    '#finished-queue': {
-        title: 'Finished Downloads',
-        description: 'Completed downloads. Shows track name, format, file size, and final status (success or error).',
-    },
+    // (Download Manager side-panel was retired — see the dedicated Downloads page)
 
     // ─── DISCOVER PAGE ────────────────────────────────────────────────
 
@@ -1290,139 +1257,30 @@ const HELPER_CONTENT = {
         description: 'Personalized mixes generated from your listening patterns. Each mix focuses on a different aspect of your taste — genre clusters, mood, or artist groups.',
     },
 
-    // ─── ARTISTS PAGE ─────────────────────────────────────────────────
+    // ─── ARTIST DETAIL PAGE ───────────────────────────────────────────
+    // (The standalone /artist-detail page is the unified destination for
+    // both library and metadata-source artists. The inline /artists page
+    // was retired in the unification project.)
 
-    // Search State
-    '.artists-search-state': {
-        title: 'Artist Search',
-        description: 'Search for any artist by name. Results show artist cards with images — click one to view their full discography.',
-        docsId: 'art-search'
-    },
-    '#artists-search-input': {
-        title: 'Search Input',
-        description: 'Type an artist name to search across your active metadata source. Results appear as you type with a short debounce delay.',
-        docsId: 'art-search'
-    },
-    '#artists-search-status': {
-        title: 'Search Status',
-        description: 'Shows the current search state — ready, searching, or result count.',
-    },
-
-    // Results State
-    '#artists-results-state': {
-        title: 'Search Results',
-        description: 'Artist cards matching your search. Click any artist to view their full discography with albums, singles, and EPs.',
-        docsId: 'art-search'
-    },
-    '#artists-back-button': {
-        title: 'Back to Search',
-        description: 'Return to the initial search view to start a new artist search.',
-    },
-    '#artists-cards-container': {
-        title: 'Artist Cards',
-        description: 'Each card shows an artist from your metadata source. Click to load their full discography.',
-    },
-
-    // Artist Detail — Hero
-    '#artists-hero-section': {
-        title: 'Artist Profile',
-        description: 'Rich artist profile with photo, name, genres, bio, and service links. Data comes from your metadata cache and library enrichment (Last.fm, Spotify, MusicBrainz, etc.).',
-        tips: [
-            'Service badges link to the artist on each platform',
-            'Bio comes from Last.fm enrichment if the artist is in your library',
-            'Listener and play count stats from Last.fm',
-            'Genre pills combine metadata source genres with Last.fm tags'
-        ],
-        docsId: 'art-detail'
-    },
-    '.artists-hero-name': {
-        title: 'Artist Name',
-        description: 'The artist\'s official name from your metadata source.',
-    },
-    '.artists-hero-badges': {
-        title: 'Service Badges',
-        description: 'Links to this artist on external services. Click any badge to open the artist\'s page on that platform. Badges appear for services where this artist has been enriched.',
-        tips: [
-            'Spotify, MusicBrainz, Deezer, iTunes, Last.fm, Genius, Tidal, Qobuz',
-            'Badges only appear when the artist has an ID for that service',
-            'Data comes from library enrichment workers'
-        ]
-    },
-    '.artists-hero-genres': {
-        title: 'Genres',
-        description: 'Genre tags for this artist. Combines genres from your metadata source with Last.fm tags for comprehensive coverage.',
-    },
-    '.artists-hero-bio': {
-        title: 'Artist Bio',
-        description: 'Biography from Last.fm. Click "Read more" to expand. Only available for artists in your library that have been enriched by the Last.fm worker.',
-    },
-    '.artists-hero-stats': {
-        title: 'Listener Stats',
-        description: 'Last.fm listener count and total play count. Shows how popular this artist is globally on Last.fm.',
-    },
-    '#artist-detail-watchlist-btn': {
-        title: 'Watchlist',
-        description: 'Add or remove this artist from your Watchlist. Watched artists are scanned for new releases which get added to your Wishlist for download.',
-        docsId: 'art-watchlist'
-    },
-    '#artist-detail-watchlist-settings-btn': {
-        title: 'Watchlist Settings',
-        description: 'Configure which release types to monitor for this artist — Albums, EPs, Singles, and content filters (live, remixes, acoustic, compilations).',
-        docsId: 'art-settings'
-    },
-
-    // Discography Tabs
-    '.artist-detail-tabs': {
-        title: 'Discography Tabs',
-        description: 'Switch between Albums and Singles & EPs. Each tab shows the artist\'s releases in that category.',
-        docsId: 'art-detail'
-    },
-    '#albums-tab': {
-        title: 'Albums',
-        description: 'Full-length studio albums by this artist. Click any album card to open the download modal.',
-    },
-    '#singles-tab': {
-        title: 'Singles & EPs',
-        description: 'Singles and extended plays by this artist. Includes single tracks, 2-3 track releases, and EPs.',
-    },
-
-    // Album Cards
-    '#album-cards-container': {
-        title: 'Album Grid',
-        description: 'Album cards with cover art. Click any album to open the download modal where you can select tracks, check library matches, and start downloading.',
-        tips: [
-            'Cover art fills the card with album name overlaid at the bottom',
-            'Completion badges show ownership status (Complete, Partial, Missing)',
-            'Cards check your library automatically after loading'
-        ],
-        docsId: 'art-detail'
-    },
-    '#singles-cards-container': {
-        title: 'Singles Grid',
-        description: 'Single and EP cards. Same behavior as albums — click to open the download modal.',
-    },
     '.album-card': {
         title: 'Release Card',
         description: 'An album, single, or EP from this artist. Click to open the download modal with track selection, library matching, and download controls.',
         tips: [
-            'Completion overlay shows how many tracks you own',
-            'Green = complete, Yellow = partial, Red = missing',
-            '"Checking..." means library match is in progress'
+            'Big-photo cover art fills the card with title and year overlaid at the bottom',
+            'Completion badge (top-right) shows ownership status: ✓ Owned / N/M / Missing',
+            'Library artists check ownership in the background — badge starts as "Checking…" then resolves'
         ]
     },
     '.completion-overlay': {
-        title: 'Completion Status',
-        description: 'Shows how many tracks from this release are in your library. "Complete" means you have all tracks, "Partial" shows owned/total, "Missing" means none found.',
+        title: 'Completion Badge',
+        description: 'Top-right badge showing ownership state for library artists. ✓ Owned = full match, N/M = partial (owned/total tracks), Missing = no match. Source artists don\'t show this badge.',
     },
-
-    // Similar Artists
-    '#similar-artists-section': {
+    '#ad-similar-artists-section': {
         title: 'Similar Artists',
-        description: 'Artists with a similar sound, streamed in real-time from your metadata source. Click any card to view that artist\'s discography.',
+        description: 'Artists with a similar sound, fetched from MusicMap by name. Works for both library and source artists. Click any bubble to navigate to that artist\'s detail page.',
         tips: [
-            'Cards load progressively as the server finds matches',
-            'Click a card to navigate to that artist\'s discography',
-            'Images are lazy-loaded for performance'
+            'Bubbles load progressively',
+            'Click navigates to the standalone artist-detail page'
         ],
         docsId: 'art-detail'
     },
@@ -1430,6 +1288,8 @@ const HELPER_CONTENT = {
         title: 'Similar Artist',
         description: 'An artist similar to the one you\'re viewing. Click to load their discography and browse their releases.',
     },
+    // (Search source picker annotation lives under `#enh-source-row` above —
+    //  the old `.search-source-picker-container` dropdown is gone.)
 
     // ─── AUTOMATIONS PAGE ─────────────────────────────────────────────
 
@@ -2378,9 +2238,9 @@ function toggleHelperMode() {
 const PAGE_TOUR_MAP = {
     'dashboard':   'dashboard',
     'sync':        'sync-playlist',
-    'downloads':   'first-download',
+    'search':      'first-download',
+    'downloads':   'first-download',  // legacy id — the Search page used to be called 'downloads'
     'discover':    'discover',
-    'artists':     'artists-browse',
     'automations': 'automations',
     'library':     'library',
     'stats':       'stats',
@@ -2542,15 +2402,11 @@ const HELPER_TOURS = {
         description: 'Step-by-step guide to downloading your first album.',
         icon: '⬇️',
         steps: [
-            // Search page layout (top-to-bottom, elements visible on load)
-            { page: 'downloads', selector: '.search-mode-toggle', title: 'Search Modes', description: 'Two search modes: Enhanced Search (default) shows categorized results from your metadata source. Classic Search queries your download source directly for raw file results.' },
-            { page: 'downloads', selector: '.enhanced-search-input-wrapper', title: 'Search for Music', description: 'Type an artist or album name here. Results appear in categorized sections — Artists, Albums, Singles/EPs, and Tracks. Try searching for your favorite artist now!' },
-            { page: 'downloads', selector: '#toggle-download-manager-btn', title: 'Download Manager', description: 'This button toggles the download manager panel on the right side. It shows active downloads with progress bars, queued items, and completed downloads with their file paths.' },
-
-            // What results look like (describe since they appear after searching)
-            { page: 'downloads', selector: '#enh-results-container', title: 'Search Results', description: 'After searching, results appear here organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
-            { page: 'downloads', selector: '.search-mode-toggle', title: 'Downloading an Album', description: 'Click any album card to open the download modal. You\'ll see the tracklist, quality options, and a big "Download Album" button. Individual tracks have a play button to preview before downloading.' },
-            { page: 'downloads', selector: '.enhanced-search-input-wrapper', title: 'That\'s It!', description: 'Search, click, download — it\'s that simple. Albums go to your configured download path, get tagged with metadata, and sync to your media server automatically. 🎉' },
+            { page: 'search', selector: '#enh-source-row', title: 'Pick a Search Source', description: 'Each icon is a metadata source. The highlighted one is where your next search goes — defaults to your configured primary source. Click a different icon to switch to Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, Music Videos, or Soulseek (raw P2P files). A small dot marks sources you\'ve already searched for the current query.' },
+            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Search for Music', description: 'Type an artist or album name here. Results appear in categorized sections — Artists, Albums, Singles/EPs, and Tracks. Try searching for your favorite artist now!' },
+            { page: 'search', selector: '#enh-results-container', title: 'Search Results', description: 'After searching, results appear organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
+            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Downloading an Album', description: 'Click any album card to open the download modal. You\'ll see the tracklist, quality options, and a big "Download Album" button. Individual tracks have a play button to preview before downloading.' },
+            { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'That\'s It!', description: 'Search, click, download. Albums go to your configured download path, get tagged with metadata, and sync to your media server automatically. Active downloads live on the dedicated Downloads page.' },
         ]
     },
     'sync-playlist': {
@@ -2576,20 +2432,8 @@ const HELPER_TOURS = {
             { page: 'sync', selector: '.sync-sidebar', title: 'Sync Controls', description: 'The command center. Select playlists with checkboxes on the left, then click "Start Sync" here. Progress bars, match counts, and logs update in real-time. That\'s the sync flow! 🎉' },
         ]
     },
-    'artists-browse': {
-        title: 'Browse Artists',
-        description: 'Search for artists and explore their discography.',
-        icon: '🎤',
-        steps: [
-            // Artists list page (visible on load)
-            { page: 'artists', selector: '#artists-search-input', title: 'Search for an Artist', description: 'Type any artist name to search your metadata source. Results appear instantly as cards below. Click one to open their full profile and discography.' },
-
-            // Artist detail page (describe what they'll see after clicking)
-            { page: 'artists', selector: '#artists-search-input', title: 'Artist Profile', description: 'After clicking an artist, you\'ll see a rich hero section with their photo, bio, genres, listening stats from Last.fm, and links to external services like Spotify and MusicBrainz.' },
-            { page: 'artists', selector: '#artists-search-input', title: 'Discography & Downloads', description: 'Below the hero, tabs show Albums and Singles/EPs. Click any release to open the download modal. The "Similar Artists" section at the bottom shows recommendations — click any to keep exploring.' },
-            { page: 'artists', selector: '#artists-search-input', title: 'Try It Now!', description: 'Search for your favorite artist above to see their full profile. From there you can download albums, explore similar artists, and add them to your watchlist. 🎉' },
-        ]
-    },
+    // 'artists-browse' tour retired — the Artists sidebar entry was replaced by the
+    // unified Search page (see the first-download tour for the new flow).
     'automations': {
         title: 'Build an Automation',
         description: 'Create automated workflows with triggers and actions.',
@@ -3111,7 +2955,7 @@ const SETUP_STEPS = [
     { id: 'download-source', label: 'Set Up Download Source',       desc: 'Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer',  icon: '⬇️', page: 'settings', settingsTab: 'downloads' },
     { id: 'download-paths',  label: 'Configure Download Paths',     desc: 'Where music is saved and organized',                 icon: '📁', page: 'settings', settingsTab: 'downloads' },
     { id: 'first-scan',      label: 'Run First Library Scan',       desc: 'Import your existing collection from media server',  icon: '🔍', page: 'dashboard', selector: '#db-updater-card' },
-    { id: 'first-download',  label: 'Download Your First Track',    desc: 'Search for and download something',                  icon: '🎶', page: 'downloads' },
+    { id: 'first-download',  label: 'Download Your First Track',    desc: 'Search for and download something',                  icon: '🎶', page: 'search' },
     { id: 'watchlist',       label: 'Add an Artist to Watchlist',   desc: 'Monitor for new releases automatically',             icon: '👁️', page: 'library' },
     { id: 'automation',      label: 'Create an Automation',         desc: 'Schedule tasks and build workflows',                 icon: '🤖', page: 'automations' },
 ];
@@ -3218,14 +3062,8 @@ async function _checkSetupStatus() {
             results['first-download'] = Date.now();
             _markSetupComplete('first-download');
         }
-        // Also check the finished queue (if on downloads page)
-        if (!results['first-download']) {
-            const fq = document.querySelector('#finished-queue');
-            if (fq && fq.querySelector('.download-item')) {
-                results['first-download'] = Date.now();
-                _markSetupComplete('first-download');
-            }
-        }
+        // (The legacy #finished-queue side-panel was retired; the dashboard stat card
+        // above is now the single source of truth for the first-download milestone.)
     }
 
     return results;
@@ -3598,10 +3436,73 @@ function closeHelperSearch() {
 // WHAT'S NEW (Phase 6)
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Entries tagged with `unreleased: true` are accumulating under a version label
+// but won't display until the build version catches up — used for in-progress
+// projects that span multiple commits before shipping. Strip the flag at
+// release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
-    '2.35': [
+    '2.4.0': [
+        // --- April 26, 2026 — Search & Artists unification + reorganize queue ---
+        { date: 'April 26, 2026 — 2.4.0 release' },
+        { title: 'Reorganize Queue: Race-Condition Hardening (kettui Review)', desc: 'kettui\'s review of PR #377 caught two real concurrency bugs in the new reorganize queue and one input-deduplication gap. (1) Worker race: the worker thread looked up the next queued item, then released the lock, then re-acquired it to flip status to "running". A cancel() landing in that window would mark the item cancelled but the worker still ran it. Now picks and flips atomically under a single lock acquisition. (2) Wakeup race: the worker cleared its wakeup event after observing an empty queue, but enqueue could fire its wakeup.set() between the empty check and the clear, making a freshly-queued album sleep up to 60 seconds before the worker noticed. Replaced the lock + event pair with a single threading.Condition so check-and-wait happen under the same lock atomically. (3) Bulk-enqueue dedupe: enqueue_many called single-item enqueue in a loop, so two copies of the same album_id in one bulk request could both slip through if the worker finished the first copy before the loop reached the second. Now holds the queue lock for the entire batch and tracks a per-batch seen set, so intra-batch duplicates are deduped against each other, not just against pre-existing items. Also fixed two related issues from the same review: the reorganize-preview Apply button could get stuck disabled when an early return / network error skipped the re-enable line (moved into a finally), and the new DB helpers (get_album_display_meta, get_artist_albums_for_reorganize) used to swallow every exception and return None / [], which made a real DB outage look like "album not found" — they now let exceptions bubble so the route layer surfaces a proper 500', page: 'library' },
+        { title: 'Reorganize Queue with Live Status Panel', desc: 'Reorganizing albums no longer locks up the page or runs as a JS-driven loop. Each click on the per-album reorganize button — or "Reorganize All" — now enqueues into a single FIFO queue that a backend worker drains one item at a time. Buttons stay clickable: spam-clicking the same album silently dedupes, and you can keep browsing while items run. A status panel mounted at the top of the artist actions bar shows what\'s active (with a progress bar, current track, and live moved/skipped/failed counts), how many items are queued behind it, and recently-finished items with success/warning indicators. The panel expands to show the full queue with per-item cancel buttons (running items can\'t be cancelled mid-flight; queued ones can) and a "Cancel All" button for the queued tail. Items belonging to a different artist than the page you\'re on are flagged with a "(other artist)" hint so you understand what you\'re seeing. Bonus: "Reorganize All" is now one backend call instead of N JS-driven calls — much faster, and the artist context is captured server-side per item so the queue can show cross-artist progress correctly. Also retired the old single-slot status endpoint and the polling loop that depended on it', page: 'library' },
+        { title: 'Fix Album Completeness Job Reporting Zero Findings for Everyone', desc: 'sassmastawillis reported the Album Completeness maintenance job was finishing in 0.1s with 0 findings, even for users with obviously-incomplete albums. Root cause: the job used `albums.track_count` as the "expected total" to compare against the library\'s actual count. But `track_count` is populated by server syncs (Plex leafCount, SoulSync standalone len(tracks)) — it\'s always the OBSERVED count, never what the metadata provider says the album should contain. So expected == actual always, and every album looked complete. Fix: new `api_track_count` column on the albums table, written only by metadata-source code paths (Spotify, iTunes, Deezer, and Discogs enrichment workers now populate it whenever they fetch album data, so it piggybacks on existing API calls instead of making new ones). Server syncs never touch this column, so it stays authoritative. The repair job uses it as the expected total; if an album somehow hasn\'t been enriched yet, the job falls back to a live API lookup and caches the result. For users with an already-enriched library, the first completeness scan after the upgrade is fast because the workers will have populated the column during normal enrichment cycles', page: 'library' },
+        { title: 'Library Reorganize: Reroute Through the Download Pipeline', desc: 'Reported by winecountrygames — using "Reorganize All" on a 3-disc Aerosmith deluxe collapsed it to a flat 1-disc layout, and on other albums it left half the tracks in their original location with no error or count of what was skipped. Root cause: the reorganize endpoint reinvented several wheels (its own template engine, its own disc-number resolution from file tags, its own sidecar sweep, its own collision detection) and each had drifted from the canonical post-processing path used by downloads. The reorganize-only logic read disc_number from file tags and silently defaulted to 1 on any failure, so a single tag-less file collapsed the whole album to single-disc. Tracks whose file paths didn\'t resolve on disk were silently skipped. Rewrote it to follow the import page\'s pattern: copy each file to a per-album staging folder under your download path, look up the canonical tracklist from your configured metadata source (Deezer / Spotify / iTunes / Discogs / Hydrabase) using the album\'s stored source IDs, then route each file through the same `_post_process_matched_download` function fresh downloads use — same template, same tagging, same multi-disc subfolder logic, same sidecar handling, same AcoustID verification. Albums with no stored source ID are reported back and skipped entirely (degrading silently to file tags is what caused the original bug). Tracks not in the source\'s catalog version (bonus tracks on a deluxe edition) are reported as skipped and left in place rather than force-fed wrong context. Files that don\'t resolve on disk are surfaced with the offending DB path so the UI can show them. The 230-line inline reorganize logic in web_server.py was extracted into core/library_reorganize.py — net -195 lines from the monolith, +13 unit tests for the new orchestrator. Frontend behavior change: the per-call template parameter in the reorganize modal is now ignored — reorganize uses your configured download template, matching the pipeline downloads use', page: 'library' },
+        { title: 'Spotify: Longer Post-Ban Cooldown (30 min)', desc: 'A user reported their Spotify rate-limit ban expired after 4 hours, the system ran its 5-minute post-ban cooldown, and then 32 seconds after the cooldown ended a single get_artist_albums call from a background worker was hit with another 4-hour ban. Diagnosis: Spotify\'s server-side memory of the previous offense outlasted our 5-minute cooldown, so the very first call after cooldown got slapped immediately. The cooldown exists specifically to prevent the "ban expires → we probe → re-ban" cycle, but the value was too short. Bumped from 5 minutes to 30 minutes — same mechanism, just enough room for Spotify to actually forget. A more principled follow-up (adaptive cooldown that scales with the previous ban size, plus making the first post-cooldown call a single light probe rather than allowing background workers through) is documented as a future PR if reports persist after this bump', page: 'dashboard' },
+        { title: 'Tidal: Reject Silent Quality Downgrades', desc: 'Netti93 reported that with Tidal set to "HiRes only" and quality fallback disabled, tracks were still downloading successfully — as m4a 320kbps files. Root cause: Tidal\'s API silently serves whatever tier your account + the track + your region permits. Ask for HI_RES_LOSSLESS on a track that\'s only in LOW_320K and Tidal returns the AAC stream without raising. The downloader wrote the m4a to disk, the filesize cleared the 100KB stub threshold, and the download reported success. The worker-level fallback chain (hires → lossless → high → low) also never got a chance to advance, because every tier "succeeded" at the first one that returned anything. Fix: after getting the stream, compare stream.audio_quality against what we requested using a rank-based tier comparison (LOW < HIGH < LOSSLESS < HI_RES < HI_RES_LOSSLESS). Same tier or better = accept (so occasional Tidal upgrades don\'t get thrown away). Lower tier = treat this tier as failed, which lets the fallback chain advance when fallback is enabled or fails the whole download honestly when the user has "HiRes only, no fallback" configured. Unrecognized audioQuality values (a new Tidal tier we haven\'t mapped yet) are rejected conservatively so the final diagnostic log can name the unknown value. Older tidalapi builds without the audio_quality attribute fall through to the pre-existing codec / file-size guards so nothing regresses', page: 'downloads' },
+        { title: 'Search Source Picker Icon Row', desc: 'The Search page now has a row of source icons above the search bar — one per source (Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, Music Videos, Soulseek). Typing searches only the currently-selected source instead of fanning out to every one by default. Click a different icon to switch; results come back on demand. The default icon on page load is your configured primary metadata source. Replaces the short-lived "Search from" dropdown that preceded this', page: 'search' },
+        { title: 'Per-Query Source Cache (No More Re-Fetching)', desc: 'Once you\'ve searched a source for a given query, switching back to it is instant — results are cached for the current query. A small dot on each source icon shows which ones already have cached results this query. Type a new query and the whole cache resets. Same behavior in the sidebar global search popover. Net effect: roughly 6-7x fewer API calls per search compared to the old default fan-out', page: 'search' },
+        { title: 'Global Search Widget Source Parity', desc: 'The sidebar Cmd+K / "/" search popover gained the same source icon row as the full Search page. Pick your source up front, see cache dots for already-fetched sources this query, and the rate-limit fallback banner appears if the backend substituted a different source than the one you clicked. Clicking the Soulseek icon hands off to the full Search page (raw file results need more room than the popover provides)', page: 'search' },
+        { title: 'Rate-Limit Fallback Banner', desc: 'If you click Spotify but the backend auto-fell back to Deezer because Spotify was rate-limited, the search results now lead with a small amber banner ("Spotify unavailable — showing Deezer.") and the Spotify icon gets an amber border. Previously results just silently showed as the fallback source with no signal that anything unusual happened', page: 'search' },
+        { title: 'Explicit Source Selection on /api/enhanced-search', desc: 'The enhanced-search endpoint now accepts an optional `source` body param (spotify, itunes, deezer, discogs, hydrabase, musicbrainz, auto). When a specific source is chosen, only that provider is queried and db_artists (local library matches) still come back. Cache keys isolate per-source so single-source and multi-source results don\'t collide. Omitted or `auto` preserves the old multi-source fan-out behavior unchanged — nothing breaks for existing callers', page: 'search' },
+        { title: 'Shared Enhanced-Search Fetch Helper', desc: 'Internal refactor — the Search page dropdown and the global search widget now route through one shared enhancedSearchFetch helper in search.js instead of duplicating the POST boilerplate. Zero UX change, but it means any future source-picker tweak only needs wiring in one place', page: 'search' },
+        { title: 'Search Page Renamed to /search', desc: 'The Search page\'s internal id is now "search" instead of the confusing "downloads" (which clashed with the actual Downloads page). Sidebar label unchanged. URL is now /search; /downloads still resolves so old bookmarks keep working. Profile ACL "Page Access" now saves as "search"; existing profiles with "downloads" in allowed_pages still resolve through a legacy-compat check', page: 'search' },
+        { title: 'Embedded Download Manager Removed from Search Page', desc: 'The Search page used to carry a second copy of the Download Manager (active + finished queues, clear/cancel-all buttons) that was hidden by default and duplicated the dedicated Downloads page. That duplicate is gone — toggle button, side-panel HTML, and its 1-second polling loop all removed. About 330 lines of dead code cleaned up. The dedicated Downloads sidebar page is now the single downloads UI', page: 'search' },
+        { title: 'Artists Sidebar Entry Retired — Use Search Instead', desc: 'Cin flagged that "Artists" in the sidebar read like a library section but was actually a dedicated artist-search page, duplicating what the unified Search already does. The sidebar entry is gone. New flow: Sidebar → Search → type artist name → click their result. "Browse Artists" on the empty Watchlist page and "View artist from Wishlist" now open Search pre-filled with the artist\'s name. Removed "Artists" from profile Home Page + Page Access options. Deep link to /artists still resolves so old bookmarks keep working — the page just isn\'t promoted anywhere', page: 'search' },
+        { title: 'Artist Detail Back Button Fallback', desc: 'The back button on the Artists-page inline detail view used to dump users on an empty "Search for an artist..." screen when they arrived from outside the Artists page — a dead end now that Artists isn\'t in the sidebar. If you searched inside the Artists page, back still returns to your results list. Otherwise (arriving from Search, Discover, Watchlist, etc.), back uses the browser history to land you on whichever page you came from. Falls back to the Search page only when there\'s no browser history to go back to (the natural place to find another artist)', page: 'search' },
+        { title: 'Interactive Help Updated for Unified Search', desc: 'The click-for-help annotations and the "Your First Download" guided tour were rewritten for the new Search page. Stale annotations pointing at removed elements (Basic/Enhanced toggle button, side-panel queues, download-manager controls) are deleted. The first-download tour now runs on /search and opens with the source picker. PAGE_TOUR_MAP accepts both "search" and the legacy "downloads" id so old bookmarks still match a tour. Retired the standalone "Browse Artists" tour', page: 'help' },
+        { title: 'Unified Source-Picker Controller (Search Page + Global Widget)', desc: 'Internal refactor — the source picker state machine (query, active source, per-query cache, fallbacks, loading state, configured-source discovery) is now a single createSearchController factory in shared-helpers.js. Both the full Search page and the sidebar global search popover consume the same controller with per-surface wiring (DOM elements, Soulseek handoff, unconfigured-source click). About 380 lines of near-duplicated state + fetch + render code consolidated into one implementation, so a bug fix or behavior tweak to the picker lands everywhere at once. Zero UX change — every keystroke, icon click, cache hit, rate-limit fallback, and unconfigured-source redirect behaves identically to before', page: 'search' },
+        { title: 'Fix Clean Search History Automation Failing with AttributeError', desc: 'The hourly Clean Search History maintenance automation was crashing with "DownloadOrchestrator object has no attribute base_url". Root cause: the check `soulseek_client.base_url` was written before the orchestrator refactor — `soulseek_client` is now a DownloadOrchestrator that wraps individual download clients, with the real Soulseek client at `.soulseek`. Two other call sites in web_server.py already used the correct `soulseek_client.soulseek.base_url` pattern; this one was missed. Now matches the same getattr-guarded pattern and the hourly cleanup runs again', page: 'stats' },
+        { title: 'Search Results Always Visible — Show/Hide Button Removed', desc: 'The "Show Results / Hide Results" toggle next to the search bar is gone. There was nothing else on the page worth seeing instead of results, so toggling visibility never made sense. Cin flagged it during PR review. Dropdown visibility is now a pure function of query state — empty input hides it, results show it', page: 'search' },
+        { title: 'Cached Search Results Restore on Navigate-Back', desc: 'Previously, navigating away from /search via a sidebar link dismissed the dropdown (the click registered as outside-click). When you came back, the input still held your query but the results were hidden until you typed again or clicked Show Results. Now the per-query cache renders automatically when you re-enter /search, so your results are right where you left them. Cin flagged the round-trip during PR review', page: 'search' },
+        { title: 'Fix Soulseek Handoff from Global Search Going Through Metadata Flow', desc: 'When you clicked the Soulseek icon in the sidebar global search popover, it navigated to /search and wrote the query into the enhanced-search input — which then ran the metadata flow against whatever your default source was (Spotify, Deezer, etc.) instead of the raw Soulseek file search you actually wanted. Cin flagged it during PR review. Now the handoff pre-fills the basic-search input directly and clicks the Search page\'s Soulseek icon so the controller\'s onSoulseekSelected callback owns the section swap and runs performDownloadsSearch with the right query', page: 'search' },
+        { title: 'Stale Search Requests No Longer Flash Empty Results on Fast Retype', desc: 'Cin flagged a race in createSearchController: when you typed a query then quickly re-typed before the first fetch returned, the first fetch\'s catch block (firing on AbortError after the second submitQuery aborted it) cleared loadingSources and notified the UI, causing a brief flash of empty/error state while the new query\'s fetch was still mid-flight. Added a monotonic _requestSeq token — each fetch captures the next value, and stale completions bail before mutating shared state. The controller still aborts in-flight fetches on supersession; this just keeps the abort-cleanup of the old request from clobbering the new one\'s spinner', page: 'search' },
+        { title: 'Source Picker Dims Soulseek When slskd Isn\'t Configured', desc: 'Cin pointed out that the Soulseek icon was always rendered as configured, so users without slskd set up could click it and fire searches that would never succeed. Soulseek is now in the backend config-status registry as `required: [slskd_url]` and removed from the frontend\'s always-configured set. Without slskd, the icon dims and clicking it routes to Settings → Downloads tab (where the slskd URL field lives, gated behind the download-source dropdown) instead of Settings → Connections', page: 'search' },
+        { title: 'Fix Discover Hero "View Discography" 404ing on Source Artists', desc: 'Clicking "View Discography" on the Discover page hero slideshow was calling navigateToArtistDetail without a source, so /api/artist-detail defaulted to a library lookup and returned 404 for artists that don\'t exist in your library (which is nearly every hero artist — they come from discover similar-artists, not the library). Regression from the unification PR that rewrote the click handler to route to /artist-detail but forgot to pass the source. Backend already sends artist.source on each hero entry; we now stash it as data-source on the discography button and thread it through to navigateToArtistDetail so the API call includes source=itunes/deezer/etc. and returns the synthesized discography', page: 'discover' },
+        { title: 'MusicBrainz Search Actually Works Now', desc: 'kettui flagged during PR #371 review that the MusicBrainz source tab never returned artists and served garbage tracks/albums. Three things were wrong. First, the artist search was hardcoded to return an empty list — re-enabled with a proper fuzzy query (bare Lucene string against alias/artist/sortname indexes) and score-filtered at 80+ to drop tribute bands. Second, track and album searches used text-search on recording/release TITLES — so typing "metallica" matched random tracks literally named "Metallica" (all scoring 100 because they\'re exact title hits). Now a bare name query resolves to the top-scoring artist, then BROWSES that artist\'s release-groups and recordings directly — the same pattern Plex uses. Structured "Artist - Title" queries still take the text-search path since the user gave an explicit title to match. Third, the adapter was firing synchronous Cover Art Archive HEAD requests (up to 30s of blocking probes per search) — replaced with deterministic URL construction so the browser loads images lazily with <img onerror> fallback. Search completes in ~3 seconds instead of 30+ on cold cache. Also shipped: project URL in User-Agent per MB\'s rate-limit policy recommendations', page: 'search' },
+        { title: 'MusicBrainz Search Follow-Ups (Images, Counts, Title Hints)', desc: 'Three fixes from kettui\'s follow-up pass on the MusicBrainz search PR. (1) Artist images were missing because MB doesn\'t store artist art — the lazy-load endpoint now accepts an optional `name` query param and resolves images by searching iTunes/Deezer for that artist name. (2) Track total_tracks was off by one because the counter initialized at 1 before summing release media track-counts — an 11-track album reported 12. Initialized to 0 now, with a special case for standalone recordings that have no release (report 1). (3) Queries like "The Beatles Abbey Road" used to browse The Beatles\' whole discography because the artist-first path resolved the artist and ignored the trailing title. Now extracts the title hint from queries shaped like "Artist Title", filters browse results to match, and falls back to text-search when no browse result matches (so "The Beatles Totally Fake Album" still finds something rather than nothing). 10 new tests covering title-hint extraction, browse-filter behavior, total_tracks edge cases', page: 'search' },
+    ],
+    '2.39': [
+        // --- April 22, 2026 ---
+        { date: 'April 22, 2026' },
+        { title: 'Fix Wrong-Artist Tracks Silently Downloading from Tidal', desc: 'A user reported that searching for "Leave A Light On" by Maduk on Tidal silently downloaded Tom Walker\'s (completely different) song of the same name, embedding Maduk metadata into Tom Walker\'s audio. Two layers of defense were failing: (1) the candidate artist gate used `< 0.4` similarity and "maduk" vs "tom walker" scored exactly 0.400, slipping past the fencepost — raised to `< 0.5`. (2) AcoustID verification correctly identified the mismatch but returned SKIP (accept) instead of FAIL (quarantine) when title matched but artist was clearly different and the expected artist was absent from every recording. Now returns FAIL when artist similarity < 0.3 (clear mismatch); preserves SKIP for the ambiguous 0.3-0.6 range (covers/collabs/formatting differences)', page: 'sync' },
+        { title: 'Tidal Search Falls Back to Shortened Queries on 0 Results', desc: 'Tidal\'s search chokes on long queries with multiple qualifier words (e.g., "maduk transformations remixed fire away fred v remix" returns nothing, but dropping "fred v remix" works). Search now retries with up to 4 progressively-shortened variants when the original returns 0 results. Qualifier-safe: if the original query mentions Live/Remix/Acoustic/etc., fallback results must still contain those keywords in their track names — otherwise a shortened query could silently downgrade "(Live)" to the studio version. Returns ([], []) if no variant preserves the qualifiers, same as before', page: 'sync' },
+    ],
+    '2.38': [
+        // --- April 21, 2026 (late) ---
+        { date: 'April 21, 2026 (late)' },
+        { title: 'Fix Missing Cover Art on Manually Fixed Discovery Tracks', desc: 'The cache matched_data built by the fix modal dropped the image_url and album.images fields when album came back as a bare string (common for Deezer/iTunes search results). Result: re-discovery used the cached match but downloads showed no artwork. Cache writes now carry image_url through to album.images + top-level matched_data, matching what the in-memory state already did. Re-fix the track to refresh its cache entry (INSERT OR REPLACE)', page: 'sync' },
+        { title: 'Fix Manual Discovery Fixes Lost After Restart (Non-Spotify Users)', desc: 'When you clicked Fix on a discovery track and picked a manual match, the cache save hardcoded the provider as "spotify" regardless of your configured primary metadata source. On re-scan, the worker queried the cache with your actual primary (Deezer, iTunes, Discogs, Hydrabase) and missed the fix entirely. All 5 save sites (Tidal / Deezer / Spotify Public / YouTube / Discovery Pool) now use the active primary source, matching what the automatic workers already do', page: 'sync' },
+    ],
+    '2.37': [
+        // --- April 21, 2026 (evening) ---
+        { date: 'April 21, 2026 (evening)' },
+        { title: 'Fix Auto-Watchlist Ignoring Global Override Settings', desc: 'The scheduled auto-watchlist scan (not the manual one) called scan_watchlist_artists directly, which bypassed Global Override application. So if you disabled Albums or Live under Watchlist → Global Override, full albums and live tracks still got added to the wishlist during the nightly scan. Override logic now runs inside scan_watchlist_artists so every entry point respects it', page: 'watchlist' },
+        { title: 'Fix Live Version Filter False Positives', desc: 'The \\blive\\b regex was too loose — it flagged any title with the word "live" regardless of context, so "What We Live For" by American Authors, "Live Forever" by Oasis, and similar verb uses got treated as live recordings. Tightened to require clear live-recording context: "(Live)", "- Live", "Live at/from/in/on/version/session/etc". Fixes both the watchlist/backfill track filter and the Library Maintenance Live/Commentary Cleaner', page: 'library' },
+    ],
+    '2.36': [
         // --- April 21, 2026 ---
         { date: 'April 21, 2026' },
+        { title: 'Fix Metadata Cache Bar Duplicating on Findings Dashboard', desc: 'The "Metadata Cache · View Details" bar under the findings chips could stack into 2–6 copies if the dashboard refreshed while a cache-health fetch was still in flight. Each resolved fetch appended its own section. Now each fetch clears any existing bar before appending', page: 'library' },
+        { title: 'Fix Discography Backfill Stalling When Repair Worker Paused', desc: 'Force-running a job via "Run Now" stalled forever when the master repair worker was paused. The job entered the scan function, logged its starting banner, then blocked on the first wait_if_paused check. Force-run now bypasses the master-pause — scheduled runs still respect it', page: 'library' },
+        { title: 'Discography Backfill: 3-Option Fix Dialog', desc: 'Clicking Fix on a missing-track finding now prompts "Add to Wishlist", "Just Clear Finding", or "Cancel" instead of silently adding to wishlist. Bulk Fix shows the same prompt once for all selected backfill findings', page: 'library' },
+        { title: 'Discography Backfill: Auto-Add to Wishlist Setting', desc: 'New opt-in setting in the Discography Backfill job config. When enabled, missing tracks are pushed straight to the wishlist during the scan AND a finding is created for the log. Default is off — you review and click Fix', page: 'library' },
+        { title: 'Discography Backfill: Faster Batched Matching', desc: 'Each artist scan now pre-fetches the library albums + tracks once and matches in-memory — same fast path the Library and Artists pages use. Avoids thousands of per-track SQL queries on artists with big libraries', page: 'library' },
+        { title: 'Discography Backfill: Rich Album Context per Finding', desc: 'Every finding now carries a full album dict (id, name, album_type, release_date, images, artists, total_tracks) matching the wishlist pipeline shape. No more generic "Add to Wishlist" loss of release metadata', page: 'library' },
+        { title: 'Discography Backfill: Per-Artist Progress Logs', desc: 'Scan logs now show [N/50] Scanning ArtistName for each artist processed, with found-count or "no missing tracks" afterward. Makes it obvious whether the job is actually progressing' },
+
+        // --- April 20, 2026 (part 2) ---
+        { date: 'April 20, 2026 (evening)' },
         { title: 'Massively Faster Artist Detail Page Loads', desc: 'Artist discography completion checks used to fire hundreds of SQL queries per page load — 15+ fuzzy title/artist searches per album times 30 albums per artist. Now pre-fetches the artist\'s library albums and tracks ONCE upfront, then matches everything in-memory. Same matching logic and accuracy, roughly 100x fewer SQL round-trips. Applies to both the Library artist page and the Artists search page', page: 'library' },
         { title: 'Fix Reorganize All Ignoring Album Type', desc: 'Reorganize All was sending every album — EPs, singles, and compilations — into the "Albums" folder because the $albumtype template variable silently defaulted to "Album". The variable is now resolved from the album\'s record_type (with track-count fallback) so ${albumtype}s produces the expected Albums/Singles/EPs/Compilations split', page: 'library' },
 
@@ -3770,12 +3671,36 @@ const WHATS_NEW = {
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '2.35';
+    return btn ? btn.textContent.trim().replace('v', '') : '2.4.0';
+}
+
+// Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns
+// negative if a < b, positive if a > b, 0 if equal. Strips any +sha suffix
+// before parsing. Missing components are treated as 0 so "2.4" sorts as
+// "2.4.0". Replaces the old parseFloat() approach which collapsed any
+// 3-part version to its first two components — making 2.4.0 and 2.4.1
+// indistinguishable.
+function _compareVersions(a, b) {
+    const parse = (s) => String(s || '0').split('+')[0].split('.').map(n => parseInt(n, 10) || 0);
+    const pa = parse(a);
+    const pb = parse(b);
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+        const diff = (pa[i] || 0) - (pb[i] || 0);
+        if (diff !== 0) return diff;
+    }
+    return 0;
 }
 
 function _getLatestWhatsNewVersion() {
-    const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
-    return versions[0] || '2.35';
+    // Only surface entries whose version number is <= the current build. Entries
+    // sitting at higher versions are unreleased work-in-progress and shouldn't
+    // flag as "new" in the helper badge until the build catches up.
+    const buildVer = _getCurrentVersion();
+    const versions = Object.keys(WHATS_NEW)
+        .filter(v => _compareVersions(v, buildVer) <= 0)
+        .sort((a, b) => _compareVersions(b, a));
+    return versions[0] || '2.4.0';
 }
 
 function openWhatsNew() {
@@ -3863,8 +3788,11 @@ function _openFullChangelog() {
 }
 
 function _showOlderNotes() {
-    // Cycle to next older version in the what's new panel
-    const versions = Object.keys(WHATS_NEW).sort((a, b) => parseFloat(b) - parseFloat(a));
+    // Cycle to next older version in the what's new panel (skip unreleased entries)
+    const buildVer = _getCurrentVersion();
+    const versions = Object.keys(WHATS_NEW)
+        .filter(v => _compareVersions(v, buildVer) <= 0)
+        .sort((a, b) => _compareVersions(b, a));
     const panel = _helperPopover;
     if (!panel) return;
     const currentTitle = panel.querySelector('.helper-popover-title');

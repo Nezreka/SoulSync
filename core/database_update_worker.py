@@ -348,7 +348,7 @@ class DatabaseUpdateWorker:
         total_artists = len(artists)
         logger.info(f"Deep scan: Processing {total_artists} artists (sequential, skip-existing mode)")
 
-        for i, artist in enumerate(artists):
+        for _i, artist in enumerate(artists):
             if self.should_stop:
                 break
 
@@ -599,7 +599,7 @@ class DatabaseUpdateWorker:
             
             result_msg = f"Smart incremental scan result: {len(artists_to_process)} artists to process from {albums_with_new_content} albums with new content"
             if stopped_early:
-                result_msg += f" (stopped early after finding 25 consecutive complete albums)"
+                result_msg += " (stopped early after finding 25 consecutive complete albums)"
             else:
                 result_msg += f" (checked all {total_tracks_checked} tracks from {len(recent_albums)} recent albums)"
             
@@ -1224,7 +1224,7 @@ class DatabaseUpdateWorker:
         # Process artists sequentially when requested (the web server uses this path).
         if self.force_sequential:
             # Sequential processing for web server mode
-            for i, artist in enumerate(artists):
+            for _i, artist in enumerate(artists):
                 if self.should_stop:
                     break
 
