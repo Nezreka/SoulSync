@@ -141,7 +141,7 @@ from core.runtime_state import (
     download_tasks,
     matched_context_lock,
     matched_downloads_context,
-    mark_task_completed as _core_mark_task_completed,
+    mark_task_completed,
     processed_download_ids,
     set_activity_toast_emitter,
     tasks_lock,
@@ -2483,7 +2483,7 @@ def _mark_task_completed(task_id, track_info=None):
     Assumes task_id exists in download_tasks (should be called within tasks_lock).
     """
     global session_completed_downloads
-    _core_mark_task_completed(task_id, track_info)
+    mark_task_completed(task_id, track_info)
 
     # Increment session counter (matches dashboard.py behavior)
     with session_stats_lock:

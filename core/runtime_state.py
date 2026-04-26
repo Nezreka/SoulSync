@@ -51,15 +51,17 @@ def add_activity_item(icon, title, subtitle, time_ago="Now", show_toast=True):
 
 
 def mark_task_completed(task_id: str, track_info: Optional[Dict[str, Any]] = None) -> bool:
-    """Mark a download task as completed in the shared task registry."""
-    with tasks_lock:
-        task = download_tasks.get(task_id)
-        if not task:
-            return False
+    """Mark a download task as completed.
 
-        task["status"] = "completed"
-        task["stream_processed"] = True
-        task["status_change_time"] = time.time()
-        if track_info is not None:
-            task["track_info"] = track_info
-        return True
+    Callers must already hold `tasks_lock`.
+    """
+    task = download_tasks.get(task_id)
+    if not task:
+        return False
+
+    task["status"] = "completed"
+    task["stream_processed"] = True
+    task["status_change_time"] = time.time()
+    if track_info is not None:
+        task["track_info"] = track_info
+    return True

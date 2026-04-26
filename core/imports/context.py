@@ -45,16 +45,20 @@ def normalize_import_context(context: Optional[Dict[str, Any]]) -> Dict[str, Any
     if not isinstance(context, dict):
         return {}
 
+    source = context.get("source") or context.get("_source") or ""
     artist = _as_dict(context.get("artist") or context.get("spotify_artist"))
     album = _as_dict(context.get("album") or context.get("spotify_album"))
     track_info = _as_dict(context.get("track_info"))
     original_search = _as_dict(context.get("original_search_result"))
     search_result = _as_dict(context.get("search_result"))
 
+    if source:
+        context["source"] = source
     context["artist"] = artist
     context["album"] = album
     context["track_info"] = track_info
     context["original_search_result"] = original_search or search_result
+    context.pop("_source", None)
     context.pop("spotify_artist", None)
     context.pop("spotify_album", None)
 
