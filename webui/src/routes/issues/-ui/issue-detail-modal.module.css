@@ -666,25 +666,6 @@
   margin-bottom: 14px;
 }
 
-.issueActionButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all 0.2s ease;
-  font-family: inherit;
-}
-
-.issueActionButton:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .issueActionDownload {
   background: rgba(var(--accent-light-rgb), 0.12);
   color: rgb(var(--accent-light-rgb));
@@ -708,23 +689,7 @@
 }
 
 .issueDetailResponseTextarea {
-  width: 100%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #fff;
-  padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  outline: none;
-  resize: vertical;
   min-height: 70px;
-  font-family: inherit;
-  transition: border-color 0.2s;
-  box-sizing: border-box;
-}
-
-.issueDetailResponseTextarea:focus {
-  border-color: rgba(var(--accent-light-rgb), 0.5);
 }
 
 .issueDetailAdminResponse {
@@ -836,25 +801,6 @@
   padding: 0 22px 22px;
 }
 
-.modalButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 16px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
-  color: #fff;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-family: inherit;
-}
-
-.modalButton:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-}
-
 .modalButtonSecondary {
   background: rgba(255, 255, 255, 0.04);
 }
@@ -868,16 +814,6 @@
   color: #08110b;
   border-color: transparent;
   font-weight: 700;
-}
-
-.modalButtonDanger {
-  background: rgba(239, 68, 68, 0.14);
-  border-color: rgba(239, 68, 68, 0.28);
-  color: #ffd0d0;
-}
-
-.modalButtonGhost {
-  background: rgba(255, 255, 255, 0.04);
 }
 
 .modalButtonProgress {
@@ -911,7 +847,6 @@
 }
 
 .modalButtonDelete:hover:not(:disabled),
-.modalButtonDanger:hover:not(:disabled),
 .modalButtonProgress:hover:not(:disabled),
 .modalButtonResolve:hover:not(:disabled),
 .modalButtonDismiss:hover:not(:disabled),
@@ -1013,12 +948,12 @@
     justify-content: center;
   }
 
-  .issueActionButton,
-  .modalButton {
+  .issueActionButtons > button,
+  .modalFooter > button {
     width: 100%;
   }
 
-  .issueActionButton {
+  .issueActionButtons > button {
     justify-content: center;
   }
 

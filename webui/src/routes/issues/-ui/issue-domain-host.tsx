@@ -327,7 +327,7 @@ function ReportIssueModal({
 
         <FormActions className={styles.modalFooter}>
           <Button
-            className={`${styles.modalButton} ${styles.modalButtonSecondary}`}
+            className={styles.modalButtonSecondary}
             type="button"
             onClick={onClose}
           >
@@ -344,7 +344,7 @@ function ReportIssueModal({
               const isSubmitting = state.isSubmitting || createMutation.isPending;
               return (
                 <Button
-                  className={`${styles.modalButton} ${styles.modalButtonPrimary}`}
+                  className={styles.modalButtonPrimary}
                   type="submit"
                   disabled={!state.category || !state.title.trim() || isSubmitting}
                 >

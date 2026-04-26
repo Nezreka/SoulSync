@@ -5,6 +5,7 @@ import {
   launchAlbumDownloadWorkflow,
   launchAlbumWishlistWorkflow,
 } from '@/platform/workflows/album-workflows';
+import { Button, FormField, TextArea } from '@/components/form';
 
 import type { IssueRecord } from '../-issues.types';
 
@@ -85,8 +86,8 @@ export function IssueDetailModal({
         return (
           <>
             {issue.status === 'open' && (
-              <button
-                className={`${styles.modalButton} ${styles.modalButtonProgress}`}
+              <Button
+                className={styles.modalButtonProgress}
                 type="button"
                 onClick={() =>
                   updateMutation.mutate({
@@ -98,10 +99,10 @@ export function IssueDetailModal({
                 disabled={updateMutation.isPending}
               >
                 Mark In Progress
-              </button>
+              </Button>
             )}
-            <button
-              className={`${styles.modalButton} ${styles.modalButtonResolve}`}
+            <Button
+              className={styles.modalButtonResolve}
               type="button"
               onClick={() =>
                 updateMutation.mutate({
@@ -113,9 +114,9 @@ export function IssueDetailModal({
               disabled={updateMutation.isPending}
             >
               Resolve
-            </button>
-            <button
-              className={`${styles.modalButton} ${styles.modalButtonDismiss}`}
+            </Button>
+            <Button
+              className={styles.modalButtonDismiss}
               type="button"
               onClick={() =>
                 updateMutation.mutate({
@@ -127,14 +128,14 @@ export function IssueDetailModal({
               disabled={updateMutation.isPending}
             >
               Dismiss
-            </button>
+            </Button>
           </>
         );
       }
 
       return (
-        <button
-          className={`${styles.modalButton} ${styles.modalButtonReopen}`}
+        <Button
+          className={styles.modalButtonReopen}
           type="button"
           onClick={() =>
             updateMutation.mutate({ issueId: issue.id, status: 'open', adminResponse })
@@ -142,14 +143,14 @@ export function IssueDetailModal({
           disabled={updateMutation.isPending}
         >
           Reopen
-        </button>
+        </Button>
       );
     }
 
     if (issue.status === 'open') {
       return (
-        <button
-          className={`${styles.modalButton} ${styles.modalButtonDelete}`}
+        <Button
+          className={styles.modalButtonDelete}
           type="button"
           onClick={() => {
             if (window.confirm('Withdraw this issue?')) {
@@ -159,7 +160,7 @@ export function IssueDetailModal({
           disabled={deleteMutation.isPending}
         >
           Withdraw
-        </button>
+        </Button>
       );
     }
 
@@ -441,38 +442,44 @@ export function IssueDetailModal({
               ) : null}
 
               {issue.entity_type !== 'artist' && isAdmin && (
-                <div className={styles.issueDetailSection}>
-                  <div className={styles.issueDetailSectionTitle}>Admin Actions</div>
-                  <div className={styles.issueActionButtons}>
-                    <button
-                      className={`${styles.issueActionButton} ${styles.issueActionDownload}`}
-                      type="button"
-                      disabled={downloadWorkflowMutation.isPending}
-                      onClick={() => downloadWorkflowMutation.mutate(albumWorkflowInput)}
-                    >
-                      {downloadWorkflowMutation.isPending ? 'Loading...' : 'Download Album'}
-                    </button>
-                    <button
-                      className={`${styles.issueActionButton} ${styles.issueActionWishlist}`}
-                      type="button"
-                      disabled={wishlistWorkflowMutation.isPending}
-                      onClick={() => wishlistWorkflowMutation.mutate(albumWorkflowInput)}
-                    >
-                      {wishlistWorkflowMutation.isPending ? 'Loading...' : 'Add to Wishlist'}
-                    </button>
-                  </div>
+              <div className={styles.issueDetailSection}>
+                <div className={styles.issueDetailSectionTitle}>Admin Actions</div>
+                <div className={styles.issueActionButtons}>
+                  <Button
+                    className={styles.issueActionDownload}
+                    type="button"
+                    disabled={downloadWorkflowMutation.isPending}
+                    onClick={() => downloadWorkflowMutation.mutate(albumWorkflowInput)}
+                  >
+                    {downloadWorkflowMutation.isPending ? 'Loading...' : 'Download Album'}
+                  </Button>
+                  <Button
+                    className={styles.issueActionWishlist}
+                    type="button"
+                    disabled={wishlistWorkflowMutation.isPending}
+                    onClick={() => wishlistWorkflowMutation.mutate(albumWorkflowInput)}
+                  >
+                    {wishlistWorkflowMutation.isPending ? 'Loading...' : 'Add to Wishlist'}
+                  </Button>
                 </div>
+              </div>
               )}
 
               {isAdmin && (
                 <div className={styles.issueDetailSection}>
-                  <div className={styles.issueDetailSectionTitle}>Admin Response</div>
-                  <textarea
-                    className={styles.issueDetailResponseTextarea}
-                    value={adminResponse}
-                    onChange={(event) => setAdminResponse(event.target.value)}
-                    placeholder="Write a response to the reporter..."
-                  />
+                  <FormField
+                    label="Admin Response"
+                    htmlFor="issue-detail-response-input"
+                    helperText="Write a response to the reporter."
+                  >
+                    <TextArea
+                      className={styles.issueDetailResponseTextarea}
+                      id="issue-detail-response-input"
+                      value={adminResponse}
+                      onChange={(event) => setAdminResponse(event.target.value)}
+                      placeholder="Write a response to the reporter..."
+                    />
+                  </FormField>
                 </div>
               )}
 
@@ -487,19 +494,19 @@ export function IssueDetailModal({
         </div>
 
         <div className={styles.modalFooter}>
-          <button
-            className={`${styles.modalButton} ${styles.modalButtonSecondary}`}
+          <Button
+            className={styles.modalButtonSecondary}
             type="button"
             onClick={onClose}
           >
             Close
-          </button>
+          </Button>
           {!isLoading && !error && issue && (
             <>
               {statusButtons}
               {isAdmin && (
-                <button
-                  className={`${styles.modalButton} ${styles.modalButtonDelete}`}
+                <Button
+                  className={styles.modalButtonDelete}
                   type="button"
                   onClick={() => {
                     if (window.confirm('Delete this issue?')) {
@@ -509,7 +516,7 @@ export function IssueDetailModal({
                   disabled={deleteMutation.isPending}
                 >
                   Delete
-                </button>
+                </Button>
               )}
             </>
           )}
