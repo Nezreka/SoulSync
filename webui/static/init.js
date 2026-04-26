@@ -186,6 +186,17 @@ function applyReduceEffects(enabled) {
 
 // ── Profile System ─────────────────────────────────────────────
 let currentProfile = null;
+const PROFILE_CONTEXT_CHANGED_EVENT = 'ss:webui-profile-context-changed';
+
+function notifyProfileContextChanged() {
+    window.dispatchEvent(new CustomEvent(PROFILE_CONTEXT_CHANGED_EVENT));
+}
+
+function setCurrentProfile(profile) {
+    currentProfile = profile;
+    updateProfileIndicator();
+    notifyProfileContextChanged();
+}
 
 // Temporary compatibility shim until existing profile rows are migrated to
 // the current page ids.
@@ -391,8 +402,7 @@ async function initProfileSystem() {
         const currentRes = await fetch('/api/profiles/current');
         const currentData = await currentRes.json();
         if (currentData.success && currentData.profile) {
-            currentProfile = currentData.profile;
-            updateProfileIndicator();
+            setCurrentProfile(currentData.profile);
 
             // Check if launch PIN is required
             if (currentData.launch_pin_required) {
@@ -823,10 +833,9 @@ function showPinDialog(profile) {
                     window.location.reload();
                     return;
                 }
-                currentProfile = data.profile;
                 dialog.style.display = 'none';
                 hideProfilePicker();
-                updateProfileIndicator();
+                setCurrentProfile(data.profile);
                 initApp();
                 return;
             } else {
@@ -873,8 +882,7 @@ async function selectProfile(profileId) {
         });
         const data = await res.json();
         if (data.success) {
-            currentProfile = data.profile;
-            updateProfileIndicator();
+            setCurrentProfile(data.profile);
             // Join profile-scoped WebSocket room for watchlist/wishlist count updates
             if (socket && socket.connected) {
                 socket.emit('profile:join', { profile_id: profileId, old_profile_id: oldProfileId });
@@ -1941,6 +1949,7 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
                     if (payload.allowed_pages !== undefined) currentProfile.allowed_pages = payload.allowed_pages;
                     if (payload.can_download !== undefined) currentProfile.can_download = payload.can_download;
                     updateProfileIndicator();
+                    notifyProfileContextChanged();
                 }
                 loadProfileManageList();
             } else {
