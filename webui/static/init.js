@@ -187,25 +187,42 @@ function applyReduceEffects(enabled) {
 // ── Profile System ─────────────────────────────────────────────
 let currentProfile = null;
 
+// Temporary compatibility shim until existing profile rows are migrated to
+// the current page ids.
+const LEGACY_PROFILE_PAGE_ALIASES = {
+    downloads: 'search',
+    artists: 'search',
+};
+
+function normalizeProfilePageId(pageId) {
+    return LEGACY_PROFILE_PAGE_ALIASES[pageId] || pageId;
+}
+
+function normalizeProfilePageList(pageIds) {
+    if (!Array.isArray(pageIds)) return pageIds;
+    return pageIds.map(normalizeProfilePageId);
+}
+
 function getProfileHomePage() {
     if (!currentProfile) return 'dashboard';
-    if (currentProfile.home_page) return currentProfile.home_page;
+    if (currentProfile.home_page) return normalizeProfilePageId(currentProfile.home_page);
     return currentProfile.is_admin ? 'dashboard' : 'discover';
 }
 
 function isPageAllowed(pageId) {
     if (!currentProfile) return true;
     if (currentProfile.id === 1) return true;
-    if (pageId === 'help' || pageId === 'issues') return true;
-    if (pageId === 'settings') return currentProfile.is_admin;
-    if (pageId === 'artist-detail') {
-        const ap = currentProfile.allowed_pages;
+    const normalizedPageId = normalizeProfilePageId(pageId);
+    if (normalizedPageId === 'help' || normalizedPageId === 'issues') return true;
+    if (normalizedPageId === 'settings') return currentProfile.is_admin;
+    if (normalizedPageId === 'artist-detail') {
+        const ap = normalizeProfilePageList(currentProfile.allowed_pages);
         if (!ap) return true;
         return ap.includes('library') || ap.includes('search');
     }
-    const ap = currentProfile.allowed_pages;
+    const ap = normalizeProfilePageList(currentProfile.allowed_pages);
     if (!ap) return true; // null = all pages
-    if (ap.includes(pageId)) return true;
+    if (ap.includes(normalizedPageId)) return true;
     return false;
 }
 
@@ -1511,6 +1528,7 @@ function getProfilePageSelectOptions(profileSettings = {}) {
     const options = [];
     const seen = new Set();
     const homeSelect = document.getElementById('new-profile-home-page');
+    const normalizedHomePage = normalizeProfilePageId(profileSettings.home_page);
 
     if (homeSelect) {
         homeSelect.querySelectorAll('option').forEach(option => {
@@ -1523,12 +1541,12 @@ function getProfilePageSelectOptions(profileSettings = {}) {
         });
     }
 
-    if (profileSettings.home_page && !seen.has(profileSettings.home_page)) {
+    if (normalizedHomePage && !seen.has(normalizedHomePage)) {
         options.push({
-            value: profileSettings.home_page,
-            label: getProfilePageLabel(profileSettings.home_page),
+            value: normalizedHomePage,
+            label: getProfilePageLabel(normalizedHomePage),
         });
-        seen.add(profileSettings.home_page);
+        seen.add(normalizedHomePage);
     }
 
     return options;
@@ -1537,7 +1555,9 @@ function getProfilePageSelectOptions(profileSettings = {}) {
 function getProfilePageAccessOptions(profileSettings = {}) {
     const options = [];
     const seen = new Set();
-    const allowedSet = Array.isArray(profileSettings.allowed_pages) ? new Set(profileSettings.allowed_pages) : null;
+    const allowedSet = Array.isArray(profileSettings.allowed_pages)
+        ? new Set(normalizeProfilePageList(profileSettings.allowed_pages))
+        : null;
     const accessContainer = document.getElementById('new-profile-allowed-pages');
 
     if (accessContainer) {
