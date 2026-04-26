@@ -169,6 +169,28 @@ app = Flask(
 )
 app.config['TEMPLATES_AUTO_RELOAD'] = DEV_STATIC_NO_CACHE
 app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
+# Force static assets (library.js / style.css / etc.) to revalidate
+# with ETag on every load instead of Flask's default 12-hour browser
+# cache. Updates ship live without users having to clear cache.
+# Modern browsers still serve 304 Not Modified when the file hasn't
+# changed, so the cost per asset per reload is just a header round-trip.
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+
+# Cache-bust query string for static assets — appended to every
+# url_for('static', ...) URL via the context processor below. Computed
+# once per process start so each server restart invalidates the
+# browser's cached copy of every JS/CSS file. This is the surefire
+# fix for "user has stale JS even after Ctrl+Shift+R" — the URL
+# itself changes, so the browser cannot reuse a previously-cached
+# response no matter what its Cache-Control header said.
+import time as _cache_bust_time
+_STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
+
+
+@app.context_processor
+def _inject_static_cache_bust():
+    return {'static_v': _STATIC_CACHE_BUST}
 
 # --- Flask Session Setup (for multi-profile support) ---
 import secrets as _secrets
@@ -13592,19 +13614,12 @@ def get_tracks_replaygain_batch_status():
     return jsonify(state)
 
 
-# ── Reorganize Album Files endpoint ──
-
-_reorganize_state = {
-    'status': 'idle',
-    'total': 0,
-    'processed': 0,
-    'moved': 0,
-    'skipped': 0,
-    'failed': 0,
-    'current_track': '',
-    'errors': [],
-}
-_reorganize_lock = threading.Lock()
+# ── Reorganize Album Files endpoints ──
+#
+# Reorganize requests flow through ``core.reorganize_queue`` — a FIFO
+# queue with a single background worker. The endpoints here are thin
+# enqueue / snapshot / cancel wrappers; the heavy lifting is in
+# :mod:`core.library_reorganize`.
 
 
 @app.route('/api/library/reorganize/sources', methods=['GET'])
@@ -13672,113 +13687,143 @@ def reorganize_album_preview(album_id):
 
 @app.route('/api/library/album/<album_id>/reorganize', methods=['POST'])
 def reorganize_album_files(album_id):
-    """Re-route an album's existing files through the same post-processing
-    pipeline downloads use. Implementation lives in
-    :mod:`core.library_reorganize` to keep this monolith from growing.
-    The request body's ``template`` (if any) is ignored — post-processing
-    always uses the configured template, matching the download path.
+    """Enqueue an album for reorganize. Returns immediately — the
+    queue worker processes items FIFO. Repeat clicks for an album
+    that's already queued or running are deduped (returns
+    ``{queued: false, reason: 'already_queued'}``).
 
-    Optional body param ``source``: when provided, only that metadata
-    source is used (no fallback chain). Matches the per-album source
-    picker in the reorganize modal."""
+    Body params:
+        source (optional): per-album source pick (Spotify / iTunes /
+            Deezer / Discogs / Hydrabase). When omitted, the
+            orchestrator uses the configured primary with fallback.
+    """
     try:
+        from core.reorganize_queue import get_queue
         data = request.get_json() or {}
         chosen_source = data.get('source') or None
-        with _reorganize_lock:
-            if _reorganize_state['status'] == 'running':
-                return jsonify({"success": False, "error": "A reorganization is already in progress"}), 409
-            _reorganize_state['status'] = 'running'
-            _reorganize_state.update({
-                'total': 0, 'processed': 0, 'moved': 0, 'skipped': 0,
-                'failed': 0, 'current_track': '', 'errors': [],
-                # Set after the run from the orchestrator's summary so the
-                # frontend can distinguish 'completed' from 'no_source_id'
-                # / 'no_album' / 'no_tracks' / 'setup_failed' (otherwise
-                # zero-failure skips look green to the user).
-                'result_status': None, 'result_source': None,
-            })
 
-        download_dir = docker_resolve_path(config_manager.get('soulseek.download_path', './downloads'))
-        staging_root = os.path.join(download_dir, 'ssync_staging')
-        try:
-            os.makedirs(staging_root, exist_ok=True)
-        except OSError:
-            pass
-        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        # Capture display fields at enqueue time so the status panel
+        # can render them without a DB lookup later.
+        meta = get_database().get_album_display_meta(album_id)
+        if meta is None:
+            return jsonify({"success": False, "error": "Album not found"}), 404
 
-        def _on_progress(updates):
-            with _reorganize_lock:
-                _reorganize_state.update(updates)
-
-        def _update_track_path(track_id, new_path):
-            try:
-                _db = get_database()
-                with _db._get_connection() as _conn:
-                    _conn.execute(
-                        "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (new_path, str(track_id)),
-                    )
-                    _conn.commit()
-            except Exception as _db_err:
-                logger.warning(f"[Reorganize] DB path update failed for {track_id}: {_db_err}")
-
-        def _cleanup_empty(src_dir):
-            try:
-                _cleanup_empty_directories(transfer_dir, os.path.join(src_dir, '_'))
-            except Exception:
-                pass
-
-        def _run():
-            from core.library_reorganize import reorganize_album
-            try:
-                summary = reorganize_album(
-                    album_id=album_id,
-                    db=get_database(),
-                    staging_root=staging_root,
-                    resolve_file_path_fn=_resolve_library_file_path,
-                    post_process_fn=_post_process_matched_download,
-                    update_track_path_fn=_update_track_path,
-                    cleanup_empty_dir_fn=_cleanup_empty,
-                    transfer_dir=transfer_dir,
-                    on_progress=_on_progress,
-                    primary_source=chosen_source,
-                    strict_source=bool(chosen_source),
-                    stop_check=lambda: bool(IS_SHUTTING_DOWN),
-                )
-                logger.info(
-                    f"[Reorganize] Album {album_id} {summary['status']} "
-                    f"(source={summary.get('source')}, moved={summary['moved']}, "
-                    f"skipped={summary['skipped']}, failed={summary['failed']})"
-                )
-                with _reorganize_lock:
-                    _reorganize_state['result_status'] = summary.get('status')
-                    _reorganize_state['result_source'] = summary.get('source')
-            except Exception as run_err:
-                logger.error(f"[Reorganize] Background error: {run_err}", exc_info=True)
-                with _reorganize_lock:
-                    _reorganize_state['result_status'] = 'error'
-            finally:
-                with _reorganize_lock:
-                    _reorganize_state['status'] = 'done'
-                    _reorganize_state['current_track'] = ''
-
-        threading.Thread(target=_run, daemon=True, name="ReorganizeAlbum").start()
-        return jsonify({"success": True, "message": "Reorganization started"})
-
+        result = get_queue().enqueue(
+            album_id=str(album_id),
+            album_title=meta['album_title'],
+            artist_id=meta['artist_id'],
+            artist_name=meta['artist_name'],
+            source=chosen_source,
+        )
+        return jsonify({"success": True, **result})
     except Exception as e:
-        logger.error(f"Reorganize error: {e}")
-        with _reorganize_lock:
-            _reorganize_state['status'] = 'idle'
+        logger.error(f"Reorganize enqueue error: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/library/album/reorganize/status', methods=['GET'])
-def get_reorganize_status():
-    """Poll the status of a running reorganization."""
-    with _reorganize_lock:
-        state = dict(_reorganize_state)
-        state['errors'] = list(_reorganize_state['errors'])
-        return jsonify(state)
+@app.route('/api/library/artist/<artist_id>/reorganize-all', methods=['POST'])
+def reorganize_all_artist_albums(artist_id):
+    """Enqueue every album for an artist. Replaces the old frontend
+    bulk-loop. Each album becomes its own queue item, processed FIFO.
+    Albums already queued or running are deduped silently.
+
+    Body params:
+        source (optional): same pick applied to every album. Per-album
+            overrides aren't supported here — use the per-album modal
+            for that.
+    """
+    try:
+        from core.reorganize_queue import get_queue
+        data = request.get_json() or {}
+        chosen_source = data.get('source') or None
+
+        albums = get_database().get_artist_albums_for_reorganize(artist_id)
+        if not albums:
+            return jsonify({"success": False, "error": "No albums found for this artist"}), 404
+
+        # Apply the user's chosen source to every album, then hand off
+        # to the queue's bulk-enqueue helper which owns the loop+tally.
+        for album in albums:
+            album['source'] = chosen_source
+        result = get_queue().enqueue_many(albums)
+
+        return jsonify({
+            "success": True,
+            "enqueued": result['enqueued'],
+            "already_queued": result['already_queued'],
+            "total_albums": result['total'],
+        })
+    except Exception as e:
+        logger.error(f"Reorganize-all enqueue error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/reorganize/queue', methods=['GET'])
+def reorganize_queue_snapshot():
+    """Snapshot of the reorganize queue — what's running, what's queued,
+    recent completions. Polled by the status panel."""
+    try:
+        from core.reorganize_queue import get_queue
+        return jsonify({"success": True, **get_queue().snapshot()})
+    except Exception as e:
+        logger.error(f"Reorganize queue snapshot error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/reorganize/queue/<queue_id>/cancel', methods=['POST'])
+def reorganize_queue_cancel(queue_id):
+    """Cancel a queued item (running items can't be cleanly cancelled —
+    see the queue module's design rules)."""
+    try:
+        from core.reorganize_queue import get_queue
+        result = get_queue().cancel(queue_id)
+        status_code = 200 if result.get('cancelled') else 409
+        return jsonify({"success": result.get('cancelled', False), **result}), status_code
+    except Exception as e:
+        logger.error(f"Reorganize cancel error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/reorganize/queue/clear', methods=['POST'])
+def reorganize_queue_clear():
+    """Cancel all queued items at once (the running item continues)."""
+    try:
+        from core.reorganize_queue import get_queue
+        cancelled = get_queue().clear_queued()
+        return jsonify({"success": True, "cancelled": cancelled})
+    except Exception as e:
+        logger.error(f"Reorganize clear error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# Wire the reorganize queue worker to its runner at module load. The
+# runner factory lives in :mod:`core.reorganize_runner` so this monolith
+# stays small. Config (paths) is read **per run** inside the closure,
+# so changing your download path in Settings takes effect on the next
+# reorganize without a server restart.
+#
+# The injected callables are wrapped in lambdas because the underlying
+# helpers (``_resolve_library_file_path`` etc.) are defined LATER in
+# this file. Lambdas defer name resolution to call time so module-load
+# import order works regardless of definition order.
+try:
+    from core.reorganize_queue import get_queue as _get_reorganize_queue
+    from core.reorganize_runner import build_runner as _build_reorganize_runner
+    _get_reorganize_queue().set_runner(_build_reorganize_runner(
+        get_database=get_database,
+        resolve_file_path_fn=lambda p: _resolve_library_file_path(p),
+        post_process_fn=lambda *a, **kw: _post_process_matched_download(*a, **kw),
+        cleanup_empty_directories_fn=lambda *a, **kw: _cleanup_empty_directories(*a, **kw),
+        is_shutting_down_fn=lambda: bool(IS_SHUTTING_DOWN),
+        get_download_path=lambda: docker_resolve_path(
+            config_manager.get('soulseek.download_path', './downloads')
+        ),
+        get_transfer_path=lambda: docker_resolve_path(
+            config_manager.get('soulseek.transfer_path', './Transfer')
+        ),
+    ))
+except Exception as _runner_init_err:
+    logger.error(f"Failed to register reorganize queue runner: {_runner_init_err}")
 
 
 # ── Library Issues endpoints ──
@@ -22732,6 +22777,22 @@ def get_version_info():
         "title": "What's New in SoulSync",
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
+            {
+                "title": "Reorganize Queue with Live Status Panel",
+                "description": "Reorganizing albums is no longer a foreground operation that locks the page. Click → enqueue → keep working. A status panel surfaces live progress.",
+                "features": [
+                    "• Per-album Reorganize and Reorganize All both enqueue into a single FIFO queue with a backend worker that drains one item at a time",
+                    "• Buttons stay clickable — spam-clicking the same album silently dedupes (returns 'already queued' instead of 409-ing)",
+                    "• Status panel at the top of the artist actions bar shows: active item (progress bar, current track, moved/skipped/failed counts), queued count, and recently-finished items with success/warning indicators",
+                    "• Click the panel to expand: full queue list with per-item cancel buttons; running item can't be cancelled mid-flight (Python threads aren't cleanly killable, post-process spawns subprocesses)",
+                    "• 'Cancel All' button drops every queued item at once — the running one continues",
+                    "• Items belonging to a different artist than the page you're on are flagged with the artist name so cross-artist progress is obvious",
+                    "• Each queued item carries its own metadata source pick (Spotify / iTunes / Deezer / Discogs / Hydrabase) — switching modal selections per album works",
+                    "• 'Reorganize All' is now one backend call instead of N JS-driven calls — the loop runs server-side and is much faster",
+                    "• Continue-on-failure: a single failed album never stalls the queue; the worker logs and moves on",
+                    "• Retired the old single-slot reorganize state endpoint plus the polling loops that depended on it",
+                ],
+            },
             {
                 "title": "Fix Wrong-Artist Tracks Silently Downloading",
                 "description": "A critical bug where searching for a track could silently download a completely different artist's song with the same name",

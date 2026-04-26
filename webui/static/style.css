@@ -43830,6 +43830,9 @@ a.enhanced-id-badge:visited {
 .enhanced-artist-meta-actions {
     display: flex;
     gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: center;
 }
 .enhanced-meta-save-btn,
 .enhanced-meta-cancel-btn {
@@ -44667,6 +44670,272 @@ textarea.enhanced-meta-field-input {
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   REORGANIZE STATUS PANEL — sits at the start of .enhanced-artist-meta-actions
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.reorganize-status-panel {
+    flex: 1 1 100%;
+    order: -1;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+    transition: background 0.2s ease, border-color 0.2s ease;
+    min-width: 0;
+}
+.reorganize-status-panel.hidden {
+    display: none;
+}
+
+.reorg-panel-compact {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    user-select: none;
+    min-width: 0;
+}
+.reorg-panel-compact-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+.reorg-panel-compact-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.reorg-panel-active-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.reorg-panel-active-text strong {
+    color: #ffffff;
+    font-weight: 600;
+}
+.reorg-panel-spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(var(--accent-rgb), 0.25);
+    border-top-color: rgb(var(--accent-rgb));
+    border-radius: 50%;
+    flex-shrink: 0;
+    animation: reorgPanelSpin 0.9s linear infinite;
+}
+@keyframes reorgPanelSpin {
+    to { transform: rotate(360deg); }
+}
+.reorg-panel-recent-icon {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.reorg-panel-recent-icon.recent-ok { background: #4ade80; box-shadow: 0 0 6px rgba(74, 222, 128, 0.4); }
+.reorg-panel-recent-icon.recent-warn { background: #facc15; box-shadow: 0 0 6px rgba(250, 204, 21, 0.4); }
+
+.reorg-panel-queue-badge {
+    background: rgba(var(--accent-rgb), 0.15);
+    color: rgb(var(--accent-light-rgb));
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.reorg-panel-chevron {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    transition: color 0.2s ease;
+}
+.reorg-panel-compact:hover .reorg-panel-chevron {
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.reorg-panel-expanded {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.reorg-panel-active-card {
+    background: rgba(var(--accent-rgb), 0.06);
+    border: 1px solid rgba(var(--accent-rgb), 0.18);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.reorg-panel-active-title {
+    font-weight: 600;
+    color: #ffffff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.reorg-panel-cross-artist {
+    margin-left: 6px;
+    color: rgba(255, 255, 255, 0.55);
+    font-weight: 400;
+    font-size: 11px;
+    font-style: italic;
+}
+.reorg-panel-progress-track {
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.reorg-panel-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg,
+        rgb(var(--accent-rgb)) 0%,
+        rgb(var(--accent-light-rgb)) 100%);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+}
+.reorg-panel-active-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 11px;
+}
+.reorg-panel-current-track {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    flex: 1 1 auto;
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
+}
+.reorg-panel-counters {
+    display: inline-flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.reorg-panel-counters .ok { color: #4ade80; }
+.reorg-panel-counters .warn { color: #facc15; }
+.reorg-panel-counters .fail { color: #f87171; }
+
+.reorg-panel-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+.reorg-panel-clear-btn {
+    background: transparent;
+    border: 1px solid rgba(248, 113, 113, 0.3);
+    color: #f87171;
+    padding: 3px 10px;
+    border-radius: 5px;
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    transition: all 0.15s ease;
+}
+.reorg-panel-clear-btn:hover {
+    background: rgba(248, 113, 113, 0.12);
+    border-color: rgba(248, 113, 113, 0.5);
+}
+
+.reorg-panel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.reorg-panel-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    padding: 6px 10px;
+    min-width: 0;
+}
+.reorg-panel-row-pos {
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 10px;
+    font-weight: 700;
+    flex-shrink: 0;
+    width: 22px;
+}
+.reorg-panel-row-body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.reorg-panel-row-title {
+    color: rgba(255, 255, 255, 0.85);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.reorg-panel-row-sub {
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.reorg-panel-cancel-btn {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+.reorg-panel-cancel-btn:hover {
+    background: rgba(248, 113, 113, 0.15);
+    color: #f87171;
+}
+.reorg-panel-row.recent-row.success { border-color: rgba(74, 222, 128, 0.18); }
+.reorg-panel-row.recent-row.warning { border-color: rgba(250, 204, 21, 0.18); }
+.reorg-panel-row.recent-row.cancelled { border-color: rgba(255, 255, 255, 0.08); opacity: 0.7; }
+.reorg-panel-row-icon {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.reorg-panel-row-icon.success { background: #4ade80; }
+.reorg-panel-row-icon.warning { background: #facc15; }
+.reorg-panel-row-icon.cancelled { background: rgba(255, 255, 255, 0.3); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    DOWNLOAD DISCOGRAPHY — Button + Modal
@@ -46159,6 +46428,32 @@ textarea.enhanced-meta-field-input {
     background: rgba(100, 149, 237, 0.12);
     color: rgba(100, 149, 237, 0.9);
     border-color: rgba(100, 149, 237, 0.35);
+}
+.enhanced-reorganize-album-btn.reorg-state-queued {
+    background: rgba(var(--accent-rgb), 0.10);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    color: rgb(var(--accent-light-rgb));
+}
+.enhanced-reorganize-album-btn.reorg-state-queued::before {
+    content: '⏳ ';
+    margin-right: 2px;
+}
+.enhanced-reorganize-album-btn.reorg-state-running {
+    background: rgba(var(--accent-rgb), 0.18);
+    border-color: rgba(var(--accent-rgb), 0.55);
+    color: #ffffff;
+}
+.enhanced-reorganize-album-btn.reorg-state-running::before {
+    content: '';
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin-right: 5px;
+    border: 2px solid rgba(255,255,255,0.35);
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    animation: reorgPanelSpin 0.9s linear infinite;
+    vertical-align: -1px;
 }
 
 .enhanced-redownload-album-btn {
