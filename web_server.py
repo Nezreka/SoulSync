@@ -37,7 +37,8 @@ _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.39"
+# Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
+_SOULSYNC_BASE_VERSION = "2.4.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
