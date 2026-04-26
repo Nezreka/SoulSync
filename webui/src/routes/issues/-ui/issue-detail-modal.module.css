@@ -828,92 +828,6 @@
   font-size: 13px;
 }
 
-.reportIssueCategoryGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 10px;
-}
-
-.reportIssueCategoryCard {
-  display: grid;
-  gap: 5px;
-  min-height: 122px;
-  text-align: left;
-  padding: 12px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
-  color: #fff;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.reportIssueCategoryCard:hover,
-.reportIssueCategoryCardSelected {
-  border-color: rgba(var(--accent-light-rgb), 0.45);
-  background: rgba(var(--accent-light-rgb), 0.1);
-}
-
-.reportIssueCategoryIcon {
-  font-size: 18px;
-}
-
-.reportIssueCategoryLabel {
-  font-weight: 700;
-  font-size: 13px;
-}
-
-.reportIssueCategoryDesc {
-  color: rgba(255, 255, 255, 0.48);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.reportIssueInput {
-  width: 100%;
-  box-sizing: border-box;
-  margin-bottom: 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #fff;
-  padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  outline: none;
-  font-family: inherit;
-}
-
-.reportIssuePriorityRow {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.reportIssuePriorityButton {
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.72);
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.reportIssuePriorityButtonSelected {
-  border-color: rgba(var(--accent-light-rgb), 0.45);
-  background: rgba(var(--accent-light-rgb), 0.14);
-  color: #fff;
-}
-
-.reportIssueError {
-  color: #ffd0d0;
-  border: 1px solid rgba(239, 68, 68, 0.25);
-  background: rgba(239, 68, 68, 0.1);
-  border-radius: 10px;
-  padding: 10px 12px;
-  font-size: 13px;
-}
-
 .modalFooter {
   display: flex;
   justify-content: flex-end;
@@ -1065,6 +979,11 @@
     justify-content: space-between;
   }
 
+  .issueDetailInfoLeft,
+  .issueDetailInfoRight {
+    width: 100%;
+  }
+
   .modal {
     max-height: calc(100vh - 24px);
     border-radius: 22px;
@@ -1075,18 +994,40 @@
   }
 
   .modalFooter {
+    flex-direction: column;
+    align-items: stretch;
     padding: 0 18px 18px;
   }
 
   .issueDetailMetaGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(1, minmax(0, 1fr));
   }
 
   .issueMetaValue {
-    max-width: 80px;
+    max-width: none;
   }
 
   .issueActionButtons {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+  }
+
+  .issueActionButton,
+  .modalButton {
+    width: 100%;
+  }
+
+  .issueActionButton {
+    justify-content: center;
+  }
+
+  .issueExternalLinks {
+    justify-content: center;
+  }
+
+  .issueExternalLink {
+    width: 100%;
     justify-content: center;
   }
 }

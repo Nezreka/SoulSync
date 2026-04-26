@@ -1,12 +1,23 @@
-import { useForm } from '@tanstack/react-form';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useForm } from "@tanstack/react-form";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
-import { getShellProfileContext } from '@/platform/shell/bridge';
-import { useShellBridge } from '@/platform/shell/route-controllers';
+import { getShellProfileContext } from "@/platform/shell/bridge";
+import {
+  FormActions,
+  FormError,
+  FormField,
+  OptionButton,
+  OptionButtonGroup,
+  OptionCard,
+  OptionCardGroup,
+  TextArea,
+  TextInput,
+} from "@/components/form";
+import { useShellBridge } from "@/platform/shell/route-controllers";
 
-import type { IssuePriority, IssueReportPayload } from '../-issues.types';
+import type { IssuePriority, IssueReportPayload } from "../-issues.types";
 
 import {
   REFRESH_EVENT,
@@ -14,10 +25,10 @@ import {
   createIssue,
   getIssueCategoriesForEntity,
   issueCountsQueryOptions,
-} from '../-issues.helpers';
-import styles from './issue-detail-modal.module.css';
+} from "../-issues.helpers";
+import styles from "./issue-detail-modal.module.css";
 
-const ISSUE_DOMAIN_QUERY_KEY = ['issues'] as const;
+const ISSUE_DOMAIN_QUERY_KEY = ["issues"] as const;
 
 interface ReportIssueFormValues {
   category: string;
@@ -27,10 +38,10 @@ interface ReportIssueFormValues {
 }
 
 const DEFAULT_REPORT_ISSUE_VALUES: ReportIssueFormValues = {
-  category: '',
-  description: '',
-  priority: 'normal',
-  title: '',
+  category: "",
+  description: "",
+  priority: "normal",
+  title: "",
 };
 
 export function IssueDomainHost() {
@@ -115,7 +126,7 @@ function ReportIssueModal({
     [payload.entityType],
   );
   const entityLabel =
-    payload.entityType === 'track' ? 'Track' : payload.entityType === 'album' ? 'Album' : 'Artist';
+    payload.entityType === "track" ? "Track" : payload.entityType === "album" ? "Album" : "Artist";
 
   const createMutation = useMutation({
     mutationFn: async (values: ReportIssueFormValues) => {
@@ -129,7 +140,7 @@ function ReportIssueModal({
       });
     },
     onSuccess: () => {
-      notify('Issue reported successfully', 'success');
+      notify("Issue reported successfully", "success");
       onSubmitted();
     },
   });
@@ -149,9 +160,9 @@ function ReportIssueModal({
         await createMutation.mutateAsync(normalizedValues);
       } catch (mutationError) {
         const message =
-          mutationError instanceof Error ? mutationError.message : 'Failed to submit issue';
+          mutationError instanceof Error ? mutationError.message : "Failed to submit issue";
         formApi.setErrorMap({ onSubmit: message });
-        notify(message, 'error');
+        notify(message, "error");
         throw mutationError;
       }
     },
@@ -194,63 +205,56 @@ function ReportIssueModal({
             {payload.artistName ? (
               <div className={styles.reportIssueEntityArtist}>
                 {payload.artistName}
-                {payload.albumTitle ? ` - ${payload.albumTitle}` : ''}
+                {payload.albumTitle ? ` - ${payload.albumTitle}` : ""}
               </div>
             ) : null}
           </div>
 
-          <div className={styles.issueDetailSection}>
-            <label className={styles.issueDetailSectionTitle}>What's the problem?</label>
-            <div className={styles.reportIssueCategoryGrid}>
-              <form.Field name="category">
-                {(field) =>
-                  categories.map(([category, meta]) => (
-                    <button
+          <FormField
+            label="What's the problem?"
+            helperText="Pick the closest match for the report."
+          >
+            <form.Field name="category">
+              {(field) => (
+                <OptionCardGroup>
+                  {categories.map(([category, meta]) => (
+                    <OptionCard
                       key={category}
-                      className={`${styles.reportIssueCategoryCard} ${
-                        field.state.value === category
-                          ? styles.reportIssueCategoryCardSelected
-                          : ''
-                      }`}
-                      type="button"
+                      description={meta.description}
+                      icon={meta.icon}
                       onClick={() => {
                         field.handleChange(category);
                         createMutation.reset();
                         form.setErrorMap({ onSubmit: undefined });
-                        if (!form.getFieldMeta('title')?.isTouched) {
+                        if (!form.getFieldMeta("title")?.isTouched) {
                           form.setFieldValue(
-                            'title',
+                            "title",
                             createDefaultIssueTitle(category, payload.entityName),
                             { dontUpdateMeta: true },
                           );
                         }
                       }}
-                    >
-                      <div className={styles.reportIssueCategoryIcon}>{meta.icon}</div>
-                      <div className={styles.reportIssueCategoryLabel}>{meta.label}</div>
-                      <div className={styles.reportIssueCategoryDesc}>{meta.description}</div>
-                    </button>
-                  ))
-                }
-              </form.Field>
-            </div>
-          </div>
+                      selected={field.state.value === category}
+                      title={meta.label}
+                    />
+                  ))}
+                </OptionCardGroup>
+              )}
+            </form.Field>
+          </FormField>
 
           <form.Subscribe selector={(state) => state.values.category}>
             {(selectedCategory) =>
               selectedCategory ? (
-                <div className={styles.issueDetailSection}>
+                <>
                   <form.Field name="title">
                     {(field) => (
-                      <>
-                        <label
-                          className={styles.issueDetailSectionTitle}
-                          htmlFor="report-issue-title-input"
-                        >
-                          Title
-                        </label>
-                        <input
-                          className={styles.reportIssueInput}
+                      <FormField
+                        helperText="A short summary that makes the problem obvious."
+                        htmlFor="report-issue-title-input"
+                        label="Title"
+                      >
+                        <TextInput
                           id="report-issue-title-input"
                           maxLength={200}
                           onBlur={field.handleBlur}
@@ -262,20 +266,18 @@ function ReportIssueModal({
                           placeholder="Brief summary of the issue..."
                           value={field.state.value}
                         />
-                      </>
+                      </FormField>
                     )}
                   </form.Field>
+
                   <form.Field name="description">
                     {(field) => (
-                      <>
-                        <label
-                          className={styles.issueDetailSectionTitle}
-                          htmlFor="report-issue-desc-input"
-                        >
-                          Details
-                        </label>
-                        <textarea
-                          className={styles.issueDetailResponseTextarea}
+                      <FormField
+                        helperText="Include any details that will help triage the issue."
+                        htmlFor="report-issue-desc-input"
+                        label="Details"
+                      >
+                        <TextArea
                           id="report-issue-desc-input"
                           maxLength={2000}
                           onBlur={field.handleBlur}
@@ -284,31 +286,32 @@ function ReportIssueModal({
                           rows={4}
                           value={field.state.value}
                         />
-                      </>
+                      </FormField>
                     )}
                   </form.Field>
+
                   <form.Field name="priority">
                     {(field) => (
-                      <div className={styles.reportIssuePriorityRow} aria-label="Priority">
-                        {(['low', 'normal', 'high'] as const).map((priority) => (
-                          <button
-                            key={priority}
-                            className={`${styles.reportIssuePriorityButton} ${
-                              field.state.value === priority
-                                ? styles.reportIssuePriorityButtonSelected
-                                : ''
-                            }`}
-                            type="button"
-                            onClick={() => field.handleChange(priority)}
-                          >
-                            {priority[0].toUpperCase()}
-                            {priority.slice(1)}
-                          </button>
-                        ))}
-                      </div>
+                      <FormField
+                        helperText="Set the urgency if this needs faster attention."
+                        label="Priority"
+                      >
+                        <OptionButtonGroup>
+                          {(["low", "normal", "high"] as const).map((priority) => (
+                            <OptionButton
+                              key={priority}
+                              onClick={() => field.handleChange(priority)}
+                              selected={field.state.value === priority}
+                            >
+                              {priority[0].toUpperCase()}
+                              {priority.slice(1)}
+                            </OptionButton>
+                          ))}
+                        </OptionButtonGroup>
+                      </FormField>
                     )}
                   </form.Field>
-                </div>
+                </>
               ) : null
             }
           </form.Subscribe>
@@ -316,12 +319,12 @@ function ReportIssueModal({
           <form.Subscribe selector={(state) => state.errors}>
             {(errors) => {
               const error = getReportIssueFormError(errors);
-              return error ? <div className={styles.reportIssueError}>{error}</div> : null;
+              return <FormError message={error} />;
             }}
           </form.Subscribe>
         </div>
 
-        <div className={styles.modalFooter}>
+        <FormActions className={styles.modalFooter}>
           <button
             className={`${styles.modalButton} ${styles.modalButtonSecondary}`}
             type="button"
@@ -344,12 +347,12 @@ function ReportIssueModal({
                   type="submit"
                   disabled={!state.category || !state.title.trim() || isSubmitting}
                 >
-                  {isSubmitting ? 'Submitting...' : 'Submit Issue'}
+                  {isSubmitting ? "Submitting..." : "Submit Issue"}
                 </button>
               );
             }}
           </form.Subscribe>
-        </div>
+        </FormActions>
       </form>
     </div>
   );
@@ -369,27 +372,27 @@ function validateReportIssueForm(
   values: ReportIssueFormValues,
 ): string | undefined {
   const normalizedValues = normalizeReportIssueFormValues(values);
-  if (!profileId) return 'Profile is still loading';
-  if (!normalizedValues.category) return 'Please select an issue category';
-  if (!normalizedValues.title) return 'Please provide a title for the issue';
+  if (!profileId) return "Profile is still loading";
+  if (!normalizedValues.category) return "Please select an issue category";
+  if (!normalizedValues.title) return "Please provide a title for the issue";
   return undefined;
 }
 
 function getReportIssueFormError(errors: Array<unknown>): string {
   const error = errors.find(Boolean);
-  if (!error) return '';
-  if (typeof error === 'string') return error;
+  if (!error) return "";
+  if (typeof error === "string") return error;
   if (error instanceof Error) return error.message;
   return String(error);
 }
 
-function notify(message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') {
+function notify(message: string, type: "success" | "error" | "warning" | "info" = "info") {
   window.showToast?.(message, type);
 }
 
 function updateBadge(openCount: number) {
-  const badge = document.getElementById('issues-nav-badge');
+  const badge = document.getElementById("issues-nav-badge");
   if (!badge) return;
   badge.textContent = String(openCount || 0);
-  badge.classList.toggle('hidden', !openCount);
+  badge.classList.toggle("hidden", !openCount);
 }
