@@ -189,3 +189,25 @@ def test_get_artist_albums_for_reorganize_isolates_by_artist(db):
           ])
     rows = db.get_artist_albums_for_reorganize('ar-1')
     assert {r['album_id'] for r in rows} == {'alb-1', 'alb-3'}
+
+
+# ── error propagation ────────────────────────────────────────────────────
+# Regression for review feedback on the original PR: helpers used to
+# swallow every Exception and return None / [], so a real DB outage
+# masqueraded as "album not found" / "no albums". Now they let the
+# error bubble — the route layer turns it into a 500 — so the user sees
+# a real failure instead of a phantom empty state.
+
+
+def test_get_album_display_meta_propagates_db_errors(db):
+    """If the underlying tables don't exist, the helper must raise
+    rather than swallow it as a missing-album result."""
+    # Don't seed — the schema is empty, so the SELECT will fail with
+    # OperationalError ("no such table: albums").
+    with pytest.raises(sqlite3.OperationalError):
+        db.get_album_display_meta('alb-1')
+
+
+def test_get_artist_albums_for_reorganize_propagates_db_errors(db):
+    with pytest.raises(sqlite3.OperationalError):
+        db.get_artist_albums_for_reorganize('ar-1')

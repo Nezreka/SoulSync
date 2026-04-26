@@ -22778,6 +22778,17 @@ def get_version_info():
         "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
         "sections": [
             {
+                "title": "Reorganize Queue: Race-Condition Hardening (kettui Review)",
+                "description": "Three concurrency / dedupe issues kettui caught in his review of PR #377, plus two related polish items from the same pass.",
+                "features": [
+                    "• Worker pick + status flip is now atomic — fixes a window where a cancel() landing between 'pick next queued' and 'flip to running' could mark an item cancelled but the worker still ran it",
+                    "• Replaced the lock + wakeup-event pair with a single threading.Condition so newly-queued items can't sleep up to 60s waiting for the next wakeup tick (the old pair had an empty-check / clear-event race)",
+                    "• enqueue_many now holds the queue lock for the whole batch and tracks a per-batch seen set, so duplicate album_ids inside one bulk call are deduped against each other (not just against pre-existing items)",
+                    "• Reorganize-preview Apply button no longer gets stuck disabled when an early return / network error skipped the re-enable line — moved into a finally",
+                    "• DB helpers get_album_display_meta and get_artist_albums_for_reorganize now let exceptions bubble instead of swallowing them as 'not found' / empty list — a real DB outage now surfaces as a 500 to the user instead of looking like a missing album",
+                ],
+            },
+            {
                 "title": "Reorganize Queue with Live Status Panel",
                 "description": "Reorganizing albums is no longer a foreground operation that locks the page. Click → enqueue → keep working. A status panel surfaces live progress.",
                 "features": [
