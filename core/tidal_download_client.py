@@ -76,6 +76,86 @@ if tidalapi is not None:
     QUALITY_MAP['hires']['tidal_quality'] = tidalapi.Quality.hi_res_lossless
 
 
+# Ordering of Tidal's audioQuality values, worst to best. Used to accept
+# tier upgrades (Tidal serving higher than the user asked) while still
+# rejecting downgrades. Values are the strings tidalapi's `Quality` enum
+# exposes — and the strings Tidal's API returns in the `audioQuality`
+# field. `HI_RES` (legacy MQA) isn't in the modern `Quality` enum but
+# may still come back for old catalog tracks; we rank it below
+# `HI_RES_LOSSLESS` so it's treated as a downgrade when the user asked
+# for true HiRes lossless.
+_QUALITY_RANK = {
+    'LOW': 1,
+    'HIGH': 2,
+    'LOSSLESS': 3,
+    'HI_RES': 4,
+    'HI_RES_LOSSLESS': 5,
+}
+
+
+def _verify_stream_tier(stream, q_info: dict, q_key: str) -> Tuple[bool, Optional[str]]:
+    """Return ``(True, None)`` when the tier Tidal actually served is
+    acceptable (same as requested, or a higher tier), ``(False, reason)``
+    when Tidal silently downgraded.
+
+    Tidal's API degrades quality without raising: ask for HI_RES_LOSSLESS
+    on a track that's only in LOW_320K and you get LOW_320K back with no
+    error. The downloader used to accept that and write the resulting
+    AAC file, which defeated "HiRes only" with no fallback and made the
+    worker's fallback chain ineffective (every tier "succeeded" at the
+    first one that returned anything).
+
+    We accept upgrades because Tidal occasionally serves a higher tier
+    than requested on tracks flagged as such in its catalog — rejecting
+    a higher quality than asked for would be user-hostile.
+
+    Defensive paths:
+    - No ``audio_quality`` on the stream (older tidalapi builds): pass
+      through, let the pre-existing codec / file-size guards decide.
+    - QUALITY_MAP entry without ``tidal_quality`` (tidalapi wasn't
+      importable at module load): pass through for the same reason.
+    - Unrecognized served quality value (new Tidal tier we haven't
+      mapped yet): reject, surfacing a "can't verify" reason so the
+      next tier gets a chance or the final diagnostic names the
+      unknown value.
+    """
+    served = getattr(stream, 'audio_quality', None)
+    expected = q_info.get('tidal_quality')
+    if served is None or expected is None:
+        return True, None
+
+    # Both sides may be enum instances (str subclass) or plain strings;
+    # coerce to str to compare values only.
+    served_str = str(served)
+    expected_str = str(expected)
+
+    if served_str == expected_str:
+        return True, None
+
+    served_rank = _QUALITY_RANK.get(served_str)
+    expected_rank = _QUALITY_RANK.get(expected_str)
+
+    if expected_rank is None:
+        # Shouldn't happen — every entry in QUALITY_MAP resolves to a
+        # known tier. If it does, don't reject valid downloads.
+        return True, None
+
+    if served_rank is None:
+        return False, (
+            f"{q_key}: Tidal returned unrecognized audioQuality "
+            f"'{served_str}' — can't verify the tier matches '{expected_str}'"
+        )
+
+    if served_rank >= expected_rank:
+        return True, None
+
+    return False, (
+        f"{q_key}: Tidal served '{served_str}' instead of "
+        f"'{expected_str}' — account tier, track licensing, "
+        f"or region doesn't permit {q_key} for this track"
+    )
+
+
 class TidalDownloadClient:
     """
     Tidal download client using tidalapi.
@@ -185,8 +265,16 @@ class TidalDownloadClient:
 
             login, future = self.session.login_oauth()
             self._device_auth_future = future
+            # tidalapi returns `verification_uri_complete` as a schemeless
+            # string like `link.tidal.com/ABCDE`. Passing that straight to
+            # an <a href> makes the browser treat it as a relative URL and
+            # route it back to the SoulSync origin, so normalize to a
+            # full https:// URL here.
+            raw_uri = login.verification_uri_complete or f"link.tidal.com/{login.user_code}"
+            if not raw_uri.startswith(('http://', 'https://')):
+                raw_uri = f"https://{raw_uri}"
             self._device_auth_link = {
-                'verification_uri': login.verification_uri_complete or f"https://link.tidal.com/{login.user_code}",
+                'verification_uri': raw_uri,
                 'user_code': login.user_code,
             }
             logger.info(f"Tidal device auth started — code: {login.user_code}")
@@ -244,6 +332,98 @@ class TidalDownloadClient:
             logger.error(f"Tidal connection check failed: {e}")
             return False
 
+    # Words that distinguish a specific audio variant from the original track.
+    # If any of these appear in a query, the fallback-retry results must also
+    # contain them — otherwise we'd silently downgrade a "(Live)" or
+    # "(Acoustic)" search to the studio version when shortened queries match
+    # too broadly.
+    _QUALIFIER_KEYWORDS = frozenset({
+        'remix', 'mix', 'edit', 'version', 'dub', 'rmx', 'vip', 'cut',
+        'rework', 'bootleg', 'flip',
+        'live', 'concert', 'unplugged', 'acoustic', 'session',
+        'instrumental', 'karaoke', 'demo', 'bonus',
+        'extended', 'radio',
+    })
+
+    @classmethod
+    def _extract_qualifiers(cls, query: str) -> List[str]:
+        """Return the qualifier keywords that appear as whole words in the
+        query (case-insensitive). Word-boundary match prevents false hits like
+        "edit" matching "edition" or "mix" matching "remix"."""
+        if not query:
+            return []
+        found = []
+        q_lower = query.lower()
+        for kw in cls._QUALIFIER_KEYWORDS:
+            if re.search(r'\b' + re.escape(kw) + r'\b', q_lower):
+                found.append(kw)
+        return found
+
+    @staticmethod
+    def _track_name_contains_qualifiers(track_name: str, qualifiers: List[str]) -> bool:
+        """True iff the track name contains every qualifier as a whole word."""
+        if not qualifiers:
+            return True
+        if not track_name:
+            return False
+        name_lower = track_name.lower()
+        for kw in qualifiers:
+            if not re.search(r'\b' + re.escape(kw) + r'\b', name_lower):
+                return False
+        return True
+
+    @staticmethod
+    def _generate_shortened_queries(original: str) -> List[str]:
+        """Generate progressively-shorter variants of a search query.
+
+        Tidal's search engine chokes on long queries with lots of qualifiers
+        (remix credits, edit labels, bonus-disc markers). When the original
+        returns 0 results, we retry with shortened variants in order of
+        conservativeness — the first variant that returns results wins.
+
+        Variants are returned in priority order. Dedupes against the original
+        and against previously-added variants so we never issue duplicate
+        requests.
+        """
+        variants: List[str] = []
+        seen = {original.strip().lower()}
+
+        def _add(candidate: str) -> None:
+            candidate = candidate.strip()
+            if candidate and candidate.lower() not in seen:
+                variants.append(candidate)
+                seen.add(candidate.lower())
+
+        # 1. Strip a trailing parenthetical/bracketed suffix.
+        #    "Song (Radio Edit)" → "Song"
+        _add(re.sub(r'\s*[\(\[][^\)\]]*[\)\]]\s*$', '', original))
+
+        # 2. Strip ALL parentheticals/brackets (mid-string too).
+        #    "Song (feat X) [Remix]" → "Song"
+        _add(re.sub(r'\s*[\(\[][^\)\]]*[\)\]]', ' ', original))
+
+        tokens = original.split()
+
+        # 3. Drop the last token — covers trailing 1-word modifiers
+        #    (e.g. "… Remix", "… Extended").
+        if len(tokens) >= 3:
+            _add(' '.join(tokens[:-1]))
+
+        # 4. Drop the last two tokens.
+        if len(tokens) >= 4:
+            _add(' '.join(tokens[:-2]))
+
+        # 5. Drop the last three tokens — covers "fred v remix" style
+        #    3-word modifiers common in remix/bonus track names.
+        if len(tokens) >= 5:
+            _add(' '.join(tokens[:-3]))
+
+        # 6. Aggressive: keep roughly the first half (rounded up).
+        if len(tokens) >= 7:
+            _add(' '.join(tokens[:len(tokens) // 2 + 1]))
+
+        return variants
+
     async def search(self, query: str, timeout: int = None, progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
         """
         Search Tidal for tracks (async, Soulseek-compatible interface).
@@ -255,20 +435,116 @@ class TidalDownloadClient:
             logger.warning("Tidal not available for search (not authenticated)")
             return ([], [])
 
+        # Defensive guard — None/empty query would blow up the shortener's
+        # .strip() call. Match the original behaviour (log + empty tuple).
+        if not query or not isinstance(query, str):
+            logger.warning(f"Invalid Tidal search query: {query!r}")
+            return ([], [])
+
         logger.info(f"Searching Tidal for: {query}")
 
+        # Outer try/except preserves the original contract: any unexpected
+        # error returns ([], []) so the caller can fall back to other sources
+        # instead of crashing. Traceback is logged once, not per-attempt.
         try:
+            # Build the retry ladder: original query, then progressively-shortened
+            # variants. Capped at 5 total requests to avoid hammering Tidal on
+            # genuinely-missing tracks, while still allowing enough variants to
+            # cover multi-word trailing modifiers like remix credits.
+            queries_to_try = [query] + self._generate_shortened_queries(query)
+            queries_to_try = queries_to_try[:5]
+
+            # Qualifier-aware safety net: if the original query contains variant
+            # keywords (Live, Remix, Acoustic, Extended, etc.), fallback results
+            # MUST still contain those qualifiers in their track names. Otherwise
+            # a shortened query could silently downgrade "Song (Live)" to the
+            # studio "Song" and the caller would download the wrong variant.
+            required_qualifiers = self._extract_qualifiers(query)
+
+            tidal_tracks: list = []
+            successful_query: Optional[str] = None
+            last_error: Optional[Exception] = None
+            # Tracks whether ANY fallback attempt returned broader matches that
+            # got rejected by the qualifier filter — used to give an accurate
+            # "no qualifier-matching variant" log message at the end instead of
+            # a generic "0 results".
+            any_fallback_filtered_out = False
+
             loop = asyncio.get_event_loop()
+            for attempt_idx, attempt_query in enumerate(queries_to_try):
+                try:
+                    q_copy = attempt_query
 
-            def _search():
-                results = self.session.search(query, models=[tidalapi.media.Track], limit=50)
-                return results.get('tracks', []) if isinstance(results, dict) else []
+                    def _search(q=q_copy):
+                        results = self.session.search(q, models=[tidalapi.media.Track], limit=50)
+                        return results.get('tracks', []) if isinstance(results, dict) else []
 
-            tidal_tracks = await loop.run_in_executor(None, _search)
+                    found = await loop.run_in_executor(None, _search)
+
+                    if found:
+                        # Fallback attempts get qualifier-filtered. We trust the
+                        # original query to return only appropriate matches, but
+                        # shortened queries are more permissive and can return
+                        # wrong-variant tracks (e.g. studio when Live was asked
+                        # for). Drop any result whose title doesn't carry all
+                        # original qualifier words.
+                        is_fallback = attempt_idx > 0
+                        if is_fallback and required_qualifiers:
+                            filtered = [
+                                t for t in found
+                                if self._track_name_contains_qualifiers(getattr(t, 'name', ''), required_qualifiers)
+                            ]
+                            if filtered:
+                                tidal_tracks = filtered
+                                successful_query = attempt_query
+                                logger.info(
+                                    f"Tidal fallback kept {len(filtered)}/{len(found)} tracks "
+                                    f"after qualifier filter {required_qualifiers} for '{attempt_query}'"
+                                )
+                                break
+                            else:
+                                any_fallback_filtered_out = True
+                                logger.debug(
+                                    f"Tidal fallback '{attempt_query}' returned {len(found)} tracks "
+                                    f"but none matched original qualifiers {required_qualifiers} — "
+                                    f"trying next variant"
+                                )
+                                if attempt_idx < len(queries_to_try) - 1:
+                                    await asyncio.sleep(0.1)
+                                continue
+                        else:
+                            tidal_tracks = found
+                            successful_query = attempt_query
+                            break
+
+                    if attempt_idx < len(queries_to_try) - 1:
+                        logger.debug(f"Tidal returned 0 results for '{attempt_query}' — trying shortened variant")
+                        # Small pause so we're not hammering Tidal with rapid retries
+                        await asyncio.sleep(0.1)
+                except Exception as e:
+                    last_error = e
+                    logger.debug(f"Tidal search attempt {attempt_idx + 1} failed: {e}")
 
             if not tidal_tracks:
-                logger.warning(f"No Tidal results for: {query}")
+                if last_error is not None:
+                    import traceback
+                    tb_str = ''.join(traceback.format_exception(
+                        type(last_error), last_error, last_error.__traceback__
+                    ))
+                    logger.error(
+                        f"Tidal search failed after {len(queries_to_try)} attempts: {last_error}\n{tb_str}"
+                    )
+                elif any_fallback_filtered_out:
+                    logger.warning(
+                        f"No Tidal results for '{query}' — fallbacks found broader matches but "
+                        f"none preserved required qualifiers {required_qualifiers}"
+                    )
+                else:
+                    logger.warning(f"No Tidal results for: {query}")
                 return ([], [])
+
+            if successful_query and successful_query != query:
+                logger.info(f"Tidal fallback query succeeded: '{successful_query}' (original: '{query}')")
 
             # Get configured quality for display
             quality_key = config_manager.get('tidal_download.quality', 'lossless')
@@ -286,7 +562,11 @@ class TidalDownloadClient:
             return (track_results, [])
 
         except Exception as e:
-            logger.error(f"Tidal search failed: {e}")
+            # Unhandled error in the retry orchestration itself (not in an
+            # individual attempt, which is already caught above). Preserves
+            # the original contract of returning ([], []) on any failure so
+            # the caller's fallback chain isn't broken.
+            logger.error(f"Tidal search orchestration failed: {e}")
             import traceback
             traceback.print_exc()
             return ([], [])
@@ -462,6 +742,13 @@ class TidalDownloadClient:
                         logger.warning(f"Quality {q_key} returned no stream, trying next")
                         quality_error_reasons.append(reason)
                         continue
+
+                    ok, reason = _verify_stream_tier(stream, q_info, q_key)
+                    if not ok:
+                        logger.warning(reason)
+                        quality_error_reasons.append(reason)
+                        continue
+
                     logger.info(f"Got Tidal stream at quality: {q_key}")
                 except Exception as e:
                     reason = f"{q_key}: {type(e).__name__}: {e}"
@@ -480,7 +767,8 @@ class TidalDownloadClient:
 
                 download_url = urls[0]
 
-                # Determine file extension from manifest
+                # Determine file extension from manifest codec (HiRes FLAC
+                # can arrive wrapped in MP4 — unwrapped at Step 4).
                 codec = manifest.get_codecs()
                 if codec and 'flac' in codec.lower():
                     extension = 'flac'
@@ -490,20 +778,6 @@ class TidalDownloadClient:
                     extension = 'm4a'
                 else:
                     extension = q_info.get('extension', 'flac')
-
-                # Verify quality wasn't silently downgraded: if HiRes was requested but the
-                # codec/manifest points to standard FLAC, log a clear warning.
-                if q_key == 'hires' and codec:
-                    codec_lower = codec.lower()
-                    if 'flac' in codec_lower or 'alac' in codec_lower:
-                        # HiRes should be 24-bit — we can't confirm bit-depth from the codec
-                        # string alone, but we log the received codec so users can diagnose.
-                        logger.info(f"HiRes stream codec: {codec} (verify file bit-depth after download)")
-                    elif 'mp4a' in codec_lower or 'aac' in codec_lower:
-                        logger.warning(
-                            f"HiRes requested but received AAC stream (codec: {codec}) — "
-                            f"account may not have HiRes subscription or track isn't available in HiRes"
-                        )
 
                 # Build output filename
                 safe_name = re.sub(r'[<>:"/\\|?*]', '_', display_name)
@@ -675,7 +949,7 @@ class TidalDownloadClient:
         download_statuses = []
 
         with self._download_lock:
-            for download_id, info in self.active_downloads.items():
+            for _download_id, info in self.active_downloads.items():
                 status = DownloadStatus(
                     id=info['id'],
                     filename=info['filename'],

@@ -27,28 +27,40 @@ class DiscographyBackfillJob(RepairJob):
     description = 'Finds missing albums and tracks for artists in your library'
     help_text = (
         'Scans each artist in your library, fetches their full discography from '
-        'the configured metadata source, and adds any tracks you don\'t already '
-        'own to the wishlist for automatic download.\n\n'
+        'the configured metadata source, and creates findings for any tracks '
+        'you don\'t already own. Click Fix on a finding to add it to the '
+        'wishlist for automatic download.\n\n'
         'Respects content filters: live versions, remixes, acoustic versions, '
         'instrumentals, and compilations are excluded by default.\n\n'
         'Settings:\n'
-        '- Include Albums/EPs/Singles: Which release types to check\n'
-        '- Include Live/Remixes/Acoustic/Compilations/Instrumentals: Content type filters\n'
-        '- Max Artists Per Run: Limit how many artists to process per scan (default: 50)'
+        '- Max Artists Per Run: Limit how many artists to process per scan (default: 50)\n'
+        '- Auto Add To Wishlist: When on, missing tracks are pushed to the wishlist during the scan as well as logged as findings\n'
+        '- Include Albums / EPs / Singles: Which release types to check\n'
+        '- Include Live / Remixes / Acoustic / Compilations / Instrumentals: Content type filters'
     )
     icon = 'repair-icon-backfill'
     default_enabled = False
-    default_interval_hours = 168  # Weekly
+    default_interval_hours = 24  # Daily — the scan is rate-limited at 50 artists per run
+    # Order matters: the UI renders these in dict-insertion order. Keys beginning
+    # with `_section_` are rendered as group headers (not settings rows) and are
+    # stripped from the saved config.
     default_settings = {
+        '_section_core': 'Core',
+        'max_artists_per_run': 50,
+        # When on, missing tracks are added to the wishlist during the scan in
+        # addition to creating findings. When off (default), only findings are
+        # created; the user reviews them and decides per-track in the repair UI.
+        'auto_add_to_wishlist': False,
+        '_section_release_types': 'Release Types',
         'include_albums': True,
         'include_eps': True,
-        'include_singles': False,
+        'include_singles': True,
+        '_section_content_filters': 'Content Filters',
         'include_live': False,
         'include_remixes': False,
         'include_acoustic': False,
         'include_compilations': False,
         'include_instrumentals': False,
-        'max_artists_per_run': 50,
     }
     auto_fix = False
 
@@ -93,12 +105,15 @@ class DiscographyBackfillJob(RepairJob):
                     log_type='info',
                 )
 
+            logger.info("[%d/%d] Scanning %s", i + 1, total, artist_name)
             try:
                 missing_count = self._scan_artist(context, artist, settings, primary_source, result)
                 if missing_count > 0:
-                    logger.info("Found %d missing tracks for %s", missing_count, artist_name)
+                    logger.info("[%d/%d] Found %d missing tracks for %s", i + 1, total, missing_count, artist_name)
+                else:
+                    logger.info("[%d/%d] %s — no missing tracks", i + 1, total, artist_name)
             except Exception as e:
-                logger.warning("Error scanning discography for %s: %s", artist_name, e)
+                logger.warning("[%d/%d] Error scanning discography for %s: %s", i + 1, total, artist_name, e)
                 result.errors += 1
 
             if context.update_progress and (i + 1) % 3 == 0:
@@ -118,18 +133,25 @@ class DiscographyBackfillJob(RepairJob):
         return result
 
     def _scan_artist(self, context, artist, settings, primary_source, result):
-        """Scan one artist's discography and create findings for missing tracks."""
+        """Scan one artist's discography and create findings for missing tracks.
+
+        Uses the same batched in-memory matching the Library and Artists pages
+        use (get_candidate_albums_for_artist + get_candidate_tracks_for_albums)
+        so one artist with a big library doesn't trigger thousands of per-track
+        SQL queries.
+        """
         artist_name = artist['name']
         result.scanned += 1
 
-        # Build source ID map for more accurate lookups
+        # Build source ID map for more accurate lookups. Primary fallback
+        # relies on artist-name search when a source ID is missing.
         source_ids = {}
         if artist.get('spotify_artist_id'):
             source_ids['spotify'] = artist['spotify_artist_id']
         if artist.get('itunes_artist_id'):
             source_ids['itunes'] = artist['itunes_artist_id']
-        if artist.get('deezer_artist_id'):
-            source_ids['deezer'] = artist['deezer_artist_id']
+        if artist.get('deezer_id'):
+            source_ids['deezer'] = artist['deezer_id']
 
         # Fetch full discography
         discography = get_artist_discography(
@@ -154,6 +176,24 @@ class DiscographyBackfillJob(RepairJob):
         if context.config_manager:
             active_server = context.config_manager.get_active_media_server()
 
+        auto_add = settings.get('auto_add_to_wishlist', False)
+
+        # Pre-fetch the artist's library albums + tracks ONCE per artist for
+        # fast in-memory matching (same pattern as the Library/Artists page
+        # completion check). Avoids thousands of per-track SQL calls.
+        candidate_tracks = None
+        try:
+            cand_albums = context.db.get_candidate_albums_for_artist(
+                artist_name, server_source=active_server
+            )
+            if cand_albums:
+                candidate_tracks = context.db.get_candidate_tracks_for_albums(
+                    [a.id for a in cand_albums]
+                )
+        except Exception as exc:
+            logger.debug("Could not pre-fetch candidates for %s: %s", artist_name, exc)
+            candidate_tracks = None
+
         # Process albums and singles
         for release in albums + singles:
             if context.check_stop():
@@ -163,7 +203,8 @@ class DiscographyBackfillJob(RepairJob):
             release_id = release.get('id', '')
             total_tracks = release.get('total_tracks', 0) or 0
             album_type = release.get('album_type', 'album')
-            release_image = release.get('image_url', '')
+            release_image = release.get('image_url', '') or ''
+            release_date = release.get('release_date', '') or ''
 
             # Filter by release type
             if not self._should_include_release(total_tracks, album_type, settings):
@@ -193,6 +234,20 @@ class DiscographyBackfillJob(RepairJob):
             if not items:
                 continue
 
+            # Build the full album context once per release so every finding
+            # created for this release carries the same wishlist-ready dict.
+            # Matches the shape add_to_wishlist / download pipeline expects.
+            album_context = {
+                'id': str(release_id),
+                'name': release_name,
+                'album_type': album_type,
+                'release_date': release_date,
+                'images': [{'url': release_image}] if release_image else [],
+                'image_url': release_image,
+                'artists': [{'name': artist_name}],
+                'total_tracks': total_tracks,
+            }
+
             for track_item in items:
                 if context.check_stop():
                     return missing_count
@@ -201,7 +256,7 @@ class DiscographyBackfillJob(RepairJob):
                 if not track_name:
                     continue
 
-                # Extract artist name from track
+                # Extract artist name from track (fall back to the discography artist)
                 track_artists = track_item.get('artists', [])
                 if track_artists:
                     first_artist = track_artists[0]
@@ -226,12 +281,15 @@ class DiscographyBackfillJob(RepairJob):
                     if is_instrumental_version(track_name, release_name):
                         continue
 
-                # Check if track already exists in library
+                # Check if track already exists in library — batched in-memory
+                # match when candidates were pre-fetched (fast path). Falls back
+                # to the legacy SQL path if pre-fetch failed.
                 db_track, confidence = context.db.check_track_exists(
                     track_name, track_artist,
                     confidence_threshold=0.7,
                     server_source=active_server,
                     album=release_name,
+                    candidate_tracks=candidate_tracks,
                 )
                 if db_track and confidence >= 0.7:
                     continue  # Already owned
@@ -244,21 +302,19 @@ class DiscographyBackfillJob(RepairJob):
                 except Exception:
                     pass
 
-                # Build track data for wishlist
+                # Build wishlist-ready track data. album is a dict (required by
+                # add_to_wishlist and by the download pipeline's cover-art
+                # extraction). Every finding carries enough context that the
+                # fix handler can hand it straight to the wishlist.
                 track_data = {
                     'id': track_item.get('id', f'backfill_{hash(f"{track_artist}_{track_name}") % 100000}'),
                     'name': track_name,
                     'artists': [{'name': track_artist}],
-                    'album': {
-                        'name': release_name,
-                        'id': str(release_id),
-                        'images': [{'url': release_image}] if release_image else [],
-                        'album_type': album_type,
-                        'release_date': release.get('release_date', ''),
-                    },
+                    'album': dict(album_context),  # copy so per-track mutations don't bleed
                     'duration_ms': track_item.get('duration_ms', 0),
                     'track_number': track_item.get('track_number', 0),
                     'disc_number': track_item.get('disc_number', 1),
+                    'image_url': release_image,
                 }
 
                 # Create finding
@@ -286,6 +342,24 @@ class DiscographyBackfillJob(RepairJob):
                         )
                         result.findings_created += 1
                         missing_count += 1
+
+                        # Auto-wishlist mode: also push to wishlist now. The
+                        # finding still gets created so the user has a log of
+                        # what the backfill picked up.
+                        if auto_add:
+                            try:
+                                context.db.add_to_wishlist(
+                                    spotify_track_data=track_data,
+                                    failure_reason='Discography backfill — missing from library (auto-added)',
+                                    source_type='repair',
+                                    source_info={
+                                        'job': 'discography_backfill',
+                                        'artist': artist_name,
+                                        'auto_added': True,
+                                    },
+                                )
+                            except Exception as wl_err:
+                                logger.debug("Auto-add to wishlist failed for '%s': %s", track_name, wl_err)
                     except Exception as e:
                         logger.debug("Error creating finding for %s: %s", track_name, e)
                         result.errors += 1
@@ -294,21 +368,29 @@ class DiscographyBackfillJob(RepairJob):
 
     @staticmethod
     def _should_include_release(total_tracks, album_type, settings):
-        """Check if a release should be included based on type settings."""
-        # Use album_type from metadata source when available
+        """Check if a release should be included based on type settings.
+
+        Spotify lumps both EPs and true singles under album_type='single', so
+        only an explicit 'album' / 'ep' / 'compilation' is trusted outright.
+        Anything else (including 'single' or missing type) falls through to a
+        track-count disambiguation matching the download pipeline:
+          - 1-3 tracks -> true single
+          - 4-6 tracks -> EP
+          - 7+ tracks -> album
+        """
         normalized = (album_type or '').lower()
         if normalized == 'compilation':
             return settings.get('include_compilations', False)
-        if normalized in ('single',):
-            return settings.get('include_singles', False)
-        if normalized in ('ep',):
+        if normalized == 'album':
+            return settings.get('include_albums', True)
+        if normalized == 'ep':
             return settings.get('include_eps', True)
-        # Fall back to track count heuristic
+        # 'single' or missing: disambiguate by track count
         if total_tracks >= 7:
             return settings.get('include_albums', True)
-        elif total_tracks >= 4:
+        if total_tracks >= 4:
             return settings.get('include_eps', True)
-        elif total_tracks >= 1:
+        if total_tracks >= 1:
             return settings.get('include_singles', False)
         return settings.get('include_albums', True)
 
@@ -342,8 +424,8 @@ class DiscographyBackfillJob(RepairJob):
                 select.append("spotify_artist_id")
             if 'itunes_artist_id' in columns:
                 select.append("itunes_artist_id")
-            if 'deezer_artist_id' in columns:
-                select.append("deezer_artist_id")
+            if 'deezer_id' in columns:
+                select.append("deezer_id")
 
             cursor.execute(f"""
                 SELECT {', '.join(select)}

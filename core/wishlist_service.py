@@ -39,7 +39,7 @@ class WishlistService:
             # Extract Spotify track data from the track_info structure
             spotify_track = self._extract_spotify_track_from_modal_info(track_info)
             if not spotify_track:
-                logger.error(f"Could not extract Spotify track data from modal info")
+                logger.error("Could not extract Spotify track data from modal info")
                 return False
             
             # Get failure reason from track_info if available

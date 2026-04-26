@@ -75,7 +75,14 @@ def _sanitize_context_values(context: dict) -> dict:
 def _apply_path_template(template: str, context: dict) -> str:
     """Apply template variables to build a path string."""
     clean = _sanitize_context_values(context)
+    # $cdnum — smart CD label. "CD01"/"CD02" only when multi-disc, empty for
+    # single-disc (collapses cleanly via the double-dash regex at the end).
+    _total_discs = int(clean.get('total_discs', 1) or 1)
+    _disc_number = int(clean.get('disc_number', 1) or 1)
+    cdnum_value = f"CD{_disc_number:02d}" if _total_discs > 1 else ''
+
     result = template
+    result = result.replace('${cdnum}', cdnum_value)
     result = result.replace('$albumartist', clean.get('albumartist', clean.get('artist', 'Unknown Artist')))
     result = result.replace('$albumtype', clean.get('albumtype', 'Album'))
     result = result.replace('$playlist', clean.get('playlist_name', ''))
@@ -83,6 +90,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$artist', clean.get('artist', 'Unknown Artist'))
     result = result.replace('$album', clean.get('album', 'Unknown Album'))
     result = result.replace('$title', clean.get('title', 'Unknown Track'))
+    result = result.replace('$cdnum', cdnum_value)
     result = result.replace('$track', f"{clean.get('track_number', 1):02d}")
     result = result.replace('$year', str(clean.get('year', '')))
     result = re.sub(r'\s+', ' ', result)
@@ -120,6 +128,9 @@ def _build_path_from_template(template: str, context: dict) -> tuple:
         filename_base = re.sub(r'\s*\(\s*\)', '', filename_base)
         filename_base = re.sub(r'\s*\{\s*\}', '', filename_base)
         filename_base = re.sub(r'\s*-\s*$', '', filename_base)
+        # Leading dash cleanup — lets $cdnum at the start of a filename
+        # cleanly disappear on single-disc albums (empty-value case).
+        filename_base = re.sub(r'^\s*-\s*', '', filename_base)
         filename_base = re.sub(r'\s+', ' ', filename_base).strip()
 
         sanitized_folders = [_sanitize_filename(p) for p in cleaned_folders]
@@ -345,7 +356,7 @@ class LibraryReorganizeJob(RepairJob):
         # API fallback: find (artist, album) pairs still missing year, batch-lookup
         if needs_year and db_album_years is not None:
             missing_pairs = set()
-            for fpath, tags in file_tags.items():
+            for _fpath, tags in file_tags.items():
                 year = tags.get('year', '')
                 if year:
                     continue
@@ -419,6 +430,9 @@ class LibraryReorganizeJob(RepairJob):
                 'title': title,
                 'track_number': track_number,
                 'disc_number': disc_number,
+                # total_discs lets $cdnum decide whether to emit "CDxx" or
+                # stay empty (single-disc albums).
+                'total_discs': total_discs,
                 'year': year,
                 'quality': quality,
                 'albumtype': 'Album',

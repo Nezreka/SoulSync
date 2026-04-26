@@ -274,7 +274,7 @@ class AcoustIDClient:
             if not search_dir.exists():
                 continue
             # Walk up to 2 levels deep to find an audio file quickly
-            for depth, pattern in enumerate(['*', '*/*']):
+            for _depth, pattern in enumerate(['*', '*/*']):
                 for f in search_dir.glob(pattern):
                     if f.is_file() and f.suffix.lower() in audio_extensions:
                         return str(f)

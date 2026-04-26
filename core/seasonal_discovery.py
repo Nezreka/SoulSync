@@ -380,8 +380,8 @@ class SeasonalDiscoveryService:
                 cursor = conn.cursor()
 
                 # Build keyword search query
-                keyword_conditions = " OR ".join([f"LOWER(track_name) LIKE ?" for _ in keywords])
-                keyword_conditions += " OR " + " OR ".join([f"LOWER(album_name) LIKE ?" for _ in keywords])
+                keyword_conditions = " OR ".join(["LOWER(track_name) LIKE ?" for _ in keywords])
+                keyword_conditions += " OR " + " OR ".join(["LOWER(album_name) LIKE ?" for _ in keywords])
 
                 keyword_params = [f"%{kw}%" for kw in keywords] + [f"%{kw}%" for kw in keywords]
 
@@ -840,7 +840,7 @@ class SeasonalDiscoveryService:
                 tracks_by_artist[artist].append(track)
 
             balanced_tracks = []
-            for artist, artist_tracks in tracks_by_artist.items():
+            for _artist, artist_tracks in tracks_by_artist.items():
                 # Sort by popularity and take top 3
                 sorted_tracks = sorted(artist_tracks, key=lambda t: t.get('popularity', 50), reverse=True)
                 balanced_tracks.extend(sorted_tracks[:3])

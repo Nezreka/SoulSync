@@ -36,6 +36,10 @@ class MetadataLookupOptions:
     max_pages: int = 0
     limit: int = 50
     artist_source_ids: Optional[Dict[str, str]] = None
+    dedup_variants: bool = True  # Collapse "Deluxe Edition" / "Remastered" etc.
+                                  # into a single canonical release card. Off
+                                  # gives the inline-Artists-page behaviour of
+                                  # showing every variant the source returns.
 
 
 # =============================================================================
@@ -633,9 +637,10 @@ def get_artist_detail_discography(
         else:
             albums.append(card)
 
-    albums = _dedup_variant_releases(albums)
-    eps = _dedup_variant_releases(eps)
-    singles = _dedup_variant_releases(singles)
+    if options is None or options.dedup_variants:
+        albums = _dedup_variant_releases(albums)
+        eps = _dedup_variant_releases(eps)
+        singles = _dedup_variant_releases(singles)
 
     albums = _sort_discography_releases(albums)
     eps = _sort_discography_releases(eps)
@@ -1778,8 +1783,14 @@ def get_artist_image_url(
     artist_id: str,
     source_override: Optional[str] = None,
     plugin: Optional[str] = None,
+    artist_name: Optional[str] = None,
 ) -> Optional[str]:
-    """Resolve an artist image URL using the configured source priority."""
+    """Resolve an artist image URL using the configured source priority.
+
+    `artist_name` is used when the source-of-record doesn't store artist
+    images (MusicBrainz) — the resolver then searches fallback sources
+    (iTunes/Deezer) by name for a matching artist and returns their image.
+    """
     if not artist_id:
         return None
 
@@ -1796,6 +1807,14 @@ def get_artist_image_url(
             return _get_artist_image_from_source('itunes', artist_id)
         return None
 
+    # MusicBrainz doesn't store artist images directly — use the artist
+    # name (passed by the frontend) to look up the image on a fallback
+    # source that does. Without a name we can't resolve.
+    if source_override == 'musicbrainz':
+        if not artist_name:
+            return None
+        return _lookup_artist_image_by_name(artist_name)
+
     if source_override:
         return _get_artist_image_from_source(source_override, artist_id)
 
@@ -1804,6 +1823,41 @@ def get_artist_image_url(
         if image_url:
             return image_url
 
+    return None
+
+
+def _lookup_artist_image_by_name(name: str) -> Optional[str]:
+    """Look up an artist image by NAME (not MBID) across fallback sources.
+    Used when the primary source doesn't store artist images (MusicBrainz).
+
+    Tries configured sources in priority order, searches each for the
+    artist name, and returns the first matching result's image URL.
+    """
+    name = (name or '').strip()
+    if not name:
+        return None
+
+    # Skip sources that don't do artist-name search or don't have images.
+    _SKIP_SOURCES = {'musicbrainz', 'soulseek', 'youtube_videos', 'hydrabase'}
+    for source in get_source_priority(get_primary_source()):
+        if source in _SKIP_SOURCES:
+            continue
+        client = get_client_for_source(source)
+        if not client or not hasattr(client, 'search_artists'):
+            continue
+        try:
+            results = client.search_artists(name, limit=1) or []
+            if results:
+                top = results[0]
+                img = getattr(top, 'image_url', None) or (
+                    top.get('image_url') if isinstance(top, dict) else None
+                )
+                if img:
+                    return img
+        except Exception as exc:
+            logger.debug("Artist image lookup by name failed on %s for %r: %s",
+                         source, name, exc)
+            continue
     return None
 
 

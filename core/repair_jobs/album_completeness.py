@@ -7,6 +7,7 @@ from core.metadata_service import (
 )
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.worker_utils import set_album_api_track_count
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.album_complete")
@@ -19,9 +20,10 @@ class AlbumCompletenessJob(RepairJob):
     description = 'Checks if all tracks from albums are present'
     help_text = (
         'Compares the number of tracks you have for each album against the expected total '
-        'from the active metadata provider first, then other supported sources if needed. '
-        'Albums where tracks are missing get flagged as findings with details about which '
-        'tracks are absent.\n\n'
+        'from your configured metadata sources. Counts cached during normal enrichment are '
+        'used when available; otherwise the job queries a metadata source directly. Albums '
+        'where tracks are missing get flagged as findings with details about which tracks '
+        'are absent.\n\n'
         'Useful for catching partial downloads or albums where some tracks failed to download. '
         'You can use the Download Missing feature from the album page to fill gaps.\n\n'
         'Settings:\n'
@@ -53,6 +55,7 @@ class AlbumCompletenessJob(RepairJob):
         conn = None
         has_itunes = False
         has_deezer = False
+        has_api_track_count = False
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
@@ -65,17 +68,31 @@ class AlbumCompletenessJob(RepairJob):
             has_discogs = 'discogs_id' in columns
             has_hydrabase = 'soul_id' in columns
 
-            # Build SELECT with available source ID columns
+            # Detect the `api_track_count` column — older DBs may not have it
+            # yet (migration runs on app start, but repair-job code mustn't
+            # assume it's present). When absent, fall back to the pre-column
+            # behavior: look up expected total via API every scan, don't try
+            # to persist it.
+            has_api_track_count = 'api_track_count' in columns
+
+            # Build SELECT with available source ID columns.
+            # NOTE: `al.track_count` is deliberately NOT selected. That
+            # column holds the OBSERVED track count written by server syncs
+            # (Plex leafCount, SoulSync standalone len(tracks)) — always
+            # equal to COUNT(t.id), so it's worthless for completeness.
+            # The expected total comes from `al.api_track_count` (cached
+            # from metadata-source enrichment) or a live API lookup.
             select_cols = [
                 ('al.id', 'album_id'),
                 ('al.title', 'album_title'),
                 ('ar.name', 'artist_name'),
                 ('al.spotify_album_id', 'spotify_album_id'),
-                ('al.track_count', 'track_count'),
                 ('COUNT(t.id)', 'actual_count'),
                 ('al.thumb_url', 'album_thumb_url'),
                 ('ar.thumb_url', 'artist_thumb_url'),
             ]
+            if has_api_track_count:
+                select_cols.append(('al.api_track_count', 'api_track_count'))
             if has_itunes:
                 select_cols.append(('al.itunes_album_id', 'itunes_album_id'))
             if has_deezer:
@@ -135,7 +152,6 @@ class AlbumCompletenessJob(RepairJob):
             title = row[column_index['album_title']]
             artist_name = row[column_index['artist_name']]
             spotify_album_id = row[column_index['spotify_album_id']]
-            db_track_count = row[column_index['track_count']]
             actual_count = row[column_index['actual_count']]
             album_thumb = row[column_index['album_thumb_url']]
             artist_thumb = row[column_index['artist_thumb_url']]
@@ -143,6 +159,9 @@ class AlbumCompletenessJob(RepairJob):
             deezer_album_id = row[column_index['deezer_album_id']] if 'deezer_album_id' in column_index else None
             discogs_album_id = row[column_index['discogs_album_id']] if 'discogs_album_id' in column_index else None
             hydrabase_album_id = row[column_index['hydrabase_album_id']] if 'hydrabase_album_id' in column_index else None
+            # Cached authoritative track count from a prior API lookup (NULL
+            # on unscanned albums and on DBs predating the column migration).
+            cached_api_count = row[column_index['api_track_count']] if 'api_track_count' in column_index else None
 
             result.scanned += 1
 
@@ -154,9 +173,6 @@ class AlbumCompletenessJob(RepairJob):
                     log_type='info'
                 )
 
-            # If we don't know the expected track count, try to get it from an API
-            expected_total = db_track_count
-
             album_ids = {
                 'spotify': spotify_album_id or '',
                 'itunes': itunes_album_id or '',
@@ -165,8 +181,20 @@ class AlbumCompletenessJob(RepairJob):
                 'hydrabase': hydrabase_album_id or '',
             }
 
+            # Expected total comes from the metadata provider, NOT from
+            # al.track_count — that column holds the observed count from
+            # server syncs (Plex leafCount, SoulSync standalone len(tracks))
+            # which by definition always equals actual_count and made the
+            # job skip every album. Use the cached api_track_count if a
+            # prior scan already looked it up; otherwise hit the API and
+            # persist the answer for next time.
+            expected_total = cached_api_count
             if not expected_total:
                 expected_total = self._get_expected_total(context, primary_source, album_ids)
+                # Only persist positive results. Zero/None would keep
+                # re-triggering the lookup on every scan.
+                if expected_total and expected_total > 0 and has_api_track_count:
+                    self._save_api_track_count(context, album_id, expected_total)
 
             # Skip singles/EPs based on expected track count (not local count)
             if expected_total and expected_total < min_tracks:
@@ -250,6 +278,27 @@ class AlbumCompletenessJob(RepairJob):
         logger.info("Completeness check: %d albums checked, %d incomplete found",
                     result.scanned, result.findings_created)
         return result
+
+    def _save_api_track_count(self, context, album_id, count):
+        """Persist a metadata-API track count via the shared worker helper.
+
+        Enrichment workers call `set_album_api_track_count` inside their own
+        `_update_album` transaction. Here we're in the repair job's fallback
+        path (the album wasn't enriched yet), so we own the connection +
+        commit ourselves. A cache-write failure must never break the scan,
+        so all errors are swallowed into the debug log.
+        """
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            cursor = conn.cursor()
+            set_album_api_track_count(cursor, album_id, count)
+            conn.commit()
+        except Exception as e:
+            logger.debug("Failed to cache api_track_count for album %s: %s", album_id, e)
+        finally:
+            if conn:
+                conn.close()
 
     def _get_expected_total(self, context, primary_source, album_ids):
         """Try to get the expected track count from the active metadata provider first."""

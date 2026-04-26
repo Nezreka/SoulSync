@@ -1,5 +1,9 @@
 import sys
 import types
+from datetime import datetime, timedelta
+
+
+_RECENT_RELEASE_DATE = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
 
 
 if "spotipy" not in sys.modules:
@@ -344,25 +348,53 @@ def test_backfill_similar_artists_fallback_ids_uses_provider_priority(monkeypatc
     assert [call[0] for call in itunes_client.search_calls] == ["iTunes Artist"]
 
 
-def test_scan_watchlist_profile_loads_artists_and_applies_overrides(monkeypatch):
+def test_scan_watchlist_profile_loads_artists_and_forwards_override_flag(monkeypatch):
+    # Global-override application moved from scan_watchlist_profile into
+    # scan_watchlist_artists so every entry point (including the automation
+    # auto-scan) respects it. scan_watchlist_profile now just forwards the
+    # apply_global_overrides flag through.
     artist = _build_artist()
     scanner = _build_scanner({"tracks": {"items": []}}, [artist])
 
     loaded_profiles = []
-    override_calls = []
     scan_calls = []
 
     monkeypatch.setattr(scanner.database, "get_watchlist_artists", lambda profile_id=None: loaded_profiles.append(profile_id) or [artist])
-    monkeypatch.setattr(scanner, "_apply_global_watchlist_overrides", lambda artists: override_calls.append(list(artists)))
     monkeypatch.setattr(scanner, "scan_watchlist_artists", lambda artists, **kwargs: scan_calls.append((list(artists), kwargs)) or ["ok"])
 
     result = scanner.scan_watchlist_profile(42)
 
     assert result == ["ok"]
     assert loaded_profiles == [42]
-    assert override_calls and override_calls[0][0].artist_name == "Artist One"
     assert scan_calls and scan_calls[0][0][0].artist_name == "Artist One"
     assert scan_calls[0][1]["profile_id"] == 42
+    assert scan_calls[0][1]["apply_global_overrides"] is True
+
+
+def test_scan_watchlist_artists_applies_global_overrides(monkeypatch):
+    # Regression guard: auto-watchlist automation bypassed overrides by
+    # calling scan_watchlist_artists directly. Overrides now run inside
+    # scan_watchlist_artists so every caller gets the global filter.
+    scanner = _build_scanner({"tracks": {"items": []}}, [])
+
+    override_calls = []
+    monkeypatch.setattr(scanner, "_apply_global_watchlist_overrides", lambda artists: override_calls.append(list(artists)))
+
+    # Empty artist list exits early but override must still have been invoked.
+    scanner.scan_watchlist_artists([])
+
+    assert override_calls == [[]]
+
+
+def test_scan_watchlist_artists_skips_overrides_when_flag_false(monkeypatch):
+    scanner = _build_scanner({"tracks": {"items": []}}, [])
+
+    override_calls = []
+    monkeypatch.setattr(scanner, "_apply_global_watchlist_overrides", lambda artists: override_calls.append(list(artists)))
+
+    scanner.scan_watchlist_artists([], apply_global_overrides=False)
+
+    assert override_calls == []
 
 
 def test_scan_watchlist_artists_scans_tracks_and_updates_state(monkeypatch):
@@ -861,7 +893,7 @@ def test_cache_discovery_recent_albums_uses_primary_source_first(monkeypatch):
         id="dz-album-1",
         name="Recent Deezer Album",
         album_type="album",
-        release_date="2026-04-01",
+        release_date=_RECENT_RELEASE_DATE,
         image_url="https://example.com/deezer-album.jpg",
     )
 
@@ -913,7 +945,7 @@ def test_cache_discovery_recent_albums_falls_back_to_spotify_when_primary_has_no
         id="sp-album-1",
         name="Spotify Recent Album",
         album_type="album",
-        release_date="2026-04-01",
+        release_date=_RECENT_RELEASE_DATE,
         image_url="https://example.com/spotify-album.jpg",
     )
     spotify_client = _FakeSourceClient(
@@ -924,7 +956,7 @@ def test_cache_discovery_recent_albums_falls_back_to_spotify_when_primary_has_no
             "id": "sp-album-1",
             "name": "Spotify Recent Album",
             "images": [{"url": "https://example.com/spotify-album.jpg"}],
-            "release_date": "2026-04-01",
+            "release_date": _RECENT_RELEASE_DATE,
             "popularity": 50,
             "tracks": {"items": [{"id": "sp-track-1", "name": "Spotify Track", "artists": [{"name": "Fallback Artist"}]}]},
             "artists": [{"id": "sp-artist"}],
@@ -964,7 +996,7 @@ def test_update_discovery_pool_incremental_uses_source_priority(monkeypatch):
     release = types.SimpleNamespace(
         id="dz-release-1",
         name="Incremental Release",
-        release_date="2026-04-16",
+        release_date=_RECENT_RELEASE_DATE,
         album_type="album",
         image_url="https://example.com/deezer-release.jpg",
     )
@@ -977,7 +1009,7 @@ def test_update_discovery_pool_incremental_uses_source_priority(monkeypatch):
             "id": "dz-release-1",
             "name": "Incremental Release",
             "images": [{"url": "https://example.com/deezer-release.jpg"}],
-            "release_date": "2026-04-16",
+            "release_date": _RECENT_RELEASE_DATE,
             "popularity": 10,
             "tracks": {"items": [{"id": "dz-track-1", "name": "Incremental Track", "artists": [{"name": "Incremental Artist"}], "duration_ms": 180000}]},
             "artists": [{"id": "dz-artist"}],
@@ -991,7 +1023,7 @@ def test_update_discovery_pool_incremental_uses_source_priority(monkeypatch):
             "id": "sp-release-1",
             "name": "Spotify Incremental Release",
             "images": [{"url": "https://example.com/spotify-release.jpg"}],
-            "release_date": "2026-04-16",
+            "release_date": _RECENT_RELEASE_DATE,
             "popularity": 50,
             "tracks": {"items": [{"id": "sp-track-1", "name": "Spotify Incremental Track", "artists": [{"name": "Incremental Artist"}], "duration_ms": 180000}]},
             "artists": [{"id": "sp-artist"}],

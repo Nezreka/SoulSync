@@ -87,7 +87,7 @@ class DownloadOrchestrator:
         # Reload underlying client configs (SLSKD URL, API key, etc.)
         if self.soulseek:
             self.soulseek._setup_client()
-            logger.info(f"Soulseek client config reloaded")
+            logger.info("Soulseek client config reloaded")
 
         # Reconnect Deezer if ARL changed
         deezer_arl = config_manager.get('deezer_download.arl', '')

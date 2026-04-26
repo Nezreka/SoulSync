@@ -311,7 +311,7 @@ class LidarrDownloadClient:
                 }
 
                 # Check if album already exists
-                existing = self._api_get(f'album', params={'foreignAlbumId': album.get('foreignAlbumId', '')})
+                existing = self._api_get('album', params={'foreignAlbumId': album.get('foreignAlbumId', '')})
                 if existing and isinstance(existing, list) and len(existing) > 0:
                     lidarr_album_id = existing[0].get('id')
                     # Trigger search for existing album

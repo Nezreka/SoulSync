@@ -85,6 +85,11 @@ def is_live_version(track_name: str, album_name: str = "") -> bool:
     """
     Detect if a track or album is a live version.
 
+    Uses patterns that require a clear live-recording context (parenthesized
+    "(Live)", dash-suffixed "- Live", or "live" with a location/format
+    modifier). The bare `\\blive\\b` pattern was too loose — it falsely
+    flagged verb uses like "What We Live For" or "Live Forever".
+
     Args:
         track_name: Track name to check
         album_name: Album name to check (optional)
@@ -98,17 +103,18 @@ def is_live_version(track_name: str, album_name: str = "") -> bool:
     # Combine track and album names for comprehensive checking
     text_to_check = f"{track_name} {album_name}".lower()
 
-    # Live version patterns
+    # Live-recording patterns — each one requires clear context so verbs
+    # like "What We Live For" / "Live Forever" / "Living on a Prayer" don't
+    # get swept up.
     live_patterns = [
-        r'\blive\b',                    # (Live), Live at, etc.
-        r'\blive at\b',                 # Live at Madison Square Garden
-        r'\bconcert\b',                 # Concert, Live Concert
+        r'[\(\[]live\b',                # (Live), (Live at ...), [Live Version]
+        r'-\s*live\b',                  # Song - Live, Song - Live at ...
+        # "live" followed by a recording-context word
+        r'\blive (at|from|in|on|version|session|recording|performance|album|show|tour|concert|edit|cut|take)\b',
         r'\bin concert\b',              # In Concert
-        r'\bunplugged\b',               # MTV Unplugged (usually live)
-        r'\blive session\b',            # Live Session
-        r'\blive from\b',               # Live from...
-        r'\blive recording\b',          # Live Recording
+        r'\bconcert\b',                 # Concert (album name)
         r'\bon stage\b',                # On Stage
+        r'\bunplugged\b',               # MTV Unplugged
     ]
 
     for pattern in live_patterns:
@@ -939,9 +945,8 @@ class WatchlistScanner:
         if watchlist_artists is None:
             watchlist_artists = self.database.get_watchlist_artists(profile_id=profile_id)
 
-        if apply_global_overrides:
-            self._apply_global_watchlist_overrides(watchlist_artists)
-
+        # scan_watchlist_artists applies overrides itself now — pass the flag
+        # through instead of applying here (prevents double-application).
         return self.scan_watchlist_artists(
             watchlist_artists,
             profile_id=profile_id,
@@ -950,6 +955,7 @@ class WatchlistScanner:
             cancel_check=cancel_check,
             artist_index_offset=artist_index_offset,
             total_artists_override=total_artists_override,
+            apply_global_overrides=apply_global_overrides,
         )
 
     def scan_watchlist_artists(
@@ -962,8 +968,19 @@ class WatchlistScanner:
         cancel_check: Optional[Callable[[], bool]] = None,
         artist_index_offset: int = 0,
         total_artists_override: Optional[int] = None,
+        apply_global_overrides: bool = True,
     ) -> List[ScanResult]:
-        """Scan a list of watchlist artists using the shared web watchlist scan flow."""
+        """Scan a list of watchlist artists using the shared web watchlist scan flow.
+
+        apply_global_overrides: when True (default), per-artist include_*
+        flags are overwritten with the global values if
+        `watchlist.global_override_enabled` is set. This matches the
+        behaviour of `scan_watchlist_profile` so every entry point respects
+        the user's Global Override toggle.
+        """
+        if apply_global_overrides:
+            self._apply_global_watchlist_overrides(watchlist_artists)
+
         scan_results: List[ScanResult] = []
         if not watchlist_artists:
             if scan_state is not None:
@@ -1117,7 +1134,7 @@ class WatchlistScanner:
                     albums = discography_result.albums
                     source_artist_id = discography_result.artist_id
                     artist_image_url = discography_result.image_url or self.get_artist_image_url(artist) or ''
-                    album_fetcher = lambda album_id, album_name='': self._get_album_data_for_source(source, album_id, album_name)
+                    album_fetcher = lambda album_id, album_name='', source=source: self._get_album_data_for_source(source, album_id, album_name)
 
                 absolute_index = artist_index_offset + i + 1
                 if scan_state is not None:
@@ -1379,7 +1396,7 @@ class WatchlistScanner:
                 rescan_cutoff = self._get_rescan_cutoff()
                 if rescan_cutoff == 'all':
                     if self._rescan_cutoff_log_marker != 'all':
-                        logger.info(f"Lookback period changed to 'all' — returning full discography")
+                        logger.info("Lookback period changed to 'all' — returning full discography")
                         self._rescan_cutoff_log_marker = 'all'
                     cutoff_timestamp = None
                     needs_full_discog = True
@@ -1605,7 +1622,7 @@ class WatchlistScanner:
             if hasattr(self, '_metadata_service') and self._metadata_service:
                 results = self._metadata_service.itunes.search_artists(artist_name, limit=5)
             else:
-                logger.warning(f"Cannot match to iTunes - MetadataService not available")
+                logger.warning("Cannot match to iTunes - MetadataService not available")
                 return None
 
             return self._best_artist_match(results, artist_name)
@@ -2856,11 +2873,11 @@ class WatchlistScanner:
 
                         cache_callback = None
                         if source == 'spotify':
-                            cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'spotify', found_id)
+                            cache_callback = lambda found_id, watchlist_id=artist.id, artist=artist: self._cache_watchlist_artist_source_id(artist, 'spotify', found_id)
                         elif source == 'itunes':
-                            cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'itunes', found_id)
+                            cache_callback = lambda found_id, watchlist_id=artist.id, artist=artist: self._cache_watchlist_artist_source_id(artist, 'itunes', found_id)
                         elif source == 'deezer':
-                            cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'deezer', found_id)
+                            cache_callback = lambda found_id, watchlist_id=artist.id, artist=artist: self._cache_watchlist_artist_source_id(artist, 'deezer', found_id)
 
                         artist_id = self._resolve_artist_id_for_source(
                             source,
@@ -3100,11 +3117,11 @@ class WatchlistScanner:
                     stored_id = getattr(artist, source_attr, None) if source_attr else None
                     cache_callback = None
                     if source == 'spotify':
-                        cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'spotify', found_id)
+                        cache_callback = lambda found_id, watchlist_id=artist.id, artist=artist: self._cache_watchlist_artist_source_id(artist, 'spotify', found_id)
                     elif source == 'itunes':
-                        cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'itunes', found_id)
+                        cache_callback = lambda found_id, watchlist_id=artist.id, artist=artist: self._cache_watchlist_artist_source_id(artist, 'itunes', found_id)
                     elif source == 'deezer':
-                        cache_callback = lambda found_id, watchlist_id=artist.id: self._cache_watchlist_artist_source_id(artist, 'deezer', found_id)
+                        cache_callback = lambda found_id, watchlist_id=artist.id, artist=artist: self._cache_watchlist_artist_source_id(artist, 'deezer', found_id)
 
                     artist_id = self._resolve_artist_id_for_source(
                         source,
@@ -3428,7 +3445,7 @@ class WatchlistScanner:
 
                     # Balance by artist - max 6 tracks per artist
                     balanced_track_data = []
-                    for artist, tracks in artist_track_data.items():
+                    for _artist, tracks in artist_track_data.items():
                         sorted_tracks = sorted(tracks, key=lambda t: t['score'], reverse=True)
                         balanced_track_data.extend(sorted_tracks[:6])
 

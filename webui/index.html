@@ -5,10 +5,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>SoulSync - Music Sync & Manager</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css') }}">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
 </head>
 
 <body>
@@ -98,9 +98,8 @@
                             <option value="">Default (Discover)</option>
                             <option value="dashboard">Dashboard</option>
                             <option value="sync">Sync</option>
-                            <option value="downloads">Search</option>
+                            <option value="search">Search</option>
                             <option value="discover">Discover</option>
-                            <option value="artists">Artists</option>
                             <option value="automations">Automations</option>
                             <option value="active-downloads">Downloads</option>
                             <option value="library">Library</option>
@@ -113,9 +112,8 @@
                         <div id="new-profile-allowed-pages" class="profile-page-checkboxes">
                             <label><input type="checkbox" value="dashboard" checked> Dashboard</label>
                             <label><input type="checkbox" value="sync" checked> Sync</label>
-                            <label><input type="checkbox" value="downloads" checked> Search</label>
+                            <label><input type="checkbox" value="search" checked> Search</label>
                             <label><input type="checkbox" value="discover" checked> Discover</label>
-                            <label><input type="checkbox" value="artists" checked> Artists</label>
                             <label><input type="checkbox" value="automations" checked> Automations</label>
                             <label><input type="checkbox" value="active-downloads" checked> Downloads</label>
                             <label><input type="checkbox" value="library" checked> Library</label>
@@ -196,7 +194,7 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></span>
                     <span class="nav-text">Sync</span>
                 </button>
-                <button class="nav-button" data-page="downloads">
+                <button class="nav-button" data-page="search">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><polyline points="8 11 11 14 14 11"/></svg></span>
                     <span class="nav-text">Search</span>
                 </button>
@@ -207,10 +205,6 @@
                 <button class="nav-button" data-page="playlist-explorer">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="12" x2="5" y2="18"/><line x1="12" y1="12" x2="19" y2="18"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="12" x2="12" y2="18"/><circle cx="12" cy="19" r="2"/></svg></span>
                     <span class="nav-text">Explorer</span>
-                </button>
-                <button class="nav-button" data-page="artists">
-                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></span>
-                    <span class="nav-text">Artists</span>
                 </button>
                 <button class="nav-button" data-page="watchlist">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>
@@ -276,7 +270,7 @@
 
             <!-- Version Section -->
             <div class="version-section">
-                <button class="version-button" onclick="showVersionInfo()">v2.3</button>
+                <button class="version-button" onclick="showVersionInfo()">v2.4.0</button>
             </div>
 
             <!-- Status Section -->
@@ -1843,15 +1837,15 @@
             </div>
 
             <!-- Downloads Page -->
-            <div class="page" id="downloads-page">
+            <div class="page" id="search-page">
                 <!-- 
                 This top-level container replicates the QSplitter from downloads.py,
                 creating the two-panel layout for the page.
                 -->
-                <div class="downloads-content manager-hidden">
+                <div class="downloads-content">
 
                     <!-- ======================================================= -->
-                    <!-- == LEFT PANEL: Search, Filters, and Results          == -->
+                    <!-- == Search page main panel                            == -->
                     <!-- ======================================================= -->
                     <div class="downloads-main-panel">
 
@@ -1859,30 +1853,16 @@
                         <div class="downloads-header">
                             <div class="downloads-header-content">
                                 <div class="downloads-header-text">
-                                    <h2 class="downloads-title"><img src="/static/search.png" class="page-header-icon" alt=""><span>Music Downloads</span></h2>
-                                    <p class="downloads-subtitle">Search, discover, and download high-quality music</p>
+                                    <h2 class="downloads-title"><img src="/static/search.png" class="page-header-icon" alt=""><span>Search</span></h2>
+                                    <p class="downloads-subtitle">Find artists, albums, and tracks from any metadata source</p>
                                 </div>
-                                <button id="toggle-download-manager-btn" class="toggle-manager-btn"
-                                    title="Toggle Download Manager">
-                                    <span class="toggle-icon">›</span>
-                                </button>
                             </div>
                         </div>
 
-                        <!-- Search Mode Toggle -->
-                        <div class="search-mode-toggle-container">
-                            <div class="search-mode-toggle" data-active="enhanced">
-                                <button class="search-mode-btn active" data-mode="enhanced">
-                                    <span class="mode-icon">✨</span>
-                                    <span class="mode-label">Enhanced Search</span>
-                                </button>
-                                <button class="search-mode-btn" data-mode="basic">
-                                    <span class="mode-icon">🔍</span>
-                                    <span class="mode-label">Basic Search</span>
-                                </button>
-                                <div class="toggle-slider"></div>
-                            </div>
-                        </div>
+                        <!-- Search source picker — icon row populated by search.js.
+                             Each icon triggers a single-source fetch (no fan-out);
+                             results are cached per (query, source) pair. -->
+                        <div id="enh-source-row" class="enh-source-row" role="tablist" aria-label="Search source"></div>
 
                         <!-- Basic Search Section (Current) -->
                         <div id="basic-search-section" class="search-section">
@@ -1995,10 +1975,6 @@
                                             placeholder="Search for artists, albums, or tracks...">
                                         <button id="enhanced-cancel-btn" class="enhanced-cancel-btn hidden">✕</button>
                                     </div>
-                                    <button id="enhanced-search-btn" class="enhanced-search-btn">
-                                        <span class="btn-icon">👁️</span>
-                                        <span class="btn-text">Show Results</span>
-                                    </button>
                                 </div>
 
                                 <!-- Enhanced Search Dropdown (Overlay Panel) -->
@@ -2024,8 +2000,9 @@
                                         <!-- Results Container -->
                                         <div id="enhanced-results-container" class="enhanced-results-container hidden">
 
-                                            <!-- Source Tabs -->
-                                            <div id="enh-source-tabs" class="enh-source-tabs hidden"></div>
+                                            <!-- Fallback banner — shown when user clicked Spotify but backend
+                                                 served Deezer due to rate-limit, etc. Populated by search.js. -->
+                                            <div id="enh-fallback-banner" class="enh-fallback-banner hidden"></div>
 
                                             <!-- Artists Container (Side by Side) -->
                                             <div class="enh-artists-wrapper">
@@ -2104,187 +2081,9 @@
                         <!-- End Enhanced Search Section -->
                     </div>
 
-                    <!-- ======================================================= -->
-                    <!-- == RIGHT PANEL: Controls and Download Queue          == -->
-                    <!-- ======================================================= -->
-                    <div class="downloads-side-panel">
-
-                        <!-- Controls Panel: Replicates create_collapsible_controls_panel() -->
-                        <div class="controls-panel">
-                            <h3 class="controls-panel__header">Download Manager</h3>
-                            <div class="controls-panel__stats">
-                                <p id="active-downloads-label">• Active Downloads: 0</p>
-                                <p id="finished-downloads-label">• Finished Downloads: 0</p>
-                            </div>
-                            <div class="controls-panel__actions">
-                                <button class="controls-panel__clear-btn">🗑️ Clear Completed</button>
-                                <button class="controls-panel__cancel-all-btn">⛔ Clear Current</button>
-                            </div>
-                        </div>
-
-                        <!-- Download Queue: Replicates TabbedDownloadManager -->
-                        <div class="download-manager">
-                            <div class="download-manager__tabs">
-                                <button class="tab-btn active" data-tab="active-queue">Download Queue (0)</button>
-                                <button class="tab-btn" data-tab="finished-queue">Finished (0)</button>
-                            </div>
-                            <div class="download-manager__content">
-
-                                <!-- Active Queue -->
-                                <div class="download-queue active" id="active-queue">
-                                    <div class="download-queue__empty-message">No active downloads.</div>
-                                </div>
-
-                                <!-- Finished Queue -->
-                                <div class="download-queue" id="finished-queue">
-                                    <div class="download-queue__empty-message">No finished downloads.</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
 
-            <!-- Artists Page -->
-            <div class="page" id="artists-page">
-                <!-- Initial Search State -->
-                <div class="artists-search-state" id="artists-search-state">
-                    <div class="artists-search-container">
-                        <div class="artists-welcome-section">
-                            <h2 class="artists-welcome-title"><img src="/static/discover.png" class="page-header-icon" alt=""><span>Discover Artists</span></h2>
-                            <p class="artists-welcome-subtitle">Search for your favorite artists and explore their
-                                complete discography</p>
-                        </div>
-
-                        <div class="artists-search-input-container">
-                            <input type="text" id="artists-search-input" class="artists-search-input"
-                                placeholder="Search for an artist...">
-                            <div class="artists-search-icon">🔍</div>
-                        </div>
-
-                        <div class="artists-search-status" id="artists-search-status">
-                            Start typing to search for artists
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Search Results State -->
-                <div class="artists-results-state hidden" id="artists-results-state">
-                    <div class="artists-results-header">
-                        <button class="artists-back-button" id="artists-back-button">
-                            <span class="back-icon">←</span>
-                            <span>Back to Search</span>
-                        </button>
-
-                        <div class="artists-search-header">
-                            <input type="text" id="artists-header-search-input" class="artists-header-search-input"
-                                placeholder="Search for an artist...">
-                        </div>
-                    </div>
-
-                    <div class="artists-results-content">
-                        <div class="artists-results-title">Search Results</div>
-                        <div class="artists-cards-container" id="artists-cards-container">
-                            <!-- Artist cards will be dynamically populated here -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Artist Detail State -->
-                <div class="artist-detail-state hidden" id="artist-detail-state">
-                    <!-- Hero Section -->
-                    <div class="artists-hero-section" id="artists-hero-section">
-                        <div class="artists-hero-bg" id="artists-hero-bg"></div>
-                        <div class="artists-hero-overlay"></div>
-                        <div class="artists-hero-content">
-                            <button class="artists-hero-back" id="artist-detail-back-button">
-                                <span>←</span> Back
-                            </button>
-                            <div class="artists-hero-main">
-                                <div class="artists-hero-image" id="artists-hero-image"></div>
-                                <div class="artists-hero-info">
-                                    <h1 class="artists-hero-name" id="artists-hero-name">Artist Name</h1>
-                                    <div class="artists-hero-badges" id="artists-hero-badges"></div>
-                                    <div class="artists-hero-genres" id="artists-hero-genres"></div>
-                                    <div class="artists-hero-bio" id="artists-hero-bio"></div>
-                                    <div class="artists-hero-stats" id="artists-hero-stats"></div>
-                                    <button class="discog-download-btn discog-btn-compact" id="discog-download-btn-artists" onclick="openDiscographyModal()" style="display:none;">
-                                        <span class="discog-btn-icon">⬇</span>
-                                        <span class="discog-btn-text">Download Discography</span>
-                                        <span class="discog-btn-shimmer"></span>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="artists-hero-actions">
-                                <button class="artist-detail-watchlist-btn" id="artist-detail-watchlist-btn">
-                                    <span class="watchlist-icon">👁️</span>
-                                    <span class="watchlist-text">Add to Watchlist</span>
-                                </button>
-                                <button class="artist-detail-watchlist-settings-btn hidden" id="artist-detail-watchlist-settings-btn" title="Watchlist Settings">
-                                    &#9881;
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Keep old hidden elements for backward compatibility with JS refs -->
-                    <div id="search-artist-detail-image" style="display:none"></div>
-                    <div id="search-artist-detail-name" style="display:none"></div>
-                    <div id="search-artist-detail-genres" style="display:none"></div>
-
-                    <div class="artist-detail-content">
-                        <div class="artist-detail-tabs">
-                            <button class="artist-tab active" data-tab="albums" id="albums-tab">
-                                <span class="tab-icon">💿</span>
-                                <span>Albums</span>
-                            </button>
-                            <button class="artist-tab" data-tab="singles" id="singles-tab">
-                                <span class="tab-icon">🎵</span>
-                                <span>Singles & EPs</span>
-                            </button>
-                        </div>
-
-                        <div class="artist-detail-discography">
-                            <div class="tab-content active" id="albums-content">
-                                <div class="album-cards-container" id="album-cards-container">
-                                    <!-- Album cards will be populated here -->
-                                </div>
-                            </div>
-
-                            <div class="tab-content" id="singles-content">
-                                <div class="singles-cards-container" id="singles-cards-container">
-                                    <!-- Singles cards will be populated here -->
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Similar Artists Section -->
-                        <div class="similar-artists-section" id="similar-artists-section">
-                            <div class="similar-artists-header">
-                                <h3 class="similar-artists-title">Similar Artists</h3>
-                                <p class="similar-artists-subtitle">Discover artists with a similar sound</p>
-                            </div>
-
-                            <!-- Loading State -->
-                            <div class="similar-artists-loading hidden" id="similar-artists-loading">
-                                <div class="loading-spinner-small"></div>
-                                <span>Finding similar artists...</span>
-                            </div>
-
-                            <!-- Error State -->
-                            <div class="similar-artists-error hidden" id="similar-artists-error">
-                                <span class="error-icon">⚠️</span>
-                                <span class="error-text">Unable to load similar artists</span>
-                            </div>
-
-                            <!-- Similar Artists Bubbles Container -->
-                            <div class="similar-artists-bubbles-container" id="similar-artists-bubbles-container">
-                                <!-- Artist bubble cards will be populated here -->
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
             <!-- Automations Page -->
             <div class="page" id="automations-page">
@@ -2355,6 +2154,7 @@
                                     </div>
                                     <div style="display:flex;align-items:center;gap:10px;">
                                         <span class="adl-count" id="adl-count"></span>
+                                        <button class="adl-cancel-all-btn" id="adl-cancel-all-btn" onclick="adlCancelAll()" style="display:none" title="Cancel all active and queued downloads">Cancel All</button>
                                         <button class="adl-clear-btn" id="adl-clear-btn" onclick="adlClearCompleted()" style="display:none">Clear Completed</button>
                                     </div>
                                 </div>
@@ -2503,11 +2303,19 @@
                             <!-- Artist cards will be populated here -->
                         </div>
 
-                        <!-- Empty State -->
+                        <!-- Empty State — populated by showLibraryEmpty() in library.js.
+                             Shows a generic "no artists" message by default; when the
+                             user's search has no library matches, it switches to a
+                             search-online CTA that hands off to the /search page. -->
                         <div class="library-empty hidden" id="library-empty">
-                            <div class="empty-icon">🎵</div>
-                            <div class="empty-title">No artists found</div>
-                            <div class="empty-subtitle">Try adjusting your search or filters</div>
+                            <div class="empty-icon" id="library-empty-icon">🎵</div>
+                            <div class="empty-title" id="library-empty-title">No artists found</div>
+                            <div class="empty-subtitle" id="library-empty-subtitle">Try adjusting your search or filters</div>
+                            <button class="library-empty-search-cta hidden" id="library-empty-search-cta">
+                                <span class="library-empty-search-cta-icon">🔍</span>
+                                <span class="library-empty-search-cta-text">Search online for <span id="library-empty-search-cta-query"></span></span>
+                                <span class="library-empty-search-cta-arrow">→</span>
+                            </button>
                         </div>
 
                         <!-- Pagination -->
@@ -2541,6 +2349,10 @@
 
                 <!-- Artist Hero Section -->
                 <div class="artist-hero-section" id="artist-hero-section">
+                    <!-- Blurred background image + dark overlay (inline-Artists hero treatment) -->
+                    <div class="artist-detail-hero-bg" id="artist-detail-hero-bg"></div>
+                    <div class="artist-detail-hero-overlay"></div>
+
                     <div class="artist-hero-content">
                         <!-- Left: Image -->
                         <div class="artist-image-container">
@@ -2708,6 +2520,27 @@
                                 <div class="releases-grid" id="singles-grid">
                                     <!-- Single cards will be populated here -->
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- Similar Artists Section (works for both library and source artists).
+                             Uses its own scoped IDs because the inline Artists page has a section
+                             with the same base IDs and both elements live in the DOM at once. -->
+                        <div class="similar-artists-section" id="ad-similar-artists-section">
+                            <div class="similar-artists-header">
+                                <h3 class="similar-artists-title">Similar Artists</h3>
+                                <p class="similar-artists-subtitle">Discover artists with a similar sound</p>
+                            </div>
+                            <div class="similar-artists-loading hidden" id="ad-similar-artists-loading">
+                                <div class="loading-spinner-small"></div>
+                                <span>Finding similar artists...</span>
+                            </div>
+                            <div class="similar-artists-error hidden" id="ad-similar-artists-error">
+                                <span class="error-icon">⚠️</span>
+                                <span class="error-text">Unable to load similar artists</span>
+                            </div>
+                            <div class="similar-artists-bubbles-container" id="ad-similar-artists-bubbles-container">
+                                <!-- Artist bubble cards will be populated here -->
                             </div>
                         </div>
 
@@ -3871,7 +3704,7 @@
                                 </div>
 
                                 <!-- Spotify Settings -->
-                                <div class="api-service-frame stg-service">
+                                <div class="api-service-frame stg-service" data-service="spotify">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #1DB954;"></span>
                                         <h4 class="service-title spotify-title">Spotify</h4>
@@ -3914,7 +3747,7 @@
                                 </div>
 
                                 <!-- iTunes Settings -->
-                                <div class="api-service-frame stg-service">
+                                <div class="api-service-frame stg-service" data-service="itunes">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #fc3c44;"></span>
                                         <h4 class="service-title itunes-title">iTunes / Apple Music</h4>
@@ -3949,7 +3782,7 @@
                                 </div>
 
                                 <!-- Deezer OAuth Auth -->
-                                <div class="api-service-frame stg-service">
+                                <div class="api-service-frame stg-service" data-service="deezer">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #A238FF;"></span>
                                         <h4 class="service-title deezer-title">Deezer (Favorites & Playlists)</h4>
@@ -3995,7 +3828,7 @@
                                 </div>
 
                                 <!-- Discogs Settings -->
-                                <div class="api-service-frame stg-service">
+                                <div class="api-service-frame stg-service" data-service="discogs">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #e0d4b8;"></span>
                                         <h4 class="service-title">Discogs</h4>
@@ -4017,7 +3850,7 @@
                                 </div>
 
                                 <!-- Tidal Playlist/Metadata Auth -->
-                                <div class="api-service-frame stg-service">
+                                <div class="api-service-frame stg-service" data-service="tidal">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #ff6600;"></span>
                                         <h4 class="service-title tidal-title">Tidal (Playlists & Metadata)</h4>
@@ -4052,7 +3885,7 @@
                                 </div>
 
                                 <!-- Qobuz Metadata/Enrichment Auth -->
-                                <div class="api-service-frame stg-service">
+                                <div class="api-service-frame stg-service" data-service="qobuz">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #4285f4;"></span>
                                         <h4 class="service-title qobuz-title">Qobuz (Metadata & Enrichment)</h4>
@@ -4109,7 +3942,7 @@
                                 </div>
 
                                 <!-- Last.fm Settings -->
-                                <div class="api-service-frame stg-service">
+                                <div class="api-service-frame stg-service" data-service="lastfm">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #d51007;"></span>
                                         <h4 class="service-title lastfm-title">Last.fm</h4>
@@ -4146,7 +3979,7 @@
                                 </div>
 
                                 <!-- Genius Settings -->
-                                <div class="api-service-frame stg-service">
+                                <div class="api-service-frame stg-service" data-service="genius">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #ffff64;"></span>
                                         <h4 class="service-title genius-title">Genius</h4>
@@ -4168,7 +4001,7 @@
                                 </div>
 
                                 <!-- AcoustID Settings -->
-                                <div class="api-service-frame stg-service">
+                                <div class="api-service-frame stg-service" data-service="acoustid">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #ba55d3;"></span>
                                         <h4 class="service-title acoustid-title">AcoustID Verification</h4>
@@ -4205,7 +4038,7 @@
                                 </div>
 
                                 <!-- ListenBrainz Settings -->
-                                <div class="api-service-frame stg-service">
+                                <div class="api-service-frame stg-service" data-service="listenbrainz">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #eb743b;"></span>
                                         <h4 class="service-title listenbrainz-title">ListenBrainz</h4>
@@ -4238,7 +4071,7 @@
                                 </div>
 
                                 <!-- Hydrabase P2P Metadata -->
-                                <div class="api-service-frame stg-service" data-stg="connections">
+                                <div class="api-service-frame stg-service" data-stg="connections" data-service="hydrabase">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #00b4d8;"></span>
                                         <h4 class="service-title">Hydrabase</h4>
@@ -5098,7 +4931,7 @@
                                     <input type="text" id="template-album-path"
                                         placeholder="$albumartist/$albumartist - $album/$track - $title">
                                     <small class="settings-hint">Variables: $albumartist, $artist, $artistletter, $album, $albumtype,
-                                        $title, $track, $disc (01), $discnum (1), $year, $quality (filename only). Use ${var} to append text: ${albumtype}s → Albums</small>
+                                        $title, $track, $disc (01), $discnum (1), $cdnum (CD01 on multi-disc, empty on single), $year, $quality (filename only). Use ${var} to append text: ${albumtype}s → Albums</small>
                                 </div>
 
                                 <div class="form-group">
@@ -6979,8 +6812,8 @@
                             <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         </div>
                         <h3>Your watchlist is empty</h3>
-                        <p>Add artists from the Artists page to monitor them for new releases.</p>
-                        <button class="watchlist-action-btn watchlist-action-primary" onclick="navigateToPage('artists')">Browse Artists</button>
+                        <p>Use Search to find an artist, then add them to your watchlist from the artist page.</p>
+                        <button class="watchlist-action-btn watchlist-action-primary" onclick="navigateToPage('search')">Open Search</button>
                     </div>
                 </div>
             </div>
@@ -8027,11 +7860,33 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/socket.io.min.js', v=static_v) }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-    <script src="{{ url_for('static', filename='setup-wizard.js') }}"></script>
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <script src="{{ url_for('static', filename='setup-wizard.js', v=static_v) }}"></script>
+    <!-- Split modules (was: script.js) — core.js must load first, init.js last -->
+    <script src="{{ url_for('static', filename='core.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='shared-helpers.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='media-player.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='settings.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='search.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='sync-spotify.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='library.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='discover.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='enrichment.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='stats-automations.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->
+    <!-- Ambient glow under the global search bar. Radial gradient, brightest
+         directly under the bar, tapering out toward the window corners.
+         Purely decorative (pointer-events: none). Visibility follows the bar
+         via _gsUpdateVisibility(). -->
+    <div class="gsearch-aura" id="gsearch-aura"></div>
     <!-- Global Search Bar — Spotlight-style search from anywhere -->
     <div class="gsearch-bar" id="gsearch-bar">
         <div class="gsearch-icon">
@@ -8108,10 +7963,10 @@
         <span>?</span>
     </button>
 
-    <script src="{{ url_for('static', filename='docs.js') }}"></script>
-    <script src="{{ url_for('static', filename='helper.js') }}"></script>
-    <script src="{{ url_for('static', filename='particles.js') }}"></script>
-    <script src="{{ url_for('static', filename='worker-orbs.js') }}"></script>
+    <script src="{{ url_for('static', filename='docs.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='helper.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='particles.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='worker-orbs.js', v=static_v) }}"></script>
 </body>
 
 </html>

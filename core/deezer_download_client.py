@@ -72,11 +72,11 @@ def _decrypt_chunk(chunk: bytes, key: bytes) -> bytes:
             cipher = Cipher(algorithms.Blowfish(key), modes.CBC(iv))
             decryptor = cipher.decryptor()
             return decryptor.update(chunk) + decryptor.finalize()
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "Deezer downloads require pycryptodome or cryptography package. "
                 "Install with: pip install pycryptodome"
-            )
+            ) from exc
 
 
 class DeezerDownloadClient:

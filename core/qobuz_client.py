@@ -361,7 +361,7 @@ class QobuzClient:
             if is_valid:
                 logger.debug(f"Secret test passed (HTTP {resp.status_code})")
             else:
-                logger.debug(f"Secret test failed (HTTP 400 — invalid signature)")
+                logger.debug("Secret test failed (HTTP 400 — invalid signature)")
             return is_valid
 
         except Exception as e:
@@ -1105,7 +1105,7 @@ class QobuzClient:
         download_statuses = []
 
         with self._download_lock:
-            for download_id, info in self.active_downloads.items():
+            for _download_id, info in self.active_downloads.items():
                 status = DownloadStatus(
                     id=info['id'],
                     filename=info['filename'],
