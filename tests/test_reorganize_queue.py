@@ -399,6 +399,71 @@ def test_enqueue_many_handles_empty_list(queue):
     assert queue.enqueue_many([]) == {'enqueued': 0, 'already_queued': 0, 'total': 0}
 
 
+def test_enqueue_many_dedupes_batch_internal_duplicates(queue):
+    """Same album_id appearing twice in the same bulk request must be
+    deduped against each other — not just against pre-existing items.
+    Regression for the race where a fast runner finishes the first copy
+    before the loop reaches the second, letting both slip through."""
+    record = []
+    queue.set_runner(_make_runner(record))
+    items = [
+        {'album_id': 'alb-x', 'album_title': 'X', 'artist_id': 'ar-1', 'artist_name': 'A'},
+        {'album_id': 'alb-y', 'album_title': 'Y', 'artist_id': 'ar-1', 'artist_name': 'A'},
+        {'album_id': 'alb-x', 'album_title': 'X (dup)', 'artist_id': 'ar-1', 'artist_name': 'A'},
+    ]
+    result = queue.enqueue_many(items)
+    assert result == {'enqueued': 2, 'already_queued': 1, 'total': 3}
+    # Wait for the queue to drain, then give the worker a moment to
+    # try (and fail) to pick a phantom third item. If the dedupe leaked,
+    # a third runner call would land here.
+    assert _wait_for(lambda: queue.snapshot()['active'] is None and not queue.snapshot()['queued'])
+    time.sleep(0.05)
+    assert len(record) == 2
+
+
+def test_cancel_and_run_are_mutually_exclusive(queue):
+    """Regression for kettui's ``_next_queued() → status flip`` race:
+    a successfully-cancelled item must NEVER have its runner invoked.
+    With the old non-atomic pick + flip, cancel could land between
+    the worker's pick and its flip-to-running, leaving the item
+    marked 'cancelled' but the worker still runs it.
+
+    Hammers many enqueue-then-immediately-cancel pairs to exercise the
+    race window. After draining, every queue_id whose cancel returned
+    ``cancelled: True`` must NOT appear in the runner's record."""
+    runner_called: set = set()
+    runner_lock = threading.Lock()
+
+    def runner(item):
+        with runner_lock:
+            runner_called.add(item.queue_id)
+        # Slight runtime widens the window where overlapping cancels
+        # could (incorrectly) fire on a running item.
+        time.sleep(0.002)
+        return {
+            'status': 'completed', 'source': 'spotify',
+            'total': 1, 'moved': 1, 'skipped': 0, 'failed': 0, 'errors': [],
+        }
+
+    queue.set_runner(runner)
+
+    successful_cancels: set = set()
+    for i in range(50):
+        r = _enqueue(queue, album_id=f'alb-race-{i}')
+        # Immediately try to cancel — half will land while item is still
+        # 'queued', half will land after worker has flipped to 'running'.
+        if queue.cancel(r['queue_id'])['cancelled']:
+            successful_cancels.add(r['queue_id'])
+
+    assert _wait_for(
+        lambda: queue.snapshot()['active'] is None and not queue.snapshot()['queued'],
+        timeout=5.0,
+    )
+
+    leaked = successful_cancels & runner_called
+    assert not leaked, f"Runner ran for cancelled items: {leaked}"
+
+
 def test_no_runner_marks_item_failed(queue):
     """If the worker pulls an item but no runner has been set, the item
     must be marked failed (not silently dropped). In practice

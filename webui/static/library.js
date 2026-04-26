@@ -6224,6 +6224,13 @@ async function loadReorganizePreview() {
     if (applyBtn) applyBtn.disabled = true;
     previewBody.innerHTML = '<div class="reorganize-preview-loading">Loading preview...</div>';
 
+    // Final apply-button state: only enable when the preview actually
+    // produced movable tracks AND no collisions blocked it. Any error
+    // path or empty result keeps it disabled. We compute it as we go and
+    // commit it in finally so an early return / throw can't leave the
+    // button stuck disabled forever.
+    let canApply = false;
+
     try {
         const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
         const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize/preview`, {
@@ -6303,11 +6310,12 @@ async function loadReorganizePreview() {
 
         previewBody.innerHTML = summary + html;
 
-        // Block apply if collisions exist
-        if (applyBtn) applyBtn.disabled = !hasChanges || hasCollisions;
+        canApply = hasChanges && !hasCollisions;
 
     } catch (error) {
         previewBody.innerHTML = `<div class="reorganize-preview-error">Error: ${escapeHtml(error.message)}</div>`;
+    } finally {
+        if (applyBtn) applyBtn.disabled = !canApply;
     }
 }
 

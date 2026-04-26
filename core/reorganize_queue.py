@@ -126,8 +126,13 @@ class ReorganizeQueue:
                 a fake runner; production wires the real one in
                 via :func:`set_runner`.
         """
-        self._lock = threading.Lock()
-        self._wakeup = threading.Event()
+        # Single Condition variable owns both mutual exclusion and the
+        # idle-worker wait. Using a Condition (vs Lock + Event) closes a
+        # race where the worker could clear an event right after enqueue
+        # set it, causing the new item to sleep for the timeout window.
+        # cond.wait() releases the lock and re-acquires on notify, so
+        # state checks and waits are properly interleaved.
+        self._cond = threading.Condition()
         self._items: List[QueueItem] = []        # everything ever submitted (active + recent)
         self._runner = runner
         self._worker: Optional[threading.Thread] = None
@@ -139,7 +144,7 @@ class ReorganizeQueue:
         """Inject the function that does the actual reorganize work.
         Web_server calls this once at startup with a closure over the
         injected dependencies (post-process fn, db, etc.)."""
-        with self._lock:
+        with self._cond:
             self._runner = runner
 
     def enqueue(
@@ -161,7 +166,7 @@ class ReorganizeQueue:
         adding a duplicate. ``cancelled`` / ``done`` / ``failed``
         items don't block re-enqueue (user retried after a failure).
         """
-        with self._lock:
+        with self._cond:
             for existing in self._items:
                 if existing.album_id == album_id and existing.status in ('queued', 'running'):
                     return {
@@ -182,7 +187,7 @@ class ReorganizeQueue:
             self._items.append(item)
             position = sum(1 for i in self._items if i.status == 'queued')
             self._ensure_worker()
-            self._wakeup.set()
+            self._cond.notify_all()
             logger.info(
                 f"[Queue] Enqueued '{album_title}' (album_id={album_id}, "
                 f"queue_id={item.queue_id}, position={position}, source={source or 'auto'})"
@@ -199,6 +204,13 @@ class ReorganizeQueue:
         ``album_title``, ``artist_id``, ``artist_name``, ``source``).
         Dedupe still applies per-album-id.
 
+        Holds the queue lock for the entire batch so two things hold:
+        (1) the worker can't start draining mid-batch, and (2) duplicate
+        album_ids inside the same batch get deduped against each other,
+        not just against pre-existing items. Without (2), a fast runner
+        could finish the first copy before the loop reached the second
+        and both would enqueue.
+
         Returns a tally dict ``{'enqueued': N, 'already_queued': M,
         'total': len(items)}`` so the caller can report bulk results
         without doing the counting themselves. Used by the bulk
@@ -207,25 +219,44 @@ class ReorganizeQueue:
         """
         enqueued = 0
         already = 0
-        for item in items:
-            result = self.enqueue(
-                album_id=str(item['album_id']),
-                album_title=item.get('album_title') or 'Unknown Album',
-                artist_id=str(item['artist_id']) if item.get('artist_id') is not None else None,
-                artist_name=item.get('artist_name') or 'Unknown Artist',
-                source=item.get('source'),
-            )
-            if result['queued']:
+        seen_in_batch: set = set()
+        with self._cond:
+            # Snapshot album_ids that already block re-enqueue so we don't
+            # rescan self._items per row.
+            blocked = {
+                i.album_id for i in self._items if i.status in ('queued', 'running')
+            }
+            for raw in items:
+                album_id = str(raw['album_id'])
+                if album_id in blocked or album_id in seen_in_batch:
+                    already += 1
+                    continue
+                seen_in_batch.add(album_id)
+                item = QueueItem(
+                    queue_id=uuid.uuid4().hex[:12],
+                    album_id=album_id,
+                    album_title=raw.get('album_title') or 'Unknown Album',
+                    artist_id=str(raw['artist_id']) if raw.get('artist_id') is not None else None,
+                    artist_name=raw.get('artist_name') or 'Unknown Artist',
+                    source=raw.get('source'),
+                    enqueued_at=time.time(),
+                )
+                self._items.append(item)
                 enqueued += 1
-            elif result.get('reason') == 'already_queued':
-                already += 1
+                logger.info(
+                    f"[Queue] Bulk-enqueued '{item.album_title}' (album_id={album_id}, "
+                    f"queue_id={item.queue_id}, source={item.source or 'auto'})"
+                )
+            if enqueued:
+                self._ensure_worker()
+                self._cond.notify_all()
         return {'enqueued': enqueued, 'already_queued': already, 'total': len(items)}
 
     def cancel(self, queue_id: str) -> dict:
         """Cancel a queued item. The currently-running item cannot be
         cancelled (Python threads aren't cleanly killable; post-process
         may have spawned ffmpeg)."""
-        with self._lock:
+        with self._cond:
             for item in self._items:
                 if item.queue_id != queue_id:
                     continue
@@ -243,7 +274,7 @@ class ReorganizeQueue:
         """Cancel ALL queued items (running item continues). Returns
         the count of items cancelled."""
         cancelled = 0
-        with self._lock:
+        with self._cond:
             now = time.time()
             for item in self._items:
                 if item.status == 'queued':
@@ -264,7 +295,7 @@ class ReorganizeQueue:
                 'totals': {'queued': N, 'running': M, 'done_today': K, ...},
             }
         """
-        with self._lock:
+        with self._cond:
             active = next((i for i in self._items if i.status == 'running'), None)
             queued = [i for i in self._items if i.status == 'queued']
             recent = [i for i in self._items if i.status in ('done', 'failed', 'cancelled')]
@@ -286,14 +317,15 @@ class ReorganizeQueue:
 
     def stop(self) -> None:
         """Stop the worker (called on server shutdown)."""
-        self._stopped = True
-        self._wakeup.set()
+        with self._cond:
+            self._stopped = True
+            self._cond.notify_all()
 
     # -- internals ---------------------------------------------------
 
     def _ensure_worker(self) -> None:
         """Lazy worker start — only spawn the thread when there's
-        actually something to process. Caller MUST hold ``_lock``."""
+        actually something to process. Caller MUST hold ``_cond``."""
         if self._worker is not None and self._worker.is_alive():
             return
         self._worker = threading.Thread(
@@ -301,29 +333,37 @@ class ReorganizeQueue:
         )
         self._worker.start()
 
-    def _next_queued(self) -> Optional[QueueItem]:
-        with self._lock:
-            for item in self._items:
-                if item.status == 'queued':
-                    return item
+    def _claim_next_or_wait(self) -> Optional[QueueItem]:
+        """Atomically pick the next queued item AND flip it to 'running'
+        under a single lock acquisition. If the queue is empty, block
+        on ``_cond.wait()`` (which releases the lock while sleeping)
+        and return None when we're notified or timeout. Returning the
+        item already-marked-running closes the cancel-vs-run race: a
+        cancel() call now sees status='running' and is rejected."""
+        with self._cond:
+            while not self._stopped:
+                for item in self._items:
+                    if item.status == 'queued':
+                        item.status = 'running'
+                        item.started_at = time.time()
+                        return item
+                # No queued items — wait for an enqueue or shutdown.
+                # 60s timeout so a stuck notify (shouldn't happen, but
+                # defensive) doesn't park the worker forever.
+                self._cond.wait(timeout=60)
             return None
 
     def _run(self) -> None:
         """Worker loop: pull next queued, run it, mark done, repeat.
-        Idles on `_wakeup` event when queue is empty."""
+        Idles on `_cond.wait()` when queue is empty."""
         logger.info("[Queue] Worker thread started")
         while not self._stopped:
-            item = self._next_queued()
+            item = self._claim_next_or_wait()
             if item is None:
-                # Idle — wait for next enqueue (with a long timeout so
-                # the thread can exit gracefully on shutdown).
-                self._wakeup.clear()
-                self._wakeup.wait(timeout=60)
+                # Only happens on shutdown — `_claim_next_or_wait` only
+                # returns None once `_stopped` is True. Loop back to the
+                # `while not self._stopped` check, which exits.
                 continue
-
-            with self._lock:
-                item.status = 'running'
-                item.started_at = time.time()
             logger.info(f"[Queue] Starting '{item.album_title}' (queue_id={item.queue_id})")
 
             try:
@@ -336,13 +376,13 @@ class ReorganizeQueue:
                     f"[Queue] Runner raised for '{item.album_title}': {e}",
                     exc_info=True,
                 )
-                with self._lock:
+                with self._cond:
                     item.status = 'failed'
                     item.error = str(e)
                     item.finished_at = time.time()
                 continue
 
-            with self._lock:
+            with self._cond:
                 item.moved = int(summary.get('moved', 0))
                 item.skipped = int(summary.get('skipped', 0))
                 item.failed = int(summary.get('failed', 0))
@@ -371,7 +411,7 @@ class ReorganizeQueue:
     # currently-running item. Safe to call from worker thread inside
     # reorganize_album's on_progress callback.
     def update_active_progress(self, *, queue_id: str, **fields) -> None:
-        with self._lock:
+        with self._cond:
             for item in self._items:
                 if item.queue_id == queue_id and item.status == 'running':
                     if 'current_track' in fields:
