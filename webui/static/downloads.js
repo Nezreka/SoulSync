@@ -4845,7 +4845,7 @@ function showToastHtml(html, type = 'info', duration = 6000) {
     // Add to notification history (strip tags for plain text)
     const tmp = document.createElement('div'); tmp.innerHTML = html;
     const plainText = tmp.textContent || tmp.innerText || '';
-    const entry = { id: Date.now() + Math.random(), message: plainText, type, helpSection: null, timestamp: Date.now(), read: false };
+    const entry = { id: Date.now() + Math.random(), message: plainText, htmlMessage: html, type, helpSection: null, timestamp: Date.now(), read: false };
     _notifState.history.unshift(entry);
     if (_notifState.history.length > _notifState.maxHistory) _notifState.history.pop();
     _notifState.unreadCount++;
@@ -4920,7 +4920,7 @@ function _openNotifPanel() {
                         ${unreadDot}
                         <span class="notif-entry-icon notif-icon-${e.type}">${icon}</span>
                         <div class="notif-entry-body">
-                            <div class="notif-entry-msg">${_escToast(e.message)}</div>
+                            <div class="notif-entry-msg">${e.htmlMessage || _escToast(e.message)}</div>
                             <div class="notif-entry-meta">${ago}${learnMore}</div>
                         </div>
                     </div>`;
