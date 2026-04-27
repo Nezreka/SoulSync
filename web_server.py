@@ -22,7 +22,7 @@ from pathlib import Path
 from urllib.parse import quote, urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, redirect, send_file, Response, session, g, abort
+from flask import Flask, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g, abort
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger, setup_logging
 from utils.async_helpers import run_async
@@ -5221,6 +5221,25 @@ def run_detection(server_type):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/sw.js')
+def service_worker():
+    """Serve sw.js from root scope so the service worker can intercept
+    fetches site-wide. A service worker only controls URLs at or below
+    its own served path — `/static/sw.js` would scope to `/static/*`
+    only. Serving from `/sw.js` (with the file living under static/)
+    grants full-site scope without needing the Service-Worker-Allowed
+    header dance.
+
+    Cache-Control: no-cache so deploys that change the SW propagate on
+    the next page load instead of being pinned by the 1-year static
+    cache the rest of /static/ uses.
+    """
+    response = send_from_directory(app.static_folder, 'sw.js', mimetype='application/javascript')
+    response.headers['Cache-Control'] = 'no-cache'
+    return response
+
 
 @app.route('/<path:page>')
 def spa_catch_all(page):
