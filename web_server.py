@@ -24700,6 +24700,89 @@ def hifi_instances():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/hifi/instances', methods=['POST'])
+def hifi_add_instance():
+    """Add a new HiFi API instance."""
+    try:
+        data = request.get_json() or {}
+        url = data.get('url', '').strip().rstrip('/')
+        if not url:
+            return jsonify({'success': False, 'error': 'URL is required'}), 400
+        if not url.startswith(('http://', 'https://')):
+            return jsonify({'success': False, 'error': 'URL must start with http:// or https://'}), 400
+        from database.music_database import get_database
+        db = get_database()
+        # Get current count to assign next priority
+        existing = db.get_all_hifi_instances()
+        priority = len(existing)
+        added = db.add_hifi_instance(url, priority)
+        if not added:
+            return jsonify({'success': False, 'error': 'Instance already exists'}), 400
+        # Reload the client
+        if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
+            soulseek_client.hifi.reload_instances()
+        return jsonify({'success': True, 'url': url})
+    except Exception as e:
+        logger.error(f"Error adding HiFi instance: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/hifi/instances/<path:url>', methods=['DELETE'])
+def hifi_remove_instance(url):
+    """Remove a HiFi API instance."""
+    try:
+        url = url.strip().rstrip('/')
+        if not url:
+            return jsonify({'success': False, 'error': 'URL is required'}), 400
+        from database.music_database import get_database
+        db = get_database()
+        removed = db.remove_hifi_instance(url)
+        if not removed:
+            return jsonify({'success': False, 'error': 'Instance not found'}), 404
+        # Reload the client
+        if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
+            soulseek_client.hifi.reload_instances()
+        return jsonify({'success': True, 'url': url})
+    except Exception as e:
+        logger.error(f"Error removing HiFi instance: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/hifi/instances/reorder', methods=['POST'])
+def hifi_reorder_instances():
+    """Reorder HiFi API instances."""
+    try:
+        data = request.get_json() or {}
+        urls = data.get('urls', [])
+        if not urls:
+            return jsonify({'success': False, 'error': 'URL list is required'}), 400
+        from database.music_database import get_database
+        db = get_database()
+        db.reorder_hifi_instances(urls)
+        # Reload the client
+        if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
+            soulseek_client.hifi.reload_instances()
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Error reordering HiFi instances: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/hifi/instances/list', methods=['GET'])
+def hifi_list_instances():
+    """Get editable list of HiFi API instances."""
+    try:
+        from database.music_database import get_database
+        from core.hifi_client import DEFAULT_INSTANCES
+        db = get_database()
+        db.seed_hifi_instances(DEFAULT_INSTANCES)
+        instances = db.get_all_hifi_instances()
+        return jsonify({'instances': instances})
+    except Exception as e:
+        logger.error(f"Error listing HiFi instances: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 # ===================================================================
 # DEEZER DOWNLOAD ENDPOINTS
 # ===================================================================

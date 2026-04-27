@@ -797,6 +797,7 @@ async function loadSettingsData() {
         document.getElementById('qobuz-allow-fallback').checked = settings.qobuz?.allow_fallback !== false;
         document.getElementById('hifi-download-quality').value = settings.hifi_download?.quality || 'lossless';
         document.getElementById('hifi-allow-fallback').checked = settings.hifi_download?.allow_fallback !== false;
+        loadHiFiInstances();
         document.getElementById('deezer-download-quality').value = settings.deezer_download?.quality || 'flac';
         document.getElementById('deezer-allow-fallback').checked = settings.deezer_download?.allow_fallback !== false;
         document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
@@ -3277,8 +3278,78 @@ async function testLidarrConnection() {
     }
 }
 
+async function loadHiFiInstances() {
+    const listEl = document.getElementById('hifi-instances-list');
+    if (!listEl) return;
+    try {
+        const resp = await fetch('/api/hifi/instances/list');
+        const data = await resp.json();
+        if (!data.instances || data.instances.length === 0) {
+            listEl.innerHTML = '<div style="color: rgba(255,255,255,0.4); font-size: 0.85em;">No instances configured.</div>';
+            return;
+        }
+        listEl.innerHTML = data.instances.map((inst, i) => {
+            const enabledClass = inst.enabled ? '' : 'opacity:0.4;';
+            const checkHtml = inst.enabled
+                ? `<span style="color:#4caf50;cursor:pointer;" onclick="toggleHiFiInstance('${escapeHtml(inst.url)}')" title="Click to disable">&#x2714;</span>`
+                : `<span style="color:#666;cursor:pointer;" onclick="toggleHiFiInstance('${escapeHtml(inst.url)}')" title="Click to enable">&#x2718;</span>`;
+            return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.82em;${enabledClass}">
+                <span style="color:rgba(255,255,255,0.4);cursor:default;user-select:none;">&#x2630;</span>
+                <span style="flex:1;color:rgba(255,255,255,0.7);font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(inst.url)}</span>
+                ${checkHtml}
+                <span style="color:#f44336;cursor:pointer;font-size:0.9em;" onclick="removeHiFiInstance('${escapeHtml(inst.url)}')" title="Remove instance">&#x2716;</span>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        listEl.innerHTML = `<div style="color:#f44336;font-size:0.85em;">Error loading instances: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function addHiFiInstance() {
+    const input = document.getElementById('hifi-new-instance');
+    if (!input) return;
+    const url = input.value.trim();
+    if (!url) return;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        alert('URL must start with http:// or https://');
+        return;
+    }
+    try {
+        const resp = await fetch('/api/hifi/instances', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            input.value = '';
+            loadHiFiInstances();
+        } else {
+            alert(data.error || 'Failed to add instance');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function removeHiFiInstance(url) {
+    try {
+        const resp = await fetch(`/api/hifi/instances/${encodeURIComponent(url)}`, {
+            method: 'DELETE'
+        });
+        const data = await resp.json();
+        if (data.success) {
+            loadHiFiInstances();
+        } else {
+            alert(data.error || 'Failed to remove instance');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
 async function checkHiFiInstances() {
-    const panel = document.getElementById('hifi-instances-panel');
+    const panel = document.getElementById('hifi-instances-status-panel');
     const btn = document.getElementById('hifi-instances-check-btn');
     if (!panel) return;
     panel.style.display = 'block';
