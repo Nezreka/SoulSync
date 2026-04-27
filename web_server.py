@@ -9056,6 +9056,12 @@ def enhanced_search_source(source_name):
     One line per search-kind (artists, albums, tracks) as it completes,
     plus a final `{"type":"done"}` marker. `youtube_videos` yields a single
     `videos` chunk via yt-dlp instead.
+
+    When the requested source's client isn't available (Spotify unauthed,
+    Discogs missing token, Hydrabase disconnected, MusicBrainz import
+    failure, soulseek_client.youtube missing), returns plain JSON
+    `{"artists":[],"albums":[],"tracks":[],"available":false}` to match
+    the original endpoint contract.
     """
     if source_name not in _search_orchestrator.VALID_STREAM_SOURCES:
         return jsonify({"error": f"Unknown source: {source_name}"}), 400
@@ -9066,10 +9072,31 @@ def enhanced_search_source(source_name):
         return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
 
     deps = _build_search_deps()
-    return app.response_class(
-        _search_orchestrator.stream_source_search(source_name, query, deps),
-        mimetype='application/x-ndjson',
-    )
+
+    if source_name == 'youtube_videos':
+        youtube_client = _search_orchestrator.resolve_youtube_videos_client(deps)
+        if youtube_client is None:
+            return jsonify({"videos": [], "available": False})
+        try:
+            return app.response_class(
+                _search_orchestrator.stream_youtube_videos(query, youtube_client, run_async),
+                mimetype='application/x-ndjson',
+            )
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    try:
+        client, _available = _search_orchestrator.resolve_client(source_name, deps)
+        if client is None:
+            return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
+
+        return app.response_class(
+            _search_orchestrator.stream_metadata_source(source_name, query, client),
+            mimetype='application/x-ndjson',
+        )
+    except Exception as e:
+        logger.error(f"Enhanced search source ({source_name}) error: {e}")
+        return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
 
 
 @app.route('/api/enhanced-search/library-check', methods=['POST'])

@@ -414,7 +414,7 @@ def test_empty_response_keys():
 
 
 # ---------------------------------------------------------------------------
-# stream_source_search — NDJSON streaming
+# Streaming generators + youtube_videos client resolution
 # ---------------------------------------------------------------------------
 
 def _drain(generator):
@@ -425,18 +425,6 @@ def _drain(generator):
     return out
 
 
-def test_stream_source_empty_query_yields_done_only():
-    deps = _build_deps()
-    out = _drain(orchestrator.stream_source_search('spotify', '', deps))
-    assert out == [{'type': 'done'}]
-
-
-def test_stream_source_unknown_client_yields_done_only():
-    deps = _build_deps(spotify_client=None)
-    out = _drain(orchestrator.stream_source_search('spotify', 'q', deps))
-    assert out == [{'type': 'done'}]
-
-
 def test_stream_metadata_source_yields_three_kinds_plus_done():
     spot = _Client(
         authed=True,
@@ -444,9 +432,7 @@ def test_stream_metadata_source_yields_three_kinds_plus_done():
         albums=[_Album('b', 'B')],
         tracks=[_Track('c', 'C')],
     )
-    deps = _build_deps(spotify_client=spot)
-
-    out = _drain(orchestrator.stream_source_search('spotify', 'q', deps))
+    out = _drain(orchestrator.stream_metadata_source('spotify', 'q', spot))
     types = [m['type'] for m in out]
     assert 'artists' in types
     assert 'albums' in types
@@ -479,22 +465,31 @@ class _FakeSoulseekWithYT:
         self.youtube = youtube
 
 
+def test_resolve_youtube_videos_returns_subclient():
+    yt = _FakeYouTube()
+    deps = _build_deps(soulseek_client=_FakeSoulseekWithYT(yt))
+    assert orchestrator.resolve_youtube_videos_client(deps) is yt
+
+
+def test_resolve_youtube_videos_no_soulseek_returns_none():
+    deps = _build_deps(soulseek_client=None)
+    assert orchestrator.resolve_youtube_videos_client(deps) is None
+
+
+def test_resolve_youtube_videos_no_youtube_attr_returns_none():
+    class _NoYT:
+        pass
+    deps = _build_deps(soulseek_client=_NoYT())
+    assert orchestrator.resolve_youtube_videos_client(deps) is None
+
+
 def test_stream_youtube_videos_yields_videos_chunk_and_done():
     yt = _FakeYouTube(results=[_FakeYouTubeVideo('vid1'), _FakeYouTubeVideo('vid2')])
-    deps = _build_deps(soulseek_client=_FakeSoulseekWithYT(yt))
-
-    out = _drain(orchestrator.stream_source_search('youtube_videos', 'q', deps))
+    out = _drain(orchestrator.stream_youtube_videos('q', yt, _sync_run_async))
     assert out[0]['type'] == 'videos'
     assert len(out[0]['data']) == 2
     assert out[0]['data'][0]['video_id'] == 'vid1'
     assert out[-1]['type'] == 'done'
-
-
-def test_stream_youtube_videos_no_youtube_yields_empty_videos():
-    deps = _build_deps(soulseek_client=None)
-    out = _drain(orchestrator.stream_source_search('youtube_videos', 'q', deps))
-    assert out[0] == {'type': 'videos', 'data': []}
-    assert out[-1] == {'type': 'done'}
 
 
 def test_stream_youtube_videos_search_failure_yields_empty_videos():
@@ -502,7 +497,6 @@ def test_stream_youtube_videos_search_failure_yields_empty_videos():
         async def search_videos(self, q, max_results=20):
             raise RuntimeError("yt-dlp boom")
 
-    deps = _build_deps(soulseek_client=_FakeSoulseekWithYT(_BadYT()))
-    out = _drain(orchestrator.stream_source_search('youtube_videos', 'q', deps))
+    out = _drain(orchestrator.stream_youtube_videos('q', _BadYT(), _sync_run_async))
     assert out[0] == {'type': 'videos', 'data': []}
     assert out[-1] == {'type': 'done'}

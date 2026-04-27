@@ -32,19 +32,17 @@ def _resolve_plex_credentials(plex_client, config_manager) -> tuple[str, str]:
     """Pull (base_url, token) for the active Plex server.
 
     Prefers the live `plex_client.server` attrs; falls back to config_manager
-    if the live client isn't connected yet.
+    if the live client isn't connected yet. Mirrors original web_server.py
+    inline logic byte-for-byte.
     """
     base, token = '', ''
-    if plex_client and getattr(plex_client, 'server', None) is not None:
+    if plex_client and plex_client.server:
         base = getattr(plex_client.server, '_baseurl', '') or ''
         token = getattr(plex_client.server, '_token', '') or ''
     if not base:
-        try:
-            cfg = config_manager.get_plex_config()
-            base = (cfg.get('base_url', '') or '').rstrip('/')
-            token = token or cfg.get('token', '')
-        except Exception:
-            pass
+        cfg = config_manager.get_plex_config()
+        base = (cfg.get('base_url', '') or '').rstrip('/')
+        token = token or cfg.get('token', '')
     return base, token
 
 
@@ -138,22 +136,14 @@ def check_library_presence(
 
         album_results: list[bool] = []
         for a in albums:
-            key = (
-                (a.get('name') or '').lower()
-                + '|||'
-                + (a.get('artist') or '').split(',')[0].strip().lower()
-            )
+            key = (a.get('name', '').lower() + '|||' + a.get('artist', '').split(',')[0].strip().lower())
             album_results.append(key in owned_albums)
 
         plex_base, plex_token = _resolve_plex_credentials(plex_client, config_manager)
 
         track_results: list[dict] = []
         for t in tracks:
-            key = (
-                (t.get('name') or '').lower()
-                + '|||'
-                + (t.get('artist') or '').split(',')[0].strip().lower()
-            )
+            key = (t.get('name', '').lower() + '|||' + t.get('artist', '').split(',')[0].strip().lower())
             in_wishlist = key in wishlist_keys
             match = owned_tracks.get(key)
             if match:
