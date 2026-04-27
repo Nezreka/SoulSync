@@ -44407,9 +44407,13 @@ def get_current_seasonal_playlist():
             return jsonify({"success": True, "tracks": []})
 
         # itunes stores IDs in itunes_track_id; all other sources
-        # (spotify, deezer, discogs, hydrabase, etc.) use spotify_track_id
-        # as the generic ID column.
-        track_id_col = 'itunes_track_id' if active_source == 'itunes' else 'spotify_track_id'
+        # Each source stores IDs in its own column
+        if active_source == 'itunes':
+            track_id_col = 'itunes_track_id'
+        elif active_source == 'deezer':
+            track_id_col = 'deezer_track_id'
+        else:
+            track_id_col = 'spotify_track_id'
         tracks = []
         with database._get_connection() as conn:
             cursor = conn.cursor()
@@ -44538,10 +44542,13 @@ def get_seasonal_playlist(season_key):
         if not track_ids:
             return jsonify({"success": True, "tracks": []})
 
-        # itunes stores IDs in itunes_track_id; all other sources
-        # (spotify, deezer, discogs, hydrabase, etc.) use spotify_track_id
-        # as the generic ID column.
-        track_id_col = 'itunes_track_id' if active_source == 'itunes' else 'spotify_track_id'
+        # Each source stores IDs in its own column
+        if active_source == 'itunes':
+            track_id_col = 'itunes_track_id'
+        elif active_source == 'deezer':
+            track_id_col = 'deezer_track_id'
+        else:
+            track_id_col = 'spotify_track_id'
 
         # Fetch track details from seasonal tracks or discovery pool (filtered by source)
         tracks = []

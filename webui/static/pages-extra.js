@@ -2515,7 +2515,7 @@ function _adlRenderBatchPanel() {
             if (batch.active > 0) phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
         } else if (batch.phase === 'complete') {
             const analysisTotal = batch.analysis_total || 0;
-            const alreadyOwned = analysisTotal > 0 ? analysisTotal - total : 0;
+            const alreadyOwned = analysisTotal > 0 ? Math.max(0, analysisTotal - total) : 0;
             let parts = [`${batch.completed} downloaded`];
             if (alreadyOwned > 0) parts.push(`${alreadyOwned} owned`);
             if (batch.failed > 0) parts.push(`${batch.failed} failed`);
