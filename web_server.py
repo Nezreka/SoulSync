@@ -325,6 +325,12 @@ def _add_discover_cache_headers(response):
     Scope: only `/api/discover/` and `/api/discovery/` paths, only GET,
     only successful 2xx responses. Any endpoint that explicitly sets
     its own Cache-Control wins (we don't override).
+
+    Uses `private` not `public` because discover data is user-specific
+    (hero artists from your watchlist, similar artists from your taste,
+    etc.). `private` keeps it browser-only — intermediate proxies
+    (corporate caching proxies, Cloudflare with cache rules, Nginx
+    proxy_cache) won't store one user's response and serve it to another.
     """
     try:
         if request.method != 'GET':
@@ -336,7 +342,7 @@ def _add_discover_cache_headers(response):
             return response
         if response.headers.get('Cache-Control'):
             return response
-        response.headers['Cache-Control'] = 'public, max-age=300'
+        response.headers['Cache-Control'] = 'private, max-age=300'
     except Exception as exc:
         # Don't let a header-tagging bug turn a successful response into
         # a 500 — log and ship the response without the cache header.
