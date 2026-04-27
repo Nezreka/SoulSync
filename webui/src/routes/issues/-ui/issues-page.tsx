@@ -2,8 +2,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 
-import { getShellProfileContext } from '@/platform/shell/bridge';
 import { Select } from '@/components/form';
+import { getShellProfileContext } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { IssueCounts, IssueRecord, IssueStatus } from '../-issues.types';

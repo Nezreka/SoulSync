@@ -85,8 +85,7 @@ export function OptionCardGroup({
   return <div className={mergeClassNames(styles.optionCardGroup, className)}>{children}</div>;
 }
 
-export interface OptionCardProps
-  extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'title'> {
+export interface OptionCardProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'title'> {
   description?: ReactNode;
   icon?: ReactNode;
   selected?: boolean;
@@ -163,7 +162,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   { className, type = 'button', ...props },
   ref,
 ) {
-  return <button ref={ref} className={mergeClassNames(styles.button, className)} type={type} {...props} />;
+  return (
+    <button
+      ref={ref}
+      className={mergeClassNames(styles.button, className)}
+      type={type}
+      {...props}
+    />
+  );
 });
 
 export function FormError({ className, message }: { className?: string; message?: ReactNode }) {
@@ -176,12 +182,6 @@ export function FormError({ className, message }: { className?: string; message?
   );
 }
 
-export function FormActions({
-  className,
-  children,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
+export function FormActions({ className, children }: { children: ReactNode; className?: string }) {
   return <div className={mergeClassNames(styles.formActions, className)}>{children}</div>;
 }

@@ -1,9 +1,8 @@
-import { useForm } from "@tanstack/react-form";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
+import { useForm } from '@tanstack/react-form';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 
-import { getShellProfileContext } from "@/platform/shell/bridge";
 import {
   Button,
   FormActions,
@@ -15,10 +14,11 @@ import {
   OptionCardGroup,
   TextArea,
   TextInput,
-} from "@/components/form";
-import { useShellBridge } from "@/platform/shell/route-controllers";
+} from '@/components/form';
+import { getShellProfileContext } from '@/platform/shell/bridge';
+import { useShellBridge } from '@/platform/shell/route-controllers';
 
-import type { IssuePriority, IssueReportPayload } from "../-issues.types";
+import type { IssuePriority, IssueReportPayload } from '../-issues.types';
 
 import {
   REFRESH_EVENT,
@@ -26,10 +26,10 @@ import {
   createIssue,
   getIssueCategoriesForEntity,
   issueCountsQueryOptions,
-} from "../-issues.helpers";
-import styles from "./issue-detail-modal.module.css";
+} from '../-issues.helpers';
+import styles from './issue-detail-modal.module.css';
 
-const ISSUE_DOMAIN_QUERY_KEY = ["issues"] as const;
+const ISSUE_DOMAIN_QUERY_KEY = ['issues'] as const;
 
 interface ReportIssueFormValues {
   category: string;
@@ -39,10 +39,10 @@ interface ReportIssueFormValues {
 }
 
 const DEFAULT_REPORT_ISSUE_VALUES: ReportIssueFormValues = {
-  category: "",
-  description: "",
-  priority: "normal",
-  title: "",
+  category: '',
+  description: '',
+  priority: 'normal',
+  title: '',
 };
 
 export function IssueDomainHost() {
@@ -127,7 +127,7 @@ function ReportIssueModal({
     [payload.entityType],
   );
   const entityLabel =
-    payload.entityType === "track" ? "Track" : payload.entityType === "album" ? "Album" : "Artist";
+    payload.entityType === 'track' ? 'Track' : payload.entityType === 'album' ? 'Album' : 'Artist';
 
   const createMutation = useMutation({
     mutationFn: async (values: ReportIssueFormValues) => {
@@ -141,7 +141,7 @@ function ReportIssueModal({
       });
     },
     onSuccess: () => {
-      notify("Issue reported successfully", "success");
+      notify('Issue reported successfully', 'success');
       onSubmitted();
     },
   });
@@ -161,9 +161,9 @@ function ReportIssueModal({
         await createMutation.mutateAsync(normalizedValues);
       } catch (mutationError) {
         const message =
-          mutationError instanceof Error ? mutationError.message : "Failed to submit issue";
+          mutationError instanceof Error ? mutationError.message : 'Failed to submit issue';
         formApi.setErrorMap({ onSubmit: message });
-        notify(message, "error");
+        notify(message, 'error');
         throw mutationError;
       }
     },
@@ -206,7 +206,7 @@ function ReportIssueModal({
             {payload.artistName ? (
               <div className={styles.reportIssueEntityArtist}>
                 {payload.artistName}
-                {payload.albumTitle ? ` - ${payload.albumTitle}` : ""}
+                {payload.albumTitle ? ` - ${payload.albumTitle}` : ''}
               </div>
             ) : null}
           </div>
@@ -227,9 +227,9 @@ function ReportIssueModal({
                         field.handleChange(category);
                         createMutation.reset();
                         form.setErrorMap({ onSubmit: undefined });
-                        if (!form.getFieldMeta("title")?.isTouched) {
+                        if (!form.getFieldMeta('title')?.isTouched) {
                           form.setFieldValue(
-                            "title",
+                            'title',
                             createDefaultIssueTitle(category, payload.entityName),
                             { dontUpdateMeta: true },
                           );
@@ -298,7 +298,7 @@ function ReportIssueModal({
                         label="Priority"
                       >
                         <OptionButtonGroup>
-                          {(["low", "normal", "high"] as const).map((priority) => (
+                          {(['low', 'normal', 'high'] as const).map((priority) => (
                             <OptionButton
                               key={priority}
                               onClick={() => field.handleChange(priority)}
@@ -326,11 +326,7 @@ function ReportIssueModal({
         </div>
 
         <FormActions className={styles.modalFooter}>
-          <Button
-            className={styles.modalButtonSecondary}
-            type="button"
-            onClick={onClose}
-          >
+          <Button className={styles.modalButtonSecondary} type="button" onClick={onClose}>
             Cancel
           </Button>
           <form.Subscribe
@@ -348,7 +344,7 @@ function ReportIssueModal({
                   type="submit"
                   disabled={!state.category || !state.title.trim() || isSubmitting}
                 >
-                  {isSubmitting ? "Submitting..." : "Submit Issue"}
+                  {isSubmitting ? 'Submitting...' : 'Submit Issue'}
                 </Button>
               );
             }}
@@ -373,27 +369,27 @@ function validateReportIssueForm(
   values: ReportIssueFormValues,
 ): string | undefined {
   const normalizedValues = normalizeReportIssueFormValues(values);
-  if (!profileId) return "Profile is still loading";
-  if (!normalizedValues.category) return "Please select an issue category";
-  if (!normalizedValues.title) return "Please provide a title for the issue";
+  if (!profileId) return 'Profile is still loading';
+  if (!normalizedValues.category) return 'Please select an issue category';
+  if (!normalizedValues.title) return 'Please provide a title for the issue';
   return undefined;
 }
 
 function getReportIssueFormError(errors: Array<unknown>): string {
   const error = errors.find(Boolean);
-  if (!error) return "";
-  if (typeof error === "string") return error;
+  if (!error) return '';
+  if (typeof error === 'string') return error;
   if (error instanceof Error) return error.message;
   return String(error);
 }
 
-function notify(message: string, type: "success" | "error" | "warning" | "info" = "info") {
+function notify(message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') {
   window.showToast?.(message, type);
 }
 
 function updateBadge(openCount: number) {
-  const badge = document.getElementById("issues-nav-badge");
+  const badge = document.getElementById('issues-nav-badge');
   if (!badge) return;
   badge.textContent = String(openCount || 0);
-  badge.classList.toggle("hidden", !openCount);
+  badge.classList.toggle('hidden', !openCount);
 }
