@@ -2606,8 +2606,9 @@ async function saveSettings(quiet = false) {
             .filter(s => s);
         const invalid = entries.filter(e => {
             if (e === '*') return false;
-            // Accept anything matching scheme://host[:port], no path required
-            return !/^https?:\/\/[^\s/]+$/i.test(e);
+            // Accept scheme://host[:port] only — no path, query, or fragment.
+            // Engineio compares Origin against {scheme}://{host} exactly.
+            return !/^https?:\/\/[^\s/?#]+$/i.test(e);
         });
         if (invalid.length) {
             showToast(

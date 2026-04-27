@@ -139,43 +139,42 @@ def test_resolve_cors_origins_never_silently_returns_wildcard_for_garbage():
 # ── will_reject ───────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("allowed, origin, host, expected_reject", [
-    # Same-origin (Origin's host:port matches the request Host) — allow
-    (None,                            'http://localhost:8888',  'localhost:8888',  False),
-    (None,                            'http://192.168.1.5:8888','192.168.1.5:8888',False),
-    (None,                            'https://soulsync.foo',   'soulsync.foo',    False),
+@pytest.mark.parametrize("allowed, origin, host, scheme, expected_reject", [
+    # Same-origin (Origin's full {scheme}://{host} matches request) — allow
+    (None,                  'http://localhost:8888',   'localhost:8888',   'http',  False),
+    (None,                  'http://192.168.1.5:8888', '192.168.1.5:8888', 'http',  False),
+    (None,                  'https://soulsync.foo',    'soulsync.foo',     'https', False),
 
     # Cross-origin with default allow-list — reject
-    (None,                            'https://x.com',          'localhost:8888',  True),
-    (None,                            'https://soulsync.foo',   'localhost:8888',  True),  # reverse proxy NOT forwarding Host
+    (None,                  'https://x.com',           'localhost:8888',   'http',  True),
+    (None,                  'https://soulsync.foo',    'localhost:8888',   'http',  True),  # reverse proxy NOT forwarding Host
+    # Scheme mismatch — engineio rejects, so do we
+    (None,                  'https://soulsync.foo',    'soulsync.foo',     'http',  True),
 
     # Wildcard short-circuit — allow
-    ('*',                             'https://x.com',          'localhost:8888',  False),
-    ('*',                             'https://anything.evil',  'localhost:8888',  False),
+    ('*',                   'https://x.com',           'localhost:8888',   'http',  False),
+    ('*',                   'https://anything.evil',   'localhost:8888',   'http',  False),
 
     # Origin in allow-list — allow
-    (['https://x.com'],               'https://x.com',          'localhost:8888',  False),
-    (['https://soulsync.foo'],        'https://soulsync.foo',   'localhost:8888',  False),
+    (['https://x.com'],     'https://x.com',           'localhost:8888',   'http',  False),
+    (['https://soulsync.foo'], 'https://soulsync.foo', 'localhost:8888',   'http',  False),
 
     # Cross-origin not in allow-list — reject
-    (['https://x.com'],               'https://y.com',          'localhost:8888',  True),
+    (['https://x.com'],     'https://y.com',           'localhost:8888',   'http',  True),
 
     # Same-origin still works even when allow-list has other entries
-    (['https://x.com'],               'http://localhost:8888',  'localhost:8888',  False),
-
-    # Origin with path component — only host:port should be compared
-    (None,                            'http://x.com:8080/path', 'x.com:8080',      False),
+    (['https://x.com'],     'http://localhost:8888',   'localhost:8888',   'http',  False),
 ])
-def test_will_reject_predicts_engineio_decision(allowed, origin, host, expected_reject):
-    assert will_reject(allowed, origin, host) is expected_reject
+def test_will_reject_predicts_engineio_decision(allowed, origin, host, scheme, expected_reject):
+    assert will_reject(allowed, origin, host, request_scheme=scheme) is expected_reject
 
 
 def test_will_reject_with_empty_host_only_uses_allowlist():
     """If the request somehow has no Host header (shouldn't happen but be
     safe), same-origin can't be checked — fall through to allow-list only."""
-    assert will_reject(None, 'https://x.com', '') is True
-    assert will_reject(['https://x.com'], 'https://x.com', '') is False
-    assert will_reject('*', 'https://x.com', '') is False
+    assert will_reject(None, 'https://x.com', '', request_scheme='https') is True
+    assert will_reject(['https://x.com'], 'https://x.com', '', request_scheme='https') is False
+    assert will_reject('*', 'https://x.com', '', request_scheme='https') is False
 
 
 def test_will_reject_honors_x_forwarded_host():
@@ -183,20 +182,27 @@ def test_will_reject_honors_x_forwarded_host():
     cors_allowed_origins is None (engineio/base_server.py:_cors_allowed_origins).
     Our predictor must mirror that — otherwise reverse-proxy users with
     proper proxy headers would trigger spurious "rejected" log lines."""
-    # Same-origin via X-Forwarded-Host (typical reverse-proxy setup)
+    # Same-origin via X-Forwarded-Host (typical TLS-terminating reverse proxy)
     assert will_reject(None, 'https://soulsync.foo', 'internal:8888',
-                       forwarded_host='soulsync.foo') is False
+                       request_scheme='http',
+                       forwarded_host='soulsync.foo',
+                       forwarded_proto='https') is False
 
     # X-Forwarded-Host with comma list (proxy chain) — first entry wins
     assert will_reject(None, 'https://soulsync.foo', 'internal:8888',
-                       forwarded_host='soulsync.foo, edge.proxy') is False
+                       request_scheme='http',
+                       forwarded_host='soulsync.foo, edge.proxy',
+                       forwarded_proto='https') is False
 
     # X-Forwarded-Host doesn't match either — still reject
     assert will_reject(None, 'https://attacker.com', 'internal:8888',
-                       forwarded_host='soulsync.foo') is True
+                       request_scheme='http',
+                       forwarded_host='soulsync.foo',
+                       forwarded_proto='https') is True
 
     # X-Forwarded-Host empty — falls back to Host check (the unset case)
     assert will_reject(None, 'https://soulsync.foo', 'soulsync.foo',
+                       request_scheme='https',
                        forwarded_host='') is False
 
 
@@ -230,18 +236,6 @@ def test_will_reject_compares_full_scheme_when_known():
                        request_scheme='http',
                        forwarded_host='soulsync.foo',
                        forwarded_proto='https, http') is False
-
-
-def test_will_reject_falls_back_to_host_only_when_no_scheme_info():
-    """Backwards-compat shim: callers that don't pass scheme info still
-    get the basic Host-only same-origin check (the original behavior).
-    Important for any integration tests that exercise the predicate
-    without a real Flask request context."""
-    # No scheme info → host-only match works
-    assert will_reject(None, 'https://soulsync.foo', 'soulsync.foo') is False
-    assert will_reject(None, 'http://x.com', 'x.com') is False
-    # Cross-origin still rejected
-    assert will_reject(None, 'https://attacker.com', 'soulsync.foo') is True
 
 
 def test_will_reject_allows_missing_origin_matching_engineio():
