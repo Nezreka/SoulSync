@@ -278,18 +278,37 @@ The template points at `boulderbadgedad/soulsync:latest` (stable) by default. To
 ```bash
 git clone https://github.com/Nezreka/SoulSync
 cd SoulSync
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 gunicorn -c gunicorn.conf.py wsgi:application
 # Open http://localhost:8008
 ```
 
-For local development and tests:
+### Local Development
+
+Use two terminals so the backend and Vite stay independent:
+
+1. Backend
+   ```bash
+   python -m pip install -r requirements-dev.txt
+   gunicorn -c gunicorn.dev.conf.py wsgi:application
+   ```
+   The dev Gunicorn config watches backend files and restarts the Python server when they change.
+2. Frontend
+   ```bash
+   cd webui
+   npm ci
+   npm run dev -- --host 127.0.0.1 --port 5173
+   ```
+   Vite hot reloads the React side when you change webui files.
+
+Run tests separately when needed:
 
 ```bash
-pip install -r requirements-dev.txt
-pytest
-gunicorn -c gunicorn.dev.conf.py wsgi:application
+python -m pytest
 ```
+
+If you want a convenience launcher, `./dev.sh` starts both halves together.
+It is most useful on Linux, macOS, and WSL.
 
 ---
 
@@ -413,17 +432,27 @@ SoulSync uses a `dev` → `main` flow:
 2. Branch off `dev`: `git checkout -b fix/your-change dev`
 3. Make your changes and commit
 4. Push and open a PR against **`dev`** (not `main`)
-5. CI (`build-and-test.yml`) runs ruff lint + compile + pytest on your branch — wait for green
+5. CI (`build-and-test.yml`) runs ruff lint + compile + `python -m pytest` on your branch — wait for green
 6. A maintainer reviews and merges
 
 ### Running locally
 
 ```bash
-pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt
 python -m ruff check .       # must be 0 errors
 python -m pytest             # all tests must pass
-gunicorn -c gunicorn.dev.conf.py wsgi:application
 ```
+
+For web UI development, keep the backend and Vite dev server in separate terminals:
+
+```bash
+gunicorn -c gunicorn.dev.conf.py wsgi:application
+cd webui
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+If you want a convenience wrapper, `./dev.sh` starts both halves together.
 
 Ruff config lives in `pyproject.toml`. The ruleset is intentionally lenient — it catches real bugs (undefined names, import shadowing, closure-in-loop) without style nits.
 

@@ -64,3 +64,23 @@ That order avoids load-time references to missing globals and keeps the React si
   - bridge typings in `webui/src/platform/shell/globals.d.ts`
   - a legacy fallback path in `webui/static/init.js`
   - bridge glue or handoff logic in `webui/static/shell-bridge.js`
+
+## Development
+
+The recommended dev flow keeps the backend and frontend separate:
+
+1. Start the Python backend:
+   ```bash
+   gunicorn -c gunicorn.dev.conf.py wsgi:application
+   ```
+   The dev Gunicorn config watches backend files and restarts the Python server when they change.
+2. Start the Vite dev server in another terminal:
+   ```bash
+   cd webui
+   npm ci
+   npm run dev -- --host 127.0.0.1 --port 5173
+   ```
+   Vite hot reloads the React side when you change webui files.
+
+If you want a convenience wrapper, the repo root also includes `./dev.sh`.
+It starts both halves together and is most useful on Linux, macOS, and WSL.
