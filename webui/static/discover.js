@@ -9295,7 +9295,7 @@ async function _doSyncDiscoverPlaylist(playlistType, playlistName) {
 
         const result = await batchResponse.json();
         if (result.success) {
-            showToast(`${playlistName}: analyzing ${syncTracks.length} tracks...`, 'info');
+            showToast(`${playlistName}: syncing ${syncTracks.length} tracks to library...`, 'info');
             const card = document.getElementById(`discover-sync-card-${playlistType}`);
             if (card) {
                 const statusEl = card.querySelector('.discover-sync-status');
