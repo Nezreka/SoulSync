@@ -17,11 +17,12 @@ import re
 import sqlite3
 import types
 import collections
+import functools
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, redirect, send_file, Response, session, g, abort
+from flask import Flask, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g, abort
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger, setup_logging
 from utils.async_helpers import run_async
@@ -36,8 +37,9 @@ _log_path = config_manager.get('logging.path', 'logs/app.log')
 _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
-# App version — single source of truth for backup metadata, version-info endpoint, etc.
-_SOULSYNC_BASE_VERSION = "2.39"
+# App version — single source of truth for backup metadata, system-info, update check, etc.
+# Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
+_SOULSYNC_BASE_VERSION = "2.4.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -169,6 +171,33 @@ app = Flask(
 )
 app.config['TEMPLATES_AUTO_RELOAD'] = DEV_STATIC_NO_CACHE
 app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
+# Static assets (library.js / style.css / etc.) get aggressive browser
+# caching (1 year). Safe because every static URL is bust-tagged with
+# `?v=static_v` (computed once per process start — see below) so each
+# server restart effectively invalidates every cached asset for every
+# user. Within a single deploy, repeat page loads hit zero round-trips
+# on static files — was a 304 round-trip per asset under the old
+# max-age=0 setting.
+#
+# In dev, DEV_STATIC_NO_CACHE flips this back to 0 so iterating on JS
+# / CSS doesn't require a server restart between edits.
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
+
+
+# Cache-bust query string for static assets — appended to every
+# url_for('static', ...) URL via the context processor below. Computed
+# once per process start so each server restart invalidates the
+# browser's cached copy of every JS/CSS file. This is the surefire
+# fix for "user has stale JS even after Ctrl+Shift+R" — the URL
+# itself changes, so the browser cannot reuse a previously-cached
+# response no matter what its Cache-Control header said.
+import time as _cache_bust_time
+_STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
+
+
+@app.context_processor
+def _inject_static_cache_bust():
+    return {'static_v': _STATIC_CACHE_BUST}
 
 # --- Flask Session Setup (for multi-profile support) ---
 import secrets as _secrets
@@ -187,11 +216,42 @@ def _init_flask_secret_key():
 app.secret_key = _init_flask_secret_key()
 
 # --- WebSocket (Socket.IO) Setup ---
-socketio = SocketIO(app, async_mode='threading', cors_allowed_origins='*')
+from core.socketio_cors import (
+    resolve_cors_origins as _resolve_socketio_cors_origins,
+    RejectionLogger as _SocketIORejectionLogger,
+    log_startup_status as _log_socketio_startup_status,
+)
+_socketio_cors_origins = _resolve_socketio_cors_origins(config_manager)
+socketio = SocketIO(app, async_mode='threading', cors_allowed_origins=_socketio_cors_origins)
+_log_socketio_startup_status(_socketio_cors_origins, logger)
+_socketio_rejection_logger = _SocketIORejectionLogger(logger)
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}
 _plex_pin_requests_lock = threading.Lock()
+
+@app.before_request
+def _log_rejected_socketio_origin():
+    """Hook the WS upgrade path so users see a clear log line when their
+    Origin is about to be rejected (engineio otherwise just silently 403s
+    the upgrade). Dedup + threading lives in `core/socketio_cors`.
+
+    Note: Flask's ``before_request`` runs on every HTTP request to every
+    endpoint — there's no path-scoped equivalent for arbitrary URL
+    prefixes. We early-return on non-/socket.io/ paths to keep the
+    overhead to one string compare per request.
+    """
+    if not request.path.startswith('/socket.io/'):
+        return
+    _socketio_rejection_logger.maybe_log(
+        _socketio_cors_origins,
+        request.headers.get('Origin'),
+        request.headers.get('Host', ''),
+        request.scheme,
+        request.headers.get('X-Forwarded-Host', ''),
+        request.headers.get('X-Forwarded-Proto', ''),
+    )
+
 
 # --- Profile Context (before_request hook) ---
 @app.before_request
@@ -251,12 +311,77 @@ def _log_slow_request(response):
 
     return response
 
+
+@app.after_request
+def _add_discover_cache_headers(response):
+    """Browser-cache discover GETs for 5 minutes.
+
+    The discover surface (hero, similar artists, recent releases, release
+    radar, deep cuts, etc.) returns semi-stable data that's expensive to
+    compute and not user-action-driven within a session. A short browser
+    cache eliminates redundant fetches when the user toggles between
+    Discover sections or navigates back.
+
+    Scope: only `/api/discover/` and `/api/discovery/` paths, only GET,
+    only successful 2xx responses. Any endpoint that explicitly sets
+    its own Cache-Control wins (we don't override).
+
+    Uses `private` not `public` because discover data is user-specific
+    (hero artists from your watchlist, similar artists from your taste,
+    etc.). `private` keeps it browser-only — intermediate proxies
+    (corporate caching proxies, Cloudflare with cache rules, Nginx
+    proxy_cache) won't store one user's response and serve it to another.
+    """
+    try:
+        if request.method != 'GET':
+            return response
+        if not (request.path.startswith('/api/discover/')
+                or request.path.startswith('/api/discovery/')):
+            return response
+        if not (200 <= response.status_code < 300):
+            return response
+        if response.headers.get('Cache-Control'):
+            return response
+        response.headers['Cache-Control'] = 'private, max-age=300'
+    except Exception as exc:
+        # Don't let a header-tagging bug turn a successful response into
+        # a 500 — log and ship the response without the cache header.
+        logger.warning(f"[discover-cache-headers] failed for {request.path}: {exc}")
+    return response
+
+
 def get_current_profile_id() -> int:
     """Get the current profile ID from Flask g context or default to 1"""
     try:
         return g.profile_id
     except AttributeError:
         return 1
+
+
+def admin_only(view_fn):
+    """Restrict a Flask view to the admin profile (profile_id == 1).
+
+    Settings-class endpoints expose / mutate service tokens, OAuth
+    secrets, and API keys. Non-admin profiles must not see them.
+
+    NOTE on the underlying auth model: `get_current_profile_id()`
+    defaults to 1 (admin) when no session is present, which means
+    single-admin / no-multi-profile installs have no actual gate here —
+    any request from the local network is treated as admin. This
+    decorator's job is to gate non-admin profiles in MULTI-profile
+    setups, not to authenticate the network. The "trust local network"
+    posture is the project's existing model; tightening it (real auth
+    on every request) is out of scope for this decorator.
+    """
+    @functools.wraps(view_fn)
+    def wrapper(*args, **kwargs):
+        if get_current_profile_id() != 1:
+            return jsonify({
+                "success": False,
+                "error": "Admin access required",
+            }), 403
+        return view_fn(*args, **kwargs)
+    return wrapper
 
 # ── Per-profile Spotify client cache ──
 _profile_spotify_clients = {}  # profile_id -> SpotifyClient
@@ -1631,7 +1756,10 @@ def _register_automation_handlers():
         hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
         soulseek_active = (dl_mode == 'soulseek' or
                           (dl_mode == 'hybrid' and 'soulseek' in hybrid_order))
-        if not soulseek_active or not soulseek_client or not soulseek_client.base_url:
+        # soulseek_client is a DownloadOrchestrator; the real client lives on
+        # .soulseek. Match the getattr pattern used at the other call sites.
+        slskd = getattr(soulseek_client, 'soulseek', None) if soulseek_client else None
+        if not soulseek_active or not slskd or not slskd.base_url:
             _update_automation_progress(automation_id,
                 log_line='Soulseek not active — skipped', log_type='skip')
             return {'status': 'skipped'}
@@ -2546,7 +2674,8 @@ def _get_file_lock(file_path):
 # Thread-safe state tracking for modal download functionality with batch management
 missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="MissingTrackWorker")
 # Separate executor for analysis to prevent starvation when download workers are busy
-analysis_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="AnalysisWorker")
+MAX_CONCURRENT_ANALYSIS = 3
+analysis_executor = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_ANALYSIS, thread_name_prefix="AnalysisWorker")
 download_tasks = {}  # task_id -> task state dict
 download_batches = {}  # batch_id -> {queue, active_count, max_concurrent}
 tasks_lock = threading.Lock()
@@ -4455,6 +4584,12 @@ SERVICE_CONFIG_REGISTRY = {
     'acoustid':     {'required': ['api_key']},
     'listenbrainz': {'required': ['token']},
     'hydrabase':    {'required': ['url', 'api_key']},
+    # Soulseek (slskd) needs a base URL. Used by the search source picker
+    # to dim Soulseek and redirect to Settings when the user has no slskd
+    # configured — clicking it would otherwise fire searches that always
+    # fail. URL field lives on Settings → Downloads, gated behind the
+    # download-source-mode dropdown.
+    'soulseek':     {'required': ['slskd_url']},
 }
 
 
@@ -5090,6 +5225,25 @@ def run_detection(server_type):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/sw.js')
+def service_worker():
+    """Serve sw.js from root scope so the service worker can intercept
+    fetches site-wide. A service worker only controls URLs at or below
+    its own served path — `/static/sw.js` would scope to `/static/*`
+    only. Serving from `/sw.js` (with the file living under static/)
+    grants full-site scope without needing the Service-Worker-Allowed
+    header dance.
+
+    Cache-Control: no-cache so deploys that change the SW propagate on
+    the next page load instead of being pinned by the 1-year static
+    cache the rest of /static/ uses.
+    """
+    response = send_from_directory(app.static_folder, 'sw.js', mimetype='application/javascript')
+    response.headers['Cache-Control'] = 'no-cache'
+    return response
+
 
 @app.route('/<path:page>')
 def spa_catch_all(page):
@@ -6226,6 +6380,7 @@ def revoke_api_key_internal(key_id):
 
 
 @app.route('/api/settings', methods=['GET', 'POST'])
+@admin_only
 def handle_settings():
     global tidal_client # Declare that we might modify the global instance
     if not config_manager:
@@ -6524,6 +6679,7 @@ def hydrabase_send():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/settings/log-level', methods=['GET', 'POST'])
+@admin_only
 def handle_log_level():
     """Get or set the application log level"""
     from utils.logging_config import set_log_level, get_current_log_level
@@ -7383,6 +7539,7 @@ def test_connection_endpoint():
 
 
 @app.route('/api/settings/config-status', methods=['GET'])
+@admin_only
 def settings_config_status_endpoint():
     """Return per-service config state for the Settings → Connections page.
     Drives the green/yellow header gradient. No API calls — just config reads.
@@ -7456,6 +7613,7 @@ def _run_single_verify(service: str):
 
 
 @app.route('/api/settings/verify', methods=['POST'])
+@admin_only
 def settings_verify_endpoint():
     """Run connection verification for one or more services.
 
@@ -11121,7 +11279,7 @@ def maintain_search_history():
         return jsonify({"success": False, "error": str(e)}), 500
 
 def fix_artist_image_url(thumb_url):
-    """Convert localhost URLs to proper server URLs using config"""
+    """Convert media-server image URLs into browser-safe URLs."""
     if not thumb_url:
         return None
 
@@ -11130,6 +11288,11 @@ def fix_artist_image_url(thumb_url):
         needs_fixing = (
             thumb_url.startswith('http://localhost:') or
             thumb_url.startswith('https://localhost:') or
+            thumb_url.startswith('http://127.0.0.1:') or
+            thumb_url.startswith('https://127.0.0.1:') or
+            thumb_url.startswith('http://host.docker.internal:') or
+            thumb_url.startswith('https://host.docker.internal:') or
+            (thumb_url.startswith('http://') and _is_internal_image_host(thumb_url)) or
             thumb_url.startswith('/library/') or  # Plex relative paths
             thumb_url.startswith('/Items/') or    # Jellyfin relative paths
             thumb_url.startswith('/api/') or      # Old Navidrome API paths
@@ -11160,7 +11323,7 @@ def fix_artist_image_url(thumb_url):
                     # Construct proper Plex URL with token
                     fixed_url = f"{plex_base_url.rstrip('/')}{path}?X-Plex-Token={plex_token}"
                     logger.info(f"Fixed URL: {fixed_url}")
-                    return fixed_url
+                    return _browser_safe_image_url(fixed_url)
 
             elif active_server == 'jellyfin':
                 jellyfin_config = config_manager.get_jellyfin_config()
@@ -11186,7 +11349,7 @@ def fix_artist_image_url(thumb_url):
                     else:
                         fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}"
                     logger.info(f"Fixed URL: {fixed_url}")
-                    return fixed_url
+                    return _browser_safe_image_url(fixed_url)
 
             elif active_server == 'navidrome':
                 navidrome_config = config_manager.get_navidrome_config()
@@ -11219,16 +11382,57 @@ def fix_artist_image_url(thumb_url):
                     # Construct proper Navidrome Subsonic URL
                     fixed_url = f"{navidrome_base_url.rstrip('/')}{path}{separator}{auth_params}"
                     logger.info(f"Fixed URL: {fixed_url}")
-                    return fixed_url
+                    return _browser_safe_image_url(fixed_url)
 
             logger.warning(f"No configuration found for {active_server} or unsupported server type")
 
-        # Return original URL if no fixing needed/possible
-        return thumb_url
+        # Return a browser-safe URL even if no server-specific rebuild was possible.
+        return _browser_safe_image_url(thumb_url)
 
     except Exception as e:
         logger.error(f"Error fixing image URL '{thumb_url}': {e}")
-        return thumb_url
+        return _browser_safe_image_url(thumb_url)
+
+
+def _is_internal_image_host(url: str) -> bool:
+    """Return True when an image URL points at a host the browser likely cannot reach directly."""
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or '').strip('[]').lower()
+        if not host:
+            return False
+
+        if host in {'localhost', '127.0.0.1', '::1', 'host.docker.internal'}:
+            return True
+
+        # Single-label hosts are usually Docker service names or local LAN aliases.
+        if '.' not in host:
+            return True
+
+        try:
+            ip = ipaddress.ip_address(host)
+            return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved
+        except ValueError:
+            return False
+    except Exception:
+        return False
+
+
+def _browser_safe_image_url(url: str) -> str:
+    """Return a browser-safe image URL, proxying internal hosts through SoulSync."""
+    if not url:
+        return url
+
+    if url.startswith('/api/image-proxy?url='):
+        return url
+
+    if url.startswith('http://') or url.startswith('https://'):
+        if _is_internal_image_host(url):
+            return f"/api/image-proxy?url={quote(url, safe='')}"
+        return url
+
+    # Relative media-server paths should already have been expanded before this point.
+    return url
 
 @app.route('/api/library/history')
 def get_library_history():
@@ -11683,10 +11887,15 @@ def get_artist_image(artist_id):
 
         source_override = request.args.get('source', '').strip().lower() or None
         plugin = request.args.get('plugin', '').strip().lower() or None
+        # `name` is optional but required for sources that don't store
+        # artist images directly (MusicBrainz) — the resolver falls back
+        # to searching iTunes/Deezer by name.
+        artist_name = request.args.get('name', '').strip() or None
         image_url = _get_artist_image_url(
             artist_id,
             source_override=source_override,
             plugin=plugin,
+            artist_name=artist_name,
         )
         return jsonify({"success": True, "image_url": image_url})
     except Exception as e:
@@ -13535,158 +13744,72 @@ def get_tracks_replaygain_batch_status():
     return jsonify(state)
 
 
-# ── Reorganize Album Files endpoint ──
+# ── Reorganize Album Files endpoints ──
+#
+# Reorganize requests flow through ``core.reorganize_queue`` — a FIFO
+# queue with a single background worker. The endpoints here are thin
+# enqueue / snapshot / cancel wrappers; the heavy lifting is in
+# :mod:`core.library_reorganize`.
 
-_reorganize_state = {
-    'status': 'idle',
-    'total': 0,
-    'processed': 0,
-    'moved': 0,
-    'skipped': 0,
-    'failed': 0,
-    'current_track': '',
-    'errors': [],
-}
-_reorganize_lock = threading.Lock()
+
+@app.route('/api/library/reorganize/sources', methods=['GET'])
+def reorganize_sources_global():
+    """List metadata sources the user has authed on this instance.
+    Used by the bulk "Reorganize All" modal where per-album ID coverage
+    varies. No network calls."""
+    try:
+        from core.library_reorganize import authed_sources
+        return jsonify({"success": True, "sources": authed_sources()})
+    except Exception as e:
+        logger.error(f"Reorganize sources (global) error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/album/<album_id>/reorganize/sources', methods=['GET'])
+def reorganize_album_sources(album_id):
+    """List metadata sources the user can pick for this album's
+    reorganize — every entry has both a stored album ID on the local
+    row AND an authenticated client. No network calls."""
+    try:
+        from core.library_reorganize import available_sources_for_album, load_album_and_tracks
+        album_data, _tracks = load_album_and_tracks(get_database(), album_id)
+        if album_data is None:
+            return jsonify({"success": False, "error": "Album not found"}), 404
+        return jsonify({"success": True, "sources": available_sources_for_album(album_data)})
+    except Exception as e:
+        logger.error(f"Reorganize sources error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route('/api/library/album/<album_id>/reorganize/preview', methods=['POST'])
 def reorganize_album_preview(album_id):
-    """Preview file reorganization for an album — returns current vs proposed paths without moving anything."""
+    """Preview file reorganization for an album — returns current vs
+    proposed paths without moving anything. Implementation lives in
+    :mod:`core.library_reorganize` and shares the planning logic with
+    the apply endpoint, so the preview is guaranteed to match what
+    apply would actually produce.
+
+    Optional body param ``source``: when provided, only that metadata
+    source is queried (no fallback chain)."""
     try:
-        database = get_database()
+        from core.library_reorganize import preview_album_reorganize
         data = request.get_json() or {}
-        template = data.get('template', '').strip()
-        if not template:
-            return jsonify({"success": False, "error": "Template is required"}), 400
-
-        conn = database._get_connection()
-        cursor = conn.cursor()
-
-        # Get album + artist info
-        cursor.execute("""
-            SELECT al.*, a.name as artist_name
-            FROM albums al
-            JOIN artists a ON al.artist_id = a.id
-            WHERE al.id = ?
-        """, (str(album_id),))
-        album_row = cursor.fetchone()
-        if not album_row:
-            return jsonify({"success": False, "error": "Album not found"}), 404
-        album_data = dict(album_row)
-
-        # Get all tracks for this album
-        cursor.execute("""
-            SELECT t.*, a.name as artist_name
-            FROM tracks t
-            JOIN artists a ON t.artist_id = a.id
-            WHERE t.album_id = ?
-            ORDER BY t.track_number
-        """, (str(album_id),))
-        tracks = [dict(r) for r in cursor.fetchall()]
-
-        if not tracks:
-            return jsonify({"success": False, "error": "No tracks found for this album"}), 404
-
+        chosen_source = data.get('source') or None
         transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-
-        # Pre-scan disc numbers so every track's template context carries the
-        # same total_discs. Needed by $cdnum (smart CD label) so the template
-        # can decide whether to emit "CDxx" or stay empty for single-disc.
-        track_disc_numbers = {}
-        for _t in tracks:
-            _rp = _resolve_library_file_path(_t.get('file_path')) if _t.get('file_path') else None
-            _dn = 1
-            if _rp:
-                try:
-                    from core.tag_writer import read_file_tags
-                    _dn = read_file_tags(_rp).get('disc_number') or 1
-                except Exception:
-                    _dn = 1
-            track_disc_numbers[_t.get('id')] = int(_dn)
-        total_discs = max(track_disc_numbers.values(), default=1) if track_disc_numbers else 1
-
-        preview_items = []
-        for track in tracks:
-            file_path = track.get('file_path')
-            resolved = _resolve_library_file_path(file_path) if file_path else None
-
-            # Reuse the disc number captured in the pre-scan (avoids re-reading tags)
-            disc_number = track_disc_numbers.get(track.get('id'), 1)
-
-            # Get file extension from current path
-            file_ext = os.path.splitext(resolved or file_path or '.mp3')[1]
-
-            # Detect quality using the same format as the download pipeline
-            quality = _get_audio_quality_string(resolved) if resolved else ''
-
-            # Build context for template
-            year_val = album_data.get('year') or ''
-            context = {
-                'artist': track.get('artist_name') or 'Unknown Artist',
-                'albumartist': album_data.get('artist_name') or track.get('artist_name') or 'Unknown Artist',
-                'album': album_data.get('title') or 'Unknown Album',
-                'title': track.get('title') or 'Unknown Track',
-                'track_number': track.get('track_number') or 1,
-                'disc_number': disc_number,
-                'total_discs': total_discs,
-                'year': year_val,
-                'quality': quality,
-                'albumtype': _get_album_type_display(
-                    album_data.get('record_type'),
-                    album_data.get('track_count') or len(tracks)
-                ),
-            }
-
-            # Build new path using the template
-            folder_path, filename = _get_file_path_from_template_raw(template, context)
-            new_relative = os.path.join(folder_path, f"{filename}{file_ext}") if folder_path else f"{filename}{file_ext}"
-            new_full = os.path.join(transfer_dir, new_relative)
-
-            # Current path relative to transfer dir for display
-            current_display = file_path or 'No file'
-            if resolved and transfer_dir and resolved.startswith(transfer_dir):
-                current_display = resolved[len(transfer_dir):].lstrip(os.sep).lstrip('/')
-
-            same = resolved and os.path.normpath(resolved) == os.path.normpath(new_full)
-
-            preview_items.append({
-                'track_id': track['id'],
-                'title': track.get('title', ''),
-                'track_number': track.get('track_number', 0),
-                'current_path': current_display,
-                'new_path': new_relative,
-                'new_full_normalized': os.path.normpath(new_full) if resolved else None,
-                'file_exists': resolved is not None,
-                'unchanged': same,
-                'collision': False,
-            })
-
-        # Detect collisions: multiple tracks mapping to the same destination
-        seen_paths = {}
-        for item in preview_items:
-            norm = item.get('new_full_normalized')
-            if not norm or not item['file_exists'] or item['unchanged']:
-                continue
-            if norm in seen_paths:
-                item['collision'] = True
-                # Also mark the first one that claimed this path
-                seen_paths[norm]['collision'] = True
-            else:
-                seen_paths[norm] = item
-
-        # Remove internal field from response
-        for item in preview_items:
-            item.pop('new_full_normalized', None)
-
-        return jsonify({
-            "success": True,
-            "album": album_data.get('title', ''),
-            "artist": album_data.get('artist_name', ''),
-            "tracks": preview_items,
-            "transfer_dir": transfer_dir,
-        })
-
+        result = preview_album_reorganize(
+            album_id=album_id,
+            db=get_database(),
+            transfer_dir=transfer_dir,
+            resolve_file_path_fn=_resolve_library_file_path,
+            build_final_path_fn=_build_final_path_for_track,
+            primary_source=chosen_source,
+            strict_source=bool(chosen_source),
+        )
+        if result.get('status') == 'no_album':
+            return jsonify({"success": False, "error": "Album not found"}), 404
+        if result.get('status') == 'no_tracks':
+            return jsonify({"success": False, "error": "No tracks found for this album"}), 404
+        return jsonify(result)
     except Exception as e:
         logger.error(f"Reorganize preview error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -13694,289 +13817,143 @@ def reorganize_album_preview(album_id):
 
 @app.route('/api/library/album/<album_id>/reorganize', methods=['POST'])
 def reorganize_album_files(album_id):
-    """Move album files to new paths based on the provided template."""
+    """Enqueue an album for reorganize. Returns immediately — the
+    queue worker processes items FIFO. Repeat clicks for an album
+    that's already queued or running are deduped (returns
+    ``{queued: false, reason: 'already_queued'}``).
+
+    Body params:
+        source (optional): per-album source pick (Spotify / iTunes /
+            Deezer / Discogs / Hydrabase). When omitted, the
+            orchestrator uses the configured primary with fallback.
+    """
     try:
+        from core.reorganize_queue import get_queue
         data = request.get_json() or {}
-        template = data.get('template', '').strip()
-        if not template:
-            return jsonify({"success": False, "error": "Template is required"}), 400
+        chosen_source = data.get('source') or None
 
-        # Atomic check-and-set to prevent concurrent reorganizations
-        with _reorganize_lock:
-            if _reorganize_state['status'] == 'running':
-                return jsonify({"success": False, "error": "A reorganization is already in progress"}), 409
-            _reorganize_state['status'] = 'running'
-
-        database = get_database()
-        conn = database._get_connection()
-        cursor = conn.cursor()
-
-        # Get album + artist info
-        cursor.execute("""
-            SELECT al.*, a.name as artist_name
-            FROM albums al
-            JOIN artists a ON al.artist_id = a.id
-            WHERE al.id = ?
-        """, (str(album_id),))
-        album_row = cursor.fetchone()
-        if not album_row:
-            with _reorganize_lock:
-                _reorganize_state['status'] = 'idle'
+        # Capture display fields at enqueue time so the status panel
+        # can render them without a DB lookup later.
+        meta = get_database().get_album_display_meta(album_id)
+        if meta is None:
             return jsonify({"success": False, "error": "Album not found"}), 404
-        album_data = dict(album_row)
 
-        # Get all tracks
-        cursor.execute("""
-            SELECT t.*, a.name as artist_name
-            FROM tracks t
-            JOIN artists a ON t.artist_id = a.id
-            WHERE t.album_id = ?
-            ORDER BY t.track_number
-        """, (str(album_id),))
-        tracks = [dict(r) for r in cursor.fetchall()]
-
-        if not tracks:
-            with _reorganize_lock:
-                _reorganize_state['status'] = 'idle'
-            return jsonify({"success": False, "error": "No tracks found"}), 404
-
-        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-
-        # Initialize state (already set to 'running' above)
-        with _reorganize_lock:
-            _reorganize_state.update({
-                'total': len(tracks),
-                'processed': 0,
-                'moved': 0,
-                'skipped': 0,
-                'failed': 0,
-                'current_track': '',
-                'errors': [],
-            })
-
-        def _run_reorganize():
-            bg_conn = None
-            try:
-                # Single DB connection for the background thread
-                bg_db = get_database()
-                bg_conn = bg_db._get_connection()
-
-                # Pre-scan disc numbers for every track so total_discs is the
-                # same for all template contexts in this album. Needed by the
-                # $cdnum template variable to decide multi-disc vs single-disc.
-                track_disc_numbers = {}
-                for _t in tracks:
-                    _rp = _resolve_library_file_path(_t.get('file_path')) if _t.get('file_path') else None
-                    _dn = 1
-                    if _rp:
-                        try:
-                            from core.tag_writer import read_file_tags
-                            _dn = read_file_tags(_rp).get('disc_number') or 1
-                        except Exception:
-                            _dn = 1
-                    track_disc_numbers[_t.get('id')] = int(_dn)
-                total_discs = max(track_disc_numbers.values(), default=1) if track_disc_numbers else 1
-
-                # Pre-compute all destination paths to detect collisions
-                dest_paths = {}  # normalized_new_path -> track_id
-                for track in tracks:
-                    file_path = track.get('file_path')
-                    resolved = _resolve_library_file_path(file_path) if file_path else None
-                    if not resolved:
-                        continue
-
-                    # Reuse the disc number from the pre-scan pass above
-                    disc_number = track_disc_numbers.get(track.get('id'), 1)
-
-                    file_ext = os.path.splitext(resolved)[1]
-                    quality = _get_audio_quality_string(resolved)
-
-                    year_val = album_data.get('year') or ''
-                    context = {
-                        'artist': track.get('artist_name') or 'Unknown Artist',
-                        'albumartist': album_data.get('artist_name') or track.get('artist_name') or 'Unknown Artist',
-                        'album': album_data.get('title') or 'Unknown Album',
-                        'title': track.get('title') or 'Unknown Track',
-                        'track_number': track.get('track_number') or 1,
-                        'disc_number': disc_number,
-                        'total_discs': total_discs,
-                        'year': year_val,
-                        'quality': quality,
-                        'albumtype': _get_album_type_display(
-                            album_data.get('record_type'),
-                            album_data.get('track_count') or len(tracks)
-                        ),
-                    }
-
-                    folder_path, filename = _get_file_path_from_template_raw(template, context)
-                    new_relative = os.path.join(folder_path, f"{filename}{file_ext}") if folder_path else f"{filename}{file_ext}"
-                    new_full = os.path.join(transfer_dir, new_relative)
-                    norm_new = os.path.normpath(new_full)
-
-                    # Check for collision: two tracks mapping to same destination
-                    if norm_new in dest_paths and dest_paths[norm_new] != str(track['id']):
-                        # Mark as collision so the move pass skips it
-                        track['_collision'] = True
-                        with _reorganize_lock:
-                            _reorganize_state['failed'] += 1
-                            _reorganize_state['processed'] += 1
-                            _reorganize_state['errors'].append({
-                                'track_id': track['id'],
-                                'title': track.get('title', 'Unknown'),
-                                'error': "Path collision with another track — add $track or $disc to template"
-                            })
-                        continue
-
-                    dest_paths[norm_new] = str(track['id'])
-
-                    # Store computed info on the track dict for the move pass
-                    track['_resolved'] = resolved
-                    track['_new_full'] = new_full
-                    track['_disc_number'] = disc_number
-
-                # Now do the actual moves
-                moved_dirs = {}  # src_dir → dest_dir for post-pass sidecar sweep
-                for track in tracks:
-                    resolved = track.get('_resolved')
-                    new_full = track.get('_new_full')
-                    track_title = track.get('title', 'Unknown')
-
-                    with _reorganize_lock:
-                        _reorganize_state['current_track'] = track_title
-
-                    # Skip tracks already handled (collision or file not found)
-                    if track.get('_collision'):
-                        continue
-
-                    if not resolved or not new_full:
-                        # File not found — only count if not already handled in pre-computation
-                        if '_resolved' not in track:
-                            with _reorganize_lock:
-                                _reorganize_state['skipped'] += 1
-                                _reorganize_state['processed'] += 1
-                                _reorganize_state['errors'].append({
-                                    'track_id': track['id'],
-                                    'title': track_title,
-                                    'error': 'File not found on disk'
-                                })
-                        continue
-
-                    # Skip if already at target
-                    if os.path.normpath(resolved) == os.path.normpath(new_full):
-                        with _reorganize_lock:
-                            _reorganize_state['skipped'] += 1
-                            _reorganize_state['processed'] += 1
-                        continue
-
-                    try:
-                        # Move file
-                        _safe_move_file(resolved, new_full)
-
-                        # Track source→dest directory mapping for post-pass sidecar sweep
-                        src_dir = os.path.dirname(resolved)
-                        dest_dir = os.path.dirname(new_full)
-                        if src_dir not in moved_dirs:
-                            moved_dirs[src_dir] = dest_dir
-
-                        # Move track-level sidecars (same filename stem as audio)
-                        src_stem = os.path.splitext(os.path.basename(resolved))[0]
-                        new_stem = os.path.splitext(os.path.basename(new_full))[0]
-                        for sidecar_ext in ('.lrc', '.nfo', '.txt', '.cue'):
-                            sidecar_src = os.path.join(src_dir, src_stem + sidecar_ext)
-                            if os.path.isfile(sidecar_src):
-                                sidecar_dst = os.path.join(dest_dir, new_stem + sidecar_ext)
-                                try:
-                                    shutil.move(sidecar_src, sidecar_dst)
-                                except Exception:
-                                    pass
-
-                        # Update DB file_path
-                        bg_cursor = bg_conn.cursor()
-                        bg_cursor.execute(
-                            "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (new_full, str(track['id']))
-                        )
-                        bg_conn.commit()
-
-                        with _reorganize_lock:
-                            _reorganize_state['moved'] += 1
-                            _reorganize_state['processed'] += 1
-
-                    except Exception as move_err:
-                        logger.error(f"Reorganize move error for {track_title}: {move_err}")
-                        with _reorganize_lock:
-                            _reorganize_state['failed'] += 1
-                            _reorganize_state['processed'] += 1
-                            _reorganize_state['errors'].append({
-                                'track_id': track['id'],
-                                'title': track_title,
-                                'error': str(move_err)
-                            })
-
-                # Post-pass: sweep source directories for leftover album-level sidecars.
-                # The per-track loop can't reliably move cover.jpg because multiple tracks
-                # share the same source dir — the first track's move may fail silently,
-                # or the file may be in a parent directory. This single pass catches them all.
-                _album_sidecars = ('cover.jpg', 'cover.jpeg', 'cover.png', 'folder.jpg',
-                                   'folder.png', 'front.jpg', 'front.png', 'album.jpg', 'album.png')
-                for src_dir, dest_dir in moved_dirs.items():
-                    if not os.path.isdir(src_dir):
-                        continue
-                    # Check if any audio files remain (don't steal sidecars from a dir that still has tracks)
-                    audio_exts = {'.flac', '.mp3', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.wma'}
-                    has_audio = any(os.path.splitext(f)[1].lower() in audio_exts
-                                    for f in os.listdir(src_dir) if os.path.isfile(os.path.join(src_dir, f)))
-                    if has_audio:
-                        continue
-                    for sidecar in _album_sidecars:
-                        sidecar_src = os.path.join(src_dir, sidecar)
-                        if os.path.isfile(sidecar_src):
-                            sidecar_dst = os.path.join(dest_dir, sidecar)
-                            if not os.path.exists(sidecar_dst):
-                                try:
-                                    shutil.move(sidecar_src, sidecar_dst)
-                                    logger.info(f"[Reorganize] Moved {sidecar} to {dest_dir}")
-                                except Exception as sc_err:
-                                    logger.error(f"[Reorganize] Failed to move {sidecar}: {sc_err}")
-
-                # Clean up empty directories left behind (after sidecars moved)
-                for src_dir in moved_dirs:
-                    try:
-                        _cleanup_empty_directories(transfer_dir, os.path.join(src_dir, '_'))
-                    except Exception:
-                        pass
-
-            except Exception as e:
-                logger.error(f"Reorganize background error: {e}")
-            finally:
-                if bg_conn:
-                    try:
-                        bg_conn.close()
-                    except Exception:
-                        pass
-                with _reorganize_lock:
-                    _reorganize_state['status'] = 'done'
-                    _reorganize_state['current_track'] = ''
-
-        thread = threading.Thread(target=_run_reorganize, daemon=True, name="ReorganizeAlbum")
-        thread.start()
-
-        return jsonify({"success": True, "message": "Reorganization started", "total": len(tracks)})
-
+        result = get_queue().enqueue(
+            album_id=str(album_id),
+            album_title=meta['album_title'],
+            artist_id=meta['artist_id'],
+            artist_name=meta['artist_name'],
+            source=chosen_source,
+        )
+        return jsonify({"success": True, **result})
     except Exception as e:
-        logger.error(f"Reorganize error: {e}")
-        with _reorganize_lock:
-            _reorganize_state['status'] = 'idle'
+        logger.error(f"Reorganize enqueue error: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/library/album/reorganize/status', methods=['GET'])
-def get_reorganize_status():
-    """Poll the status of a running reorganization."""
-    with _reorganize_lock:
-        state = dict(_reorganize_state)
-        state['errors'] = list(_reorganize_state['errors'])
-        return jsonify(state)
+@app.route('/api/library/artist/<artist_id>/reorganize-all', methods=['POST'])
+def reorganize_all_artist_albums(artist_id):
+    """Enqueue every album for an artist. Replaces the old frontend
+    bulk-loop. Each album becomes its own queue item, processed FIFO.
+    Albums already queued or running are deduped silently.
+
+    Body params:
+        source (optional): same pick applied to every album. Per-album
+            overrides aren't supported here — use the per-album modal
+            for that.
+    """
+    try:
+        from core.reorganize_queue import get_queue
+        data = request.get_json() or {}
+        chosen_source = data.get('source') or None
+
+        albums = get_database().get_artist_albums_for_reorganize(artist_id)
+        if not albums:
+            return jsonify({"success": False, "error": "No albums found for this artist"}), 404
+
+        # Apply the user's chosen source to every album, then hand off
+        # to the queue's bulk-enqueue helper which owns the loop+tally.
+        for album in albums:
+            album['source'] = chosen_source
+        result = get_queue().enqueue_many(albums)
+
+        return jsonify({
+            "success": True,
+            "enqueued": result['enqueued'],
+            "already_queued": result['already_queued'],
+            "total_albums": result['total'],
+        })
+    except Exception as e:
+        logger.error(f"Reorganize-all enqueue error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/reorganize/queue', methods=['GET'])
+def reorganize_queue_snapshot():
+    """Snapshot of the reorganize queue — what's running, what's queued,
+    recent completions. Polled by the status panel."""
+    try:
+        from core.reorganize_queue import get_queue
+        return jsonify({"success": True, **get_queue().snapshot()})
+    except Exception as e:
+        logger.error(f"Reorganize queue snapshot error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/reorganize/queue/<queue_id>/cancel', methods=['POST'])
+def reorganize_queue_cancel(queue_id):
+    """Cancel a queued item (running items can't be cleanly cancelled —
+    see the queue module's design rules)."""
+    try:
+        from core.reorganize_queue import get_queue
+        result = get_queue().cancel(queue_id)
+        status_code = 200 if result.get('cancelled') else 409
+        return jsonify({"success": result.get('cancelled', False), **result}), status_code
+    except Exception as e:
+        logger.error(f"Reorganize cancel error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/reorganize/queue/clear', methods=['POST'])
+def reorganize_queue_clear():
+    """Cancel all queued items at once (the running item continues)."""
+    try:
+        from core.reorganize_queue import get_queue
+        cancelled = get_queue().clear_queued()
+        return jsonify({"success": True, "cancelled": cancelled})
+    except Exception as e:
+        logger.error(f"Reorganize clear error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# Wire the reorganize queue worker to its runner at module load. The
+# runner factory lives in :mod:`core.reorganize_runner` so this monolith
+# stays small. Config (paths) is read **per run** inside the closure,
+# so changing your download path in Settings takes effect on the next
+# reorganize without a server restart.
+#
+# The injected callables are wrapped in lambdas because the underlying
+# helpers (``_resolve_library_file_path`` etc.) are defined LATER in
+# this file. Lambdas defer name resolution to call time so module-load
+# import order works regardless of definition order.
+try:
+    from core.reorganize_queue import get_queue as _get_reorganize_queue
+    from core.reorganize_runner import build_runner as _build_reorganize_runner
+    _get_reorganize_queue().set_runner(_build_reorganize_runner(
+        get_database=get_database,
+        resolve_file_path_fn=lambda p: _resolve_library_file_path(p),
+        post_process_fn=lambda *a, **kw: _post_process_matched_download(*a, **kw),
+        cleanup_empty_directories_fn=lambda *a, **kw: _cleanup_empty_directories(*a, **kw),
+        is_shutting_down_fn=lambda: bool(IS_SHUTTING_DOWN),
+        get_download_path=lambda: docker_resolve_path(
+            config_manager.get('soulseek.download_path', './downloads')
+        ),
+        get_transfer_path=lambda: docker_resolve_path(
+            config_manager.get('soulseek.transfer_path', './Transfer')
+        ),
+    ))
+except Exception as _runner_init_err:
+    logger.error(f"Failed to register reorganize queue runner: {_runner_init_err}")
 
 
 # ── Library Issues endpoints ──
@@ -16189,7 +16166,9 @@ def stream_audio():
             response = send_file(file_path, as_attachment=False, mimetype=mimetype)
             response.headers.add('Accept-Ranges', 'bytes')
             response.headers.add('Content-Length', str(file_size))
-            response.headers.add('Cache-Control', 'no-cache')
+            # Override the default static-cache max-age — streaming media
+            # bypasses caching (range requests, mid-track seeks).
+            response.headers['Cache-Control'] = 'no-cache'
             return response
         
     except Exception as e:
@@ -22622,7 +22601,11 @@ def _check_and_remove_from_wishlist(context):
         
         # Try to extract Spotify track ID from various sources in the context
         spotify_track_id = None
-        
+        # Populated lazily by Method 3 or Method 4. Initialized here so Method 4's
+        # `if not wishlist_tracks` guard doesn't UnboundLocalError when Methods 1/2
+        # found nothing and Method 3 never ran (no wishlist_id in track_info).
+        wishlist_tracks = []
+
         # Method 1: Direct track_info with id
         track_info = context.get('track_info', {})
         if track_info.get('id'):
@@ -22914,1488 +22897,6 @@ def check_for_update():
         'latest_sha': latest[:8] if latest else None,
         'is_docker': os.path.exists('/.dockerenv'),
     })
-
-@app.route('/api/version-info', methods=['GET'])
-def get_version_info():
-    """
-    Returns version information and release notes, matching the GUI's VersionInfoModal content.
-    This provides the same data that the GUI version modal displays.
-    """
-    version_data = {
-        "version": SOULSYNC_VERSION,
-        "title": "What's New in SoulSync",
-        "subtitle": f"Version {SOULSYNC_VERSION} — Latest Changes",
-        "sections": [
-            {
-                "title": "Fix Wrong-Artist Tracks Silently Downloading",
-                "description": "A critical bug where searching for a track could silently download a completely different artist's song with the same name",
-                "features": [
-                    "• Example: searching 'Maduk — Leave A Light On' on Tidal was downloading Tom Walker's unrelated song of the same name, then embedding Maduk's metadata into Tom Walker's audio",
-                    "• Root cause 1: candidate artist gate used `< 0.4` similarity but Maduk/Tom Walker scored exactly 0.400, slipping past the fencepost — raised to `< 0.5`",
-                    "• Root cause 2: AcoustID verification returned SKIP (accept) instead of FAIL (quarantine) when title matched but artist was clearly different — now FAILs when artist similarity is below 0.3",
-                    "• Preserves SKIP for the ambiguous 0.3–0.6 range (covers, collabs, formatting differences) so legitimate tracks aren't falsely quarantined",
-                    "• Both pre-download candidate validation AND post-download verification are now fixed — defense in depth",
-                ],
-            },
-            {
-                "title": "Tidal Search Falls Back on Long Queries",
-                "description": "Tidal's search chokes on long remix-credit queries — now retries with progressively-shortened variants when the original returns 0 results",
-                "features": [
-                    "• Example: 'maduk transformations remixed fire away fred v remix' returned 0; now falls back to shorter queries until Tidal finds the track",
-                    "• Up to 4 shortened variants tried, capped total 5 requests, 100ms between attempts",
-                    "• Qualifier-safe: Live/Remix/Acoustic/Extended searches only accept fallback results that still contain the qualifier — studio version never replaces a '(Live)' request",
-                    "• Returns empty if no variant preserves qualifiers — same outcome as before",
-                ],
-            },
-            {
-                "title": "Manual Discovery Fixes Persist Across Restart",
-                "description": "When you manually fix a discovery match, the fix is now saved under your active metadata source instead of always 'spotify' — so Deezer/iTunes/Discogs/Hydrabase users' fixes actually survive restart and re-scan",
-                "features": [
-                    "• Affected Tidal, Deezer, Spotify Public, YouTube, and Discovery Pool manual fixes",
-                    "• Symmetric with how the auto-discovery worker saves — no more mismatch",
-                    "• Existing Spotify-primary users unaffected (the hardcoded value matched their source)",
-                ],
-            },
-            {
-                "title": "Watchlist Content Filters Fixed",
-                "description": "Global Override settings and live-version detection now behave the way the UI implies",
-                "features": [
-                    "• Scheduled auto-watchlist now honors Watchlist → Global Override (was bypassing it and using per-artist defaults)",
-                    "• 'Live' detection tightened — no more false positives on titles like 'What We Live For' or 'Live Forever'",
-                    "• Same fix applies to the Library Maintenance Live/Commentary Cleaner",
-                    "• Still catches (Live), - Live, Live at/from/in/on/version/session/recording, Unplugged, In Concert",
-                ],
-            },
-            {
-                "title": "Discography Backfill",
-                "description": "New maintenance job that fills gaps in your library — scans each artist's full discography and finds what you're missing",
-                "features": [
-                    "• Scans each artist in your library against metadata source discographies",
-                    "• Creates findings for missing tracks — review and click 'Add to Wishlist' to queue downloads",
-                    "• Respects all content filters (live, remix, acoustic, compilation, instrumental)",
-                    "• Release type filters (album, EP, single) with configurable defaults",
-                    "• Optional 'auto-add to wishlist' setting — create findings AND push to wishlist in one pass",
-                    "• 3-option fix prompt (Add to Wishlist / Just Clear / Cancel) for manual review",
-                    "• Batched in-memory library matching — same fast path the Library pages use",
-                    "• Opt-in, disabled by default — runs weekly, processes up to 50 artists per run",
-                    "• Rate-limited to avoid hammering metadata APIs",
-                ],
-            },
-            {
-                "title": "Repair 'Run Now' Honored While Paused",
-                "description": "Force-running a repair job no longer stalls forever when the master repair worker is paused",
-                "features": [
-                    "• Jobs queued via 'Run Now' run to completion even if the master worker is paused",
-                    "• Fixes silent stalls where Discography Backfill logged 'scanning 50 artists' then did nothing",
-                    "• Master-pause still blocks scheduled runs — this only affects explicit user-triggered runs",
-                ],
-            },
-            {
-                "title": "Multi-Artist Tagging",
-                "description": "Enhanced control over how multiple artists are written to audio file tags",
-                "features": [
-                    "• Configurable artist separator: comma, semicolon, or slash",
-                    "• Multi-value ARTISTS tag for Navidrome/Jellyfin multi-artist linking",
-                    "• 'Move featured artists to title' mode — primary artist in ARTIST tag, others as (feat. ...) in title",
-                    "• All opt-in with defaults matching current behavior",
-                ],
-            },
-            {
-                "title": "Enriched Downloads Page",
-                "description": "Download cards now show rich metadata instead of just filenames",
-                "features": [
-                    "• Album artwork thumbnail on each download card",
-                    "• Artist name, album name, and source badge",
-                    "• Quality badge appears after post-processing",
-                    "• Falls back gracefully for transfers without metadata context",
-                ],
-            },
-            {
-                "title": "Template Variable Delimiters",
-                "description": "Use ${var} syntax to append literal text to template variables",
-                "features": [
-                    "• ${albumtype}s produces 'Albums', 'Singles', 'EPs'",
-                    "• Both $var and ${var} syntaxes work in all templates",
-                    "• Validation updated to accept delimited variables",
-                ],
-            },
-            {
-                "title": "Reorganize All Albums",
-                "description": "Bulk reorganize all albums for an artist from the enhanced library view",
-                "features": [
-                    "• New 'Reorganize All' button in the artist header",
-                    "• Processes albums sequentially with progress toasts",
-                    "• Continues on error — one failed album doesn't block the rest",
-                    "• Uses the same template and endpoint as per-album reorganize",
-                ],
-            },
-            {
-                "title": "SoulSync Standalone Library",
-                "description": "Use SoulSync without Plex, Jellyfin, or Navidrome — manage your library directly",
-                "features": [
-                    "• New 'Standalone' server option in Settings → Connections",
-                    "• Downloads and imports write artist/album/track to the library database immediately",
-                    "• Pre-populated enrichment IDs (Spotify, Deezer, MusicBrainz) — workers skip re-discovery",
-                    "• Deep scan finds untracked files in Transfer → moves to Staging for processing",
-                    "• Deep scan removes stale DB records when files are deleted from disk",
-                    "• Sync page and sync buttons hidden automatically in standalone mode",
-                    "• Full library page, artist detail, discography, and enhanced view all work standalone",
-                ],
-                "usage_note": "Go to Settings → Connections and click the 'Standalone' button. No media server needed."
-            },
-            {
-                "title": "Auto-Import",
-                "description": "Background import folder watcher that automatically identifies and imports music into your library",
-                "features": [
-                    "• Recursive scan — any folder depth (Artist/Album/tracks, Album/tracks, loose files)",
-                    "• Single file support — loose audio files identified via tags, filename, or AcoustID",
-                    "• Tag-based identification preferred over weak metadata matches (85% confidence for tagged files)",
-                    "• AcoustID fingerprinting fallback for untagged or ambiguous files",
-                    "• Stats bar, filter pills (All/Review/Imported/Failed), Scan Now, Approve All, Clear History",
-                    "• Expandable track match details with per-track confidence scores",
-                    "• Race condition fix prevents duplicate processing during multi-track albums",
-                ],
-                "usage_note": "Enable on the Import page Auto tab. Set your import folder in Settings."
-            },
-            {
-                "title": "Wishlist Nebula",
-                "description": "Wishlist redesigned as an interactive artist orb visualization",
-                "features": [
-                    "• Each artist is a glowing orb with their photo — album fans and single moons orbit around them",
-                    "• Click orbs to expand and see albums/singles, download directly from the nebula",
-                    "• Processing state shows live progress with spinning ring animation",
-                    "• Stats strip at top shows total artists, albums, singles, and tracks",
-                ],
-                "usage_note": "Click Wishlist in the sidebar to see the Nebula view."
-            },
-            {
-                "title": "Automation Group Management",
-                "description": "Organize and manage your automation groups with full control",
-                "features": [
-                    "• Rename, delete, and bulk-toggle automation groups from group headers",
-                    "• Drag-and-drop automations between groups to reorganize",
-                    "• Delete confirmation dialog with group name and automation count",
-                ],
-                "usage_note": "Right-click or use the action buttons on group headers in the Automations page."
-            },
-            {
-                "title": "Bidirectional Artist Sync & Server Playlists",
-                "description": "Artist sync now goes both ways, and server playlists show full coverage",
-                "features": [
-                    "• Artist Sync pulls new content from your media server AND removes stale library entries",
-                    "• Deep scan mode fetches full metadata for newly discovered tracks",
-                    "• Server playlist view shows all playlists with clear synced vs unsynced visual separation",
-                ],
-            },
-            {
-                "title": "Provider-Agnostic Discovery",
-                "description": "Discovery features work with any configured metadata source instead of requiring Spotify",
-                "features": [
-                    "• Similar artist matching, discovery pool, and incremental updates use source priority",
-                    "• Falls back through Spotify, iTunes, and Deezer in configured order",
-                    "• MusicMap URL encoding fixed for artists with special characters",
-                    "• Freshness check simplified to age-based — backfill handles missing IDs separately",
-                ],
-            },
-            {
-                "title": "Dashboard & Navigation",
-                "description": "Dashboard improvements and sidebar navigation enhancements",
-                "features": [
-                    "• Library Status card on Dashboard — shows server state, track counts, scan buttons",
-                    "• Tools page in sidebar — all maintenance tools moved from Dashboard modal",
-                    "• Watchlist and Wishlist promoted to full sidebar pages with live count badges",
-                    "• AcoustID scanner scans full library with actionable fix options (retag, redownload, delete)",
-                ],
-            },
-            {
-                "title": "MusicBrainz & Metadata Fixes",
-                "description": "Critical tag embedding fix and Picard-style album consistency",
-                "features": [
-                    "• Fix: source ID tags (Spotify, MusicBrainz, Deezer, AudioDB) were silently skipped on every download — now embed correctly",
-                    "• Picard-style release preference scoring prevents Navidrome album splits",
-                    "• Source tags wiped when metadata enhancement is skipped or fails",
-                    "• Spotify API no longer called when Deezer/iTunes is the configured primary source",
-                ],
-            },
-            {
-                "title": "Downloads & Soulseek Improvements",
-                "description": "Better download management, search accuracy, and queue control",
-                "features": [
-                    "• Downloads batch panel — color-coded batch cards with progress, cancel, expand, and 7-day history",
-                    "• Soulseek search queries now include album name — reduces wrong-artist downloads",
-                    "• Reject Soulseek results from Various Artists/VA/Unknown Artist folders",
-                    "• Clearing wishlist now cancels the active wishlist download batch",
-                    "• Album delete with 'Delete Files Too' option on enhanced library page",
-                    "• Fix download modal freezing mid-download — M3U auto-save was exhausting server threads",
-                    "• Fix Unknown Artist when adding playlist tracks to wishlist",
-                    "• Fix slskd timeout spam when Soulseek is not the active download source",
-                ],
-            },
-            {
-                "title": "Recent Fixes",
-                "description": "Bug fixes from recent releases and community reports",
-                "features": [
-                    "• Fix watchlist scan false failures — empty discography no longer reported as error",
-                    "• Fix deezer_artist_id column error on enhanced library sync",
-                    "• Fix wishlist button intermittently not navigating to page",
-                    "• Fix worker orb tooltips rendering behind dashboard content",
-                    "• Fix OAuth callback port hardcoding — custom ports now respected",
-                    "• Fix allow duplicates setting not saving",
-                    "• Fix wishlist dropping cross-album tracks when duplicates enabled",
-                    "• Fix replace lower quality setting not persisting",
-                    "• Fix Spotify enrichment worker infinite loop on pre-matched artists",
-                    "• Reject Qobuz 30-second sample/preview downloads",
-                    "• Fix library page crash on All filter — non-string soul_id broke card rendering",
-                    "• Auto Wing It fallback for failed discovery — unmatched tracks download via Soulseek with raw metadata",
-                    "• Lidarr download source now production-ready — full orchestrator integration",
-                    "• Fix album track lookup hardcoded to Spotify — now uses configured primary source",
-                    "• Fix M3U showing all tracks as missing — regenerate with real paths after post-processing",
-                    "• Fix AcoustID retag not writing corrected tags to audio file",
-                    "• Fix wishlist albums cycle stuck at 1 concurrent worker instead of configured value",
-                    "• Fix downloads badge dropping to 300 after opening Downloads page",
-                    "• Fix server playlist Find & Add inserting at wrong position on Plex",
-                    "• Smarter Fix modal results — standard album versions sorted above live/remix/cover/soundtrack variants",
-                    "• Unmatch discovery tracks — red ✕ button to remove bad matches from playlist discovery",
-                    "• Customizable music video naming — path template with $artist, $title, $year variables",
-                    "• Fix soulseek log spam when not configured as download source",
-                ],
-            },
-            {
-                "title": "Earlier in v2.3",
-                "description": "Major features from earlier in this release cycle",
-                "features": [
-                    "• Centralized Downloads page with live-updating list and filter pills",
-                    "• First-Run Setup Wizard — 7-step guided configuration",
-                    "• Music Videos — search and download from YouTube",
-                    "• Inbound Music Request API for external tools (Discord bots, Home Assistant)",
-                    "• Lidarr download source (development) — 7th source for Usenet/torrent via Lidarr",
-                    "• Graceful shutdown — all workers respond to shutdown signals immediately",
-                    "• Unknown Artist prevention with 3-tier metadata fallback",
-                    "• Deezer multi-artist tagging using contributors field",
-                    "• Artist Map — Watchlist Constellation, Genre Map, and Artist Explorer canvas modes",
-                    "• Discogs integration — enrichment worker, fallback source, enhanced search tab",
-                    "• Wing It mode, Global Search Bar, Redesigned Notifications",
-                    "• Server Playlist Manager, Sync History Dashboard, Playlist Explorer",
-                    "• Enhanced Library Manager with inline tag editing and write-to-file",
-                    "• Automation Signals, Multi-Source Search Tabs, Rich Artist Profiles",
-                ],
-            },
-        ]
-    }
-    return jsonify(version_data)
-
-_OLD_V22_NOTES = """
-            {
-                "title": "Wing It — Download or Sync Without Discovery",
-                "description": "Bypass metadata discovery and use raw track names directly",
-                "features": [
-                    "• Wing It button on all discovery modals and ListenBrainz Discover page cards",
-                    "• Choose Download or Sync from a compact dropdown — no extra dialogs",
-                    "• Download: sends raw artist/title to the download engine with full post-processing",
-                    "• Sync: creates playlist on media server by matching raw names against library",
-                    "• Failed tracks are NOT added to wishlist — clean wing-it behavior",
-                    "• Live sync progress displayed inline just like normal sync",
-                    "• Download creates a bubble on the dashboard for progress tracking"
-                ],
-                "usage_note": "Click the Wing It button next to Start Discovery or Download Missing in any playlist modal."
-            },
-            {
-                "title": "Global Search Bar — Search From Anywhere",
-                "description": "Spotlight-style search bar accessible from every page",
-                "features": [
-                    "• Persistent search bar at the bottom of the screen — faded when idle, expands on focus",
-                    "• Full enhanced search parity — artists, albums, singles/EPs, tracks with source tabs",
-                    "• Keyboard shortcuts: / or Ctrl+K to focus, Escape to close",
-                    "• Click artists to navigate to their detail page, albums to open download modal",
-                    "• In Library badges and green play buttons for tracks you already own",
-                    "• Source tabs (Spotify, iTunes, Deezer) with result counts",
-                    "• Results collapse on navigation, search bar stays visible"
-                ],
-                "usage_note": "Press / or Ctrl+K from any page, or click the search bar at the bottom of the screen."
-            },
-            {
-                "title": "Redesigned Notification System",
-                "description": "Modern compact toasts with notification history and bell button",
-                "features": [
-                    "• Compact pill-shaped toasts in the bottom-right — one at a time, auto-dismiss after 3.5s",
-                    "• Notification bell button with unread badge counter next to the help button",
-                    "• Click the bell to open the notification history panel with the last 50 notifications",
-                    "• Each notification shows type icon, message, relative timestamp, and optional 'Learn more' link",
-                    "• Unread dot indicators — panel marks all as read when opened",
-                    "• Clear All button to empty notification history",
-                    "• Click any toast to dismiss it immediately"
-                ]
-            },
-            {
-                "title": "Track Redownload — Fix Mismatched Downloads",
-                "description": "Replace wrong downloads with the correct version using manual source selection",
-                "features": [
-                    "• Redownload button (↻) on each track in the enhanced library view",
-                    "• Step 1: All metadata sources (Spotify, iTunes, Deezer) searched in columns side-by-side",
-                    "• Step 2: All download sources searched simultaneously — results stream in as each source responds",
-                    "• Step 3: Download with real progress bar, old file deleted, DB path updated automatically",
-                    "• Full pipeline parity — track number, album context, metadata tagging all work correctly",
-                    "• Source Info (ℹ) button shows where each track was downloaded from",
-                    "• Download provenance tracking — every download's source is recorded for future reference",
-                    "• Smart Delete: choose to remove from library only or delete the file from disk too",
-                    "• Download Blacklist: block specific sources from the Source Info popover — blacklisted sources skipped in all future downloads",
-                    "• Blacklist viewer on dashboard Tools section with remove capability"
-                ],
-                "usage_note": "In the enhanced library view, click ↻ to redownload, ℹ for source info, or to delete."
-            },
-            {
-                "title": "Spotify API Rate Limit Improvements",
-                "description": "Reduced Spotify API usage through caching and smart worker management",
-                "features": [
-                    "• get_artist_albums now cached — discography views, completion badges hit cache instead of API",
-                    "• Watchlist scans bypass cache with skip_cache flag to always detect new releases",
-                    "• All 5 discovery workers (Tidal, YouTube, ListenBrainz, Beatport, playlist search) now use cached search methods",
-                    "• Eliminated duplicate API calls — discovery workers were calling sp.search() AND search_tracks() per query",
-                    "• Auth probe cache TTL increased from 5 to 15 minutes — reduces /v1/me calls by 66%",
-                    "• Spotify, Last.fm, and Genius enrichment workers auto-pause during active downloads to preserve rate limit headroom",
-                    "• Dashboard shows 'Yielding for downloads' when workers are auto-paused"
-                ]
-            },
-            {
-                "title": "Additional Fixes",
-                "description": "Bug fixes and quality-of-life improvements",
-                "features": [
-                    "• $discnum template variable — unpadded disc number for multi-disc album path templates",
-                    "• Media player no longer collapses in sidebar on short viewports and mobile",
-                    "• Playlist Explorer controls redesigned — prominent Explore button, icons, polish",
-                    "• YouTube '- Topic' suffix stripped from auto-generated channel names (#231)",
-                    "• Cover Art Archive album art now opt-in via Settings toggle (#232)",
-                    "• cover.jpg now correctly uses Cover Art Archive when enabled (was silently failing)",
-                    "• Genius artist search returns multiple results for manual matching (#233)",
-                    "• Genius API interval increased from 1.5s to 2s to reduce 429 rate limits",
-                    "• MusicBrainz cache now visible in Cache Browser with browse, clear, and clear-failed-only options",
-                    "• Cache Health popup shows MusicBrainz alongside other sources, 'Failed Lookups' clarified as MB-specific",
-                    "• Block artists from discovery — hover any track in a discovery playlist and click to permanently exclude that artist",
-                    "• Configurable concurrent downloads (1-10) — Settings → Downloads, Soulseek albums stay at 1",
-                    "• Streaming search sources — Apple Music results load progressively instead of blocking for 9+ seconds",
-                    "• API Rate Monitor — real-time speedometer gauges for all services on Dashboard, click for 24h history",
-                    "• Spotify pagination throttled — prevents 429 bans during watchlist scans with large discographies",
-                    "• Import now triggers full scan → DB update chain through automation engine",
-                    "• Track source-info and redownload work with Jellyfin string IDs (#237)",
-                    "• Clear Match button to undo wrong manual matches (#236)",
-                    "• Tidal auth no longer crashes when download orchestrator not initialized",
-                    "• Download orchestrator hardened — one failing client no longer kills all download sources",
-                    "• Webhook THEN action — send HTTP POST to any URL (Gotify, Home Assistant, Slack, n8n) from automations",
-                    "• M3U auto-export now skips albums — only generates for playlists (#241)",
-                    "• Copy Debug Info includes API call rates, Spotify rate limit state, and download client failures",
-                    "• Discogs integration — new metadata source with enrichment worker, fallback source, search tabs, watchlist, cache",
-                    "• Discogs enriches: genres/styles (400+ taxonomy), labels, catalog numbers, bios, community ratings",
-                    "• Track provenance preserved through lossy transcoding with bit depth/sample rate/bitrate (#245)",
-                    "• spotify_public playlists use full API when authenticated, no longer overwrite discovery data",
-                    "• Watchlist backfills all sources (Spotify, iTunes, Deezer, Discogs) at start of every scan",
-                    "• Collectors edition album matching for library completion checks",
-                    "• Mobile responsive styles for rate monitor, notifications, and global search"
-                ]
-            },
-            {
-                "title": "Server Playlist Manager — Compare & Fix Matches",
-                "description": "Review and fix track matches between your source playlists and media server",
-                "features": [
-                    "• New Server Playlists tab (default on Sync page) — shows server playlists that match your mirrored playlists",
-                    "• Dual-column comparison view — source tracks on the left, server tracks on the right with match status",
-                    "• Click any track to highlight and auto-scroll to its pair in the other column",
-                    "• Find & Add — click empty slots to search your library and add tracks at the correct position",
-                    "• Swap — replace a matched track with a different version from your library",
-                    "• Remove — delete incorrect tracks from server playlists with confirmation",
-                    "• Title similarity percentage shown on each match (exact, high, or fuzzy)",
-                    "• Disambiguation modal when multiple mirrored playlists share the same name",
-                    "• Album art shown for source tracks, server tracks, and search results",
-                    "• Smart matching — exact title match first, then fuzzy artist+title match (≥75% threshold)",
-                    "• Works with Plex, Jellyfin, and Navidrome"
-                ],
-                "usage_note": "Navigate to Sync → Server Playlists tab. Click any playlist card to open the comparison editor."
-            },
-            {
-                "title": "Sync History Dashboard with Per-Track Details",
-                "description": "Dashboard shows recent syncs as visual cards with full per-track match data",
-                "features": [
-                    "• Recent Syncs section on dashboard with scrolling cards showing match percentage and health indicators",
-                    "• Click any sync card to see per-track match details — status, confidence score, album art, download/wishlist status",
-                    "• Filter by All, Matched, Unmatched, or Downloaded tracks in the detail modal",
-                    "• Per-track data cached for all sync types — playlist-to-server, download missing tracks, wishlist processing",
-                    "• Auto-refreshes every 30 seconds when viewing dashboard"
-                ]
-            },
-            {
-                "title": "Fix Japanese Song Searches Producing Gibberish",
-                "description": "CJK text no longer mangled by unidecode in Soulseek search queries",
-                "features": [
-                    "• Japanese kanji, hiragana, katakana, and Korean hangul preserved in search queries",
-                    "• unidecode was converting Japanese to Chinese pinyin (e.g. 命の灯火 → 'tvanimedei')",
-                    "• Soulseek users typically share files with original CJK characters in filenames"
-                ]
-            },
-            {
-                "title": "Fix Partial Name Matching False Positives (#225)",
-                "description": "Track ownership check no longer falsely matches prefix/suffix variations",
-                "features": [
-                    "• 'Believe' no longer matches 'Believe In Me' — length ratio penalty prevents partial title matches",
-                    "• Titles differing in length by more than 30% get their similarity score penalized proportionally",
-                    "• Exact matches and cleaned matches (e.g. remastered tags stripped) are unaffected"
-                ]
-            },
-            {
-                "title": "Fix Pipeline Stops When Metadata Match Fails (#224)",
-                "description": "Playlist sync no longer drops tracks that failed iTunes/Apple Music discovery",
-                "features": [
-                    "• Tracks that fail metadata discovery now continue through the pipeline using original playlist data",
-                    "• Track name and artist from the source playlist are used for Soulseek search when discovery fails",
-                    "• Only tracks with completely missing name/artist are skipped (not tracks that simply failed matching)"
-                ]
-            },
-            {
-                "title": "Playlist Explorer — Visual Discovery Tree",
-                "description": "Use playlists as seeds to discover full albums and discographies",
-                "features": [
-                    "• New Explorer page with interactive tree visualization",
-                    "• Select any mirrored playlist and choose Albums or Discographies mode",
-                    "• Tree builds progressively — artist nodes appear as Spotify data streams in",
-                    "• Click artists to expand and see all their albums with art, year, and track counts",
-                    "• Select individual albums or entire branches, then add to wishlist in one click",
-                    "• Albums mode shows only albums containing playlist tracks; Discographies shows everything",
-                    "• SVG connecting lines with animated draw-in effect",
-                    "• 'In Library' and 'In Playlist' badges on album cards"
-                ]
-            },
-            {
-                "title": "Fix .LRC Files Written Without Timestamps",
-                "description": "Plain lyrics now saved as .txt instead of invalid .lrc files",
-                "features": [
-                    "• Synced (timestamped) lyrics → .lrc file — valid format for Plex, Navidrome, Jellyfin",
-                    "• Plain (unsynced) lyrics → .txt file — no longer written with incorrect .lrc extension",
-                    "• Lyrics still embedded in audio file tags regardless of type (players can display both)",
-                    "• File move/rename operations updated to handle both .lrc and .txt sidecars"
-                ]
-            },
-            {
-                "title": "Fix Collaborative Album Artist Not Applied to Singles (#215)",
-                "description": "Single path template now respects the First Listed Artist setting",
-                "features": [
-                    "• Single downloads now include structured artists list for collab artist extraction",
-                    "• $albumartist variable now works in single and playlist path templates",
-                    "• Settings UI updated to show $albumartist as available for single and playlist templates"
-                ]
-            },
-            {
-                "title": "Fix Enrichment Overwriting Manual Matches (#221)",
-                "description": "Enriching an entity that was manually matched no longer reverts the status to not_found",
-                "features": [
-                    "• Genius and AudioDB workers now check for existing service IDs before searching by name",
-                    "• Manual matches are used for direct API lookup instead of re-searching by name",
-                    "• If the direct lookup succeeds, metadata is enriched and match status is preserved",
-                    "• If the direct lookup fails, the manual match status is preserved (not overwritten to not_found)",
-                    "• Added AudioDB lookup-by-ID methods for artist, album, and track"
-                ]
-            },
-            {
-                "title": "Fix Spotify OAuth ERR_EMPTY_RESPONSE in Docker (#220)",
-                "description": "OAuth callback server hardened for Docker/SSH tunnel setups",
-                "features": [
-                    "• Top-level error handler ensures an HTTP response is always sent (no more ERR_EMPTY_RESPONSE)",
-                    "• All callback logging now goes to app.log (was only in Docker stdout before)",
-                    "• Health check at http://localhost:8888/ to verify the callback server is running",
-                    "• Startup logs the actual bind address for diagnosing port conflicts",
-                    "• Port-in-use errors now logged clearly with explanation"
-                ]
-            },
-            {
-                "title": "Show All Services on Dashboard (#219)",
-                "description": "Dashboard now shows connection status for all external services, not just the core three",
-                "features": [
-                    "• Enrichment services shown as color-coded chips below core service cards",
-                    "• API call counts per service: 1-hour and 24-hour windowed totals shown on each chip",
-                    "• Spotify chip includes daily budget bar (used/3000) with color-coded fill",
-                    "• Unconfigured services show dashed border — click to jump directly to their Settings section",
-                    "• All configurable services clickable — navigates to Settings → Connections and scrolls to the service",
-                    "• Spotify card always labeled 'Spotify' — no longer confusingly switches to 'Apple Music'",
-                    "• Fallback state (using iTunes/Deezer) shown with amber indicator when Spotify is not connected"
-                ]
-            },
-            {
-                "title": "Add Qobuz to Connections Tab (#218)",
-                "description": "Qobuz credentials now available on the Connections tab for metadata enrichment",
-                "features": [
-                    "• New Qobuz section on Settings → Connections tab for enrichment auth",
-                    "• Users can connect Qobuz for metadata enrichment regardless of download source",
-                    "• Auth status syncs between Connections and Downloads tabs"
-                ]
-            },
-            {
-                "title": "Fix Enrichment Widget Showing 'Running' When Rate Limited",
-                "description": "Enrichment tooltip now shows Rate Limited or Daily Limit Reached instead of stuck on Running",
-                "features": [
-                    "• Shows 'Rate Limited' with countdown when Spotify rate limit is active",
-                    "• Shows 'Daily Limit Reached' with reset time when daily budget is exhausted",
-                    "• Shows 'Waiting for next item...' instead of blank when no current item"
-                ]
-            },
-            {
-                "title": "Metadata Cache Maintenance",
-                "description": "The cache evictor now runs four maintenance phases to keep the metadata cache clean",
-                "features": [
-                    "• Input validation prevents junk entities (Unknown Artist, empty names) from being cached",
-                    "• Junk cleanup removes existing placeholder entries from the cache",
-                    "• Orphan cleanup removes search results pointing to deleted entities",
-                    "• MusicBrainz null cleanup removes failed lookups after 30 days (was 90) so they get retried",
-                    "• Health stats available in the repair dashboard"
-                ]
-            },
-            {
-                "title": "Fix Wishlist Download Selection Ignoring Checkboxes",
-                "description": "Download Selection now respects which tracks are checked in the wishlist overview",
-                "features": [
-                    "• Selected track IDs are collected before closing the overview modal",
-                    "• Only checked tracks are sent to the download analysis board",
-                    "• If nothing is checked, downloads the full category (same as before)"
-                ]
-            },
-            {
-                "title": "Fix Tidal OAuth Redirect URI in Docker",
-                "description": "Tidal OAuth now uses the configured redirect URI instead of the Docker container hostname",
-                "features": [
-                    "• Respects the redirect URI set in Settings instead of overriding with request hostname",
-                    "• Falls back to dynamic host detection only if no redirect URI is configured",
-                    "• Fixes Tidal authentication failing in Docker due to internal hostname in OAuth URL"
-                ]
-            },
-            {
-                "title": "High-Resolution Cover Art from Cover Art Archive",
-                "description": "Album art now sourced from Cover Art Archive when available — often 1200x1200+ original quality",
-                "features": [
-                    "• Tries Cover Art Archive first using MusicBrainz release ID (full resolution)",
-                    "• Falls back to Spotify/iTunes/Deezer URL (640x640) if CAA unavailable",
-                    "• Source ID embedding now runs before art embedding to make release ID available"
-                ]
-            },
-            {
-                "title": "Embedded Lyrics in Audio Files",
-                "description": "Lyrics are now embedded directly in audio file tags alongside the .lrc sidecar file",
-                "features": [
-                    "• Lyrics embedded as USLT (MP3), lyrics (FLAC/OGG), or ©lyr (M4A) tags",
-                    "• Navidrome, Jellyfin, and Plex can now display lyrics without .lrc file support",
-                    "• .lrc sidecar files are still created for compatibility with other players"
-                ]
-            },
-            {
-                "title": "Fix AcoustID False Positives for Non-English Tracks",
-                "description": "AcoustID no longer quarantines correct files when titles are in different languages",
-                "features": [
-                    "• High-confidence fingerprint matches (95%+) now SKIP instead of FAIL when title/artist don't match",
-                    "• Prevents Japanese, Chinese, Korean, and other non-Latin tracks from being falsely quarantined",
-                    "• Audio fingerprint confirms the recording is correct — metadata mismatch is just a language difference"
-                ]
-            },
-            {
-                "title": "Fix Soulseek Junk Tags Surviving Post-Processing",
-                "description": "Tags from Soulseek source files are now wiped to disk immediately, before metadata enhancement",
-                "features": [
-                    "• Clears and saves tags before any API calls or metadata extraction",
-                    "• If enhancement fails, file has clean empty tags instead of inconsistent junk",
-                    "• Fixes album fragmentation in Navidrome/Jellyfin/Plex caused by partial MusicBrainz data",
-                    "• Happy path unchanged — full metadata still written on success"
-                ]
-            },
-            {
-                "title": "Watch All Unwatched Preview Modal",
-                "description": "The Watch All Unwatched button now opens a modal showing exactly which artists will be added",
-                "features": [
-                    "• Preview list shows all eligible artists with images, track counts, and matched sources",
-                    "• Clear separation of eligible vs ineligible artists (no external ID)",
-                    "• Collapsible section explains why some artists can't be added yet",
-                    "• Confirm before adding — no more silent 'Added 0' surprises",
-                    "• Results summary shown after completion"
-                ]
-            },
-            {
-                "title": "Fix Watch All Unwatched Skipping Deezer Artists",
-                "description": "Watch All Unwatched now supports Deezer as an ID source",
-                "features": [
-                    "• Added Deezer ID support to the bulk watchlist add flow",
-                    "• Source detection based on actual ID field used instead of numeric heuristic",
-                    "• Fallback chain: active source first, then Spotify, iTunes, Deezer"
-                ]
-            },
-            {
-                "title": "Fix Library Maintenance Path Fixes Failing Silently",
-                "description": "Path mismatch fixes now use fresh config and report errors to the UI",
-                "features": [
-                    "• Output folder path is re-read from config before each fix attempt",
-                    "• Fix failure reasons are now shown in the toast notification",
-                    "• Bulk fix failures are logged individually with finding ID and error details"
-                ]
-            },
-            {
-                "title": "Fix Spotify Manual Match Storing Wrong IDs",
-                "description": "Manual match modals no longer store iTunes/Deezer IDs in Spotify ID columns",
-                "features": [
-                    "• Detects actual provider from result IDs — Spotify IDs are alphanumeric, iTunes/Deezer are numeric",
-                    "• Match button now stores IDs in the correct service column (itunes_artist_id vs spotify_artist_id)",
-                    "• Results show provider label when falling back (e.g. 'ID: 312095 (itunes)')",
-                    "• Fixes broken Spotify links on artist pages caused by stored iTunes IDs"
-                ]
-            },
-            {
-                "title": "Spotify Enrichment Daily Budget",
-                "description": "The background enrichment worker now caps itself at 3,000 items per day to prevent rate limit bans",
-                "features": [
-                    "• Worker-only daily budget — user-initiated searches, playlist operations, etc. are unaffected",
-                    "• Counter resets automatically at midnight each day",
-                    "• Worker sleeps when budget is exhausted and resumes the next day",
-                    "• Budget status exposed in the enrichment worker dashboard widget"
-                ]
-            },
-            {
-                "title": "Deezer Download Source",
-                "description": "Download music directly from Deezer with ARL authentication",
-                "features": [
-                    "• New download source: Deezer joins Soulseek, YouTube, Tidal, Qobuz, and HiFi",
-                    "• FLAC lossless, MP3 320, and MP3 128 with automatic quality fallback",
-                    "• ARL token authentication — paste from browser cookies, test connection in Settings",
-                    "• Full hybrid mode support — use Deezer as primary, fallback, or in any priority order",
-                    "• Blowfish CBC decryption handles Deezer's encrypted streams transparently",
-                    "• AcoustID verification automatically skipped for Deezer (and Tidal/Qobuz/HiFi) — trusted API sources"
-                ]
-            },
-            {
-                "title": "Cache-Powered Discovery",
-                "description": "Five new discover sections mined from your metadata cache — zero API calls",
-                "features": [
-                    "• Undiscovered Albums: albums by your most-played artists that aren't in your library",
-                    "• New In Your Genres: recently released albums matching your top genres",
-                    "• From Your Labels: popular albums on labels already in your library",
-                    "• Deep Cuts: low-popularity tracks from artists you listen to — find the hidden gems",
-                    "• Genre Explorer: genre landscape pills with artist counts — tap to deep dive",
-                    "• All data sourced from local metadata cache — instant, no API rate limits"
-                ]
-            },
-            {
-                "title": "Genre Deep Dive Modal",
-                "description": "Tap any genre pill to explore artists, tracks, and albums in that genre",
-                "features": [
-                    "• Artists section with scaled avatars — top artist gets largest, 'In Library' badges",
-                    "• Click any artist → navigates directly to their page on the Artists tab",
-                    "• Popular tracks list with album art, duration, click to open album download modal",
-                    "• Albums carousel with 'In Library' badges and full download flow on click",
-                    "• Related genres pills — click to seamlessly switch to a sibling genre",
-                    "• Header shows counts: '12 artists · 15 tracks · 20 albums'",
-                    "• Accent gradient header with animated light sweep"
-                ]
-            },
-            {
-                "title": "Database Storage Visualization",
-                "description": "See how your database space is distributed across tables",
-                "features": [
-                    "• Donut chart on Stats page showing storage breakdown by table",
-                    "• Uses SQLite dbstat for real byte sizes, falls back to row counts",
-                    "• Top 8 tables shown individually, rest grouped as 'Other'",
-                    "• Center label shows total database file size"
-                ]
-            },
-            {
-                "title": "Library Page Performance",
-                "description": "Library artist grid loads significantly faster with smoother animations",
-                "features": [
-                    "• innerHTML batch rendering replaces per-card DOM manipulation — near-instant grid population",
-                    "• Database query split into 3 steps: paginate first, then batch-fetch counts for visible page only",
-                    "• Event delegation — single click listener instead of 75+ individual handlers",
-                    "• Staggered card fade-in animation on page load"
-                ]
-            },
-            {
-                "title": "Per-Artist Enrichment Rings",
-                "description": "See metadata coverage for each artist on their detail page",
-                "features": [
-                    "• SVG ring indicators for all 9 enrichment services below the album/EP/singles bars",
-                    "• Rings animate on page load with staggered fill-in effect",
-                    "• Hover glow in each service's brand color",
-                    "• Stats page enrichment coverage also expanded to all 9 services"
-                ]
-            },
-            {
-                "title": "Mobile Responsive Overhaul",
-                "description": "Comprehensive mobile layout fixes across all pages",
-                "features": [
-                    "• Stats, Automations, Hydrabase, Issues, Help pages now fully mobile responsive",
-                    "• Artist hero section stacks properly with compact image, wrapping badges, bio clamp",
-                    "• Enhanced library track table: action columns collapse into iOS-style bottom sheet popover",
-                    "• Genre explorer, enrichment rings, filter bars all adapt to narrow screens"
-                ]
-            },
-            {
-                "title": "Album Split Fix (Navidrome)",
-                "description": "Prevent deluxe/standard editions from splitting into separate albums",
-                "features": [
-                    "• MusicBrainz release cache key normalized — strips edition suffixes (Deluxe, Remastered, etc.)",
-                    "• First track's MBID locked in for all subsequent tracks in the same album",
-                    "• Handles both parenthetical '(Deluxe Edition)' and bare 'Deluxe Edition' suffixes",
-                    "• Opus bitrate capped at 256kbps to prevent encoding failures"
-                ]
-            },
-            {
-                "title": "Picard-Style Album Tagging",
-                "description": "All tracks in an album now get the same MusicBrainz release ID automatically",
-                "features": [
-                    "• Pre-flight MB release lookup before album tracks start downloading",
-                    "• Picks ONE release, validates track count, caches for all tracks in the batch",
-                    "• Strips Spotify edition suffixes (Super Deluxe, Remastered) for better MB matching",
-                    "• New Album Tag Consistency repair job: scan and fix existing albums with mismatched tags"
-                ]
-            },
-            {
-                "title": "Enrichment & Repair Fixes",
-                "description": "Critical fixes for background workers and maintenance jobs",
-                "features": [
-                    "• All 9 enrichment workers: error status items no longer auto-retry in infinite loops",
-                    "• Cover art filler: findings no longer recreated after being fixed",
-                    "• Spotify rate limit respected by search_tracks, search_albums, and cover art scanner",
-                    "• Config save: 30s timeout + WAL mode fixes 'database is locked' on busy systems",
-                    "• Enrichment workers auto-pause during DB scans and resume when complete"
-                ]
-            },
-            {
-                "title": "Automation Signal Chain Fix",
-                "description": "Event-triggered automations now receive playlist context properly",
-                "features": [
-                    "• playlist_id forwarded from events to action handlers (fixes silent 'No playlist specified')",
-                    "• Mirrored playlist discovery no longer pre-marks tracks as discovered with wrong album art",
-                    "• Reorganize modal now loads saved path template instead of hardcoded default",
-                    "• Spotify enrichment worker starts unpaused by default like all other workers"
-                ]
-            },
-            {
-                "title": "Unified Glass UI Redesign",
-                "description": "Consistent visual style across all cards, modals, and buttons",
-                "features": [
-                    "• Dashboard tool cards, service cards, and stat cards: unified glass style",
-                    "• Sync page playlist cards: all sources (Spotify, YouTube, Tidal, Deezer, Mirrored, Beatport)",
-                    "• Download missing and wishlist modals: cleaner backgrounds, softer shadows",
-                    "• Watchlist and enhance quality buttons: glass hover with accent glow",
-                    "• Library page: innerHTML rendering + staggered card animation for faster loads"
-                ]
-            },
-            {
-                "title": "Scrobbling to Last.fm & ListenBrainz",
-                "description": "Automatically scrobble your plays from Plex, Jellyfin, or Navidrome",
-                "features": [
-                    "• Listen on your media server — SoulSync automatically scrobbles to Last.fm and/or ListenBrainz",
-                    "• Last.fm: full web auth flow, ListenBrainz: simple token-based",
-                    "• Batch scrobbling with dedup tracking — events only scrobbled once"
-                ]
-            },
-            {
-                "title": "Personalized Discovery + Listening Stats",
-                "description": "Discovery playlists use your listening history, plus a full stats dashboard",
-                "features": [
-                    "• Release Radar, Discovery Weekly, and Because You Listen To: personalized by play history",
-                    "• Listening Stats page: timeline chart, genre breakdown, top artists/albums/tracks",
-                    "• Database storage donut chart in Library Health section",
-                    "• Play buttons on stats page tracks with cover art"
-                ]
-            },
-            {
-                "title": "Interactive Help System",
-                "description": "Full contextual help platform accessible from the floating ? button",
-                "features": [
-                    "• 200+ contextual help entries — click any UI element to learn what it does",
-                    "• 11 guided tours covering every page (97 steps total) with spotlight overlay",
-                    "• Page-aware menu suggests the relevant tour for your current page",
-                    "• Search across all help topics, tours, and keyboard shortcuts (Ctrl+K)",
-                    "• Setup Progress tracker with auto-detection — checks your services, library, and watchlist",
-                    "• What's New panel with version-tagged highlights and 'Show me' navigation",
-                    "• Troubleshoot mode scans for disconnected services and shows fix steps",
-                    "• Keyboard shortcut overlay showing all hotkeys grouped by scope",
-                    "• Quick action buttons in popovers (e.g., 'Open Settings' on service cards)",
-                    "• First-launch welcome prompt for new users"
-                ]
-            },
-            {
-                "title": "Rich Artist Profiles",
-                "description": "Full-bleed hero section on the Artists page with deep metadata",
-                "features": [
-                    "• Large portrait image with blurred background, glassmorphic design",
-                    "• Bio, genres, listening stats from Last.fm, service logo badges",
-                    "• Multi-source genre explorer with Deezer genre support",
-                    "• Similar artist cards with full-bleed library-card styling"
-                ]
-            },
-            {
-                "title": "Enhanced Library Manager",
-                "description": "Inline metadata editing and tag writing from the library view",
-                "features": [
-                    "• Toggle between Standard and Enhanced view on any artist detail page",
-                    "• Inline-edit track title, number, BPM; album and artist fields editable",
-                    "• Write tags directly to audio files (MP3, FLAC, OGG, M4A) with diff preview",
-                    "• Bulk select tracks across albums for batch edit and batch tag write",
-                    "• Server sync after writes — Plex per-track, Jellyfin library scan"
-                ]
-            },
-            {
-                "title": "In Library Badges + Search Improvements",
-                "description": "Know what you already own before downloading",
-                "features": [
-                    "• 'In Library' badges on enhanced search album and track results",
-                    "• Async post-render matching — search results appear instantly, badges fill in",
-                    "• Multi-source search tabs: compare results from Spotify, iTunes, and Deezer",
-                    "• Clickable artist name in download modal navigates to discography"
-                ]
-            },
-            {
-                "title": "FLAC Bit Depth + Quality Filter",
-                "description": "Finer control over audio quality preferences",
-                "features": [
-                    "• Quality profile enforces 16-bit vs 24-bit FLAC preference",
-                    "• Bit depth fallback option: accept other bit depth if preferred unavailable",
-                    "• 1450 kbps threshold separates 16-bit from 24-bit FLAC",
-                    "• Sort prioritizes audio quality (effective kbps) over peer speed"
-                ]
-            },
-            {
-                "title": "Enrichment Worker Improvements",
-                "description": "Better name matching and quieter logs across all 8+ workers",
-                "features": [
-                    "• Dash-suffix normalization: 'Title - Remix' now matches 'Title (Remix)' across all workers",
-                    "• AcoustID log noise reduced — individual recording matches moved to DEBUG",
-                    "• Streaming source verification: artist/title fuzzy match prevents wrong track downloads",
-                    "• Deezer enrichment worker caches API calls through metadata cache",
-                    "• Per-source quality fallback toggles for streaming download sources"
-                ]
-            },
-            {
-                "title": "Launch PIN Lock Screen",
-                "description": "Protect SoulSync access with a PIN on every page load",
-                "features": [
-                    "• Toggle in Settings → Advanced → Security to require PIN on launch",
-                    "• Full-screen lock overlay with PIN input — closing the tab requires re-entry",
-                    "• PIN validated server-side against admin profile (bcrypt hashed)",
-                    "• Inline PIN creation if admin has no PIN set",
-                    "• Shake animation on wrong PIN, auto-focus input"
-                ]
-            },
-            {
-                "title": "Stream Source Setting",
-                "description": "Choose where track previews come from — independent of download source",
-                "features": [
-                    "• New dropdown in Settings → Downloads: YouTube (instant, default) or Active Download Source",
-                    "• If active source is Soulseek, automatically falls back to YouTube",
-                    "• YouTube streams require no auth — instant playback"
-                ]
-            },
-            {
-                "title": "YouTube Download Fix",
-                "description": "Fixed 'Requested format not available' errors affecting all YouTube downloads",
-                "features": [
-                    "• Removed stale player_client and HLS/DASH skip overrides that blocked audio formats",
-                    "• Browser cookie fallback — retries without cookies when authenticated sessions restrict formats",
-                    "• Docker containers auto-update yt-dlp on every start"
-                ]
-            },
-            {
-                "title": "Accurate Album Completion Badges",
-                "description": "Album completion now uses exact track counts instead of percentage rounding",
-                "features": [
-                    "• Exact match: 'Complete' only when all tracks are present — no more 90% rounding",
-                    "• Deduplicated counting: duplicate album entries don't inflate track counts",
-                    "• Multi-artist album detection: finds albums filed under different artists in your library",
-                    "• Censored title matching: 'B*****t Faucet' now matches 'Bullshit Faucet' (Apple Music)"
-                ]
-            },
-            {
-                "title": "Collaborative Album Handling",
-                "description": "Smart folder naming and matching for albums with multiple artists",
-                "features": [
-                    "• New setting: Collaborative Album Artist — use first listed artist or all combined",
-                    "• Spotify: picks first from separate artist objects. Deezer: already first-only",
-                    "• iTunes: resolves primary artist via artistId API lookup (safe for 'Tyler, the Creator')",
-                    "• Album-aware track matching prevents re-downloads of collab albums filed under different artists"
-                ]
-            },
-            {
-                "title": "Per-Artist Library Sync",
-                "description": "Validate and clean up individual artist library entries",
-                "features": [
-                    "• New 'Sync' button on enhanced library view",
-                    "• Checks each track's file exists on disk, removes stale entries",
-                    "• Cleans empty albums and updates track counts",
-                    "• Per-artist watchlist lookback period override"
-                ]
-            },
-            {
-                "title": "Stability & Bug Fixes",
-                "description": "Various fixes for crashes, data integrity, and UX",
-                "features": [
-                    "• Enrichment worker pause state persists across restarts",
-                    "• Soulseek timeout spam prevention — skips API calls when disconnected",
-                    "• Navidrome playlist sync uses POST (fixes truncation on large playlists)",
-                    "• Deezer metadata cache no longer serves stale data missing track numbers/year",
-                    "• Track numbering fix for non-Spotify metadata sources (Deezer/iTunes)",
-                    "• Album delete endpoint accepts all ID formats (fixes Navidrome string IDs)",
-                    "• Hydrabase auto-reconnect when server restarts",
-                    "• Wishlist process API endpoint for external apps"
-                ]
-            }
-"""  # end of _OLD_V22_NOTES
-
-_OLD_V2_NOTES = r"""
-                "features": [
-                    "• Generates soul IDs using SHA-256 hash of normalized names",
-                    "• Artists: hash(name + debut_year) — debut year from iTunes + Deezer API verification",
-                    "• Albums: hash(artist + album), Tracks: dual IDs (song + album-specific)",
-                    "• Dashboard worker button with rainbow spinner and hover tooltip",
-                    "• SoulSync badge on library artist cards when matched"
-                ]
-            },
-            {
-                "title": "Lossy Codec Expansion + Retroactive Converter",
-                "description": "Opus and AAC support for post-download conversion, plus a repair job for existing files",
-                "features": [
-                    "• Lossy copy now supports MP3, Opus, and AAC (M4A) — configurable codec and bitrate",
-                    "• Opus: -map 0:a for clean audio extraction, cover art embedded via METADATA_BLOCK_PICTURE",
-                    "• AAC: MP4Cover embedding, -movflags +faststart for streaming optimization",
-                    "• New Lossy Converter repair job: scans FLAC library, creates findings, Fix/Fix All converts",
-                    "• Job reads codec/bitrate from current settings at fix time (change settings after scanning)",
-                    "• Independent Blasphemy Mode toggle per job (separate from download-time setting)"
-                ]
-            },
-            {
-                "title": "Smarter Staging Import",
-                "description": "Tag-first matching and auto-grouping for the import workflow",
-                "features": [
-                    "• Tags take priority over filename parsing — no more '08' as artist name",
-                    "• Auto-detected album groups from file tags shown as one-click import cards",
-                    "• Match scoring rebalanced: title (0.45) + artist (0.15) + track# (0.30) + album bonus (0.10)",
-                    "• Filename parser pattern order fixed — track numbers no longer misidentified as artists"
-                ]
-            },
-            {
-                "title": "Library Artist Hero Redesign",
-                "description": "Expanded artist detail section with Last.fm integration",
-                "features": [
-                    "• Horizontal service badge row with hover lift animations",
-                    "• Last.fm bio with Read More toggle, listener/play count stats",
-                    "• Scrollable top 100 tracks from Last.fm in sidebar card",
-                    "• Last.fm tags merged with existing genres",
-                    "• Compact inline progress bars for Albums/EPs/Singles completion"
-                ]
-            },
-            {
-                "title": "Hydrabase Search & Routing",
-                "description": "Hydrabase shows as a search tab with proper ID routing",
-                "features": [
-                    "• Hydrabase appears as a source tab on enhanced search when connected",
-                    "• Plugin-aware ID routing: numeric IDs → iTunes, alphanumeric → Spotify",
-                    "• Artist images fetched from iTunes for Hydrabase results",
-                    "• Full Spotify-compatible interface: get_album, get_artist, get_track_details"
-                ]
-            },
-            {
-                "title": "Orphan File Detector + MusicBrainz Fixes",
-                "description": "Better orphan detection and album version matching",
-                "features": [
-                    "• Orphan detector: normalized tag matching strips feat./parentheticals to reduce false positives",
-                    "• Orphan fix now prompts 'Move to Staging' or 'Delete' instead of auto-deleting",
-                    "• MusicBrainz release matching: version qualifier scoring prevents deluxe → standard MBID mismatch",
-                    "• Playlist sync crash fixed: profile ID captured at request time, not in background thread"
-                ]
-            },
-            {
-                "title": "Release Year Collection",
-                "description": "Post-processing now collects release year from all metadata sources",
-                "features": [
-                    "• Year extracted from MusicBrainz, Deezer, Tidal, Qobuz during post-processing",
-                    "• First source to find a year wins — written to ORIGINALDATE/DATE tags and album DB year",
-                    "• Library Reorganize API year lookup cap raised from 50 to 200"
-                ]
-            },
-            {
-                "title": "Multi-Source Search Tabs",
-                "description": "View search results from Spotify, iTunes, and Deezer side by side",
-                "features": [
-                    "• Enhanced search now fires parallel queries against all available metadata sources",
-                    "• Switchable tabs above results — click to view results from Spotify, Apple Music, or Deezer",
-                    "• Tabs load progressively — primary source shows instantly, alternates appear as they complete",
-                    "• Click an artist or album from any tab to browse that source's data temporarily",
-                    "• Downloads use the metadata from whichever source tab you're viewing",
-                    "• Similar artists always use your primary source — no accidental cross-source mixing"
-                ]
-            },
-            {
-                "title": "Per-Profile Service Credentials",
-                "description": "Each profile can connect their own Spotify, Tidal, and media server library",
-                "features": [
-                    "• Non-admin profiles can enter their own Spotify credentials and authenticate their own account",
-                    "• Per-profile Tidal authentication — connect your own Tidal account through the shared app",
-                    "• Per-profile media server library selection — choose which Plex library or Jellyfin user playlists sync to",
-                    "• Tabbed personal settings modal: Music Services, Server, and Scrobbling tabs",
-                    "• Server tab auto-detects active server and shows library name dropdowns (not raw IDs)",
-                    "• All credentials encrypted. Admin users see zero change — fully backwards compatible"
-                ]
-            },
-            {
-                "title": "Modern Settings Redesign",
-                "description": "Settings page rebuilt with tabbed single-column layout",
-                "features": [
-                    "• Horizontal tab bar: Connections, Downloads, Library, Appearance, Advanced",
-                    "• Single centered column replaces 3-column wall of cards",
-                    "• Clean row layout — label left, control right",
-                    "• Custom styled dropdowns with SVG arrows and hover states",
-                    "• Mobile responsive — rows stack, tab bar scrolls"
-                ]
-            },
-            {
-                "title": "Hybrid N-Source Download Priority",
-                "description": "Hybrid mode now supports all 5 download sources with drag-to-reorder priority",
-                "features": [
-                    "• Enable/disable any combination of Soulseek, YouTube, Tidal, Qobuz, and HiFi",
-                    "• Up/down arrows to reorder source priority — downloads try each enabled source in order",
-                    "• Source icons with toggle switches and priority numbers",
-                    "• Configurable download timeout and max peer queue length for Soulseek",
-                    "• Peer quality (upload speed, free slots, queue length) now factors into result ranking"
-                ]
-            },
-            {
-                "title": "Automation Hub Pipelines",
-                "description": "One-click deployment of multi-automation pipelines",
-                "features": [
-                    "• 11 pre-built pipelines: Release Radar, Discovery Weekly, Playlist Auto-Sync, Nightly Operations, and more",
-                    "• Each pipeline deploys 2-5 linked automations with signal chaining in one click",
-                    "• Visual pipeline cards with connected flow nodes and accent-colored design",
-                    "• Pipeline detail modal shows full WHEN/DO/THEN breakdown for each automation",
-                    "• Deploy prompts for notification config (Discord/Telegram/Pushbullet) when pipeline includes alerts"
-                ]
-            },
-            {
-                "title": "Staging Folder Pre-Download Check",
-                "description": "Check your import folder for existing files before downloading",
-                "features": [
-                    "• Before searching Soulseek/YouTube, checks the import folder for a matching file",
-                    "• Tag-based matching (Mutagen) with filename parsing fallback",
-                    "• On match, copies the file to transfer and runs normal post-processing",
-                    "• Staging scan cached per batch — only scans once for the entire download"
-                ]
-            },
-            {
-                "title": "Library Safety & Repair Fixes",
-                "description": "Critical fixes for library maintenance jobs and safety guards",
-                "features": [
-                    "• Mass orphan safety guard — 'witness me' confirmation required when >50% of files flagged as orphans",
-                    "• Tag-based orphan fallback — reads file metadata before marking as orphan to prevent false positives",
-                    "• Album Completeness expanded to support iTunes and Deezer (was Spotify-only)",
-                    "• Album Completeness min completion % filter — skip playlist imports, catch real failed downloads",
-                    "• Fix Track Number Repair returning 400 on fix (entity_id was NULL for file-based findings)",
-                    "• Fix Library Reorganize producing (_) in paths when year is empty",
-                    "• Fix Fix All ignoring Single/Album Dedup findings",
-                    "• Fix enrichment workers looping infinitely on tracks with NULL IDs",
-                    "• Fix Tidal token refresh hammering API when credentials removed",
-                    "• Fix YouTube playlist parsing capped at ~100 tracks",
-                    "• Allow re-sync from download_complete state with Rediscover button"
-                ]
-            },
-            {
-                "title": "Deezer Metadata Source",
-                "description": "Deezer added as a configurable free metadata fallback alongside iTunes/Apple Music",
-                "features": [
-                    "• New setting to choose between iTunes and Deezer as your fallback metadata source — switch anytime from Settings",
-                    "• All metadata lookups, watchlist scans, discovery, and enrichment seamlessly use whichever fallback is configured",
-                    "• On-the-fly artist ID resolution — switching sources auto-matches existing watchlist artists by name on the next scan",
-                    "• Source badges on watchlist artist cards show which services (Spotify, iTunes, Deezer) each artist is matched to",
-                    "• Full backward compatibility — existing iTunes users experience zero changes on upgrade",
-                    "• Name-based duplicate detection prevents adding the same artist twice across different metadata sources"
-                ]
-            },
-            {
-                "title": "Library History",
-                "description": "Persistent record of every download and server import — viewable from the dashboard",
-                "features": [
-                    "• History button next to Recent Activity opens a modal with Downloads and Server Imports tabs",
-                    "• Every completed SoulSync download is logged with title, artist, album, quality, and cover art",
-                    "• Every new track imported from Plex, Jellyfin, or Navidrome is logged automatically",
-                    "• Paginated browsing with tab count badges and relative timestamps",
-                    "• History persists across restarts — unlike the in-memory activity feed"
-                ]
-            },
-            {
-                "title": "MusicBrainz MBID Mismatch Repair",
-                "description": "New repair job to detect and fix wrong MusicBrainz recording IDs on library tracks",
-                "features": [
-                    "• Detects tracks where the stored MusicBrainz recording ID resolves to a different title than expected",
-                    "• Fix action clears the bad MBID so enrichment can re-match correctly",
-                    "• Also fixes MusicBrainz recording matching returning wrong titles due to unstable MBID lookups"
-                ]
-            },
-            {
-                "title": "HiFi Download Source",
-                "description": "Free lossless downloads via public hifi-api instances — no account or subscription required",
-                "features": [
-                    "• New download mode alongside Soulseek, YouTube, Tidal, and Qobuz — select HiFi Only or use in hybrid mode",
-                    "• Quality selection: Hi-Res, Lossless, High, or Low with automatic fallback chain (hires → lossless → high → low)",
-                    "• Automatic instance rotation across 6 public API servers — any server error triggers failover to the next instance",
-                    "• Full search, download, streaming, and post-processing support — works identically to other download sources",
-                    "• Test connection button in Settings to verify instance availability"
-                ]
-            },
-            {
-                "title": "Spotify Link (No API Credentials)",
-                "description": "Scrape Spotify playlists and albums by URL without needing Spotify API credentials",
-                "features": [
-                    "• New Spotify Link tab on the playlist sync page — paste any public Spotify playlist or album URL",
-                    "• Extracts all track metadata (title, artist, album, duration, cover art) via web scraping",
-                    "• Works without Spotify client ID/secret — great for users who don't want to set up a Spotify developer app",
-                    "• Full download and sync support — tracks are matched and downloaded like any other playlist source"
-                ]
-            },
-            {
-                "title": "Library Maintenance Suite",
-                "description": "Full-featured library repair system with 9 automated jobs, fix actions, and rich findings UI",
-                "features": [
-                    "• 9 repair jobs: track number mismatch, dead files, duplicates, metadata gaps, album completeness, missing cover art, AcoustID scanner, orphan files, fake lossless detection",
-                    "• One-click fix actions for findings — remove dead entries, delete orphans, resolve duplicates, apply metadata, update track numbers",
-                    "• Findings dashboard with per-job filter chips, summary stats, and expandable detail panels",
-                    "• Album art and artist images displayed in findings with labeled media cards",
-                    "• Real-time progress on job cards via WebSocket — phase, log lines, and per-item activity",
-                    "• Visual detail renderers: cover art previews, KEEP/REMOVE badges for duplicates, completion progress bars, spectral analysis for fake lossless",
-                    "• Job help text modals explaining what each repair job checks and how to interpret findings"
-                ]
-            },
-            {
-                "title": "Post-Processing Enhancements",
-                "description": "Granular control over post-processing and richer file tagging",
-                "features": [
-                    "• Granular toggles for each post-processing step — enable/disable metadata services, cover art, and lyrics individually",
-                    "• Embed Tidal, Qobuz, Last.fm, and Genius metadata directly into audio file tags during post-processing",
-                    "• FLAC bit depth fallback option in quality profiles — accept lower bit depth when preferred isn't available"
-                ]
-            },
-            {
-                "title": "Per-Profile ListenBrainz",
-                "description": "Each profile can connect their own ListenBrainz account for personalized playlists",
-                "features": [
-                    "• Personal settings modal with ListenBrainz connect/disconnect flow",
-                    "• Per-profile playlist caching — switching profiles shows that user's playlists",
-                    "• Graceful fallback to global ListenBrainz token when no personal token is set",
-                    "• Stale playlist cache recovery for interrupted syncs"
-                ]
-            },
-            {
-                "title": "Quality Enhance",
-                "description": "Upgrade existing library tracks to higher quality versions",
-                "features": [
-                    "• Quality enhance button on library tracks — find and download a higher quality version",
-                    "• iTunes fallback for quality enhance when Spotify metadata isn't available",
-                    "• Full metadata source parity between Spotify and iTunes for upgrade searches"
-                ]
-            },
-            {
-                "title": "Hi-Res FLAC Downsampling",
-                "description": "Automatically convert 24-bit hi-res downloads to 16-bit/44.1kHz CD quality",
-                "features": [
-                    "• New toggle in Settings → Post-Download Conversion: downsample hi-res FLAC to CD quality after download",
-                    "• Converts 24-bit and/or high sample rate FLAC files to 16-bit/44.1kHz — saves ~50% disk space with no audible difference",
-                    "• Safe in-place replacement: writes to temp file, verifies output, then atomic swap — original untouched on failure",
-                    "• Runs before lossy copy so MP3s are created from the downsampled version when both are enabled",
-                    "• Automatically updates $quality in filenames and QUALITY tags after conversion",
-                    "• Overrides strict bit depth rejection — files are accepted and converted instead of quarantined"
-                ]
-            },
-            {
-                "title": "Recent Bug Fixes & Improvements",
-                "description": "Stability fixes, UX improvements, and edge case handling",
-                "features": [
-                    "• Fix $year template variable empty for playlist/sync downloads — album metadata now backfilled from Spotify API",
-                    "• Fix dead file cleaner reporting 66k+ false positives — transfer path fell back to ./Transfer under DB contention",
-                    "• Fix library reorganize not updating database paths after moving files — suffix-based matching with SQL LIKE escaping",
-                    "• Fix library reorganize not moving cover.jpg and other album-level sidecar files with tracks",
-                    "• Fix orphaned sidecar files left behind after reorganize — post-pass sweep moves remaining non-audio files",
-                    "• Fix Navidrome library scan was a no-op — now triggers actual scan via Subsonic startScan API",
-                    "• Select All, Fix Selected, and Fix All bulk actions for Library Maintenance findings",
-                    "• Fix empty brackets in folder names ($year, $quality etc.) not being cleaned when template variables resolve to empty",
-                    "• Fix missing album cover art in download progress bubbles for redownload and issue modal downloads",
-                    "• Cancel button for watchlist scans — stop manual or automation-triggered scans mid-run",
-                    "• Fix HiFi client not failing over to next instance on HTTP 500 — previously only 502/503/504 triggered rotation",
-                    "• Fix service status labels missing HiFi and Qobuz display names",
-                    "• Redownload button on enhanced library view — re-download any album directly from the library manager",
-                    "• Hemisphere setting for seasonal playlists — southern hemisphere users get correct seasonal recommendations",
-                    "• Play button on repair findings — preview tracks directly from the maintenance findings list",
-                    "• Spotify rate limit guards added to all repair jobs — prevents ban escalation during library maintenance",
-                    "• Fix watchlist migration dropping profile_id & fix profile delete dialog hidden behind overlay",
-                    "• Fix watchlist NOT NULL constraint blocking iTunes-only artists from being added",
-                    "• Fix Windows path mangling for artist names with trailing dots (e.g. Fred again..)",
-                    "• Fix watchlist scan failing entirely when Spotify is rate limited — iTunes provider fallback added",
-                    "• Fix per-profile ListenBrainz playlist cache scoping and stale data recovery",
-                    "• Harden metadata cache — prevent simplified data from overwriting full entries, fix connection leaks",
-                    "• Scope automation-triggered watchlist scans to the calling profile",
-                    "• Fix watchlist scan silently skipping all albums due to metadata cache returning incomplete data",
-                    "• Optimized enhanced library view performance with event delegation and scoped DOM queries",
-                    "• Fix Qobuz and HiFi streaming source checks that blocked playback with 'format not supported' error"
-                ]
-            },
-            {
-                "title": "Library Issue Reporting",
-                "description": "Report and track issues for tracks, albums, and artists directly from the library",
-                "features": [
-                    "• Report issues on any library item — tracks, albums, or artists — with category, priority, and notes",
-                    "• Actionable issue detail modal with album art, artist photo overlay, genre tags, and format badges",
-                    "• Download Album and Add to Wishlist buttons directly from the issue modal (admin only)",
-                    "• Enhanced-library-style track listing with format and bitrate indicators",
-                    "• Smart album fetch — uses Spotify ID when available, falls back to enhanced search"
-                ]
-            },
-            {
-                "title": "Album File Reorganization",
-                "description": "Reorganize album files on disk from the Enhanced Library Manager",
-                "features": [
-                    "• Move and rename album files to match your configured folder template",
-                    "• Preview the reorganization with before/after file paths before applying",
-                    "• Supports multi-disc albums with automatic disc subfolder creation",
-                    "• Database paths updated automatically after files are moved"
-                ]
-            },
-            {
-                "title": "Interactive REST API Docs",
-                "description": "Full API documentation with a built-in endpoint tester",
-                "features": [
-                    "• Comprehensive docs for all API endpoints organized by category",
-                    "• Built-in endpoint tester — execute API calls directly from the docs page",
-                    "• JSON response viewer with syntax highlighting and copy support",
-                    "• Complete metadata serialization for all entity types"
-                ]
-            },
-            {
-                "title": "Watchlist Improvements",
-                "description": "Smarter cross-provider matching, manual artist linking, and scan timestamp fixes",
-                "features": [
-                    "• Cross-provider artist matching now uses fuzzy name comparison instead of blindly taking the first result",
-                    "• Manual artist linking UI — change the linked Spotify/iTunes artist from the watchlist config modal",
-                    "• Mismatch warning when the linked provider artist name differs from the watchlist entry",
-                    "• Watchlist settings gear button accessible from artist detail page and artist cards",
-                    "• Scan timestamps preserved for UI display — 'Never scanned' no longer shows after lookback changes",
-                    "• Lookback period changes use a one-time rescan flag instead of wiping all timestamps"
-                ]
-            },
-            {
-                "title": "AcoustID Verification Fix",
-                "description": "More accurate audio file verification with broader title normalization",
-                "features": [
-                    "• Strip ALL parentheticals in title normalization — fixes false mismatches for parody, soundtrack, and featured artist suffixes",
-                    "• Previously only whitelisted suffixes like (Live) and (Remastered) were stripped"
-                ]
-            },
-            {
-                "title": "Deezer Playlist Sync",
-                "description": "Full Deezer integration for playlist sync alongside Spotify, Tidal, and YouTube",
-                "features": [
-                    "• Import and sync Deezer playlists with full track matching and discovery",
-                    "• Deezer discovery worker with Spotify/iTunes match caching",
-                    "• Fix modal for unmatched Deezer tracks with manual search",
-                    "• Manual fixes persist to discovery cache across restarts"
-                ]
-            },
-            {
-                "title": "Discovery Page Improvements",
-                "description": "Better playlist generation, caching, and iTunes parity",
-                "features": [
-                    "• iTunes discovery playlists now produce quality results — synthetic popularity scoring replaces broken 0-popularity tiering",
-                    "• EPs included in iTunes discovery pool (previously excluded)",
-                    "• Popular Picks and Hidden Gems playlists now work correctly for iTunes users",
-                    "• Seasonal playlists fully work with iTunes — album search, watchlist search, and track fetching",
-                    "• Similar artist metadata (images, genres, popularity) cached at scan time — no more redundant API calls",
-                    "• Hero slider loads instantly from cache instead of making 10 Spotify API calls per page load",
-                    "• View Recommended modal uses cached data — only uncached artists trigger API calls",
-                    "• Album art now displays in discovery pool modal for both Spotify and iTunes matches"
-                ]
-            },
-            {
-                "title": "Rate Limit Detection Fix",
-                "description": "Rate limit handling completely overhauled — escalating bans, no more rate limit loops",
-                "features": [
-                    "• Fixed rate limits going undetected in get_album, get_artist, and batch artist enrichment",
-                    "• These methods previously swallowed 429 exceptions — global ban was never activated",
-                    "• Escalating ban durations — repeated rate limits within 1 hour double the ban (30m → 1h → 2h → 4h max)",
-                    "• Default ban raised from 10 minutes to 30 minutes — prevents rapid re-ban cycling",
-                    "• Exhausted-retry detection — 5 consecutive 429s trigger a 1-hour ban instead of re-raising",
-                    "• Rate limit modal with live countdown timer, ban duration, and triggering endpoint",
-                    "• Redundant get_album_tracks API call removed from iTunes discovery pool population"
-                ]
-            },
-            {
-                "title": "Download & Matching Fixes",
-                "description": "Accuracy improvements for album downloads and track matching",
-                "features": [
-                    "• Album download pre-flight search finds complete album folders before track-by-track downloading",
-                    "• Fix wrong track downloads when album name matches a track title in hybrid mode",
-                    "• Improved album download analysis with album-scoped track matching",
-                    "• Fix Tidal playlist sync dropping remix/version info from track titles",
-                    "• Race guard verification extended to all download source monitors"
-                ]
-            },
-            {
-                "title": "Security & Config",
-                "description": "Encryption at rest and config improvements",
-                "features": [
-                    "• Sensitive config values (API keys, passwords, tokens) encrypted at rest with Fernet",
-                    "• Transparent migration — existing plaintext values auto-encrypt on first load",
-                    "• Tidal OAuth fix — override Accept header on token requests"
-                ]
-            },
-            {
-                "title": "Recent Bug Fixes",
-                "description": "Stability and UX fixes",
-                "features": [
-                    "• Fix sync stuck at 80% — serialize datetime in SyncResult for WebSocket emit",
-                    "• Fix automated scans for non-Plex servers and incremental scan performance",
-                    "• Fix Tidal/Qobuz enrichment backfill failing on dict-type copyright and isrc fields",
-                    "• Fix false positive track matching and tag writing visibility for library files",
-                    "• Stop unnecessary Spotify API call every 60s from enrichment status polling",
-                    "• Spotify rate limit UX — persistent modal with countdown, dismiss, and disconnect buttons",
-                    "• Navidrome ReportRealPath guidance when library files can't be found",
-                    "• Enhanced library write-all modal and confirmation dialog improvements"
-                ]
-            },
-            {
-                "title": "Tidal & Qobuz Enrichment Workers",
-                "description": "Two new background enrichment workers for Tidal and Qobuz metadata",
-                "features": [
-                    "• Tidal worker enriches artists, albums, and tracks with Tidal IDs, thumbnails, and metadata",
-                    "• Qobuz worker enriches artists, albums, and tracks with Qobuz IDs, labels, genres, and metadata",
-                    "• Dashboard buttons with real-time status, progress tracking, and pause/resume controls",
-                    "• Smart no-auth detection — buttons grey out when not authenticated to either service",
-                    "• Module-level rate limiting for Qobuz — shared throttle across all client instances",
-                    "• Full Enhanced Library Manager integration — status chips, manual matching, clickable service badges",
-                    "• Library artist card badges and discography 'View on' buttons for both services",
-                    "• Total enrichment worker count now at 9: Spotify, iTunes, MusicBrainz, AudioDB, Deezer, Last.fm, Genius, Tidal, Qobuz"
-                ]
-            },
-            {
-                "title": "Full Qobuz Support",
-                "description": "Qobuz added as a first-class download source alongside Tidal and Soulseek",
-                "features": [
-                    "• Search, browse, and download from Qobuz with quality selection up to Hi-Res 24-bit/192kHz",
-                    "• Qobuz appears as a download source in hybrid mode with configurable priority",
-                    "• Playlist import from Qobuz URLs with mirrored playlist support",
-                    "• Settings page integration with conditional source visibility"
-                ]
-            },
-            {
-                "title": "Hybrid Mode Redesign",
-                "description": "Overhauled download source selection and priority system",
-                "features": [
-                    "• Redesigned hybrid mode with drag-and-drop source priority ordering",
-                    "• Tidal, Qobuz, and Soulseek sources with per-source quality preferences",
-                    "• Conditional settings — source-specific options only appear when that source is enabled",
-                    "• Reorganized settings page with clearer Download Source section"
-                ]
-            },
-            {
-                "title": "Spotify Rate Limit Protection",
-                "description": "Smart detection and handling of Spotify API rate limits with escalating bans",
-                "features": [
-                    "• Automatic detection of long rate limit bans (Retry-After > 60s) from Spotify",
-                    "• Escalating ban durations — repeated hits within 1 hour double the ban (30m → 1h → 2h → 4h)",
-                    "• Global suppression of all Spotify API calls during a ban — no wasted requests",
-                    "• Seamless iTunes/Apple Music fallback for searches while Spotify is rate limited",
-                    "• Enrichment worker auto-pauses during rate limit and resumes when ban expires",
-                    "• Rate limit modal with live countdown timer, ban duration, triggering endpoint, and dismiss/disconnect buttons",
-                    "• One-click Disconnect Spotify button to clear ban, pause enrichment, and delete cache",
-                    "• Auth probe no longer makes API calls during ban — prevents extending the ban",
-                    "• Cooldown-to-restored transition auto-closes modal and refreshes discover page"
-                ]
-            },
-            {
-                "title": "Profile Permissions & Page Access Control",
-                "description": "Granular admin controls over what each profile can see and do",
-                "features": [
-                    "• Admin can control which sidebar pages each profile can access",
-                    "• Per-profile download toggle — disable downloading for specific users (frontend + backend enforced)",
-                    "• Per-user home page — every user can choose their own landing page",
-                    "• Enhanced Library Manager restricted to admin profiles only",
-                    "• Non-admin users default to Discover page instead of Dashboard"
-                ]
-            },
-            {
-                "title": "Now Playing Overhaul",
-                "description": "Redesigned media player with expanded Now Playing modal and smart radio",
-                "features": [
-                    "• Expanded Now Playing modal — click the sidebar player to open a full-screen experience",
-                    "• Album art ambient glow — dominant color from cover art tints the modal background",
-                    "• Smart Radio mode — auto-queue up to 50 similar tracks based on genre, mood, and style",
-                    "• Queue system — add tracks from the library, manage queue in Now Playing modal",
-                    "• Web Audio visualizer — real frequency-driven bars responding to actual playback",
-                    "• Repeat modes (off, repeat-all, repeat-one), shuffle, Media Session API controls",
-                    "• Keyboard shortcuts — Space, arrows, M (mute), Escape (close)"
-                ]
-            },
-            {
-                "title": "Enhanced Library Manager",
-                "description": "Professional-grade library management with tag writing and server sync",
-                "features": [
-                    "• Toggle between Standard and Enhanced views on any artist's discography",
-                    "• Inline metadata editing — click any field to edit artist, album, or track data",
-                    "• Per-service manual matching for all 9 enrichment services",
-                    "• Write Tags to File — sync database metadata to audio file tags (MP3/FLAC/OGG/M4A)",
-                    "• Tag preview modal showing a diff of file vs database values before writing",
-                    "• Batch write tags for entire albums or bulk-selected tracks with live progress",
-                    "• Optional cover art embedding with per-album caching",
-                    "• Server sync after tag writes — push updated metadata to Plex, Jellyfin, or Navidrome",
-                    "• Bulk select and batch edit tracks across albums",
-                    "• Sortable track table columns, multi-disc support, play tracks from library"
-                ],
-                "usage_note": "Open any artist's detail page and click 'Enhanced' in the view toggle to access the library manager."
-            },
-            {
-                "title": "Last.fm & Genius Enrichment Workers",
-                "description": "Background enrichment workers for Last.fm and Genius metadata",
-                "features": [
-                    "• Last.fm worker enriches artists, albums, and tracks with listener counts, play counts, tags, and bios",
-                    "• Genius worker enriches artists and tracks with descriptions, alternate names, and lyrics",
-                    "• Dashboard buttons with status, progress, and pause/resume controls",
-                    "• No-auth detection — buttons grey out with guidance when API keys are missing",
-                    "• Settings reload — changing API keys takes effect immediately without restarting"
-                ]
-            },
-            {
-                "title": "UI & Visual Overhaul",
-                "description": "Per-page particle animations, sidebar visualizer, watchlist redesign, and design refresh",
-                "features": [
-                    "• Per-page particle animations with unique themes for each page",
-                    "• Particle toggle in Settings — disable background particles to reduce GPU usage",
-                    "• Sidebar audio visualizer with 5 reactive styles and settings toggle",
-                    "• Sidebar SVG icons with accent-colored navigation and ambient aura",
-                    "• Watchlist modal redesign — gradient overlay cards, staggered entrance animations, SVG icon buttons, glassmorphic styling",
-                    "• Settings page visual refresh — premium header, custom toggle switches, refined input styling",
-                    "• Page headers with sidebar icons and gradient shimmer styling",
-                    "• Service badges on library artist cards for all 9 enrichment services",
-                    "• Glassmorphic 'View on' buttons on artist discography pages",
-                    "• Help & Docs page — comprehensive in-app documentation covering every feature"
-                ]
-            },
-            {
-                "title": "Tidal Download Improvements",
-                "description": "Stability and accuracy fixes for Tidal downloads",
-                "features": [
-                    "• Tidal download validation — detect and clean up unplayable hi-res stubs",
-                    "• Tidal playlist pagination rate limiting with exponential backoff",
-                    "• Include Tidal version field in track names — fixes remixes resolving to base title",
-                    "• Direct single-playlist fetch instead of redundantly re-fetching all playlists"
-                ]
-            },
-            {
-                "title": "Bug Fixes & Stability",
-                "description": "Reliability improvements across the board",
-                "features": [
-                    "• Fix Genius search blindly matching wrong artists — all bad matches auto-reset",
-                    "• Fix library page albums merging across different artists with same album title/year",
-                    "• Fix post-processing race condition on files already moved by another thread",
-                    "• iTunes storefront fallback — ID lookups automatically try 10 regional storefronts",
-                    "• Fix infinite Spotify rate limit loop from unguarded auth probes",
-                    "• Fix playlist folder downloads marked as failed despite successful processing",
-                    "• Fix Docker upgrade crashes from stale volume mounts and partial DB migrations",
-                    "• Isolate service client initialization so one failure doesn't break the app",
-                    "• Explicit content filter with configurable toggle to skip explicit tracks",
-"""  # end of _OLD_V2_NOTES_REMOVED
 
 
 def _simple_monitor_task():
@@ -26705,7 +25206,11 @@ def download_backup_endpoint(filename):
         backup_path = os.path.join(os.path.dirname(db_path), filename)
         if not os.path.exists(backup_path):
             return jsonify({"success": False, "error": "Backup not found"}), 404
-        return send_file(backup_path, as_attachment=True, download_name=filename)
+        # Override the default static-cache max-age — this is a sensitive
+        # DB backup, browsers should never cache it.
+        response = send_file(backup_path, as_attachment=True, download_name=filename)
+        response.headers['Cache-Control'] = 'no-store'
+        return response
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -28867,14 +27372,8 @@ def _on_download_completed(batch_id, task_id, success=True):
                     except Exception:
                         pass
 
-                # Push discover playlists to media server after downloads complete
+                # Push is handled in _check_batch_completion_v2 (once per batch).
                 playlist_id = batch.get('playlist_id')
-                if playlist_id and playlist_id.startswith('discover_'):
-                    threading.Thread(
-                        target=_push_discover_playlist_to_server,
-                        args=(batch_id, batch),
-                        daemon=True
-                    ).start()
 
                 # Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
                 if playlist_id and playlist_id.startswith('youtube_'):
@@ -28987,11 +27486,11 @@ def _on_download_completed(batch_id, task_id, success=True):
 
 
 def _submit_or_queue_batch(batch_id, playlist_id, tracks):
-    """Submit a batch for analysis, or queue it if 3 analysis slots are full."""
+    """Submit a batch for analysis, or queue it if all analysis slots are full."""
     with tasks_lock:
         active_analysis_count = sum(1 for b in download_batches.values()
                                     if b.get('phase') == 'analysis')
-        if active_analysis_count >= 3:
+        if active_analysis_count >= MAX_CONCURRENT_ANALYSIS:
             download_batches[batch_id]['phase'] = 'queued'
             download_batches[batch_id]['_queued_tracks'] = tracks
             download_batches[batch_id]['_queued_playlist_id'] = playlist_id
@@ -29006,7 +27505,7 @@ def _promote_queued_batches():
     with tasks_lock:
         active_analysis_count = sum(1 for b in download_batches.values()
                                     if b.get('phase') == 'analysis')
-        if active_analysis_count >= 3:
+        if active_analysis_count >= MAX_CONCURRENT_ANALYSIS:
             return
         # Find batches waiting in queue, ordered by creation (dict insertion order)
         for bid, batch in list(download_batches.items()):
@@ -29018,7 +27517,7 @@ def _promote_queued_batches():
                 logger.info(f"[Queue] Promoting batch {bid} ('{batch.get('playlist_name')}') from queued -> analysis")
                 analysis_executor.submit(_run_full_missing_tracks_process, bid, queued_pid, queued_tracks)
                 active_analysis_count += 1
-                if active_analysis_count >= 3:
+                if active_analysis_count >= MAX_CONCURRENT_ANALYSIS:
                     break
 
 
@@ -31142,6 +29641,8 @@ def start_playlist_missing_downloads(playlist_id):
                 'active_count': 0,
                 'max_concurrent': _get_max_concurrent(),
                 'queue_index': 0,
+                'playlist_id': playlist_id,
+                'playlist_name': playlist_name,
                 # Track state management (replicating sync.py)
                 'permanently_failed_tracks': [],
                 'cancelled_tracks': set(),
@@ -32271,11 +30772,17 @@ def _check_batch_completion_v2(batch_id):
                         except Exception:
                             pass
 
-                    # Push discover playlists to media server after downloads complete
+                    # Push playlists to media server after downloads complete
                     playlist_id = batch.get('playlist_id')
-                    if playlist_id and playlist_id.startswith('discover_'):
+                    _push_prefixes = (
+                        'discover_', 'auto_mirror_', 'youtube_mirrored_',
+                        'youtube_', 'tidal_', 'deezer_', 'spotify_public_',
+                        'listenbrainz_', 'beatport_',
+                    )
+                    if playlist_id and playlist_id.startswith(_push_prefixes):
+                        get_database().update_sync_history_push_status(batch_id, 'pending')
                         threading.Thread(
-                            target=_push_discover_playlist_to_server,
+                            target=_push_playlist_to_server,
                             args=(batch_id, batch),
                             daemon=True
                         ).start()
@@ -32753,9 +31260,9 @@ def _record_sync_history_completion(batch_id, batch):
         completed_count = 0
         failed_count = len(batch.get('permanently_failed_tracks', []))
 
-        logger.warning(f"[SyncHistory] Recording completion for batch {batch_id}: "
-                      f"analysis_results={len(analysis_results)}, tracks_found={tracks_found}, "
-                      f"queue_len={len(queue)}, failed={failed_count}")
+        logger.info(f"[SyncHistory] Recording completion for batch {batch_id}: "
+                     f"analysis_results={len(analysis_results)}, tracks_found={tracks_found}, "
+                     f"queue_len={len(queue)}, failed={failed_count}")
 
         # Build download status map: track_index → status
         download_status_map = {}
@@ -32767,8 +31274,8 @@ def _record_sync_history_completion(batch_id, batch):
             if task.get('status') == 'completed':
                 completed_count += 1
 
-        logger.warning(f"[SyncHistory] Batch {batch_id}: completed_downloads={completed_count}, "
-                      f"download_status_map_size={len(download_status_map)}")
+        logger.info(f"[SyncHistory] Batch {batch_id}: completed_downloads={completed_count}, "
+                     f"download_status_map_size={len(download_status_map)}")
 
         # Build per-track results from analysis
         track_results = []
@@ -32810,12 +31317,12 @@ def _record_sync_history_completion(batch_id, batch):
 
         db = MusicDatabase()
         updated = db.update_sync_history_completion(batch_id, tracks_found, completed_count, failed_count)
-        logger.warning(f"[SyncHistory] DB update for batch {batch_id}: updated={updated}")
+        logger.info(f"[SyncHistory] DB update for batch {batch_id}: updated={updated}")
 
         # Save per-track results
         if track_results:
             tr_updated = db.update_sync_history_track_results(batch_id, json.dumps(track_results))
-            logger.warning(f"[SyncHistory] Track results saved for batch {batch_id}: updated={tr_updated}, count={len(track_results)}")
+            logger.info(f"[SyncHistory] Track results saved for batch {batch_id}: updated={tr_updated}, count={len(track_results)}")
 
     except Exception as e:
         logger.warning(f"Failed to record sync history completion: {e}")
@@ -32823,18 +31330,40 @@ def _record_sync_history_completion(batch_id, batch):
         traceback.print_exc()
 
 
-def _push_discover_playlist_to_server(batch_id, batch):
-    """After a discover batch completes, push the playlist to the media server.
-    Runs in a background thread. Triggers a scan, waits, then searches for tracks and creates/updates the playlist."""
+def _push_playlist_to_server(batch_id, batch):
+    """After a batch completes, push the playlist to the active media server.
+    Runs in a background thread. Triggers a scan, waits, then searches for tracks and creates/updates the playlist.
+    Supports Navidrome, Plex, and Jellyfin."""
+    database = get_database()
     try:
+        # Resolve the active media server client
+        active_server = config_manager.get_active_media_server()
+        server_client = None
+        if active_server == 'navidrome' and navidrome_client and navidrome_client.is_connected():
+            server_client = navidrome_client
+        elif active_server == 'plex' and plex_client and plex_client.is_connected():
+            server_client = plex_client
+        elif active_server == 'jellyfin' and jellyfin_client and jellyfin_client.is_connected():
+            server_client = jellyfin_client
+
+        if not server_client:
+            logger.info(f"[PlaylistPush] Server push skipped — no connected media server (active: '{active_server}')")
+            database.update_sync_history_push_status(batch_id, 'skipped')
+            return
+
         playlist_id = batch.get('playlist_id', '')
         playlist_name = batch.get('playlist_name', '')
         if not playlist_name:
+            logger.info(f"[PlaylistPush] No playlist_name for batch {batch_id} - skipping server push")
+            database.update_sync_history_push_status(batch_id, 'skipped')
             return
+
+        database.update_sync_history_push_status(batch_id, 'pushing')
 
         analysis_results = batch.get('analysis_results', [])
         if not analysis_results:
-            logger.info(f"[DiscoverPush] No analysis results for {playlist_name} - skipping server push")
+            logger.info(f"[PlaylistPush] No analysis results for {playlist_name} - skipping server push")
+            database.update_sync_history_push_status(batch_id, 'skipped')
             return
 
         # Build list of tracks that should be in the playlist (found in library OR successfully downloaded)
@@ -32867,59 +31396,57 @@ def _push_discover_playlist_to_server(batch_id, batch):
                 })
 
         if not tracks_to_find:
-            logger.info(f"[DiscoverPush] No tracks to push for {playlist_name}")
+            logger.info(f"[PlaylistPush] No tracks to push for {playlist_name}")
+            database.update_sync_history_push_status(batch_id, 'skipped')
             return
 
-        logger.info(f"[DiscoverPush] {playlist_name}: {len(tracks_to_find)} tracks to push to server, triggering scan first")
+        logger.info(f"[PlaylistPush] {playlist_name}: {len(tracks_to_find)} tracks to push to {active_server}, triggering scan first")
 
         # Trigger a library scan so newly downloaded tracks are indexed
-        if navidrome_client and navidrome_client.is_connected():
-            navidrome_client.trigger_library_scan()
-        elif hasattr(web_scan_manager, 'request_scan'):
-            web_scan_manager.request_scan(f"Discover playlist push: {playlist_name}")
+        server_client.trigger_library_scan()
 
         # Wait for scan to finish (poll every 5s, up to 90s)
-        if navidrome_client and navidrome_client.is_connected():
-            for _ in range(18):
-                time.sleep(5)
-                if not navidrome_client.is_library_scanning():
-                    break
-            logger.info(f"[DiscoverPush] Scan complete, searching for tracks")
-        else:
-            time.sleep(30)
+        for _ in range(18):
+            time.sleep(5)
+            if not server_client.is_library_scanning():
+                break
+        logger.info(f"[PlaylistPush] Scan complete, searching for tracks on {active_server}")
 
         # Search for each track on the media server
         matched_server_tracks = []
-        if navidrome_client and navidrome_client.is_connected():
-            for t in tracks_to_find:
-                results = navidrome_client.search_tracks(t['title'], t['artist'], limit=5)
-                if results:
-                    # Use the first result's underlying NavidromeTrack for playlist creation
-                    best = results[0]
-                    nav_track = getattr(best, '_original_navidrome_track', None)
-                    if nav_track:
-                        matched_server_tracks.append(nav_track)
-                        logger.debug(f"[DiscoverPush] Matched: '{t['title']}' by '{t['artist']}' → {best.id}")
-                    else:
-                        matched_server_tracks.append(best)
-                else:
-                    logger.info(f"[DiscoverPush] No match for: '{t['title']}' by '{t['artist']}'")
+        for t in tracks_to_find:
+            results = server_client.search_tracks(t['title'], t['artist'], limit=5)
+            if results:
+                best = results[0]
+                # Navidrome/Plex store the original server object for playlist creation
+                original = getattr(best, '_original_navidrome_track', None) or getattr(best, '_original_plex_track', None)
+                matched_server_tracks.append(original if original else best)
+                logger.debug(f"[PlaylistPush] Matched: '{t['title']}' by '{t['artist']}' → {getattr(best, 'id', getattr(best, 'ratingKey', '?'))}")
+            else:
+                logger.info(f"[PlaylistPush] No match for: '{t['title']}' by '{t['artist']}'")
 
         if not matched_server_tracks:
-            logger.warning(f"[DiscoverPush] No tracks matched on server for {playlist_name}")
+            logger.warning(f"[PlaylistPush] No tracks matched on {active_server} for {playlist_name}")
+            database.update_sync_history_push_status(batch_id, 'failed')
             return
 
-        logger.info(f"[DiscoverPush] Pushing {len(matched_server_tracks)}/{len(tracks_to_find)} tracks to '{playlist_name}' on server")
-        success = navidrome_client.update_playlist(playlist_name, matched_server_tracks)
+        logger.info(f"[PlaylistPush] Pushing {len(matched_server_tracks)}/{len(tracks_to_find)} tracks to '{playlist_name}' on {active_server}")
+        success = server_client.update_playlist(playlist_name, matched_server_tracks)
         if success:
-            logger.info(f"[DiscoverPush] Successfully pushed '{playlist_name}' to server with {len(matched_server_tracks)} tracks")
+            logger.info(f"[PlaylistPush] Successfully pushed '{playlist_name}' to {active_server} with {len(matched_server_tracks)} tracks")
+            database.update_sync_history_push_status(batch_id, 'success')
         else:
-            logger.warning(f"[DiscoverPush] Failed to push '{playlist_name}' to server")
+            logger.warning(f"[PlaylistPush] Failed to push '{playlist_name}' to {active_server}")
+            database.update_sync_history_push_status(batch_id, 'failed')
 
     except Exception as e:
-        logger.error(f"[DiscoverPush] Error pushing playlist to server: {e}")
+        logger.error(f"[PlaylistPush] Error pushing playlist to server: {e}")
         import traceback
         traceback.print_exc()
+        try:
+            database.update_sync_history_push_status(batch_id, 'failed')
+        except Exception:
+            pass
 
 
 # ===============================
@@ -33661,6 +32188,8 @@ def start_missing_downloads():
                 'active_count': 0,
                 'max_concurrent': _get_max_concurrent(),
                 'queue_index': 0,
+                'playlist_id': playlist_id,
+                'playlist_name': 'Legacy Modal',
                 # Track state management (replicating sync.py)
                 'permanently_failed_tracks': [],
                 'cancelled_tracks': set(),
@@ -44157,17 +42686,41 @@ def _auto_sync_discover_playlists(profile_id, active_source):
                                     'duration_ms': t.duration_ms or 0
                                 })
                 elif ptype == 'seasonal_playlist':
-                    from core.seasonal_discovery import SeasonalDiscoveryService
-                    seasonal_svc = SeasonalDiscoveryService(database)
-                    season_data = seasonal_svc.get_current_season_playlist()
-                    if season_data and season_data.get('tracks'):
-                        tracks = [{
-                            'id': t.get('spotify_track_id', ''),
-                            'name': t.get('track_name', ''),
-                            'artists': [t.get('artist_name', '')],
-                            'album': t.get('album_name', ''),
-                            'duration_ms': t.get('duration_ms', 0)
-                        } for t in season_data['tracks']]
+                    from core.seasonal_discovery import get_seasonal_discovery_service, SEASONAL_CONFIG
+                    seasonal_svc = get_seasonal_discovery_service(spotify_client, database)
+                    current_season = seasonal_svc.get_current_season()
+                    if current_season and current_season in SEASONAL_CONFIG:
+                        track_ids = seasonal_svc.get_curated_seasonal_playlist(current_season, source=active_source)
+                        if track_ids:
+                            if active_source == 'itunes':
+                                s_id_col = 'itunes_track_id'
+                            elif active_source == 'deezer':
+                                s_id_col = 'deezer_track_id'
+                            else:
+                                s_id_col = 'spotify_track_id'
+                            with database._get_connection() as conn:
+                                cursor = conn.cursor()
+                                for tid in track_ids:
+                                    cursor.execute(f"""
+                                        SELECT {s_id_col} as track_id, track_name, artist_name, album_name, duration_ms
+                                        FROM seasonal_tracks WHERE {s_id_col} = ? AND source = ?
+                                    """, (tid, active_source))
+                                    row = cursor.fetchone()
+                                    if not row:
+                                        cursor.execute(f"""
+                                            SELECT {s_id_col} as track_id, track_name, artist_name, album_name, duration_ms
+                                            FROM discovery_pool WHERE {s_id_col} = ? AND source = ?
+                                        """, (tid, active_source))
+                                        row = cursor.fetchone()
+                                    if row:
+                                        r = dict(row)
+                                        tracks.append({
+                                            'id': r.get('track_id', ''),
+                                            'name': r.get('track_name', ''),
+                                            'artists': [r.get('artist_name', '')],
+                                            'album': r.get('album_name', ''),
+                                            'duration_ms': r.get('duration_ms', 0)
+                                        })
                 else:
                     from core.personalized_playlists import PersonalizedPlaylistsService
                     service = PersonalizedPlaylistsService(database)
@@ -44180,7 +42733,7 @@ def _auto_sync_discover_playlists(profile_id, active_source):
                     if ptype in method_map:
                         raw_tracks = method_map[ptype](limit=50)
                         tracks = [{
-                            'id': t.get('spotify_track_id', ''),
+                            'id': t.get('track_id') or t.get('spotify_track_id') or t.get('deezer_track_id') or t.get('itunes_track_id') or '',
                             'name': t.get('track_name', ''),
                             'artists': [t.get('artist_name', '')],
                             'album': t.get('album_name', ''),
@@ -44229,7 +42782,7 @@ def get_discover_synced_playlists():
         try:
             with database._get_connection() as conn:
                 pool_count = conn.execute(
-                    "SELECT COUNT(*) FROM discovery_pool WHERE source = ?", (active_source,)
+                    "SELECT COUNT(*) FROM discovery_pool WHERE source = ? AND profile_id = ?", (active_source, pid)
                 ).fetchone()[0]
         except Exception:
             pool_count = 0
@@ -44246,19 +42799,20 @@ def get_discover_synced_playlists():
                     curated_ids = database.get_curated_playlist(ptype, profile_id=pid)
                 track_count = len(curated_ids) if curated_ids else 0
             elif ptype == 'seasonal_playlist':
-                from core.seasonal_discovery import SeasonalDiscoveryService
+                from core.seasonal_discovery import get_seasonal_discovery_service
                 try:
-                    seasonal_svc = SeasonalDiscoveryService(database)
-                    season_data = seasonal_svc.get_current_season_playlist()
-                    track_count = len(season_data.get('tracks', [])) if season_data else 0
+                    seasonal_svc = get_seasonal_discovery_service(spotify_client, database)
+                    current_season = seasonal_svc.get_current_season()
+                    if current_season:
+                        curated = seasonal_svc.get_curated_seasonal_playlist(current_season, source=active_source)
+                        track_count = len(curated) if curated else 0
+                    else:
+                        track_count = 0
                 except Exception:
                     track_count = 0
             else:
                 # Personalized playlists come from the discovery pool
-                # familiar_favorites is not implemented — always report 0
-                if ptype == 'familiar_favorites':
-                    track_count = 0
-                elif pool_count > 0:
+                if pool_count > 0:
                     track_count = min(50, pool_count)
                 else:
                     track_count = 0
@@ -44354,9 +42908,12 @@ def manage_discover_auto_update():
                     settings[key] = bool(val)
         return jsonify({"success": True, "settings": settings})
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     playlist_type = data.get('playlist_type')
     enabled = data.get('enabled', False)
+
+    if not playlist_type:
+        return jsonify({"success": False, "error": "Missing playlist_type"}), 400
 
     is_lb_type = playlist_type and playlist_type.startswith('listenbrainz_')
     if playlist_type not in valid_types and not is_lb_type:
@@ -44460,7 +43017,14 @@ def get_current_seasonal_playlist():
         if not track_ids:
             return jsonify({"success": True, "tracks": []})
 
-        track_id_col = 'spotify_track_id' if active_source == 'spotify' else 'itunes_track_id'
+        # itunes stores IDs in itunes_track_id; all other sources
+        # Each source stores IDs in its own column
+        if active_source == 'itunes':
+            track_id_col = 'itunes_track_id'
+        elif active_source == 'deezer':
+            track_id_col = 'deezer_track_id'
+        else:
+            track_id_col = 'spotify_track_id'
         tracks = []
         with database._get_connection() as conn:
             cursor = conn.cursor()
@@ -44589,8 +43153,13 @@ def get_seasonal_playlist(season_key):
         if not track_ids:
             return jsonify({"success": True, "tracks": []})
 
-        # Use source-appropriate ID column for lookups
-        track_id_col = 'spotify_track_id' if active_source == 'spotify' else 'itunes_track_id'
+        # Each source stores IDs in its own column
+        if active_source == 'itunes':
+            track_id_col = 'itunes_track_id'
+        elif active_source == 'deezer':
+            track_id_col = 'deezer_track_id'
+        else:
+            track_id_col = 'spotify_track_id'
 
         # Fetch track details from seasonal tracks or discovery pool (filtered by source)
         tracks = []
@@ -45830,8 +44399,7 @@ def image_proxy():
     url = request.args.get('url', '')
     if not url or not url.startswith('http'):
         return '', 400
-    # Only allow known image CDNs
-    from urllib.parse import urlparse
+
     host = urlparse(url).hostname or ''
     allowed_hosts = [
         'i.scdn.co', 'mosaic.scdn.co',  # Spotify
@@ -45840,8 +44408,9 @@ def image_proxy():
         'is1-ssl.mzstatic.com', 'is2-ssl.mzstatic.com', 'is3-ssl.mzstatic.com',
         'is4-ssl.mzstatic.com', 'is5-ssl.mzstatic.com',  # iTunes/Apple
         'img.discogs.com', 'i.discogs.com',  # Discogs
+        'localhost', '127.0.0.1', 'host.docker.internal',  # Local/Docker media servers
     ]
-    if not any(host == h or host.endswith('.' + h) for h in allowed_hosts):
+    if not any(host == h or host.endswith('.' + h) for h in allowed_hosts) and not _is_internal_image_host(url):
         return '', 403
     try:
         resp = requests.get(url, timeout=10, stream=True, headers={

@@ -63,9 +63,15 @@ _rate_limit_first_hit = 0    # Timestamp of the first hit in the current escalat
 _LONG_RATE_LIMIT_THRESHOLD = 60  # seconds
 
 # After a ban expires, wait this long before making any auth probe calls.
-# This prevents the "immediate re-probe → re-ban" cycle where Spotify's server-side
-# cooldown outlasts the Retry-After value they sent us.
-_POST_BAN_COOLDOWN = 300  # 5 minutes
+# This prevents the "immediate re-probe → re-ban" cycle where Spotify's
+# server-side cooldown outlasts the Retry-After (or our default ban
+# duration) we used. A user who'd just sat through a 4-hour MAX_RETRIES
+# ban had it expire, hit our 5-minute cooldown, made a single
+# get_artist_albums call 32 seconds after the cooldown ended, and got
+# slapped with another 4-hour ban — the post-ban cooldown was too short
+# for Spotify's server to forget the previous offense. 30 minutes is a
+# better empirical floor; can be revisited if reports persist.
+_POST_BAN_COOLDOWN = 1800  # 30 minutes
 
 # Escalation: if we get rate limited again within this window, increase ban duration
 _ESCALATION_WINDOW = 3600   # 1 hour — if re-limited within this, escalate

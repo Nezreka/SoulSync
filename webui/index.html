@@ -5,10 +5,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>SoulSync - Music Sync & Manager</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css') }}">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png', v=static_v) }}">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json', v=static_v) }}">
+    <meta name="theme-color" content="#1db954">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa-icon-192.png', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
 </head>
 
 <body>
@@ -270,7 +273,7 @@
 
             <!-- Version Section -->
             <div class="version-section">
-                <button class="version-button" onclick="showVersionInfo()">v2.3</button>
+                <button class="version-button" onclick="showVersionInfo()">v2.4.0</button>
             </div>
 
             <!-- Status Section -->
@@ -1872,23 +1875,10 @@
                             </div>
                         </div>
 
-                        <!-- Search Source Picker (replaces Enhanced/Basic toggle) -->
-                        <div class="search-source-picker-container">
-                            <label for="search-source-select" class="search-source-picker-label">Search from</label>
-                            <div class="search-source-picker-wrapper">
-                                <select id="search-source-select" class="search-source-picker-select">
-                                    <option value="auto" selected>All sources (Auto)</option>
-                                    <option value="spotify">Spotify</option>
-                                    <option value="itunes">Apple Music</option>
-                                    <option value="deezer">Deezer</option>
-                                    <option value="discogs">Discogs</option>
-                                    <option value="hydrabase">Hydrabase</option>
-                                    <option value="musicbrainz">MusicBrainz</option>
-                                    <option value="soulseek">Soulseek (raw files)</option>
-                                </select>
-                                <span class="search-source-picker-caret">▾</span>
-                            </div>
-                        </div>
+                        <!-- Search source picker — icon row populated by search.js.
+                             Each icon triggers a single-source fetch (no fan-out);
+                             results are cached per (query, source) pair. -->
+                        <div id="enh-source-row" class="enh-source-row" role="tablist" aria-label="Search source"></div>
 
                         <!-- Basic Search Section (Current) -->
                         <div id="basic-search-section" class="search-section">
@@ -2001,10 +1991,6 @@
                                             placeholder="Search for artists, albums, or tracks...">
                                         <button id="enhanced-cancel-btn" class="enhanced-cancel-btn hidden">✕</button>
                                     </div>
-                                    <button id="enhanced-search-btn" class="enhanced-search-btn">
-                                        <span class="btn-icon">👁️</span>
-                                        <span class="btn-text">Show Results</span>
-                                    </button>
                                 </div>
 
                                 <!-- Enhanced Search Dropdown (Overlay Panel) -->
@@ -2030,8 +2016,9 @@
                                         <!-- Results Container -->
                                         <div id="enhanced-results-container" class="enhanced-results-container hidden">
 
-                                            <!-- Source Tabs -->
-                                            <div id="enh-source-tabs" class="enh-source-tabs hidden"></div>
+                                            <!-- Fallback banner — shown when user clicked Spotify but backend
+                                                 served Deezer due to rate-limit, etc. Populated by search.js. -->
+                                            <div id="enh-fallback-banner" class="enh-fallback-banner hidden"></div>
 
                                             <!-- Artists Container (Side by Side) -->
                                             <div class="enh-artists-wrapper">
@@ -2332,11 +2319,19 @@
                             <!-- Artist cards will be populated here -->
                         </div>
 
-                        <!-- Empty State -->
+                        <!-- Empty State — populated by showLibraryEmpty() in library.js.
+                             Shows a generic "no artists" message by default; when the
+                             user's search has no library matches, it switches to a
+                             search-online CTA that hands off to the /search page. -->
                         <div class="library-empty hidden" id="library-empty">
-                            <div class="empty-icon">🎵</div>
-                            <div class="empty-title">No artists found</div>
-                            <div class="empty-subtitle">Try adjusting your search or filters</div>
+                            <div class="empty-icon" id="library-empty-icon">🎵</div>
+                            <div class="empty-title" id="library-empty-title">No artists found</div>
+                            <div class="empty-subtitle" id="library-empty-subtitle">Try adjusting your search or filters</div>
+                            <button class="library-empty-search-cta hidden" id="library-empty-search-cta">
+                                <span class="library-empty-search-cta-icon">🔍</span>
+                                <span class="library-empty-search-cta-text">Search online for <span id="library-empty-search-cta-query"></span></span>
+                                <span class="library-empty-search-cta-arrow">→</span>
+                            </button>
                         </div>
 
                         <!-- Pagination -->
@@ -5430,6 +5425,14 @@
                                 <div class="form-group" id="security-change-pin-section" style="display: none;">
                                     <button class="auth-button" onclick="showChangeSecurityPin()">Change PIN</button>
                                 </div>
+
+                                <div class="form-group">
+                                    <label for="security-cors-origins">Allowed WebSocket Origins:</label>
+                                    <textarea id="security-cors-origins" rows="3" placeholder="https://soulsync.example.com&#10;http://192.168.1.5:8888" style="width: 100%; font-family: monospace; font-size: 12px;"></textarea>
+                                    <div class="setting-help-text">
+                                        Origins (full URL, no trailing slash) allowed to open WebSocket connections to this instance — one per line, or comma-separated. Leave empty for same-origin only (the secure default; works for direct access and most reverse-proxy setups). Add your public domain here if you reach SoulSync via a reverse proxy or custom domain and the WebSocket fails to connect. Use <code>*</code> on its own line to allow any origin (insecure — only do this if you understand why you need it).
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Discovery Settings -->
@@ -7881,28 +7884,33 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='vendor/socket.io.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='vendor/socket.io.min.js', v=static_v) }}"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-    <script src="{{ url_for('static', filename='setup-wizard.js') }}"></script>
+    <script src="{{ url_for('static', filename='setup-wizard.js', v=static_v) }}"></script>
     <!-- Split modules (was: script.js) — core.js must load first, init.js last -->
-    <script src="{{ url_for('static', filename='core.js') }}"></script>
-    <script src="{{ url_for('static', filename='shared-helpers.js') }}"></script>
-    <script src="{{ url_for('static', filename='media-player.js') }}"></script>
-    <script src="{{ url_for('static', filename='settings.js') }}"></script>
-    <script src="{{ url_for('static', filename='search.js') }}"></script>
-    <script src="{{ url_for('static', filename='sync-spotify.js') }}"></script>
-    <script src="{{ url_for('static', filename='downloads.js') }}"></script>
-    <script src="{{ url_for('static', filename='wishlist-tools.js') }}"></script>
-    <script src="{{ url_for('static', filename='sync-services.js') }}"></script>
-    <script src="{{ url_for('static', filename='api-monitor.js') }}"></script>
-    <script src="{{ url_for('static', filename='library.js') }}"></script>
-    <script src="{{ url_for('static', filename='beatport-ui.js') }}"></script>
-    <script src="{{ url_for('static', filename='discover.js') }}"></script>
-    <script src="{{ url_for('static', filename='enrichment.js') }}"></script>
-    <script src="{{ url_for('static', filename='stats-automations.js') }}"></script>
-    <script src="{{ url_for('static', filename='pages-extra.js') }}"></script>
-    <script src="{{ url_for('static', filename='init.js') }}"></script>
+    <script src="{{ url_for('static', filename='core.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='shared-helpers.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='media-player.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='settings.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='search.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='sync-spotify.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='downloads.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='wishlist-tools.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='library.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='discover.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='enrichment.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='stats-automations.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->
+    <!-- Ambient glow under the global search bar. Radial gradient, brightest
+         directly under the bar, tapering out toward the window corners.
+         Purely decorative (pointer-events: none). Visibility follows the bar
+         via _gsUpdateVisibility(). -->
+    <div class="gsearch-aura" id="gsearch-aura"></div>
     <!-- Global Search Bar — Spotlight-style search from anywhere -->
     <div class="gsearch-bar" id="gsearch-bar">
         <div class="gsearch-icon">
@@ -7979,10 +7987,10 @@
         <span>?</span>
     </button>
 
-    <script src="{{ url_for('static', filename='docs.js') }}"></script>
-    <script src="{{ url_for('static', filename='helper.js') }}"></script>
-    <script src="{{ url_for('static', filename='particles.js') }}"></script>
-    <script src="{{ url_for('static', filename='worker-orbs.js') }}"></script>
+    <script src="{{ url_for('static', filename='docs.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='helper.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='particles.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='worker-orbs.js', v=static_v) }}"></script>
 </body>
 
 </html>

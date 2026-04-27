@@ -636,7 +636,8 @@ class MusicDatabase:
                     playlist_folder_mode INTEGER DEFAULT 0,
                     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     completed_at TIMESTAMP,
-                    track_results TEXT
+                    track_results TEXT,
+                    server_push_status TEXT
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sh_started_at ON sync_history (started_at DESC)")
@@ -659,6 +660,16 @@ class MusicDatabase:
                 try:
                     cursor.execute("ALTER TABLE sync_history ADD COLUMN source_page TEXT")
                     logger.info("Added source_page column to sync_history table")
+                except Exception:
+                    pass
+
+            # Migration: add server_push_status column to sync_history
+            try:
+                cursor.execute("SELECT server_push_status FROM sync_history LIMIT 1")
+            except Exception:
+                try:
+                    cursor.execute("ALTER TABLE sync_history ADD COLUMN server_push_status TEXT")
+                    logger.info("Added server_push_status column to sync_history table")
                 except Exception:
                     pass
 
@@ -3122,6 +3133,19 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN soul_id TEXT DEFAULT NULL")
                 logger.info("Added soul_id column to albums table")
 
+            # Albums: api_track_count — cached expected track count from the
+            # metadata provider, separate from track_count which is the
+            # OBSERVED count written by server syncs (Plex leafCount,
+            # SoulSync standalone len(tracks)). Without a separate column,
+            # the Album Completeness job can't tell apart "you have all the
+            # tracks" from "Plex says this album has N tracks and you have
+            # N tracks" — the latter looks complete but might be missing
+            # material the metadata source knows about. NULL = not yet
+            # looked up; the repair job fills it as it runs.
+            if 'api_track_count' not in album_cols:
+                cursor.execute("ALTER TABLE albums ADD COLUMN api_track_count INTEGER DEFAULT NULL")
+                logger.info("Added api_track_count column to albums table")
+
             # Tracks: soul_id (song-level) + album_soul_id (release-specific)
             cursor.execute("PRAGMA table_info(tracks)")
             track_cols = [c[1] for c in cursor.fetchall()]
@@ -4715,6 +4739,10 @@ class MusicDatabase:
                         'audiodb_id', 'audiodb_match_status', 'audiodb_last_attempted',
                         'style', 'mood', 'label', 'explicit', 'record_type',
                         'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
+                        # api_track_count is metadata-source-derived enrichment cache;
+                        # losing it on a ratingKey rekey would force the next
+                        # completeness scan back to live API lookups (kettui PR #374).
+                        'api_track_count',
                     ]
 
                     # Read enrichment data from old album
@@ -4778,6 +4806,63 @@ class MusicDatabase:
             logger.error(f"Error inserting/updating {server_source} album {getattr(album_obj, 'title', 'Unknown')}: {e}")
             return False
     
+    def get_album_display_meta(self, album_id) -> Optional[Dict[str, Any]]:
+        """Return ``{album_title, artist_id, artist_name}`` for an album row.
+
+        Used by the reorganize queue enqueue endpoint to capture display
+        strings at submission time so the status panel can render
+        without a DB lookup per poll. Returns None when the album row
+        does not exist; lets DB errors bubble up so callers can surface
+        a real failure instead of swallowing it as "album not found".
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT al.title AS album_title,
+                       ar.id    AS artist_id,
+                       ar.name  AS artist_name
+                FROM albums al
+                JOIN artists ar ON al.artist_id = ar.id
+                WHERE al.id = ?
+                """,
+                (str(album_id),),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {
+                'album_title': row['album_title'] or 'Unknown Album',
+                'artist_id': str(row['artist_id']) if row['artist_id'] is not None else None,
+                'artist_name': row['artist_name'] or 'Unknown Artist',
+            }
+
+    def get_artist_albums_for_reorganize(self, artist_id) -> List[Dict[str, Any]]:
+        """Return ``[{album_id, album_title, artist_id, artist_name}, ...]``
+        for every album owned by ``artist_id``, ordered by year then
+        title. Used by the bulk Reorganize-All endpoint to pull the
+        full tracklist server-side instead of trusting whatever the
+        frontend cached. Returns an empty list when the artist has no
+        albums; lets DB errors bubble so a real failure surfaces as a
+        500 rather than masquerading as "no albums found".
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT al.id    AS album_id,
+                       al.title AS album_title,
+                       ar.id    AS artist_id,
+                       ar.name  AS artist_name
+                FROM albums al
+                JOIN artists ar ON al.artist_id = ar.id
+                WHERE ar.id = ?
+                ORDER BY al.year ASC, al.title ASC
+                """,
+                (str(artist_id),),
+            )
+            return [dict(r) for r in cursor.fetchall()]
+
     def get_albums_by_artist(self, artist_id: int) -> List[DatabaseAlbum]:
         """Get all albums by artist ID"""
         try:
@@ -10497,6 +10582,20 @@ class MusicDatabase:
             logger.debug(f"Error updating sync history track results: {e}")
             return False
 
+    def update_sync_history_push_status(self, batch_id, status):
+        """Update the server push status for a sync_history entry."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE sync_history SET server_push_status = ? WHERE batch_id = ?
+            """, (status, batch_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.debug(f"Error updating sync history push status: {e}")
+            return False
+
     def refresh_sync_history_entry(self, entry_id, tracks_found=0, tracks_downloaded=0, tracks_failed=0):
         """Update an existing sync_history entry with new stats and reset timestamps to move it to the top."""
         try:
@@ -10611,7 +10710,8 @@ class MusicDatabase:
             cursor.execute("""
                 SELECT id, batch_id, playlist_name, source, sync_type, source_page,
                        total_tracks, tracks_found, tracks_downloaded, tracks_failed,
-                       thumb_url, is_album_download, started_at, completed_at
+                       thumb_url, is_album_download, started_at, completed_at,
+                       server_push_status
                 FROM sync_history
                 WHERE completed_at IS NOT NULL
                   AND started_at >= datetime('now', ? || ' days')

@@ -1903,6 +1903,19 @@ async function checkAdminPinRequired() {
     }
 }
 
+// Service worker registration. Runs as soon as the JS parses (doesn't
+// need to wait for DOMContentLoaded). Cache-first image strategy +
+// stale-while-revalidate static shell — see /sw.js for details. Skipped
+// when the API isn't available (older browsers, file:// origin) or when
+// the page is loaded from a non-secure origin (SW requires HTTPS or
+// localhost).
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+            .catch((err) => console.warn('[SW] registration failed:', err));
+    });
+}
+
 document.addEventListener('DOMContentLoaded', async function () {
     console.log('SoulSync WebUI initializing...');
 
@@ -2152,7 +2165,13 @@ function navigateToPage(pageId, options = {}) {
     // Artists page, now replaced by clicking artists from the unified Search.
     if (pageId === 'downloads' || pageId === 'artists') pageId = 'search';
 
-    if (pageId === currentPage) return;
+    if (pageId === currentPage) {
+        // Already on this page — still process pending sync tab actions
+        if (pageId === 'sync' && window._pendingSyncTabAction && typeof _applySyncTabAction === 'function') {
+            _applySyncTabAction();
+        }
+        return;
+    }
 
     // Permission guard — redirect to home page if not allowed
     if (!isPageAllowed(pageId)) {
@@ -2237,6 +2256,15 @@ async function loadPageData(pageId) {
         if (typeof _stopNebulaLivePolling === 'function') _stopNebulaLivePolling();
         if (pageId !== 'sync') {
             cleanupBeatportContent();
+            // Clear any discover sync tab pollers when leaving the sync page
+            if (typeof discoverSyncPollers === 'object') {
+                for (const key of Object.keys(discoverSyncPollers)) {
+                    clearInterval(discoverSyncPollers[key]);
+                    delete discoverSyncPollers[key];
+                }
+            }
+            // Reset so discover tab refetches on next visit
+            discoverSyncPlaylistsLoaded = false;
         }
         switch (pageId) {
             case 'dashboard':
@@ -2246,6 +2274,10 @@ async function loadPageData(pageId) {
             case 'sync':
                 initializeSyncPage();
                 await loadSyncData();
+                // Process any pending deep-link tab switch (e.g. from Discover page)
+                if (window._pendingSyncTabAction && typeof _applySyncTabAction === 'function') {
+                    _applySyncTabAction();
+                }
                 break;
             case 'search':
                 initializeSearch();

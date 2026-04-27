@@ -917,32 +917,29 @@ const HELPER_CONTENT = {
         description: 'Search for music across your configured metadata sources and download from Soulseek, YouTube, Tidal, Qobuz, HiFi, or Deezer.',
         docsId: 'search'
     },
-    '.search-source-picker-container': {
-        title: 'Search From',
-        description: 'Pick which metadata source to search. "All sources (Auto)" keeps the multi-source fan-out behavior; any specific source hits only that provider. "Soulseek (raw files)" switches to raw P2P file search with quality filters.',
+    '#enh-source-row': {
+        title: 'Search Source Icons',
+        description: 'Each icon is a metadata source. The highlighted one is what your next search will target — defaults to your configured primary source on page load. Click a different icon to search or switch to that source; a small dot on the icon marks sources that already have cached results for the current query.',
         tips: [
-            'Auto: searches your configured primary source plus library matches',
-            'Spotify / Apple Music / Deezer / Discogs / Hydrabase / MusicBrainz: metadata-only results for that provider',
-            'Soulseek: raw file results with format, bitrate, size, uploader — same as the old Basic Search'
+            'Typing searches only the highlighted source — no more silent fan-out across every provider',
+            'Switching to an already-cached source is instant, no re-fetch',
+            'The Soulseek icon routes to the raw-file search (same as the old Basic Search)',
+            'Music Videos queries YouTube for downloadable music video files',
+            'An amber border on a source means the backend fell back to a different provider for you (usually because Spotify is rate-limited)'
         ],
         docsId: 'search-enhanced'
     },
 
     // Enhanced Search
     '.enhanced-search-input-wrapper': {
-        title: 'Enhanced Search',
-        description: 'Type an artist, album, or track name. Results appear in categorized sections: Library Artists, Artists, Albums, Singles & EPs, and Tracks. Results come from your active metadata source.',
+        title: 'Search Bar',
+        description: 'Type an artist, album, or track name. Results appear in categorized sections: Library Artists, Artists, Albums, Singles & EPs, and Tracks. Only the source highlighted in the icon row above is queried — click another icon to switch.',
         tips: [
             'Click an album to open the download modal',
             'Click a track to search your download source',
             'Play button previews tracks from your download source',
-            'Multi-source tabs compare results across Spotify, iTunes, and Deezer'
+            'Switch sources via the icon row above — results are cached per query'
         ],
-        docsId: 'search-enhanced'
-    },
-    '.enh-source-tabs': {
-        title: 'Source Tabs',
-        description: 'Switch between metadata sources to see results from Spotify, iTunes, or Deezer. Each source has its own catalog — tracks missing on one may be found on another.',
         docsId: 'search-enhanced'
     },
     '#enh-db-artists-section': {
@@ -1291,11 +1288,8 @@ const HELPER_CONTENT = {
         title: 'Similar Artist',
         description: 'An artist similar to the one you\'re viewing. Click to load their discography and browse their releases.',
     },
-    '.search-source-picker-container': {
-        title: 'Search Source',
-        description: 'Pick which metadata source the Search page queries. "All sources (Auto)" fans out across configured providers (the legacy default); pick a specific source to constrain the lookup. "Soulseek (raw files)" routes to the file-search pipeline that used to be the Basic mode.',
-        docsId: 'search'
-    },
+    // (Search source picker annotation lives under `#enh-source-row` above —
+    //  the old `.search-source-picker-container` dropdown is gone.)
 
     // ─── AUTOMATIONS PAGE ─────────────────────────────────────────────
 
@@ -2408,7 +2402,7 @@ const HELPER_TOURS = {
         description: 'Step-by-step guide to downloading your first album.',
         icon: '⬇️',
         steps: [
-            { page: 'search', selector: '.search-source-picker-container', title: 'Pick a Search Source', description: '"All sources (Auto)" fans out across every provider. Pick a specific one (Spotify, Apple Music, Deezer, etc.) to get results from just that catalog. "Soulseek (raw files)" is the old Basic mode — raw P2P file results with quality filters.' },
+            { page: 'search', selector: '#enh-source-row', title: 'Pick a Search Source', description: 'Each icon is a metadata source. The highlighted one is where your next search goes — defaults to your configured primary source. Click a different icon to switch to Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, Music Videos, or Soulseek (raw P2P files). A small dot marks sources you\'ve already searched for the current query.' },
             { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Search for Music', description: 'Type an artist or album name here. Results appear in categorized sections — Artists, Albums, Singles/EPs, and Tracks. Try searching for your favorite artist now!' },
             { page: 'search', selector: '#enh-results-container', title: 'Search Results', description: 'After searching, results appear organized by type: Artists at the top as cards, then Albums, Singles/EPs, and individual Tracks. "In Library" badges mark items you already own.' },
             { page: 'search', selector: '.enhanced-search-input-wrapper', title: 'Downloading an Album', description: 'Click any album card to open the download modal. You\'ll see the tracklist, quality options, and a big "Download Album" button. Individual tracks have a play button to preview before downloading.' },
@@ -3443,20 +3437,49 @@ function closeHelperSearch() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Entries tagged with `unreleased: true` are accumulating under a version label
-// but won't display until the build version catches up. The Search/Artists
-// unification project stays folded here at 2.40 until the whole thing ships.
+// but won't display until the build version catches up — used for in-progress
+// projects that span multiple commits before shipping. Strip the flag at
+// release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
-    '2.40': [
-        // --- Search & Artists unification (in progress, not yet released) ---
-        { date: 'Unreleased — Search & Artists unification', unreleased: true },
-        { title: 'Search Source Picker', desc: 'The Search page\'s Enhanced/Basic toggle is replaced by a single "Search from" dropdown at the top — pick All sources (Auto), Spotify, Apple Music, Deezer, Discogs, Hydrabase, MusicBrainz, or Soulseek (raw files). Auto keeps today\'s multi-source fan-out; picking a specific source hits only that provider so there are no more surprise Spotify rate-limit hits from flows that didn\'t need Spotify. "Soulseek" routes to the raw-file search (what "Basic" used to do), so one picker now covers both old modes. Loading text reflects the selected source', page: 'search', unreleased: true },
-        { title: 'Explicit Source Selection on /api/enhanced-search', desc: 'The enhanced-search endpoint now accepts an optional `source` body param (spotify, itunes, deezer, discogs, hydrabase, musicbrainz, auto). When a specific source is chosen, only that provider is queried and db_artists (local library matches) still come back. Cache keys isolate per-source so single-source and multi-source results don\'t collide. Omitted or `auto` preserves the old multi-source fan-out behavior unchanged — nothing breaks for existing callers', page: 'search', unreleased: true },
-        { title: 'Shared Enhanced-Search Fetch Helper', desc: 'Internal refactor — the Search page dropdown and the global search widget now route through one shared enhancedSearchFetch helper in search.js instead of duplicating the POST boilerplate. Zero UX change, but it means any future source-picker tweak only needs wiring in one place', page: 'search', unreleased: true },
-        { title: 'Search Page Renamed to /search', desc: 'The Search page\'s internal id is now "search" instead of the confusing "downloads" (which clashed with the actual Downloads page). Sidebar label unchanged. URL is now /search; /downloads still resolves so old bookmarks keep working. Profile ACL "Page Access" now saves as "search"; existing profiles with "downloads" in allowed_pages still resolve through a legacy-compat check', page: 'search', unreleased: true },
-        { title: 'Embedded Download Manager Removed from Search Page', desc: 'The Search page used to carry a second copy of the Download Manager (active + finished queues, clear/cancel-all buttons) that was hidden by default and duplicated the dedicated Downloads page. That duplicate is gone — toggle button, side-panel HTML, and its 1-second polling loop all removed. About 330 lines of dead code cleaned up. The dedicated Downloads sidebar page is now the single downloads UI', page: 'search', unreleased: true },
-        { title: 'Artists Sidebar Entry Retired — Use Search Instead', desc: 'Cin flagged that "Artists" in the sidebar read like a library section but was actually a dedicated artist-search page, duplicating what the unified Search already does. The sidebar entry is gone. New flow: Sidebar → Search → type artist name → click their result. "Browse Artists" on the empty Watchlist page and "View artist from Wishlist" now open Search pre-filled with the artist\'s name. Removed "Artists" from profile Home Page + Page Access options. Deep link to /artists still resolves so old bookmarks keep working — the page just isn\'t promoted anywhere', page: 'search', unreleased: true },
-        { title: 'Artist Detail Back Button Fallback', desc: 'The back button on the Artists-page inline detail view used to dump users on an empty "Search for an artist..." screen when they arrived from outside the Artists page — a dead end now that Artists isn\'t in the sidebar. If you searched inside the Artists page, back still returns to your results list. Otherwise (arriving from Search, Discover, Watchlist, etc.), back uses the browser history to land you on whichever page you came from. Falls back to the Search page only when there\'s no browser history to go back to (the natural place to find another artist)', page: 'search', unreleased: true },
-        { title: 'Interactive Help Updated for Unified Search', desc: 'The click-for-help annotations and the "Your First Download" guided tour were rewritten for the new Search page. Stale annotations pointing at removed elements (Basic/Enhanced toggle button, side-panel queues, download-manager controls) are deleted. The first-download tour now runs on /search and opens with the source picker. PAGE_TOUR_MAP accepts both "search" and the legacy "downloads" id so old bookmarks still match a tour. Retired the standalone "Browse Artists" tour', page: 'help', unreleased: true },
+    '2.4.1': [
+        // --- post-2.4.0 dev work — entries hidden by _getLatestWhatsNewVersion until the build version bumps ---
+        { date: 'Unreleased — 2.4.1 dev cycle' },
+        { title: 'Lock Down Socket.IO CORS', desc: 'socket.io was accepting websocket connections from any origin (cors=*). now defaults to same-origin only. if your websocket fails after updating, the server logs a clear warning with the rejected origin — add it to settings → security → allowed websocket origins.', page: 'settings' },
+        { title: 'Faster Docker Startup — yt-dlp Pinned', desc: 'docker startup used to run `pip install -U yt-dlp` on every container start. removed that — yt-dlp is now pinned in requirements.txt so startup is fast and reproducible. tradeoff: youtube fixes ship via soulsync releases now instead of next container restart.' },
+        { title: 'Settings Endpoints: Admin-Only', desc: 'the /api/settings endpoints (read, write, log-level, config-status, verify) had no auth gate — any logged-in profile could read or change service tokens, oauth secrets, api keys. now admin-only. single-admin setups (no multi-profile config) work transparently as before.', page: 'settings' },
+        { title: 'Browser Caching for Static Assets + Discover Pages', desc: 'static assets (js/css/icons) now get a 1-year browser cache instead of revalidating on every page load. safe because the existing ?v=static_v cache-bust query changes every server restart, so deploys still ship live. discover pages (hero, similar artists, recent releases, deep cuts, etc.) now cache 5 minutes browser-side so toggling between sections doesn\'t re-fetch everything. faster repeat loads, fewer round-trips.', page: 'discover' },
+        { title: 'Service Worker for Cover Art + Installable PWA', desc: 'cover art used to re-fetch from the cdn on every library / discover page visit. now a service worker caches images locally — second visit serves art instantly from disk, no network hit. also added a pwa manifest so soulsync can be installed to home screen / desktop as a standalone app (chrome / edge / safari → install soulsync). cache versioned so future strategy changes invalidate cleanly.' },
+    ],
+    '2.4.0': [
+        // --- April 26, 2026 — Search & Artists unification + reorganize queue ---
+        { date: 'April 26, 2026 — 2.4.0 release' },
+        { title: 'Reorganize Queue Polish', desc: 'cleaned up some race conditions in the reorganize queue. cancel + bulk dedupe behavior is solid now. preview button no longer gets stuck disabled on errors.', page: 'library' },
+        { title: 'Reorganize Queue with Live Status Panel', desc: 'reorganize is now a queue with a live status panel. spam-click all you want — items run one at a time and you can keep browsing while they go. expand the panel to see queue + cancel buttons.', page: 'library' },
+        { title: 'Album Completeness Job Actually Works', desc: 'completeness job was finding zero issues for everyone. now it works — uses real expected track counts from your metadata source instead of comparing your library to itself.', page: 'library' },
+        { title: 'Reorganize Routes Through the Download Pipeline', desc: 'reorganize now uses the same pipeline downloads use. fixes 3-disc albums collapsing to single-disc and tracks silently disappearing on you. extracted to core/library_reorganize.py.', page: 'library' },
+        { title: 'Spotify: Longer Post-Ban Cooldown', desc: 'bumped the post-ban cooldown from 5 to 30 minutes. first call after a ban was getting re-banned within seconds because spotify\'s memory outlasts the cooldown.', page: 'dashboard' },
+        { title: 'Tidal: No More Silent Quality Downgrades', desc: 'tidal was silently serving 320kbps when you asked for hires. now it rejects the downgrade and the fallback chain advances properly — or fails honestly if you have "hires only, no fallback" set.', page: 'downloads' },
+        { title: 'Search Source Picker Icon Row', desc: 'search page now has a row of source icons above the bar — one per source. typing only searches the active source instead of fanning out to all of them. click another icon to switch.', page: 'search' },
+        { title: 'Per-Query Source Cache', desc: 'switching back to a source you already searched is instant — results are cached for the current query. cache resets when you type a new query. ~6-7x fewer api calls per search.', page: 'search' },
+        { title: 'Global Search Widget Source Parity', desc: 'the sidebar global search popover got the same source icon row + cache dots + fallback banner as the full search page.', page: 'search' },
+        { title: 'Rate-Limit Fallback Banner', desc: 'if the backend swaps your selected source for a working one (e.g. spotify rate-limited → deezer), you get a small amber banner explaining the swap. icon for the failed source gets an amber border.', page: 'search' },
+        { title: 'Explicit Source Selection on /api/enhanced-search', desc: 'enhanced-search endpoint takes a source param now to skip the fan-out backend-side. cache keys isolate per-source so single and multi-source results don\'t collide.', page: 'search' },
+        { title: 'Shared Enhanced-Search Fetch Helper', desc: 'internal — search dropdown and global widget share one fetch helper now instead of duplicating the post boilerplate.', page: 'search' },
+        { title: 'Search Page Renamed to /search', desc: 'search page is now /search instead of the confusing /downloads (which clashed with the actual downloads page). old urls still work.', page: 'search' },
+        { title: 'Embedded Download Manager Removed from Search Page', desc: 'killed the duplicate download manager on the search page (~330 lines of dead code). dedicated downloads page is the only one now.', page: 'search' },
+        { title: 'Artists Sidebar Entry Retired', desc: 'removed the artists sidebar entry — unified search already does what it did. old /artists urls still resolve.', page: 'search' },
+        { title: 'Artist Detail Back Button Fallback', desc: 'back button on inline artist detail uses browser history when you arrived from outside the artists page, instead of dumping you on an empty artists search.', page: 'search' },
+        { title: 'Interactive Help Updated for Unified Search', desc: 'rewrote the click-for-help annotations and the first-download tour for the new search page. retired the standalone browse-artists tour.', page: 'help' },
+        { title: 'Unified Source-Picker Controller', desc: 'internal — search page and global widget share one controller now (~380 lines of duplicate state/fetch/render code gone). bug fixes land everywhere at once.', page: 'search' },
+        { title: 'Fix Clean Search History Automation Crashing', desc: 'hourly clean-search-history automation was crashing on a stale base_url path. fixed.', page: 'stats' },
+        { title: 'Search Results Always Visible', desc: 'killed the show/hide results toggle. visibility is just based on whether you\'ve typed a query.', page: 'search' },
+        { title: 'Cached Search Results Restore on Navigate-Back', desc: 'leaving and coming back to /search now re-renders your last query\'s results from cache instead of hiding them.', page: 'search' },
+        { title: 'Fix Soulseek Handoff from Global Search', desc: 'clicking soulseek in the global search popover used to run metadata search against your default source instead of basic file search. fixed.', page: 'search' },
+        { title: 'Stale Search Requests No Longer Flash Empty', desc: 'fast retypes used to flash an empty state for a moment while the new fetch was still mid-flight. added a request-sequence token so old responses don\'t clobber new ones.', page: 'search' },
+        { title: 'Soulseek Icon Dims When slskd Isn\'t Configured', desc: 'soulseek icon dims if you don\'t have slskd set up. clicking it routes to settings → downloads instead of failing silently.', page: 'search' },
+        { title: 'Fix Discover Hero View Discography 404', desc: 'view discography on the discover hero was 404ing for non-library artists. fixed by passing the source through to /api/artist-detail.', page: 'discover' },
+        { title: 'MusicBrainz Search Actually Works', desc: 'musicbrainz search was returning empty/garbage results and taking 30+ seconds. rewrote it — artist, track, and album searches all work now and complete in ~3 seconds on cold cache.', page: 'search' },
+        { title: 'MusicBrainz Search Follow-Ups', desc: 'three more musicbrainz fixes — artist images now resolve via itunes/deezer fallback, total_tracks off-by-one fixed, and "artist title" queries no longer browse the whole discography.', page: 'search' },
     ],
     '2.39': [
         // --- April 22, 2026 ---
@@ -3655,20 +3678,329 @@ const WHATS_NEW = {
     ],
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// VERSION MODAL — curated highlight reel
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `WHATS_NEW` above is the per-version detailed log used by the "What's New"
+// helper-popover panel — short one-liners, internal page links, every entry
+// shown on every browse-back through versions.
+//
+// `VERSION_MODAL_SECTIONS` (this block) is the curated highlight reel shown
+// when the user clicks the version button in the sidebar. It's NOT a
+// mechanical view of WHATS_NEW — it's editorial curation: bigger-picture
+// sections, bullet-list expansions, optional "usage" hints at the bottom.
+// Some sections aggregate across multiple WHATS_NEW entries ("Recent Fixes",
+// "Earlier in v2.3"); some don't have a 1:1 WHATS_NEW counterpart at all.
+//
+// Both consts live here so a release editor only opens one file. At release
+// time:
+//   1. Add the per-version block to `WHATS_NEW` (one entry per shipped item).
+//   2. Promote any items worth a modal-section into `VERSION_MODAL_SECTIONS`
+//      at the top of the array (latest highlights lead).
+//   3. Roll older sections down or merge them into a "Recent Fixes" /
+//      "Earlier in vX.Y" aggregator section as they age out of the spotlight.
+//
+// Section shape: { title, description, features: [bullet strings],
+//                  usage_note?: 'optional hint shown at the bottom' }
+const VERSION_MODAL_SECTIONS = [
+    {
+        title: "Reorganize Queue Polish",
+        description: "cleaned up some race conditions in the queue. behavior is solid now.",
+        features: [
+            "• worker pick + status flip is atomic now — cancel can\'t land between them and let a cancelled item still run",
+            "• swapped lock + wakeup-event for a single threading.Condition — newly-queued items don\'t sleep up to 60s anymore",
+            "• bulk enqueue dedupes within a single batch (was only deduping against pre-existing items)",
+            "• reorganize-preview Apply button no longer gets stuck disabled on errors",
+            "• db helpers let exceptions bubble instead of swallowing them as \"album not found\"",
+        ],
+    },
+    {
+        title: "Reorganize Queue with Live Status Panel",
+        description: "reorganize is now a queue with a live status panel. spam-click all you want — items run one at a time and you can keep browsing.",
+        features: [
+            "• per-album reorganize and reorganize all both enqueue into a single backend queue",
+            "• buttons stay clickable — clicking the same album twice silently dedupes",
+            "• status panel shows active progress, queued count, and recent finishes",
+            "• expand the panel for the full queue + per-item cancel buttons (running items can\'t be cancelled mid-flight)",
+            "• cross-artist items get tagged so you know what\'s queued from where",
+            "• continue-on-failure: one bad album never stalls the queue",
+            "• reorganize all is now one backend call instead of N js-driven calls — way faster",
+        ],
+    },
+    {
+        title: "Fix Wrong-Artist Tracks Silently Downloading",
+        description: "searching for a track could silently download a completely different artist\'s song with the same name. fixed at two layers.",
+        features: [
+            "• example: \"maduk — leave a light on\" on tidal was downloading tom walker\'s song of the same name with maduk\'s metadata embedded",
+            "• tightened the candidate artist gate (was letting through 0.4 similarity, now blocks at 0.5)",
+            "• acoustid verification now FAILs (quarantines) clear artist mismatches instead of accepting them",
+            "• ambiguous matches (covers, collabs) still get the benefit of the doubt — only obvious mismatches get blocked",
+        ],
+    },
+    {
+        title: "Tidal Search Falls Back on Long Queries",
+        description: "tidal\'s search chokes on long remix-credit queries. now retries with shorter variants when the original returns 0 results.",
+        features: [
+            "• example: \"maduk transformations remixed fire away fred v remix\" returned 0 — falls back to shorter queries until tidal finds the track",
+            "• up to 4 shortened variants tried, capped at 5 total requests",
+            "• qualifier-safe: live/remix/acoustic searches only accept fallback results that keep the qualifier",
+            "• returns empty if no variant preserves the qualifiers — same as before",
+        ],
+    },
+    {
+        title: "Manual Discovery Fixes Persist Across Restart",
+        description: "manual discovery fixes are now saved under your active metadata source instead of always \"spotify\" — so deezer / itunes / discogs / hydrabase users\' fixes survive restart.",
+        features: [
+            "• affects tidal, deezer, spotify public, youtube, and discovery pool manual fixes",
+            "• matches how the auto-discovery worker already saved",
+            "• spotify-primary users unaffected (hardcoded value matched their source)",
+        ],
+    },
+    {
+        title: "Watchlist Content Filters Fixed",
+        description: "global override and live-version detection now behave the way the ui implies.",
+        features: [
+            "• scheduled auto-watchlist honors watchlist → global override (was bypassing it)",
+            "• live detection tightened — no more false positives on titles like \"what we live for\"",
+            "• same fix applies to the library maintenance live/commentary cleaner",
+            "• still catches (live), - live, live at/from/in/on, unplugged, in concert",
+        ],
+    },
+    {
+        title: "Discography Backfill",
+        description: "new maintenance job that scans each artist\'s full discography and finds what you\'re missing.",
+        features: [
+            "• scans each library artist against your metadata source",
+            "• creates findings for missing tracks — review and add to wishlist",
+            "• respects all content filters (live, remix, acoustic, etc.) and release type filters",
+            "• optional auto-add-to-wishlist setting for hands-off operation",
+            "• opt-in, runs weekly, processes up to 50 artists per run",
+        ],
+    },
+    {
+        title: "Repair 'Run Now' Honored While Paused",
+        description: "force-running a repair job no longer stalls forever when the master worker is paused.",
+        features: [
+            "• jobs queued via run now complete even if the master worker is paused",
+            "• fixes silent stalls where the job logged \"scanning 50 artists\" then did nothing",
+            "• master-pause still blocks scheduled runs — only affects user-triggered runs",
+        ],
+    },
+    {
+        title: "Multi-Artist Tagging",
+        description: "more control over how multiple artists are written to audio file tags.",
+        features: [
+            "• configurable separator: comma, semicolon, or slash",
+            "• multi-value ARTISTS tag for navidrome / jellyfin multi-artist linking",
+            "• \"move featured artists to title\" mode — primary in ARTIST tag, others as (feat. ...) in title",
+            "• opt-in, defaults match current behavior",
+        ],
+    },
+    {
+        title: "Enriched Downloads Page",
+        description: "download cards now show rich metadata instead of just filenames.",
+        features: [
+            "• album artwork thumbnail on each card",
+            "• artist name, album name, source badge",
+            "• quality badge appears after post-processing",
+            "• falls back gracefully for transfers without metadata context",
+        ],
+    },
+    {
+        title: "Template Variable Delimiters",
+        description: "use ${var} syntax to append literal text to template variables.",
+        features: [
+            "• ${albumtype}s produces \"Albums\", \"Singles\", \"EPs\"",
+            "• both $var and ${var} syntaxes work everywhere",
+            "• validation updated to accept delimited variables",
+        ],
+    },
+    {
+        title: "Reorganize All Albums",
+        description: "bulk reorganize all albums for an artist from the enhanced library view.",
+        features: [
+            "• new reorganize all button in the artist header",
+            "• processes sequentially with progress toasts",
+            "• continues on error — one failed album doesn\'t block the rest",
+            "• uses the same template + endpoint as per-album reorganize",
+        ],
+    },
+    {
+        title: "SoulSync Standalone Library",
+        description: "use soulsync without plex, jellyfin, or navidrome — manage your library directly.",
+        features: [
+            "• new standalone server option in settings → connections",
+            "• downloads and imports write to the library db immediately",
+            "• pre-populated enrichment ids — workers skip re-discovery",
+            "• deep scan finds untracked files and removes stale db records",
+            "• sync page hidden automatically in standalone mode",
+            "• full library / artist detail / discography all work standalone",
+        ],
+        usage_note: "settings → connections → standalone. no media server needed.",
+    },
+    {
+        title: "Auto-Import",
+        description: "background folder watcher that automatically identifies and imports music into your library.",
+        features: [
+            "• recursive scan — any folder depth (artist/album/tracks, loose files, whatever)",
+            "• tag-based identification preferred, acoustid fingerprinting as fallback",
+            "• stats bar, filter pills, scan now, approve all, clear history",
+            "• expandable per-track match details with confidence scores",
+            "• race condition fix prevents duplicate processing on multi-track albums",
+        ],
+        usage_note: "import page → auto tab. set your import folder in settings.",
+    },
+    {
+        title: "Wishlist Nebula",
+        description: "wishlist redesigned as an interactive artist orb visualization.",
+        features: [
+            "• each artist is a glowing orb — albums and singles orbit around it",
+            "• click orbs to expand and download directly from the nebula",
+            "• live progress with spinning ring animation while processing",
+            "• stats strip up top: total artists, albums, singles, tracks",
+        ],
+        usage_note: "click wishlist in the sidebar.",
+    },
+    {
+        title: "Automation Group Management",
+        description: "organize and manage automation groups properly.",
+        features: [
+            "• rename, delete, and bulk-toggle groups from the group header",
+            "• drag-and-drop automations between groups",
+            "• delete confirmation shows group name and automation count",
+        ],
+        usage_note: "use the action buttons on group headers in the automations page.",
+    },
+    {
+        title: "Bidirectional Artist Sync & Server Playlists",
+        description: "artist sync now goes both ways, and server playlists show full coverage.",
+        features: [
+            "• artist sync pulls new content from your media server AND removes stale library entries",
+            "• deep scan mode fetches full metadata for newly-discovered tracks",
+            "• server playlist view shows all playlists with synced vs unsynced visual separation",
+        ],
+    },
+    {
+        title: "Provider-Agnostic Discovery",
+        description: "discovery features work with any configured metadata source instead of requiring spotify.",
+        features: [
+            "• similar artist matching, discovery pool, and incremental updates use source priority",
+            "• falls back through spotify, itunes, deezer in configured order",
+            "• musicmap url encoding fixed for artists with special characters",
+            "• freshness check simplified to age-based",
+        ],
+    },
+    {
+        title: "Dashboard & Navigation",
+        description: "dashboard improvements and sidebar navigation enhancements.",
+        features: [
+            "• library status card on dashboard — server state, track counts, scan buttons",
+            "• tools page in sidebar — maintenance tools moved out of the dashboard modal",
+            "• watchlist and wishlist promoted to full sidebar pages with live count badges",
+            "• acoustid scanner scans full library with retag / redownload / delete fix options",
+        ],
+    },
+    {
+        title: "MusicBrainz & Metadata Fixes",
+        description: "critical tag embedding fix and picard-style album consistency.",
+        features: [
+            "• source id tags (spotify, musicbrainz, deezer, audiodb) were silently skipped on every download — now embed correctly",
+            "• picard-style release preference scoring prevents navidrome album splits",
+            "• source tags wiped when metadata enhancement is skipped or fails",
+            "• spotify api no longer called when deezer/itunes is your primary source",
+        ],
+    },
+    {
+        title: "Downloads & Soulseek Improvements",
+        description: "better download management, search accuracy, and queue control.",
+        features: [
+            "• downloads batch panel — color-coded cards with progress, cancel, expand, 7-day history",
+            "• soulseek queries include album name now — fewer wrong-artist downloads",
+            "• reject results from various artists / unknown artist folders",
+            "• clearing wishlist cancels the active wishlist download batch",
+            "• album delete with \"delete files too\" option on enhanced library",
+            "• fix download modal freezing mid-download (m3u auto-save was exhausting server threads)",
+            "• fix unknown artist when adding playlist tracks to wishlist",
+        ],
+    },
+    {
+        title: "Recent Fixes",
+        description: "smaller bug fixes from recent releases and community reports.",
+        features: [
+            "• fix watchlist scan false failures — empty discography no longer reported as error",
+            "• fix deezer_artist_id column error on enhanced library sync",
+            "• fix wishlist button intermittently not navigating",
+            "• fix worker orb tooltips rendering behind dashboard content",
+            "• fix oauth callback port hardcoding — custom ports respected now",
+            "• fix allow duplicates and replace-lower-quality settings not saving",
+            "• fix wishlist dropping cross-album tracks when duplicates enabled",
+            "• fix spotify enrichment worker infinite loop on pre-matched artists",
+            "• reject qobuz 30-second sample/preview downloads",
+            "• auto wing-it fallback for failed discovery",
+            "• fix album track lookup hardcoded to spotify — uses configured primary now",
+            "• fix m3u showing all tracks as missing after post-processing",
+            "• fix acoustid retag not writing corrected tags to file",
+            "• fix downloads badge dropping to 300 after opening downloads page",
+            "• unmatch discovery tracks (red ✕ button)",
+            "• customizable music video naming with $artist, $title, $year",
+            "• fix soulseek log spam when not configured as download source",
+        ],
+    },
+    {
+        title: "Earlier in v2.3",
+        description: "major features from earlier in this release cycle.",
+        features: [
+            "• centralized downloads page with live-updating list and filter pills",
+            "• first-run setup wizard — 7-step guided configuration",
+            "• music videos — search and download from youtube",
+            "• inbound music request api for external tools (discord bots, home assistant)",
+            "• lidarr download source (in development) for usenet / torrent",
+            "• graceful shutdown — all workers respond to shutdown signals immediately",
+            "• unknown artist prevention with 3-tier metadata fallback",
+            "• deezer multi-artist tagging via contributors field",
+            "• artist map — watchlist constellation, genre map, artist explorer",
+            "• discogs integration — enrichment worker, fallback source, search tab",
+            "• wing it mode, global search bar, redesigned notifications",
+            "• server playlist manager, sync history dashboard, playlist explorer",
+            "• enhanced library manager with inline tag editing and write-to-file",
+            "• automation signals, multi-source search tabs, rich artist profiles",
+        ],
+    },
+];
+
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '2.39';
+    return btn ? btn.textContent.trim().replace('v', '') : '2.4.0';
+}
+
+// Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns
+// negative if a < b, positive if a > b, 0 if equal. Strips any +sha suffix
+// before parsing. Missing components are treated as 0 so "2.4" sorts as
+// "2.4.0". Replaces the old parseFloat() approach which collapsed any
+// 3-part version to its first two components — making 2.4.0 and 2.4.1
+// indistinguishable.
+function _compareVersions(a, b) {
+    const parse = (s) => String(s || '0').split('+')[0].split('.').map(n => parseInt(n, 10) || 0);
+    const pa = parse(a);
+    const pb = parse(b);
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+        const diff = (pa[i] || 0) - (pb[i] || 0);
+        if (diff !== 0) return diff;
+    }
+    return 0;
 }
 
 function _getLatestWhatsNewVersion() {
     // Only surface entries whose version number is <= the current build. Entries
     // sitting at higher versions are unreleased work-in-progress and shouldn't
     // flag as "new" in the helper badge until the build catches up.
-    const buildVer = parseFloat(_getCurrentVersion()) || 2.39;
+    const buildVer = _getCurrentVersion();
     const versions = Object.keys(WHATS_NEW)
-        .filter(v => (parseFloat(v) || 0) <= buildVer)
-        .sort((a, b) => parseFloat(b) - parseFloat(a));
-    return versions[0] || '2.39';
+        .filter(v => _compareVersions(v, buildVer) <= 0)
+        .sort((a, b) => _compareVersions(b, a));
+    return versions[0] || '2.4.0';
 }
 
 function openWhatsNew() {
@@ -3757,10 +4089,10 @@ function _openFullChangelog() {
 
 function _showOlderNotes() {
     // Cycle to next older version in the what's new panel (skip unreleased entries)
-    const buildVer = parseFloat(_getCurrentVersion()) || 2.39;
+    const buildVer = _getCurrentVersion();
     const versions = Object.keys(WHATS_NEW)
-        .filter(v => (parseFloat(v) || 0) <= buildVer)
-        .sort((a, b) => parseFloat(b) - parseFloat(a));
+        .filter(v => _compareVersions(v, buildVer) <= 0)
+        .sort((a, b) => _compareVersions(b, a));
     const panel = _helperPopover;
     if (!panel) return;
     const currentTitle = panel.querySelector('.helper-popover-title');
