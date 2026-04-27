@@ -228,7 +228,13 @@ _plex_pin_requests_lock = threading.Lock()
 def _log_rejected_socketio_origin():
     """Hook the WS upgrade path so users see a clear log line when their
     Origin is about to be rejected (engineio otherwise just silently 403s
-    the upgrade). Dedup + threading lives in `core/socketio_cors`."""
+    the upgrade). Dedup + threading lives in `core/socketio_cors`.
+
+    Note: Flask's ``before_request`` runs on every HTTP request to every
+    endpoint — there's no path-scoped equivalent for arbitrary URL
+    prefixes. We early-return on non-/socket.io/ paths to keep the
+    overhead to one string compare per request.
+    """
     if not request.path.startswith('/socket.io/'):
         return
     _socketio_rejection_logger.maybe_log(

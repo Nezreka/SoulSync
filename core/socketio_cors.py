@@ -76,7 +76,9 @@ def resolve_cors_origins(config_manager: Any) -> ResolvedOrigins:
             return None
         parts = [p.strip() for p in raw.replace('\n', ',').split(',')]
     elif isinstance(raw, (list, tuple)):
-        parts = [str(p).strip() for p in raw]
+        # Drop non-string entries instead of stringifying — `[None]` would
+        # otherwise coerce to ``['None']`` and become a junk allow-list entry.
+        parts = [p.strip() for p in raw if isinstance(p, str)]
     else:
         return None
     parts = [p for p in parts if p]
@@ -118,9 +120,10 @@ def will_reject(
     matters for non-browser clients like ``curl`` — which engineio
     intentionally permits.
 
-    Proxy params default to empty so callers without proxy awareness
-    fall back to a host-only same-origin check (still correct for
-    direct-access setups).
+    ``request_scheme`` is required for an accurate same-origin match —
+    engineio compares full ``{scheme}://{host}`` strings, so callers
+    that omit it default to ``'http'``. Production wires Flask's
+    ``request.scheme`` here, which WSGI guarantees to be non-empty.
     """
     if allowed == '*':
         return False
@@ -145,21 +148,7 @@ def will_reject(
                         if forwarded_proto
                         else (request_scheme or 'http'))
             candidates.append(f"{f_scheme}://{f_host}")
-    if origin in candidates:
-        return False
-
-    # Backwards-compat shim: callers that don't pass scheme info still
-    # get the original host-only same-origin check, so callers / tests
-    # that exercise this predicate without a real Flask request context
-    # don't get spurious rejections. Production callers always pass
-    # scheme, so this branch is inert in normal operation.
-    if not request_scheme and not forwarded_proto:
-        origin_host = origin.split('://', 1)[-1].split('/', 1)[0]
-        if host and origin_host == host:
-            return False
-        if forwarded_host and origin_host == forwarded_host.split(',')[0].strip():
-            return False
-    return True
+    return origin not in candidates
 
 
 class RejectionLogger:
@@ -184,7 +173,10 @@ class RejectionLogger:
         self._logger = logger
         self._seen: Set[str] = set()
         self._lock = threading.Lock()
-        self._cap = max(1, int(dedup_cap))
+        try:
+            self._cap = max(1, int(dedup_cap))
+        except (TypeError, ValueError):
+            self._cap = self.DEFAULT_DEDUP_CAP
         self._overflow_warned = False
 
     def maybe_log(
@@ -204,8 +196,6 @@ class RejectionLogger:
         won't be rejected (no Origin header, allowed origin, same-origin
         match against Host / X-Forwarded-Host with proper scheme).
         """
-        if not origin:
-            return False  # Non-browser clients (curl, server-to-server)
         if not will_reject(allowed, origin, host, request_scheme,
                            forwarded_host, forwarded_proto):
             return False
