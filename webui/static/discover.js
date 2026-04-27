@@ -9295,7 +9295,18 @@ async function _doSyncDiscoverPlaylist(playlistType, playlistName) {
 
         const result = await batchResponse.json();
         if (result.success) {
-            showToast(`${playlistName}: syncing ${syncTracks.length} tracks to library...`, 'info');
+            // Custom toast with clickable link to Downloads page
+            const _toastMsg = `${playlistName}: analyzing ${syncTracks.length} tracks...`;
+            const _toastContainer = document.getElementById('toast-container');
+            if (_toastContainer) {
+                const _t = document.createElement('div');
+                _t.className = 'toast-compact toast-info';
+                _t.innerHTML = `<span class="toast-compact-icon">ℹ</span><span class="toast-compact-msg">${_toastMsg} <a href="/active-downloads" style="color:rgb(var(--accent-light-rgb));text-decoration:underline;cursor:pointer" onclick="event.stopPropagation();if(typeof navigateToPage==='function'){event.preventDefault();navigateToPage('active-downloads')}">View progress</a> &mdash; missing tracks will be downloaded.</span>`;
+                _t.onclick = () => { _t.classList.add('toast-exit'); setTimeout(() => { if (_toastContainer.contains(_t)) _toastContainer.removeChild(_t); }, 200); };
+                _toastContainer.appendChild(_t);
+                requestAnimationFrame(() => _t.classList.add('toast-enter'));
+                setTimeout(() => { if (_toastContainer.contains(_t)) { _t.classList.add('toast-exit'); setTimeout(() => { if (_toastContainer.contains(_t)) _toastContainer.removeChild(_t); }, 300); } }, 6000);
+            }
             const card = document.getElementById(`discover-sync-card-${playlistType}`);
             if (card) {
                 const statusEl = card.querySelector('.discover-sync-status');
