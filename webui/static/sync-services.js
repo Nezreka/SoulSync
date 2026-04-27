@@ -2780,8 +2780,19 @@ function _applySyncTabAction() {
             syncDiscoverPlaylistFromTab(action.autoSync, action.autoSyncName || action.autoSync);
         }
     };
-    // Small delay to let lazy tab content render
-    setTimeout(apply, 400);
+    // Wait for lazy-loaded content to appear before applying
+    let attempts = 0;
+    const maxAttempts = 20; // 20 * 200ms = 4s max
+    const waitAndApply = () => {
+        const ready = !action.highlight || document.getElementById(action.highlight);
+        if (ready || attempts >= maxAttempts) {
+            apply();
+        } else {
+            attempts++;
+            setTimeout(waitAndApply, 200);
+        }
+    };
+    setTimeout(waitAndApply, 200);
 }
 
 function initializeSyncPage() {

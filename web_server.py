@@ -44103,17 +44103,41 @@ def _auto_sync_discover_playlists(profile_id, active_source):
                                     'duration_ms': t.duration_ms or 0
                                 })
                 elif ptype == 'seasonal_playlist':
-                    from core.seasonal_discovery import SeasonalDiscoveryService
-                    seasonal_svc = SeasonalDiscoveryService(database)
-                    season_data = seasonal_svc.get_current_season_playlist()
-                    if season_data and season_data.get('tracks'):
-                        tracks = [{
-                            'id': t.get('spotify_track_id', ''),
-                            'name': t.get('track_name', ''),
-                            'artists': [t.get('artist_name', '')],
-                            'album': t.get('album_name', ''),
-                            'duration_ms': t.get('duration_ms', 0)
-                        } for t in season_data['tracks']]
+                    from core.seasonal_discovery import get_seasonal_discovery_service, SEASONAL_CONFIG
+                    seasonal_svc = get_seasonal_discovery_service(spotify_client, database)
+                    current_season = seasonal_svc.get_current_season()
+                    if current_season and current_season in SEASONAL_CONFIG:
+                        track_ids = seasonal_svc.get_curated_seasonal_playlist(current_season, source=active_source)
+                        if track_ids:
+                            if active_source == 'itunes':
+                                s_id_col = 'itunes_track_id'
+                            elif active_source == 'deezer':
+                                s_id_col = 'deezer_track_id'
+                            else:
+                                s_id_col = 'spotify_track_id'
+                            with database._get_connection() as conn:
+                                cursor = conn.cursor()
+                                for tid in track_ids:
+                                    cursor.execute(f"""
+                                        SELECT {s_id_col} as track_id, track_name, artist_name, album_name, duration_ms
+                                        FROM seasonal_tracks WHERE {s_id_col} = ? AND source = ?
+                                    """, (tid, active_source))
+                                    row = cursor.fetchone()
+                                    if not row:
+                                        cursor.execute(f"""
+                                            SELECT {s_id_col} as track_id, track_name, artist_name, album_name, duration_ms
+                                            FROM discovery_pool WHERE {s_id_col} = ? AND source = ?
+                                        """, (tid, active_source))
+                                        row = cursor.fetchone()
+                                    if row:
+                                        r = dict(row)
+                                        tracks.append({
+                                            'id': r.get('track_id', ''),
+                                            'name': r.get('track_name', ''),
+                                            'artists': [r.get('artist_name', '')],
+                                            'album': r.get('album_name', ''),
+                                            'duration_ms': r.get('duration_ms', 0)
+                                        })
                 else:
                     from core.personalized_playlists import PersonalizedPlaylistsService
                     service = PersonalizedPlaylistsService(database)
@@ -44126,7 +44150,7 @@ def _auto_sync_discover_playlists(profile_id, active_source):
                     if ptype in method_map:
                         raw_tracks = method_map[ptype](limit=50)
                         tracks = [{
-                            'id': t.get('spotify_track_id', ''),
+                            'id': t.get('track_id') or t.get('spotify_track_id') or t.get('deezer_track_id') or t.get('itunes_track_id') or '',
                             'name': t.get('track_name', ''),
                             'artists': [t.get('artist_name', '')],
                             'album': t.get('album_name', ''),
@@ -44192,11 +44216,15 @@ def get_discover_synced_playlists():
                     curated_ids = database.get_curated_playlist(ptype, profile_id=pid)
                 track_count = len(curated_ids) if curated_ids else 0
             elif ptype == 'seasonal_playlist':
-                from core.seasonal_discovery import SeasonalDiscoveryService
+                from core.seasonal_discovery import get_seasonal_discovery_service
                 try:
-                    seasonal_svc = SeasonalDiscoveryService(database)
-                    season_data = seasonal_svc.get_current_season_playlist()
-                    track_count = len(season_data.get('tracks', [])) if season_data else 0
+                    seasonal_svc = get_seasonal_discovery_service(spotify_client, database)
+                    current_season = seasonal_svc.get_current_season()
+                    if current_season:
+                        curated = seasonal_svc.get_curated_seasonal_playlist(current_season, source=active_source)
+                        track_count = len(curated) if curated else 0
+                    else:
+                        track_count = 0
                 except Exception:
                     track_count = 0
             else:
