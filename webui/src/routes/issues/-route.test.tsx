@@ -204,7 +204,9 @@ describe('issues route', () => {
 
     await waitFor(() => {
       expect(
-        fetchMock.mock.calls.some(([request]) => request instanceof Request && request.method === 'POST'),
+        fetchMock.mock.calls.some(
+          ([request]) => request instanceof Request && request.method === 'POST',
+        ),
       ).toBe(true);
     });
   });

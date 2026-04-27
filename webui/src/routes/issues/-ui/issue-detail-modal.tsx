@@ -1,11 +1,11 @@
 import { useMutation } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 
+import { Button, FormField, TextArea } from '@/components/form';
 import {
   launchAlbumDownloadWorkflow,
   launchAlbumWishlistWorkflow,
 } from '@/platform/workflows/album-workflows';
-import { Button, FormField, TextArea } from '@/components/form';
 
 import type { IssueRecord } from '../-issues.types';
 
@@ -429,7 +429,9 @@ export function IssueDetailModal({
                           </span>
                           <span className={styles.issueDetailTracklistDur}>{duration}</span>
                           <span className={styles.issueDetailTracklistMeta}>
-                            {format ? <span className={styles.issueTrackBadge}>{format}</span> : null}
+                            {format ? (
+                              <span className={styles.issueTrackBadge}>{format}</span>
+                            ) : null}
                             {bitrate ? (
                               <span className={styles.issueTrackBadge}>{bitrate}</span>
                             ) : null}
@@ -442,27 +444,27 @@ export function IssueDetailModal({
               ) : null}
 
               {issue.entity_type !== 'artist' && isAdmin && (
-              <div className={styles.issueDetailSection}>
-                <div className={styles.issueDetailSectionTitle}>Admin Actions</div>
-                <div className={styles.issueActionButtons}>
-                  <Button
-                    className={styles.issueActionDownload}
-                    type="button"
-                    disabled={downloadWorkflowMutation.isPending}
-                    onClick={() => downloadWorkflowMutation.mutate(albumWorkflowInput)}
-                  >
-                    {downloadWorkflowMutation.isPending ? 'Loading...' : 'Download Album'}
-                  </Button>
-                  <Button
-                    className={styles.issueActionWishlist}
-                    type="button"
-                    disabled={wishlistWorkflowMutation.isPending}
-                    onClick={() => wishlistWorkflowMutation.mutate(albumWorkflowInput)}
-                  >
-                    {wishlistWorkflowMutation.isPending ? 'Loading...' : 'Add to Wishlist'}
-                  </Button>
+                <div className={styles.issueDetailSection}>
+                  <div className={styles.issueDetailSectionTitle}>Admin Actions</div>
+                  <div className={styles.issueActionButtons}>
+                    <Button
+                      className={styles.issueActionDownload}
+                      type="button"
+                      disabled={downloadWorkflowMutation.isPending}
+                      onClick={() => downloadWorkflowMutation.mutate(albumWorkflowInput)}
+                    >
+                      {downloadWorkflowMutation.isPending ? 'Loading...' : 'Download Album'}
+                    </Button>
+                    <Button
+                      className={styles.issueActionWishlist}
+                      type="button"
+                      disabled={wishlistWorkflowMutation.isPending}
+                      onClick={() => wishlistWorkflowMutation.mutate(albumWorkflowInput)}
+                    >
+                      {wishlistWorkflowMutation.isPending ? 'Loading...' : 'Add to Wishlist'}
+                    </Button>
+                  </div>
                 </div>
-              </div>
               )}
 
               {isAdmin && (
@@ -494,11 +496,7 @@ export function IssueDetailModal({
         </div>
 
         <div className={styles.modalFooter}>
-          <Button
-            className={styles.modalButtonSecondary}
-            type="button"
-            onClick={onClose}
-          >
+          <Button className={styles.modalButtonSecondary} type="button" onClick={onClose}>
             Close
           </Button>
           {!isLoading && !error && issue && (
@@ -626,8 +624,10 @@ function getTrackMetaItems(snapshot: ReturnType<typeof parseSnapshot>) {
   const duration = formatDuration(snapshot.duration);
   if (duration) items.push({ icon: 'T', label: 'Duration', value: duration });
   if (snapshot.format) items.push({ icon: 'F', label: 'Format', value: String(snapshot.format) });
-  if (snapshot.bitrate) items.push({ icon: 'B', label: 'Bitrate', value: `${snapshot.bitrate} kbps` });
+  if (snapshot.bitrate)
+    items.push({ icon: 'B', label: 'Bitrate', value: `${snapshot.bitrate} kbps` });
   if (snapshot.bpm) items.push({ icon: 'M', label: 'BPM', value: String(snapshot.bpm) });
-  if (snapshot.quality) items.push({ icon: 'Q', label: 'Quality', value: String(snapshot.quality) });
+  if (snapshot.quality)
+    items.push({ icon: 'Q', label: 'Quality', value: String(snapshot.quality) });
   return items;
 }
