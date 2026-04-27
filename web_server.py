@@ -235,7 +235,9 @@ def _log_rejected_socketio_origin():
         _socketio_cors_origins,
         request.headers.get('Origin'),
         request.headers.get('Host', ''),
+        request.scheme,
         request.headers.get('X-Forwarded-Host', ''),
+        request.headers.get('X-Forwarded-Proto', ''),
     )
 
 
