@@ -7,6 +7,7 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
+from config.settings import config_manager
 from core.imports.context import (
     extract_artist_name,
     get_import_clean_album,
@@ -31,8 +32,6 @@ logger = get_logger("imports.side_effects")
 
 
 def _get_config_manager():
-    from config.settings import config_manager
-
     return config_manager
 
 
@@ -222,8 +221,7 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
 def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[str, Any], album_info: Dict[str, Any]) -> None:
     """Write imported media to the SoulSync library tables when the active server is SoulSync."""
     try:
-        config_manager = _get_config_manager()
-        if config_manager.get_active_media_server() != "soulsync":
+        if _get_config_manager().get_active_media_server() != "soulsync":
             return
 
         context = normalize_import_context(context)
@@ -288,7 +286,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         if genres:
             from core.genre_filter import filter_genres as _filter_genres
 
-            genres = _filter_genres(genres, config_manager)
+            genres = _filter_genres(genres, _get_config_manager())
         genres_json = json.dumps(genres) if genres else ""
 
         bitrate = 0

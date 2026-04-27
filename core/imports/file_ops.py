@@ -9,12 +9,9 @@ import subprocess
 import time
 from pathlib import Path
 
+from config.settings import config_manager
+
 logger = logging.getLogger("imports.file_ops")
-
-
-def _get_config_manager():
-    from config.settings import config_manager
-    return config_manager
 
 
 def safe_move_file(src, dst):
@@ -176,7 +173,6 @@ def downsample_hires_flac(final_path, context):
     """Downsample a hi-res FLAC to 16-bit/44.1kHz if enabled."""
     from mutagen.flac import FLAC
 
-    config_manager = _get_config_manager()
     if not config_manager.get("lossy_copy.downsample_hires", False):
         return None
 
@@ -287,7 +283,6 @@ def create_lossy_copy(final_path):
     """Convert a FLAC file to a lossy copy using the configured codec."""
     from mutagen.flac import FLAC
 
-    config_manager = _get_config_manager()
     if not config_manager.get("lossy_copy.enabled", False):
         return None
 

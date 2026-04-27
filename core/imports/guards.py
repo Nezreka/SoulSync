@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from config.settings import config_manager
 from core.imports.context import (
     get_import_clean_artist,
     get_import_clean_title,
@@ -25,15 +26,12 @@ logger = get_logger("imports.guards")
 
 
 def _get_config_manager():
-    from config.settings import config_manager
-
     return config_manager
 
 
 def move_to_quarantine(file_path: str, context: dict, reason: str, automation_engine=None) -> str:
     """Move a file to the quarantine folder and write a metadata sidecar."""
-    config_manager = _get_config_manager()
-    download_dir = config_manager.get("soulseek.download_path", "./downloads")
+    download_dir = _get_config_manager().get("soulseek.download_path", "./downloads")
     quarantine_dir = Path(download_dir) / "ss_quarantine"
     quarantine_dir.mkdir(parents=True, exist_ok=True)
 
@@ -95,7 +93,6 @@ def check_flac_bit_depth(file_path: str, context: dict) -> Optional[str]:
     if not context.get("_audio_quality", "").startswith("FLAC"):
         return None
 
-    config_manager = _get_config_manager()
     quality_profile = MusicDatabase().get_quality_profile()
     flac_config = quality_profile.get("qualities", {}).get("flac", {})
     flac_pref = flac_config.get("bit_depth", "any")
@@ -107,7 +104,7 @@ def check_flac_bit_depth(file_path: str, context: dict) -> Optional[str]:
         return None
 
     flac_fallback = flac_config.get("bit_depth_fallback", True)
-    downsample_enabled = config_manager.get("lossy_copy.downsample_hires", False)
+    downsample_enabled = _get_config_manager().get("lossy_copy.downsample_hires", False)
     track_info = context.get("track_info", {})
     track_name = track_info.get("name", os.path.basename(file_path))
 

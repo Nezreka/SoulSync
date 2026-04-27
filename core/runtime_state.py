@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from functools import wraps
 from typing import Any, Dict, Optional
 
 matched_context_lock = threading.Lock()
@@ -18,6 +19,17 @@ post_process_locks_lock = threading.Lock()
 activity_feed = []
 activity_feed_lock = threading.Lock()
 _activity_toast_emitter = None
+
+
+def caller_must_hold_tasks_lock(func):
+    """Best-effort guard for helpers that mutate download_tasks in place."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not tasks_lock.locked():
+            raise RuntimeError(f"{func.__name__}() requires tasks_lock to be held by the caller")
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 def set_activity_toast_emitter(emitter) -> None:
@@ -50,6 +62,7 @@ def add_activity_item(icon, title, subtitle, time_ago="Now", show_toast=True):
     return activity_item
 
 
+@caller_must_hold_tasks_lock
 def mark_task_completed(task_id: str, track_info: Optional[Dict[str, Any]] = None) -> bool:
     """Mark a download task as completed.
 

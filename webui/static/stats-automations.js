@@ -1214,9 +1214,7 @@ function importPageRenderMatchList() {
     // Build rows
     let matchedCount = 0;
     const rows = data.matches.map((m, idx) => {
-        const track = m.track || m.spotify_track || {};
-        const trackNumber = track.track_number ?? track.trackNumber;
-        const displayTrackNumber = trackNumber ? trackNumber : (idx + 1);
+        const trackInfo = _importPageGetTrackDisplayInfo(m, idx);
         let file = null;
         let confidence = m.confidence;
         let isOverride = false;
@@ -1256,8 +1254,8 @@ function importPageRenderMatchList() {
             <div class="import-page-match-row ${file ? 'matched' : ''}"
                  ondragover="importPageHandleDragOver(event)" ondragleave="this.classList.remove('drag-over')" ondrop="importPageHandleDrop(event, ${idx})"
                  onclick="importPageTapAssign(${idx})">
-                <span class="import-page-match-num">${displayTrackNumber}</span>
-                <span class="import-page-match-track">${_esc(track.name || track.title || 'Unknown Track')}</span>
+                <span class="import-page-match-num">${trackInfo.displayTrackNumber}</span>
+                <span class="import-page-match-track">${_esc(trackInfo.name)}</span>
                 <span class="import-page-match-file ${file ? 'has-file' : ''}">
                     ${file
                 ? `<span class="import-page-match-file-name">${_esc(file.filename)}</span>
@@ -1305,6 +1303,21 @@ function importPageRenderMatchList() {
     const processBtn = document.getElementById('import-page-album-process-btn');
     processBtn.disabled = matchedCount === 0;
     processBtn.textContent = `Process ${matchedCount} Track${matchedCount !== 1 ? 's' : ''}`;
+}
+
+function _importPageGetTrackDisplayInfo(item, index) {
+    const track = item?.track || item?.spotify_track || {};
+    const rawTrackNumber = track.track_number ?? track.trackNumber ?? null;
+    const trackNumber = rawTrackNumber === null || rawTrackNumber === undefined || rawTrackNumber === ''
+        ? null
+        : String(rawTrackNumber).split('/')[0].trim();
+
+    return {
+        track,
+        name: track.name || track.title || `Track ${index + 1}`,
+        trackNumber,
+        displayTrackNumber: trackNumber || String(index + 1),
+    };
 }
 
 // --- Album Tab: Drag and Drop ---
@@ -1672,7 +1685,7 @@ function _importQueueAdd(job) {
 async function _importQueueRunJob(entry, job) {
     for (let i = 0; i < job.items.length; i++) {
         const itemName = job.type === 'album'
-            ? (job.items[i].spotify_track?.name || `Track ${i + 1}`)
+            ? _importPageGetTrackDisplayInfo(job.items[i], i).name
             : (job.items[i].title || job.items[i].filename || `File ${i + 1}`);
 
         // Update status with current track info
