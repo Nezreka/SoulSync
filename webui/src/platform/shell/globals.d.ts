@@ -30,7 +30,7 @@ declare global {
     };
     SoulSyncWebShellBridge?: {
       getCurrentPageId: () => ShellPageId;
-      getCurrentProfileContext: () => ShellProfileContext;
+      getCurrentProfileContext: () => ShellProfileContext | null;
       isPageAllowed: (pageId: ShellPageId) => boolean;
       getProfileHomePage: () => ShellPageId;
       resolveLegacyPath: (pathname: string) => ShellPageId | null;
