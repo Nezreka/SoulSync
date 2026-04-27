@@ -72,8 +72,9 @@ const SOURCE_LABELS = {
         tabClass: 'enh-tab-youtube', badgeClass: 'enh-badge-youtube',
     },
     soulseek: {
-        // No canonical brand logo available — stick with a basic music glyph.
-        text: 'Soulseek', icon: '🎼',
+        // Routes through /api/search (raw slskd file results) — historically
+        // called "Basic Search" in the UI before the source picker landed.
+        text: 'Basic Search', icon: '🎼',
         tabClass: 'enh-tab-soulseek', badgeClass: 'enh-badge-soulseek',
     },
 };

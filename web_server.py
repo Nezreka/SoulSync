@@ -2671,102 +2671,24 @@ def add_cache_headers(response, cache_duration=300):
     return response
 
 
-_enhanced_search_cache = collections.OrderedDict()
-_enhanced_search_cache_lock = threading.Lock()
-_ENHANCED_SEARCH_CACHE_TTL = 600
-_ENHANCED_SEARCH_CACHE_MAX_ENTRIES = 100
+# Enhanced-search cache + helpers live in core/search/cache.py.
+# Re-exported here so the existing call sites in this module still resolve.
+from core.search.cache import (
+    get_cache_key as _get_enhanced_search_cache_key_impl,
+    get_cached_response as _get_cached_enhanced_search_response,
+    set_cached_response as _set_cached_enhanced_search_response,
+)
+from core.search.orchestrator import VALID_SOURCES as ENHANCED_SEARCH_VALID_SOURCES
 
 
 def _get_enhanced_search_cache_key(query, requested_source=None):
-    """Build a cache key that follows the current metadata/search configuration.
-
-    When an explicit `requested_source` is provided (single-source search), it is
-    included in the key so that results for different sources don't collide."""
-    normalized_query = (query or '').strip().lower()
-
-    try:
-        active_server = config_manager.get_active_media_server()
-    except Exception:
-        active_server = 'unknown'
-
-    try:
-        fallback_source = _get_metadata_fallback_source()
-    except Exception:
-        fallback_source = 'unknown'
-
-    try:
-        hydrabase_active = _is_hydrabase_active()
-    except Exception:
-        hydrabase_active = False
-
-    source_tag = (requested_source or '').strip().lower() or 'auto'
-    return (normalized_query, active_server, fallback_source, hydrabase_active, source_tag)
-
-
-ENHANCED_SEARCH_VALID_SOURCES = (
-    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz',
-)
-
-
-def _resolve_enhanced_search_client(source_name):
-    """Return (client, is_available) for a single requested metadata source.
-
-    Mirrors the client-resolution logic used by the /source/<source> endpoint so
-    that the `source` param on the main endpoint behaves consistently."""
-    if source_name == 'spotify':
-        if spotify_client and spotify_client.is_spotify_authenticated():
-            return spotify_client, True
-        return None, False
-    if source_name == 'itunes':
-        return _get_itunes_client(), True
-    if source_name == 'deezer':
-        return _get_deezer_client(), True
-    if source_name == 'discogs':
-        token = config_manager.get('discogs.token', '')
-        if not token:
-            return None, False
-        return _get_discogs_client(token), True
-    if source_name == 'hydrabase':
-        if hydrabase_client and hydrabase_client.is_connected():
-            return hydrabase_client, True
-        return None, False
-    if source_name == 'musicbrainz':
-        try:
-            from core.musicbrainz_search import MusicBrainzSearchClient
-            return MusicBrainzSearchClient(), True
-        except Exception as e:
-            logger.warning(f"MusicBrainz search client init failed: {e}")
-            return None, False
-    return None, False
-
-
-def _get_cached_enhanced_search_response(cache_key):
-    """Return a cached enhanced-search response if it is still fresh."""
-    now = time.time()
-    with _enhanced_search_cache_lock:
-        entry = _enhanced_search_cache.get(cache_key)
-        if not entry:
-            return None
-
-        if now - entry['timestamp'] < _ENHANCED_SEARCH_CACHE_TTL:
-            _enhanced_search_cache.move_to_end(cache_key)
-            return entry['data']
-
-        _enhanced_search_cache.pop(cache_key, None)
-        return None
-
-
-def _set_cached_enhanced_search_response(cache_key, response_data):
-    """Store an enhanced-search response in the short-lived in-memory cache."""
-    with _enhanced_search_cache_lock:
-        _enhanced_search_cache[cache_key] = {
-            'timestamp': time.time(),
-            'data': response_data,
-        }
-        _enhanced_search_cache.move_to_end(cache_key)
-
-        while len(_enhanced_search_cache) > _ENHANCED_SEARCH_CACHE_MAX_ENTRIES:
-            _enhanced_search_cache.popitem(last=False)
+    """Thin wrapper that wires live config providers into the cache-key builder."""
+    return _get_enhanced_search_cache_key_impl(
+        query, requested_source,
+        active_server_provider=config_manager.get_active_media_server,
+        fallback_source_provider=_get_metadata_fallback_source,
+        hydrabase_active_provider=_is_hydrabase_active,
+    )
 
 # --- Background Download Monitoring (GUI Parity) ---
 class WebUIDownloadMonitor:
@@ -9038,64 +8960,65 @@ def start_sync():
     # Placeholder: simulates starting a sync
     return jsonify({"success": True, "message": "Sync process started."})
 
+# Search route bodies live in core/search/* — these routes are thin handlers.
+from core.search import basic as _search_basic
+from core.search import library_check as _search_library_check
+from core.search import orchestrator as _search_orchestrator
+from core.search import stream as _search_stream
+
+
+def _build_search_deps():
+    """Build the SearchDeps bundle from this module's globals on each request.
+
+    Constructed per-request so config / client state is always live.
+    """
+    return _search_orchestrator.SearchDeps(
+        database=get_database(),
+        config_manager=config_manager,
+        spotify_client=spotify_client,
+        hydrabase_client=hydrabase_client,
+        hydrabase_worker=hydrabase_worker,
+        soulseek_client=soulseek_client,
+        fix_artist_image_url=fix_artist_image_url,
+        is_hydrabase_active=_is_hydrabase_active,
+        get_metadata_fallback_source=_get_metadata_fallback_source,
+        get_metadata_fallback_client=_get_metadata_fallback_client,
+        get_itunes_client=_get_itunes_client,
+        get_deezer_client=_get_deezer_client,
+        get_discogs_client=_get_discogs_client,
+        run_background_comparison=_run_background_comparison,
+        run_async=run_async,
+        dev_mode_enabled_provider=lambda: dev_mode_enabled,
+    )
+
+
 @app.route('/api/search', methods=['POST'])
 def search_music():
-    """Real search using soulseek_client"""
+    """Basic Soulseek file search."""
     data = request.get_json()
     query = data.get('query')
     if not query:
         return jsonify({"error": "No search query provided."}), 400
 
     logger.info(f"Web UI Search initiated for: '{query}'")
-
-    # Add activity for search start
     add_activity_item("", "Search Started", f"'{query}'", "Now")
-    
+
     try:
-        tracks, albums = run_async(soulseek_client.search(query))
-
-        # Convert to dictionaries for JSON response
-        processed_albums = []
-        for album in albums:
-            album_dict = album.__dict__.copy()
-            album_dict["tracks"] = [track.__dict__ for track in album.tracks]
-            album_dict["result_type"] = "album"
-            processed_albums.append(album_dict)
-
-        processed_tracks = []
-        for track in tracks:
-            track_dict = track.__dict__.copy()
-            track_dict["result_type"] = "track"
-            processed_tracks.append(track_dict)
-        
-        # Sort by quality score
-        all_results = sorted(processed_albums + processed_tracks, key=lambda x: x.get('quality_score', 0), reverse=True)
-
-        # Add activity for search completion
-        total_results = len(all_results)
-        add_activity_item("", "Search Complete", f"'{query}' - {total_results} results", "Now")
-
-        return jsonify({"results": all_results})
-        
+        results = _search_basic.run_basic_soulseek_search(query, soulseek_client, run_async)
+        add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
+        return jsonify({"results": results})
     except Exception as e:
         logger.error(f"Search error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/enhanced-search', methods=['POST'])
 def enhanced_search():
-    """
-    Unified search across metadata sources and local database for enhanced search mode.
-    Returns categorized results: DB artists, source artists, albums, and tracks.
+    """Unified metadata search across configured sources + local DB artists.
 
-    Fires parallel queries against all available sources (Spotify, iTunes, Deezer)
-    and returns results keyed by source, plus backward-compatible top-level keys
-    mapped from the primary source.
-
-    Optional JSON body param `source` (one of: auto, spotify, itunes, deezer,
-    discogs, hydrabase, musicbrainz). When set to a specific source, the endpoint
-    bypasses the primary-source fan-out and returns just that source's results
-    (plus the usual db_artists). `auto` and omitted behave identically — current
-    multi-source fan-out.
+    Optional `source` body param ("spotify"|"itunes"|"deezer"|"discogs"|
+    "hydrabase"|"musicbrainz"|"auto"|"") forces a single-source search and
+    bypasses the fan-out. Otherwise picks a primary source per the user's
+    configuration and lists alternates for the frontend to fetch async.
     """
     data = request.get_json()
     query = data.get('query', '').strip()
@@ -9105,285 +9028,42 @@ def enhanced_search():
     if requested_source and requested_source not in ENHANCED_SEARCH_VALID_SOURCES:
         return jsonify({"error": f"Unknown source: {requested_source}"}), 400
 
-    cache_key = _get_enhanced_search_cache_key(query, requested_source)
-
-    empty_source = {"artists": [], "albums": [], "tracks": [], "available": False}
-
     if not query:
-        return jsonify({
-            "db_artists": [],
-            "spotify_artists": [],
-            "spotify_albums": [],
-            "spotify_tracks": [],
-            "sources": {},
-            "primary_source": "spotify",
-            "metadata_source": "spotify"
-        })
+        return jsonify(_search_orchestrator.empty_response())
 
-    cached_response = _get_cached_enhanced_search_response(cache_key)
-    if cached_response is not None:
+    cache_key = _get_enhanced_search_cache_key(query, requested_source)
+    cached = _get_cached_enhanced_search_response(cache_key)
+    if cached is not None:
         logger.info(f"Enhanced search cache hit for: '{query}'")
-        return jsonify(cached_response)
+        return jsonify(cached)
 
-    logger.info(
-        f"Enhanced search initiated for: '{query}' "
-        f"(source={requested_source or 'auto'})"
-    )
+    logger.info(f"Enhanced search initiated for: '{query}' (source={requested_source or 'auto'})")
 
     try:
-        # Search local database for artists (always)
-        database = get_database()
-        active_server = config_manager.get_active_media_server()
-        db_artists_objs = database.search_artists(query, limit=5, server_source=active_server)
-
-        db_artists = []
-        for artist in db_artists_objs:
-            image_url = None
-            if hasattr(artist, 'thumb_url') and artist.thumb_url:
-                image_url = fix_artist_image_url(artist.thumb_url)
-            db_artists.append({
-                "id": artist.id,
-                "name": artist.name,
-                "image_url": image_url
-            })
-
-        # Very short queries are usually broad enough that remote metadata searches
-        # just add latency without improving the result quality much. Keep them local.
-        if len(query) < 3:
-            short_source = requested_source or _get_metadata_fallback_source()
-            response_data = {
-                "db_artists": db_artists,
-                "spotify_artists": [],
-                "spotify_albums": [],
-                "spotify_tracks": [],
-                "metadata_source": short_source,
-                "primary_source": short_source,
-                "alternate_sources": [],
-                "sources": {},
-            }
-            _set_cached_enhanced_search_response(cache_key, response_data)
-            return jsonify(response_data)
-
-        # Explicit single-source search — bypass primary-source fan-out entirely.
-        if requested_source:
-            client, available = _resolve_enhanced_search_client(requested_source)
-            if not client:
-                response_data = {
-                    "db_artists": db_artists,
-                    "spotify_artists": [],
-                    "spotify_albums": [],
-                    "spotify_tracks": [],
-                    "metadata_source": requested_source,
-                    "primary_source": requested_source,
-                    "alternate_sources": [],
-                    "source_available": False,
-                }
-                _set_cached_enhanced_search_response(cache_key, response_data)
-                return jsonify(response_data)
-
-            try:
-                source_results = _enhanced_search_source(query, client, requested_source)
-            except Exception as e:
-                logger.warning(f"Single-source search ({requested_source}) failed: {e}")
-                source_results = {"artists": [], "albums": [], "tracks": [], "available": False}
-
-            logger.info(
-                f"Enhanced search [source={requested_source}] results: "
-                f"{len(db_artists)} DB, {len(source_results['artists'])} artists, "
-                f"{len(source_results['albums'])} albums, {len(source_results['tracks'])} tracks"
-            )
-
-            response_data = {
-                "db_artists": db_artists,
-                "spotify_artists": source_results["artists"],
-                "spotify_albums": source_results["albums"],
-                "spotify_tracks": source_results["tracks"],
-                "metadata_source": requested_source,
-                "primary_source": requested_source,
-                "alternate_sources": [],
-                "source_available": True,
-            }
-            _set_cached_enhanced_search_response(cache_key, response_data)
-            return jsonify(response_data)
-
-        # ── Determine primary source and search it synchronously ──
-        primary_source = "spotify"
-        primary_results = empty_source
-
-        if _is_hydrabase_active():
-            primary_source = "hydrabase"
-            try:
-                primary_results = _enhanced_search_source(query, hydrabase_client)
-                # Fire off background comparison
-                _run_background_comparison(query, hydrabase_counts={
-                    'tracks': len(primary_results['tracks']),
-                    'artists': len(primary_results['artists']),
-                    'albums': len(primary_results['albums'])
-                })
-            except Exception as e:
-                logger.error(f"Hydrabase search failed: {e}")
-                primary_source = "spotify"
-                primary_results = empty_source
-
-        if primary_source != "hydrabase":
-            # Mirror to Hydrabase worker (fire-and-forget)
-            if hydrabase_worker and dev_mode_enabled:
-                hydrabase_worker.enqueue(query, 'tracks')
-                hydrabase_worker.enqueue(query, 'albums')
-                hydrabase_worker.enqueue(query, 'artists')
-
-            # Search using the user's configured primary metadata source
-            fb_source = _get_metadata_fallback_source()
-            try:
-                primary_results = _enhanced_search_source(query, _get_metadata_fallback_client(), fb_source)
-                primary_source = fb_source
-            except Exception as e:
-                logger.debug(f"Primary source ({fb_source}) search failed: {e}")
-
-            # If primary source failed and it wasn't Spotify, try Spotify as fallback
-            if primary_results is empty_source and fb_source != 'spotify':
-                if spotify_client and spotify_client.is_spotify_authenticated():
-                    try:
-                        primary_results = _enhanced_search_source(query, spotify_client, "spotify")
-                        primary_source = "spotify"
-                    except Exception as e:
-                        logger.debug(f"Spotify fallback search failed: {e}")
-
-        # Determine which alternate sources are available (for frontend to fetch async)
-        spotify_available = bool(spotify_client and spotify_client.is_spotify_authenticated())
-        hydrabase_available = bool(hydrabase_client and hydrabase_client.is_connected())
-        discogs_available = bool(config_manager.get('discogs.token', ''))
-        alternate_sources = []
-        if primary_source != 'spotify' and spotify_available:
-            alternate_sources.append('spotify')
-        if primary_source != 'itunes':
-            alternate_sources.append('itunes')
-        if primary_source != 'deezer':
-            alternate_sources.append('deezer')
-        if primary_source != 'discogs' and discogs_available:
-            alternate_sources.append('discogs')
-        if primary_source != 'hydrabase' and hydrabase_available:
-            alternate_sources.append('hydrabase')
-        # YouTube music videos always available (uses yt-dlp, no auth needed)
-        alternate_sources.append('youtube_videos')
-        # MusicBrainz always available (public API, no auth)
-        alternate_sources.append('musicbrainz')
-
-        logger.info(f"Enhanced search results ({primary_source}): {len(db_artists)} DB artists, "
-                     f"{len(primary_results['artists'])} artists, {len(primary_results['albums'])} albums, "
-                     f"{len(primary_results['tracks'])} tracks | "
-                     f"Alt sources available: {alternate_sources}")
-
-        response_data = {
-            # Backward compat — same shape as before
-            "db_artists": db_artists,
-            "spotify_artists": primary_results["artists"],
-            "spotify_albums": primary_results["albums"],
-            "spotify_tracks": primary_results["tracks"],
-            "metadata_source": primary_source,
-            # New multi-source data
-            "primary_source": primary_source,
-            "alternate_sources": alternate_sources,
-        }
+        deps = _build_search_deps()
+        response_data = _search_orchestrator.run_enhanced_search(query, requested_source, deps)
         _set_cached_enhanced_search_response(cache_key, response_data)
         return jsonify(response_data)
-
     except Exception as e:
         logger.error(f"Enhanced search error: {e}")
         return jsonify({"error": str(e)}), 500
 
 
-def _search_metadata_source_kind(client, query, kind, source_name=None):
-    """Search one result type from a metadata source and normalize it."""
-    source_label = source_name or type(client).__name__
-
-    if kind == "artists":
-        artists = []
-        try:
-            artist_objs = client.search_artists(query, limit=10)
-            for artist in artist_objs:
-                artists.append({
-                    "id": artist.id,
-                    "name": artist.name,
-                    "image_url": artist.image_url,
-                    "external_urls": artist.external_urls or {},
-                })
-        except Exception as e:
-            logger.debug(f"Artist search failed for {source_label}: {e}")
-        return artists
-
-    if kind == "albums":
-        albums = []
-        try:
-            album_objs = client.search_albums(query, limit=10)
-            for album in album_objs:
-                artist_name = ', '.join(album.artists) if album.artists else 'Unknown Artist'
-                albums.append({
-                    "id": album.id,
-                    "name": album.name,
-                    "artist": artist_name,
-                    "image_url": album.image_url,
-                    "release_date": album.release_date,
-                    "total_tracks": album.total_tracks,
-                    "album_type": album.album_type,
-                    "external_urls": album.external_urls or {},
-                })
-        except Exception as e:
-            logger.warning(f"Album search failed for {source_label}: {e}", exc_info=True)
-        return albums
-
-    if kind == "tracks":
-        tracks = []
-        try:
-            track_objs = client.search_tracks(query, limit=10)
-            for track in track_objs:
-                artist_name = ', '.join(track.artists) if track.artists else 'Unknown Artist'
-                tracks.append({
-                    "id": track.id,
-                    "name": track.name,
-                    "artist": artist_name,
-                    "album": track.album,
-                    "duration_ms": track.duration_ms,
-                    "image_url": track.image_url,
-                    "release_date": track.release_date,
-                    "external_urls": track.external_urls or {},
-                })
-        except Exception as e:
-            logger.warning(f"Track search failed for {source_label}: {e}", exc_info=True)
-        return tracks
-
-    raise ValueError(f"Unknown metadata search kind: {kind}")
-
-
-def _enhanced_search_source(query, client, source_name=None):
-    """Search a single metadata source and return normalized results dict."""
-    results = {"artists": [], "albums": [], "tracks": []}
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {
-            executor.submit(_search_metadata_source_kind, client, query, "artists", source_name): "artists",
-            executor.submit(_search_metadata_source_kind, client, query, "albums", source_name): "albums",
-            executor.submit(_search_metadata_source_kind, client, query, "tracks", source_name): "tracks",
-        }
-        for future in as_completed(futures):
-            kind = futures[future]
-            try:
-                results[kind] = future.result()
-            except Exception as e:
-                logger.warning(f"{kind.title()} search failed for {source_name or type(client).__name__}: {e}", exc_info=True)
-                results[kind] = []
-
-    return {"artists": results["artists"], "albums": results["albums"], "tracks": results["tracks"], "available": True}
-
-
 @app.route('/api/enhanced-search/source/<source_name>', methods=['POST'])
 def enhanced_search_source(source_name):
-    """Fetch search results from a specific alternate metadata source.
+    """Streaming NDJSON search for one alternate metadata source.
 
-    Streams NDJSON — one line per search type (artists, albums, tracks) as each completes.
-    This prevents slow sources (iTunes with 3s rate limit) from blocking the UI.
-    Falls back to single JSON response if streaming not supported.
+    One line per search-kind (artists, albums, tracks) as it completes,
+    plus a final `{"type":"done"}` marker. `youtube_videos` yields a single
+    `videos` chunk via yt-dlp instead.
+
+    When the requested source's client isn't available (Spotify unauthed,
+    Discogs missing token, Hydrabase disconnected, MusicBrainz import
+    failure, soulseek_client.youtube missing), returns plain JSON
+    `{"artists":[],"albums":[],"tracks":[],"available":false}` to match
+    the original endpoint contract.
     """
-    if source_name not in ('spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'youtube_videos', 'musicbrainz'):
+    if source_name not in _search_orchestrator.VALID_STREAM_SOURCES:
         return jsonify({"error": f"Unknown source: {source_name}"}), 400
 
     data = request.get_json()
@@ -9391,87 +9071,29 @@ def enhanced_search_source(source_name):
     if not query:
         return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
 
-    # YouTube music videos — separate flow from metadata sources
+    deps = _build_search_deps()
+
     if source_name == 'youtube_videos':
-        if not soulseek_client or not hasattr(soulseek_client, 'youtube') or not soulseek_client.youtube:
+        youtube_client = _search_orchestrator.resolve_youtube_videos_client(deps)
+        if youtube_client is None:
             return jsonify({"videos": [], "available": False})
         try:
-            def generate_videos():
-                try:
-                    # Search YouTube via yt-dlp
-                    video_query = f"{query} official music video"
-                    results = run_async(soulseek_client.youtube.search_videos(video_query, max_results=20))
-                    videos = []
-                    for v in (results or []):
-                        videos.append({
-                            'video_id': v.video_id,
-                            'title': v.title,
-                            'channel': v.channel,
-                            'duration': v.duration,
-                            'thumbnail': v.thumbnail,
-                            'url': v.url,
-                            'view_count': v.view_count,
-                            'upload_date': v.upload_date,
-                        })
-                    yield json.dumps({"type": "videos", "data": videos}) + "\n"
-                except Exception as e:
-                    logger.error(f"YouTube music video search failed: {e}")
-                    yield json.dumps({"type": "videos", "data": []}) + "\n"
-                yield json.dumps({"type": "done"}) + "\n"
-            return app.response_class(generate_videos(), mimetype='application/x-ndjson')
+            return app.response_class(
+                _search_orchestrator.stream_youtube_videos(query, youtube_client, run_async),
+                mimetype='application/x-ndjson',
+            )
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
     try:
-        client = None
-        if source_name == 'spotify':
-            if spotify_client and spotify_client.is_spotify_authenticated():
-                client = spotify_client
-            else:
-                return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
-        elif source_name == 'itunes':
-            client = _get_itunes_client()
-        elif source_name == 'deezer':
-            client = _get_deezer_client()
-        elif source_name == 'discogs':
-            token = config_manager.get('discogs.token', '')
-            if token:
-                client = _get_discogs_client(token)
-            else:
-                return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
-        elif source_name == 'hydrabase':
-            if hydrabase_client and hydrabase_client.is_connected():
-                client = hydrabase_client
-            else:
-                return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
-        elif source_name == 'musicbrainz':
-            try:
-                from core.musicbrainz_search import MusicBrainzSearchClient
-                client = MusicBrainzSearchClient()
-            except Exception as e:
-                logger.warning(f"MusicBrainz search client init failed: {e}")
-                return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
+        client, _available = _search_orchestrator.resolve_client(source_name, deps)
+        if client is None:
+            return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
 
-        def generate():
-            # Stream each search type as it completes
-            with ThreadPoolExecutor(max_workers=3) as executor:
-                futures = {
-                    executor.submit(_search_metadata_source_kind, client, query, "artists", source_name): "artists",
-                    executor.submit(_search_metadata_source_kind, client, query, "albums", source_name): "albums",
-                    executor.submit(_search_metadata_source_kind, client, query, "tracks", source_name): "tracks",
-                }
-                for future in as_completed(futures):
-                    kind = futures[future]
-                    try:
-                        payload = future.result()
-                    except Exception as e:
-                        logger.warning(f"{kind.title()} search failed for {source_name}: {e}", exc_info=True)
-                        payload = []
-                    yield json.dumps({"type": kind, "data": payload}) + "\n"
-
-            yield json.dumps({"type": "done"}) + "\n"
-
-        return app.response_class(generate(), mimetype='application/x-ndjson')
+        return app.response_class(
+            _search_orchestrator.stream_metadata_source(source_name, query, client),
+            mimetype='application/x-ndjson',
+        )
     except Exception as e:
         logger.error(f"Enhanced search source ({source_name}) error: {e}")
         return jsonify({"artists": [], "albums": [], "tracks": [], "available": False})
@@ -9479,114 +9101,30 @@ def enhanced_search_source(source_name):
 
 @app.route('/api/enhanced-search/library-check', methods=['POST'])
 def enhanced_search_library_check():
-    """Batch check which albums/tracks from search results exist in the library.
-    Called async after search results render — doesn't block the search."""
+    """Batch-check which albums/tracks from search results are already in the library.
+
+    Called async after search renders so badges fade in without blocking results.
+    """
     try:
         data = request.get_json() or {}
-        albums = data.get('albums', [])
-        tracks = data.get('tracks', [])
-
-        database = get_database()
-        conn = database._get_connection()
-        try:
-            cursor = conn.cursor()
-
-            # Build lookup sets from library — two fast queries
-            cursor.execute("SELECT LOWER(al.title) || '|||' || LOWER(ar.name) FROM albums al JOIN artists ar ON ar.id = al.artist_id")
-            owned_albums = {r[0] for r in cursor.fetchall()}
-
-            cursor.execute("""
-                SELECT LOWER(t.title) || '|||' || LOWER(a.name), t.id, t.file_path, t.title, a.name, al.title, al.thumb_url
-                FROM tracks t JOIN artists a ON a.id = t.artist_id JOIN albums al ON al.id = t.album_id
-            """)
-            owned_tracks = {}
-            for r in cursor.fetchall():
-                if r[0] not in owned_tracks:  # Keep first match only
-                    owned_tracks[r[0]] = {'track_id': r[1], 'file_path': r[2], 'title': r[3], 'artist_name': r[4], 'album_title': r[5], 'album_thumb_url': r[6]}
-
-            # Build wishlist lookup set — track name|||artist
-            wishlist_keys = set()
-            try:
-                profile_id = get_current_profile_id()
-                cursor.execute("SELECT spotify_data FROM wishlist_tracks WHERE profile_id = ?", (profile_id,))
-                for wr in cursor.fetchall():
-                    try:
-                        wd = json.loads(wr[0]) if isinstance(wr[0], str) else {}
-                        wname = (wd.get('name') or '').lower()
-                        wartists = wd.get('artists', [])
-                        if wartists:
-                            wa = wartists[0].get('name', '') if isinstance(wartists[0], dict) else str(wartists[0])
-                        else:
-                            wa = ''
-                        if wname:
-                            wishlist_keys.add(wname + '|||' + wa.lower().strip())
-                    except Exception:
-                        pass
-            except Exception:
-                # profile_id column may not exist on older DBs — try without it
-                try:
-                    cursor.execute("SELECT spotify_data FROM wishlist_tracks")
-                    for wr in cursor.fetchall():
-                        try:
-                            wd = json.loads(wr[0]) if isinstance(wr[0], str) else {}
-                            wname = (wd.get('name') or '').lower()
-                            wartists = wd.get('artists', [])
-                            if wartists:
-                                wa = wartists[0].get('name', '') if isinstance(wartists[0], dict) else str(wartists[0])
-                            else:
-                                wa = ''
-                            if wname:
-                                wishlist_keys.add(wname + '|||' + wa.lower().strip())
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
-            # O(1) lookups per item
-            album_results = []
-            for a in albums:
-                key = (a.get('name', '').lower() + '|||' + a.get('artist', '').split(',')[0].strip().lower())
-                album_results.append(key in owned_albums)
-
-            # Resolve Plex thumb URLs (relative paths need base URL + token)
-            _plex_base = ''
-            _plex_token = ''
-            if plex_client and plex_client.server:
-                _plex_base = getattr(plex_client.server, '_baseurl', '') or ''
-                _plex_token = getattr(plex_client.server, '_token', '') or ''
-            if not _plex_base:
-                _pc = config_manager.get_plex_config()
-                _plex_base = (_pc.get('base_url', '') or '').rstrip('/')
-                _plex_token = _plex_token or _pc.get('token', '')
-
-            track_results = []
-            for t in tracks:
-                key = (t.get('name', '').lower() + '|||' + t.get('artist', '').split(',')[0].strip().lower())
-                in_wishlist = key in wishlist_keys
-                match = owned_tracks.get(key)
-                if match:
-                    # Resolve thumb URL
-                    thumb = match.get('album_thumb_url') or ''
-                    if thumb and not thumb.startswith('http') and _plex_base and thumb.startswith('/'):
-                        thumb = f"{_plex_base}{thumb}?X-Plex-Token={_plex_token}" if _plex_token else f"{_plex_base}{thumb}"
-                    match['album_thumb_url'] = thumb
-                    track_results.append({'in_library': True, 'in_wishlist': in_wishlist, **match})
-                else:
-                    track_results.append({'in_library': False, 'in_wishlist': in_wishlist})
-        finally:
-            conn.close()
-
-        return jsonify({'albums': album_results, 'tracks': track_results})
+        result = _search_library_check.check_library_presence(
+            database=get_database(),
+            plex_client=plex_client,
+            config_manager=config_manager,
+            profile_id=get_current_profile_id(),
+            albums=data.get('albums', []),
+            tracks=data.get('tracks', []),
+        )
+        return jsonify(result)
     except Exception as e:
         logger.debug(f"Library check error: {e}")
         return jsonify({'albums': [], 'tracks': []})
 
 @app.route('/api/enhanced-search/stream-track', methods=['POST'])
 def stream_enhanced_search_track():
-    """
-    Quick slskd search for a single track to stream from enhanced search.
-    Uses multi-query retry strategy to work around Soulseek keyword filtering.
-    Returns the best matching result from Soulseek.
+    """Single-track preview search — finds the best Soulseek/stream-source match.
+
+    Uses a multi-query retry strategy to work around Soulseek keyword filtering.
     """
     data = request.get_json()
     track_name = data.get('track_name', '').strip()
@@ -9600,145 +9138,22 @@ def stream_enhanced_search_track():
     logger.info(f"Enhanced search stream request: '{track_name}' by '{artist_name}'")
 
     try:
-        # Create a temporary SpotifyTrack-like object for the matching engine
-        temp_track = type('TempTrack', (), {
-            'name': track_name,
-            'artists': [artist_name],
-            'album': album_name if album_name else None,
-            'duration_ms': duration_ms
-        })()
-
-        # Determine effective stream source
-        # stream_source: "youtube" (default, instant) or "active" (use download source)
-        stream_source = config_manager.get('download_source.stream_source', 'youtube')
-        download_mode = config_manager.get('download_source.mode', 'hybrid')
-
-        # Resolve the effective mode for streaming
-        if stream_source == 'youtube':
-            effective_mode = 'youtube'
-        else:
-            # "active" mode — use download source, but fall back to YouTube if Soulseek
-            _hybrid_order = config_manager.get('download_source.hybrid_order', ['hifi', 'youtube', 'soulseek'])
-            _hybrid_first = _hybrid_order[0] if _hybrid_order else config_manager.get('download_source.hybrid_primary', 'hifi')
-            if download_mode == 'soulseek' or (download_mode == 'hybrid' and _hybrid_first == 'soulseek'):
-                effective_mode = 'youtube'  # Soulseek is too slow for streaming preview
-                logger.info("Stream source is 'active' but primary is Soulseek — falling back to YouTube")
-            elif download_mode == 'hybrid':
-                effective_mode = _hybrid_first
-            else:
-                effective_mode = download_mode
-
-        logger.info(f"Stream source: {stream_source} → effective: {effective_mode}")
-
-        # Generate search queries based on effective stream mode
-        search_queries = []
-        import re
-
-        if effective_mode in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
-            # Streaming sources: Include artist for better context
-            if artist_name and track_name:
-                search_queries.append(f"{artist_name} {track_name}".strip())
-
-            # Fallback: Artist + Cleaned track (remove parentheses/brackets)
-            cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
-            cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
-            if cleaned_name and cleaned_name.lower() != track_name.lower():
-                search_queries.append(f"{artist_name} {cleaned_name}".strip())
-
-            logger.info(f"{effective_mode.title()} stream: Searching with artist + track name: {search_queries}")
-        else:
-            # Soulseek mode: Track name only to avoid keyword filtering
-            if track_name.strip():
-                search_queries.append(track_name.strip())
-
-            cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
-            cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
-
-            if cleaned_name and cleaned_name.lower() != track_name.lower():
-                search_queries.append(cleaned_name.strip())
-
-            logger.info(f"Soulseek mode: Searching by track name only (will match with artist): {search_queries}")
-
-        # Remove duplicates while preserving order
-        unique_queries = []
-        seen = set()
-        for query in search_queries:
-            if query and query.lower() not in seen:
-                unique_queries.append(query)
-                seen.add(query.lower())
-
-        search_queries = unique_queries
-
-        # Select the search client based on effective stream mode
-        _stream_clients = {
-            'youtube': soulseek_client.youtube,
-            'tidal': soulseek_client.tidal,
-            'qobuz': soulseek_client.qobuz,
-            'hifi': soulseek_client.hifi,
-            'deezer_dl': soulseek_client.deezer_dl,
-            'lidarr': soulseek_client.lidarr,
-        }
-        stream_client = _stream_clients.get(effective_mode)
-        use_direct_client = stream_client is not None
-
-        # Try queries sequentially until we find a good match
-        for query_index, query in enumerate(search_queries):
-            logger.info(f"Query {query_index + 1}/{len(search_queries)}: '{query}'")
-
-            try:
-                # Search using the stream source client (not the download source)
-                if use_direct_client:
-                    tracks_result, _ = run_async(stream_client.search(query, timeout=15))
-                else:
-                    tracks_result, _ = run_async(soulseek_client.search(query, timeout=15))
-
-                if tracks_result:
-                    logger.info(f"Found {len(tracks_result)} results for query: '{query}'")
-
-                    # Use matching engine to find best match
-                    _max_q = config_manager.get('soulseek.max_peer_queue', 0) or 0
-                    best_matches = matching_engine.find_best_slskd_matches_enhanced(temp_track, tracks_result, max_peer_queue=_max_q)
-
-                    if best_matches:
-                        # Get the first (best) result
-                        best_result = best_matches[0]
-
-                        # Convert to dictionary for JSON response (same format as basic search)
-                        result_dict = {
-                            "username": best_result.username,
-                            "filename": best_result.filename,
-                            "size": best_result.size,
-                            "bitrate": best_result.bitrate,
-                            "duration": best_result.duration,
-                            "quality": best_result.quality,
-                            "free_upload_slots": best_result.free_upload_slots,
-                            "upload_speed": best_result.upload_speed,
-                            "queue_length": best_result.queue_length,
-                            "result_type": "track"
-                        }
-
-                        logger.info(f"Returning best match from query '{query}': {best_result.filename} ({best_result.quality})")
-
-                        return jsonify({
-                            "success": True,
-                            "result": result_dict
-                        })
-                    else:
-                        logger.info(f"No suitable matches for query '{query}', trying next query...")
-                else:
-                    logger.info(f"No results for query '{query}', trying next query...")
-
-            except Exception as search_error:
-                logger.warning(f"Error searching with query '{query}': {search_error}")
-                continue
-
-        # If we get here, none of the queries found a suitable match
-        logger.warning(f"No suitable matches found after trying {len(search_queries)} queries")
-        return jsonify({
-            "success": False,
-            "error": "No suitable track found after trying multiple search strategies"
-        }), 404
-
+        result = _search_stream.stream_search_track(
+            track_name=track_name,
+            artist_name=artist_name,
+            album_name=album_name,
+            duration_ms=duration_ms,
+            config_manager=config_manager,
+            soulseek_client=soulseek_client,
+            matching_engine=matching_engine,
+            run_async=run_async,
+        )
+        if result is None:
+            return jsonify({
+                "success": False,
+                "error": "No suitable track found after trying multiple search strategies",
+            }), 404
+        return jsonify({"success": True, "result": result})
     except Exception as e:
         logger.error(f"Error streaming enhanced search track: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
