@@ -171,12 +171,17 @@ app = Flask(
 )
 app.config['TEMPLATES_AUTO_RELOAD'] = DEV_STATIC_NO_CACHE
 app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
-# Force static assets (library.js / style.css / etc.) to revalidate
-# with ETag on every load instead of Flask's default 12-hour browser
-# cache. Updates ship live without users having to clear cache.
-# Modern browsers still serve 304 Not Modified when the file hasn't
-# changed, so the cost per asset per reload is just a header round-trip.
-app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+# Static assets (library.js / style.css / etc.) get aggressive browser
+# caching (1 year). Safe because every static URL is bust-tagged with
+# `?v=static_v` (computed once per process start — see below) so each
+# server restart effectively invalidates every cached asset for every
+# user. Within a single deploy, repeat page loads hit zero round-trips
+# on static files — was a 304 round-trip per asset under the old
+# max-age=0 setting.
+#
+# In dev, DEV_STATIC_NO_CACHE flips this back to 0 so iterating on JS
+# / CSS doesn't require a server restart between edits.
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 
 
 # Cache-bust query string for static assets — appended to every
@@ -305,6 +310,45 @@ def _log_slow_request(response):
         pass
 
     return response
+
+
+@app.after_request
+def _add_discover_cache_headers(response):
+    """Browser-cache discover GETs for 5 minutes.
+
+    The discover surface (hero, similar artists, recent releases, release
+    radar, deep cuts, etc.) returns semi-stable data that's expensive to
+    compute and not user-action-driven within a session. A short browser
+    cache eliminates redundant fetches when the user toggles between
+    Discover sections or navigates back.
+
+    Scope: only `/api/discover/` and `/api/discovery/` paths, only GET,
+    only successful 2xx responses. Any endpoint that explicitly sets
+    its own Cache-Control wins (we don't override).
+
+    Uses `private` not `public` because discover data is user-specific
+    (hero artists from your watchlist, similar artists from your taste,
+    etc.). `private` keeps it browser-only — intermediate proxies
+    (corporate caching proxies, Cloudflare with cache rules, Nginx
+    proxy_cache) won't store one user's response and serve it to another.
+    """
+    try:
+        if request.method != 'GET':
+            return response
+        if not (request.path.startswith('/api/discover/')
+                or request.path.startswith('/api/discovery/')):
+            return response
+        if not (200 <= response.status_code < 300):
+            return response
+        if response.headers.get('Cache-Control'):
+            return response
+        response.headers['Cache-Control'] = 'private, max-age=300'
+    except Exception as exc:
+        # Don't let a header-tagging bug turn a successful response into
+        # a 500 — log and ship the response without the cache header.
+        logger.warning(f"[discover-cache-headers] failed for {request.path}: {exc}")
+    return response
+
 
 def get_current_profile_id() -> int:
     """Get the current profile ID from Flask g context or default to 1"""
@@ -16099,7 +16143,9 @@ def stream_audio():
             response = send_file(file_path, as_attachment=False, mimetype=mimetype)
             response.headers.add('Accept-Ranges', 'bytes')
             response.headers.add('Content-Length', str(file_size))
-            response.headers.add('Cache-Control', 'no-cache')
+            # Override the default static-cache max-age — streaming media
+            # bypasses caching (range requests, mid-track seeks).
+            response.headers['Cache-Control'] = 'no-cache'
             return response
         
     except Exception as e:
@@ -25137,7 +25183,11 @@ def download_backup_endpoint(filename):
         backup_path = os.path.join(os.path.dirname(db_path), filename)
         if not os.path.exists(backup_path):
             return jsonify({"success": False, "error": "Backup not found"}), 404
-        return send_file(backup_path, as_attachment=True, download_name=filename)
+        # Override the default static-cache max-age — this is a sensitive
+        # DB backup, browsers should never cache it.
+        response = send_file(backup_path, as_attachment=True, download_name=filename)
+        response.headers['Cache-Control'] = 'no-store'
+        return response
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
