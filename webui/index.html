@@ -5409,6 +5409,14 @@
                                 <div class="form-group" id="security-change-pin-section" style="display: none;">
                                     <button class="auth-button" onclick="showChangeSecurityPin()">Change PIN</button>
                                 </div>
+
+                                <div class="form-group">
+                                    <label for="security-cors-origins">Allowed WebSocket Origins:</label>
+                                    <textarea id="security-cors-origins" rows="3" placeholder="https://soulsync.example.com&#10;http://192.168.1.5:8888" style="width: 100%; font-family: monospace; font-size: 12px;"></textarea>
+                                    <div class="setting-help-text">
+                                        Origins (full URL, no trailing slash) allowed to open WebSocket connections to this instance — one per line, or comma-separated. Leave empty for same-origin only (the secure default; works for direct access and most reverse-proxy setups). Add your public domain here if you reach SoulSync via a reverse proxy or custom domain and the WebSocket fails to connect. Use <code>*</code> on its own line to allow any origin (insecure — only do this if you understand why you need it).
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Discovery Settings -->
