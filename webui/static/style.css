@@ -60255,6 +60255,10 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     flex-shrink: 0;
 }
 
+#discover-playlist-modal .mirrored-modal {
+    max-width: 1050px;
+}
+
 #discover-playlist-modal .mirrored-track-header,
 #discover-playlist-modal .mirrored-track-row {
     grid-template-columns: 40px 40px 1.4fr 1.2fr 1fr 56px;
