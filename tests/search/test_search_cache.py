@@ -119,3 +119,15 @@ def test_key_hydrabase_provider_failure_falls_back_to_false():
                                      fallback_source_provider=lambda: 'spotify',
                                      hydrabase_active_provider=boom)
     assert key[3] is False
+
+
+def test_key_preserves_falsy_provider_returns():
+    """Original behavior: if provider returns None / '' on success, store it
+    as-is. Don't coerce to 'unknown' — that's reserved for exceptions."""
+    key = search_cache.get_cache_key('q', None,
+                                     active_server_provider=lambda: None,
+                                     fallback_source_provider=lambda: '',
+                                     hydrabase_active_provider=lambda: 0)
+    assert key[1] is None
+    assert key[2] == ''
+    assert key[3] == 0
