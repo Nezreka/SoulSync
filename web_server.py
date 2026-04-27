@@ -46801,46 +46801,18 @@ except Exception as e:
     listening_stats_worker = None
 
 # --- Stats API Endpoints ---
+# Logic lives in core/stats/queries.py — these routes are thin handlers.
+
+from core.stats import queries as _stats_queries
+
 
 @app.route('/api/stats/cached', methods=['GET'])
 def stats_cached():
     """Get all pre-computed stats for a time range from cache. Instant response."""
     try:
-        import json as _json
         time_range = request.args.get('range', '7d')
-        database = get_database()
-        conn = database._get_connection()
-        cursor = conn.cursor()
-
-        # Get time-range-specific cache
-        cursor.execute("SELECT value FROM metadata WHERE key = ?", (f'stats_cache_{time_range}',))
-        row = cursor.fetchone()
-        data = _json.loads(row[0]) if row and row[0] else {}
-
-        # Get recent plays cache
-        cursor.execute("SELECT value FROM metadata WHERE key = 'stats_cache_recent'")
-        row = cursor.fetchone()
-        recent = _json.loads(row[0]) if row and row[0] else []
-
-        # Get library health cache
-        cursor.execute("SELECT value FROM metadata WHERE key = 'stats_cache_health'")
-        row = cursor.fetchone()
-        health = _json.loads(row[0]) if row and row[0] else {}
-
-        conn.close()
-
-        # Fix image URLs (stored as relative paths, need server prefix)
-        for item in (data.get('top_artists') or []) + (data.get('top_albums') or []) + (data.get('top_tracks') or []):
-            if item.get('image_url'):
-                item['image_url'] = fix_artist_image_url(item['image_url'])
-
-        return jsonify({
-            'success': True,
-            'cached': True,
-            **data,
-            'recent': recent,
-            'health': health,
-        })
+        data = _stats_queries.get_cached_stats(get_database(), fix_artist_image_url, time_range)
+        return jsonify({'success': True, **data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -46849,8 +46821,7 @@ def stats_overview():
     """Get aggregate listening stats for a time range."""
     try:
         time_range = request.args.get('range', 'all')
-        database = get_database()
-        data = database.get_listening_stats(time_range)
+        data = _stats_queries.get_overview(get_database(), time_range)
         return jsonify({'success': True, **data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -46861,31 +46832,7 @@ def stats_top_artists():
     try:
         time_range = request.args.get('range', 'all')
         limit = int(request.args.get('limit', 10))
-        database = get_database()
-        artists = database.get_top_artists(time_range, limit)
-
-        # Enrich with images, Last.fm stats, and soul_id from the library
-        for artist in artists:
-            try:
-                conn = database._get_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT thumb_url, id, lastfm_listeners, lastfm_playcount, soul_id
-                    FROM artists
-                    WHERE LOWER(name) = LOWER(?)
-                    LIMIT 1
-                """, (artist['name'],))
-                row = cursor.fetchone()
-                if row:
-                    artist['image_url'] = fix_artist_image_url(row[0]) if row[0] else None
-                    artist['id'] = row[1]
-                    artist['global_listeners'] = row[2]
-                    artist['global_playcount'] = row[3]
-                    artist['soul_id'] = row[4]
-                conn.close()
-            except Exception:
-                pass
-
+        artists = _stats_queries.get_top_artists(get_database(), fix_artist_image_url, time_range, limit)
         return jsonify({'success': True, 'artists': artists})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -46896,28 +46843,7 @@ def stats_top_albums():
     try:
         time_range = request.args.get('range', 'all')
         limit = int(request.args.get('limit', 10))
-        database = get_database()
-        albums = database.get_top_albums(time_range, limit)
-
-        # Enrich with images
-        for album in albums:
-            try:
-                conn = database._get_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT al.thumb_url, al.id, al.artist_id FROM albums al
-                    WHERE LOWER(al.title) = LOWER(?) AND al.thumb_url IS NOT NULL AND al.thumb_url != ''
-                    LIMIT 1
-                """, (album['name'],))
-                row = cursor.fetchone()
-                if row:
-                    album['image_url'] = fix_artist_image_url(row[0]) if row[0] else None
-                    album['id'] = row[1]
-                    album['artist_id'] = row[2]
-                conn.close()
-            except Exception:
-                pass
-
+        albums = _stats_queries.get_top_albums(get_database(), fix_artist_image_url, time_range, limit)
         return jsonify({'success': True, 'albums': albums})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -46928,30 +46854,7 @@ def stats_top_tracks():
     try:
         time_range = request.args.get('range', 'all')
         limit = int(request.args.get('limit', 10))
-        database = get_database()
-        tracks = database.get_top_tracks(time_range, limit)
-
-        # Enrich with album images
-        for track in tracks:
-            try:
-                conn = database._get_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT al.thumb_url, t.id, t.artist_id FROM tracks t
-                    JOIN albums al ON al.id = t.album_id
-                    JOIN artists ar ON ar.id = t.artist_id
-                    WHERE LOWER(t.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
-                    LIMIT 1
-                """, (track['name'], track['artist']))
-                row = cursor.fetchone()
-                if row:
-                    track['image_url'] = fix_artist_image_url(row[0]) if row[0] else None
-                    track['id'] = row[1]
-                    track['artist_id'] = row[2]
-                conn.close()
-            except Exception:
-                pass
-
+        tracks = _stats_queries.get_top_tracks(get_database(), fix_artist_image_url, time_range, limit)
         return jsonify({'success': True, 'tracks': tracks})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -46962,8 +46865,7 @@ def stats_timeline():
     try:
         time_range = request.args.get('range', '30d')
         granularity = request.args.get('granularity', 'day')
-        database = get_database()
-        data = database.get_listening_timeline(time_range, granularity)
+        data = _stats_queries.get_timeline(get_database(), time_range, granularity)
         return jsonify({'success': True, 'timeline': data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -46973,8 +46875,7 @@ def stats_genres():
     """Get genre distribution by play count."""
     try:
         time_range = request.args.get('range', 'all')
-        database = get_database()
-        data = database.get_genre_breakdown(time_range)
+        data = _stats_queries.get_genres(get_database(), time_range)
         return jsonify({'success': True, 'genres': data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -46983,8 +46884,7 @@ def stats_genres():
 def stats_library_health():
     """Get library health metrics."""
     try:
-        database = get_database()
-        data = database.get_library_health()
+        data = _stats_queries.get_library_health(get_database())
         return jsonify({'success': True, **data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -46993,8 +46893,7 @@ def stats_library_health():
 def stats_db_storage():
     """Get database storage breakdown by table."""
     try:
-        database = get_database()
-        data = database.get_db_storage_stats()
+        data = _stats_queries.get_db_storage(get_database())
         return jsonify({'success': True, **data})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -47004,28 +46903,7 @@ def stats_recent():
     """Get recently played tracks."""
     try:
         limit = int(request.args.get('limit', 20))
-        database = get_database()
-        conn = database._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT title, artist, album, played_at, duration_ms
-            FROM listening_history
-            ORDER BY played_at DESC
-            LIMIT ?
-        """, (limit,))
-        rows = cursor.fetchall()
-        conn.close()
-
-        tracks = []
-        for row in rows:
-            tracks.append({
-                'title': row[0],
-                'artist': row[1],
-                'album': row[2],
-                'played_at': row[3],
-                'duration_ms': row[4],
-            })
-
+        tracks = _stats_queries.get_recent_tracks(get_database(), limit)
         return jsonify({'success': True, 'tracks': tracks})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -47040,41 +46918,10 @@ def stats_resolve_track():
         if not title:
             return jsonify({'success': False, 'error': 'Title required'}), 400
 
-        database = get_database()
-        conn = database._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT t.id, t.title, t.file_path, t.bitrate, t.duration,
-                   ar.name as artist_name, al.title as album_title,
-                   al.thumb_url, t.artist_id, t.album_id
-            FROM tracks t
-            JOIN artists ar ON ar.id = t.artist_id
-            LEFT JOIN albums al ON al.id = t.album_id
-            WHERE LOWER(t.title) = LOWER(?) AND LOWER(ar.name) = LOWER(?)
-              AND t.file_path IS NOT NULL AND t.file_path != ''
-            LIMIT 1
-        """, (title.strip(), artist.strip()))
-        row = cursor.fetchone()
-        conn.close()
-
-        if not row:
+        track = _stats_queries.resolve_track(get_database(), fix_artist_image_url, title, artist)
+        if track is None:
             return jsonify({'success': False, 'error': 'Track not found in library'})
-
-        return jsonify({
-            'success': True,
-            'track': {
-                'id': row[0],
-                'title': row[1],
-                'file_path': row[2],
-                'bitrate': row[3],
-                'duration': row[4],
-                'artist_name': row[5],
-                'album_title': row[6],
-                'image_url': fix_artist_image_url(row[7]) if row[7] else None,
-                'artist_id': row[8],
-                'album_id': row[9],
-            }
-        })
+        return jsonify({'success': True, 'track': track})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -47084,22 +46931,7 @@ def listening_stats_sync():
     try:
         if not listening_stats_worker:
             return jsonify({'success': False, 'error': 'Listening stats worker not initialized'}), 400
-
-        import threading
-        def _do_sync():
-            try:
-                logger.info("[Stats Sync] Starting manual poll...")
-                listening_stats_worker._poll()
-                listening_stats_worker.stats['polls_completed'] += 1
-                listening_stats_worker.stats['last_poll'] = time.strftime('%Y-%m-%d %H:%M:%S')
-                logger.info("[Stats Sync] Manual poll completed")
-            except Exception as e:
-                logger.error(f"[Stats Sync] Manual poll failed: {e}")
-                import traceback
-                traceback.print_exc()
-                logger.error(f"Manual stats sync failed: {e}")
-
-        threading.Thread(target=_do_sync, daemon=True).start()
+        _stats_queries.trigger_listening_sync(listening_stats_worker)
         return jsonify({'success': True, 'message': 'Sync started'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -47108,10 +46940,7 @@ def listening_stats_sync():
 def listening_stats_status():
     """Get listening stats worker status."""
     try:
-        if listening_stats_worker is None:
-            return jsonify({'enabled': False, 'running': False, 'paused': False,
-                            'idle': False, 'current_item': None, 'stats': {}})
-        return jsonify(listening_stats_worker.get_stats())
+        return jsonify(_stats_queries.get_listening_status(listening_stats_worker))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
