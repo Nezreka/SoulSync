@@ -339,11 +339,15 @@ class PlaylistSyncService:
                         if original_track_data:
                             spotify_track_data = original_track_data
                         else:
+                            _img_url = getattr(spotify_track, 'image_url', None) or ''
                             spotify_track_data = {
                                 'id': spotify_track.id,
                                 'name': spotify_track.name,
                                 'artists': [{'name': a} if isinstance(a, str) else a for a in spotify_track.artists],
-                                'album': {'name': spotify_track.album},
+                                'album': {
+                                    'name': spotify_track.album,
+                                    'images': [{'url': _img_url}] if _img_url else []
+                                },
                                 'duration_ms': spotify_track.duration_ms,
                                 'popularity': getattr(spotify_track, 'popularity', 0),
                                 'preview_url': getattr(spotify_track, 'preview_url', None),

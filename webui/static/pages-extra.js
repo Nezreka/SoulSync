@@ -2484,10 +2484,16 @@ function _adlRenderBatchPanel() {
         const isFiltered = _adlFilterBatchId === batch.batch_id;
         const total = batch.total || 1;
         const done = batch.completed + batch.failed;
-        const pct = Math.round((done / total) * 100);
+        let pct;
+        if (batch.phase === 'analysis') {
+            const at = batch.analysis_total || 1;
+            pct = Math.round(((batch.analysis_processed || 0) / at) * 100);
+        } else {
+            pct = Math.round((done / total) * 100);
+        }
         const hasFailed = batch.failed > 0;
         const isTerminal = batch.phase === 'complete' || batch.phase === 'cancelled' || batch.phase === 'error';
-        const isActive = batch.phase === 'downloading' && batch.active > 0;
+        const isActive = (batch.phase === 'downloading' && batch.active > 0) || batch.phase === 'analysis';
 
         // Fade progress for completing batches
         let fadeStyle = '';
@@ -2508,8 +2514,13 @@ function _adlRenderBatchPanel() {
         let phaseText = '';
         let phaseIcon = '';
         if (batch.phase === 'analysis') {
-            phaseText = 'Analyzing...';
+            const ap = batch.analysis_processed || 0;
+            const at = batch.analysis_total || 0;
+            phaseText = at > 0 ? `Analyzing ${ap}/${at}` : 'Analyzing...';
             phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';
+        } else if (batch.phase === 'queued') {
+            phaseText = 'Queued';
+            phaseIcon = '<span style="margin-right:4px">⏳</span>';
         } else if (batch.phase === 'downloading') {
             phaseText = `${batch.completed}/${total} tracks`;
             if (batch.active > 0) phaseIcon = '<span class="adl-spinner" style="margin-right:4px"></span>';

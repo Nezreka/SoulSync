@@ -7901,13 +7901,17 @@ async function startDiscoverPlaylistSync(playlistType, playlistName) {
                 }
                 return t;
             }
+            const _coverUrl = track.album_cover_url || track.image_url || '';
             return {
                 id: track.spotify_track_id || track.track_id || '',
                 name: track.track_name || track.name || '',
                 artists: [track.artist_name || 'Unknown Artist'],
-                album: track.album_name || '',
+                album: {
+                    name: track.album_name || '',
+                    images: _coverUrl ? [{ url: _coverUrl }] : []
+                },
                 duration_ms: track.duration_ms || 0,
-                image_url: track.album_cover_url || track.image_url || ''
+                image_url: _coverUrl
             };
         });
 
@@ -9260,13 +9264,17 @@ async function _doSyncDiscoverPlaylist(playlistType, playlistName) {
                 }
                 return t;
             }
+            const _coverUrl = track.album_cover_url || track.image_url || '';
             return {
                 id: track.spotify_track_id || track.track_id || '',
                 name: track.track_name || track.name || '',
                 artists: [track.artist_name || 'Unknown Artist'],
-                album: track.album_name || '',
+                album: {
+                    name: track.album_name || '',
+                    images: _coverUrl ? [{ url: _coverUrl }] : []
+                },
                 duration_ms: track.duration_ms || 0,
-                image_url: track.album_cover_url || track.image_url || ''
+                image_url: _coverUrl
             };
         });
 
@@ -9287,13 +9295,13 @@ async function _doSyncDiscoverPlaylist(playlistType, playlistName) {
 
         const result = await batchResponse.json();
         if (result.success) {
-            showToast(`Downloading ${playlistName} (${syncTracks.length} tracks)...`, 'info');
+            showToast(`${playlistName}: analyzing ${syncTracks.length} tracks...`, 'info');
             const card = document.getElementById(`discover-sync-card-${playlistType}`);
             if (card) {
                 const statusEl = card.querySelector('.discover-sync-status');
                 if (statusEl) {
                     statusEl.className = 'discover-sync-status syncing';
-                    statusEl.textContent = 'Downloading...';
+                    statusEl.textContent = 'Analyzing...';
                 }
             }
             // Poll the download batch status
@@ -9377,6 +9385,28 @@ function pollDiscoverBatchFromTab(playlistType, batchId, playlistName) {
             if (!resp.ok) { clearInterval(pollInterval); return; }
             const data = await resp.json();
             const phase = data.phase || data.status;
+
+            // Update card status text during intermediate phases
+            const card = document.getElementById(`discover-sync-card-${playlistType}`);
+            if (card && phase !== 'complete' && phase !== 'error' && phase !== 'cancelled') {
+                const statusEl = card.querySelector('.discover-sync-status');
+                if (statusEl) {
+                    statusEl.className = 'discover-sync-status syncing';
+                    if (phase === 'analyzing' || phase === 'analysis') {
+                        const analysisResults = data.analysis_results || [];
+                        const total = data.total || data.track_count || 0;
+                        const analyzed = analysisResults.length;
+                        statusEl.textContent = total > 0 ? `Analyzing ${analyzed}/${total}` : 'Analyzing...';
+                    } else if (phase === 'downloading') {
+                        const tasks = data.tasks || [];
+                        const completed = tasks.filter(t => t.status === 'completed').length;
+                        const total = tasks.length;
+                        statusEl.textContent = total > 0 ? `Downloading ${completed}/${total}` : 'Downloading...';
+                    } else {
+                        statusEl.textContent = phase === 'idle' ? 'Starting...' : `${phase.charAt(0).toUpperCase() + phase.slice(1)}...`;
+                    }
+                }
+            }
 
             if (phase === 'complete' || phase === 'error' || phase === 'cancelled') {
                 clearInterval(pollInterval);

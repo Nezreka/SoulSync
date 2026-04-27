@@ -5950,7 +5950,7 @@ def get_debug_info():
 
     # Active downloads & syncs (use list() snapshots to avoid RuntimeError from concurrent mutation)
     try:
-        active_downloads = len([bid for bid, bd in list(download_batches.items()) if bd.get('phase') == 'downloading'])
+        active_downloads = len([bid for bid, bd in list(download_batches.items()) if bd.get('phase') in ('analysis', 'downloading', 'queued')])
     except Exception:
         active_downloads = 0
     active_syncs = 0
@@ -28395,6 +28395,13 @@ def _ensure_spotify_track_format(track_info):
     album.setdefault('album_type', 'album')
     album.setdefault('total_tracks', 0)
 
+    # Recover cover art from top-level image_url / album_cover_url when album
+    # was a plain string (discover fallback path) and images ended up empty
+    if not album.get('images'):
+        _img_url = track_info.get('image_url') or track_info.get('album_cover_url') or ''
+        if _img_url:
+            album['images'] = [{'url': _img_url}]
+
     # Build proper Spotify track structure
     spotify_track = {
         'id': track_info.get('id', f"webui_{hash(str(track_info))}"),
@@ -31637,6 +31644,7 @@ def get_all_downloads_unified():
                     'phase': batch.get('phase', 'unknown'),
                     'total': len(queue),
                     'analysis_total': batch.get('analysis_total', len(queue)),
+                    'analysis_processed': batch.get('analysis_processed', 0),
                     'completed': sum(1 for s in statuses if s in ('completed', 'skipped', 'already_owned')),
                     'failed': sum(1 for s in statuses if s in ('failed', 'not_found', 'cancelled')),
                     'active': sum(1 for s in statuses if s in ('downloading', 'searching', 'post_processing')),
@@ -31822,10 +31830,16 @@ def cancel_download_task():
                 album_data = dict(album_raw)  # Copy all fields including artists
                 album_data.setdefault('name', 'Unknown Album')
                 album_data.setdefault('album_type', track_info.get('album_type', 'album'))
+                # Ensure images are present (recover from top-level image_url if needed)
+                if 'images' not in album_data:
+                    _img = track_info.get('image_url') or track_info.get('album_image_url') or ''
+                    album_data['images'] = [{'url': _img}] if _img else []
             else:
+                _img = track_info.get('image_url') or track_info.get('album_image_url') or ''
                 album_data = {
                     'name': str(album_raw) if album_raw else 'Unknown Album',
-                    'album_type': track_info.get('album_type', 'album')
+                    'album_type': track_info.get('album_type', 'album'),
+                    'images': [{'url': _img}] if _img else []
                 }
 
             spotify_track_data = {

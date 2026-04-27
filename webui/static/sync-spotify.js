@@ -1413,6 +1413,8 @@ function getPhaseText(phase) {
         case 'discovered': return 'Discovery Complete';
         case 'syncing': return 'Syncing...';
         case 'sync_complete': return 'Sync Complete';
+        case 'analysis': return 'Analyzing...';
+        case 'queued': return 'Queued';
         case 'downloading': return 'Downloading...';
         case 'download_complete': return 'Download Complete';
         default: return phase;
@@ -1422,7 +1424,8 @@ function getPhaseText(phase) {
 function getPhaseColor(phase) {
     switch (phase) {
         case 'fresh': return '#999';
-        case 'discovering': case 'syncing': case 'downloading': return '#ffa500';
+        case 'discovering': case 'syncing': case 'downloading': case 'analysis': return '#ffa500';
+        case 'queued': return '#6b9fff';
         case 'discovered': case 'sync_complete': case 'download_complete': return 'rgb(var(--accent-rgb))';
         default: return '#999';
     }
