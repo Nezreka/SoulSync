@@ -210,11 +210,42 @@ def _init_flask_secret_key():
 app.secret_key = _init_flask_secret_key()
 
 # --- WebSocket (Socket.IO) Setup ---
-socketio = SocketIO(app, async_mode='threading', cors_allowed_origins='*')
+from core.socketio_cors import (
+    resolve_cors_origins as _resolve_socketio_cors_origins,
+    RejectionLogger as _SocketIORejectionLogger,
+    log_startup_status as _log_socketio_startup_status,
+)
+_socketio_cors_origins = _resolve_socketio_cors_origins(config_manager)
+socketio = SocketIO(app, async_mode='threading', cors_allowed_origins=_socketio_cors_origins)
+_log_socketio_startup_status(_socketio_cors_origins, logger)
+_socketio_rejection_logger = _SocketIORejectionLogger(logger)
 
 # Plex PIN auth requests stored in memory for polling
 _plex_pin_requests = {}
 _plex_pin_requests_lock = threading.Lock()
+
+@app.before_request
+def _log_rejected_socketio_origin():
+    """Hook the WS upgrade path so users see a clear log line when their
+    Origin is about to be rejected (engineio otherwise just silently 403s
+    the upgrade). Dedup + threading lives in `core/socketio_cors`.
+
+    Note: Flask's ``before_request`` runs on every HTTP request to every
+    endpoint — there's no path-scoped equivalent for arbitrary URL
+    prefixes. We early-return on non-/socket.io/ paths to keep the
+    overhead to one string compare per request.
+    """
+    if not request.path.startswith('/socket.io/'):
+        return
+    _socketio_rejection_logger.maybe_log(
+        _socketio_cors_origins,
+        request.headers.get('Origin'),
+        request.headers.get('Host', ''),
+        request.scheme,
+        request.headers.get('X-Forwarded-Host', ''),
+        request.headers.get('X-Forwarded-Proto', ''),
+    )
+
 
 # --- Profile Context (before_request hook) ---
 @app.before_request

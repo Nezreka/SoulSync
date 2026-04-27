@@ -996,6 +996,11 @@ async function loadSettingsData() {
             const requirePin = settings.security?.require_pin_on_launch || false;
             document.getElementById('security-require-pin').checked = requirePin;
 
+            // CORS origins — stored verbatim as the user typed (string).
+            const corsOrigins = settings.security?.cors_origins || '';
+            const corsField = document.getElementById('security-cors-origins');
+            if (corsField) corsField.value = corsOrigins;
+
             // Check if admin has a PIN set
             const profilesRes = await fetch('/api/profiles');
             const profilesData = await profilesRes.json();
@@ -2587,8 +2592,31 @@ async function saveSettings(quiet = false) {
         },
         security: {
             require_pin_on_launch: document.getElementById('security-require-pin')?.checked || false,
+            cors_origins: document.getElementById('security-cors-origins')?.value?.trim() || '',
         }
     };
+
+    // Validate cors_origins entries — backend silently filters malformed
+    // values, so warn the user up-front if any line doesn't look like a
+    // URL (or the special '*' token). One-shot toast; doesn't block save.
+    const corsRaw = settings.security.cors_origins;
+    if (corsRaw) {
+        const entries = corsRaw.replace(/\n/g, ',').split(',')
+            .map(s => s.trim())
+            .filter(s => s);
+        const invalid = entries.filter(e => {
+            if (e === '*') return false;
+            // Accept scheme://host[:port] only — no path, query, or fragment.
+            // Engineio compares Origin against {scheme}://{host} exactly.
+            return !/^https?:\/\/[^\s/?#]+$/i.test(e);
+        });
+        if (invalid.length) {
+            showToast(
+                `Allowed Origins: ${invalid.length} entr${invalid.length === 1 ? 'y looks' : 'ies look'} malformed (need full URL like https://soulsync.example.com, no trailing slash). Saving anyway — they\'ll be ignored.`,
+                'warning'
+            );
+        }
+    }
 
     try {
         if (!quiet) showLoadingOverlay('Saving settings...');
