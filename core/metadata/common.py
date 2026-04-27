@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 import threading
+import weakref
 from types import SimpleNamespace
-from typing import Any, Dict
+from typing import Any
 
 from utils.logging_config import get_logger as _create_logger
 
@@ -26,7 +27,7 @@ __all__ = [
     "wipe_source_tags",
 ]
 
-_FILE_LOCKS: Dict[str, threading.Lock] = {}
+_FILE_LOCKS: "weakref.WeakValueDictionary[str, threading.Lock]" = weakref.WeakValueDictionary()
 _FILE_LOCKS_LOCK = threading.Lock()
 
 
@@ -117,6 +118,8 @@ def get_mutagen_symbols():
 
 
 def get_file_lock(file_path: str) -> threading.Lock:
+    # Keep a per-path lock while it is actively referenced, but let it
+    # fall out of the cache once nobody is using it anymore.
     with _FILE_LOCKS_LOCK:
         lock = _FILE_LOCKS.get(file_path)
         if lock is None:

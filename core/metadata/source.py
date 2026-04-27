@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import re
+import socket
 import threading
 import time
+from collections import OrderedDict
 from typing import Any, Dict
+
+import requests
 
 from core.imports.context import (
     extract_artist_name,
@@ -38,11 +42,16 @@ __all__ = [
     "mb_release_detail_cache_lock",
 ]
 
-mb_release_cache: Dict[tuple, str] = {}
+_MB_RELEASE_CACHE_MAX_ENTRIES = 4096
+_MB_RELEASE_DETAIL_CACHE_MAX_ENTRIES = 4096
+
+mb_release_cache: "OrderedDict[tuple, str]" = OrderedDict()
 mb_release_cache_lock = threading.RLock()
-mb_release_detail_cache: Dict[str, Dict[str, Any]] = {}
+mb_release_detail_cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
 mb_release_detail_cache_lock = threading.RLock()
 logger = _create_logger("metadata.source")
+
+_SOURCE_NETWORK_EXCEPTIONS = (requests.RequestException, socket.timeout, TimeoutError)
 
 _EDITION_PAREN_RE = re.compile(
     r'\s*[\(\[]\s*(?:deluxe|expanded|remaster(?:ed)?|anniversary|special|collector|'
@@ -62,6 +71,29 @@ def normalize_album_cache_key(album_name: str) -> str:
     result = _EDITION_PAREN_RE.sub("", album_name or "")
     result = _EDITION_BARE_RE.sub("", result)
     return result.lower().strip()
+
+
+def _bounded_cache_get(cache, key):
+    value = cache.get(key)
+    if value is not None and hasattr(cache, "move_to_end"):
+        cache.move_to_end(key)
+    return value
+
+
+def _bounded_cache_set(cache, key, value, max_entries: int) -> None:
+    cache[key] = value
+    if hasattr(cache, "move_to_end"):
+        cache.move_to_end(key)
+        while len(cache) > max_entries:
+            cache.popitem(last=False)
+
+
+def _call_source_lookup(label: str, func, *args, **kwargs):
+    try:
+        return func(*args, **kwargs)
+    except _SOURCE_NETWORK_EXCEPTIONS as exc:
+        logger.warning("%s lookup failed (network): %s", label, exc)
+        return None
 
 
 SOURCE_TAG_CONFIG = {
@@ -194,119 +226,124 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
     if not mb_service:
         return
 
-    try:
-        result = mb_service.match_recording(track_title, artist_name)
-        if result and result.get("mbid"):
-            pp["recording_mbid"] = result["mbid"]
-            pp["id_tags"]["MUSICBRAINZ_RECORDING_ID"] = pp["recording_mbid"]
-            details = mb_service.mb_client.get_recording(pp["recording_mbid"], includes=["isrcs", "genres"])
-            if details:
-                isrcs = details.get("isrcs", [])
-                if isrcs:
-                    pp["isrc"] = isrcs[0]
-                pp["mb_genres"] = [g["name"] for g in sorted(details.get("genres", []), key=lambda x: x.get("count", 0), reverse=True)]
+    result = _call_source_lookup("MusicBrainz recording", mb_service.match_recording, track_title, artist_name)
+    if result and result.get("mbid"):
+        pp["recording_mbid"] = result["mbid"]
+        pp["id_tags"]["MUSICBRAINZ_RECORDING_ID"] = pp["recording_mbid"]
+        details = _call_source_lookup(
+            "MusicBrainz recording details",
+            mb_service.mb_client.get_recording,
+            pp["recording_mbid"],
+            includes=["isrcs", "genres"],
+        )
+        if details:
+            isrcs = details.get("isrcs", [])
+            if isrcs:
+                pp["isrc"] = isrcs[0]
+            pp["mb_genres"] = [g["name"] for g in sorted(details.get("genres", []), key=lambda x: x.get("count", 0), reverse=True)]
 
-        track_artist_name = metadata.get("artist", "") or artist_name
-        if ", " in track_artist_name:
-            track_artist_name = track_artist_name.split(", ")[0]
-        artist_result = mb_service.match_artist(track_artist_name)
-        if artist_result and artist_result.get("mbid"):
-            pp["artist_mbid"] = artist_result["mbid"]
-            pp["id_tags"]["MUSICBRAINZ_ARTIST_ID"] = pp["artist_mbid"]
+    track_artist_name = metadata.get("artist", "") or artist_name
+    if ", " in track_artist_name:
+        track_artist_name = track_artist_name.split(", ")[0]
+    artist_result = _call_source_lookup("MusicBrainz artist", mb_service.match_artist, track_artist_name)
+    if artist_result and artist_result.get("mbid"):
+        pp["artist_mbid"] = artist_result["mbid"]
+        pp["id_tags"]["MUSICBRAINZ_ARTIST_ID"] = pp["artist_mbid"]
 
-        album_name_for_mb = metadata.get("album", "")
-        if album_name_for_mb:
-            artist_key = (pp.get("batch_artist_name") or artist_name).lower().strip()
-            rc_key_norm = (normalize_album_cache_key(album_name_for_mb), artist_key)
-            rc_key_exact = (album_name_for_mb.lower().strip(), artist_key)
-            with mb_release_cache_lock:
-                cached = mb_release_cache.get(rc_key_norm)
-                if cached is None:
-                    cached = mb_release_cache.get(rc_key_exact)
-                if cached is not None:
-                    pp["release_mbid"] = cached
-                else:
-                    try:
-                        rc_result = mb_service.match_release(album_name_for_mb, artist_name)
-                        pp["release_mbid"] = rc_result.get("mbid", "") if rc_result else ""
-                    except Exception:
-                        pp["release_mbid"] = ""
-                    mb_release_cache[rc_key_norm] = pp["release_mbid"]
-                    mb_release_cache[rc_key_exact] = pp["release_mbid"]
-            if pp["release_mbid"]:
-                pp["id_tags"]["MUSICBRAINZ_RELEASE_ID"] = pp["release_mbid"]
-
+    album_name_for_mb = metadata.get("album", "")
+    if album_name_for_mb:
+        artist_key = (pp.get("batch_artist_name") or artist_name).lower().strip()
+        rc_key_norm = (normalize_album_cache_key(album_name_for_mb), artist_key)
+        rc_key_exact = (album_name_for_mb.lower().strip(), artist_key)
+        release_mbid = None
+        with mb_release_cache_lock:
+            cached = _bounded_cache_get(mb_release_cache, rc_key_norm)
+            if cached is None:
+                cached = _bounded_cache_get(mb_release_cache, rc_key_exact)
+            if cached:
+                release_mbid = cached
+            else:
+                rc_result = _call_source_lookup("MusicBrainz release", mb_service.match_release, album_name_for_mb, artist_name)
+                if rc_result and rc_result.get("mbid"):
+                    release_mbid = rc_result["mbid"]
+                if release_mbid:
+                    _bounded_cache_set(mb_release_cache, rc_key_norm, release_mbid, _MB_RELEASE_CACHE_MAX_ENTRIES)
+                    _bounded_cache_set(mb_release_cache, rc_key_exact, release_mbid, _MB_RELEASE_CACHE_MAX_ENTRIES)
+        pp["release_mbid"] = release_mbid or ""
         if pp["release_mbid"]:
+            pp["id_tags"]["MUSICBRAINZ_RELEASE_ID"] = pp["release_mbid"]
+
+    if pp["release_mbid"]:
+        with mb_release_detail_cache_lock:
+            release_detail = _bounded_cache_get(mb_release_detail_cache, pp["release_mbid"])
+        if release_detail is None:
+            release_detail = _call_source_lookup(
+                "MusicBrainz release details",
+                mb_service.mb_client.get_release,
+                pp["release_mbid"],
+                includes=["release-groups", "labels", "media", "artist-credits", "recordings"],
+            ) or {}
             with mb_release_detail_cache_lock:
-                release_detail = mb_release_detail_cache.get(pp["release_mbid"])
-            if release_detail is None:
-                release_detail = mb_service.mb_client.get_release(
-                    pp["release_mbid"],
-                    includes=["release-groups", "labels", "media", "artist-credits", "recordings"],
-                ) or {}
-                with mb_release_detail_cache_lock:
-                    mb_release_detail_cache[pp["release_mbid"]] = release_detail
-            if release_detail:
-                rg = release_detail.get("release-group", {})
-                if rg.get("id"):
-                    pp["id_tags"]["MUSICBRAINZ_RELEASEGROUPID"] = rg["id"]
-                ac = release_detail.get("artist-credit", [])
-                if ac and isinstance(ac[0], dict):
-                    aa = ac[0].get("artist", {})
-                    if aa.get("id"):
-                        pp["id_tags"]["MUSICBRAINZ_ALBUMARTISTID"] = aa["id"]
-                if rg.get("primary-type"):
-                    pp["id_tags"]["RELEASETYPE"] = rg["primary-type"]
-                if rg.get("first-release-date"):
-                    pp["id_tags"]["ORIGINALDATE"] = rg["first-release-date"]
-                    if not pp["release_year"] and len(rg["first-release-date"]) >= 4:
-                        year = rg["first-release-date"][:4]
-                        if year.isdigit():
-                            pp["release_year"] = year
-                if release_detail.get("status"):
-                    pp["id_tags"]["RELEASESTATUS"] = release_detail["status"]
-                if release_detail.get("country"):
-                    pp["id_tags"]["RELEASECOUNTRY"] = release_detail["country"]
-                if release_detail.get("barcode"):
-                    pp["id_tags"]["BARCODE"] = release_detail["barcode"]
-                media_list = release_detail.get("media", [])
-                if media_list:
-                    fmt = media_list[0].get("format", "")
-                    if fmt:
-                        pp["id_tags"]["MEDIA"] = fmt
-                    pp["id_tags"]["TOTALDISCS"] = str(len(media_list))
-                label_info = release_detail.get("label-info", [])
-                if label_info and isinstance(label_info[0], dict):
-                    cat = label_info[0].get("catalog-number", "")
-                    if cat:
-                        pp["id_tags"]["CATALOGNUMBER"] = cat
-                text_rep = release_detail.get("text-representation", {})
-                if isinstance(text_rep, dict) and text_rep.get("script"):
-                    pp["id_tags"]["SCRIPT"] = text_rep["script"]
-                if release_detail.get("asin"):
-                    pp["id_tags"]["ASIN"] = release_detail["asin"]
-                track_num = metadata.get("track_number")
-                disc_num = metadata.get("disc_number") or 1
-                if track_num and media_list:
-                    try:
-                        track_num_int = int(track_num)
-                        disc_num_int = int(disc_num)
-                        for medium in media_list:
-                            if medium.get("position", 1) == disc_num_int:
-                                for mtrack in (medium.get("tracks") or medium.get("track-list", [])):
-                                    if mtrack.get("position") == track_num_int:
-                                        if mtrack.get("id"):
-                                            pp["id_tags"]["MUSICBRAINZ_RELEASETRACKID"] = mtrack["id"]
-                                        release_recording = mtrack.get("recording", {})
-                                        if release_recording.get("id"):
-                                            pp["recording_mbid"] = release_recording["id"]
-                                            pp["id_tags"]["MUSICBRAINZ_RECORDING_ID"] = release_recording["id"]
-                                        break
-                                break
-                    except (ValueError, TypeError):
-                        pass
-    except Exception as exc:
-        logger.error("MusicBrainz lookup failed (non-fatal): %s", exc)
+                _bounded_cache_set(mb_release_detail_cache, pp["release_mbid"], release_detail, _MB_RELEASE_DETAIL_CACHE_MAX_ENTRIES)
+        if release_detail:
+            rg = release_detail.get("release-group", {})
+            if rg.get("id"):
+                pp["id_tags"]["MUSICBRAINZ_RELEASEGROUPID"] = rg["id"]
+            ac = release_detail.get("artist-credit", [])
+            if ac and isinstance(ac[0], dict):
+                aa = ac[0].get("artist", {})
+                if aa.get("id"):
+                    pp["id_tags"]["MUSICBRAINZ_ALBUMARTISTID"] = aa["id"]
+            if rg.get("primary-type"):
+                pp["id_tags"]["RELEASETYPE"] = rg["primary-type"]
+            if rg.get("first-release-date"):
+                pp["id_tags"]["ORIGINALDATE"] = rg["first-release-date"]
+                if not pp["release_year"] and len(rg["first-release-date"]) >= 4:
+                    year = rg["first-release-date"][:4]
+                    if year.isdigit():
+                        pp["release_year"] = year
+            if release_detail.get("status"):
+                pp["id_tags"]["RELEASESTATUS"] = release_detail["status"]
+            if release_detail.get("country"):
+                pp["id_tags"]["RELEASECOUNTRY"] = release_detail["country"]
+            if release_detail.get("barcode"):
+                pp["id_tags"]["BARCODE"] = release_detail["barcode"]
+            media_list = release_detail.get("media", [])
+            if media_list:
+                fmt = media_list[0].get("format", "")
+                if fmt:
+                    pp["id_tags"]["MEDIA"] = fmt
+                pp["id_tags"]["TOTALDISCS"] = str(len(media_list))
+            label_info = release_detail.get("label-info", [])
+            if label_info and isinstance(label_info[0], dict):
+                cat = label_info[0].get("catalog-number", "")
+                if cat:
+                    pp["id_tags"]["CATALOGNUMBER"] = cat
+            text_rep = release_detail.get("text-representation", {})
+            if isinstance(text_rep, dict) and text_rep.get("script"):
+                pp["id_tags"]["SCRIPT"] = text_rep["script"]
+            if release_detail.get("asin"):
+                pp["id_tags"]["ASIN"] = release_detail["asin"]
+            track_num = metadata.get("track_number")
+            disc_num = metadata.get("disc_number") or 1
+            if track_num and media_list:
+                try:
+                    track_num_int = int(track_num)
+                    disc_num_int = int(disc_num)
+                    for medium in media_list:
+                        if medium.get("position", 1) == disc_num_int:
+                            for mtrack in (medium.get("tracks") or medium.get("track-list", [])):
+                                if mtrack.get("position") == track_num_int:
+                                    if mtrack.get("id"):
+                                        pp["id_tags"]["MUSICBRAINZ_RELEASETRACKID"] = mtrack["id"]
+                                    release_recording = mtrack.get("recording", {})
+                                    if release_recording.get("id"):
+                                        pp["recording_mbid"] = release_recording["id"]
+                                        pp["id_tags"]["MUSICBRAINZ_RECORDING_ID"] = release_recording["id"]
+                                    break
+                            break
+                except (ValueError, TypeError):
+                    pass
 
 
 def _process_deezer_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
@@ -315,33 +352,30 @@ def _process_deezer_source(pp: dict, metadata: dict, cfg, runtime, track_title: 
     if not track_title or not artist_name:
         return
 
-    try:
-        deezer_worker = getattr(runtime, "deezer_worker", None)
-        dz_client = deezer_worker.client if deezer_worker else None
-        if not dz_client:
-            return
-        dz_result = dz_client.search_track(artist_name, track_title)
-        if dz_result and _names_match(dz_result.get("title", ""), track_title) and _names_match(dz_result.get("artist", {}).get("name", ""), artist_name):
-            dz_track_id = dz_result["id"]
-            pp["id_tags"]["DEEZER_TRACK_ID"] = str(dz_track_id)
-            dz_artist_id = dz_result.get("artist", {}).get("id")
-            if dz_artist_id:
-                pp["id_tags"]["DEEZER_ARTIST_ID"] = str(dz_artist_id)
-            dz_details = dz_client.get_track_details(dz_track_id)
-            if dz_details:
-                bpm_val = dz_details.get("bpm")
-                if bpm_val and bpm_val > 0:
-                    pp["deezer_bpm"] = bpm_val
-                dz_isrc = dz_details.get("isrc")
-                if dz_isrc:
-                    pp["deezer_isrc"] = dz_isrc
-            if not pp["release_year"]:
-                dz_album = dz_result.get("album", {})
-                dz_release = (dz_album.get("release_date", "") if isinstance(dz_album, dict) else "") or ""
-                if len(dz_release) >= 4 and dz_release[:4].isdigit():
-                    pp["release_year"] = dz_release[:4]
-    except Exception as exc:
-        logger.error("Deezer lookup failed (non-fatal): %s", exc)
+    deezer_worker = getattr(runtime, "deezer_worker", None)
+    dz_client = deezer_worker.client if deezer_worker else None
+    if not dz_client:
+        return
+    dz_result = _call_source_lookup("Deezer track", dz_client.search_track, artist_name, track_title)
+    if dz_result and _names_match(dz_result.get("title", ""), track_title) and _names_match(dz_result.get("artist", {}).get("name", ""), artist_name):
+        dz_track_id = dz_result["id"]
+        pp["id_tags"]["DEEZER_TRACK_ID"] = str(dz_track_id)
+        dz_artist_id = dz_result.get("artist", {}).get("id")
+        if dz_artist_id:
+            pp["id_tags"]["DEEZER_ARTIST_ID"] = str(dz_artist_id)
+        dz_details = _call_source_lookup("Deezer track details", dz_client.get_track_details, dz_track_id)
+        if dz_details:
+            bpm_val = dz_details.get("bpm")
+            if bpm_val and bpm_val > 0:
+                pp["deezer_bpm"] = bpm_val
+            dz_isrc = dz_details.get("isrc")
+            if dz_isrc:
+                pp["deezer_isrc"] = dz_isrc
+        if not pp["release_year"]:
+            dz_album = dz_result.get("album", {})
+            dz_release = (dz_album.get("release_date", "") if isinstance(dz_album, dict) else "") or ""
+            if len(dz_release) >= 4 and dz_release[:4].isdigit():
+                pp["release_year"] = dz_release[:4]
 
 
 def _process_audiodb_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
@@ -350,29 +384,26 @@ def _process_audiodb_source(pp: dict, metadata: dict, cfg, runtime, track_title:
     if not track_title or not artist_name:
         return
 
-    try:
-        audiodb_worker = getattr(runtime, "audiodb_worker", None)
-        adb_client = audiodb_worker.client if audiodb_worker else None
-        if not adb_client:
-            return
-        adb_result = adb_client.search_track(artist_name, track_title)
-        if adb_result and _names_match(adb_result.get("strTrack", ""), track_title) and _names_match(adb_result.get("strArtist", ""), artist_name):
-            adb_track_id = adb_result.get("idTrack")
-            if adb_track_id:
-                pp["id_tags"]["AUDIODB_TRACK_ID"] = str(adb_track_id)
-            adb_mb_track = adb_result.get("strMusicBrainzID")
-            if adb_mb_track and "MUSICBRAINZ_RECORDING_ID" not in pp["id_tags"]:
-                pp["id_tags"]["MUSICBRAINZ_RECORDING_ID"] = adb_mb_track
-                pp["recording_mbid"] = adb_mb_track
-            adb_mb_artist = adb_result.get("strMusicBrainzArtistID")
-            if adb_mb_artist and "MUSICBRAINZ_ARTIST_ID" not in pp["id_tags"]:
-                pp["id_tags"]["MUSICBRAINZ_ARTIST_ID"] = adb_mb_artist
-                pp["artist_mbid"] = adb_mb_artist
-            pp["audiodb_mood"] = adb_result.get("strMood") or None
-            pp["audiodb_style"] = adb_result.get("strStyle") or None
-            pp["audiodb_genre"] = adb_result.get("strGenre") or None
-    except Exception as exc:
-        logger.error("AudioDB lookup failed (non-fatal): %s", exc)
+    audiodb_worker = getattr(runtime, "audiodb_worker", None)
+    adb_client = audiodb_worker.client if audiodb_worker else None
+    if not adb_client:
+        return
+    adb_result = _call_source_lookup("AudioDB track", adb_client.search_track, artist_name, track_title)
+    if adb_result and _names_match(adb_result.get("strTrack", ""), track_title) and _names_match(adb_result.get("strArtist", ""), artist_name):
+        adb_track_id = adb_result.get("idTrack")
+        if adb_track_id:
+            pp["id_tags"]["AUDIODB_TRACK_ID"] = str(adb_track_id)
+        adb_mb_track = adb_result.get("strMusicBrainzID")
+        if adb_mb_track and "MUSICBRAINZ_RECORDING_ID" not in pp["id_tags"]:
+            pp["id_tags"]["MUSICBRAINZ_RECORDING_ID"] = adb_mb_track
+            pp["recording_mbid"] = adb_mb_track
+        adb_mb_artist = adb_result.get("strMusicBrainzArtistID")
+        if adb_mb_artist and "MUSICBRAINZ_ARTIST_ID" not in pp["id_tags"]:
+            pp["id_tags"]["MUSICBRAINZ_ARTIST_ID"] = adb_mb_artist
+            pp["artist_mbid"] = adb_mb_artist
+        pp["audiodb_mood"] = adb_result.get("strMood") or None
+        pp["audiodb_style"] = adb_result.get("strStyle") or None
+        pp["audiodb_genre"] = adb_result.get("strGenre") or None
 
 
 def _process_tidal_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
@@ -381,35 +412,32 @@ def _process_tidal_source(pp: dict, metadata: dict, cfg, runtime, track_title: s
     if not track_title or not artist_name:
         return
 
-    try:
-        tidal_client = getattr(runtime, "tidal_client", None)
-        if not (tidal_client and tidal_client.is_authenticated()):
-            return
-        td_result = tidal_client.search_track(artist_name, track_title)
-        if td_result and _names_match(td_result.get("title", ""), track_title):
-            td_track_id = td_result.get("id")
-            if td_track_id:
-                pp["id_tags"]["TIDAL_TRACK_ID"] = str(td_track_id)
-            td_artist = td_result.get("artist", {})
-            if isinstance(td_artist, dict) and td_artist.get("id"):
-                pp["id_tags"]["TIDAL_ARTIST_ID"] = str(td_artist["id"])
-            if td_track_id:
-                td_details = tidal_client.get_track(str(td_track_id))
-                if td_details:
-                    pp["tidal_isrc"] = td_details.get("isrc")
-                    td_copyright = td_details.get("copyright")
-                    if isinstance(td_copyright, dict):
-                        td_copyright = td_copyright.get("text", td_copyright.get("name", ""))
-                    pp["tidal_copyright"] = td_copyright or None
-            if not pp["release_year"]:
-                td_album = td_result.get("album", {})
-                td_release = ""
-                if isinstance(td_album, dict):
-                    td_release = str(td_album.get("release_date", "") or td_album.get("releaseDate", "") or "")
-                if len(td_release) >= 4 and td_release[:4].isdigit():
-                    pp["release_year"] = td_release[:4]
-    except Exception as exc:
-        logger.error("Tidal lookup failed (non-fatal): %s", exc)
+    tidal_client = getattr(runtime, "tidal_client", None)
+    if not (tidal_client and tidal_client.is_authenticated()):
+        return
+    td_result = _call_source_lookup("Tidal track", tidal_client.search_track, artist_name, track_title)
+    if td_result and _names_match(td_result.get("title", ""), track_title):
+        td_track_id = td_result.get("id")
+        if td_track_id:
+            pp["id_tags"]["TIDAL_TRACK_ID"] = str(td_track_id)
+        td_artist = td_result.get("artist", {})
+        if isinstance(td_artist, dict) and td_artist.get("id"):
+            pp["id_tags"]["TIDAL_ARTIST_ID"] = str(td_artist["id"])
+        if td_track_id:
+            td_details = _call_source_lookup("Tidal track details", tidal_client.get_track, str(td_track_id))
+            if td_details:
+                pp["tidal_isrc"] = td_details.get("isrc")
+                td_copyright = td_details.get("copyright")
+                if isinstance(td_copyright, dict):
+                    td_copyright = td_copyright.get("text", td_copyright.get("name", ""))
+                pp["tidal_copyright"] = td_copyright or None
+        if not pp["release_year"]:
+            td_album = td_result.get("album", {})
+            td_release = ""
+            if isinstance(td_album, dict):
+                td_release = str(td_album.get("release_date", "") or td_album.get("releaseDate", "") or "")
+            if len(td_release) >= 4 and td_release[:4].isdigit():
+                pp["release_year"] = td_release[:4]
 
 
 def _process_qobuz_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
@@ -418,50 +446,47 @@ def _process_qobuz_source(pp: dict, metadata: dict, cfg, runtime, track_title: s
     if not track_title or not artist_name:
         return
 
-    try:
-        qobuz_worker = getattr(runtime, "qobuz_enrichment_worker", None)
-        qz_client = qobuz_worker.client if qobuz_worker else None
-        if not (qz_client and qz_client.is_authenticated()):
-            return
-        qz_result = qz_client.search_track(artist_name, track_title)
-        if qz_result:
-            qz_performer = qz_result.get("performer") or {}
-            if not isinstance(qz_performer, dict):
-                qz_performer = {}
-            qz_artist_name = qz_performer.get("name", "")
-            if _names_match(qz_result.get("title", ""), track_title) and _names_match(qz_artist_name, artist_name):
-                qz_track_id = qz_result.get("id")
-                if qz_track_id:
-                    pp["id_tags"]["QOBUZ_TRACK_ID"] = str(qz_track_id)
-                if qz_performer.get("id"):
-                    pp["id_tags"]["QOBUZ_ARTIST_ID"] = str(qz_performer["id"])
-                qz_isrc = qz_result.get("isrc")
-                if isinstance(qz_isrc, dict):
-                    qz_isrc = qz_isrc.get("value", qz_isrc.get("id", ""))
-                if qz_isrc:
-                    pp["qobuz_isrc"] = qz_isrc
-                qz_copyright = qz_result.get("copyright")
-                if isinstance(qz_copyright, dict):
-                    qz_copyright = qz_copyright.get("text", qz_copyright.get("name", ""))
-                if isinstance(qz_copyright, str):
-                    pp["qobuz_copyright"] = qz_copyright
-                qz_album = qz_result.get("album", {})
-                if isinstance(qz_album, dict):
-                    qz_label_info = qz_album.get("label", {})
-                    if isinstance(qz_label_info, dict) and qz_label_info.get("name"):
-                        pp["qobuz_label"] = qz_label_info["name"]
-                    if not pp["release_year"]:
-                        qz_release = str(qz_album.get("release_date_original", "") or "")
-                        if not qz_release:
-                            qz_ts = qz_album.get("released_at")
-                            if qz_ts and isinstance(qz_ts, (int, float)) and qz_ts > 0:
-                                import datetime as _dt
+    qobuz_worker = getattr(runtime, "qobuz_enrichment_worker", None)
+    qz_client = qobuz_worker.client if qobuz_worker else None
+    if not (qz_client and qz_client.is_authenticated()):
+        return
+    qz_result = _call_source_lookup("Qobuz track", qz_client.search_track, artist_name, track_title)
+    if qz_result:
+        qz_performer = qz_result.get("performer") or {}
+        if not isinstance(qz_performer, dict):
+            qz_performer = {}
+        qz_artist_name = qz_performer.get("name", "")
+        if _names_match(qz_result.get("title", ""), track_title) and _names_match(qz_artist_name, artist_name):
+            qz_track_id = qz_result.get("id")
+            if qz_track_id:
+                pp["id_tags"]["QOBUZ_TRACK_ID"] = str(qz_track_id)
+            if qz_performer.get("id"):
+                pp["id_tags"]["QOBUZ_ARTIST_ID"] = str(qz_performer["id"])
+            qz_isrc = qz_result.get("isrc")
+            if isinstance(qz_isrc, dict):
+                qz_isrc = qz_isrc.get("value", qz_isrc.get("id", ""))
+            if qz_isrc:
+                pp["qobuz_isrc"] = qz_isrc
+            qz_copyright = qz_result.get("copyright")
+            if isinstance(qz_copyright, dict):
+                qz_copyright = qz_copyright.get("text", qz_copyright.get("name", ""))
+            if isinstance(qz_copyright, str):
+                pp["qobuz_copyright"] = qz_copyright
+            qz_album = qz_result.get("album", {})
+            if isinstance(qz_album, dict):
+                qz_label_info = qz_album.get("label", {})
+                if isinstance(qz_label_info, dict) and qz_label_info.get("name"):
+                    pp["qobuz_label"] = qz_label_info["name"]
+                if not pp["release_year"]:
+                    qz_release = str(qz_album.get("release_date_original", "") or "")
+                    if not qz_release:
+                        qz_ts = qz_album.get("released_at")
+                        if qz_ts and isinstance(qz_ts, (int, float)) and qz_ts > 0:
+                            import datetime as _dt
 
-                                qz_release = str(_dt.datetime.utcfromtimestamp(qz_ts).year)
-                        if len(qz_release) >= 4 and qz_release[:4].isdigit():
-                            pp["release_year"] = qz_release[:4]
-    except Exception as exc:
-        logger.error("Qobuz lookup failed (non-fatal): %s", exc)
+                            qz_release = str(_dt.datetime.utcfromtimestamp(qz_ts).year)
+                    if len(qz_release) >= 4 and qz_release[:4].isdigit():
+                        pp["release_year"] = qz_release[:4]
 
 
 def _process_lastfm_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
@@ -470,25 +495,22 @@ def _process_lastfm_source(pp: dict, metadata: dict, cfg, runtime, track_title: 
     if not track_title or not artist_name:
         return
 
-    try:
-        lastfm_worker = getattr(runtime, "lastfm_worker", None)
-        lf_client = lastfm_worker.client if lastfm_worker else None
-        if not lf_client:
-            return
-        lf_result = lf_client.get_track_info(artist_name, track_title)
-        if lf_result:
-            lf_url = lf_result.get("url")
-            if lf_url:
-                pp["lastfm_url"] = lf_url
-            lf_toptags = lf_result.get("toptags", {})
-            if isinstance(lf_toptags, dict):
-                tag_list = lf_toptags.get("tag", [])
-                if isinstance(tag_list, list):
-                    pp["lastfm_tags"] = [tag.get("name", "") for tag in tag_list if isinstance(tag, dict) and tag.get("name")]
-                elif isinstance(tag_list, dict) and tag_list.get("name"):
-                    pp["lastfm_tags"] = [tag_list["name"]]
-    except Exception as exc:
-        logger.error("Last.fm lookup failed (non-fatal): %s", exc)
+    lastfm_worker = getattr(runtime, "lastfm_worker", None)
+    lf_client = lastfm_worker.client if lastfm_worker else None
+    if not lf_client:
+        return
+    lf_result = _call_source_lookup("Last.fm track", lf_client.get_track_info, artist_name, track_title)
+    if lf_result:
+        lf_url = lf_result.get("url")
+        if lf_url:
+            pp["lastfm_url"] = lf_url
+        lf_toptags = lf_result.get("toptags", {})
+        if isinstance(lf_toptags, dict):
+            tag_list = lf_toptags.get("tag", [])
+            if isinstance(tag_list, list):
+                pp["lastfm_tags"] = [tag.get("name", "") for tag in tag_list if isinstance(tag, dict) and tag.get("name")]
+            elif isinstance(tag_list, dict) and tag_list.get("name"):
+                pp["lastfm_tags"] = [tag_list["name"]]
 
 
 def _process_genius_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
@@ -497,26 +519,23 @@ def _process_genius_source(pp: dict, metadata: dict, cfg, runtime, track_title: 
     if not track_title or not artist_name:
         return
 
-    try:
-        import core.genius_client as _genius_module
+    import core.genius_client as _genius_module
 
-        if time.time() < _genius_module._rate_limit_until:
-            logger.info("Genius rate-limited, skipping (non-blocking)")
-            return
-        genius_worker = getattr(runtime, "genius_worker", None)
-        g_client = genius_worker.client if genius_worker else None
-        if not g_client:
-            return
-        g_result = g_client.search_song(artist_name, track_title)
-        if g_result:
-            g_id = g_result.get("id")
-            if g_id:
-                pp["id_tags"]["GENIUS_TRACK_ID"] = str(g_id)
-            g_url = g_result.get("url")
-            if g_url:
-                pp["genius_url"] = g_url
-    except Exception as exc:
-        logger.error("Genius lookup failed (non-fatal): %s", exc)
+    if time.time() < _genius_module._rate_limit_until:
+        logger.info("Genius rate-limited, skipping (non-blocking)")
+        return
+    genius_worker = getattr(runtime, "genius_worker", None)
+    g_client = genius_worker.client if genius_worker else None
+    if not g_client:
+        return
+    g_result = _call_source_lookup("Genius track", g_client.search_song, artist_name, track_title)
+    if g_result:
+        g_id = g_result.get("id")
+        if g_id:
+            pp["id_tags"]["GENIUS_TRACK_ID"] = str(g_id)
+        g_url = g_result.get("url")
+        if g_url:
+            pp["genius_url"] = g_url
 
 
 def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:

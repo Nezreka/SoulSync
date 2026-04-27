@@ -1,5 +1,9 @@
+from collections import OrderedDict
 import types
 import sqlite3
+
+import pytest
+import requests
 
 from core.metadata import enrichment as me
 from core.metadata import artwork as ma
@@ -348,6 +352,109 @@ def test_embed_source_ids_writes_musicbrainz_release_year_and_updates_album_year
     check.close()
 
     assert row["year"] == 2021
+
+
+def test_musicbrainz_release_lookup_failure_does_not_poison_cache(monkeypatch):
+    class _FakeMBClient:
+        def get_release(self, mbid, includes=None):
+            return {}
+
+    class _FakeMBService:
+        def __init__(self):
+            self.release_calls = 0
+            self.mb_client = _FakeMBClient()
+
+        def match_recording(self, title, artist):
+            return None
+
+        def match_artist(self, artist):
+            return {"mbid": "artist-mbid"}
+
+        def match_release(self, album, artist):
+            self.release_calls += 1
+            if self.release_calls == 1:
+                raise requests.RequestException("temporary MusicBrainz outage")
+            return {"mbid": "release-mbid"}
+
+    monkeypatch.setattr(ms, "get_config_manager", lambda: _Config({"musicbrainz.embed_tags": True}))
+    monkeypatch.setattr(ms, "mb_release_cache", {})
+    monkeypatch.setattr(ms, "mb_release_detail_cache", {})
+
+    service = _FakeMBService()
+    runtime = types.SimpleNamespace(mb_worker=types.SimpleNamespace(mb_service=service))
+    pp = {
+        "id_tags": {},
+        "track_title": "Song One",
+        "artist_name": "Artist One",
+        "batch_artist_name": "Artist One",
+        "metadata": {"album": "Album One"},
+        "recording_mbid": None,
+        "artist_mbid": None,
+        "release_mbid": "",
+        "mb_genres": [],
+        "isrc": None,
+        "deezer_bpm": None,
+        "deezer_isrc": None,
+        "audiodb_mood": None,
+        "audiodb_style": None,
+        "audiodb_genre": None,
+        "tidal_isrc": None,
+        "tidal_copyright": None,
+        "qobuz_isrc": None,
+        "qobuz_copyright": None,
+        "qobuz_label": None,
+        "lastfm_tags": [],
+        "lastfm_url": None,
+        "genius_url": None,
+        "release_year": None,
+    }
+    metadata = {"album": "Album One", "artist": "Artist One"}
+
+    ms._process_musicbrainz_source(pp, metadata, _Config({"musicbrainz.embed_tags": True}), runtime, "Song One", "Artist One")
+    assert service.release_calls == 1
+    assert ms.mb_release_cache == {}
+
+    poisoned_norm_key = (ms.normalize_album_cache_key("Album One"), "artist one")
+    poisoned_exact_key = ("album one", "artist one")
+    ms.mb_release_cache[poisoned_norm_key] = ""
+    ms.mb_release_cache[poisoned_exact_key] = ""
+
+    ms._process_musicbrainz_source(pp, metadata, _Config({"musicbrainz.embed_tags": True}), runtime, "Song One", "Artist One")
+    assert service.release_calls == 2
+
+
+def test_source_processors_do_not_swallow_programmer_errors():
+    class _BoomClient:
+        def search_track(self, artist_name, track_title):
+            raise ValueError("boom")
+
+    runtime = types.SimpleNamespace(deezer_worker=types.SimpleNamespace(client=_BoomClient()))
+    pp = {
+        "id_tags": {},
+        "batch_artist_name": "Artist One",
+        "release_year": None,
+    }
+    metadata = {"album": "Album One"}
+
+    with pytest.raises(ValueError):
+        ms._process_deezer_source(pp, metadata, _Config({"deezer.embed_tags": True}), runtime, "Song One", "Artist One")
+
+
+def test_musicbrainz_caches_evict_oldest_entries():
+    release_cache = OrderedDict()
+    detail_cache = OrderedDict()
+
+    ms._bounded_cache_set(release_cache, ("album-1", "artist"), "release-1", 2)
+    ms._bounded_cache_set(release_cache, ("album-2", "artist"), "release-2", 2)
+    assert list(release_cache.keys()) == [("album-1", "artist"), ("album-2", "artist")]
+
+    assert ms._bounded_cache_get(release_cache, ("album-1", "artist")) == "release-1"
+    ms._bounded_cache_set(release_cache, ("album-3", "artist"), "release-3", 2)
+    assert list(release_cache.keys()) == [("album-1", "artist"), ("album-3", "artist")]
+
+    ms._bounded_cache_set(detail_cache, "release-1", {"title": "One"}, 1)
+    ms._bounded_cache_set(detail_cache, "release-2", {"title": "Two"}, 1)
+    assert list(detail_cache.keys()) == ["release-2"]
 
 
 def test_enhance_file_metadata_forwards_runtime_to_source_embedding(monkeypatch):

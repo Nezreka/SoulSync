@@ -1,3 +1,5 @@
+import os
+
 import core.imports.album_naming as album_naming
 import core.imports.paths as import_paths
 
@@ -69,7 +71,7 @@ def test_get_file_path_from_template_raw_handles_quality_and_disc_placeholders(m
         },
     )
 
-    assert folder_path == "Artist One/Album One"
+    assert folder_path == os.path.join("Artist One", "Album One")
     assert filename == "3 - Song One [FLAC 16bit]"
 
 
