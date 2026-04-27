@@ -36,7 +36,7 @@ def extract_artist_name(artist: Any) -> str:
     if isinstance(artist, dict):
         return str(artist.get("name", "") or "")
     if hasattr(artist, "name"):
-        return str(getattr(artist, "name") or "")
+        return str(artist.name or "")
     return str(artist) if artist else ""
 
 
