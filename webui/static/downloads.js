@@ -1220,7 +1220,7 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
                 if (data.is_auto_processing) {
                     if (!_wishlistAutoProcessingNotified) {
                         navigateToPage('active-downloads');
-                        showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
+                        showToastHtml('Wishlist auto-processing started. View progress in <a href="/active-downloads" style="color:rgb(var(--accent-light-rgb));text-decoration:underline;cursor:pointer" onclick="event.stopPropagation();if(typeof navigateToPage===\'function\'){event.preventDefault();navigateToPage(\'active-downloads\')}">Download Manager</a>.');
                         _wishlistAutoProcessingNotified = true;
                     }
                     return;
@@ -1243,7 +1243,7 @@ function startWishlistCountdownTimer(currentCycle, initialSeconds) {
                         if (!_wishlistAutoProcessingNotified) {
                             console.log('🤖 [Wishlist] Auto-processing detected, closing overview modal');
                             closeWishlistOverviewModal();
-                            showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
+                            showToastHtml('Wishlist auto-processing started. View progress in <a href="/active-downloads" style="color:rgb(var(--accent-light-rgb));text-decoration:underline;cursor:pointer" onclick="event.stopPropagation();if(typeof navigateToPage===\'function\'){event.preventDefault();navigateToPage(\'active-downloads\')}">Download Manager</a>.');
                             _wishlistAutoProcessingNotified = true;
                         }
                         return; // Exit interval
@@ -2222,7 +2222,7 @@ async function startWishlistMissingTracksProcess(playlistId) {
             // Special handling for auto-processing conflict
             if (response.status === 409) {
                 console.log('🤖 [Wishlist] Auto-processing is running, redirecting to download manager');
-                showToast('Wishlist auto-processing is already running. Opening Download Manager...', 'info');
+                showToastHtml('Wishlist auto-processing is already running. Opening <a href="/active-downloads" style="color:rgb(var(--accent-light-rgb));text-decoration:underline;cursor:pointer" onclick="event.stopPropagation();if(typeof navigateToPage===\'function\'){event.preventDefault();navigateToPage(\'active-downloads\')}">Download Manager</a>...');
 
                 // Close wishlist modal and show download manager
                 const wishlistModal = document.getElementById('download-modal-wishlist');
@@ -4837,6 +4837,40 @@ function showToast(message, type = 'success', helpSection = null) {
 
 function _escToast(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function _escAttr(s) { return _escToast(s).replace(/'/g, "\\'").replace(/\n/g, ' ').replace(/\r/g, ''); }
+
+/** Show a toast with raw HTML content (for inline links). Also adds to notification history. */
+function showToastHtml(html, type = 'info', duration = 6000) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    // Add to notification history (strip tags for plain text)
+    const tmp = document.createElement('div'); tmp.innerHTML = html;
+    const plainText = tmp.textContent || tmp.innerText || '';
+    const entry = { id: Date.now() + Math.random(), message: plainText, type, helpSection: null, timestamp: Date.now(), read: false };
+    _notifState.history.unshift(entry);
+    if (_notifState.history.length > _notifState.maxHistory) _notifState.history.pop();
+    _notifState.unreadCount++;
+    _updateNotifBadge();
+
+    if (_notifState.currentToast && container.contains(_notifState.currentToast)) {
+        _notifState.currentToast.classList.add('toast-exit');
+        const old = _notifState.currentToast;
+        setTimeout(() => { if (container.contains(old)) container.removeChild(old); }, 200);
+    }
+    if (_notifState.toastTimer) clearTimeout(_notifState.toastTimer);
+
+    const icon = _notifIcons[type] || '\u2139';
+    const toast = document.createElement('div');
+    toast.className = `toast-compact toast-${type}`;
+    toast.innerHTML = `<span class="toast-compact-icon">${icon}</span><span class="toast-compact-msg">${html}</span>`;
+    toast.onclick = () => { toast.classList.add('toast-exit'); setTimeout(() => { if (container.contains(toast)) container.removeChild(toast); }, 200); };
+    container.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('toast-enter'));
+    _notifState.currentToast = toast;
+    _notifState.toastTimer = setTimeout(() => {
+        if (container.contains(toast)) { toast.classList.add('toast-exit'); setTimeout(() => { if (container.contains(toast)) container.removeChild(toast); }, 300); }
+        _notifState.currentToast = null;
+    }, duration);
+}
 
 function _updateNotifBadge() {
     const badge = document.getElementById('notif-bell-badge');

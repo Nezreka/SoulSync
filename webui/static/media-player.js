@@ -488,7 +488,7 @@ function updateWishlistStatsFromData(data) {
     if (data.is_auto_processing) {
         if (!_wishlistAutoProcessingNotified) {
             if (currentPage === 'wishlist') navigateToPage('active-downloads');
-            showToast('Wishlist auto-processing started. View progress in Download Manager.', 'info');
+            showToastHtml('Wishlist auto-processing started. View progress in <a href="/active-downloads" style="color:rgb(var(--accent-light-rgb));text-decoration:underline;cursor:pointer" onclick="event.stopPropagation();if(typeof navigateToPage===\'function\'){event.preventDefault();navigateToPage(\'active-downloads\')}">Download Manager</a>.');
             _wishlistAutoProcessingNotified = true;
         }
         return;
