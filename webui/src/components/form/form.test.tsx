@@ -66,7 +66,11 @@ function FormDemo() {
       <FormField label="Priority" helperText="Set urgency">
         <OptionButtonGroup>
           {(['low', 'normal', 'high'] as const).map((value) => (
-            <OptionButton key={value} onClick={() => setPriority(value)} selected={priority === value}>
+            <OptionButton
+              key={value}
+              onClick={() => setPriority(value)}
+              selected={priority === value}
+            >
               {value[0].toUpperCase()}
               {value.slice(1)}
             </OptionButton>

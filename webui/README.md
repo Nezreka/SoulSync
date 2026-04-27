@@ -82,5 +82,12 @@ The recommended dev flow keeps the backend and frontend separate:
    ```
    Vite hot reloads the React side when you change webui files.
 
+For linting and formatting, use:
+
+```bash
+npm run check
+npm run fix
+```
+
 If you want a convenience wrapper, the repo root also includes `./dev.sh`.
 It starts both halves together and is most useful on Linux, macOS, and WSL.

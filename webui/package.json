@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "check": "vp check src",
     "dev": "vp dev",
+    "fix": "vp check --fix src",
     "build": "vp build",
     "test": "vp test run",
     "test:watch": "vp test",
