@@ -371,8 +371,13 @@ class SeasonalDiscoveryService:
             config = SEASONAL_CONFIG[season_key]
             keywords = config['keywords']
 
-            # Use the right track ID column based on source
-            track_id_col = 'spotify_track_id' if source == 'spotify' else 'itunes_track_id'
+            # Each source stores IDs in its own column
+            if source == 'itunes':
+                track_id_col = 'itunes_track_id'
+            elif source == 'deezer':
+                track_id_col = 'deezer_track_id'
+            else:
+                track_id_col = 'spotify_track_id'
 
             seasonal_tracks = []
 
