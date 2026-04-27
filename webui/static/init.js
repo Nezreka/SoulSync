@@ -329,50 +329,6 @@ function activatePage(pageId, options = {}) {
     loadPageData(pageId);
 }
 
-function activateLegacyPath(pathname) {
-    const router = getWebRouter();
-    const targetPage = router?.resolvePageId?.(pathname) || _getPageFromPath(pathname);
-    if (!targetPage) return;
-
-    if (!isPageAllowed(targetPage)) {
-        const home = getProfileHomePage();
-        if (home !== targetPage) {
-            navigateToPage(home, { replace: true });
-        }
-        return;
-    }
-
-    activatePage(targetPage, { forceReload: true });
-}
-
-const SHELL_BRIDGE_READY_EVENT = 'ss:webui-shell-bridge-ready';
-
-window.SoulSyncWebShellBridge = {
-    getCurrentPageId() {
-        return currentPage || getWebRouter()?.resolvePageId?.(window.location.pathname) || _getPageFromPath();
-    },
-    getCurrentProfileContext() {
-        return getCurrentProfileContext();
-    },
-    isPageAllowed(pageId) {
-        return isPageAllowed(pageId);
-    },
-    getProfileHomePage() {
-        return getProfileHomePage();
-    },
-    setActivePageChrome(pageId) {
-        setActivePageChrome(pageId);
-    },
-    activateLegacyPath(pathname) {
-        activateLegacyPath(pathname);
-    },
-    showReactHost(pageId) {
-        showReactHost(pageId);
-    },
-};
-
-window.dispatchEvent(new CustomEvent(SHELL_BRIDGE_READY_EVENT));
-
 function renderProfileAvatar(el, profile) {
     // Renders avatar as image (if avatar_url set) or colored initial fallback
     // Preserves existing classes, ensures 'profile-avatar' is present

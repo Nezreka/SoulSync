@@ -7824,7 +7824,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     {{ vite_assets('body')|safe }}
     <script src="{{ url_for('static', filename='setup-wizard.js', v=static_v) }}"></script>
-    <!-- Split modules (was: script.js) — core.js must load first, init.js last -->
+    <!-- Split modules (was: script.js) — core.js must load first, init.js before shell-bridge.js -->
     <script src="{{ url_for('static', filename='core.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='shared-helpers.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='media-player.js', v=static_v) }}"></script>
@@ -7842,6 +7842,7 @@
     <script src="{{ url_for('static', filename='stats-automations.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='pages-extra.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='init.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='shell-bridge.js', v=static_v) }}"></script>
     <!-- Notification bell + floating helper toggle — always accessible above modals -->
     <!-- Ambient glow under the global search bar. Radial gradient, brightest
          directly under the bar, tapering out toward the window corners.
