@@ -78,17 +78,17 @@ def get_cache_key(
     normalized_query = (query or '').strip().lower()
 
     try:
-        active_server = active_server_provider() or 'unknown'
+        active_server = active_server_provider()
     except Exception:
         active_server = 'unknown'
 
     try:
-        fallback_source = fallback_source_provider() or 'unknown'
+        fallback_source = fallback_source_provider()
     except Exception:
         fallback_source = 'unknown'
 
     try:
-        hydrabase_active = bool(hydrabase_active_provider())
+        hydrabase_active = hydrabase_active_provider()
     except Exception:
         hydrabase_active = False
 
