@@ -3441,6 +3441,11 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.4.1': [
+        // --- post-2.4.0 dev work — entries hidden by _getLatestWhatsNewVersion until the build version bumps ---
+        { date: 'Unreleased — 2.4.1 dev cycle' },
+        { title: 'Faster Docker Startup — yt-dlp Pinned', desc: 'docker startup used to run `pip install -U yt-dlp` on every container start. removed that — yt-dlp is now pinned in requirements.txt so startup is fast and reproducible. tradeoff: youtube fixes ship via soulsync releases now instead of next container restart.' },
+    ],
     '2.4.0': [
         // --- April 26, 2026 — Search & Artists unification + reorganize queue ---
         { date: 'April 26, 2026 — 2.4.0 release' },
