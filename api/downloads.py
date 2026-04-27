@@ -5,6 +5,7 @@ Download management endpoints — list, cancel active downloads.
 from flask import request, current_app
 from .auth import require_api_key
 from .helpers import api_success, api_error
+from core.runtime_state import download_tasks, tasks_lock
 
 
 def _serialize_download(task_id, task):
@@ -53,8 +54,6 @@ def register_routes(bp):
         descending so newest/in-flight tasks appear first.
         """
         try:
-            from web_server import download_tasks, tasks_lock
-
             # Parse pagination params
             try:
                 limit = int(request.args.get("limit", 100))
