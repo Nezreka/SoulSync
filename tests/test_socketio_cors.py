@@ -20,7 +20,6 @@ These pin the security-relevant behavior:
 Pure unit tests — no Flask, no engineio, no network. Just the logic.
 """
 
-import logging
 import threading
 from typing import Any, List
 
@@ -201,6 +200,82 @@ def test_will_reject_honors_x_forwarded_host():
                        forwarded_host='') is False
 
 
+def test_will_reject_compares_full_scheme_when_known():
+    """When the caller provides scheme info, engineio compares full
+    {scheme}://{host} strings. A TLS-terminating proxy can leave the
+    backend seeing http while the browser's Origin is https — engineio
+    rejects, our predictor must too (otherwise we miss logging it)."""
+    # Backend sees http, browser sent https → engineio rejects → we predict reject
+    assert will_reject(None, 'https://soulsync.foo', 'soulsync.foo',
+                       request_scheme='http') is True
+
+    # Backend sees http, browser sent http → match → allow
+    assert will_reject(None, 'http://soulsync.foo', 'soulsync.foo',
+                       request_scheme='http') is False
+
+    # X-Forwarded-Proto says the public request was https → match origin's https
+    assert will_reject(None, 'https://soulsync.foo', 'internal:8888',
+                       request_scheme='http',
+                       forwarded_host='soulsync.foo',
+                       forwarded_proto='https') is False
+
+    # X-Forwarded-Proto says https but Origin is http → mismatch → reject
+    assert will_reject(None, 'http://soulsync.foo', 'internal:8888',
+                       request_scheme='http',
+                       forwarded_host='soulsync.foo',
+                       forwarded_proto='https') is True
+
+    # Comma-separated X-Forwarded-Proto (proxy chain) — first wins, like engineio
+    assert will_reject(None, 'https://soulsync.foo', 'internal:8888',
+                       request_scheme='http',
+                       forwarded_host='soulsync.foo',
+                       forwarded_proto='https, http') is False
+
+
+def test_will_reject_falls_back_to_host_only_when_no_scheme_info():
+    """Backwards-compat shim: callers that don't pass scheme info still
+    get the basic Host-only same-origin check (the original behavior).
+    Important for any integration tests that exercise the predicate
+    without a real Flask request context."""
+    # No scheme info → host-only match works
+    assert will_reject(None, 'https://soulsync.foo', 'soulsync.foo') is False
+    assert will_reject(None, 'http://x.com', 'x.com') is False
+    # Cross-origin still rejected
+    assert will_reject(None, 'https://attacker.com', 'soulsync.foo') is True
+
+
+def test_will_reject_allows_missing_origin_matching_engineio():
+    """Engineio (server.py:207: ``if origin:``) skips CORS validation
+    entirely when no Origin header is sent — non-browser clients (curl,
+    server-to-server) are intentionally permitted. Our predictor must
+    match that or we'd log spurious "rejected" warnings for legitimate
+    non-browser traffic. Must also not raise on None input."""
+    # Wildcard permits missing origin — and so does the default policy
+    # (matches engineio's actual behavior).
+    assert will_reject('*', None, 'localhost:8888') is False
+    assert will_reject('*', '', 'localhost:8888') is False
+    assert will_reject(None, None, 'localhost:8888') is False
+    assert will_reject(None, '', 'localhost:8888') is False
+    assert will_reject(['https://x.com'], None, 'localhost:8888') is False
+
+
+def test_will_reject_honors_forwarded_proto_alone():
+    """Engineio adds the forwarded candidate when EITHER X-Forwarded-Proto
+    OR X-Forwarded-Host is present (it falls back to HTTP_HOST for the
+    missing one). Our predictor must mirror that — otherwise a misconfig
+    sending only X-Forwarded-Proto would look like a rejection in our
+    log even though engineio actually allows it."""
+    # forwarded_proto alone: backend host stands in for forwarded_host
+    assert will_reject(None, 'https://localhost:8888', 'localhost:8888',
+                       request_scheme='http',
+                       forwarded_proto='https') is False
+
+    # forwarded_proto alone but origin's host doesn't match the backend host
+    assert will_reject(None, 'https://attacker.com', 'localhost:8888',
+                       request_scheme='http',
+                       forwarded_proto='https') is True
+
+
 # ── RejectionLogger ───────────────────────────────────────────────────────
 
 
@@ -230,8 +305,11 @@ def test_rejection_logger_silent_when_request_would_be_allowed():
     rl.maybe_log('*', 'https://x.com', 'localhost:8888')
     # In allow-list — no warning
     rl.maybe_log(['https://x.com'], 'https://x.com', 'localhost:8888')
-    # Same-origin via X-Forwarded-Host — no warning
-    rl.maybe_log(None, 'https://soulsync.foo', 'internal:8888', 'soulsync.foo')
+    # Same-origin via X-Forwarded-Host (with proxy scheme info) — no warning
+    rl.maybe_log(None, 'https://soulsync.foo', 'internal:8888',
+                 request_scheme='http',
+                 forwarded_host='soulsync.foo',
+                 forwarded_proto='https')
 
     assert log.warnings == []
 
@@ -295,6 +373,43 @@ def test_rejection_logger_reset_for_tests_clears_dedup():
     rl.reset_for_tests()
     rl.maybe_log(None, 'https://x.com', 'localhost:8888')
     assert len(log.warnings) == 2  # logged again after reset
+
+
+def test_rejection_logger_caps_dedup_set_at_configured_limit():
+    """A hostile actor opening connections from many distinct fake origins
+    would otherwise grow the dedup set unbounded. After the cap is hit,
+    further rejections are silently dropped (after one overflow notice)."""
+    log = _CapturingLogger()
+    rl = RejectionLogger(log, dedup_cap=5)
+
+    # Fill the cap
+    for i in range(5):
+        rl.maybe_log(None, f'https://fake{i}.com', 'localhost:8888')
+    assert len(log.warnings) == 5
+
+    # Next unique origin → overflow notice, NOT a per-origin warning
+    rl.maybe_log(None, 'https://fake5.com', 'localhost:8888')
+    assert len(log.warnings) == 6
+    assert 'cap' in log.warnings[5].lower() or 'suppress' in log.warnings[5].lower()
+
+    # Further unique origins → silently dropped (overflow notice already emitted)
+    for i in range(6, 20):
+        rl.maybe_log(None, f'https://fake{i}.com', 'localhost:8888')
+    assert len(log.warnings) == 6  # unchanged
+
+    # After reset, cap restarts
+    rl.reset_for_tests()
+    rl.maybe_log(None, 'https://fake0.com', 'localhost:8888')
+    assert len(log.warnings) == 7
+
+
+def test_rejection_logger_default_cap_is_reasonable():
+    """The default cap should be high enough that legitimate-but-unusual
+    setups (e.g., a power user with a dozen reverse-proxy domains rotating)
+    don't hit the overflow notice during normal use."""
+    assert RejectionLogger.DEFAULT_DEDUP_CAP >= 50, (
+        "default dedup cap should fit normal usage"
+    )
 
 
 # ── log_startup_status ────────────────────────────────────────────────────

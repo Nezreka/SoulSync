@@ -2596,6 +2596,27 @@ async function saveSettings(quiet = false) {
         }
     };
 
+    // Validate cors_origins entries — backend silently filters malformed
+    // values, so warn the user up-front if any line doesn't look like a
+    // URL (or the special '*' token). One-shot toast; doesn't block save.
+    const corsRaw = settings.security.cors_origins;
+    if (corsRaw) {
+        const entries = corsRaw.replace(/\n/g, ',').split(',')
+            .map(s => s.trim())
+            .filter(s => s);
+        const invalid = entries.filter(e => {
+            if (e === '*') return false;
+            // Accept anything matching scheme://host[:port], no path required
+            return !/^https?:\/\/[^\s/]+$/i.test(e);
+        });
+        if (invalid.length) {
+            showToast(
+                `Allowed Origins: ${invalid.length} entr${invalid.length === 1 ? 'y looks' : 'ies look'} malformed (need full URL like https://soulsync.example.com, no trailing slash). Saving anyway — they\'ll be ignored.`,
+                'warning'
+            );
+        }
+    }
+
     try {
         if (!quiet) showLoadingOverlay('Saving settings...');
 
