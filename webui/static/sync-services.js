@@ -2736,6 +2736,65 @@ async function startDeezerDownloadMissing(urlHash) {
 // SYNC PAGE FUNCTIONALITY (REDESIGNED)
 // ===============================
 
+/**
+ * Navigate to the Sync page and activate a specific tab.
+ * Works from any page. If already on the sync page, just switches the tab.
+ * @param {string} tabId - Tab data-tab value (e.g. 'discover', 'spotify', 'mirrored')
+ * @param {object} [opts] - Options
+ * @param {string} [opts.highlight] - Element ID to scroll to and briefly highlight
+ * @param {string} [opts.autoSync] - Discover playlist type to auto-trigger sync on
+ * @param {boolean} [opts.forceDownload] - Pass force_download_all when auto-syncing
+ */
+function navigateToSyncTab(tabId, opts) {
+    window._pendingSyncTabAction = { tabId, ...(opts || {}) };
+    if (typeof currentPage !== 'undefined' && currentPage === 'sync') {
+        _applySyncTabAction();
+    } else {
+        navigateToPage('sync');
+    }
+}
+
+function _applySyncTabAction() {
+    const action = window._pendingSyncTabAction;
+    if (!action) return;
+    window._pendingSyncTabAction = null;
+    const tabId = action.tabId;
+
+    // Click the target tab button to trigger normal tab-switch logic
+    const btn = document.querySelector(`.sync-tab-button[data-tab="${tabId}"]`);
+    if (btn && !btn.classList.contains('active')) {
+        btn.click();
+    }
+
+    // Wait for lazy-loaded content, then highlight / auto-sync
+    const apply = () => {
+        if (action.highlight) {
+            const el = document.getElementById(action.highlight);
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.add('discover-sync-card-highlight');
+                setTimeout(() => el.classList.remove('discover-sync-card-highlight'), 2500);
+            }
+        }
+        if (action.autoSync) {
+            syncDiscoverPlaylistFromTab(action.autoSync, action.autoSyncName || action.autoSync);
+        }
+    };
+    // Wait for lazy-loaded content to appear before applying
+    let attempts = 0;
+    const maxAttempts = 20; // 20 * 200ms = 4s max
+    const waitAndApply = () => {
+        const ready = !action.highlight || document.getElementById(action.highlight);
+        if (ready || attempts >= maxAttempts) {
+            apply();
+        } else {
+            attempts++;
+            setTimeout(waitAndApply, 200);
+        }
+    };
+    setTimeout(waitAndApply, 200);
+}
+
 function initializeSyncPage() {
     // Logic for tab switching
     const tabButtons = document.querySelectorAll('.sync-tab-button');
