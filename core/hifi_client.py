@@ -91,14 +91,12 @@ class HiFiClient:
         self.download_path = Path(download_path)
         self.download_path.mkdir(parents=True, exist_ok=True)
 
-        # API instance management
-        self._instances = list(DEFAULT_INSTANCES)
-        if base_url:
-            # User-provided instance gets top priority
-            self._instances.insert(0, base_url.rstrip('/'))
+        # API instance management — loaded from database
+        self._instances = []
+        self._instance_lock = threading.Lock()
+        self._load_instances_from_db()
 
         self._current_instance = self._instances[0] if self._instances else None
-        self._instance_lock = threading.Lock()
 
         # HTTP session with retry-friendly settings
         self.session = http_requests.Session()
@@ -125,6 +123,33 @@ class HiFiClient:
     def set_shutdown_check(self, check_callable):
         """Set a callback function to check for system shutdown."""
         self.shutdown_check = check_callable
+
+    def _load_instances_from_db(self):
+        """Load instances from the database, seeding defaults if empty."""
+        try:
+            from database.music_database import get_database
+            db = get_database()
+            db.seed_hifi_instances(DEFAULT_INSTANCES)
+            rows = db.get_hifi_instances()
+            urls = [r['url'] for r in rows if r['enabled']]
+            if urls:
+                self._instances = urls
+            else:
+                self._instances = list(DEFAULT_INSTANCES)
+        except Exception as e:
+            logger.warning(f"Failed to load HiFi instances from DB, using defaults: {e}")
+            self._instances = list(DEFAULT_INSTANCES)
+
+    def reload_instances(self):
+        """Reload instances from the database (called after settings change)."""
+        with self._instance_lock:
+            old_current = self._current_instance
+            self._load_instances_from_db()
+            self._current_instance = self._instances[0] if self._instances else None
+            if self._current_instance != old_current:
+                logger.info(f"HiFi instances reloaded, active: {self._current_instance}")
+            else:
+                logger.info("HiFi instances reloaded")
 
     # ===================== Instance Management =====================
 
