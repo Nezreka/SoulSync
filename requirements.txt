@@ -27,12 +27,7 @@ beautifulsoup4>=4.12.0
 # System monitoring
 psutil>=6.0.0
 
-# YouTube support
-# Pinned to an exact version for reproducible builds. The Docker
-# entrypoint used to `pip install -U yt-dlp` on every container start,
-# which made startup non-deterministic and depended on PyPI being
-# reachable. Bump this pin in a SoulSync release when yt-dlp ships a
-# YouTube-fix update — that's the supported upgrade path now.
+# YouTube support — pinned for reproducible builds; bump per release. See #367.
 yt-dlp==2026.3.17
 
 # Lyrics support
