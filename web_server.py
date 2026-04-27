@@ -17,6 +17,7 @@ import re
 import sqlite3
 import types
 import collections
+import functools
 from pathlib import Path
 from urllib.parse import quote, urljoin, urlparse
 
@@ -311,6 +312,32 @@ def get_current_profile_id() -> int:
         return g.profile_id
     except AttributeError:
         return 1
+
+
+def admin_only(view_fn):
+    """Restrict a Flask view to the admin profile (profile_id == 1).
+
+    Settings-class endpoints expose / mutate service tokens, OAuth
+    secrets, and API keys. Non-admin profiles must not see them.
+
+    NOTE on the underlying auth model: `get_current_profile_id()`
+    defaults to 1 (admin) when no session is present, which means
+    single-admin / no-multi-profile installs have no actual gate here —
+    any request from the local network is treated as admin. This
+    decorator's job is to gate non-admin profiles in MULTI-profile
+    setups, not to authenticate the network. The "trust local network"
+    posture is the project's existing model; tightening it (real auth
+    on every request) is out of scope for this decorator.
+    """
+    @functools.wraps(view_fn)
+    def wrapper(*args, **kwargs):
+        if get_current_profile_id() != 1:
+            return jsonify({
+                "success": False,
+                "error": "Admin access required",
+            }), 403
+        return view_fn(*args, **kwargs)
+    return wrapper
 
 # ── Per-profile Spotify client cache ──
 _profile_spotify_clients = {}  # profile_id -> SpotifyClient
@@ -6286,6 +6313,7 @@ def revoke_api_key_internal(key_id):
 
 
 @app.route('/api/settings', methods=['GET', 'POST'])
+@admin_only
 def handle_settings():
     global tidal_client # Declare that we might modify the global instance
     if not config_manager:
@@ -6584,6 +6612,7 @@ def hydrabase_send():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/settings/log-level', methods=['GET', 'POST'])
+@admin_only
 def handle_log_level():
     """Get or set the application log level"""
     from utils.logging_config import set_log_level, get_current_log_level
@@ -7443,6 +7472,7 @@ def test_connection_endpoint():
 
 
 @app.route('/api/settings/config-status', methods=['GET'])
+@admin_only
 def settings_config_status_endpoint():
     """Return per-service config state for the Settings → Connections page.
     Drives the green/yellow header gradient. No API calls — just config reads.
@@ -7516,6 +7546,7 @@ def _run_single_verify(service: str):
 
 
 @app.route('/api/settings/verify', methods=['POST'])
+@admin_only
 def settings_verify_endpoint():
     """Run connection verification for one or more services.
 
