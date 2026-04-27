@@ -22,8 +22,6 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-EMPTY_SOURCE = {"artists": [], "albums": [], "tracks": [], "available": False}
-
 
 def search_kind(client, query: str, kind: str, source_name: Optional[str] = None) -> list:
     """Search one result type from a metadata source and normalize it."""

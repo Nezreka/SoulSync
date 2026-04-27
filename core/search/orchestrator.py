@@ -190,8 +190,13 @@ def _alternate_sources(primary_source: str, deps: SearchDeps) -> list[str]:
 
 def _fan_out_response(query: str, db_artists: list[dict], deps: SearchDeps) -> dict:
     """Default flow: pick a primary source, run it, list alternates."""
+    # Per-request empty marker — used for identity check at the spotify-fallback
+    # gate below. Local (not module-level) so a future caller can't accidentally
+    # mutate it across requests.
+    empty_source = {"artists": [], "albums": [], "tracks": [], "available": False}
+
     primary_source = 'spotify'
-    primary_results = sources.EMPTY_SOURCE
+    primary_results = empty_source
 
     if deps.is_hydrabase_active():
         primary_source = 'hydrabase'
@@ -205,7 +210,7 @@ def _fan_out_response(query: str, db_artists: list[dict], deps: SearchDeps) -> d
         except Exception as e:
             logger.error(f"Hydrabase search failed: {e}")
             primary_source = 'spotify'
-            primary_results = sources.EMPTY_SOURCE
+            primary_results = empty_source
 
     if primary_source != 'hydrabase':
         if deps.hydrabase_worker and deps.dev_mode_enabled_provider():
@@ -220,7 +225,7 @@ def _fan_out_response(query: str, db_artists: list[dict], deps: SearchDeps) -> d
         except Exception as e:
             logger.debug(f"Primary source ({fb_source}) search failed: {e}")
 
-        if primary_results is sources.EMPTY_SOURCE and fb_source != 'spotify':
+        if primary_results is empty_source and fb_source != 'spotify':
             if deps.spotify_client and deps.spotify_client.is_spotify_authenticated():
                 try:
                     primary_results = sources.search_source(query, deps.spotify_client, 'spotify')
@@ -283,40 +288,21 @@ def run_enhanced_search(query: str, requested_source: str, deps: SearchDeps) -> 
 # NDJSON streaming for /api/enhanced-search/source/<src>
 # ---------------------------------------------------------------------------
 
-def stream_source_search(source_name: str, query: str, deps: SearchDeps) -> Iterator[str]:
-    """Yield NDJSON lines for a single-source streaming search.
+def resolve_youtube_videos_client(deps: SearchDeps):
+    """Return the soulseek_client.youtube subclient or None when unavailable."""
+    if not deps.soulseek_client:
+        return None
+    return getattr(deps.soulseek_client, 'youtube', None)
 
-    One line per kind (artists / albums / tracks) as each finishes; final
-    `{"type":"done"}` line. For `youtube_videos`, yields a single
-    `{"type":"videos", "data": [...]}` line plus the done marker.
+
+def stream_youtube_videos(query: str, youtube_client, run_async: Callable) -> Iterator[str]:
+    """yt-dlp video search generator — yields one videos chunk + done marker.
+
+    Caller is responsible for verifying youtube_client is not None.
     """
-    if not query:
-        yield json.dumps({'type': 'done'}) + '\n'
-        return
-
-    if source_name == 'youtube_videos':
-        yield from _stream_youtube_videos(query, deps)
-        return
-
-    client, _available = resolve_client(source_name, deps)
-    if client is None:
-        yield json.dumps({'type': 'done'}) + '\n'
-        return
-
-    yield from _stream_metadata_source(source_name, query, client)
-
-
-def _stream_youtube_videos(query: str, deps: SearchDeps) -> Iterator[str]:
-    """yt-dlp video search — yields a single videos chunk + done marker."""
-    youtube = getattr(deps.soulseek_client, 'youtube', None) if deps.soulseek_client else None
-    if not youtube:
-        yield json.dumps({'type': 'videos', 'data': []}) + '\n'
-        yield json.dumps({'type': 'done'}) + '\n'
-        return
-
     try:
         video_query = f"{query} official music video"
-        results = deps.run_async(youtube.search_videos(video_query, max_results=20))
+        results = run_async(youtube_client.search_videos(video_query, max_results=20))
         videos = []
         for v in (results or []):
             videos.append({
@@ -336,8 +322,11 @@ def _stream_youtube_videos(query: str, deps: SearchDeps) -> Iterator[str]:
     yield json.dumps({'type': 'done'}) + '\n'
 
 
-def _stream_metadata_source(source_name: str, query: str, client) -> Iterator[str]:
-    """Fan three search-kinds out and yield each as it lands."""
+def stream_metadata_source(source_name: str, query: str, client) -> Iterator[str]:
+    """Fan three search-kinds out and yield each as it lands.
+
+    Caller is responsible for resolving and validating the client.
+    """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     with ThreadPoolExecutor(max_workers=3) as executor:
