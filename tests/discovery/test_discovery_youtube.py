@@ -279,6 +279,22 @@ def test_skip_discovery_flag_skips_track():
 # Completion: phase + activity feed
 # ---------------------------------------------------------------------------
 
+def test_float_duration_does_not_crash_format():
+    """yt_dlp can return float duration_ms — format string must handle it (regression)."""
+    states = {}
+    tr = _track(duration_ms=212345.7)  # float, not int
+    _seed_state('hflt', states, tracks=[tr])
+    deps = _build_deps(states=states)
+
+    # Before fix: raised "Unknown format code 'd' for object of type 'float'".
+    # After fix: int() cast makes it work and produces a clean duration string.
+    dy.run_youtube_discovery_worker('hflt', deps)
+
+    result = states['hflt']['discovery_results'][0]
+    assert result['status'] != 'Error'  # didn't crash mid-loop
+    assert ':' in result['duration']    # duration string formatted
+
+
 def test_completion_marks_phase_discovered():
     """All tracks processed → phase='discovered', status='complete', progress=100."""
     states = {}
