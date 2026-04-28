@@ -29,7 +29,6 @@ import json
 import logging
 import re
 import time
-import traceback
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -231,7 +230,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             analysis_results.append({
                 'track_index': track_index, 'track': track_data, 'found': found, 'confidence': confidence
             })
-
+            
             # WISHLIST REMOVAL: If track is found in database, check if it should be removed from wishlist
             if found and confidence >= 0.7:
                 try:
@@ -553,7 +552,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                             spotify_data = json.loads(spotify_data)
                         except:
                             spotify_data = {}
-
+                    
                     if not spotify_data:
                         spotify_data = {}
 
@@ -626,6 +625,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
 
     except Exception as e:
         logger.error(f"Master worker for batch {batch_id} failed: {e}")
+        import traceback
         traceback.print_exc()
 
         is_auto_batch = False
