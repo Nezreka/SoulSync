@@ -223,3 +223,112 @@ def test_automatic_wishlist_cleanup_after_db_update_removes_library_matches():
 
     assert removed == 1
     assert wishlist_service.removed == [("sp-1", True, None, 1)]
+
+
+class _CleanupProfilesDatabase:
+    def get_all_profiles(self):
+        return [{"id": 1}]
+
+
+class _CleanupWishlistService:
+    def __init__(self, tracks):
+        self._tracks = list(tracks)
+        self.removed = []
+
+    def get_wishlist_tracks_for_download(self, profile_id=1):
+        return list(self._tracks)
+
+    def mark_track_download_result(self, spotify_track_id, success, error_message=None, profile_id=1):
+        self.removed.append((spotify_track_id, success, error_message, profile_id))
+        return True
+
+
+class _CleanupMusicDatabase:
+    def __init__(self):
+        self.track_checks = []
+
+    def check_track_exists(self, track_name, artist_name, confidence_threshold=0.7, server_source=None, album=None):
+        self.track_checks.append((track_name, artist_name, server_source, album))
+        if track_name == "Owned Song" and artist_name == "Artist A":
+            return {"id": "db-track"}, 0.9
+        if track_name == "Broken Song":
+            raise RuntimeError("boom")
+        return None, 0.0
+
+
+def test_remove_tracks_already_in_library_skips_enhance_tracks_and_handles_errors():
+    wishlist_service = _CleanupWishlistService(
+        [
+            {
+                "name": "Owned Song",
+                "artists": ["Artist A"],
+                "spotify_track_id": "sp-1",
+                "album": {"name": "Album A"},
+            },
+            {
+                "name": "Enhance Song",
+                "artists": [{"name": "Artist B"}],
+                "spotify_track_id": "sp-2",
+                "source_type": "enhance",
+                "album": {"name": "Album B"},
+            },
+            {
+                "name": "Broken Song",
+                "artists": [{"name": "Artist C"}],
+                "spotify_track_id": "sp-3",
+                "album": {"name": "Album C"},
+            },
+        ]
+    )
+    music_db = _CleanupMusicDatabase()
+
+    removed = processing.remove_tracks_already_in_library(
+        wishlist_service,
+        _CleanupProfilesDatabase(),
+        music_db,
+        "navidrome",
+        logger=_FakeLogger(),
+        skip_track_fn=lambda track: track.get("source_type") == "enhance",
+    )
+
+    assert removed == 1
+    assert wishlist_service.removed == [("sp-1", True, None, 1)]
+    assert music_db.track_checks == [
+        ("Owned Song", "Artist A", "navidrome", "Album A"),
+        ("Broken Song", "Artist C", "navidrome", "Album C"),
+    ]
+
+
+def test_finalize_auto_wishlist_completion_with_no_tracks_added_still_resets_state():
+    db = _FakeDB()
+    automation_engine = _FakeAutomationEngine()
+    resets = []
+    activities = []
+    summary = {"tracks_added": 0, "total_failed": 5, "errors": 0}
+
+    result = processing.finalize_auto_wishlist_completion(
+        "batch-2",
+        summary,
+        download_batches={"batch-2": {"current_cycle": "singles"}},
+        tasks_lock=_FakeLock(),
+        reset_processing_state=lambda: resets.append(True),
+        add_activity_item=lambda *args: activities.append(args),
+        automation_engine=automation_engine,
+        db_factory=lambda: db,
+        logger=_FakeLogger(),
+    )
+
+    assert result is summary
+    assert resets == [True]
+    assert activities == []
+    assert automation_engine.events == [
+        (
+            "wishlist_processing_completed",
+            {
+                "tracks_processed": "5",
+                "tracks_found": "0",
+                "tracks_failed": "5",
+            },
+        )
+    ]
+    assert db.connection.committed is True
