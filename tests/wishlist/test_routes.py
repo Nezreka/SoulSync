@@ -485,3 +485,76 @@ def test_add_album_track_to_wishlist_builds_spotify_payload_and_merges_context()
     ]
     assert add_call["spotify_track_data"]["duration_ms"] == 1234
     assert add_call["spotify_track_data"]["explicit"] is True
+
+
+def test_set_wishlist_cycle_rejects_invalid_cycle():
+    runtime, _service, _db, _logger, _activity_calls = _build_runtime()
+
+    payload, status = set_wishlist_cycle(runtime, "mixes")
+
+    assert status == 400
+    assert payload == {"error": "Invalid cycle. Must be 'albums' or 'singles'"}
+
+
+def test_remove_album_from_wishlist_matches_album_id():
+    tracks = [
+        {
+            "wishlist_id": 1,
+            "spotify_track_id": "track-1",
+            "id": "track-1",
+            "spotify_data": {
+                "album": {"id": "album-1", "name": "Complete Album"},
+                "artists": [{"name": "Artist One"}],
+            },
+        },
+        {
+            "wishlist_id": 2,
+            "spotify_track_id": "track-2",
+            "id": "track-2",
+            "spotify_data": {
+                "album": {"id": "album-2", "name": "Other Album"},
+                "artists": [{"name": "Artist Two"}],
+            },
+        },
+    ]
+    runtime, service, _db, _logger, _activity_calls = _build_runtime(tracks=tracks)
+
+    payload, status = remove_album_from_wishlist(runtime, album_id="album-1")
+
+    assert status == 200
+    assert payload == {
+        "success": True,
+        "message": "Removed 1 track(s) from wishlist",
+        "removed_count": 1,
+    }
+    assert service.removed == [("track-1", 1)]
+
+
+def test_remove_album_from_wishlist_requires_lookup_fields():
+    runtime, _service, _db, _logger, _activity_calls = _build_runtime()
+
+    payload, status = remove_album_from_wishlist(runtime)
+
+    assert status == 400
+    assert payload == {"success": False, "error": "No album_id or album_name provided"}
+
+
+def test_remove_batch_from_wishlist_rejects_invalid_payload():
+    runtime, _service, _db, _logger, _activity_calls = _build_runtime()
+
+    payload, status = remove_batch_from_wishlist(runtime, "track-1")
+
+    assert status == 400
+    assert payload == {"success": False, "error": "Missing or invalid spotify_track_ids"}
+
+
+def test_add_album_track_to_wishlist_requires_required_fields():
+    runtime, _service, _db, _logger, _activity_calls = _build_runtime()
+
+    payload, status = add_album_track_to_wishlist(runtime, track=None, artist=None, album=None)
+
+    assert status == 400
+    assert payload == {
+        "success": False,
+        "error": "Missing required fields: track, artist, album",
+    }

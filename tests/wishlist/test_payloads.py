@@ -56,3 +56,37 @@ def test_ensure_spotify_track_format_builds_webui_shape():
     assert out["album"]["album_type"] == "album"
     assert out["album"]["total_tracks"] == 0
     assert out["source"] == "webui_modal"
+
+
+def test_extract_spotify_track_from_modal_info_converts_trackresult_like_object():
+    track_info = {
+        "spotify_track": SimpleNamespace(
+            title="Song Two",
+            artist="Artist Two",
+            album="Album Two",
+        )
+    }
+
+    out = payloads.extract_spotify_track_from_modal_info(track_info)
+
+    assert out["source"] == "trackresult"
+    assert out["name"] == "Song Two"
+    assert out["artists"] == [{"name": "Artist Two"}]
+    assert out["album"]["name"] == "Album Two"
+
+
+def test_extract_spotify_track_from_modal_info_reconstructs_from_slskd_result():
+    track_info = {
+        "slskd_result": SimpleNamespace(
+            title="Song Three",
+            artist="Artist Three",
+            album="Album Three",
+        )
+    }
+
+    out = payloads.extract_spotify_track_from_modal_info(track_info)
+
+    assert out["reconstructed"] is True
+    assert out["name"] == "Song Three"
+    assert out["artists"] == [{"name": "Artist Three"}]
+    assert out["album"]["name"] == "Album Three"

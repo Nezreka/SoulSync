@@ -128,6 +128,8 @@ def _build_runtime(
     progress_calls=None,
     guard_events=None,
     batch_map=None,
+    guard_acquired=True,
+    is_actually_processing=False,
 ):
     if progress_calls is None:
         progress_calls = []
@@ -146,7 +148,7 @@ def _build_runtime(
     def guard():
         guard_events.append("enter")
         try:
-            yield True
+            yield guard_acquired
         finally:
             guard_events.append("exit")
 
@@ -159,7 +161,6 @@ def _build_runtime(
 
     runtime = WishlistAutoProcessingRuntime(
         processing_guard=guard,
-        is_actually_processing=lambda: False,
         app_context_factory=app_context,
         get_wishlist_service=lambda: wishlist_service,
         get_profiles_database=lambda: profiles_db,
@@ -174,6 +175,7 @@ def _build_runtime(
         get_active_server=lambda: active_server,
         logger=logger,
         current_time_fn=lambda: 123.0,
+        is_actually_processing=lambda: is_actually_processing,
         profile_id=1,
     )
     return runtime, wishlist_service, profiles_db, music_db, executor, logger, progress_calls, guard_events
@@ -231,3 +233,94 @@ def test_process_wishlist_automatically_creates_batch_for_matching_tracks():
     assert any(kwargs.get("progress") == 50 for _args, kwargs in progress_calls)
     assert guard_events == ["enter", "exit"]
     assert any("Starting automatic wishlist batch" in msg for msg in logger.info_messages)
+
+
+def test_process_wishlist_automatically_returns_early_when_already_processing():
+    runtime, _service, _profiles_db, music_db, executor, logger, progress_calls, guard_events = _build_runtime(
+        tracks=[
+            {
+                "name": "Album Track",
+                "artists": [{"name": "Artist A"}],
+                "spotify_data": {"album": {"album_type": "album"}},
+            }
+        ],
+        cycle_value="albums",
+        count=1,
+        is_actually_processing=True,
+    )
+
+    process_wishlist_automatically(runtime, automation_id="auto-3")
+
+    assert executor.submissions == []
+    assert music_db.duplicate_removals == []
+    assert progress_calls == []
+    assert guard_events == []
+    assert any("Already processing" in msg for msg in logger.info_messages)
+
+
+def test_process_wishlist_automatically_returns_early_when_guard_not_acquired():
+    runtime, _service, _profiles_db, music_db, executor, logger, progress_calls, guard_events = _build_runtime(
+        tracks=[
+            {
+                "name": "Album Track",
+                "artists": [{"name": "Artist A"}],
+                "spotify_data": {"album": {"album_type": "album"}},
+            }
+        ],
+        cycle_value="albums",
+        count=1,
+        guard_acquired=False,
+    )
+
+    process_wishlist_automatically(runtime, automation_id="auto-4")
+
+    assert executor.submissions == []
+    assert music_db.duplicate_removals == []
+    assert progress_calls == []
+    assert guard_events == ["enter", "exit"]
+    assert any("race condition check" in msg for msg in logger.info_messages)
+
+
+def test_process_wishlist_automatically_returns_early_when_no_tracks_are_available():
+    runtime, _service, _profiles_db, music_db, executor, logger, progress_calls, guard_events = _build_runtime(
+        tracks=[],
+        cycle_value="albums",
+        count=0,
+    )
+
+    process_wishlist_automatically(runtime, automation_id="auto-5")
+
+    assert executor.submissions == []
+    assert music_db.duplicate_removals == []
+    assert guard_events == ["enter", "exit"]
+    assert [kwargs.get("progress") for _args, kwargs in progress_calls if "progress" in kwargs] == [10]
+    assert any("No tracks in wishlist for auto-processing" in msg for msg in logger.warning_messages)
+
+
+def test_process_wishlist_automatically_skips_when_wishlist_batch_is_already_active():
+    batch_map = {
+        "batch-1": {
+            "playlist_id": "wishlist",
+            "phase": "analysis",
+        }
+    }
+    runtime, _service, _profiles_db, music_db, executor, logger, progress_calls, guard_events = _build_runtime(
+        tracks=[
+            {
+                "name": "Album Track",
+                "artists": [{"name": "Artist A"}],
+                "spotify_data": {"album": {"album_type": "album"}},
+            }
+        ],
+        cycle_value="albums",
+        count=1,
+        batch_map=batch_map,
+    )
+
+    process_wishlist_automatically(runtime, automation_id="auto-6")
+
+    assert executor.submissions == []
+    assert music_db.duplicate_removals == []
+    assert guard_events == ["enter", "exit"]
+    assert [kwargs.get("progress") for _args, kwargs in progress_calls if "progress" in kwargs] == [10]
+    assert any("already active in another batch" in msg for msg in logger.info_messages)
