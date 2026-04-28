@@ -3289,19 +3289,99 @@ async function loadHiFiInstances() {
             return;
         }
         listEl.innerHTML = data.instances.map((inst, i) => {
-            const enabledClass = inst.enabled ? '' : 'opacity:0.4;';
+            const enabledClass = inst.enabled ? '' : 'hifi-instance-disabled';
             const checkHtml = inst.enabled
-                ? `<span style="color:#4caf50;cursor:pointer;" onclick="toggleHiFiInstance('${escapeHtml(inst.url)}')" title="Click to disable">&#x2714;</span>`
-                : `<span style="color:#666;cursor:pointer;" onclick="toggleHiFiInstance('${escapeHtml(inst.url)}')" title="Click to enable">&#x2718;</span>`;
-            return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:0.82em;${enabledClass}">
-                <span style="color:rgba(255,255,255,0.4);cursor:default;user-select:none;">&#x2630;</span>
-                <span style="flex:1;color:rgba(255,255,255,0.7);font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(inst.url)}</span>
+                ? `<span class="hifi-instance-toggle on" onclick="toggleHiFiInstance('${escapeHtml(inst.url)}')" title="Click to disable">&#x2714;</span>`
+                : `<span class="hifi-instance-toggle off" onclick="toggleHiFiInstance('${escapeHtml(inst.url)}')" title="Click to enable">&#x2718;</span>`;
+            return `<div class="hifi-instance-item${inst.enabled ? '' : ' disabled'}" draggable="true" data-url="${escapeHtml(inst.url)}">
+                <span class="hifi-instance-grip">&#x2630;</span>
+                <span class="hifi-instance-url">${escapeHtml(inst.url)}</span>
                 ${checkHtml}
-                <span style="color:#f44336;cursor:pointer;font-size:0.9em;" onclick="removeHiFiInstance('${escapeHtml(inst.url)}')" title="Remove instance">&#x2716;</span>
+                <span class="hifi-instance-remove" onclick="removeHiFiInstance('${escapeHtml(inst.url)}')" title="Remove instance">&#x2716;</span>
             </div>`;
         }).join('');
+        _initHiFiDragDrop();
     } catch (e) {
         listEl.innerHTML = `<div style="color:#f44336;font-size:0.85em;">Error loading instances: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function _initHiFiDragDrop() {
+    const listEl = document.getElementById('hifi-instances-list');
+    if (!listEl) return;
+    let dragIdx = null;
+
+    listEl.querySelectorAll('.hifi-instance-item').forEach((item, idx) => {
+        item.addEventListener('dragstart', (e) => {
+            dragIdx = idx;
+            item.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            dragIdx = null;
+            listEl.querySelectorAll('.hifi-instance-item').forEach(i => i.classList.remove('drag-over'));
+        });
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            item.classList.add('drag-over');
+        });
+        item.addEventListener('dragleave', () => {
+            item.classList.remove('drag-over');
+        });
+        item.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            item.classList.remove('drag-over');
+            if (dragIdx === null) return;
+            const items = [...listEl.querySelectorAll('.hifi-instance-item')];
+            const dragged = items[dragIdx];
+            if (dragIdx !== idx) {
+                if (dragIdx < idx) {
+                    item.after(dragged);
+                } else {
+                    item.before(dragged);
+                }
+                const urls = [...listEl.querySelectorAll('.hifi-instance-item')].map(el => el.dataset.url);
+                await _saveHiFiInstanceOrder(urls);
+            }
+        });
+    });
+}
+
+async function _saveHiFiInstanceOrder(urls) {
+    try {
+        await fetch('/api/hifi/instances/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urls })
+        });
+    } catch (e) {
+        console.error('Failed to save HiFi instance order:', e);
+    }
+}
+
+async function toggleHiFiInstance(url) {
+    const listEl = document.getElementById('hifi-instances-list');
+    if (!listEl) return;
+    const item = listEl.querySelector(`.hifi-instance-item[data-url="${url}"]`);
+    const toggle = item?.querySelector('.hifi-instance-toggle');
+    const currentlyEnabled = toggle?.classList.contains('on');
+    const newEnabled = !currentlyEnabled;
+    try {
+        const resp = await fetch('/api/hifi/instances/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, enabled: newEnabled })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            loadHiFiInstances();
+        } else {
+            alert(data.error || 'Failed to toggle instance');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
     }
 }
 

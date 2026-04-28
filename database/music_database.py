@@ -11656,6 +11656,18 @@ class MusicDatabase:
             logger.error(f"Error removing HiFi instance: {e}")
             return False
 
+    def toggle_hifi_instance(self, url: str, enabled: bool) -> bool:
+        """Enable or disable a HiFi instance."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE hifi_instances SET enabled = ? WHERE url = ?", (1 if enabled else 0, url))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error toggling HiFi instance: {e}")
+            return False
+
     def reorder_hifi_instances(self, urls: List[str]) -> bool:
         """Update priorities based on the given URL order."""
         try:
