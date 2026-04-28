@@ -794,7 +794,9 @@ transfer_data_cache = {
 session_completed_downloads = 0
 session_stats_lock = threading.Lock()
 
-batch_locks = {}
+# `batch_locks` lives in core/runtime_state.py (re-exported here so the existing
+# call sites resolve without modification). All download globals share that home.
+from core.runtime_state import batch_locks
 _orphaned_download_keys = set()
 
 _enrichment_activity_log = {}
@@ -9353,15 +9355,17 @@ def get_download_status():
 
 
 
+# Cancel + clear logic lives in core/downloads/cancel.py — these routes are thin handlers.
+from core.downloads import cancel as _downloads_cancel
+
+
 @app.route('/api/downloads/cancel', methods=['POST'])
 def cancel_download():
-    """
-    Cancel a specific download transfer, matching GUI functionality.
-    """
+    """Cancel a specific download transfer, matching GUI functionality."""
     data = request.get_json()
     if not data:
         return jsonify({"success": False, "error": "No data provided."}), 400
-    
+
     download_id = data.get('download_id')
     username = data.get('username')
 
@@ -9369,52 +9373,40 @@ def cancel_download():
         return jsonify({"success": False, "error": "Missing download_id or username."}), 400
 
     try:
-        # Call the same client method the GUI uses
-        success = run_async(soulseek_client.cancel_download(download_id, username, remove=True))
+        success = _downloads_cancel.cancel_single_download(soulseek_client, run_async, download_id, username)
         if success:
             return jsonify({"success": True, "message": "Download cancelled."})
-        else:
-            return jsonify({"success": False, "error": "Failed to cancel download via slskd."}), 500
+        return jsonify({"success": False, "error": "Failed to cancel download via slskd."}), 500
     except Exception as e:
         logger.error(f"Error cancelling download: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+
 @app.route('/api/downloads/cancel-all', methods=['POST'])
 def cancel_all_downloads():
-    """
-    Cancel all active downloads from slskd, then clear completed ones.
-    """
+    """Cancel all active downloads from slskd, then clear completed ones."""
     try:
-        # First cancel all active downloads
-        cancel_success = run_async(soulseek_client.cancel_all_downloads())
-        if not cancel_success:
-            return jsonify({"success": False, "error": "Failed to cancel active downloads."}), 500
-
-        # Then clear the now-cancelled/completed downloads
-        clear_success = run_async(soulseek_client.clear_all_completed_downloads())
-
-        # Sweep empty directories
-        _sweep_empty_download_directories()
-
-        return jsonify({"success": True, "message": "All downloads cancelled and cleared."})
+        success, msg = _downloads_cancel.cancel_all_active(
+            soulseek_client, run_async, _sweep_empty_download_directories,
+        )
+        if success:
+            return jsonify({"success": True, "message": msg})
+        return jsonify({"success": False, "error": msg}), 500
     except Exception as e:
         logger.error(f"Error cancelling all downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+
 @app.route('/api/downloads/clear-finished', methods=['POST'])
 def clear_finished_downloads():
-    """
-    Clear all terminal (completed, cancelled, failed) downloads from slskd.
-    """
+    """Clear all terminal (completed, cancelled, failed) downloads from slskd."""
     try:
-        # This single client call handles clearing everything that is no longer active
-        success = run_async(soulseek_client.clear_all_completed_downloads())
+        success = _downloads_cancel.clear_finished_active(
+            soulseek_client, run_async, _sweep_empty_download_directories,
+        )
         if success:
-            # Also sweep empty directories left behind by completed downloads
-            _sweep_empty_download_directories()
             return jsonify({"success": True, "message": "Finished downloads cleared."})
-        else:
-            return jsonify({"success": False, "error": "Backend failed to clear downloads."}), 500
+        return jsonify({"success": False, "error": "Backend failed to clear downloads."}), 500
     except Exception as e:
         logger.error(f"Error clearing finished downloads: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -24646,29 +24638,7 @@ def get_batch_history():
 def clear_completed_downloads():
     """Remove completed/failed/cancelled tasks from the download tracker."""
     try:
-        terminal_statuses = {'completed', 'failed', 'not_found', 'cancelled', 'skipped', 'already_owned'}
-        cleared = 0
-        with tasks_lock:
-            task_ids_to_remove = [
-                tid for tid, task in download_tasks.items()
-                if task.get('status') in terminal_statuses
-            ]
-            for tid in task_ids_to_remove:
-                del download_tasks[tid]
-                cleared += 1
-            # Also clean up empty batches
-            empty_batches = []
-            for bid, batch in download_batches.items():
-                remaining = [t for t in batch.get('queue', []) if t in download_tasks]
-                if not remaining:
-                    empty_batches.append(bid)
-                else:
-                    batch['queue'] = remaining
-            for bid in empty_batches:
-                del download_batches[bid]
-                if bid in batch_locks:
-                    del batch_locks[bid]
-
+        cleared = _downloads_cancel.clear_completed_local()
         return jsonify({'success': True, 'cleared': cleared})
     except Exception as e:
         logger.error(f"Error clearing completed downloads: {e}")
