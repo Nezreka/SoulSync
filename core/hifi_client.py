@@ -12,20 +12,22 @@ Supports:
 - Track search by title, artist, album
 - Album lookup by ID
 - Artist lookup by ID
-- Direct FLAC download URLs from Tidal CDN
-- Quality selection: HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW
+- HLS manifest-based downloads via /trackManifests/ endpoint
+- Quality selection: HIRES_LOSSLESS, LOSSLESS, HIGH, LOW
 - Multiple API instance failover
+- FFmpeg demuxing for FLAC extraction from MP4 containers
 """
 
 import os
 import re
-import json
-import base64
 import uuid
 import time
+import shutil
+import subprocess
 import threading
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
+from urllib.parse import urljoin
 
 import requests as http_requests
 
@@ -35,37 +37,43 @@ from core.soulseek_client import TrackResult, AlbumResult, DownloadStatus
 
 logger = get_logger("hifi_client")
 
-# Quality tiers matching Tidal's internal quality labels
-HIFI_QUALITY_MAP = {
+# HLS quality presets mapping to /trackManifests/ format parameters
+HLS_QUALITY_MAP = {
     'hires': {
-        'api_value': 'HI_RES_LOSSLESS',
-        'label': 'FLAC 24-bit/96kHz',
+        'formats': ['FLAC_HIRES'],
+        'manifest_type': 'HLS',
         'extension': 'flac',
+        'label': 'FLAC 24-bit/96kHz',
         'bitrate': 9216,
         'codec': 'flac',
     },
     'lossless': {
-        'api_value': 'LOSSLESS',
-        'label': 'FLAC 16-bit/44.1kHz',
+        'formats': ['FLAC'],
+        'manifest_type': 'HLS',
         'extension': 'flac',
+        'label': 'FLAC 16-bit/44.1kHz',
         'bitrate': 1411,
         'codec': 'flac',
     },
     'high': {
-        'api_value': 'HIGH',
-        'label': 'AAC 320kbps',
+        'formats': ['AACLC'],
+        'manifest_type': 'HLS',
         'extension': 'm4a',
+        'label': 'AAC 320kbps',
         'bitrate': 320,
         'codec': 'aac',
     },
     'low': {
-        'api_value': 'LOW',
-        'label': 'AAC 96kbps',
+        'formats': ['HEAACV1'],
+        'manifest_type': 'HLS',
         'extension': 'm4a',
+        'label': 'AAC 96kbps',
         'bitrate': 96,
         'codec': 'aac',
     },
 }
+
+HLS_MAP_TAG_RE = re.compile(r'#EXT-X-MAP:.*URI="([^"]+)"')
 
 # Default public hifi-api instances (ordered by preference)
 DEFAULT_INSTANCES = [
@@ -85,47 +93,39 @@ class HiFiClient:
     """
 
     def __init__(self, download_path: str = None, base_url: str = None):
-        # Download path (use Soulseek path for consistency with post-processing)
         if download_path is None:
             download_path = config_manager.get('soulseek.download_path', './downloads')
         self.download_path = Path(download_path)
         self.download_path.mkdir(parents=True, exist_ok=True)
 
-        # API instance management — loaded from database
         self._instances = []
         self._instance_lock = threading.Lock()
         self._load_instances_from_db()
 
         self._current_instance = self._instances[0] if self._instances else None
 
-        # HTTP session with retry-friendly settings
         self.session = http_requests.Session()
         self.session.headers.update({
             'User-Agent': 'SoulSync/1.0',
             'Accept': 'application/json',
         })
 
-        # Download tracking (mirrors TidalDownloadClient pattern)
         self.active_downloads: Dict[str, Dict[str, Any]] = {}
         self._download_lock = threading.Lock()
 
-        # Shutdown check callback
         self.shutdown_check = None
 
-        # Rate limiting
         self._last_api_call = 0
         self._api_lock = threading.Lock()
-        self._min_interval = 0.5  # 500ms between calls
+        self._min_interval = 0.5
 
         logger.info(f"HiFi client initialized (instance: {self._current_instance}, "
                      f"download path: {self.download_path})")
 
     def set_shutdown_check(self, check_callable):
-        """Set a callback function to check for system shutdown."""
         self.shutdown_check = check_callable
 
     def _load_instances_from_db(self):
-        """Load instances from the database, seeding defaults if empty."""
         try:
             from database.music_database import get_database
             db = get_database()
@@ -141,7 +141,6 @@ class HiFiClient:
             self._instances = list(DEFAULT_INSTANCES)
 
     def reload_instances(self):
-        """Reload instances from the database (called after settings change)."""
         with self._instance_lock:
             old_current = self._current_instance
             self._load_instances_from_db()
@@ -151,15 +150,11 @@ class HiFiClient:
             else:
                 logger.info("HiFi instances reloaded")
 
-    # ===================== Instance Management =====================
-
     def _get_instance(self) -> Optional[str]:
-        """Get the current active API instance URL."""
         with self._instance_lock:
             return self._current_instance
 
     def _rotate_instance(self, failed_url: str):
-        """Move a failed instance to the back of the list and switch to next."""
         with self._instance_lock:
             if failed_url in self._instances:
                 self._instances.remove(failed_url)
@@ -171,7 +166,6 @@ class HiFiClient:
                 self._current_instance = None
 
     def _rate_limit(self):
-        """Enforce minimum interval between API calls."""
         with self._api_lock:
             now = time.time()
             elapsed = now - self._last_api_call
@@ -180,10 +174,6 @@ class HiFiClient:
             self._last_api_call = time.time()
 
     def _api_get(self, path: str, params: dict = None, timeout: int = 15) -> Optional[dict]:
-        """
-        Make a GET request to the hifi-api, with instance failover.
-        Tries each instance up to once before giving up.
-        """
         tried = set()
 
         while True:
@@ -201,7 +191,6 @@ class HiFiClient:
                 response.raise_for_status()
                 data = response.json()
 
-                # Check for API-level errors
                 if isinstance(data, dict) and data.get('error'):
                     logger.warning(f"HiFi API error from {instance}: {data['error']}")
                     return None
@@ -226,10 +215,7 @@ class HiFiClient:
                 logger.error(f"HiFi API unexpected error: {e}")
                 return None
 
-    # ===================== Availability =====================
-
     def is_available(self) -> bool:
-        """Check if the HiFi API is reachable."""
         try:
             data = self._api_get('/', timeout=5)
             return data is not None
@@ -237,11 +223,9 @@ class HiFiClient:
             return False
 
     def is_configured(self) -> bool:
-        """Check if HiFi client is configured and ready (matches Soulseek interface)."""
         return self._current_instance is not None
 
     async def check_connection(self) -> bool:
-        """Test if HiFi API is accessible (async, Soulseek-compatible)."""
         try:
             import asyncio
             loop = asyncio.get_event_loop()
@@ -251,28 +235,13 @@ class HiFiClient:
             return False
 
     def get_version(self) -> Optional[str]:
-        """Get the API version of the current instance."""
         data = self._api_get('/')
         if data and isinstance(data, dict):
             return data.get('version') or data.get('data', {}).get('version')
         return None
 
-    # ===================== Search =====================
-
     def search_tracks(self, title: str = None, artist: str = None,
                       album: str = None, limit: int = 20) -> List[Dict]:
-        """
-        Search for tracks on Tidal via hifi-api.
-
-        Args:
-            title: Track title to search for
-            artist: Artist name to search for
-            album: Album name to search for
-            limit: Max results to return
-
-        Returns:
-            List of track dicts with id, title, artist, album, duration, etc.
-        """
         params = {'limit': limit}
         if title:
             params['s'] = title
@@ -289,7 +258,6 @@ class HiFiClient:
         if not data:
             return []
 
-        # Handle response format: {data: {items: [...]}} or {data: [...]}
         items = []
         if isinstance(data, dict):
             inner = data.get('data', data)
@@ -310,15 +278,9 @@ class HiFiClient:
         return results
 
     def search_raw(self, query: str, limit: int = 20) -> List[Dict]:
-        """
-        Generic search (free-text query). Maps to title search.
-        Returns raw dicts (not TrackResult).
-        """
         return self.search_tracks(title=query, limit=limit)
 
     def _parse_track(self, item: dict) -> Dict:
-        """Parse a track item from hifi-api response into a normalized dict."""
-        # Artist can be a dict with 'name' or a list of artists
         artist_name = 'Unknown Artist'
         artists_raw = item.get('artists', item.get('artist'))
         if isinstance(artists_raw, list):
@@ -334,7 +296,6 @@ class HiFiClient:
         elif isinstance(artists_raw, str):
             artist_name = artists_raw
 
-        # Album
         album_raw = item.get('album', {})
         album_name = ''
         if isinstance(album_raw, dict):
@@ -342,7 +303,6 @@ class HiFiClient:
         elif isinstance(album_raw, str):
             album_name = album_raw
 
-        # Duration
         duration_s = item.get('duration', 0)
         duration_ms = duration_s * 1000 if duration_s and duration_s < 100000 else duration_s
 
@@ -358,10 +318,7 @@ class HiFiClient:
             'quality': item.get('audioQuality', item.get('quality', '')),
         }
 
-    # ===================== Track Info & Stream URL =====================
-
     def get_track_info(self, track_id: int) -> Optional[Dict]:
-        """Get detailed metadata for a specific track."""
         data = self._api_get('/info/', params={'id': track_id})
         if not data:
             return None
@@ -371,57 +328,7 @@ class HiFiClient:
             return self._parse_track(inner)
         return None
 
-    def get_stream_url(self, track_id: int, quality: str = 'lossless') -> Optional[Dict]:
-        """
-        Get the direct download URL for a track.
-
-        Args:
-            track_id: Tidal track ID
-            quality: One of 'hires', 'lossless', 'high', 'low'
-
-        Returns:
-            Dict with 'url', 'mime_type', 'codec', 'quality' or None on failure.
-        """
-        q_info = HIFI_QUALITY_MAP.get(quality, HIFI_QUALITY_MAP['lossless'])
-        api_quality = q_info['api_value']
-
-        data = self._api_get('/track/', params={'id': track_id, 'quality': api_quality})
-        if not data:
-            return None
-
-        # Extract manifest from response
-        inner = data.get('data', data) if isinstance(data, dict) else data
-        if not isinstance(inner, dict):
-            return None
-
-        manifest_b64 = inner.get('manifest')
-        if not manifest_b64:
-            logger.warning(f"No manifest in track response for {track_id}")
-            return None
-
-        try:
-            manifest = json.loads(base64.b64decode(manifest_b64))
-        except Exception as e:
-            logger.error(f"Failed to decode manifest for track {track_id}: {e}")
-            return None
-
-        urls = manifest.get('urls', [])
-        if not urls:
-            logger.warning(f"No URLs in manifest for track {track_id}")
-            return None
-
-        return {
-            'url': urls[0],
-            'mime_type': manifest.get('mimeType', ''),
-            'codec': manifest.get('codecs', ''),
-            'encryption': manifest.get('encryptionType', 'NONE'),
-            'quality': quality,
-        }
-
-    # ===================== Album & Artist =====================
-
     def get_album(self, album_id: int, limit: int = 100) -> Optional[Dict]:
-        """Get album metadata and track list."""
         data = self._api_get('/album/', params={'id': album_id, 'limit': limit})
         if not data:
             return None
@@ -430,7 +337,6 @@ class HiFiClient:
         if not isinstance(inner, dict):
             return None
 
-        # Parse tracks within album
         tracks_raw = inner.get('items', inner.get('tracks', []))
         tracks = []
         for item in tracks_raw:
@@ -451,7 +357,6 @@ class HiFiClient:
         }
 
     def get_artist(self, artist_id: int) -> Optional[Dict]:
-        """Get artist info and top tracks."""
         data = self._api_get('/artist/', params={'id': artist_id})
         if not data:
             return None
@@ -459,14 +364,150 @@ class HiFiClient:
         inner = data.get('data', data) if isinstance(data, dict) else data
         return inner if isinstance(inner, dict) else None
 
-    # ===================== Soulseek-Compatible Search =====================
+    def _parse_hls_playlist(self, text: str, playlist_url: str):
+        init_uri = None
+        segment_uris = []
+        variant_uri = None
+
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+        for index, line in enumerate(lines):
+            if line.startswith('#EXTM3U'):
+                continue
+
+            if line.startswith('#EXT-X-STREAM-INF'):
+                for next_line in lines[index + 1:]:
+                    if not next_line.startswith('#'):
+                        variant_uri = urljoin(playlist_url, next_line)
+                        break
+                break
+
+            if line.startswith('#EXT-X-MAP'):
+                match = HLS_MAP_TAG_RE.search(line)
+                if match:
+                    init_uri = match.group(1)
+                continue
+
+            if line.startswith('#'):
+                continue
+
+            segment_uris.append(urljoin(playlist_url, line))
+
+        if variant_uri:
+            return None, [variant_uri]
+
+        if not segment_uris:
+            raise ValueError('No segment URIs found in the HLS playlist')
+
+        if init_uri:
+            init_uri = urljoin(playlist_url, init_uri)
+
+        return init_uri, segment_uris
+
+    def _get_hls_manifest(self, track_id: int, quality: str = 'lossless') -> Optional[Dict]:
+        q_info = HLS_QUALITY_MAP.get(quality, HLS_QUALITY_MAP['lossless'])
+        formats = q_info['formats']
+
+        params = [
+            ('id', str(track_id)),
+            ('formats', ','.join(formats)),
+            ('usage', 'DOWNLOAD'),
+            ('manifestType', 'HLS'),
+            ('adaptive', 'true'),
+            ('uriScheme', 'HTTPS'),
+        ]
+
+        data = self._api_get('/trackManifests/', params=params, timeout=20)
+        if not data:
+            return None
+
+        try:
+            inner = data.get('data', data) if isinstance(data, dict) else data
+            attrs = inner.get('data', {}).get('attributes', {})
+            uri = attrs.get('uri')
+        except (AttributeError, KeyError) as e:
+            logger.warning(f"Failed to extract playlist URI from manifest response: {e}")
+            return None
+
+        if not uri:
+            logger.warning(f"No playlist URI in manifest for track {track_id}")
+            return None
+
+        try:
+            playlist_resp = self.session.get(uri, allow_redirects=True, timeout=30)
+            playlist_resp.raise_for_status()
+            playlist_text = playlist_resp.text
+        except Exception as e:
+            logger.warning(f"Failed to fetch HLS playlist for track {track_id}: {e}")
+            return None
+
+        try:
+            init_uri, segment_uris = self._parse_hls_playlist(playlist_text, uri)
+        except ValueError as e:
+            logger.warning(f"Failed to parse HLS playlist for track {track_id}: {e}")
+            return None
+
+        if '#EXT-X-STREAM-INF' in playlist_text and segment_uris:
+            playlist_uri = segment_uris[0]
+            try:
+                logger.debug(f"Detected master HLS playlist, following variant: {playlist_uri}")
+                variant_resp = self.session.get(playlist_uri, allow_redirects=True, timeout=30)
+                variant_resp.raise_for_status()
+                variant_text = variant_resp.text
+                init_uri, segment_uris = self._parse_hls_playlist(variant_text, playlist_uri)
+            except Exception as e:
+                logger.warning(f"Failed to fetch variant playlist for track {track_id}: {e}")
+                return None
+
+        if init_uri:
+            logger.info(f"HiFi HLS manifest for track {track_id}: "
+                        f"init segment + {len(segment_uris)} segments ({quality})")
+        else:
+            logger.info(f"HiFi HLS manifest for track {track_id}: "
+                        f"{len(segment_uris)} segments ({quality})")
+
+        return {
+            'init_uri': init_uri,
+            'segment_uris': segment_uris,
+            'extension': q_info['extension'],
+            'codec': q_info['codec'],
+            'quality': quality,
+        }
+
+    def _demux_flac(self, input_path: Path, output_path: Path) -> None:
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg:
+            tools_dir = Path(__file__).parent.parent / 'tools'
+            ffmpeg_candidate = tools_dir / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
+            if ffmpeg_candidate.exists():
+                ffmpeg = str(ffmpeg_candidate)
+            else:
+                raise RuntimeError('ffmpeg is required to demux FLAC from MP4. Install ffmpeg and retry.')
+
+        try:
+            result = subprocess.run(
+                [
+                    ffmpeg,
+                    '-y',
+                    '-hide_banner',
+                    '-loglevel', 'error',
+                    '-i', str(input_path),
+                    '-map', '0:a:0',
+                    '-c', 'copy',
+                    str(output_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f'ffmpeg failed while demuxing {input_path} -> {output_path}: '
+                f'{exc.returncode}\n{exc.stderr}'
+            ) from exc
 
     async def search(self, query: str, timeout: int = None,
                      progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
-        """
-        Search with Soulseek-compatible return format (TrackResult, AlbumResult).
-        Matches the interface expected by DownloadOrchestrator.
-        """
         import asyncio
 
         try:
@@ -474,7 +515,7 @@ class HiFiClient:
             tracks = await loop.run_in_executor(None, lambda: self.search_raw(query))
 
             quality_key = config_manager.get('hifi_download.quality', 'lossless')
-            q_info = HIFI_QUALITY_MAP.get(quality_key, HIFI_QUALITY_MAP['lossless'])
+            q_info = HLS_QUALITY_MAP.get(quality_key, HLS_QUALITY_MAP['lossless'])
 
             results = []
             for t in tracks:
@@ -491,7 +532,6 @@ class HiFiClient:
             return ([], [])
 
     def _to_track_result(self, track: Dict, quality_info: Dict) -> TrackResult:
-        """Convert a hifi track dict to a TrackResult."""
         display_name = f"{track['artist']} - {track['title']}"
         filename = f"{track['id']}||{display_name}"
 
@@ -511,13 +551,7 @@ class HiFiClient:
             track_number=track.get('track_number'),
         )
 
-    # ===================== Download =====================
-
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
-        """
-        Download a track (async, Soulseek-compatible interface).
-        Filename format: "track_id||display_name"
-        """
         try:
             if '||' not in filename:
                 logger.error(f"Invalid filename format: {filename}")
@@ -562,7 +596,6 @@ class HiFiClient:
             return None
 
     def _download_worker(self, download_id: str, track_id: int, display_name: str):
-        """Background download thread."""
         try:
             with self._download_lock:
                 if download_id in self.active_downloads:
@@ -586,111 +619,144 @@ class HiFiClient:
                     self.active_downloads[download_id]['state'] = 'Errored'
 
     def _download_sync(self, download_id: str, track_id: int, display_name: str) -> Optional[str]:
-        """
-        Synchronous download with quality fallback chain.
-        Returns file path on success, None on failure.
-        """
         quality_key = config_manager.get('hifi_download.quality', 'lossless')
         chain = ['hires', 'lossless', 'high', 'low']
         start = chain.index(quality_key) if quality_key in chain else 1
         allow_fallback = config_manager.get('hifi_download.allow_fallback', True)
         chain = chain[start:] if allow_fallback else [quality_key]
 
-        MIN_AUDIO_SIZE = 100 * 1024  # 100KB
+        MIN_AUDIO_SIZE = 100 * 1024
 
         for q_key in chain:
             if self.shutdown_check and self.shutdown_check():
                 logger.info("Shutdown detected, aborting HiFi download")
                 return None
 
-            stream_info = self.get_stream_url(track_id, quality=q_key)
-            if not stream_info or not stream_info.get('url'):
-                logger.warning(f"No stream URL at quality {q_key}, trying next")
+            manifest_info = self._get_hls_manifest(track_id, quality=q_key)
+            if not manifest_info or not manifest_info.get('segment_uris'):
+                logger.warning(f"No HLS manifest at quality {q_key}, trying next")
                 continue
 
-            download_url = stream_info['url']
-            codec = stream_info.get('codec', '')
-
-            # Determine extension
-            if 'flac' in codec.lower():
-                extension = 'flac'
-            elif 'mp4a' in codec.lower() or 'aac' in codec.lower():
-                extension = 'm4a'
-            else:
-                extension = HIFI_QUALITY_MAP.get(q_key, {}).get('extension', 'flac')
-
-            # Build output path
+            extension = manifest_info['extension']
             safe_name = re.sub(r'[<>:"/\\|?*]', '_', display_name)
             out_filename = f"{safe_name}.{extension}"
             out_path = self.download_path / out_filename
 
-            try:
-                logger.info(f"Downloading from HiFi ({q_key}): {out_filename}")
-                response = http_requests.get(download_url, stream=True, timeout=120)
-                response.raise_for_status()
+            is_flac = q_key in ('hires', 'lossless')
+            intermediate_path = out_path.with_suffix('.m4a') if is_flac else out_path
 
-                total_size = int(response.headers.get('content-length', 0))
+            try:
+                init_uri = manifest_info.get('init_uri')
+                segment_uris = manifest_info['segment_uris']
+                total_segments = len(segment_uris) + (1 if init_uri else 0)
+
+                logger.info(f"Downloading from HiFi ({q_key}): {out_filename} "
+                            f"({total_segments} segments)")
+
                 downloaded = 0
-                chunk_size = 64 * 1024
                 speed_start = time.time()
-                last_speed_update = speed_start
+                segments_completed = 0
 
                 with self._download_lock:
                     if download_id in self.active_downloads:
-                        self.active_downloads[download_id]['size'] = total_size
+                        self.active_downloads[download_id]['size'] = 0
 
-                with open(out_path, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=chunk_size):
-                        if not chunk:
-                            continue
+                with intermediate_path.open('wb') as output_file:
+                    if init_uri:
                         if self.shutdown_check and self.shutdown_check():
-                            f.close()
-                            out_path.unlink(missing_ok=True)
+                            logger.info("Shutdown detected, aborting HiFi download")
+                            intermediate_path.unlink(missing_ok=True)
                             return None
 
-                        f.write(chunk)
-                        downloaded += len(chunk)
+                        logger.debug(f"Downloading init segment: {init_uri}")
+                        init_data = self.session.get(init_uri, allow_redirects=True, timeout=30)
+                        init_data.raise_for_status()
+                        output_file.write(init_data.content)
+                        downloaded += len(init_data.content)
+                        segments_completed += 1
 
-                        if total_size > 0:
-                            progress = (downloaded / total_size) * 100
-                        else:
-                            progress = 0
+                        self._update_download_progress(download_id, downloaded,
+                                                       segments_completed, total_segments, speed_start)
 
-                        # Calculate speed every 0.5s
-                        now = time.time()
-                        elapsed_total = now - speed_start
-                        speed = int(downloaded / elapsed_total) if elapsed_total > 0 else 0
-                        time_remaining = int((total_size - downloaded) / speed) if speed > 0 and total_size > 0 else None
+                    for segment_url in segment_uris:
+                        if self.shutdown_check and self.shutdown_check():
+                            logger.info("Shutdown detected, aborting HiFi download")
+                            intermediate_path.unlink(missing_ok=True)
+                            return None
 
-                        with self._download_lock:
-                            if download_id in self.active_downloads:
-                                self.active_downloads[download_id]['transferred'] = downloaded
-                                self.active_downloads[download_id]['progress'] = round(progress, 1)
-                                self.active_downloads[download_id]['speed'] = speed
-                                self.active_downloads[download_id]['time_remaining'] = time_remaining
+                        seg_resp = self.session.get(segment_url, allow_redirects=True, timeout=30)
+                        seg_resp.raise_for_status()
+                        output_file.write(seg_resp.content)
+                        downloaded += len(seg_resp.content)
+                        segments_completed += 1
+
+                        self._update_download_progress(download_id, downloaded,
+                                                       segments_completed, total_segments, speed_start)
 
             except Exception as e:
                 logger.warning(f"Download failed at quality {q_key}: {e}")
-                out_path.unlink(missing_ok=True)
+                intermediate_path.unlink(missing_ok=True)
                 continue
 
-            # Validate file size
             if downloaded < MIN_AUDIO_SIZE:
                 logger.warning(f"File too small at {q_key} ({downloaded} bytes), trying next")
-                out_path.unlink(missing_ok=True)
+                intermediate_path.unlink(missing_ok=True)
                 continue
 
-            logger.info(f"HiFi download complete ({q_key}): {out_path} "
-                         f"({downloaded / (1024*1024):.1f} MB)")
-            return str(out_path)
+            try:
+                if is_flac:
+                    logger.info(f"Demuxing FLAC from MP4 container: {intermediate_path} -> {out_path}")
+                    self._demux_flac(intermediate_path, out_path)
+                    intermediate_path.unlink(missing_ok=True)
+                    final_size = out_path.stat().st_size if out_path.exists() else 0
+                else:
+                    final_size = intermediate_path.stat().st_size if intermediate_path.exists() else 0
+
+                if final_size < MIN_AUDIO_SIZE:
+                    logger.warning(f"Final file too small after processing at {q_key} "
+                                   f"({final_size} bytes), trying next")
+                    out_path.unlink(missing_ok=True)
+                    continue
+
+                logger.info(f"HiFi download complete ({q_key}): {out_path} "
+                            f"({final_size / (1024*1024):.1f} MB)")
+                return str(out_path)
+
+            except Exception as e:
+                logger.warning(f"Post-processing failed at quality {q_key}: {e}")
+                out_path.unlink(missing_ok=True)
+                intermediate_path.unlink(missing_ok=True)
+                continue
 
         logger.error(f"All quality tiers exhausted for '{display_name}'")
         return None
 
-    # ===================== Status / Cancel / Clear =====================
+    def _update_download_progress(self, download_id: str, downloaded: int,
+                                  segments_completed: int, total_segments: int,
+                                  speed_start: float):
+        with self._download_lock:
+            if download_id not in self.active_downloads:
+                return
+            info = self.active_downloads[download_id]
+            info['transferred'] = downloaded
+
+            now = time.time()
+            elapsed_total = now - speed_start
+            speed = int(downloaded / elapsed_total) if elapsed_total > 0 else 0
+            info['speed'] = speed
+
+            if total_segments > 0:
+                progress = (segments_completed / total_segments) * 100
+                info['progress'] = round(min(progress, 99.9), 1)
+
+            time_remaining = None
+            if speed > 0:
+                remaining_bytes = downloaded * (total_segments / max(segments_completed, 1)) - downloaded
+                if remaining_bytes > 0:
+                    time_remaining = int(remaining_bytes / speed)
+            info['time_remaining'] = time_remaining
 
     async def get_all_downloads(self) -> List[DownloadStatus]:
-        """Get all active downloads (Soulseek-compatible)."""
         statuses = []
         with self._download_lock:
             for _dl_id, info in self.active_downloads.items():
@@ -709,7 +775,6 @@ class HiFiClient:
         return statuses
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
-        """Get status of a specific download."""
         with self._download_lock:
             info = self.active_downloads.get(download_id)
             if not info:
@@ -729,7 +794,6 @@ class HiFiClient:
 
     async def cancel_download(self, download_id: str, username: str = None,
                               remove: bool = False) -> bool:
-        """Cancel an active download."""
         with self._download_lock:
             if download_id not in self.active_downloads:
                 return False
@@ -739,7 +803,6 @@ class HiFiClient:
         return True
 
     async def clear_all_completed_downloads(self) -> bool:
-        """Clear all terminal downloads."""
         with self._download_lock:
             to_remove = [
                 did for did, info in self.active_downloads.items()
