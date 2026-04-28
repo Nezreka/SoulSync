@@ -5,7 +5,7 @@ Alternative music download source using tidalapi.
 This client provides:
 - Tidal search with metadata
 - Device flow authentication (link.tidal.com)
-- HiRes/Lossless/High quality audio downloads
+- HiRes/Lossless/High quality audio downloads via Tidal v2 trackManifests endpoint
 - Drop-in replacement compatible with Soulseek interface
 """
 
@@ -13,12 +13,14 @@ import os
 import re
 import asyncio
 import uuid
+import time
 import threading
 import shutil
 import subprocess
 from typing import List, Optional, Dict, Any, Tuple
 from pathlib import Path
 from datetime import datetime, timezone
+from urllib.parse import urljoin
 
 try:
     import tidalapi
@@ -36,31 +38,27 @@ from core.soulseek_client import TrackResult, AlbumResult, DownloadStatus
 logger = get_logger("tidal_download_client")
 
 
-# Quality tier definitions
+# Quality tiers definitions (used for display in search results)
 QUALITY_MAP = {
     'low': {
-        'tidal_quality': 'LOW' if tidalapi is None else None,  # set dynamically
         'label': 'AAC 96kbps',
         'extension': 'm4a',
         'bitrate': 96,
         'codec': 'aac',
     },
     'high': {
-        'tidal_quality': 'HIGH' if tidalapi is None else None,
         'label': 'AAC 320kbps',
         'extension': 'm4a',
         'bitrate': 320,
         'codec': 'aac',
     },
     'lossless': {
-        'tidal_quality': 'LOSSLESS' if tidalapi is None else None,
         'label': 'FLAC 16-bit/44.1kHz',
         'extension': 'flac',
         'bitrate': 1411,
         'codec': 'flac',
     },
     'hires': {
-        'tidal_quality': 'HI_RES_LOSSLESS' if tidalapi is None else None,
         'label': 'FLAC 24-bit/96kHz',
         'extension': 'flac',
         'bitrate': 9216,
@@ -68,92 +66,31 @@ QUALITY_MAP = {
     },
 }
 
-# Initialize quality map with actual tidalapi constants if available
-if tidalapi is not None:
-    QUALITY_MAP['low']['tidal_quality'] = tidalapi.Quality.low_96k
-    QUALITY_MAP['high']['tidal_quality'] = tidalapi.Quality.low_320k
-    QUALITY_MAP['lossless']['tidal_quality'] = tidalapi.Quality.high_lossless
-    QUALITY_MAP['hires']['tidal_quality'] = tidalapi.Quality.hi_res_lossless
-
-
-# Ordering of Tidal's audioQuality values, worst to best. Used to accept
-# tier upgrades (Tidal serving higher than the user asked) while still
-# rejecting downgrades. Values are the strings tidalapi's `Quality` enum
-# exposes — and the strings Tidal's API returns in the `audioQuality`
-# field. `HI_RES` (legacy MQA) isn't in the modern `Quality` enum but
-# may still come back for old catalog tracks; we rank it below
-# `HI_RES_LOSSLESS` so it's treated as a downgrade when the user asked
-# for true HiRes lossless.
-_QUALITY_RANK = {
-    'LOW': 1,
-    'HIGH': 2,
-    'LOSSLESS': 3,
-    'HI_RES': 4,
-    'HI_RES_LOSSLESS': 5,
+# HLS-specific format mapping for v2 trackManifests endpoint
+HLS_QUALITY_MAP = {
+    'hires': {
+        'formats': ['FLAC_HIRES'],
+        'manifest_type': 'HLS',
+        'extension': 'flac',
+    },
+    'lossless': {
+        'formats': ['FLAC'],
+        'manifest_type': 'HLS',
+        'extension': 'flac',
+    },
+    'high': {
+        'formats': ['AACLC'],
+        'manifest_type': 'HLS',
+        'extension': 'm4a',
+    },
+    'low': {
+        'formats': ['HEAACV1'],
+        'manifest_type': 'HLS',
+        'extension': 'm4a',
+    },
 }
 
-
-def _verify_stream_tier(stream, q_info: dict, q_key: str) -> Tuple[bool, Optional[str]]:
-    """Return ``(True, None)`` when the tier Tidal actually served is
-    acceptable (same as requested, or a higher tier), ``(False, reason)``
-    when Tidal silently downgraded.
-
-    Tidal's API degrades quality without raising: ask for HI_RES_LOSSLESS
-    on a track that's only in LOW_320K and you get LOW_320K back with no
-    error. The downloader used to accept that and write the resulting
-    AAC file, which defeated "HiRes only" with no fallback and made the
-    worker's fallback chain ineffective (every tier "succeeded" at the
-    first one that returned anything).
-
-    We accept upgrades because Tidal occasionally serves a higher tier
-    than requested on tracks flagged as such in its catalog — rejecting
-    a higher quality than asked for would be user-hostile.
-
-    Defensive paths:
-    - No ``audio_quality`` on the stream (older tidalapi builds): pass
-      through, let the pre-existing codec / file-size guards decide.
-    - QUALITY_MAP entry without ``tidal_quality`` (tidalapi wasn't
-      importable at module load): pass through for the same reason.
-    - Unrecognized served quality value (new Tidal tier we haven't
-      mapped yet): reject, surfacing a "can't verify" reason so the
-      next tier gets a chance or the final diagnostic names the
-      unknown value.
-    """
-    served = getattr(stream, 'audio_quality', None)
-    expected = q_info.get('tidal_quality')
-    if served is None or expected is None:
-        return True, None
-
-    # Both sides may be enum instances (str subclass) or plain strings;
-    # coerce to str to compare values only.
-    served_str = str(served)
-    expected_str = str(expected)
-
-    if served_str == expected_str:
-        return True, None
-
-    served_rank = _QUALITY_RANK.get(served_str)
-    expected_rank = _QUALITY_RANK.get(expected_str)
-
-    if expected_rank is None:
-        # Shouldn't happen — every entry in QUALITY_MAP resolves to a
-        # known tier. If it does, don't reject valid downloads.
-        return True, None
-
-    if served_rank is None:
-        return False, (
-            f"{q_key}: Tidal returned unrecognized audioQuality "
-            f"'{served_str}' — can't verify the tier matches '{expected_str}'"
-        )
-
-    if served_rank >= expected_rank:
-        return True, None
-
-    return False, (
-        f"{q_key}: Tidal served '{served_str}' instead of "
-        f"'{expected_str}' — account tier, track licensing, "
-        f"or region doesn't permit {q_key} for this track"
-    )
+HLS_MAP_TAG_RE = re.compile(r'#EXT-X-MAP:.*URI="([^"]+)"')
 
 
 class TidalDownloadClient:
@@ -166,7 +103,6 @@ class TidalDownloadClient:
         if tidalapi is None:
             logger.warning("tidalapi not installed — Tidal downloads unavailable")
 
-        # Use Soulseek download path for consistency (post-processing expects files here)
         if download_path is None:
             download_path = config_manager.get('soulseek.download_path', './downloads')
 
@@ -175,35 +111,26 @@ class TidalDownloadClient:
 
         logger.info(f"Tidal download client using download path: {self.download_path}")
 
-        # Callback for shutdown check (avoids circular imports)
         self.shutdown_check = None
 
-        # tidalapi session
         self.session: Optional['tidalapi.Session'] = None
         self._init_session()
 
-        # Download queue management (mirrors YouTube's download tracking)
         self.active_downloads: Dict[str, Dict[str, Any]] = {}
         self._download_lock = threading.Lock()
 
-        # Device auth state
         self._device_auth_future = None
         self._device_auth_link = None
 
     def set_shutdown_check(self, check_callable):
-        """Set a callback function to check for system shutdown"""
         self.shutdown_check = check_callable
 
-    # ===================== Auth =====================
-
     def _init_session(self):
-        """Create a tidalapi session and try to restore saved tokens."""
         if tidalapi is None:
             return
 
         self.session = tidalapi.Session()
 
-        # Try to restore saved session
         saved = config_manager.get('tidal_download.session', {})
         token_type = saved.get('token_type', '')
         access_token = saved.get('access_token', '')
@@ -212,10 +139,8 @@ class TidalDownloadClient:
 
         if token_type and access_token:
             try:
-                # Convert stored float timestamp back to datetime for tidalapi
                 expiry_dt = datetime.fromtimestamp(expiry_time, tz=timezone.utc) if expiry_time else None
 
-                # tidalapi's load_oauth_session restores from saved tokens
                 restored = self.session.load_oauth_session(
                     token_type=token_type,
                     access_token=access_token,
@@ -224,7 +149,7 @@ class TidalDownloadClient:
                 )
                 if restored and self.session.check_login():
                     logger.info("Restored Tidal download session from saved tokens")
-                    self._save_session()  # refresh may have rotated tokens
+                    self._save_session()
                     return
                 else:
                     logger.warning("Saved Tidal session tokens are invalid/expired")
@@ -232,7 +157,6 @@ class TidalDownloadClient:
                 logger.warning(f"Could not restore Tidal session: {e}")
 
     def _save_session(self):
-        """Persist session tokens to config."""
         if not self.session:
             return
         config_manager.set('tidal_download.session', {
@@ -243,7 +167,6 @@ class TidalDownloadClient:
         })
 
     def is_authenticated(self) -> bool:
-        """Check if we have a valid Tidal session."""
         if not self.session:
             return False
         try:
@@ -252,10 +175,6 @@ class TidalDownloadClient:
             return False
 
     def start_device_auth(self) -> Optional[Dict[str, str]]:
-        """
-        Start the device-code OAuth flow.
-        Returns dict with 'verification_uri' and 'user_code', or None on error.
-        """
         if tidalapi is None:
             return None
 
@@ -265,11 +184,6 @@ class TidalDownloadClient:
 
             login, future = self.session.login_oauth()
             self._device_auth_future = future
-            # tidalapi returns `verification_uri_complete` as a schemeless
-            # string like `link.tidal.com/ABCDE`. Passing that straight to
-            # an <a href> makes the browser treat it as a relative URL and
-            # route it back to the SoulSync origin, so normalize to a
-            # full https:// URL here.
             raw_uri = login.verification_uri_complete or f"link.tidal.com/{login.user_code}"
             if not raw_uri.startswith(('http://', 'https://')):
                 raw_uri = f"https://{raw_uri}"
@@ -285,10 +199,6 @@ class TidalDownloadClient:
             return None
 
     def check_device_auth(self) -> Dict[str, Any]:
-        """
-        Check if device auth has completed.
-        Returns {'status': 'pending'|'completed'|'error', ...}
-        """
         if not self._device_auth_future:
             return {'status': 'error', 'message': 'No auth in progress'}
 
@@ -300,7 +210,6 @@ class TidalDownloadClient:
                     'user_code': self._device_auth_link.get('user_code', ''),
                 }
 
-            # Future is done — check result
             result = self._device_auth_future.result(timeout=0)
             if self.session and self.session.check_login():
                 self._save_session()
@@ -313,18 +222,13 @@ class TidalDownloadClient:
             logger.error(f"Tidal device auth check error: {e}")
             return {'status': 'error', 'message': str(e)}
 
-    # ===================== Search =====================
-
     def is_available(self) -> bool:
-        """Check if Tidal download client is available (tidalapi installed and authenticated)."""
         return tidalapi is not None and self.is_authenticated()
 
     def is_configured(self) -> bool:
-        """Check if Tidal client is configured and ready (matches Soulseek interface)."""
         return self.is_available()
 
     async def check_connection(self) -> bool:
-        """Test if Tidal is accessible (async, Soulseek-compatible)."""
         try:
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, self.is_available)
@@ -332,11 +236,6 @@ class TidalDownloadClient:
             logger.error(f"Tidal connection check failed: {e}")
             return False
 
-    # Words that distinguish a specific audio variant from the original track.
-    # If any of these appear in a query, the fallback-retry results must also
-    # contain them — otherwise we'd silently downgrade a "(Live)" or
-    # "(Acoustic)" search to the studio version when shortened queries match
-    # too broadly.
     _QUALIFIER_KEYWORDS = frozenset({
         'remix', 'mix', 'edit', 'version', 'dub', 'rmx', 'vip', 'cut',
         'rework', 'bootleg', 'flip',
@@ -347,9 +246,6 @@ class TidalDownloadClient:
 
     @classmethod
     def _extract_qualifiers(cls, query: str) -> List[str]:
-        """Return the qualifier keywords that appear as whole words in the
-        query (case-insensitive). Word-boundary match prevents false hits like
-        "edit" matching "edition" or "mix" matching "remix"."""
         if not query:
             return []
         found = []
@@ -361,7 +257,6 @@ class TidalDownloadClient:
 
     @staticmethod
     def _track_name_contains_qualifiers(track_name: str, qualifiers: List[str]) -> bool:
-        """True iff the track name contains every qualifier as a whole word."""
         if not qualifiers:
             return True
         if not track_name:
@@ -374,17 +269,6 @@ class TidalDownloadClient:
 
     @staticmethod
     def _generate_shortened_queries(original: str) -> List[str]:
-        """Generate progressively-shorter variants of a search query.
-
-        Tidal's search engine chokes on long queries with lots of qualifiers
-        (remix credits, edit labels, bonus-disc markers). When the original
-        returns 0 results, we retry with shortened variants in order of
-        conservativeness — the first variant that returns results wins.
-
-        Variants are returned in priority order. Dedupes against the original
-        and against previously-added variants so we never issue duplicate
-        requests.
-        """
         variants: List[str] = []
         seen = {original.strip().lower()}
 
@@ -394,80 +278,45 @@ class TidalDownloadClient:
                 variants.append(candidate)
                 seen.add(candidate.lower())
 
-        # 1. Strip a trailing parenthetical/bracketed suffix.
-        #    "Song (Radio Edit)" → "Song"
         _add(re.sub(r'\s*[\(\[][^\)\]]*[\)\]]\s*$', '', original))
-
-        # 2. Strip ALL parentheticals/brackets (mid-string too).
-        #    "Song (feat X) [Remix]" → "Song"
         _add(re.sub(r'\s*[\(\[][^\)\]]*[\)\]]', ' ', original))
 
         tokens = original.split()
 
-        # 3. Drop the last token — covers trailing 1-word modifiers
-        #    (e.g. "… Remix", "… Extended").
         if len(tokens) >= 3:
             _add(' '.join(tokens[:-1]))
 
-        # 4. Drop the last two tokens.
         if len(tokens) >= 4:
             _add(' '.join(tokens[:-2]))
 
-        # 5. Drop the last three tokens — covers "fred v remix" style
-        #    3-word modifiers common in remix/bonus track names.
         if len(tokens) >= 5:
             _add(' '.join(tokens[:-3]))
 
-        # 6. Aggressive: keep roughly the first half (rounded up).
         if len(tokens) >= 7:
             _add(' '.join(tokens[:len(tokens) // 2 + 1]))
 
         return variants
 
     async def search(self, query: str, timeout: int = None, progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
-        """
-        Search Tidal for tracks (async, Soulseek-compatible interface).
-
-        Returns:
-            Tuple of (track_results, album_results). Album results always empty.
-        """
         if not self.is_available():
             logger.warning("Tidal not available for search (not authenticated)")
             return ([], [])
 
-        # Defensive guard — None/empty query would blow up the shortener's
-        # .strip() call. Match the original behaviour (log + empty tuple).
         if not query or not isinstance(query, str):
             logger.warning(f"Invalid Tidal search query: {query!r}")
             return ([], [])
 
         logger.info(f"Searching Tidal for: {query}")
 
-        # Outer try/except preserves the original contract: any unexpected
-        # error returns ([], []) so the caller can fall back to other sources
-        # instead of crashing. Traceback is logged once, not per-attempt.
         try:
-            # Build the retry ladder: original query, then progressively-shortened
-            # variants. Capped at 5 total requests to avoid hammering Tidal on
-            # genuinely-missing tracks, while still allowing enough variants to
-            # cover multi-word trailing modifiers like remix credits.
             queries_to_try = [query] + self._generate_shortened_queries(query)
             queries_to_try = queries_to_try[:5]
 
-            # Qualifier-aware safety net: if the original query contains variant
-            # keywords (Live, Remix, Acoustic, Extended, etc.), fallback results
-            # MUST still contain those qualifiers in their track names. Otherwise
-            # a shortened query could silently downgrade "Song (Live)" to the
-            # studio "Song" and the caller would download the wrong variant.
             required_qualifiers = self._extract_qualifiers(query)
 
             tidal_tracks: list = []
             successful_query: Optional[str] = None
             last_error: Optional[Exception] = None
-            # Tracks whether ANY fallback attempt returned broader matches that
-            # got rejected by the qualifier filter — used to give an accurate
-            # "no qualifier-matching variant" log message at the end instead of
-            # a generic "0 results".
             any_fallback_filtered_out = False
 
             loop = asyncio.get_event_loop()
@@ -482,12 +331,6 @@ class TidalDownloadClient:
                     found = await loop.run_in_executor(None, _search)
 
                     if found:
-                        # Fallback attempts get qualifier-filtered. We trust the
-                        # original query to return only appropriate matches, but
-                        # shortened queries are more permissive and can return
-                        # wrong-variant tracks (e.g. studio when Live was asked
-                        # for). Drop any result whose title doesn't carry all
-                        # original qualifier words.
                         is_fallback = attempt_idx > 0
                         if is_fallback and required_qualifiers:
                             filtered = [
@@ -519,7 +362,6 @@ class TidalDownloadClient:
 
                     if attempt_idx < len(queries_to_try) - 1:
                         logger.debug(f"Tidal returned 0 results for '{attempt_query}' — trying shortened variant")
-                        # Small pause so we're not hammering Tidal with rapid retries
                         await asyncio.sleep(0.1)
                 except Exception as e:
                     last_error = e
@@ -546,7 +388,6 @@ class TidalDownloadClient:
             if successful_query and successful_query != query:
                 logger.info(f"Tidal fallback query succeeded: '{successful_query}' (original: '{query}')")
 
-            # Get configured quality for display
             quality_key = config_manager.get('tidal_download.quality', 'lossless')
             quality_info = QUALITY_MAP.get(quality_key, QUALITY_MAP['lossless'])
 
@@ -562,32 +403,25 @@ class TidalDownloadClient:
             return (track_results, [])
 
         except Exception as e:
-            # Unhandled error in the retry orchestration itself (not in an
-            # individual attempt, which is already caught above). Preserves
-            # the original contract of returning ([], []) on any failure so
-            # the caller's fallback chain isn't broken.
             logger.error(f"Tidal search orchestration failed: {e}")
             import traceback
             traceback.print_exc()
             return ([], [])
 
     def _tidal_to_track_result(self, track, quality_info: dict) -> TrackResult:
-        """Convert tidalapi Track to TrackResult (Soulseek-compatible format)."""
         artist_name = track.artist.name if track.artist else 'Unknown Artist'
         title = track.name or 'Unknown Title'
         album_name = track.album.name if track.album else None
 
-        # Duration in milliseconds
         duration_ms = int(track.duration * 1000) if track.duration else None
 
-        # Encode track_id in filename (same pattern as YouTube: "id||display_name")
         display_name = f"{artist_name} - {title}"
         filename = f"{track.id}||{display_name}"
 
         track_result = TrackResult(
             username='tidal',
             filename=filename,
-            size=0,  # Unknown until download
+            size=0,
             bitrate=quality_info.get('bitrate'),
             duration=duration_ms,
             quality=quality_info.get('codec', 'flac'),
@@ -602,19 +436,166 @@ class TidalDownloadClient:
 
         return track_result
 
-    # ===================== Download =====================
+    def _parse_hls_playlist(self, text: str, playlist_url: str):
+        init_uri = None
+        segment_uris = []
+        variant_uri = None
+
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+        for index, line in enumerate(lines):
+            if line.startswith('#EXTM3U'):
+                continue
+
+            if line.startswith('#EXT-X-STREAM-INF'):
+                for next_line in lines[index + 1:]:
+                    if not next_line.startswith('#'):
+                        variant_uri = urljoin(playlist_url, next_line)
+                        break
+                break
+
+            if line.startswith('#EXT-X-MAP'):
+                match = HLS_MAP_TAG_RE.search(line)
+                if match:
+                    init_uri = match.group(1)
+                continue
+
+            if line.startswith('#'):
+                continue
+
+            segment_uris.append(urljoin(playlist_url, line))
+
+        if variant_uri:
+            return None, [variant_uri]
+
+        if not segment_uris:
+            raise ValueError('No segment URIs found in the HLS playlist')
+
+        if init_uri:
+            init_uri = urljoin(playlist_url, init_uri)
+
+        return init_uri, segment_uris
+
+    def _get_hls_manifest(self, track_id: int, quality: str = 'lossless') -> Optional[Dict]:
+        q_info = HLS_QUALITY_MAP.get(quality, HLS_QUALITY_MAP['lossless'])
+        formats = q_info['formats']
+
+        access_token = self.session.access_token
+        if not access_token:
+            logger.error("No Tidal access token available")
+            return None
+
+        url = f"https://openapi.tidal.com/v2/trackManifests/{track_id}"
+        params = [
+            ('adaptive', 'true'),
+            ('manifestType', 'HLS'),
+            ('uriScheme', 'HTTPS'),
+            ('usage', 'DOWNLOAD'),
+        ]
+        for fmt in formats:
+            params.append(('formats', fmt))
+
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Accept': 'application/vnd.api+json',
+        }
+
+        try:
+            response = http_requests.get(url, params=params, headers=headers, timeout=20)
+            response.raise_for_status()
+            data = response.json()
+        except http_requests.HTTPError as e:
+            logger.warning(f"Failed to fetch HLS manifest for track {track_id}: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to fetch HLS manifest for track {track_id}: {e}")
+            return None
+
+        try:
+            attrs = data.get('data', {}).get('attributes', {})
+            uri = attrs.get('uri')
+        except (AttributeError, KeyError) as e:
+            logger.warning(f"Failed to extract playlist URI from manifest response for track {track_id}: {e}")
+            return None
+
+        if not uri:
+            logger.warning(f"No playlist URI in manifest for track {track_id}")
+            return None
+
+        try:
+            playlist_resp = http_requests.get(uri, allow_redirects=True, timeout=30)
+            playlist_resp.raise_for_status()
+            playlist_text = playlist_resp.text
+        except Exception as e:
+            logger.warning(f"Failed to fetch HLS playlist for track {track_id}: {e}")
+            return None
+
+        try:
+            init_uri, segment_uris = self._parse_hls_playlist(playlist_text, uri)
+        except ValueError as e:
+            logger.warning(f"Failed to parse HLS playlist for track {track_id}: {e}")
+            return None
+
+        if '#EXT-X-STREAM-INF' in playlist_text and segment_uris:
+            playlist_uri = segment_uris[0]
+            try:
+                logger.debug(f"Detected master HLS playlist, following variant: {playlist_uri}")
+                variant_resp = http_requests.get(playlist_uri, allow_redirects=True, timeout=30)
+                variant_resp.raise_for_status()
+                variant_text = variant_resp.text
+                init_uri, segment_uris = self._parse_hls_playlist(variant_text, playlist_uri)
+            except Exception as e:
+                logger.warning(f"Failed to fetch variant playlist for track {track_id}: {e}")
+                return None
+
+        if init_uri:
+            logger.info(f"Tidal HLS manifest for track {track_id}: "
+                        f"init segment + {len(segment_uris)} segments ({quality})")
+        else:
+            logger.info(f"Tidal HLS manifest for track {track_id}: "
+                        f"{len(segment_uris)} segments ({quality})")
+
+        return {
+            'init_uri': init_uri,
+            'segment_uris': segment_uris,
+            'extension': QUALITY_MAP.get(quality, {}).get('extension', 'flac'),
+            'codec': QUALITY_MAP.get(quality, {}).get('codec', 'flac'),
+            'quality': quality,
+        }
+
+    def _demux_flac(self, input_path: Path, output_path: Path) -> None:
+        ffmpeg = shutil.which('ffmpeg')
+        if not ffmpeg:
+            tools_dir = Path(__file__).parent.parent / 'tools'
+            ffmpeg_candidate = tools_dir / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
+            if ffmpeg_candidate.exists():
+                ffmpeg = str(ffmpeg_candidate)
+            else:
+                raise RuntimeError('ffmpeg is required to demux FLAC from MP4. Install ffmpeg and retry.')
+
+        try:
+            result = subprocess.run(
+                [
+                    ffmpeg,
+                    '-y',
+                    '-hide_banner',
+                    '-loglevel', 'error',
+                    '-i', str(input_path),
+                    '-map', '0:a:0',
+                    '-c', 'copy',
+                    str(output_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f'ffmpeg failed while demuxing {input_path} -> {output_path}: '
+                f'{exc.returncode}\n{exc.stderr}'
+            ) from exc
 
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
-        """
-        Download a Tidal track (async, Soulseek-compatible interface).
-
-        Returns download_id immediately and runs download in background thread.
-
-        Args:
-            username: Ignored for Tidal (always "tidal")
-            filename: Encoded as "track_id||display_name"
-            file_size: Ignored
-        """
         try:
             if '||' not in filename:
                 logger.error(f"Invalid filename format: {filename}")
@@ -634,7 +615,7 @@ class TidalDownloadClient:
             with self._download_lock:
                 self.active_downloads[download_id] = {
                     'id': download_id,
-                    'filename': filename,  # Keep original encoded format for context matching
+                    'filename': filename,
                     'username': 'tidal',
                     'state': 'Initializing',
                     'progress': 0.0,
@@ -647,7 +628,6 @@ class TidalDownloadClient:
                     'file_path': None,
                 }
 
-            # Start download in background thread
             download_thread = threading.Thread(
                 target=self._download_thread_worker,
                 args=(download_id, track_id, display_name, filename),
@@ -665,7 +645,6 @@ class TidalDownloadClient:
             return None
 
     def _download_thread_worker(self, download_id: str, track_id: int, display_name: str, original_filename: str):
-        """Background thread worker for downloading Tidal tracks."""
         try:
             with self._download_lock:
                 if download_id in self.active_downloads:
@@ -698,254 +677,148 @@ class TidalDownloadClient:
                     self.active_downloads[download_id]['state'] = 'Errored'
 
     def _download_sync(self, download_id: str, track_id: int, display_name: str) -> Optional[str]:
-        """
-        Synchronous download method (runs in background thread).
-
-        Returns file path if successful, None otherwise.
-        """
         if not self.session or not self.session.check_login():
             logger.error("Tidal session not authenticated")
             return None
 
-        try:
-            # Get track object
-            track = self.session.track(track_id)
-            if not track:
-                logger.error(f"Could not fetch Tidal track: {track_id}")
+        quality_key = config_manager.get('tidal_download.quality', 'lossless')
+        chain = ['hires', 'lossless', 'high', 'low']
+        start = chain.index(quality_key) if quality_key in chain else 1
+        allow_fallback = config_manager.get('tidal_download.allow_fallback', True)
+        chain = chain[start:] if allow_fallback else [quality_key]
+
+        MIN_AUDIO_SIZE = 100 * 1024
+
+        for q_key in chain:
+            if self.shutdown_check and self.shutdown_check():
+                logger.info("Shutdown detected, aborting Tidal download")
                 return None
 
-            # Determine quality
-            quality_key = config_manager.get('tidal_download.quality', 'lossless')
-            quality_info = QUALITY_MAP.get(quality_key, QUALITY_MAP['lossless'])
+            manifest_info = self._get_hls_manifest(track_id, quality=q_key)
+            if not manifest_info or not manifest_info.get('segment_uris'):
+                logger.warning(f"No HLS manifest at quality {q_key}, trying next")
+                continue
 
-            # Try quality fallback chain: hires → lossless → high → low
-            # The entire download+validation is inside the loop so that garbage
-            # files (stubs, empty HiRes responses) trigger a retry at the next tier.
-            quality_chain = ['hires', 'lossless', 'high', 'low']
-            start_idx = quality_chain.index(quality_key) if quality_key in quality_chain else 1
-            allow_fallback = config_manager.get('tidal_download.allow_fallback', True)
-            chain = quality_chain[start_idx:] if allow_fallback else [quality_key]
+            extension = manifest_info['extension']
+            safe_name = re.sub(r'[<>:"/\\|?*]', '_', display_name)
+            out_filename = f"{safe_name}.{extension}"
+            out_path = self.download_path / out_filename
 
-            MIN_AUDIO_SIZE = 100 * 1024  # 100KB
+            is_flac = q_key in ('hires', 'lossless')
+            intermediate_path = out_path.with_suffix('.m4a') if is_flac else out_path
 
-            quality_error_reasons = []
+            try:
+                init_uri = manifest_info.get('init_uri')
+                segment_uris = manifest_info['segment_uris']
+                total_segments = len(segment_uris) + (1 if init_uri else 0)
 
-            for q_key in chain:
-                q_info = QUALITY_MAP[q_key]
+                logger.info(f"Downloading from Tidal ({q_key}): {out_filename} "
+                            f"({total_segments} segments)")
 
-                # --- Step 1: Get stream ---
-                try:
-                    self.session.audio_quality = q_info['tidal_quality']
-                    stream = track.get_stream()
-                    if not stream or not stream.manifest_mime_type:
-                        reason = f"{q_key}: no stream returned"
-                        logger.warning(f"Quality {q_key} returned no stream, trying next")
-                        quality_error_reasons.append(reason)
-                        continue
+                downloaded = 0
+                speed_start = time.time()
+                segments_completed = 0
 
-                    ok, reason = _verify_stream_tier(stream, q_info, q_key)
-                    if not ok:
-                        logger.warning(reason)
-                        quality_error_reasons.append(reason)
-                        continue
+                with self._download_lock:
+                    if download_id in self.active_downloads:
+                        self.active_downloads[download_id]['size'] = 0
 
-                    logger.info(f"Got Tidal stream at quality: {q_key}")
-                except Exception as e:
-                    reason = f"{q_key}: {type(e).__name__}: {e}"
-                    logger.warning(f"Quality {q_key} unavailable: {e}")
-                    quality_error_reasons.append(reason)
-                    continue
+                with intermediate_path.open('wb') as output_file:
+                    if init_uri:
+                        if self.shutdown_check and self.shutdown_check():
+                            logger.info("Shutdown detected, aborting Tidal download")
+                            intermediate_path.unlink(missing_ok=True)
+                            return None
 
-                # --- Step 2: Parse manifest ---
-                manifest = stream.get_stream_manifest()
-                urls = manifest.get_urls()
-                if not urls:
-                    reason = f"{q_key}: manifest returned no URLs"
-                    logger.warning(f"No download URLs for quality {q_key}, trying next")
-                    quality_error_reasons.append(reason)
-                    continue
+                        logger.debug(f"Downloading init segment: {init_uri}")
+                        init_data = http_requests.get(init_uri, allow_redirects=True, timeout=30)
+                        init_data.raise_for_status()
+                        output_file.write(init_data.content)
+                        downloaded += len(init_data.content)
+                        segments_completed += 1
 
-                download_url = urls[0]
+                        self._update_download_progress(download_id, downloaded,
+                                                       segments_completed, total_segments, speed_start)
 
-                # Determine file extension from manifest codec (HiRes FLAC
-                # can arrive wrapped in MP4 — unwrapped at Step 4).
-                codec = manifest.get_codecs()
-                if codec and 'flac' in codec.lower():
-                    extension = 'flac'
-                elif codec and ('mp4a' in codec.lower() or 'aac' in codec.lower()):
-                    extension = 'm4a'
-                elif codec and 'alac' in codec.lower():
-                    extension = 'm4a'
+                    for segment_url in segment_uris:
+                        if self.shutdown_check and self.shutdown_check():
+                            logger.info("Shutdown detected, aborting Tidal download")
+                            intermediate_path.unlink(missing_ok=True)
+                            return None
+
+                        seg_resp = http_requests.get(segment_url, allow_redirects=True, timeout=30)
+                        seg_resp.raise_for_status()
+                        output_file.write(seg_resp.content)
+                        downloaded += len(seg_resp.content)
+                        segments_completed += 1
+
+                        self._update_download_progress(download_id, downloaded,
+                                                       segments_completed, total_segments, speed_start)
+
+            except Exception as e:
+                logger.warning(f"Download failed at quality {q_key}: {e}")
+                intermediate_path.unlink(missing_ok=True)
+                continue
+
+            if downloaded < MIN_AUDIO_SIZE:
+                logger.warning(f"File too small at {q_key} ({downloaded} bytes), trying next")
+                intermediate_path.unlink(missing_ok=True)
+                continue
+
+            try:
+                if is_flac:
+                    logger.info(f"Demuxing FLAC from MP4 container: {intermediate_path} -> {out_path}")
+                    self._demux_flac(intermediate_path, out_path)
+                    intermediate_path.unlink(missing_ok=True)
+                    final_size = out_path.stat().st_size if out_path.exists() else 0
                 else:
-                    extension = q_info.get('extension', 'flac')
+                    final_size = intermediate_path.stat().st_size if intermediate_path.exists() else 0
 
-                # Build output filename
-                safe_name = re.sub(r'[<>:"/\\|?*]', '_', display_name)
-                out_filename = f"{safe_name}.{extension}"
-                out_path = self.download_path / out_filename
-
-                # Check for shutdown before downloading
-                if self.shutdown_check and self.shutdown_check():
-                    logger.info("Server shutting down, aborting Tidal download")
-                    return None
-
-                # --- Step 3: Download ---
-                try:
-                    logger.info(f"Downloading from Tidal ({q_key}): {out_filename}")
-                    response = http_requests.get(download_url, stream=True, timeout=120)
-                    response.raise_for_status()
-
-                    total_size = int(response.headers.get('content-length', 0))
-                    downloaded = 0
-                    chunk_size = 64 * 1024  # 64KB chunks
-
-                    with self._download_lock:
-                        if download_id in self.active_downloads:
-                            self.active_downloads[download_id]['size'] = total_size
-
-                    with open(out_path, 'wb') as f:
-                        for chunk in response.iter_content(chunk_size=chunk_size):
-                            if not chunk:
-                                continue
-
-                            if self.shutdown_check and self.shutdown_check():
-                                logger.info("Server shutting down, aborting Tidal download mid-stream")
-                                f.close()
-                                out_path.unlink(missing_ok=True)
-                                return None
-
-                            f.write(chunk)
-                            downloaded += len(chunk)
-
-                            if total_size > 0:
-                                progress = (downloaded / total_size) * 100
-                            else:
-                                progress = 0
-
-                            with self._download_lock:
-                                if download_id in self.active_downloads:
-                                    self.active_downloads[download_id]['transferred'] = downloaded
-                                    self.active_downloads[download_id]['progress'] = round(progress, 1)
-
-                except Exception as dl_err:
-                    logger.warning(f"Download failed at quality {q_key}: {dl_err}")
-                    quality_error_reasons.append(f"{q_key}: download error: {type(dl_err).__name__}: {dl_err}")
-                    out_path.unlink(missing_ok=True)
-                    continue
-
-                # --- Step 4: Validate ---
-                if downloaded < MIN_AUDIO_SIZE:
-                    logger.warning(
-                        f"Tidal download too small at {q_key} ({downloaded} bytes) — "
-                        f"likely a stub/preview for '{display_name}'. Trying next quality."
-                    )
-                    quality_error_reasons.append(f"{q_key}: file too small ({downloaded} bytes), likely a stub")
-                    out_path.unlink(missing_ok=True)
-                    continue
-
-                # HiRes FLAC in MP4 container: extract raw FLAC with FFmpeg
-                if extension == 'flac' and self._is_mp4_container(out_path):
-                    extracted = self._extract_flac_from_mp4(out_path)
-                    if extracted:
-                        out_path = Path(extracted)
-                    else:
-                        logger.warning(
-                            f"Cannot extract FLAC from MP4 container at {q_key} — "
-                            f"deleting and trying next quality"
-                        )
-                        quality_error_reasons.append(f"{q_key}: FLAC extraction from MP4 container failed")
-                        out_path.unlink(missing_ok=True)
-                        continue
-
-                # Final size check after any extraction
-                final_size = out_path.stat().st_size if out_path.exists() else 0
                 if final_size < MIN_AUDIO_SIZE:
-                    logger.warning(
-                        f"Final file too small after processing at {q_key} "
-                        f"({final_size} bytes) — trying next quality"
-                    )
-                    quality_error_reasons.append(f"{q_key}: final file too small after extraction ({final_size} bytes)")
+                    logger.warning(f"Final file too small after processing at {q_key} "
+                                   f"({final_size} bytes), trying next")
                     out_path.unlink(missing_ok=True)
                     continue
 
-                # Success — file is valid
-                logger.info(f"Tidal download complete ({q_key}): {out_path} ({final_size / (1024*1024):.1f} MB)")
+                logger.info(f"Tidal download complete ({q_key}): {out_path} "
+                            f"({final_size / (1024*1024):.1f} MB)")
                 return str(out_path)
 
-            # All quality tiers exhausted — build a diagnostic message
-            # Re-use quality_key/allow_fallback already read above to stay consistent
-            # with how the chain was built (avoids config-change-mid-download inconsistency).
-            reasons_str = '; '.join(quality_error_reasons) if quality_error_reasons else 'unknown'
-            if quality_key == 'hires' and not allow_fallback:
-                hint = (
-                    " HiRes quality is unavailable for this track on your account or in your region. "
-                    "Enable 'Quality Fallback' in Tidal settings to fall back to Lossless automatically."
-                )
-            else:
-                hint = ""
-            logger.error(
-                f"No Tidal quality tier produced a valid download for '{display_name}'."
-                f"{hint} Failure reasons: [{reasons_str}]"
-            )
-            return None
+            except Exception as e:
+                logger.warning(f"Post-processing failed at quality {q_key}: {e}")
+                out_path.unlink(missing_ok=True)
+                intermediate_path.unlink(missing_ok=True)
+                continue
 
-        except Exception as e:
-            logger.error(f"Tidal download failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+        logger.error(f"All quality tiers exhausted for '{display_name}'")
+        return None
 
-    def _is_mp4_container(self, filepath: Path) -> bool:
-        """Check if a file is actually an MP4 container (HiRes FLAC can be wrapped in MP4)."""
-        try:
-            with open(filepath, 'rb') as f:
-                header = f.read(12)
-                # MP4 files have 'ftyp' at offset 4
-                return b'ftyp' in header
-        except Exception:
-            return False
+    def _update_download_progress(self, download_id: str, downloaded: int,
+                                  segments_completed: int, total_segments: int,
+                                  speed_start: float):
+        with self._download_lock:
+            if download_id not in self.active_downloads:
+                return
+            info = self.active_downloads[download_id]
+            info['transferred'] = downloaded
 
-    def _extract_flac_from_mp4(self, mp4_path: Path) -> Optional[str]:
-        """Extract FLAC audio from MP4 container using FFmpeg."""
-        ffmpeg = shutil.which('ffmpeg')
-        if not ffmpeg:
-            # Also check tools directory
-            tools_dir = Path(__file__).parent.parent / 'tools'
-            ffmpeg_candidate = tools_dir / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
-            if ffmpeg_candidate.exists():
-                ffmpeg = str(ffmpeg_candidate)
-            else:
-                logger.warning("FFmpeg not found — cannot extract FLAC from MP4 container")
-                return None
+            now = time.time()
+            elapsed_total = now - speed_start
+            speed = int(downloaded / elapsed_total) if elapsed_total > 0 else 0
+            info['speed'] = speed
 
-        flac_path = mp4_path.with_suffix('.flac')
-        temp_path = mp4_path.with_suffix('.tmp.flac')
+            if total_segments > 0:
+                progress = (segments_completed / total_segments) * 100
+                info['progress'] = round(min(progress, 99.9), 1)
 
-        try:
-            result = subprocess.run(
-                [ffmpeg, '-i', str(mp4_path), '-vn', '-acodec', 'copy', str(temp_path), '-y'],
-                capture_output=True, text=True, timeout=120,
-            )
-
-            if result.returncode == 0 and temp_path.exists() and temp_path.stat().st_size > 0:
-                mp4_path.unlink(missing_ok=True)
-                temp_path.rename(flac_path)
-                logger.info(f"Extracted FLAC from MP4 container: {flac_path.name}")
-                return str(flac_path)
-            else:
-                logger.warning(f"FFmpeg extraction failed: {result.stderr[:200] if result.stderr else 'unknown error'}")
-                temp_path.unlink(missing_ok=True)
-                return None
-
-        except Exception as e:
-            logger.warning(f"FFmpeg extraction error: {e}")
-            temp_path.unlink(missing_ok=True)
-            return None
-
-    # ===================== Status / Cancel / Clear =====================
+            time_remaining = None
+            if speed > 0:
+                remaining_bytes = downloaded * (total_segments / max(segments_completed, 1)) - downloaded
+                if remaining_bytes > 0:
+                    time_remaining = int(remaining_bytes / speed)
+            info['time_remaining'] = time_remaining
 
     async def get_all_downloads(self) -> List[DownloadStatus]:
-        """Get all active downloads (matches Soulseek interface)."""
         download_statuses = []
 
         with self._download_lock:
@@ -967,7 +840,6 @@ class TidalDownloadClient:
         return download_statuses
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
-        """Get status of a specific download (matches Soulseek interface)."""
         with self._download_lock:
             if download_id not in self.active_downloads:
                 return None
@@ -987,7 +859,6 @@ class TidalDownloadClient:
             )
 
     async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:
-        """Cancel an active download (matches Soulseek interface)."""
         try:
             with self._download_lock:
                 if download_id not in self.active_downloads:
@@ -1007,7 +878,6 @@ class TidalDownloadClient:
             return False
 
     async def clear_all_completed_downloads(self) -> bool:
-        """Clear all terminal downloads from the list (matches Soulseek interface)."""
         try:
             with self._download_lock:
                 ids_to_remove = [
