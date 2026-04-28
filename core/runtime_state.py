@@ -12,6 +12,7 @@ matched_downloads_context: Dict[str, Dict[str, Any]] = {}
 tasks_lock = threading.Lock()
 download_tasks: Dict[str, Dict[str, Any]] = {}
 download_batches: Dict[str, Dict[str, Any]] = {}
+batch_locks: Dict[str, threading.Lock] = {}
 processed_download_ids = set()
 post_process_locks: Dict[str, threading.Lock] = {}
 post_process_locks_lock = threading.Lock()
