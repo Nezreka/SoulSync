@@ -24750,6 +24750,27 @@ def hifi_remove_instance(url):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/hifi/instances/toggle', methods=['POST'])
+@admin_only
+def hifi_toggle_instance():
+    """Toggle enabled state of a HiFi API instance."""
+    try:
+        data = request.get_json() or {}
+        url = data.get('url', '').strip().rstrip('/')
+        enabled = data.get('enabled', True)
+        if not url:
+            return jsonify({'success': False, 'error': 'URL is required'}), 400
+        from database.music_database import get_database
+        db = get_database()
+        db.toggle_hifi_instance(url, enabled)
+        if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
+            soulseek_client.hifi.reload_instances()
+        return jsonify({'success': True})
+    except Exception as e:
+        logger.error(f"Error toggling HiFi instance: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/hifi/instances/reorder', methods=['POST'])
 @admin_only
 def hifi_reorder_instances():
