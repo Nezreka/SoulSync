@@ -24701,6 +24701,7 @@ def hifi_instances():
 
 
 @app.route('/api/hifi/instances', methods=['POST'])
+@admin_only
 def hifi_add_instance():
     """Add a new HiFi API instance."""
     try:
@@ -24728,6 +24729,7 @@ def hifi_add_instance():
 
 
 @app.route('/api/hifi/instances/<path:url>', methods=['DELETE'])
+@admin_only
 def hifi_remove_instance(url):
     """Remove a HiFi API instance."""
     try:
@@ -24749,6 +24751,7 @@ def hifi_remove_instance(url):
 
 
 @app.route('/api/hifi/instances/reorder', methods=['POST'])
+@admin_only
 def hifi_reorder_instances():
     """Reorder HiFi API instances."""
     try:
@@ -24769,6 +24772,7 @@ def hifi_reorder_instances():
 
 
 @app.route('/api/hifi/instances/list', methods=['GET'])
+@admin_only
 def hifi_list_instances():
     """Get editable list of HiFi API instances."""
     try:
