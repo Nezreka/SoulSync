@@ -34,13 +34,13 @@ from core.imports.context import (
 from core.imports.filename import extract_track_number_from_filename
 from core.imports.guards import check_flac_bit_depth, move_to_quarantine
 from core.imports.side_effects import (
-    check_and_remove_from_wishlist,
     emit_track_downloaded,
     record_download_provenance,
     record_library_history_download,
     record_retag_download,
     record_soulsync_library_entry,
 )
+from core.wishlist.resolution import check_and_remove_from_wishlist
 from core.runtime_state import (
     add_activity_item,
     download_batches,
