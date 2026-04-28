@@ -16,7 +16,7 @@ from database.music_database import get_database
 from utils.logging_config import get_logger
 
 
-logger = get_logger("imports.side_effects")
+logger = get_logger("wishlist.resolution")
 
 
 def _primary_track_artist_name(track_info: Dict[str, Any]) -> str:

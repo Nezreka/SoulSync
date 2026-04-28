@@ -12,6 +12,11 @@ from typing import Any, Callable, Dict
 from core.wishlist.payloads import build_failed_track_wishlist_context
 from core.wishlist.selection import filter_wishlist_tracks_by_category, sanitize_and_dedupe_wishlist_tracks
 from core.wishlist.state import get_wishlist_cycle, set_wishlist_cycle
+from utils.logging_config import get_logger
+
+
+module_logger = get_logger("wishlist.processing")
+logger = module_logger
 
 
 @dataclass
@@ -32,9 +37,9 @@ class WishlistAutoProcessingRuntime:
     run_full_missing_tracks_process: Callable[[str, str, list[dict[str, Any]]], Any]
     get_batch_max_concurrent: Callable[[], int]
     get_active_server: Callable[[], str]
-    logger: Any
     current_time_fn: Callable[[], float]
     profile_id: int = 1
+    logger: Any = module_logger
 
 
 def remove_completed_tracks_from_wishlist(
@@ -42,7 +47,7 @@ def remove_completed_tracks_from_wishlist(
     download_tasks: Dict[str, Dict[str, Any]],
     remove_from_wishlist: Callable[[Dict[str, Any]], Any],
     *,
-    logger,
+    logger=logger,
 ) -> int:
     """Remove completed batch tasks from the wishlist."""
     removed_count = 0
@@ -65,7 +70,7 @@ def add_cancelled_tracks_to_failed_tracks(
     download_tasks: Dict[str, Dict[str, Any]],
     permanently_failed_tracks: list[Dict[str, Any]],
     *,
-    logger,
+    logger=logger,
     max_process: int = 100,
 ) -> int:
     """Promote cancelled-but-missing tasks into the failed-track list."""
@@ -111,7 +116,7 @@ def recover_uncaptured_failed_tracks(
     download_tasks: Dict[str, Dict[str, Any]],
     permanently_failed_tracks: list[Dict[str, Any]],
     *,
-    logger,
+    logger=logger,
 ) -> int:
     """Recover tasks force-marked failed/not_found so wishlist processing does not skip them."""
     recovered_count = 0
@@ -164,7 +169,7 @@ def finalize_auto_wishlist_completion(
     add_activity_item: Callable[[Any, Any, Any, Any], Any],
     automation_engine,
     db_factory: Callable[[], Any],
-    logger,
+    logger=logger,
 ) -> Dict[str, Any]:
     """Finalize auto wishlist processing after a batch finishes."""
     tracks_added = completion_summary.get('tracks_added', 0)
@@ -222,7 +227,7 @@ def remove_tracks_already_in_library(
     music_database,
     active_server: str,
     *,
-    logger,
+    logger=logger,
     skip_track_fn: Callable[[dict[str, Any]], bool] | None = None,
     log_prefix: str = "[Auto-Wishlist]",
 ) -> int:
@@ -296,8 +301,8 @@ class WishlistManualDownloadRuntime:
     get_batch_max_concurrent: Callable[[], int]
     add_activity_item: Callable[[Any, Any, Any, Any], Any]
     active_server: str
-    logger: Any
     profile_id: int
+    logger: Any = module_logger
 
 
 def start_manual_wishlist_download_batch(
@@ -411,7 +416,7 @@ def cleanup_wishlist_against_library(
     profile_id: int,
     active_server: str,
     *,
-    logger,
+    logger=logger,
 ) -> tuple[Dict[str, Any], int]:
     """Remove wishlist tracks that already exist in the library for one profile."""
     try:
@@ -617,7 +622,7 @@ def automatic_wishlist_cleanup_after_db_update(
     profiles_database=None,
     music_database=None,
     active_server: str | None = None,
-    logger,
+    logger=logger,
 ) -> int:
     """Remove wishlist entries that already exist in the library after a DB update."""
     try:

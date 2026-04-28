@@ -12,6 +12,11 @@ from core.wishlist.reporting import build_wishlist_stats_payload
 from core.wishlist.selection import prepare_wishlist_tracks_for_display
 from core.wishlist.state import get_wishlist_cycle as _get_wishlist_cycle
 from core.wishlist.state import set_wishlist_cycle as _set_wishlist_cycle
+from utils.logging_config import get_logger
+
+
+module_logger = get_logger("wishlist.routes")
+logger = module_logger
 
 
 @dataclass
@@ -28,8 +33,8 @@ class WishlistRouteRuntime:
     is_wishlist_actually_processing: Callable[[], bool]
     reset_wishlist_processing_state: Callable[[], None]
     add_activity_item: Callable[[Any, Any, Any, Any], Any]
-    logger: Any
     active_server: str
+    logger: Any = module_logger
     get_next_run_seconds: Callable[[str], int] | None = None
     thread_factory: Callable[..., Any] = threading.Thread
 
