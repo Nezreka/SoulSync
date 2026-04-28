@@ -112,7 +112,7 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                             'spotify_track': cached_match.get('name', ''),
                             'spotify_artist': deps.extract_artist_name(cached_match.get('artists', [''])[0]) if cached_match.get('artists') else '',
                             'spotify_album': cached_match.get('album', {}).get('name', '') if isinstance(cached_match.get('album'), dict) else cached_match.get('album', ''),
-                            'duration': f"{track['duration_ms'] // 60000}:{(track['duration_ms'] % 60000) // 1000:02d}" if track['duration_ms'] else '0:00',
+                            'duration': f"{int(track['duration_ms']) // 60000}:{(int(track['duration_ms']) % 60000) // 1000:02d}" if track['duration_ms'] else '0:00',
                             'discovery_source': discovery_source,
                             'matched_data': cached_match,
                             'spotify_data': cached_match
@@ -247,7 +247,7 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                     'spotify_track': matched_track.name if matched_track else '',
                     'spotify_artist': deps.extract_artist_name(matched_track.artists[0]) if matched_track else '',
                     'spotify_album': matched_track.album if matched_track else '',
-                    'duration': f"{track['duration_ms'] // 60000}:{(track['duration_ms'] % 60000) // 1000:02d}" if track['duration_ms'] else '0:00',
+                    'duration': f"{int(track['duration_ms']) // 60000}:{(int(track['duration_ms']) % 60000) // 1000:02d}" if track['duration_ms'] else '0:00',
                     'discovery_source': discovery_source,
                     'confidence': best_confidence
                 }
