@@ -2312,66 +2312,7 @@ def _register_automation_handlers():
 
     def _record_automation_history(aid, result):
         """Capture progress state into run history before cleanup clears it."""
-        try:
-            with automation_progress_lock:
-                state = automation_progress_states.get(aid)
-                if state:
-                    started_at = state.get('started_at')
-                    finished_at = state.get('finished_at') or datetime.now(timezone.utc).isoformat()
-                    log_entries = list(state.get('log', []))
-                else:
-                    started_at = datetime.now(timezone.utc).isoformat()
-                    finished_at = datetime.now(timezone.utc).isoformat()
-                    log_entries = []
-
-            # Compute duration
-            duration = None
-            if started_at and finished_at:
-                try:
-                    t0 = datetime.fromisoformat(started_at)
-                    t1 = datetime.fromisoformat(finished_at)
-                    duration = (t1 - t0).total_seconds()
-                except Exception:
-                    pass
-
-            # Determine status
-            r_status = result.get('status', 'completed') if result else 'completed'
-            if r_status == 'error':
-                status = 'error'
-            elif r_status == 'skipped':
-                status = 'skipped'
-            elif r_status == 'timeout':
-                status = 'timeout'
-            else:
-                status = 'completed'
-
-            # Extract summary from the last success/error log line
-            summary = None
-            for entry in reversed(log_entries):
-                if entry.get('type') in ('success', 'error'):
-                    summary = entry.get('text', '')
-                    break
-            if not summary and log_entries:
-                summary = log_entries[-1].get('text', '')
-            # Fallback: use reason or error from result when no log entries captured
-            if not summary and result:
-                summary = result.get('reason') or result.get('error') or result.get('status', '')
-
-            result_json = json.dumps({k: v for k, v in result.items() if not k.startswith('_')}) if result else None
-            log_json = json.dumps(log_entries) if log_entries else None
-
-            get_database().insert_automation_run_history(
-                automation_id=aid,
-                started_at=started_at,
-                finished_at=finished_at,
-                duration_seconds=duration,
-                status=status,
-                summary=summary,
-                result_json=result_json,
-                log_lines=log_json
-            )
-        except Exception as e:
-            logger.error(f"Error recording automation history for {aid}: {e}")
+        _auto_progress.record_history(aid, result, get_database())
 
     automation_engine.register_progress_callbacks(_progress_init, _progress_finish, _update_automation_progress, _record_automation_history)
 
@@ -2410,44 +2351,23 @@ except Exception as e:
 
 
 # --- Automation Progress Tracking ---
-automation_progress_states = {}   # automation_id (int) -> state dict
-automation_progress_lock = threading.Lock()
+# State + helpers live in core/automation/progress.py. Re-exported here
+# so the existing call sites (registered as engine progress callbacks
+# and used inside _record_automation_history) keep resolving.
+from core.automation import progress as _auto_progress
+
+automation_progress_states = _auto_progress.progress_states
+automation_progress_lock = _auto_progress.progress_lock
+
 
 def _init_automation_progress(automation_id, automation_name, action_type):
     """Initialize progress state when an automation starts running."""
-    with automation_progress_lock:
-        automation_progress_states[automation_id] = {
-            'status': 'running',
-            'action_type': action_type,
-            'progress': 0, 'phase': 'Starting...', 'current_item': '',
-            'processed': 0, 'total': 0,
-            'log': [{'type': 'info', 'text': f'Starting {automation_name}'}],
-            'started_at': datetime.now(timezone.utc).isoformat(),
-            'finished_at': None,
-        }
+    _auto_progress.init_progress(automation_id, automation_name, action_type)
+
 
 def _update_automation_progress(automation_id, **kwargs):
     """Update progress state from handler threads. Thread-safe."""
-    if automation_id is None:
-        return
-    with automation_progress_lock:
-        state = automation_progress_states.get(automation_id)
-        if not state:
-            return
-        for k, v in kwargs.items():
-            if k == 'log_line':
-                state['log'].append({'type': kwargs.get('log_type', 'info'), 'text': v})
-                if len(state['log']) > 50:
-                    state['log'] = state['log'][-50:]
-            elif k != 'log_type':
-                state[k] = v
-        # Immediate emit on finish so frontend gets final state without waiting for loop
-        if kwargs.get('status') in ('finished', 'error'):
-            state['finished_at'] = datetime.now(timezone.utc).isoformat()
-            try:
-                socketio.emit('automation:progress', {str(automation_id): dict(state)})
-            except Exception:
-                pass
+    _auto_progress.update_progress(automation_id, socketio_emit=socketio.emit, **kwargs)
 
 # --- Global Matched Downloads Context Management ---
 # Shared with core.runtime_state so the refactored pipeline and web
@@ -6412,32 +6332,17 @@ def get_genre_whitelist_defaults():
     return jsonify({'genres': sorted(DEFAULT_GENRES, key=str.lower)})
 
 
+# Automation route bodies live in core/automation/api.py — these routes are thin handlers.
+from core.automation import api as _auto_api
+from core.automation import signals as _auto_signals
+
+
 @app.route('/api/automations', methods=['GET'])
 def list_automations():
     """List all automations for the current profile."""
     try:
         profile_id = session.get('profile_id', 1)
-        db = get_database()
-        automations = db.get_automations(profile_id)
-        # Parse JSON config fields for frontend
-        for auto in automations:
-            for field in ('trigger_config', 'action_config', 'notify_config', 'last_result'):
-                try:
-                    auto[field] = json.loads(auto[field]) if isinstance(auto[field], str) else auto[field]
-                except (json.JSONDecodeError, TypeError):
-                    if field in ('trigger_config', 'action_config', 'notify_config'):
-                        auto[field] = {}
-                    else:
-                        auto[field] = None
-            # Parse then_actions
-            try:
-                auto['then_actions'] = json.loads(auto.get('then_actions') or '[]') if isinstance(auto.get('then_actions'), str) else (auto.get('then_actions') or [])
-            except (json.JSONDecodeError, TypeError):
-                auto['then_actions'] = []
-            # Backward compat: if then_actions empty but notify_type set, build it
-            if not auto['then_actions'] and auto.get('notify_type'):
-                auto['then_actions'] = [{'type': auto['notify_type'], 'config': auto.get('notify_config', {})}]
-        return jsonify(automations)
+        return jsonify(_auto_api.list_automations(get_database(), profile_id))
     except Exception as e:
         logger.error(f"Error listing automations: {e}")
         return jsonify({"error": str(e)}), 500
@@ -6446,80 +6351,21 @@ def list_automations():
 def create_automation():
     """Create a new automation."""
     try:
-        data = request.get_json()
-        name = data.get('name', '').strip()
-        if not name:
-            return jsonify({"error": "Name is required"}), 400
-
-        trigger_type = data.get('trigger_type', 'schedule')
-        trigger_config = json.dumps(data.get('trigger_config', {}))
-        action_type = data.get('action_type', 'process_wishlist')
-        action_config = json.dumps(data.get('action_config', {}))
-        # then_actions array (new multi-then system)
-        then_actions = data.get('then_actions', [])
-        then_actions_json = json.dumps(then_actions)
-        # Backward compat: derive notify_type/notify_config from first then_action
-        if then_actions:
-            notify_type = then_actions[0].get('type')
-            notify_config = json.dumps(then_actions[0].get('config', {}))
-        else:
-            notify_type = data.get('notify_type') or None
-            notify_config = json.dumps(data.get('notify_config', {})) if notify_type else '{}'
         profile_id = session.get('profile_id', 1)
-
-        # Signal cycle detection
-        if automation_engine and (trigger_type == 'signal_received' or any(t.get('type') == 'fire_signal' for t in then_actions)):
-            db = get_database()
-            all_autos = db.get_automations(profile_id)
-            test_auto = {
-                'trigger_type': trigger_type,
-                'trigger_config': trigger_config,
-                'then_actions': then_actions_json,
-                'enabled': True,
-            }
-            all_autos.append(test_auto)
-            cycle = automation_engine.detect_signal_cycles(all_autos)
-            if cycle:
-                return jsonify({"error": f"Signal cycle detected: {' → '.join(cycle)}. This would cause an infinite loop."}), 400
-
-        group_name = data.get('group_name') or None
-        db = get_database()
-        auto_id = db.create_automation(name, trigger_type, trigger_config, action_type, action_config, profile_id, notify_type, notify_config, then_actions_json, group_name)
-        if auto_id is None:
-            return jsonify({"error": "Failed to create automation"}), 500
-
-        # Schedule it
-        if automation_engine:
-            automation_engine.schedule_automation(auto_id)
-
-        return jsonify({"success": True, "id": auto_id})
+        body, status = _auto_api.create_automation(get_database(), automation_engine, profile_id, request.get_json())
+        return jsonify(body), status
     except Exception as e:
         logger.error(f"Error creating automation: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/automations/<int:automation_id>', methods=['GET'])
 def get_automation(automation_id):
     """Get a single automation."""
     try:
-        db = get_database()
-        auto = db.get_automation(automation_id)
-        if not auto:
+        auto = _auto_api.get_automation(get_database(), automation_id)
+        if auto is None:
             return jsonify({"error": "Automation not found"}), 404
-        for field in ('trigger_config', 'action_config', 'notify_config', 'last_result'):
-            try:
-                auto[field] = json.loads(auto[field]) if isinstance(auto[field], str) else auto[field]
-            except (json.JSONDecodeError, TypeError):
-                if field in ('trigger_config', 'action_config', 'notify_config'):
-                    auto[field] = {}
-                else:
-                    auto[field] = None
-        # Parse then_actions
-        try:
-            auto['then_actions'] = json.loads(auto.get('then_actions') or '[]') if isinstance(auto.get('then_actions'), str) else (auto.get('then_actions') or [])
-        except (json.JSONDecodeError, TypeError):
-            auto['then_actions'] = []
-        if not auto['then_actions'] and auto.get('notify_type'):
-            auto['then_actions'] = [{'type': auto['notify_type'], 'config': auto.get('notify_config', {})}]
         return jsonify(auto)
     except Exception as e:
         logger.error(f"Error getting automation: {e}")
@@ -6529,102 +6375,20 @@ def get_automation(automation_id):
 def update_automation_endpoint(automation_id):
     """Update an automation."""
     try:
-        data = request.get_json()
-        db = get_database()
-
-        update_fields = {}
-        if 'name' in data:
-            update_fields['name'] = data['name'].strip()
-        if 'trigger_type' in data:
-            update_fields['trigger_type'] = data['trigger_type']
-        if 'trigger_config' in data:
-            update_fields['trigger_config'] = json.dumps(data['trigger_config'])
-        if 'action_type' in data:
-            update_fields['action_type'] = data['action_type']
-        if 'action_config' in data:
-            update_fields['action_config'] = json.dumps(data['action_config'])
-        if 'then_actions' in data:
-            then_actions = data['then_actions']
-            update_fields['then_actions'] = json.dumps(then_actions)
-            # Backward compat: derive notify_type/notify_config from first then_action
-            if then_actions:
-                update_fields['notify_type'] = then_actions[0].get('type')
-                update_fields['notify_config'] = json.dumps(then_actions[0].get('config', {}))
-            else:
-                update_fields['notify_type'] = None
-                update_fields['notify_config'] = '{}'
-        elif 'notify_type' in data:
-            update_fields['notify_type'] = data['notify_type'] or None
-        if 'notify_config' in data and 'then_actions' not in data:
-            update_fields['notify_config'] = json.dumps(data['notify_config'])
-        if 'group_name' in data:
-            update_fields['group_name'] = data['group_name'] or None
-
-        if not update_fields:
-            return jsonify({"error": "No fields to update"}), 400
-
-        # Signal cycle detection
-        trigger_type = data.get('trigger_type', '')
-        then_actions = data.get('then_actions', [])
-        if automation_engine and (trigger_type == 'signal_received' or any(t.get('type') == 'fire_signal' for t in then_actions)):
-            all_autos = db.get_automations()
-            # Replace the automation being edited with the updated version
-            test_autos = []
-            for a in all_autos:
-                if a['id'] == automation_id:
-                    merged = dict(a)
-                    if 'trigger_type' in data:
-                        merged['trigger_type'] = data['trigger_type']
-                    if 'trigger_config' in data:
-                        merged['trigger_config'] = json.dumps(data['trigger_config'])
-                    if 'then_actions' in data:
-                        merged['then_actions'] = json.dumps(data['then_actions'])
-                    merged['enabled'] = True
-                    test_autos.append(merged)
-                else:
-                    test_autos.append(a)
-            cycle = automation_engine.detect_signal_cycles(test_autos)
-            if cycle:
-                return jsonify({"error": f"Signal cycle detected: {' → '.join(cycle)}. This would cause an infinite loop."}), 400
-
-        success = db.update_automation(automation_id, **update_fields)
-        if not success:
-            return jsonify({"error": "Automation not found"}), 404
-
-        # Reschedule
-        if automation_engine:
-            auto = db.get_automation(automation_id)
-            if auto and auto.get('enabled'):
-                automation_engine.schedule_automation(automation_id)
-            else:
-                automation_engine.cancel_automation(automation_id)
-
-        return jsonify({"success": True})
+        body, status = _auto_api.update_automation(get_database(), automation_engine, automation_id, request.get_json())
+        return jsonify(body), status
     except Exception as e:
         logger.error(f"Error updating automation: {e}")
         return jsonify({"error": str(e)}), 500
 
+
 @app.route('/api/automations/group', methods=['PUT'])
 def batch_update_automation_group():
-    """Batch update group_name for multiple automations (rename group, delete group, drag-drop)."""
+    """Batch update group_name for multiple automations."""
     try:
         data = request.get_json()
-        automation_ids = data.get('automation_ids', [])
-        group_name = data.get('group_name')  # None/null = ungroup
-
-        if not automation_ids or not isinstance(automation_ids, list):
-            return jsonify({"error": "automation_ids must be a non-empty list"}), 400
-
-        # Sanitize IDs to integers
-        try:
-            automation_ids = [int(aid) for aid in automation_ids]
-        except (ValueError, TypeError):
-            return jsonify({"error": "automation_ids must contain integers"}), 400
-
-        db = get_database()
-        updated = db.batch_update_group(automation_ids, group_name)
-
-        return jsonify({"success": True, "updated": updated})
+        body, status = _auto_api.batch_update_group(get_database(), data.get('automation_ids', []), data.get('group_name'))
+        return jsonify(body), status
     except Exception as e:
         logger.error(f"Error batch updating automation group: {e}")
         return jsonify({"error": str(e)}), 500
@@ -6635,31 +6399,9 @@ def bulk_toggle_automations():
     """Bulk enable/disable multiple automations."""
     try:
         data = request.get_json()
-        automation_ids = data.get('automation_ids', [])
-        enabled = data.get('enabled', True)
-
-        if not automation_ids or not isinstance(automation_ids, list):
-            return jsonify({"error": "automation_ids must be a non-empty list"}), 400
-
-        try:
-            automation_ids = [int(aid) for aid in automation_ids]
-        except (ValueError, TypeError):
-            return jsonify({"error": "automation_ids must contain integers"}), 400
-
-        db = get_database()
-        updated = db.bulk_set_enabled(automation_ids, bool(enabled))
-
-        # Reschedule/cancel affected automations
-        if automation_engine and updated > 0:
-            for aid in automation_ids:
-                auto = db.get_automation(aid)
-                if auto:
-                    if auto.get('enabled'):
-                        automation_engine.schedule_automation(auto)
-                    else:
-                        automation_engine.cancel_automation(aid)
-
-        return jsonify({"success": True, "updated": updated})
+        body, status = _auto_api.bulk_toggle(get_database(), automation_engine,
+                                              data.get('automation_ids', []), data.get('enabled', True))
+        return jsonify(body), status
     except Exception as e:
         logger.error(f"Error bulk toggling automations: {e}")
         return jsonify({"error": str(e)}), 500
@@ -6669,102 +6411,55 @@ def bulk_toggle_automations():
 def delete_automation_endpoint(automation_id):
     """Delete an automation. System automations cannot be deleted."""
     try:
-        db = get_database()
-        auto = db.get_automation(automation_id)
-        if auto and auto.get('is_system'):
-            return jsonify({"error": "System automations cannot be deleted"}), 403
-        if automation_engine:
-            automation_engine.cancel_automation(automation_id)
-        success = db.delete_automation(automation_id)
-        if not success:
-            return jsonify({"error": "Automation not found"}), 404
-        return jsonify({"success": True})
+        body, status = _auto_api.delete_automation(get_database(), automation_engine, automation_id)
+        return jsonify(body), status
     except Exception as e:
         logger.error(f"Error deleting automation: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/automations/<int:automation_id>/duplicate', methods=['POST'])
 def duplicate_automation_endpoint(automation_id):
     """Duplicate an automation. System automations cannot be duplicated."""
     try:
-        db = get_database()
-        auto = db.get_automation(automation_id)
-        if not auto:
-            return jsonify({"error": "Automation not found"}), 404
-        if auto.get('is_system'):
-            return jsonify({"error": "System automations cannot be duplicated"}), 403
         profile_id = session.get('profile_id', 1)
-        new_id = db.create_automation(
-            name=f"{auto['name']} (Copy)",
-            trigger_type=auto['trigger_type'],
-            trigger_config=auto.get('trigger_config', '{}'),
-            action_type=auto['action_type'],
-            action_config=auto.get('action_config', '{}'),
-            profile_id=profile_id,
-            notify_type=auto.get('notify_type'),
-            notify_config=auto.get('notify_config', '{}'),
-            then_actions=auto.get('then_actions', '[]'),
-            group_name=auto.get('group_name'),
-        )
-        if new_id is None:
-            return jsonify({"error": "Failed to duplicate automation"}), 500
-        if automation_engine:
-            automation_engine.schedule_automation(new_id)
-        return jsonify({"success": True, "id": new_id})
+        body, status = _auto_api.duplicate_automation(get_database(), automation_engine, profile_id, automation_id)
+        return jsonify(body), status
     except Exception as e:
         logger.error(f"Error duplicating automation: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/automations/<int:automation_id>/toggle', methods=['POST'])
 def toggle_automation_endpoint(automation_id):
     """Toggle an automation's enabled state."""
     try:
-        db = get_database()
-        success = db.toggle_automation(automation_id)
-        if not success:
-            return jsonify({"error": "Automation not found"}), 404
-
-        # Reschedule or cancel based on new state
-        if automation_engine:
-            auto = db.get_automation(automation_id)
-            if auto and auto.get('enabled'):
-                automation_engine.schedule_automation(automation_id)
-            else:
-                automation_engine.cancel_automation(automation_id)
-
-        return jsonify({"success": True})
+        body, status = _auto_api.toggle_automation(get_database(), automation_engine, automation_id)
+        return jsonify(body), status
     except Exception as e:
         logger.error(f"Error toggling automation: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/automations/<int:automation_id>/run', methods=['POST'])
 def run_automation_endpoint(automation_id):
     """Manually trigger an automation."""
     try:
-        if not automation_engine:
-            return jsonify({"error": "Automation engine not available"}), 500
-        success = automation_engine.run_now(automation_id, profile_id=get_current_profile_id())
-        if not success:
-            return jsonify({"error": "Automation not found"}), 404
-        return jsonify({"success": True})
+        body, status = _auto_api.run_automation(automation_engine, automation_id, get_current_profile_id())
+        return jsonify(body), status
     except Exception as e:
         logger.error(f"Error running automation: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/automations/progress', methods=['GET'])
 def get_automation_progress():
     """Get current progress state for all running/recently finished automations."""
     try:
-        with automation_progress_lock:
-            result = {}
-            for aid, state in automation_progress_states.items():
-                if state['status'] in ('running', 'finished', 'error'):
-                    cp = dict(state)
-                    cp['log'] = list(state['log'])
-                    result[str(aid)] = cp
-        return jsonify(result)
+        return jsonify(_auto_progress.get_running_progress())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/automations/<int:automation_id>/history', methods=['GET'])
 def get_automation_history(automation_id):
@@ -6772,56 +6467,15 @@ def get_automation_history(automation_id):
     try:
         limit = request.args.get('limit', 50, type=int)
         offset = request.args.get('offset', 0, type=int)
-        db = get_database()
-        data = db.get_automation_run_history(automation_id, limit=limit, offset=offset)
-        # Parse log_lines JSON strings for the frontend
-        for entry in data.get('history', []):
-            if entry.get('log_lines'):
-                try:
-                    entry['log_lines'] = json.loads(entry['log_lines'])
-                except (json.JSONDecodeError, TypeError):
-                    entry['log_lines'] = []
-            else:
-                entry['log_lines'] = []
-            if entry.get('result_json'):
-                try:
-                    entry['result_json'] = json.loads(entry['result_json'])
-                except (json.JSONDecodeError, TypeError):
-                    pass
-        data['automation_id'] = automation_id
-        return jsonify(data)
+        return jsonify(_auto_api.get_history(get_database(), automation_id, limit=limit, offset=offset))
     except Exception as e:
         logger.error(f"Error getting automation history: {e}")
         return jsonify({"error": str(e)}), 500
 
+
 def _collect_known_signals():
     """Collect all signal names used across automations (for autocomplete)."""
-    signals = set()
-    try:
-        db = get_database()
-        for auto in db.get_automations():
-            # Check signal_received triggers
-            if auto.get('trigger_type') == 'signal_received':
-                try:
-                    tc = json.loads(auto.get('trigger_config') or '{}')
-                    sig = tc.get('signal_name', '').strip()
-                    if sig:
-                        signals.add(sig)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            # Check fire_signal in then_actions
-            try:
-                ta = json.loads(auto.get('then_actions') or '[]')
-                for item in ta:
-                    if item.get('type') == 'fire_signal':
-                        sig = item.get('config', {}).get('signal_name', '').strip()
-                        if sig:
-                            signals.add(sig)
-            except (json.JSONDecodeError, TypeError):
-                pass
-    except Exception:
-        pass
-    return sorted(signals)
+    return _auto_signals.collect_known_signals(get_database())
 
 @app.route('/api/scripts', methods=['GET'])
 def list_available_scripts():
@@ -47981,47 +47635,10 @@ def _emit_scan_status_loop():
 
 def _emit_automation_progress_loop():
     """Push automation:progress events every 1 second for running automations."""
-    while not globals().get('IS_SHUTTING_DOWN', False):
-        socketio.sleep(1)
-        try:
-            with automation_progress_lock:
-                active = {}
-                stale = []
-                now = datetime.now()
-                for aid, state in automation_progress_states.items():
-                    if state['status'] == 'running':
-                        # Timeout zombie running states after 2 hours
-                        try:
-                            started = datetime.fromisoformat(state.get('started_at', ''))
-                            if (now - started).total_seconds() > 7200:
-                                state['status'] = 'error'
-                                state['phase'] = 'Timed out'
-                                state['finished_at'] = now.isoformat()
-                                state['log'].append({'type': 'error', 'text': 'Timed out after 2 hours'})
-                                # Emit error state before cleanup so frontend sees it
-                                cp = dict(state)
-                                cp['log'] = list(state['log'])
-                                active[str(aid)] = cp
-                                continue
-                        except (ValueError, TypeError):
-                            pass
-                        cp = dict(state)
-                        cp['log'] = list(state['log'])
-                        active[str(aid)] = cp
-                    elif state['status'] in ('finished', 'error') and state.get('finished_at'):
-                        # Clean up finished states after 60 seconds (frontend already got final emit)
-                        try:
-                            finished_time = datetime.fromisoformat(state['finished_at'])
-                            if (now - finished_time).total_seconds() > 60:
-                                stale.append(aid)
-                        except (ValueError, TypeError):
-                            stale.append(aid)
-                for aid in stale:
-                    del automation_progress_states[aid]
-            if active:
-                socketio.emit('automation:progress', active)
-        except Exception as e:
-            logger.debug(f"Error emitting automation progress: {e}")
+    _auto_progress.emit_progress_loop(
+        socketio,
+        is_shutting_down=lambda: globals().get('IS_SHUTTING_DOWN', False),
+    )
 
 def _emit_repair_progress_loop():
     """Push repair:progress events every 1 second for running repair jobs."""
