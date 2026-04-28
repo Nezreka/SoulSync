@@ -359,6 +359,9 @@ def test_musicbrainz_release_lookup_failure_does_not_poison_cache(monkeypatch):
         def get_release(self, mbid, includes=None):
             return {}
 
+        def get_artist(self, mbid, includes=None):
+            return {}
+
     class _FakeMBService:
         def __init__(self):
             self.release_calls = 0
@@ -593,3 +596,111 @@ def test_download_cover_art_uses_album_context_image_url(tmp_path, monkeypatch):
     cover_path = target_dir / "cover.jpg"
     assert cover_path.exists()
     assert cover_path.read_bytes() == b"cover-bytes"
+
+
+# ---------------------------------------------------------------------------
+# MusicBrainz genre fallback chain (recording → release → artist)
+# ---------------------------------------------------------------------------
+
+def _build_mb_genre_test(monkeypatch, *, recording_genres, release_genres, artist_genres):
+    """Helper: assemble a fake MB stack with configurable genres at each tier."""
+    class _FakeMBClient:
+        def __init__(self):
+            self.artist_calls = 0
+            self.release_calls = 0
+
+        def get_recording(self, mbid, includes=None):
+            return {"isrcs": [], "genres": list(recording_genres)}
+
+        def get_release(self, mbid, includes=None):
+            self.release_calls += 1
+            return {"genres": list(release_genres), "media": []}
+
+        def get_artist(self, mbid, includes=None):
+            self.artist_calls += 1
+            return {"genres": list(artist_genres)}
+
+    class _FakeMBService:
+        def __init__(self):
+            self.mb_client = _FakeMBClient()
+
+        def match_recording(self, t, a):
+            return {"mbid": "rec-mbid"}
+
+        def match_artist(self, a):
+            return {"mbid": "artist-mbid"}
+
+        def match_release(self, album, artist):
+            return {"mbid": "release-mbid"}
+
+    service = _FakeMBService()
+    monkeypatch.setattr(ms, "get_config_manager", lambda: _Config({"musicbrainz.embed_tags": True}))
+    monkeypatch.setattr(ms, "mb_release_cache", {})
+    monkeypatch.setattr(ms, "mb_release_detail_cache", {})
+
+    runtime = types.SimpleNamespace(mb_worker=types.SimpleNamespace(mb_service=service))
+    pp = {
+        "id_tags": {}, "track_title": "T", "artist_name": "A", "batch_artist_name": "A",
+        "metadata": {"album": "Alb"}, "recording_mbid": None, "artist_mbid": None,
+        "release_mbid": "", "mb_genres": [], "isrc": None,
+        "deezer_bpm": None, "deezer_isrc": None,
+        "audiodb_mood": None, "audiodb_style": None, "audiodb_genre": None,
+        "tidal_isrc": None, "tidal_copyright": None,
+        "qobuz_isrc": None, "qobuz_copyright": None, "qobuz_label": None,
+        "lastfm_tags": [], "lastfm_url": None, "genius_url": None, "release_year": None,
+    }
+    return pp, service, runtime
+
+
+def test_mb_genre_recording_used_when_present(monkeypatch):
+    pp, service, runtime = _build_mb_genre_test(
+        monkeypatch,
+        recording_genres=[{"name": "Rock", "count": 5}],
+        release_genres=[{"name": "Pop", "count": 10}],
+        artist_genres=[{"name": "Jazz", "count": 20}],
+    )
+    ms._process_musicbrainz_source(pp, {"album": "Alb"}, _Config({"musicbrainz.embed_tags": True}),
+                                    runtime, "T", "A")
+    assert pp["mb_genres"] == ["Rock"]
+    # Release/artist genre lookups not consulted because recording had genres
+    assert service.mb_client.artist_calls == 0
+
+
+def test_mb_genre_falls_back_to_release_when_recording_empty(monkeypatch):
+    pp, service, runtime = _build_mb_genre_test(
+        monkeypatch,
+        recording_genres=[],
+        release_genres=[{"name": "Pop", "count": 10}, {"name": "Indie", "count": 3}],
+        artist_genres=[{"name": "Jazz", "count": 20}],
+    )
+    ms._process_musicbrainz_source(pp, {"album": "Alb"}, _Config({"musicbrainz.embed_tags": True}),
+                                    runtime, "T", "A")
+    # Sorted by count desc: Pop (10) before Indie (3)
+    assert pp["mb_genres"] == ["Pop", "Indie"]
+    # Artist not consulted because release had genres
+    assert service.mb_client.artist_calls == 0
+
+
+def test_mb_genre_falls_back_to_artist_when_recording_and_release_empty(monkeypatch):
+    pp, service, runtime = _build_mb_genre_test(
+        monkeypatch,
+        recording_genres=[],
+        release_genres=[],
+        artist_genres=[{"name": "Jazz", "count": 20}, {"name": "Fusion", "count": 5}],
+    )
+    ms._process_musicbrainz_source(pp, {"album": "Alb"}, _Config({"musicbrainz.embed_tags": True}),
+                                    runtime, "T", "A")
+    assert pp["mb_genres"] == ["Jazz", "Fusion"]
+    assert service.mb_client.artist_calls == 1
+
+
+def test_mb_genre_all_empty_returns_empty(monkeypatch):
+    pp, service, runtime = _build_mb_genre_test(
+        monkeypatch,
+        recording_genres=[],
+        release_genres=[],
+        artist_genres=[],
+    )
+    ms._process_musicbrainz_source(pp, {"album": "Alb"}, _Config({"musicbrainz.embed_tags": True}),
+                                    runtime, "T", "A")
+    assert pp["mb_genres"] == []

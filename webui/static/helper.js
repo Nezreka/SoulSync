@@ -3451,6 +3451,7 @@ const WHATS_NEW = {
         { title: 'Service Worker for Cover Art + Installable PWA', desc: 'cover art used to re-fetch from the cdn on every library / discover page visit. now a service worker caches images locally — second visit serves art instantly from disk, no network hit. also added a pwa manifest so soulsync can be installed to home screen / desktop as a standalone app (chrome / edge / safari → install soulsync). cache versioned so future strategy changes invalidate cleanly.' },
         { title: 'Stats Endpoints Lifted to core/stats', desc: 'internal — moved /api/stats/* and /api/listening-stats/* logic out of web_server.py into core/stats/queries.py with full test coverage. no behavior change. step toward breaking up the web_server.py monolith.' },
         { title: 'Search Endpoints Lifted to core/search', desc: 'internal — moved /api/search and /api/enhanced-search/* logic into core/search/ (cache, sources, library_check, stream, basic, orchestrator). 612 fewer lines in web_server.py, 94 new tests. no behavior change.' },
+        { title: 'Automation Endpoints Lifted to core/automation', desc: 'internal — moved /api/automations/* CRUD + run + history routes, progress tracking helpers, and signal collection into core/automation/ (api, progress, signals). 383 fewer lines in web_server.py, 72 new tests. action handler registration stays put — those closures are tangled with feature implementations.' },
     ],
     '2.4.0': [
         // --- April 26, 2026 — Search & Artists unification + reorganize queue ---

@@ -281,7 +281,7 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                 "MusicBrainz release details",
                 mb_service.mb_client.get_release,
                 pp["release_mbid"],
-                includes=["release-groups", "labels", "media", "artist-credits", "recordings"],
+                includes=["release-groups", "labels", "media", "artist-credits", "recordings", "genres"],
             ) or {}
             with mb_release_detail_cache_lock:
                 _bounded_cache_set(mb_release_detail_cache, pp["release_mbid"], release_detail, _MB_RELEASE_DETAIL_CACHE_MAX_ENTRIES)
@@ -344,6 +344,31 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
                             break
                 except (ValueError, TypeError):
                     pass
+
+    # Genre fallback chain: most MusicBrainz recordings don't carry genres at
+    # the track level, but releases and artists usually do. If the recording
+    # came back empty, try the release; if that's empty too, fetch the artist
+    # with `includes=['genres']` and use that.
+    _release_detail_for_genres = locals().get("release_detail")
+    if not pp["mb_genres"] and _release_detail_for_genres:
+        pp["mb_genres"] = [
+            g["name"] for g in sorted(
+                _release_detail_for_genres.get("genres", []), key=lambda x: x.get("count", 0), reverse=True,
+            )
+        ]
+    if not pp["mb_genres"] and pp.get("artist_mbid"):
+        artist_detail = _call_source_lookup(
+            "MusicBrainz artist details",
+            mb_service.mb_client.get_artist,
+            pp["artist_mbid"],
+            includes=["genres"],
+        )
+        if artist_detail:
+            pp["mb_genres"] = [
+                g["name"] for g in sorted(
+                    artist_detail.get("genres", []), key=lambda x: x.get("count", 0), reverse=True,
+                )
+            ]
 
 
 def _process_deezer_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
