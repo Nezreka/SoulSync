@@ -5029,7 +5029,7 @@ def get_status():
                                 (download_mode == 'hybrid' and 'soulseek' in hybrid_order))
 
             # Serverless sources (YouTube, HiFi, Qobuz) are always available
-            serverless_sources = ('youtube', 'hifi', 'qobuz')
+            serverless_sources = ('youtube', 'hifi', 'qobuz', 'tidal', 'deezer_dl')
             is_serverless = (download_mode in serverless_sources or
                              (download_mode == 'hybrid' and
                               hybrid_order and any(s in serverless_sources for s in hybrid_order)))
