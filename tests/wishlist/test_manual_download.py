@@ -80,6 +80,7 @@ class _FakeLock:
 
 def _build_runtime(tracks, owned_matches=None, batch_map=None):
     wishlist_service = _FakeWishlistService(tracks)
+    processing.get_wishlist_service = lambda: wishlist_service
     music_db = _FakeMusicDatabase(owned_matches=owned_matches)
     executor = _FakeExecutor()
     logger = _FakeLogger()
@@ -87,7 +88,6 @@ def _build_runtime(tracks, owned_matches=None, batch_map=None):
     batch_map = batch_map or {}
 
     runtime = WishlistManualDownloadRuntime(
-        get_wishlist_service=lambda: wishlist_service,
         get_music_database=lambda: music_db,
         download_batches=batch_map,
         tasks_lock=_FakeLock(),
