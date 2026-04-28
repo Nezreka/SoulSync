@@ -17442,7 +17442,6 @@ def check_and_recover_stuck_flags():
         timeout_seconds=stuck_timeout,
         now=current_time,
         label="Wishlist auto-processing",
-        logger=logger,
         reset_callback=_reset_wishlist_processing_state,
     ):
         return True
@@ -17476,7 +17475,6 @@ def is_wishlist_actually_processing():
         timeout_seconds=900,
         now=current_time,
         on_stuck=check_and_recover_stuck_flags,
-        logger=logger,
     )
 
 def is_watchlist_actually_scanning():
@@ -17542,7 +17540,6 @@ def _process_wishlist_automatically(automation_id=None):
         run_full_missing_tracks_process=_run_full_missing_tracks_process,
         get_batch_max_concurrent=_get_batch_max_concurrent,
         get_active_server=config_manager.get_active_media_server,
-        logger=logger,
         current_time_fn=time.time,
         profile_id=1,
     )
@@ -18366,7 +18363,6 @@ def _build_wishlist_route_runtime(
         is_wishlist_actually_processing=is_actually_processing_fn or is_wishlist_actually_processing,
         reset_wishlist_processing_state=reset_wishlist_processing_state or (lambda: None),
         add_activity_item=add_activity_item,
-        logger=logger,
         active_server=config_manager.get_active_media_server(),
         get_next_run_seconds=get_next_run_seconds,
     )
@@ -18405,7 +18401,6 @@ def start_wishlist_missing_downloads():
             get_batch_max_concurrent=_get_batch_max_concurrent,
             add_activity_item=add_activity_item,
             active_server=config_manager.get_active_media_server(),
-            logger=logger,
             profile_id=manual_profile_id,
         )
 
@@ -18456,7 +18451,6 @@ def cleanup_wishlist():
             db,
             get_current_profile_id(),
             active_server,
-            logger=logger,
         )
         return jsonify(payload), status_code
         
@@ -20353,7 +20347,6 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
             batch,
             download_tasks,
             _check_and_remove_from_wishlist,
-            logger=logger,
         )
         
         # STEP 1: Add cancelled tracks that were missing to permanently_failed_tracks (replicating sync.py)
@@ -20364,7 +20357,6 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                 batch,
                 download_tasks,
                 permanently_failed_tracks,
-                logger=logger,
             )
             logger.warning(f"[Wishlist Processing] Processed {processed_count} cancelled tracks")
 
@@ -20376,7 +20368,6 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
             batch,
             download_tasks,
             permanently_failed_tracks,
-            logger=logger,
         )
         if recovered_count:
             logger.warning(f"[Wishlist Processing] Recovered {recovered_count} uncaptured failed tracks for wishlist")
@@ -20535,7 +20526,6 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
             add_activity_item=add_activity_item,
             automation_engine=automation_engine,
             db_factory=MusicDatabase,
-            logger=logger,
         )
 
     except Exception as e:

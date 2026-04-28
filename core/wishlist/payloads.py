@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 from utils.logging_config import get_logger
 
 
-logger = get_logger("wishlist_service")
+logger = get_logger("wishlist.payloads")
 
 
 def sanitize_track_data_for_processing(track_data):

@@ -11,7 +11,7 @@ from database.music_database import get_database
 from utils.logging_config import get_logger
 
 
-logger = get_logger("wishlist_service")
+logger = get_logger("wishlist.service")
 
 
 class WishlistService:
