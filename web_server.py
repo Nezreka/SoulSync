@@ -29235,7 +29235,7 @@ def _run_listenbrainz_discovery_worker(state_key):
                             'spotify_track': cached_match.get('name', ''),
                             'spotify_artist': _extract_artist_name(cached_match.get('artists', [''])[0]) if cached_match.get('artists') else '',
                             'spotify_album': cached_match.get('album', {}).get('name', '') if isinstance(cached_match.get('album'), dict) else cached_match.get('album', ''),
-                            'duration': f"{duration_ms // 60000}:{(duration_ms % 60000) // 1000:02d}" if duration_ms else '0:00',
+                            'duration': f"{int(duration_ms) // 60000}:{(int(duration_ms) % 60000) // 1000:02d}" if duration_ms else '0:00',
                             'discovery_source': discovery_source,
                             'matched_data': cached_match,
                             'spotify_data': cached_match
@@ -29369,7 +29369,7 @@ def _run_listenbrainz_discovery_worker(state_key):
                     'spotify_track': matched_track.name if matched_track else '',
                     'spotify_artist': _extract_artist_name(matched_track.artists[0]) if matched_track else '',
                     'spotify_album': matched_track.album if matched_track else '',
-                    'duration': f"{duration_ms // 60000}:{(duration_ms % 60000) // 1000:02d}" if duration_ms else '0:00',
+                    'duration': f"{int(duration_ms) // 60000}:{(int(duration_ms) % 60000) // 1000:02d}" if duration_ms else '0:00',
                     'discovery_source': discovery_source,
                     'confidence': best_confidence
                 }
@@ -40109,7 +40109,7 @@ def prepare_mirrored_discovery(playlist_id):
                         'spotify_track': '',
                         'spotify_artist': '',
                         'spotify_album': '',
-                        'duration': f"{dur // 60000}:{(dur % 60000) // 1000:02d}" if dur else '0:00',
+                        'duration': f"{int(dur) // 60000}:{(int(dur) % 60000) // 1000:02d}" if dur else '0:00',
                         'confidence': 0,
                     })
                     continue
@@ -40133,7 +40133,7 @@ def prepare_mirrored_discovery(playlist_id):
                     'spotify_track': matched.get('name', ''),
                     'spotify_artist': artist_str,
                     'spotify_album': album_str,
-                    'duration': f"{dur // 60000}:{(dur % 60000) // 1000:02d}" if dur else '0:00',
+                    'duration': f"{int(dur) // 60000}:{(int(dur) % 60000) // 1000:02d}" if dur else '0:00',
                     'discovery_source': extra.get('provider', 'spotify'),
                     'confidence': extra.get('confidence', 0),
                     'matched_data': matched,
@@ -40158,7 +40158,7 @@ def prepare_mirrored_discovery(playlist_id):
                     'spotify_track': '',
                     'spotify_artist': '',
                     'spotify_album': '',
-                    'duration': f"{dur // 60000}:{(dur % 60000) // 1000:02d}" if dur else '0:00',
+                    'duration': f"{int(dur) // 60000}:{(int(dur) % 60000) // 1000:02d}" if dur else '0:00',
                     'discovery_source': cached_provider,
                     'confidence': 0,
                 })
@@ -40175,7 +40175,7 @@ def prepare_mirrored_discovery(playlist_id):
                     'spotify_track': '',
                     'spotify_artist': '',
                     'spotify_album': '',
-                    'duration': f"{dur // 60000}:{(dur % 60000) // 1000:02d}" if dur else '0:00',
+                    'duration': f"{int(dur) // 60000}:{(int(dur) % 60000) // 1000:02d}" if dur else '0:00',
                     'confidence': 0,
                 })
 
