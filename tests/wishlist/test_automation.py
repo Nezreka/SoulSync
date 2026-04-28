@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from types import SimpleNamespace
 
+from core.wishlist import processing
 from core.wishlist.processing import WishlistAutoProcessingRuntime, process_wishlist_automatically
 
 
@@ -139,6 +140,7 @@ def _build_runtime(
         batch_map = {}
 
     wishlist_service = _FakeWishlistService(tracks, count=count)
+    processing.get_wishlist_service = lambda: wishlist_service
     profiles_db = _FakeProfilesDatabase(profiles or [{"id": 1}])
     music_db = _FakeMusicDatabase(cycle_value=cycle_value)
     executor = _FakeExecutor()
@@ -162,7 +164,6 @@ def _build_runtime(
     runtime = WishlistAutoProcessingRuntime(
         processing_guard=guard,
         app_context_factory=app_context,
-        get_wishlist_service=lambda: wishlist_service,
         get_profiles_database=lambda: profiles_db,
         get_music_database=lambda: music_db,
         download_batches=batch_map,

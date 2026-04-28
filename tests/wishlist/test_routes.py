@@ -1,5 +1,6 @@
 import json
 
+import core.wishlist.routes as routes_module
 from core.wishlist.routes import (
     WishlistRouteRuntime,
     add_album_track_to_wishlist,
@@ -148,7 +149,6 @@ def _build_runtime(
     cycle_value="albums",
     duplicate_removals=0,
     clear_result=True,
-    auto_processing_flag=False,
     actually_processing=False,
     next_run_seconds=0,
     download_batches=None,
@@ -157,17 +157,16 @@ def _build_runtime(
     reset_callback=None,
 ):
     service = _FakeWishlistService(tracks=tracks, count=count, clear_result=clear_result)
+    routes_module.get_wishlist_service = lambda: service
     db = _FakeMusicDatabase(cycle_value=cycle_value, duplicate_removals=duplicate_removals)
     logger = _FakeLogger()
     activity_calls = []
     runtime = WishlistRouteRuntime(
-        get_wishlist_service=lambda: service,
         get_music_database=lambda: db,
-        get_current_profile_id=lambda: 1,
+        profile_id=1,
         download_batches=download_batches if download_batches is not None else {},
         download_tasks=download_tasks if download_tasks is not None else {},
         tasks_lock=_FakeLock(),
-        is_wishlist_auto_processing_flag=lambda: auto_processing_flag,
         is_wishlist_actually_processing=lambda: actually_processing,
         reset_wishlist_processing_state=reset_callback or (lambda: None),
         add_activity_item=lambda *args: activity_calls.append(args),
@@ -200,7 +199,7 @@ def test_process_wishlist_api_starts_background_thread_when_idle():
 def test_process_wishlist_api_rejects_when_flag_is_set():
     thread_factory = _FakeThreadFactory()
     runtime, _service, _db, logger, _activity_calls = _build_runtime(
-        auto_processing_flag=True,
+        actually_processing=True,
         thread_factory=thread_factory,
     )
 

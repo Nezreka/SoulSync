@@ -17529,7 +17529,6 @@ def _process_wishlist_automatically(automation_id=None):
         processing_guard=_processing_guard,
         is_actually_processing=is_wishlist_actually_processing,
         app_context_factory=lambda: app.app_context(),
-        get_wishlist_service=get_wishlist_service,
         get_profiles_database=get_database,
         get_music_database=MusicDatabase,
         download_batches=download_batches,
@@ -18344,22 +18343,18 @@ def get_wishlist_tracks():
 
 def _build_wishlist_route_runtime(
     *,
-    is_auto_processing_flag=None,
     is_actually_processing_fn=None,
     reset_wishlist_processing_state=None,
     get_next_run_seconds=None,
 ):
-    from core.wishlist_service import get_wishlist_service
     from database.music_database import MusicDatabase
 
     return _WishlistRouteRuntime(
-        get_wishlist_service=get_wishlist_service,
         get_music_database=MusicDatabase,
-        get_current_profile_id=get_current_profile_id,
+        profile_id=get_current_profile_id(),
         download_batches=download_batches,
         download_tasks=download_tasks,
         tasks_lock=tasks_lock,
-        is_wishlist_auto_processing_flag=is_auto_processing_flag or (lambda: wishlist_auto_processing),
         is_wishlist_actually_processing=is_actually_processing_fn or is_wishlist_actually_processing,
         reset_wishlist_processing_state=reset_wishlist_processing_state or (lambda: None),
         add_activity_item=add_activity_item,
@@ -18385,14 +18380,11 @@ def start_wishlist_missing_downloads():
             }), 409
 
         data = request.get_json() or {}
-        from core.wishlist_service import get_wishlist_service
         from database.music_database import MusicDatabase
 
-        wishlist_service = get_wishlist_service()
         db = MusicDatabase()
         manual_profile_id = get_current_profile_id()
         manual_runtime = _WishlistManualDownloadRuntime(
-            get_wishlist_service=lambda: wishlist_service,
             get_music_database=lambda: db,
             download_batches=download_batches,
             tasks_lock=tasks_lock,

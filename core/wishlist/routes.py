@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict
 
 from core.wishlist.reporting import build_wishlist_stats_payload
 from core.wishlist.selection import prepare_wishlist_tracks_for_display
+from core.wishlist.service import get_wishlist_service
 from core.wishlist.state import get_wishlist_cycle as _get_wishlist_cycle
 from core.wishlist.state import set_wishlist_cycle as _set_wishlist_cycle
 from utils.logging_config import get_logger
@@ -23,13 +24,11 @@ logger = module_logger
 class WishlistRouteRuntime:
     """Dependencies needed to service wishlist HTTP endpoints outside the controller."""
 
-    get_wishlist_service: Callable[[], Any]
     get_music_database: Callable[[], Any]
-    get_current_profile_id: Callable[[], int]
+    profile_id: int
     download_batches: Dict[str, Dict[str, Any]]
     download_tasks: Dict[str, Dict[str, Any]]
     tasks_lock: Any
-    is_wishlist_auto_processing_flag: Callable[[], bool]
     is_wishlist_actually_processing: Callable[[], bool]
     reset_wishlist_processing_state: Callable[[], None]
     add_activity_item: Callable[[Any, Any, Any, Any], Any]
@@ -113,7 +112,7 @@ def process_wishlist_api(
 ) -> tuple[Dict[str, Any], int]:
     """Trigger wishlist processing in the background."""
     try:
-        if runtime.is_wishlist_auto_processing_flag():
+        if runtime.is_wishlist_actually_processing():
             return {"success": False, "error": "Wishlist processing already in progress"}, 409
 
         thread = runtime.thread_factory(target=start_processing, daemon=True)
@@ -127,8 +126,7 @@ def process_wishlist_api(
 def get_wishlist_count(runtime: WishlistRouteRuntime) -> tuple[Dict[str, Any], int]:
     """Return the current wishlist count for the active profile."""
     try:
-        wishlist_service = runtime.get_wishlist_service()
-        count = wishlist_service.get_wishlist_count(profile_id=runtime.get_current_profile_id())
+        count = get_wishlist_service().get_wishlist_count(profile_id=runtime.profile_id)
         return {"count": count}, 200
     except Exception as exc:
         runtime.logger.error("Error getting wishlist count: %s", exc)
@@ -138,8 +136,7 @@ def get_wishlist_count(runtime: WishlistRouteRuntime) -> tuple[Dict[str, Any], i
 def get_wishlist_stats(runtime: WishlistRouteRuntime) -> tuple[Dict[str, Any], int]:
     """Return wishlist statistics for the UI."""
     try:
-        wishlist_service = runtime.get_wishlist_service()
-        raw_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=runtime.get_current_profile_id())
+        raw_tracks = get_wishlist_service().get_wishlist_tracks_for_download(profile_id=runtime.profile_id)
         next_run_in_seconds = runtime.get_next_run_seconds("process_wishlist") if runtime.get_next_run_seconds else 0
         is_processing = runtime.is_wishlist_actually_processing()
         current_cycle = _get_wishlist_cycle(runtime.get_music_database)
@@ -188,7 +185,6 @@ def get_wishlist_tracks(
 ) -> tuple[Dict[str, Any], int]:
     """Return wishlist tracks for the modal UI."""
     try:
-        wishlist_service = runtime.get_wishlist_service()
         db = runtime.get_music_database()
 
         with runtime.tasks_lock:
@@ -198,13 +194,13 @@ def get_wishlist_tracks(
             )
 
         if not wishlist_batch_active:
-            duplicates_removed = db.remove_wishlist_duplicates(profile_id=runtime.get_current_profile_id())
+            duplicates_removed = db.remove_wishlist_duplicates(profile_id=runtime.profile_id)
             if duplicates_removed > 0:
                 runtime.logger.warning("Cleaned %s duplicate tracks from wishlist", duplicates_removed)
         else:
             runtime.logger.warning("Skipping wishlist duplicate cleanup - download in progress")
 
-        raw_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=runtime.get_current_profile_id())
+        raw_tracks = get_wishlist_service().get_wishlist_tracks_for_download(profile_id=runtime.profile_id)
         prepared = prepare_wishlist_tracks_for_display(raw_tracks, category=category, limit=limit)
 
         if prepared["duplicates_found"] > 0:
@@ -232,8 +228,7 @@ def get_wishlist_tracks(
 def clear_wishlist(runtime: WishlistRouteRuntime) -> tuple[Dict[str, Any], int]:
     """Clear the wishlist and cancel active wishlist batches."""
     try:
-        wishlist_service = runtime.get_wishlist_service()
-        success = wishlist_service.clear_wishlist(profile_id=runtime.get_current_profile_id())
+        success = get_wishlist_service().clear_wishlist(profile_id=runtime.profile_id)
 
         if success:
             cancelled_count = 0
@@ -282,10 +277,9 @@ def remove_track_from_wishlist(
         if not spotify_track_id:
             return {"success": False, "error": "No spotify_track_id provided"}, 400
 
-        wishlist_service = runtime.get_wishlist_service()
-        success = wishlist_service.remove_track_from_wishlist(
+        success = get_wishlist_service().remove_track_from_wishlist(
             spotify_track_id,
-            profile_id=runtime.get_current_profile_id(),
+            profile_id=runtime.profile_id,
         )
 
         if success:
@@ -310,8 +304,8 @@ def remove_album_from_wishlist(
         if not album_id and not album_name_filter:
             return {"success": False, "error": "No album_id or album_name provided"}, 400
 
-        wishlist_service = runtime.get_wishlist_service()
-        all_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=runtime.get_current_profile_id())
+        wishlist_service = get_wishlist_service()
+        all_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=runtime.profile_id)
 
         tracks_to_remove = []
         for track in all_tracks:
@@ -334,7 +328,7 @@ def remove_album_from_wishlist(
                     tracks_to_remove.append(spotify_track_id)
 
         removed_count = 0
-        album_remove_pid = runtime.get_current_profile_id()
+        album_remove_pid = runtime.profile_id
         for spotify_track_id in tracks_to_remove:
             if wishlist_service.remove_track_from_wishlist(spotify_track_id, profile_id=album_remove_pid):
                 removed_count += 1
@@ -363,11 +357,10 @@ def remove_batch_from_wishlist(
         if not spotify_track_ids or not isinstance(spotify_track_ids, list):
             return {"success": False, "error": "Missing or invalid spotify_track_ids"}, 400
 
-        wishlist_service = runtime.get_wishlist_service()
         removed = 0
-        pid = runtime.get_current_profile_id()
+        pid = runtime.profile_id
         for track_id in spotify_track_ids:
-            if wishlist_service.remove_track_from_wishlist(track_id, profile_id=pid):
+            if get_wishlist_service().remove_track_from_wishlist(track_id, profile_id=pid):
                 removed += 1
 
         runtime.logger.info("Batch removed %s track(s) from wishlist", removed)
@@ -406,13 +399,12 @@ def add_album_track_to_wishlist(
             "added_via": "library_wishlist_modal",
         }
 
-        wishlist_service = runtime.get_wishlist_service()
-        success = wishlist_service.add_spotify_track_to_wishlist(
+        success = get_wishlist_service().add_spotify_track_to_wishlist(
             spotify_track_data=spotify_track_data,
             failure_reason="Added from library (incomplete album)",
             source_type=source_type,
             source_context=enhanced_source_context,
-            profile_id=runtime.get_current_profile_id(),
+            profile_id=runtime.profile_id,
         )
 
         if success:

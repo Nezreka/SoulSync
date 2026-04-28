@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict
 
 from core.wishlist.payloads import build_failed_track_wishlist_context
 from core.wishlist.selection import filter_wishlist_tracks_by_category, sanitize_and_dedupe_wishlist_tracks
+from core.wishlist.service import get_wishlist_service
 from core.wishlist.state import get_wishlist_cycle, set_wishlist_cycle
 from utils.logging_config import get_logger
 
@@ -26,7 +27,6 @@ class WishlistAutoProcessingRuntime:
     processing_guard: Callable[[], AbstractContextManager[bool]]
     is_actually_processing: Callable[[], bool]
     app_context_factory: Callable[[], AbstractContextManager[Any]]
-    get_wishlist_service: Callable[[], Any]
     get_profiles_database: Callable[[], Any]
     get_music_database: Callable[[], Any]
     download_batches: Dict[str, Dict[str, Any]]
@@ -292,7 +292,6 @@ def remove_tracks_already_in_library(
 class WishlistManualDownloadRuntime:
     """Dependencies needed to start a manual wishlist download batch outside the controller."""
 
-    get_wishlist_service: Callable[[], Any]
     get_music_database: Callable[[], Any]
     download_batches: Dict[str, Dict[str, Any]]
     tasks_lock: Any
@@ -316,7 +315,7 @@ def start_manual_wishlist_download_batch(
     logger = runtime.logger
 
     try:
-        wishlist_service = runtime.get_wishlist_service()
+        wishlist_service = get_wishlist_service()
         db = runtime.get_music_database()
         manual_profile_id = runtime.profile_id
 
@@ -471,7 +470,7 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                 return
 
             with runtime.app_context_factory():
-                wishlist_service = runtime.get_wishlist_service()
+                wishlist_service = get_wishlist_service()
 
                 # Check if wishlist has tracks across all profiles
                 database = runtime.get_profiles_database()
@@ -627,7 +626,6 @@ def automatic_wishlist_cleanup_after_db_update(
     """Remove wishlist entries that already exist in the library after a DB update."""
     try:
         from config.settings import config_manager
-        from core.wishlist.service import get_wishlist_service
         from database.music_database import MusicDatabase, get_database
 
         wishlist_service = wishlist_service or get_wishlist_service()
