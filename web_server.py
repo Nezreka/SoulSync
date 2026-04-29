@@ -24728,12 +24728,12 @@ def hifi_add_instance():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/hifi/instances/<path:url>', methods=['DELETE'])
+@app.route('/api/hifi/instances', methods=['DELETE'])
 @admin_only
-def hifi_remove_instance(url):
+def hifi_remove_instance():
     """Remove a HiFi API instance."""
     try:
-        url = url.strip().rstrip('/')
+        url = (request.args.get('url') or '').strip().rstrip('/')
         if not url:
             return jsonify({'success': False, 'error': 'URL is required'}), 400
         from database.music_database import get_database
