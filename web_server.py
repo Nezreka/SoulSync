@@ -97,7 +97,11 @@ from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker
 from core.web_scan_manager import WebScanManager
 from core.metadata.cache import get_metadata_cache
-from core.metadata.registry import register_runtime_clients as register_metadata_runtime_clients
+from core.metadata.registry import (
+    clear_cached_metadata_client,
+    get_spotify_client,
+    register_runtime_clients,
+)
 from core.imports.context import (
     get_import_clean_album,
     get_import_clean_title,
@@ -611,8 +615,8 @@ logger.info("Initializing SoulSync services for Web UI...")
 spotify_client = plex_client = jellyfin_client = navidrome_client = soulsync_library_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
 
 try:
-    spotify_client = SpotifyClient()
-    logger.info("  Spotify client initialized")
+    spotify_client = get_spotify_client()
+    logger.info("  Spotify client initialized via metadata registry")
 except Exception as e:
     logger.error(f"  Spotify client failed to initialize: {e}")
 
@@ -7291,7 +7295,7 @@ def auth_spotify():
                 logger.error(f"Per-profile Spotify auth failed, falling back to global: {e}")
 
         # Global auth (admin or fallback)
-        temp_spotify_client = SpotifyClient()
+        temp_spotify_client = get_spotify_client()
         if temp_spotify_client.sp and temp_spotify_client.sp.auth_manager:
             # Get the authorization URL
             auth_url = temp_spotify_client.sp.auth_manager.get_authorize_url()
@@ -7640,7 +7644,8 @@ def spotify_callback():
         if token_info:
             # CRITICAL: update the GLOBAL spotify_client, not a local variable
             global spotify_client
-            spotify_client = SpotifyClient()
+            clear_cached_metadata_client("spotify")
+            spotify_client = get_spotify_client()
             if spotify_client.is_spotify_authenticated():
                 # Clear any active rate limit ban and post-ban cooldown
                 # so Spotify is immediately usable after re-auth
@@ -38617,7 +38622,6 @@ def start_oauth_callback_servers():
 
                     # Manually trigger the token exchange using spotipy's auth manager
                     try:
-                        from core.spotify_client import SpotifyClient
                         from spotipy.oauth2 import SpotifyOAuth
                         from config.settings import config_manager
 
@@ -38641,7 +38645,8 @@ def start_oauth_callback_servers():
                         if token_info:
                             # Reinitialize the global client with new tokens
                             global spotify_client
-                            spotify_client = SpotifyClient()
+                            clear_cached_metadata_client("spotify")
+                            spotify_client = get_spotify_client()
 
                             if spotify_client.is_spotify_authenticated():
                                 # Clear rate limit ban + post-ban cooldown so Spotify is usable immediately
@@ -39696,8 +39701,7 @@ except Exception as e:
     hydrabase_worker = None
     hydrabase_client = None
 
-register_metadata_runtime_clients(
-    spotify_client=spotify_client,
+register_runtime_clients(
     hydrabase_client=hydrabase_client,
     dev_mode_enabled_provider=lambda: dev_mode_enabled,
 )
