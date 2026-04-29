@@ -37103,18 +37103,33 @@ def deezer_resume():
 # ================================================================================================
 
 # --- Spotify Worker Initialization ---
+# The Spotify enrichment worker calls `/v1/search` continuously to match library
+# tracks against Spotify's catalog. After Spotify's February 2026 API tightening
+# (search limit cut from 50→10, sustained-rate detection more aggressive), running
+# this worker when the user has chosen a non-Spotify primary metadata source
+# (Deezer, iTunes, Discogs, Hydrabase) generates dead API traffic that triggers
+# multi-hour 429 bans and disrupts the user's actual selected source.
+#
+# Gate the worker at boot: only auto-start when Spotify is the configured primary
+# source. Users on other sources can manually unpause the worker from settings if
+# they explicitly want background Spotify enrichment.
 spotify_enrichment_worker = None
 try:
+    from core.metadata_service import get_primary_source as _get_primary_source
     from database.music_database import MusicDatabase
     spotify_enrichment_db = MusicDatabase()
     spotify_enrichment_worker = SpotifyWorker(database=spotify_enrichment_db)
-    if config_manager.get('spotify_enrichment_paused', False):
+    _primary = _get_primary_source()
+    _user_paused = config_manager.get('spotify_enrichment_paused', False)
+    if _user_paused or _primary != 'spotify':
         spotify_enrichment_worker.paused = True  # Set BEFORE start() to prevent race condition
     spotify_enrichment_worker.start()
-    if spotify_enrichment_worker.paused:
+    if not spotify_enrichment_worker.paused:
+        logger.info("Spotify enrichment worker initialized and started")
+    elif _user_paused:
         logger.info("Spotify enrichment worker initialized (paused — restored from config)")
     else:
-        logger.info("Spotify enrichment worker initialized and started")
+        logger.info(f"Spotify enrichment worker initialized (paused — primary metadata source is '{_primary}', not Spotify)")
 except Exception as e:
     logger.error(f"Spotify enrichment worker initialization failed: {e}")
     spotify_enrichment_worker = None
