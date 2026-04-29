@@ -18,6 +18,7 @@ import sqlite3
 import types
 import collections
 import functools
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote, urljoin, urlparse
 
@@ -104,6 +105,47 @@ from core.imports.context import (
     get_import_original_search,
     get_import_track_info,
     normalize_import_context,
+)
+from core.wishlist.payloads import (
+    build_cancelled_task_wishlist_payload as _build_cancelled_task_wishlist_payload,
+    build_failed_track_wishlist_context as _build_failed_track_wishlist_context,
+    ensure_spotify_track_format as _ensure_spotify_track_format,
+    get_track_artist_name as _get_track_artist_name,
+)
+from core.wishlist.routes import (
+    WishlistRouteRuntime as _WishlistRouteRuntime,
+    add_album_track_to_wishlist as _wishlist_add_album_track_to_wishlist,
+    clear_wishlist as _wishlist_clear_wishlist,
+    get_wishlist_count as _wishlist_get_wishlist_count,
+    get_wishlist_cycle as _wishlist_get_wishlist_cycle,
+    get_wishlist_stats as _wishlist_get_wishlist_stats,
+    get_wishlist_tracks as _wishlist_get_wishlist_tracks,
+    process_wishlist_api as _wishlist_process_api,
+    remove_album_from_wishlist as _wishlist_remove_album_from_wishlist,
+    remove_batch_from_wishlist as _wishlist_remove_batch_from_wishlist,
+    remove_track_from_wishlist as _wishlist_remove_track_from_wishlist,
+    set_wishlist_cycle as _wishlist_set_wishlist_cycle,
+)
+from core.wishlist.processing import (
+    add_cancelled_tracks_to_failed_tracks as _add_cancelled_tracks_to_failed_tracks,
+    automatic_wishlist_cleanup_after_db_update as _cleanup_wishlist_after_db_update,
+    cleanup_wishlist_against_library as _cleanup_wishlist_against_library,
+    build_wishlist_source_context as _build_wishlist_source_context,
+    finalize_auto_wishlist_completion as _finalize_auto_wishlist_completion,
+    start_manual_wishlist_download_batch as _start_manual_wishlist_download_batch,
+    process_wishlist_automatically as _process_wishlist_automatically_impl,
+    recover_uncaptured_failed_tracks as _recover_uncaptured_failed_tracks,
+    remove_completed_tracks_from_wishlist as _remove_completed_tracks_from_wishlist,
+    WishlistAutoProcessingRuntime as _WishlistAutoProcessingRuntime,
+    WishlistManualDownloadRuntime as _WishlistManualDownloadRuntime,
+)
+from core.wishlist.resolution import (
+    check_and_remove_from_wishlist as _check_and_remove_from_wishlist,
+    check_and_remove_track_from_wishlist_by_metadata as _check_and_remove_track_from_wishlist_by_metadata,
+)
+from core.wishlist.state import (
+    is_wishlist_actually_processing as _is_wishlist_actually_processing,
+    reset_flag_if_stuck as _reset_wishlist_flag_if_stuck,
 )
 from core.imports.album import (
     build_album_import_context,
@@ -17094,8 +17136,6 @@ def _execute_retag(group_id, album_id):
                 "phase": "Error",
                 "error_message": str(e)
             })
-
-
 def _check_and_remove_from_wishlist(context):
     """
     Check if a successfully downloaded track should be removed from wishlist.
@@ -17272,13 +17312,9 @@ def _check_and_remove_track_from_wishlist_by_metadata(track_data):
         traceback.print_exc()
         return False
 
-# Auto-wishlist cleanup logic lives in core/downloads/cleanup.py.
-from core.downloads import cleanup as _downloads_cleanup
-
-
 def _automatic_wishlist_cleanup_after_db_update():
     """Automatic wishlist cleanup that runs after database updates."""
-    _downloads_cleanup.cleanup_wishlist_after_db_update(config_manager)
+    return _cleanup_wishlist_after_db_update(logger=logger)
 
 # ── Update detection ─────────────────────────────────────────────
 _GITHUB_REPO = "Nezreka/SoulSync"
@@ -17380,46 +17416,6 @@ def start_simple_background_monitor():
     monitor_thread.daemon = True
     monitor_thread.start()
 
-# ===============================
-# == AUTOMATIC WISHLIST PROCESSING ==
-# ===============================
-
-def _sanitize_track_data_for_processing(track_data):
-    """
-    Sanitizes track data from wishlist service to ensure consistent format.
-    Preserves album dict to retain full metadata (images, id, etc.) and normalizes artist field.
-    """
-    if not isinstance(track_data, dict):
-        logger.info(f"[Sanitize] Unexpected track data type: {type(track_data)}")
-        return track_data
-    
-    # Create a copy to avoid modifying original data
-    sanitized = track_data.copy()
-    
-    # Handle album field - preserve dict format to retain full metadata (images, id, etc.)
-    # Downstream code already handles both dict and string formats defensively
-    raw_album = sanitized.get('album', '')
-    if not isinstance(raw_album, (dict, str)):
-        sanitized['album'] = str(raw_album)
-
-    # Handle artists field - ensure it's a list of strings
-    raw_artists = sanitized.get('artists', [])
-    if isinstance(raw_artists, list):
-        processed_artists = []
-        for artist in raw_artists:
-            if isinstance(artist, str):
-                processed_artists.append(artist)
-            elif isinstance(artist, dict) and 'name' in artist:
-                processed_artists.append(artist['name'])
-            else:
-                processed_artists.append(str(artist))
-        sanitized['artists'] = processed_artists
-    else:
-        logger.info(f"[Sanitize] Unexpected artists format: {type(raw_artists)}")
-        sanitized['artists'] = [str(raw_artists)] if raw_artists else []
-    
-    return sanitized
-
 def check_and_recover_stuck_flags():
     """
     Check if wishlist_auto_processing or watchlist_auto_scanning flags are stuck.
@@ -17433,17 +17429,22 @@ def check_and_recover_stuck_flags():
     current_time = time.time()
     stuck_timeout = 900  # 15 minutes in seconds (reduced from 2 hours for faster recovery)
 
-    # Check wishlist flag
-    if wishlist_auto_processing:
-        time_stuck = current_time - wishlist_auto_processing_timestamp
-        if time_stuck > stuck_timeout:
-            stuck_minutes = time_stuck / 60
-            logger.info(f"[Stuck Detection] Wishlist auto-processing flag has been stuck for {stuck_minutes:.1f} minutes - RESETTING")
-            with wishlist_timer_lock:
-                wishlist_auto_processing = False
-                wishlist_auto_processing_timestamp = 0
+    def _reset_wishlist_processing_state():
+        global wishlist_auto_processing, wishlist_auto_processing_timestamp
+        with wishlist_timer_lock:
+            wishlist_auto_processing = False
+            wishlist_auto_processing_timestamp = 0
 
-            return True
+    # Check wishlist flag
+    if _reset_wishlist_flag_if_stuck(
+        wishlist_auto_processing,
+        wishlist_auto_processing_timestamp,
+        timeout_seconds=stuck_timeout,
+        now=current_time,
+        label="Wishlist auto-processing",
+        reset_callback=_reset_wishlist_processing_state,
+    ):
+        return True
 
     # Check watchlist flag
     if watchlist_auto_scanning:
@@ -17465,21 +17466,16 @@ def is_wishlist_actually_processing():
     """
     global wishlist_auto_processing, wishlist_auto_processing_timestamp
 
-    if not wishlist_auto_processing:
-        return False
-
     import time
     current_time = time.time()
-    time_since_start = current_time - wishlist_auto_processing_timestamp
 
-    # If more than 15 minutes, flag is stuck - auto-recover and return False
-    if time_since_start > 900:  # 15 minutes
-        stuck_minutes = time_since_start / 60
-        logger.warning(f"[Stuck Detection] Wishlist flag stuck for {stuck_minutes:.1f} minutes - auto-recovering")
-        check_and_recover_stuck_flags()
-        return False
-
-    return True
+    return _is_wishlist_actually_processing(
+        wishlist_auto_processing,
+        wishlist_auto_processing_timestamp,
+        timeout_seconds=900,
+        now=current_time,
+        on_stuck=check_and_recover_stuck_flags,
+    )
 
 def is_watchlist_actually_scanning():
     """
@@ -17504,328 +17500,50 @@ def is_watchlist_actually_scanning():
 
     return True
 
-def _classify_wishlist_track(track):
-    """Classify a wishlist track as 'singles' or 'albums'.
-
-    Uses Spotify's album_type as the primary signal (most authoritative),
-    falls back to total_tracks heuristic, defaults to 'albums'.
-
-    Returns:
-        'singles' or 'albums'
-    """
-    spotify_data = track.get('spotify_data', {})
-    if isinstance(spotify_data, str):
-        try:
-            import json
-            spotify_data = json.loads(spotify_data)
-        except Exception:
-            spotify_data = {}
-
-    album_data = spotify_data.get('album') or {}
-    if not isinstance(album_data, dict):
-        album_data = {}
-    total_tracks = album_data.get('total_tracks')
-    album_type = album_data.get('album_type', '').lower()
-
-    # Prioritize Spotify's album_type classification (most accurate)
-    if album_type in ('single', 'ep'):
-        return 'singles'
-    if album_type in ('album', 'compilation'):
-        return 'albums'
-
-    # Fallback: track count heuristic
-    if total_tracks is not None and total_tracks > 0:
-        return 'singles' if total_tracks < 6 else 'albums'
-
-    # No classification data — default to albums
-    return 'albums'
-
-
 def _process_wishlist_automatically(automation_id=None):
     """Main automatic processing logic that runs in background thread."""
     global wishlist_auto_processing, wishlist_auto_processing_timestamp
+    from core.wishlist_service import get_wishlist_service
 
-    logger.info("[Auto-Wishlist] Timer triggered - starting automatic wishlist processing...")
-
-    try:
-        # CRITICAL FIX: Use smart stuck detection BEFORE acquiring lock
-        # This prevents deadlock and handles stuck flags (2-hour timeout)
-        if is_wishlist_actually_processing():
-            logger.info("[Auto-Wishlist] Already processing (verified with stuck detection), skipping.")
-            return
-
-        # Check conditions and set flag
-        should_skip_already_running = False
+    @contextmanager
+    def _processing_guard():
+        global wishlist_auto_processing, wishlist_auto_processing_timestamp
 
         with wishlist_timer_lock:
-            # Re-check inside lock to handle race conditions
             if wishlist_auto_processing:
-                logger.info("[Auto-Wishlist] Already processing (race condition check), skipping.")
-                should_skip_already_running = True
-
-            else:
-                # Set flag and timestamp
-                import time
-                wishlist_auto_processing = True
-                wishlist_auto_processing_timestamp = time.time()
-                logger.info(f"[Auto-Wishlist] Flag set at timestamp {wishlist_auto_processing_timestamp}")
-
-        if should_skip_already_running:
-            return
-        
-        # Use app context for database operations
-        with app.app_context():
-            from core.wishlist_service import get_wishlist_service
-            wishlist_service = get_wishlist_service()
-
-            # Check if wishlist has tracks across all profiles
-            database = get_database()
-            all_profiles = database.get_all_profiles()
-            count = sum(wishlist_service.get_wishlist_count(profile_id=p['id']) for p in all_profiles)
-            logger.info(f"[Auto-Wishlist] Wishlist count check: {count} tracks found across {len(all_profiles)} profiles")
-            _update_automation_progress(automation_id, progress=10, phase='Checking wishlist',
-                                         log_line=f'{count} tracks across {len(all_profiles)} profiles', log_type='info')
-            if count == 0:
-                logger.warning("ℹ️ [Auto-Wishlist] No tracks in wishlist for auto-processing.")
-                with wishlist_timer_lock:
-                    wishlist_auto_processing = False
-                    wishlist_auto_processing_timestamp = 0
+                yield False
                 return
 
-            logger.info(f"[Auto-Wishlist] Found {count} tracks in wishlist, starting automatic processing...")
-            
-            # Check if wishlist processing is already active (auto or manual)
-            playlist_id = "wishlist"
-            with tasks_lock:
-                for _batch_id, batch_data in download_batches.items():
-                    batch_playlist_id = batch_data.get('playlist_id')
-                    # Check for both auto ('wishlist') and manual ('wishlist_manual') batches
-                    if (batch_playlist_id in ['wishlist', 'wishlist_manual'] and
-                        batch_data.get('phase') not in ['complete', 'error', 'cancelled']):
-                        logger.info(f"Wishlist processing already active in another batch ({batch_playlist_id}), skipping automatic start")
-                        with wishlist_timer_lock:
-                            wishlist_auto_processing = False
-                        return
+            wishlist_auto_processing = True
+            wishlist_auto_processing_timestamp = time.time()
+            logger.info(f"[Auto-Wishlist] Flag set at timestamp {wishlist_auto_processing_timestamp}")
 
-            # CRITICAL: Clean duplicates BEFORE fetching tracks to prevent count mismatches
-            # This prevents the "11 tracks shown but 12 counted" bug
-            from database.music_database import MusicDatabase
-            db = MusicDatabase()
+        try:
+            yield True
+        finally:
+            with wishlist_timer_lock:
+                wishlist_auto_processing = False
+                wishlist_auto_processing_timestamp = 0
 
-            logger.warning("[Auto-Wishlist] Cleaning duplicate tracks before processing...")
-            for p in all_profiles:
-                duplicates_removed = db.remove_wishlist_duplicates(profile_id=p['id'])
-                if duplicates_removed > 0:
-                    logger.warning(f"[Auto-Wishlist] Removed {duplicates_removed} duplicate tracks from profile {p['id']}")
+    runtime = _WishlistAutoProcessingRuntime(
+        processing_guard=_processing_guard,
+        is_actually_processing=is_wishlist_actually_processing,
+        app_context_factory=lambda: app.app_context(),
+        get_profiles_database=get_database,
+        get_music_database=MusicDatabase,
+        download_batches=download_batches,
+        tasks_lock=tasks_lock,
+        update_automation_progress=_update_automation_progress,
+        automation_engine=automation_engine,
+        missing_download_executor=missing_download_executor,
+        run_full_missing_tracks_process=_run_full_missing_tracks_process,
+        get_batch_max_concurrent=_get_batch_max_concurrent,
+        get_active_server=config_manager.get_active_media_server,
+        current_time_fn=time.time,
+        profile_id=1,
+    )
 
-            # CLEANUP: Remove tracks from wishlist that already exist in library
-            # This prevents wasting bandwidth on tracks we already have
-            logger.debug("[Auto-Wishlist] Checking wishlist against library for already-owned tracks...")
-            active_server = config_manager.get_active_media_server()
-            cleanup_tracks = []
-            for p in all_profiles:
-                cleanup_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
-            cleanup_removed = 0
-
-            for track in cleanup_tracks:
-                track_name = track.get('name', '')
-                artists = track.get('artists', [])
-                spotify_track_id = track.get('spotify_track_id') or track.get('id')
-                track_album = track.get('album', {}).get('name') if isinstance(track.get('album'), dict) else track.get('album')
-
-                if not track_name or not artists or not spotify_track_id:
-                    continue
-
-                # Check if track exists in library
-                found_in_db = False
-                for artist in artists:
-                    if isinstance(artist, str):
-                        artist_name = artist
-                    elif isinstance(artist, dict) and 'name' in artist:
-                        artist_name = artist['name']
-                    else:
-                        artist_name = str(artist)
-
-                    try:
-                        db_track, confidence = db.check_track_exists(
-                            track_name, artist_name,
-                            confidence_threshold=0.7,
-                            server_source=active_server,
-                            album=track_album
-                        )
-
-                        if db_track and confidence >= 0.7:
-                            found_in_db = True
-                            break
-                    except Exception as db_error:
-                        continue
-
-                # Remove from wishlist if found in library
-                if found_in_db:
-                    try:
-                        removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
-                        if removed:
-                            cleanup_removed += 1
-                            logger.info(f"[Auto-Wishlist] Removed already-owned track: '{track_name}' by {artist_name}")
-                    except Exception as remove_error:
-                        logger.error(f"[Auto-Wishlist] Error removing track from wishlist: {remove_error}")
-
-            if cleanup_removed > 0:
-                logger.info(f"[Auto-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
-                _update_automation_progress(automation_id, progress=25, phase='Cleaned up duplicates',
-                                             log_line=f'Removed {cleanup_removed} already-owned tracks', log_type='success')
-            else:
-                _update_automation_progress(automation_id, progress=25, phase='Cleanup done',
-                                             log_line='No duplicates or already-owned tracks found', log_type='skip')
-
-            # Get wishlist tracks for processing (after cleanup) - combine all profiles
-            raw_wishlist_tracks = []
-            for p in all_profiles:
-                raw_wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=p['id']))
-            if not raw_wishlist_tracks:
-                logger.warning("No tracks returned from wishlist service.")
-                with wishlist_timer_lock:
-                    wishlist_auto_processing = False
-                    wishlist_auto_processing_timestamp = 0
-                return
-
-            # SANITIZE: Ensure consistent data format from wishlist service
-            wishlist_tracks = []
-            seen_track_ids_sanitation = set()  # Deduplicate during sanitization
-            duplicates_found = 0
-            for track in raw_wishlist_tracks:
-                sanitized_track = _sanitize_track_data_for_processing(track)
-                spotify_track_id = sanitized_track.get('spotify_track_id') or sanitized_track.get('id')
-
-                # Skip duplicates during sanitization
-                if spotify_track_id and spotify_track_id in seen_track_ids_sanitation:
-                    duplicates_found += 1
-                    continue
-
-                wishlist_tracks.append(sanitized_track)
-                if spotify_track_id:
-                    seen_track_ids_sanitation.add(spotify_track_id)
-
-            if duplicates_found > 0:
-                logger.warning(f"[Auto-Wishlist] Found and removed {duplicates_found} duplicate tracks during sanitization")
-            logger.info(f"[Auto-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
-
-            # CYCLE FILTERING: Get current cycle and filter tracks by category
-            with db._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT value FROM metadata WHERE key = 'wishlist_cycle'")
-                row = cursor.fetchone()
-
-                if row:
-                    current_cycle = row['value']
-                else:
-                    # Default to albums on first run
-                    current_cycle = 'albums'
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO metadata (key, value, updated_at)
-                        VALUES ('wishlist_cycle', 'albums', CURRENT_TIMESTAMP)
-                    """)
-                    conn.commit()
-
-            # Filter tracks by current cycle category
-            filtered_tracks = []
-            seen_track_ids_filtering = set()  # Deduplicate during filtering
-            for track in wishlist_tracks:
-                track_category = _classify_wishlist_track(track)
-                spotify_track_id = track.get('spotify_track_id') or track.get('id')
-                matches_category = (current_cycle == track_category)
-
-                # Only add if matches category AND not a duplicate
-                if matches_category:
-                    # Only deduplicate if track has a valid ID
-                    if spotify_track_id:
-                        if spotify_track_id not in seen_track_ids_filtering:
-                            filtered_tracks.append(track)
-                            seen_track_ids_filtering.add(spotify_track_id)
-                    else:
-                        # No ID - can't deduplicate safely, always add
-                        filtered_tracks.append(track)
-
-            logger.info(f"[Auto-Wishlist] Current cycle: {current_cycle}")
-            logger.info(f"[Auto-Wishlist] Filtered {len(filtered_tracks)}/{len(wishlist_tracks)} tracks for '{current_cycle}' category")
-            _update_automation_progress(automation_id, progress=40, phase=f'Processing {current_cycle}',
-                                         log_line=f'Cycle: {current_cycle} — {len(filtered_tracks)} tracks to process', log_type='info')
-
-            # If no tracks in this category, skip to next cycle immediately
-            if len(filtered_tracks) == 0:
-                logger.warning(f"ℹ️ [Auto-Wishlist] No {current_cycle} tracks in wishlist, toggling cycle and scheduling next run")
-
-                # Toggle cycle
-                next_cycle = 'singles' if current_cycle == 'albums' else 'albums'
-                with db._get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO metadata (key, value, updated_at)
-                        VALUES ('wishlist_cycle', ?, CURRENT_TIMESTAMP)
-                    """, (next_cycle,))
-                    conn.commit()
-                logger.info(f"[Auto-Wishlist] Cycle toggled: {current_cycle} → {next_cycle}")
-
-                with wishlist_timer_lock:
-                    wishlist_auto_processing = False
-                    wishlist_auto_processing_timestamp = 0
-                return
-
-            # Use filtered tracks for processing — stamp original index
-            wishlist_tracks = filtered_tracks
-            for i, track in enumerate(wishlist_tracks):
-                track['_original_index'] = i
-
-            # Create batch for automatic processing
-            batch_id = str(uuid.uuid4())
-            playlist_name = f"Wishlist (Auto - {current_cycle.capitalize()})"
-            
-            # Create task queue - convert wishlist tracks to expected format
-            with tasks_lock:
-                download_batches[batch_id] = {
-                    'phase': 'analysis',
-                    'playlist_id': playlist_id,
-                    'playlist_name': playlist_name,
-                    'queue': [],
-                    'active_count': 0,
-                    'max_concurrent': _get_batch_max_concurrent(),  # Wishlist always does single-track downloads, not folder grabs
-                    'queue_index': 0,
-                    'analysis_total': len(wishlist_tracks),
-                    'analysis_processed': 0,
-                    'analysis_results': [],
-                    # Track state management (replicating sync.py)
-                    'permanently_failed_tracks': [],
-                    'cancelled_tracks': set(),
-                    # Wishlist tracks are already known-missing — skip the expensive library check
-                    'force_download_all': True,
-                    # Mark as auto-initiated
-                    'auto_initiated': True,
-                    'auto_processing_timestamp': time.time(),
-                    # Store current cycle for toggling after completion
-                    'current_cycle': current_cycle,
-                    # Profile context for failed track wishlist re-adds (auto = profile 1 default)
-                    'profile_id': 1
-                }
-            
-            logger.info(f"Starting automatic wishlist batch {batch_id} with {len(wishlist_tracks)} tracks")
-            _update_automation_progress(automation_id, progress=50, phase=f'Downloading {len(wishlist_tracks)} tracks',
-                                         log_line=f'Started batch: {len(wishlist_tracks)} {current_cycle}', log_type='success')
-            
-            # Submit the wishlist processing job using existing infrastructure
-            missing_download_executor.submit(_run_full_missing_tracks_process, batch_id, playlist_id, wishlist_tracks)
-            
-            # Don't mark auto_processing as False here - let completion handler do it
-            
-    except Exception as e:
-        logger.error(f"Error in automatic wishlist processing: {e}")
-        import traceback
-        traceback.print_exc()
-        _update_automation_progress(automation_id, log_line=f'Error: {str(e)}', log_type='error')
-
-        with wishlist_timer_lock:
-            wishlist_auto_processing = False
-            wishlist_auto_processing_timestamp = 0
-        raise  # re-raise so automation wrapper returns error status
+    _process_wishlist_automatically_impl(runtime, automation_id=automation_id)
 
 # ===============================
 # == DATABASE UPDATER API      ==
@@ -18390,15 +18108,14 @@ def get_database_stats():
 def process_wishlist_api():
     """Trigger wishlist processing via API. Processes pending wishlist tracks in the background."""
     try:
-        if wishlist_auto_processing:
-            return jsonify({"success": False, "error": "Wishlist processing already in progress"}), 409
-
-        # Run in background thread (same as automation trigger)
-        import threading
-        thread = threading.Thread(target=_process_wishlist_automatically, daemon=True)
-        thread.start()
-
-        return jsonify({"success": True, "message": "Wishlist processing started"})
+        runtime = _build_wishlist_route_runtime(
+            is_auto_processing_flag=lambda: wishlist_auto_processing,
+        )
+        payload, status_code = _wishlist_process_api(
+            runtime,
+            start_processing=lambda: _process_wishlist_automatically(),
+        )
+        return jsonify(payload), status_code
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -18406,10 +18123,9 @@ def process_wishlist_api():
 def get_wishlist_count():
     """Endpoint to get current wishlist count."""
     try:
-        from core.wishlist_service import get_wishlist_service
-        wishlist_service = get_wishlist_service()
-        count = wishlist_service.get_wishlist_count(profile_id=get_current_profile_id())
-        return jsonify({"count": count})
+        runtime = _build_wishlist_route_runtime()
+        payload, status_code = _wishlist_get_wishlist_count(runtime)
+        return jsonify(payload), status_code
     except Exception as e:
         logger.error(f"Error getting wishlist count: {e}")
         return jsonify({"error": str(e)}), 500
@@ -18427,58 +18143,13 @@ def get_wishlist_stats():
         }
     """
     try:
-        from core.wishlist_service import get_wishlist_service
-
-        wishlist_service = get_wishlist_service()
-        raw_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=get_current_profile_id())
-
-        singles_count = 0
-        albums_count = 0
-        seen_ids = set()
-
-        for track in raw_tracks:
-            # Deduplicate by ID (same as tracks endpoint) so counts match
-            track_id = track.get('spotify_track_id') or track.get('id')
-            if track_id:
-                if track_id in seen_ids:
-                    continue
-                seen_ids.add(track_id)
-
-            category = _classify_wishlist_track(track)
-            if category == 'singles':
-                singles_count += 1
-            else:
-                albums_count += 1
-
-        total_count = singles_count + albums_count
-
-        # Calculate time until next auto-processing and get processing state
-        next_run_in_seconds = automation_engine.get_system_automation_next_run_seconds('process_wishlist') if automation_engine else 0
-
-        # Use smart function with stuck detection (not raw flag)
-        is_processing = is_wishlist_actually_processing()
-
-        # Get current cycle (albums or singles)
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-        try:
-            with db._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT value FROM metadata WHERE key = 'wishlist_cycle'")
-                row = cursor.fetchone()
-                current_cycle = row['value'] if row else 'albums'
-        except Exception:
-            current_cycle = 'albums'  # Safe fallback
-
-        return jsonify({
-            "singles": singles_count,
-            "albums": albums_count,
-            "total": total_count,
-            "next_run_in_seconds": next_run_in_seconds,
-            "is_auto_processing": is_processing,
-            "current_cycle": current_cycle
-        })
-
+        runtime = _build_wishlist_route_runtime(
+            get_next_run_seconds=(
+                automation_engine.get_system_automation_next_run_seconds if automation_engine else None
+            ),
+        )
+        payload, status_code = _wishlist_get_wishlist_stats(runtime)
+        return jsonify(payload), status_code
     except Exception as e:
         logger.error(f"Error getting wishlist stats: {e}")
         import traceback
@@ -18494,28 +18165,9 @@ def get_wishlist_cycle():
         {"cycle": "albums" | "singles"}
     """
     try:
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        # Get cycle from metadata table
-        with db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT value FROM metadata WHERE key = 'wishlist_cycle'")
-            row = cursor.fetchone()
-
-            if row:
-                cycle = row['value']
-            else:
-                # Default to albums on first run
-                cycle = 'albums'
-                cursor.execute("""
-                    INSERT OR REPLACE INTO metadata (key, value, updated_at)
-                    VALUES ('wishlist_cycle', 'albums', CURRENT_TIMESTAMP)
-                """)
-                conn.commit()
-
-        return jsonify({"cycle": cycle})
-
+        runtime = _build_wishlist_route_runtime()
+        payload, status_code = _wishlist_get_wishlist_cycle(runtime)
+        return jsonify(payload), status_code
     except Exception as e:
         logger.error(f"Error getting wishlist cycle: {e}")
         return jsonify({"error": str(e)}), 500
@@ -18531,24 +18183,9 @@ def set_wishlist_cycle():
     try:
         data = request.get_json()
         cycle = data.get('cycle')
-
-        if cycle not in ['albums', 'singles']:
-            return jsonify({"error": "Invalid cycle. Must be 'albums' or 'singles'"}), 400
-
-        from database.music_database import MusicDatabase
-        db = MusicDatabase()
-
-        # Store cycle in metadata table
-        with db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT OR REPLACE INTO metadata (key, value, updated_at)
-                VALUES ('wishlist_cycle', ?, CURRENT_TIMESTAMP)
-            """, (cycle,))
-            conn.commit()
-
-        logger.info(f"Wishlist cycle set to: {cycle}")
-        return jsonify({"success": True, "cycle": cycle})
+        runtime = _build_wishlist_route_runtime()
+        payload, status_code = _wishlist_set_wishlist_cycle(runtime, cycle)
+        return jsonify(payload), status_code
 
     except Exception as e:
         logger.error(f"Error setting wishlist cycle: {e}")
@@ -18695,89 +18332,35 @@ def get_wishlist_tracks():
         limit (optional): Maximum number of tracks to return (for performance)
     """
     try:
-        from core.wishlist_service import get_wishlist_service
-        from database.music_database import MusicDatabase
-
-        # Get category filter and limit from query params
         category = request.args.get('category', None)  # None = all tracks
         limit = request.args.get('limit', type=int, default=None)  # None = no limit
-
-        # Clean duplicates ONLY if no active wishlist download is running
-        # This prevents count mismatches during active downloads
-        with tasks_lock:
-            wishlist_batch_active = any(
-                batch.get('playlist_id') == 'wishlist' and batch.get('phase') in ['analysis', 'downloading']
-                for batch in download_batches.values()
-            )
-
-        if not wishlist_batch_active:
-            db = MusicDatabase()
-            duplicates_removed = db.remove_wishlist_duplicates(profile_id=get_current_profile_id())
-            if duplicates_removed > 0:
-                logger.warning(f"Cleaned {duplicates_removed} duplicate tracks from wishlist")
-        else:
-            logger.warning("Skipping wishlist duplicate cleanup - download in progress")
-
-        wishlist_service = get_wishlist_service()
-        raw_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=get_current_profile_id())
-
-        # SANITIZE: Ensure consistent data format for frontend
-        sanitized_tracks = []
-        seen_track_ids_sanitation = set()  # Deduplicate during sanitization
-        duplicates_found = 0
-        for track in raw_tracks:
-            sanitized_track = _sanitize_track_data_for_processing(track)
-            spotify_track_id = sanitized_track.get('spotify_track_id') or sanitized_track.get('id')
-
-            # Skip duplicates during sanitization
-            if spotify_track_id and spotify_track_id in seen_track_ids_sanitation:
-                duplicates_found += 1
-                continue
-
-            sanitized_tracks.append(sanitized_track)
-            if spotify_track_id:
-                seen_track_ids_sanitation.add(spotify_track_id)
-
-        if duplicates_found > 0:
-            logger.warning(f"[API-Wishlist-Tracks] Found and removed {duplicates_found} duplicate tracks during sanitization")
-
-        # FILTER by category if specified
-        if category:
-            filtered_tracks = []
-            seen_track_ids_filtering = set()  # Deduplicate during filtering
-            for track in sanitized_tracks:
-                track_category = _classify_wishlist_track(track)
-                spotify_track_id = track.get('spotify_track_id') or track.get('id')
-                matches_category = (category == track_category)
-
-                # Only add if matches category AND not a duplicate
-                if matches_category:
-                    # Only deduplicate if track has a valid ID
-                    if spotify_track_id:
-                        if spotify_track_id not in seen_track_ids_filtering:
-                            filtered_tracks.append(track)
-                            seen_track_ids_filtering.add(spotify_track_id)
-                    else:
-                        # No ID - can't deduplicate safely, always add
-                        filtered_tracks.append(track)
-
-                # Apply limit early for performance
-                if limit and len(filtered_tracks) >= limit:
-                    break
-
-            # Count total in category (quick scan — no heavy processing, just classification)
-            total_in_category = sum(1 for t in sanitized_tracks if _classify_wishlist_track(t) == category)
-
-            logger.info(f"Wishlist filter: {len(filtered_tracks)}/{total_in_category} tracks in '{category}' category (limit: {limit or 'none'})")
-            return jsonify({"tracks": filtered_tracks, "category": category, "total": total_in_category})
-
-        # Apply limit to non-filtered results
-        total_count = len(sanitized_tracks)
-        result_tracks = sanitized_tracks[:limit] if limit else sanitized_tracks
-        return jsonify({"tracks": result_tracks, "total": total_count})
+        runtime = _build_wishlist_route_runtime()
+        payload, status_code = _wishlist_get_wishlist_tracks(runtime, category=category, limit=limit)
+        return jsonify(payload), status_code
     except Exception as e:
         logger.error(f"Error getting wishlist tracks: {e}")
         return jsonify({"error": str(e)}), 500
+
+def _build_wishlist_route_runtime(
+    *,
+    is_actually_processing_fn=None,
+    reset_wishlist_processing_state=None,
+    get_next_run_seconds=None,
+):
+    from database.music_database import MusicDatabase
+
+    return _WishlistRouteRuntime(
+        get_music_database=MusicDatabase,
+        profile_id=get_current_profile_id(),
+        download_batches=download_batches,
+        download_tasks=download_tasks,
+        tasks_lock=tasks_lock,
+        is_wishlist_actually_processing=is_actually_processing_fn or is_wishlist_actually_processing,
+        reset_wishlist_processing_state=reset_wishlist_processing_state or (lambda: None),
+        add_activity_item=add_activity_item,
+        active_server=config_manager.get_active_media_server(),
+        get_next_run_seconds=get_next_run_seconds,
+    )
 
 @app.route('/api/wishlist/download_missing', methods=['POST'])
 def start_wishlist_missing_downloads():
@@ -18797,225 +18380,29 @@ def start_wishlist_missing_downloads():
             }), 409
 
         data = request.get_json() or {}
-        force_download_all = data.get('force_download_all', False)
-        category = data.get('category')  # Get category filter (albums or singles)
-        track_ids = data.get('track_ids')  # NEW: Get specific track IDs from frontend
-
-        from core.wishlist_service import get_wishlist_service
         from database.music_database import MusicDatabase
 
-        wishlist_service = get_wishlist_service()
-
-        # CRITICAL: Clean duplicates BEFORE fetching tracks to prevent count mismatches
-        # This prevents the "11 tracks shown but 12 counted" bug
-        logger.warning("[Manual-Wishlist] Cleaning duplicate tracks before download...")
         db = MusicDatabase()
         manual_profile_id = get_current_profile_id()
-        duplicates_removed = db.remove_wishlist_duplicates(profile_id=manual_profile_id)
-        if duplicates_removed > 0:
-            logger.warning(f"[Manual-Wishlist] Removed {duplicates_removed} duplicate tracks")
+        manual_runtime = _WishlistManualDownloadRuntime(
+            get_music_database=lambda: db,
+            download_batches=download_batches,
+            tasks_lock=tasks_lock,
+            missing_download_executor=missing_download_executor,
+            run_full_missing_tracks_process=_run_full_missing_tracks_process,
+            get_batch_max_concurrent=_get_batch_max_concurrent,
+            add_activity_item=add_activity_item,
+            active_server=config_manager.get_active_media_server(),
+            profile_id=manual_profile_id,
+        )
 
-        # CLEANUP: Remove tracks from wishlist that already exist in library
-        # This prevents wasting bandwidth on tracks we already have
-        logger.info("[Manual-Wishlist] Checking wishlist against library for already-owned tracks...")
-        active_server = config_manager.get_active_media_server()
-        cleanup_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=manual_profile_id)
-        cleanup_removed = 0
-
-        for track in cleanup_tracks:
-            # BYPASS: Don't remove enhance tracks — they intentionally re-download existing library tracks
-            if track.get('source_type') == 'enhance':
-                continue
-
-            track_name = track.get('name', '')
-            artists = track.get('artists', [])
-            spotify_track_id = track.get('spotify_track_id') or track.get('id')
-            track_album = track.get('album', {}).get('name') if isinstance(track.get('album'), dict) else track.get('album')
-
-            if not track_name or not artists or not spotify_track_id:
-                continue
-
-            # Check if track exists in library
-            found_in_db = False
-            for artist in artists:
-                if isinstance(artist, str):
-                    artist_name = artist
-                elif isinstance(artist, dict) and 'name' in artist:
-                    artist_name = artist['name']
-                else:
-                    artist_name = str(artist)
-
-                try:
-                    db_track, confidence = db.check_track_exists(
-                        track_name, artist_name,
-                        confidence_threshold=0.7,
-                        server_source=active_server,
-                        album=track_album
-                    )
-
-                    if db_track and confidence >= 0.7:
-                        found_in_db = True
-                        break
-                except Exception as db_error:
-                    continue
-
-            # Remove from wishlist if found in library
-            if found_in_db:
-                try:
-                    removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
-                    if removed:
-                        cleanup_removed += 1
-                        logger.info(f"[Manual-Wishlist] Removed already-owned track: '{track_name}' by {artist_name}")
-                except Exception as remove_error:
-                    logger.error(f"[Manual-Wishlist] Error removing track from wishlist: {remove_error}")
-
-        if cleanup_removed > 0:
-            logger.info(f"[Manual-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
-
-        # Get wishlist tracks formatted for download modal (after cleanup)
-        raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=manual_profile_id)
-        if not raw_wishlist_tracks:
-            return jsonify({"success": False, "error": "No tracks in wishlist"}), 400
-
-        # SANITIZE: Ensure consistent data format from wishlist service
-        wishlist_tracks = []
-        seen_track_ids_sanitation = set()  # Deduplicate during sanitization
-        duplicates_found = 0
-        for track in raw_wishlist_tracks:
-            sanitized_track = _sanitize_track_data_for_processing(track)
-            spotify_track_id = sanitized_track.get('spotify_track_id') or sanitized_track.get('id')
-
-            # Skip duplicates during sanitization
-            if spotify_track_id and spotify_track_id in seen_track_ids_sanitation:
-                duplicates_found += 1
-                continue
-
-            wishlist_tracks.append(sanitized_track)
-            if spotify_track_id:
-                seen_track_ids_sanitation.add(spotify_track_id)
-
-        if duplicates_found > 0:
-            logger.warning(f"[Manual-Wishlist] Found and removed {duplicates_found} duplicate tracks during sanitization")
-        logger.info(f"[Manual-Wishlist] Sanitized {len(wishlist_tracks)} tracks from wishlist service")
-
-        # FILTER BY TRACK IDs if specified (prioritized - prevents race conditions)
-        if track_ids:
-            # Build a lookup by track ID for O(1) access
-            track_lookup = {}
-            for track in wishlist_tracks:
-                spotify_track_id = track.get('spotify_track_id') or track.get('id')
-                if spotify_track_id and spotify_track_id not in track_lookup:
-                    track_lookup[spotify_track_id] = track
-
-            # Iterate in track_ids order (matches frontend display order)
-            # Stamp each track with its original position in the track_ids array
-            # so track_index matches the modal row even if cleanup removed some tracks
-            filtered_tracks = []
-            seen_track_ids = set()
-            for frontend_index, tid in enumerate(track_ids):
-                if tid in track_lookup and tid not in seen_track_ids:
-                    track = track_lookup[tid]
-                    track['_original_index'] = frontend_index  # Preserve frontend table position
-                    filtered_tracks.append(track)
-                    seen_track_ids.add(tid)
-
-            wishlist_tracks = filtered_tracks
-            logger.info(f"[Manual-Wishlist] Filtered to {len(wishlist_tracks)} specific tracks by ID (preserving frontend display order)")
-
-        # FILTER BY CATEGORY if specified and no track_ids (backward compatibility)
-        elif category:
-            import json
-            filtered_tracks = []
-            seen_track_ids = set()  # Track IDs we've already added to prevent duplicates
-            for track in wishlist_tracks:
-                # Extract track count from spotify_data
-                spotify_data = track.get('spotify_data', {})
-                if isinstance(spotify_data, str):
-                    try:
-                        spotify_data = json.loads(spotify_data)
-                    except:
-                        spotify_data = {}
-
-                album_data = spotify_data.get('album', {})
-                if not isinstance(album_data, dict):
-                    album_data = {}
-                total_tracks = album_data.get('total_tracks')
-                album_type = album_data.get('album_type', 'album').lower()
-
-                # Categorize by track count if available, otherwise use album_type
-                # Single: 1 track, EP: 2-5 tracks, Album: 6+ tracks
-                is_single_or_ep = False
-                is_album = False
-
-                if total_tracks is not None and total_tracks > 0:
-                    # Use track count (most accurate)
-                    is_single_or_ep = total_tracks < 6
-                    is_album = total_tracks >= 6
-                else:
-                    # Fall back to Spotify's album_type
-                    is_single_or_ep = album_type in ['single', 'ep']
-                    is_album = album_type == 'album'
-
-                spotify_track_id = track.get('spotify_track_id') or track.get('id')
-                matches_category = (category == 'singles' and is_single_or_ep) or (category == 'albums' and is_album)
-
-                # Only add if matches category AND not a duplicate
-                if matches_category:
-                    # Only deduplicate if track has a valid ID
-                    if spotify_track_id:
-                        if spotify_track_id not in seen_track_ids:
-                            filtered_tracks.append(track)
-                            seen_track_ids.add(spotify_track_id)
-                    else:
-                        # No ID - can't deduplicate safely, always add
-                        filtered_tracks.append(track)
-
-            wishlist_tracks = filtered_tracks
-            logger.info(f"[Manual-Wishlist] Filtered to {len(wishlist_tracks)} tracks for category: {category}")
-
-        # Stamp original index on each track so task indices match frontend row order
-        for i, track in enumerate(wishlist_tracks):
-            track['_original_index'] = i
-
-        # Add activity for wishlist download start
-        add_activity_item("", "Wishlist Download Started", f"{len(wishlist_tracks)} tracks", "Now")
-
-        batch_id = str(uuid.uuid4())
-        
-        # Use "wishlist" as the playlist_id for consistency in the modal system
-        playlist_id = "wishlist"
-        playlist_name = "Wishlist"
-        
-        # Create task queue for this batch - convert wishlist tracks to the expected format
-        task_queue = []
-        with tasks_lock:
-            download_batches[batch_id] = {
-                'phase': 'analysis',
-                'playlist_id': playlist_id,
-                'playlist_name': playlist_name,
-                'queue': task_queue,
-                'active_count': 0,
-                'max_concurrent': _get_batch_max_concurrent(),  # Wishlist always does single-track downloads, not folder grabs
-                'queue_index': 0,
-                'analysis_total': len(wishlist_tracks),
-                'analysis_processed': 0,
-                'analysis_results': [],
-                # Track state management (replicating sync.py)
-                'permanently_failed_tracks': [],
-                'cancelled_tracks': set(),
-                # Wishlist tracks are already known-missing — always skip the library check
-                'force_download_all': True,
-                # Profile context for failed track wishlist re-adds
-                'profile_id': manual_profile_id
-            }
-
-        # Submit the wishlist processing job using the same processing function
-        missing_download_executor.submit(_run_full_missing_tracks_process, batch_id, playlist_id, wishlist_tracks)
-
-        return jsonify({
-            "success": True,
-            "batch_id": batch_id
-        })
+        payload, status_code = _start_manual_wishlist_download_batch(
+            manual_runtime,
+            track_ids=data.get('track_ids'),
+            category=data.get('category'),
+            force_download_all=data.get('force_download_all', False),
+        )
+        return jsonify(payload), status_code
         
     except Exception as e:
         logger.error(f"Error starting wishlist download process: {e}")
@@ -19026,36 +18413,17 @@ def clear_wishlist():
     """Endpoint to clear all tracks from the wishlist.
     Also cancels any active wishlist download batch so cleared tracks don't keep downloading."""
     try:
-        from core.wishlist_service import get_wishlist_service
-        wishlist_service = get_wishlist_service()
-        success = wishlist_service.clear_wishlist(profile_id=get_current_profile_id())
+        def _reset_wishlist_processing_state():
+            global wishlist_auto_processing, wishlist_auto_processing_timestamp
+            with wishlist_timer_lock:
+                wishlist_auto_processing = False
+                wishlist_auto_processing_timestamp = 0
 
-        if success:
-            # Cancel any active wishlist download batch
-            cancelled_count = 0
-            with tasks_lock:
-                for _batch_id, batch_data in download_batches.items():
-                    if batch_data.get('playlist_id') == 'wishlist' and batch_data.get('phase') not in ('complete', 'error', 'cancelled'):
-                        batch_data['phase'] = 'cancelled'
-                        for task_id in batch_data.get('queue', []):
-                            if task_id in download_tasks and download_tasks[task_id]['status'] not in ('completed', 'failed', 'not_found', 'cancelled'):
-                                download_tasks[task_id]['status'] = 'cancelled'
-                                cancelled_count += 1
-
-                # Reset wishlist auto-processing flag
-                global wishlist_auto_processing, wishlist_auto_processing_timestamp
-                with wishlist_timer_lock:
-                    wishlist_auto_processing = False
-                    wishlist_auto_processing_timestamp = 0
-
-            if cancelled_count > 0:
-                logger.warning(f"[Wishlist Clear] Cancelled {cancelled_count} active wishlist downloads")
-                add_activity_item("", "Wishlist Cleared", f"Wishlist cleared and {cancelled_count} downloads cancelled", "Now")
-
-            return jsonify({"success": True, "message": "Wishlist cleared successfully", "cancelled_downloads": cancelled_count})
-        else:
-            return jsonify({"success": False, "error": "Failed to clear wishlist"}), 500
-
+        runtime = _build_wishlist_route_runtime(
+            reset_wishlist_processing_state=_reset_wishlist_processing_state,
+        )
+        payload, status_code = _wishlist_clear_wishlist(runtime)
+        return jsonify(payload), status_code
     except Exception as e:
         logger.error(f"Error clearing wishlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -19070,81 +18438,13 @@ def cleanup_wishlist():
         wishlist_service = get_wishlist_service()
         db = MusicDatabase()
         active_server = config_manager.get_active_media_server()
-        
-        logger.info("[Wishlist Cleanup] Starting wishlist cleanup process...")
-
-        # Get wishlist tracks for current profile
-        cleanup_profile_id = get_current_profile_id()
-        wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=cleanup_profile_id)
-        if not wishlist_tracks:
-            return jsonify({"success": True, "message": "No tracks in wishlist to clean up", "removed_count": 0})
-
-        logger.info(f"[Wishlist Cleanup] Found {len(wishlist_tracks)} tracks in wishlist")
-        
-        removed_count = 0
-        processed_count = 0
-        
-        for track in wishlist_tracks:
-            processed_count += 1
-            track_name = track.get('name', '')
-            artists = track.get('artists', [])
-            spotify_track_id = track.get('spotify_track_id') or track.get('id')
-            track_album = track.get('album', {}).get('name') if isinstance(track.get('album'), dict) else track.get('album')
-
-            # Skip if no essential data
-            if not track_name or not artists or not spotify_track_id:
-                continue
-
-            logger.info(f"[Wishlist Cleanup] Checking track {processed_count}/{len(wishlist_tracks)}: '{track_name}'")
-
-            # Check each artist
-            found_in_db = False
-            for artist in artists:
-                # Handle both string format and dict format
-                if isinstance(artist, str):
-                    artist_name = artist
-                elif isinstance(artist, dict) and 'name' in artist:
-                    artist_name = artist['name']
-                else:
-                    artist_name = str(artist)
-
-                try:
-                    db_track, confidence = db.check_track_exists(
-                        track_name, artist_name,
-                        confidence_threshold=0.7,
-                        server_source=active_server,
-                        album=track_album
-                    )
-                    
-                    if db_track and confidence >= 0.7:
-                        found_in_db = True
-                        logger.info(f"[Wishlist Cleanup] Track found in database: '{track_name}' by {artist_name} (confidence: {confidence:.2f})")
-                        break
-                        
-                except Exception as db_error:
-                    logger.error(f"[Wishlist Cleanup] Error checking database for track '{track_name}': {db_error}")
-                    continue
-            
-            # If found in database, remove from wishlist
-            if found_in_db:
-                try:
-                    removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
-                    if removed:
-                        removed_count += 1
-                        logger.info(f"[Wishlist Cleanup] Removed track from wishlist: '{track_name}' ({spotify_track_id})")
-                    else:
-                        logger.error(f"[Wishlist Cleanup] Failed to remove track from wishlist: '{track_name}' ({spotify_track_id})")
-                except Exception as remove_error:
-                    logger.error(f"[Wishlist Cleanup] Error removing track from wishlist: {remove_error}")
-        
-        logger.info(f"[Wishlist Cleanup] Completed cleanup: {removed_count} tracks removed from wishlist")
-        
-        return jsonify({
-            "success": True, 
-            "message": f"Wishlist cleanup completed: {removed_count} tracks removed",
-            "removed_count": removed_count,
-            "processed_count": processed_count
-        })
+        payload, status_code = _cleanup_wishlist_against_library(
+            wishlist_service,
+            db,
+            get_current_profile_id(),
+            active_server,
+        )
+        return jsonify(payload), status_code
         
     except Exception as e:
         logger.error(f"Error in wishlist cleanup: {e}")
@@ -19156,24 +18456,11 @@ def cleanup_wishlist():
 def remove_track_from_wishlist():
     """Endpoint to remove a single track from the wishlist."""
     try:
-        from core.wishlist_service import get_wishlist_service
-
         data = request.get_json()
         spotify_track_id = data.get('spotify_track_id')
-
-        if not spotify_track_id:
-            return jsonify({"success": False, "error": "No spotify_track_id provided"}), 400
-
-        wishlist_service = get_wishlist_service()
-        success = wishlist_service.remove_track_from_wishlist(spotify_track_id, profile_id=get_current_profile_id())
-
-        if success:
-            logger.info(f"Successfully removed track from wishlist: {spotify_track_id}")
-            return jsonify({"success": True, "message": "Track removed from wishlist"})
-        else:
-            logger.warning(f"Failed to remove track from wishlist: {spotify_track_id}")
-            return jsonify({"success": False, "error": "Track not found in wishlist"}), 404
-
+        runtime = _build_wishlist_route_runtime()
+        payload, status_code = _wishlist_remove_track_from_wishlist(runtime, spotify_track_id)
+        return jsonify(payload), status_code
     except Exception as e:
         logger.error(f"Error removing track from wishlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -19182,87 +18469,16 @@ def remove_track_from_wishlist():
 def remove_album_from_wishlist():
     """Endpoint to remove all tracks from an album from the wishlist."""
     try:
-        from core.wishlist_service import get_wishlist_service
-        import json
-
         data = request.get_json()
         album_id = data.get('album_id')
         album_name_filter = data.get('album_name')
-
-        if not album_id and not album_name_filter:
-            return jsonify({"success": False, "error": "No album_id or album_name provided"}), 400
-
-        wishlist_service = get_wishlist_service()
-        all_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=get_current_profile_id())
-
-        # Find all tracks that belong to this album
-        tracks_to_remove = []
-        for track in all_tracks:
-            spotify_data = track.get('spotify_data', {})
-            if isinstance(spotify_data, str):
-                try:
-                    spotify_data = json.loads(spotify_data)
-                except:
-                    spotify_data = {}
-
-            # Get album ID - safely handle null album data
-            album_data = spotify_data.get('album') or {}
-            if not isinstance(album_data, dict):
-                album_data = {}
-            track_album_id = album_data.get('id')
-
-            if not track_album_id:
-                # Create custom ID matching frontend logic exactly
-                # album_data is guaranteed to be a dict from above check
-                album_name = album_data.get('name', 'Unknown Album')
-                artists = spotify_data.get('artists', [])
-                if artists and isinstance(artists[0], dict):
-                    artist_name = artists[0].get('name', 'Unknown Artist')
-                elif artists and isinstance(artists[0], str):
-                    artist_name = artists[0]
-                else:
-                    artist_name = 'Unknown Artist'
-                custom_id = f"{album_name}_{artist_name}"
-                # Match frontend regex exactly:
-                # 1. Remove all special chars except spaces, underscores, hyphens: /[^a-zA-Z0-9\s_-]/g
-                # 2. Replace consecutive whitespace with single underscore: /\s+/g
-                track_album_id = re.sub(r'[^a-zA-Z0-9\s_-]', '', custom_id)  # Remove special chars
-                track_album_id = re.sub(r'\s+', '_', track_album_id).lower()  # Replace spaces & lowercase
-
-            # Match by album ID or album name
-            matched = False
-            if album_id and track_album_id == album_id:
-                matched = True
-            elif album_name_filter:
-                track_album_name = album_data.get('name', '')
-                if isinstance(spotify_data.get('album'), str):
-                    track_album_name = spotify_data['album']
-                if track_album_name and track_album_name.lower().strip() == album_name_filter.lower().strip():
-                    matched = True
-
-            if matched:
-                spotify_track_id = track.get('spotify_track_id') or track.get('id')
-                if spotify_track_id:
-                    tracks_to_remove.append(spotify_track_id)
-
-        # Remove all matching tracks
-        removed_count = 0
-        album_remove_pid = get_current_profile_id()
-        for spotify_track_id in tracks_to_remove:
-            if wishlist_service.remove_track_from_wishlist(spotify_track_id, profile_id=album_remove_pid):
-                removed_count += 1
-
-        if removed_count > 0:
-            logger.info(f"Successfully removed {removed_count} tracks from album {album_id}")
-            return jsonify({
-                "success": True,
-                "message": f"Removed {removed_count} track(s) from wishlist",
-                "removed_count": removed_count
-            })
-        else:
-            logger.warning(f"No tracks found for album {album_id}")
-            return jsonify({"success": False, "error": "No tracks found for this album"}), 404
-
+        runtime = _build_wishlist_route_runtime()
+        payload, status_code = _wishlist_remove_album_from_wishlist(
+            runtime,
+            album_id=album_id,
+            album_name_filter=album_name_filter,
+        )
+        return jsonify(payload), status_code
     except Exception as e:
         logger.error(f"Error removing album from wishlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -19271,28 +18487,11 @@ def remove_album_from_wishlist():
 def remove_batch_from_wishlist():
     """Endpoint to remove multiple tracks from the wishlist."""
     try:
-        from core.wishlist_service import get_wishlist_service
-
         data = request.get_json()
         spotify_track_ids = data.get('spotify_track_ids', [])
-
-        if not spotify_track_ids or not isinstance(spotify_track_ids, list):
-            return jsonify({"success": False, "error": "Missing or invalid spotify_track_ids"}), 400
-
-        wishlist_service = get_wishlist_service()
-        removed = 0
-        pid = get_current_profile_id()
-        for track_id in spotify_track_ids:
-            if wishlist_service.remove_track_from_wishlist(track_id, profile_id=pid):
-                removed += 1
-
-        logger.info(f"Batch removed {removed} track(s) from wishlist")
-        return jsonify({
-            "success": True,
-            "removed": removed,
-            "message": f"Removed {removed} track{'s' if removed != 1 else ''} from wishlist"
-        })
-
+        runtime = _build_wishlist_route_runtime()
+        payload, status_code = _wishlist_remove_batch_from_wishlist(runtime, spotify_track_ids)
+        return jsonify(payload), status_code
     except Exception as e:
         logger.error(f"Error batch removing from wishlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -19301,8 +18500,6 @@ def remove_batch_from_wishlist():
 def add_album_track_to_wishlist():
     """Endpoint to add a single track from an album to the wishlist."""
     try:
-        from core.wishlist_service import get_wishlist_service
-
         data = request.get_json()
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
@@ -19312,76 +18509,16 @@ def add_album_track_to_wishlist():
         album = data.get('album')
         source_type = data.get('source_type', 'album')
         source_context = data.get('source_context', {})
-
-        if not track or not artist or not album:
-            return jsonify({"success": False, "error": "Missing required fields: track, artist, album"}), 400
-
-        # Create Spotify track data format expected by wishlist service
-        # Handle both formats: Spotify API format (images array) and library format (image_url string)
-        album_images = []
-        if 'images' in album and album.get('images'):
-            # Spotify API format with images array
-            album_images = album['images']
-        elif 'image_url' in album and album.get('image_url'):
-            # Library format with single image_url - convert to Spotify format
-            album_images = [{'url': album['image_url'], 'height': 640, 'width': 640}]
-
-        spotify_track_data = {
-            'id': track.get('id'),
-            'name': track.get('name'),
-            'artists': track.get('artists', []),
-            'album': {
-                'id': album.get('id'),
-                'name': album.get('name'),
-                'artists': album.get('artists', []),
-                'images': album_images,
-                'album_type': album.get('album_type', 'album'),
-                'release_date': album.get('release_date', ''),
-                'total_tracks': album.get('total_tracks', 1)
-            },
-            'duration_ms': track.get('duration_ms', 0),
-            'track_number': track.get('track_number', 1),
-            'disc_number': track.get('disc_number', 1),
-            'explicit': track.get('explicit', False),
-            'popularity': track.get('popularity', 0),
-            'preview_url': track.get('preview_url'),
-            'external_urls': track.get('external_urls', {})
-        }
-
-        # Add source context information
-        enhanced_source_context = {
-            **source_context,
-            'artist_id': artist.get('id'),
-            'artist_name': artist.get('name'),
-            'album_id': album.get('id'),
-            'album_name': album.get('name'),
-            'added_via': 'library_wishlist_modal'
-        }
-
-        # Get wishlist service and add track
-        wishlist_service = get_wishlist_service()
-
-        success = wishlist_service.add_spotify_track_to_wishlist(
-            spotify_track_data=spotify_track_data,
-            failure_reason="Added from library (incomplete album)",
+        runtime = _build_wishlist_route_runtime()
+        payload, status_code = _wishlist_add_album_track_to_wishlist(
+            runtime,
+            track=track,
+            artist=artist,
+            album=album,
             source_type=source_type,
-            source_context=enhanced_source_context,
-            profile_id=get_current_profile_id()
+            source_context=source_context,
         )
-
-        if success:
-            logger.info(f"Added track '{track.get('name')}' by '{artist.get('name')}' to wishlist")
-            return jsonify({
-                "success": True,
-                "message": f"Added '{track.get('name')}' to wishlist"
-            })
-        else:
-            logger.error(f"Failed to add track '{track.get('name')}' to wishlist")
-            return jsonify({
-                "success": False,
-                "error": "Failed to add track to wishlist"
-            })
-
+        return jsonify(payload), status_code
     except Exception as e:
         logger.error(f"Error adding track to wishlist: {e}")
         import traceback
@@ -20865,101 +20002,6 @@ def _start_next_batch_of_downloads(batch_id):
 
 
 
-def _get_track_artist_name(track_info):
-    """Extract artist name from track info, handling different data formats (replicating sync.py)"""
-    if not track_info:
-        return "Unknown Artist"
-    
-    # Handle Spotify API format with artists array
-    artists = track_info.get('artists', [])
-    if artists and len(artists) > 0:
-        if isinstance(artists[0], dict) and 'name' in artists[0]:
-            return artists[0]['name']
-        elif isinstance(artists[0], str):
-            return artists[0]
-    
-    # Fallback to single artist field
-    artist = track_info.get('artist')
-    if artist:
-        return artist
-        
-    return "Unknown Artist"
-
-def _ensure_spotify_track_format(track_info):
-    """
-    Ensure track_info has proper Spotify track structure for wishlist service.
-    Converts webui track format to match sync.py's spotify_track format.
-    """
-    if not track_info:
-        return {}
-    
-    # If it already has the proper Spotify structure, return as-is
-    if isinstance(track_info.get('artists'), list) and len(track_info.get('artists', [])) > 0:
-        first_artist = track_info['artists'][0]
-        if isinstance(first_artist, dict) and 'name' in first_artist:
-            # Already has proper Spotify format
-            return track_info
-    
-    # Convert to proper Spotify format
-    artists_list = []
-    
-    # Handle different artist formats from webui
-    artists = track_info.get('artists', [])
-    if artists:
-        if isinstance(artists, list):
-            for artist in artists:
-                if isinstance(artist, dict) and 'name' in artist:
-                    artists_list.append({'name': artist['name']})
-                elif isinstance(artist, str):
-                    artists_list.append({'name': artist})
-                else:
-                    artists_list.append({'name': str(artist)})
-        else:
-            # Single artist as string
-            artists_list.append({'name': str(artists)})
-    else:
-        # Fallback: try single artist field
-        artist = track_info.get('artist')
-        if artist:
-            artists_list.append({'name': str(artist)})
-        else:
-            artists_list.append({'name': 'Unknown Artist'})
-    
-    # Build album object — preserve ALL fields (id, release_date, total_tracks,
-    # album_type, images, etc.) so wishlist tracks retain full album context
-    # for correct folder placement, multi-disc support, and classification
-    album_data = track_info.get('album', {})
-    if isinstance(album_data, dict):
-        album = dict(album_data)  # Copy all fields
-        album.setdefault('name', 'Unknown Album')
-    else:
-        album = {
-            'name': str(album_data) if album_data else track_info.get('name', 'Unknown Album'),
-            'album_type': 'single',
-            'total_tracks': 1,
-            'release_date': '',
-        }
-    album.setdefault('images', [])
-    album.setdefault('album_type', 'album')
-    album.setdefault('total_tracks', 0)
-
-    # Build proper Spotify track structure
-    spotify_track = {
-        'id': track_info.get('id', f"webui_{hash(str(track_info))}"),
-        'name': track_info.get('name', 'Unknown Track'),
-        'artists': artists_list,  # Proper Spotify format
-        'album': album,
-        'duration_ms': track_info.get('duration_ms', 0),
-        'track_number': track_info.get('track_number', 1),
-        'disc_number': track_info.get('disc_number', 1),
-        'preview_url': track_info.get('preview_url'),
-        'external_urls': track_info.get('external_urls', {}),
-        'popularity': track_info.get('popularity', 0),
-        'source': 'webui_modal'  # Mark as coming from webui
-    }
-
-    return spotify_track
-
 def _process_failed_tracks_to_wishlist_exact(batch_id):
     """
     Process failed and cancelled tracks to wishlist - EXACT replication of sync.py's on_all_downloads_complete() logic.
@@ -20967,7 +20009,6 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
     """
     try:
         from core.wishlist_service import get_wishlist_service
-        from datetime import datetime
         
         logger.info(f"[Wishlist Processing] Starting wishlist processing for batch {batch_id}")
 
@@ -20988,83 +20029,34 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         
         # STEP 0: Remove completed tracks from wishlist (THIS WAS MISSING!)
         logger.info("[Wishlist Processing] Checking completed tracks for wishlist removal")
-        for task_id in batch.get('queue', []):
-            if task_id in download_tasks:
-                task = download_tasks[task_id]
-                if task.get('status') == 'completed':
-                    try:
-                        track_info = task.get('track_info', {})
-                        context = {'track_info': track_info, 'original_search_result': track_info}
-                        _check_and_remove_from_wishlist(context)
-                    except Exception as e:
-                        logger.error(f"[Wishlist Processing] Error removing completed track from wishlist: {e}")
+        _remove_completed_tracks_from_wishlist(
+            batch,
+            download_tasks,
+            _check_and_remove_from_wishlist,
+        )
         
         # STEP 1: Add cancelled tracks that were missing to permanently_failed_tracks (replicating sync.py)
         # This matches sync.py's logic for adding cancelled missing tracks to the failed list
         if cancelled_tracks:
             logger.warning(f"[Wishlist Processing] Processing {len(cancelled_tracks)} cancelled tracks")
-            
-            # Process cancelled tracks with safeguard to prevent infinite loops
-            processed_count = 0
-            max_process = 100  # Safety limit
-            
-            with tasks_lock:
-                for task_id in batch.get('queue', [])[:max_process]:  # Limit processing
-                    if task_id in download_tasks:
-                        task = download_tasks[task_id]
-                        track_index = task.get('track_index', 0)
-                        if track_index in cancelled_tracks:
-                            # Check if track was actually missing (not successfully downloaded)
-                            task_status = task.get('status', 'unknown')
-                            if task_status != 'completed':
-                                # Build cancelled track info matching sync.py format
-                                original_track_info = task.get('track_info', {})
-                                spotify_track_data = _ensure_spotify_track_format(original_track_info)
-                                
-                                cancelled_track_info = {
-                                    'download_index': track_index,
-                                    'table_index': track_index,
-                                    'track_name': original_track_info.get('name', 'Unknown Track'),
-                                    'artist_name': _get_track_artist_name(original_track_info),
-                                    'retry_count': 0,
-                                    'spotify_track': spotify_track_data,  # Properly formatted spotify track
-                                    'failure_reason': 'Download cancelled',
-                                    'candidates': task.get('cached_candidates', [])
-                                }
-                                
-                                # Check if not already in permanently_failed_tracks (sync.py does this check)
-                                if not any(t.get('table_index') == track_index for t in permanently_failed_tracks):
-                                    permanently_failed_tracks.append(cancelled_track_info)
-                                    processed_count += 1
-                                    logger.error(f"[Wishlist Processing] Added cancelled missing track {cancelled_track_info['track_name']} to failed list for wishlist")
-            
+            processed_count = _add_cancelled_tracks_to_failed_tracks(
+                batch,
+                download_tasks,
+                permanently_failed_tracks,
+            )
             logger.warning(f"[Wishlist Processing] Processed {processed_count} cancelled tracks")
 
         # STEP 1.5: Recover any failed/not_found tasks not captured in permanently_failed_tracks.
         # Stuck detection (in _on_download_completed, _check_batch_completion_v2, and the Safety Valve)
         # can force-mark tasks as not_found/failed without adding them to permanently_failed_tracks,
         # causing them to silently skip wishlist processing.
-        with tasks_lock:
-            for task_id in batch.get('queue', []):
-                if task_id in download_tasks:
-                    task = download_tasks[task_id]
-                    if task['status'] in ('failed', 'not_found'):
-                        track_index = task.get('track_index', 0)
-                        if not any(t.get('table_index') == track_index for t in permanently_failed_tracks):
-                            original_track_info = task.get('track_info', {})
-                            spotify_track_data = _ensure_spotify_track_format(original_track_info)
-                            recovered_track_info = {
-                                'download_index': track_index,
-                                'table_index': track_index,
-                                'track_name': original_track_info.get('name', 'Unknown Track'),
-                                'artist_name': _get_track_artist_name(original_track_info),
-                                'retry_count': task.get('retry_count', 0),
-                                'spotify_track': spotify_track_data,
-                                'failure_reason': task.get('error_message', 'Download failed'),
-                                'candidates': task.get('cached_candidates', [])
-                            }
-                            permanently_failed_tracks.append(recovered_track_info)
-                            logger.error(f"[Wishlist Processing] Recovered uncaptured failed track for wishlist: {recovered_track_info['track_name']}")
+        recovered_count = _recover_uncaptured_failed_tracks(
+            batch,
+            download_tasks,
+            permanently_failed_tracks,
+        )
+        if recovered_count:
+            logger.warning(f"[Wishlist Processing] Recovered {recovered_count} uncaptured failed tracks for wishlist")
 
         # STEP 2: Add permanently failed tracks to wishlist (exact sync.py logic)
         failed_count = len(permanently_failed_tracks)
@@ -21078,12 +20070,7 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                 wishlist_service = get_wishlist_service()
                 
                 # Create source_context identical to sync.py
-                source_context = {
-                    'playlist_name': batch.get('playlist_name', 'Unknown Playlist'),
-                    'playlist_id': batch.get('playlist_id', None),
-                    'added_from': 'webui_modal',  # Distinguish from sync_page_modal
-                    'timestamp': datetime.now().isoformat()
-                }
+                source_context = _build_wishlist_source_context(batch)
                 
                 # Process each failed track (matching sync.py's loop) with safety limit
                 max_failed_tracks = min(len(permanently_failed_tracks), 50)  # Safety limit
@@ -21201,62 +20188,31 @@ def _process_failed_tracks_to_wishlist_exact_with_auto_completion(batch_id):
     This extends the standard processing with automatic scheduling of the next cycle.
     """
     global wishlist_auto_processing
+    global wishlist_auto_processing_timestamp
     
     try:
         logger.info(f"[Auto-Wishlist] Processing completion for auto-initiated batch {batch_id}")
         
-        # Run standard wishlist processing
         completion_summary = _process_failed_tracks_to_wishlist_exact(batch_id)
-        
-        # Log auto-processing completion
-        tracks_added = completion_summary.get('tracks_added', 0)
-        total_failed = completion_summary.get('total_failed', 0)
-        logger.error(f"[Auto-Wishlist] Background processing complete: {tracks_added} added to wishlist, {total_failed} failed")
-        
-        # Add activity for wishlist processing
-        if tracks_added > 0:
-            add_activity_item("", "Wishlist Updated", f"{tracks_added} failed tracks added to wishlist", "Now")
 
-        # TOGGLE CYCLE: Switch to next category for next run
-        try:
-            with tasks_lock:
-                if batch_id in download_batches:
-                    current_cycle = download_batches[batch_id].get('current_cycle', 'albums')
-                else:
-                    current_cycle = 'albums'  # Default fallback
+        def _reset_auto_processing_state():
+            global wishlist_auto_processing, wishlist_auto_processing_timestamp
+            with wishlist_timer_lock:
+                wishlist_auto_processing = False
+                wishlist_auto_processing_timestamp = 0
 
-            next_cycle = 'singles' if current_cycle == 'albums' else 'albums'
+        from database.music_database import MusicDatabase
 
-            from database.music_database import MusicDatabase
-            db = MusicDatabase()
-            with db._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT OR REPLACE INTO metadata (key, value, updated_at)
-                    VALUES ('wishlist_cycle', ?, CURRENT_TIMESTAMP)
-                """, (next_cycle,))
-                conn.commit()
-
-            logger.info(f"[Auto-Wishlist] Cycle toggled after completion: {current_cycle} → {next_cycle}")
-        except Exception as cycle_error:
-            logger.error(f"[Auto-Wishlist] Error toggling cycle: {cycle_error}")
-
-        # Mark auto-processing as complete and reset timestamp
-        with wishlist_timer_lock:
-            wishlist_auto_processing = False
-            wishlist_auto_processing_timestamp = 0
-
-        try:
-            if automation_engine:
-                automation_engine.emit('wishlist_processing_completed', {
-                    'tracks_processed': str(total_failed),
-                    'tracks_found': str(tracks_added),
-                    'tracks_failed': str(total_failed - tracks_added),
-                })
-        except Exception:
-            pass
-
-        return completion_summary
+        return _finalize_auto_wishlist_completion(
+            batch_id,
+            completion_summary,
+            download_batches=download_batches,
+            tasks_lock=tasks_lock,
+            reset_processing_state=_reset_auto_processing_state,
+            add_activity_item=add_activity_item,
+            automation_engine=automation_engine,
+            db_factory=MusicDatabase,
+        )
 
     except Exception as e:
         logger.error(f"[Auto-Wishlist] Error in auto-completion processing: {e}")
@@ -21311,6 +20267,7 @@ def _build_master_deps():
         start_next_batch_of_downloads=_start_next_batch_of_downloads,
         reset_wishlist_auto_processing=_reset_wishlist_auto_processing,
     )
+
 
 
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
@@ -22735,69 +21692,13 @@ def _add_cancelled_task_to_wishlist(task):
     try:
         from core.wishlist_service import get_wishlist_service
         wishlist_service = get_wishlist_service()
-        
-        track_info = task.get('track_info', {})
-        artists_data = track_info.get('artists', [])
-        formatted_artists = []
-        
-        for artist in artists_data:
-            if isinstance(artist, str):
-                formatted_artists.append({'name': artist})
-            elif isinstance(artist, dict):
-                if 'name' in artist and isinstance(artist['name'], str):
-                    formatted_artists.append(artist)
-                elif 'name' in artist and isinstance(artist['name'], dict) and 'name' in artist['name']:
-                    formatted_artists.append({'name': artist['name']['name']})
-                else:
-                    formatted_artists.append({'name': str(artist)})
-            else:
-                formatted_artists.append({'name': str(artist)})
-        
-        # Build album data - preserve all fields (including artists) for correct folder placement
-        album_raw = track_info.get('album', {})
-        if isinstance(album_raw, dict):
-            album_data = dict(album_raw)  # Copy all fields including artists
-            album_data.setdefault('name', 'Unknown Album')
-            album_data.setdefault('album_type', track_info.get('album_type', 'album'))
-            # Add images fallback if not present
-            if 'images' not in album_data and track_info.get('album_image_url'):
-                album_data['images'] = [{'url': track_info.get('album_image_url')}]
-        else:
-            # album is a string (album name)
-            album_data = {
-                'name': str(album_raw) if album_raw else 'Unknown Album',
-                'album_type': track_info.get('album_type', 'album')
-            }
-            # Add album image if available
-            if track_info.get('album_image_url'):
-                album_data['images'] = [{'url': track_info.get('album_image_url')}]
-
-        spotify_track_data = {
-            'id': track_info.get('id'),
-            'name': track_info.get('name'),
-            'artists': formatted_artists,
-            'album': album_data,
-            'duration_ms': track_info.get('duration_ms')
-        }
-
-        source_context = {
-            'playlist_name': task.get('playlist_name', 'Unknown Playlist'),
-            'playlist_id': task.get('playlist_id'),
-            'added_from': 'modal_cancellation_v2'
-        }
-
-        success = wishlist_service.add_spotify_track_to_wishlist(
-            spotify_track_data=spotify_track_data,
-            failure_reason="Download cancelled by user (v2)",
-            source_type="playlist",
-            source_context=source_context,
-            profile_id=get_current_profile_id()
-        )
+        payload = _build_cancelled_task_wishlist_payload(task, profile_id=get_current_profile_id())
+        success = wishlist_service.add_spotify_track_to_wishlist(**payload)
         
         if success:
-            logger.info(f"[Atomic Cancel] Added '{track_info.get('name')}' to wishlist")
+            logger.info(f"[Atomic Cancel] Added '{task.get('track_info', {}).get('name')}' to wishlist")
         else:
-            logger.error(f"[Atomic Cancel] Failed to add '{track_info.get('name')}' to wishlist")
+            logger.error(f"[Atomic Cancel] Failed to add '{task.get('track_info', {}).get('name')}' to wishlist")
             
     except Exception as e:
         logger.error(f"[Atomic Cancel] Critical error adding to wishlist: {e}")

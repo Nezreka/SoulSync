@@ -323,7 +323,7 @@ def test_youtube_task_uses_get_download_status_to_resolve_path(monkeypatch):
     assert any(c[0] == 'mark_completed' for c in rec.calls)
 
 
-def test_fuzzy_context_matching_when_exact_key_missing():
+def test_fuzzy_context_matching_when_exact_key_missing(monkeypatch):
     """When exact key isn't in matched_downloads_context, worker tries fuzzy match
     constrained to same Soulseek username."""
     download_tasks['t1'] = {
@@ -339,6 +339,7 @@ def test_fuzzy_context_matching_when_exact_key_missing():
     deps, rec = _build_deps(
         find_completed_file=lambda *a, **kw: (None, None),  # file not found
     )
+    monkeypatch.setattr(pp.time, 'sleep', lambda s: None)
     # Won't find file → marks failed. But the fuzzy match log path executes.
     pp.run_post_processing_worker('t1', 'b1', deps)
     assert download_tasks['t1']['status'] == 'failed'
