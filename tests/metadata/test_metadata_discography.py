@@ -41,16 +41,18 @@ if "config.settings" not in sys.modules:
     sys.modules["config"] = config_pkg
     sys.modules["config.settings"] = settings_mod
 
-from core import metadata_service
-from core.metadata_service import MetadataLookupOptions
+from core.metadata import registry as metadata_registry
+from core.metadata import completion as metadata_completion
+from core.metadata import discography as metadata_discography
+from core.metadata.lookup import MetadataLookupOptions
 from database.music_database import MusicDatabase
 
 
 @pytest.fixture(autouse=True)
 def _clear_metadata_client_cache():
-    metadata_service.clear_cached_metadata_clients()
+    metadata_registry.clear_cached_metadata_clients()
     yield
-    metadata_service.clear_cached_metadata_clients()
+    metadata_registry.clear_cached_metadata_clients()
 
 
 class _FakeSourceClient:
@@ -117,11 +119,11 @@ def test_get_artist_discography_uses_primary_then_fallback(monkeypatch):
         "itunes": itunes,
     }
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: clients.get(source))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: clients.get(source))
 
-    result = metadata_service.get_artist_discography("artist-1", "Artist One", MetadataLookupOptions())
+    result = metadata_discography.get_artist_discography("artist-1", "Artist One", MetadataLookupOptions())
 
     assert result["source"] == "spotify"
     assert result["source_priority"] == ["deezer", "spotify", "itunes"]
@@ -152,11 +154,11 @@ def test_get_artist_discography_uses_name_search_when_direct_lookup_missing(monk
     )
     clients = {"deezer": deezer}
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: clients.get(source))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: clients.get(source))
 
-    result = metadata_service.get_artist_discography("artist-1", "Artist One", MetadataLookupOptions())
+    result = metadata_discography.get_artist_discography("artist-1", "Artist One", MetadataLookupOptions())
 
     assert result["source"] == "deezer"
     assert [album["id"] for album in result["albums"]] == ["deezer-album-1"]
@@ -189,11 +191,11 @@ def test_get_artist_discography_respects_source_override_without_fallback(monkey
         "spotify": spotify,
     }
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: clients.get(source))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: clients.get(source))
 
-    result = metadata_service.get_artist_discography(
+    result = metadata_discography.get_artist_discography(
         "artist-1",
         "Artist One",
         MetadataLookupOptions(source_override="itunes", allow_fallback=False),
@@ -231,16 +233,16 @@ def test_get_artist_discography_uses_hydrabase_fast_path_when_active(monkeypatch
     )
     clients = {"deezer": None, "spotify": None, "itunes": None}
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes", "hydrabase"])
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes", "hydrabase"])
     def fake_get_client_for_source(source):
         if source == "hydrabase":
             return hydrabase
         return clients.get(source)
 
-    monkeypatch.setattr(metadata_service, "get_client_for_source", fake_get_client_for_source)
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", fake_get_client_for_source)
 
-    result = metadata_service.get_artist_discography("artist-1", "Artist One", MetadataLookupOptions())
+    result = metadata_discography.get_artist_discography("artist-1", "Artist One", MetadataLookupOptions())
 
     assert result["source"] == "hydrabase"
     assert [album["id"] for album in result["albums"]] == ["hydrabase-album-1"]
@@ -298,12 +300,12 @@ def test_iter_artist_discography_completion_uses_primary_source_first(monkeypatc
         "itunes": itunes,
     }
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: clients.get(source))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: clients.get(source))
 
     db = _CompletionFakeDB(owned_tracks=1, expected_tracks=2)
-    events = list(metadata_service.iter_artist_discography_completion_events(
+    events = list(metadata_completion.iter_artist_discography_completion_events(
         {
             "albums": [{"id": "release-1", "name": "Album One", "total_tracks": 0}],
             "singles": [],
@@ -337,12 +339,12 @@ def test_iter_artist_discography_completion_respects_source_override(monkeypatch
         "itunes": itunes,
     }
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: clients.get(source))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: clients.get(source))
 
     db = _CompletionFakeDB(owned_tracks=1, expected_tracks=3)
-    events = list(metadata_service.iter_artist_discography_completion_events(
+    events = list(metadata_completion.iter_artist_discography_completion_events(
         {
             "albums": [{"id": "release-2", "name": "Album Two", "total_tracks": 0}],
             "singles": [],
@@ -362,12 +364,12 @@ def test_iter_artist_discography_completion_uses_release_artist_metadata(monkeyp
     source = _FakeSourceClient()
     clients = {"deezer": source}
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source_name: clients.get(source_name))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source_name, **kwargs: clients.get(source_name))
 
     db = _CompletionFakeDB(owned_tracks=1, expected_tracks=2)
-    events = list(metadata_service.iter_artist_discography_completion_events(
+    events = list(metadata_completion.iter_artist_discography_completion_events(
         {
             "albums": [{
                 "id": "release-3",
@@ -389,8 +391,7 @@ def test_iter_artist_discography_completion_uses_release_artist_metadata(monkeyp
 
 def test_get_artist_detail_discography_classifies_release_types(monkeypatch):
     monkeypatch.setattr(
-        metadata_service,
-        "get_artist_discography",
+        "core.metadata.discography.get_artist_discography",
         lambda artist_id, artist_name='', options=None: {
             "albums": [
                 {
@@ -425,7 +426,7 @@ def test_get_artist_detail_discography_classifies_release_types(monkeypatch):
         },
     )
 
-    result = metadata_service.get_artist_detail_discography("artist-1", "Artist One", MetadataLookupOptions())
+    result = metadata_discography.get_artist_detail_discography("artist-1", "Artist One", MetadataLookupOptions())
 
     assert result["success"] is True
     assert result["source"] == "deezer"
@@ -440,8 +441,7 @@ def test_get_artist_detail_discography_classifies_release_types(monkeypatch):
 
 def test_get_artist_detail_discography_dedups_variant_releases(monkeypatch):
     monkeypatch.setattr(
-        metadata_service,
-        "get_artist_discography",
+        "core.metadata.discography.get_artist_discography",
         lambda artist_id, artist_name='', options=None: {
             "albums": [
                 {
@@ -475,7 +475,7 @@ def test_get_artist_detail_discography_dedups_variant_releases(monkeypatch):
         },
     )
 
-    result = metadata_service.get_artist_detail_discography("artist-1", "Artist One", MetadataLookupOptions())
+    result = metadata_discography.get_artist_detail_discography("artist-1", "Artist One", MetadataLookupOptions())
 
     assert result["success"] is True
     assert [album["id"] for album in result["albums"]] == ["album-standard"]
@@ -489,8 +489,7 @@ def test_get_artist_detail_discography_keeps_variants_when_dedup_disabled(monkey
     every release the source returns (matching the retired inline Artists
     page behaviour)."""
     monkeypatch.setattr(
-        metadata_service,
-        "get_artist_discography",
+        "core.metadata.discography.get_artist_discography",
         lambda artist_id, artist_name='', options=None: {
             "albums": [
                 {
@@ -524,7 +523,7 @@ def test_get_artist_detail_discography_keeps_variants_when_dedup_disabled(monkey
         },
     )
 
-    result = metadata_service.get_artist_detail_discography(
+    result = metadata_discography.get_artist_detail_discography(
         "artist-1",
         "Artist One",
         MetadataLookupOptions(dedup_variants=False),
@@ -558,11 +557,11 @@ def test_get_artist_discography_keeps_provider_artist_ids(monkeypatch):
     spotify = _SpotifyArtistIdClient()
     clients = {"spotify": spotify}
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "spotify")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: clients.get(source))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "spotify")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: clients.get(source))
 
-    result = metadata_service.get_artist_discography("364555966", "Amarok", MetadataLookupOptions())
+    result = metadata_discography.get_artist_discography("364555966", "Amarok", MetadataLookupOptions())
 
     assert result["source"] == "spotify"
     assert [album["id"] for album in result["albums"]] == ["spotify-release-1"]
@@ -601,11 +600,11 @@ def test_get_artist_discography_prefers_source_specific_artist_ids(monkeypatch):
         "deezer": deezer,
     }
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "spotify")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "deezer"])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: clients.get(source))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "spotify")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "deezer"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: clients.get(source))
 
-    result = metadata_service.get_artist_discography(
+    result = metadata_discography.get_artist_discography(
         "artist-1",
         "Artist One",
         MetadataLookupOptions(

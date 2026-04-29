@@ -38,7 +38,8 @@ if "config.settings" not in sys.modules:
     sys.modules["config"] = config_pkg
     sys.modules["config.settings"] = settings_mod
 
-from core import metadata_service
+from core.metadata import artist_image as metadata_artist_image
+from core.metadata import registry as metadata_registry
 
 
 class _FakeSpotifyClient:
@@ -101,15 +102,15 @@ def test_get_artist_image_url_uses_primary_source_priority(monkeypatch):
     deezer = _FakeDeezerClient()
     spotify = _FakeSpotifyClient()
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify"])
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify"])
     monkeypatch.setattr(
-        metadata_service,
+        metadata_registry,
         "get_client_for_source",
-        lambda source: {"deezer": deezer, "spotify": spotify}.get(source),
+        lambda source, **kwargs: {"deezer": deezer, "spotify": spotify}.get(source),
     )
 
-    image_url = metadata_service.get_artist_image_url("artist-1")
+    image_url = metadata_artist_image.get_artist_image_url("artist-1")
 
     assert image_url == "https://deezer.example/artist.jpg"
     assert deezer.calls == ["artist-1"]
@@ -120,15 +121,15 @@ def test_get_artist_image_url_uses_itunes_album_art_for_explicit_override(monkey
     itunes = _FakeItunesClient()
     spotify = _FakeSpotifyClient()
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "spotify")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "spotify")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "itunes"])
     monkeypatch.setattr(
-        metadata_service,
+        metadata_registry,
         "get_client_for_source",
-        lambda source: {"itunes": itunes, "spotify": spotify}.get(source),
+        lambda source, **kwargs: {"itunes": itunes, "spotify": spotify}.get(source),
     )
 
-    image_url = metadata_service.get_artist_image_url("12345", source_override="itunes")
+    image_url = metadata_artist_image.get_artist_image_url("12345", source_override="itunes")
 
     assert image_url == "https://itunes.example/artist.jpg"
     assert itunes.calls == ["12345"]
@@ -140,15 +141,15 @@ def test_get_artist_image_url_handles_hydrabase_plugin(monkeypatch):
     deezer = _FakeDeezerClient("https://deezer.example/hydra.jpg")
     spotify = _FakeSpotifyClient()
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "spotify")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "deezer"])
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "spotify")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "deezer"])
     monkeypatch.setattr(
-        metadata_service,
+        metadata_registry,
         "get_client_for_source",
-        lambda source: {"deezer": deezer, "spotify": spotify}.get(source),
+        lambda source, **kwargs: {"deezer": deezer, "spotify": spotify}.get(source),
     )
 
-    image_url = metadata_service.get_artist_image_url("artist-1", source_override="hydrabase", plugin="deezer")
+    image_url = metadata_artist_image.get_artist_image_url("artist-1", source_override="hydrabase", plugin="deezer")
 
     assert image_url == "https://deezer.example/hydra.jpg"
     assert deezer.calls == ["artist-1"]

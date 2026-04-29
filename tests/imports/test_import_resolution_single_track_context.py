@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from core import metadata_service
+from core.metadata import registry as metadata_registry
 from core.imports import resolution
 
 
@@ -67,12 +67,12 @@ def test_get_single_track_import_context_uses_primary_source_priority(monkeypatc
     )
     spotify_client = FakeClient()
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
     monkeypatch.setattr(
-        metadata_service,
+        metadata_registry,
         "get_client_for_source",
-        lambda source: {"deezer": deezer_client, "spotify": spotify_client, "itunes": None}.get(source),
+        lambda source, **kwargs: {"deezer": deezer_client, "spotify": spotify_client, "itunes": None}.get(source),
     )
 
     result = resolution.get_single_track_import_context("Song One", "Artist One")
@@ -101,12 +101,12 @@ def test_get_single_track_import_context_falls_back_to_next_source(monkeypatch):
         artist_details={"spotify-artist-1": {"id": "spotify-artist-1", "genres": ["indie"]}},
     )
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
     monkeypatch.setattr(
-        metadata_service,
+        metadata_registry,
         "get_client_for_source",
-        lambda source: {"deezer": deezer_client, "spotify": spotify_client, "itunes": None}.get(source),
+        lambda source, **kwargs: {"deezer": deezer_client, "spotify": spotify_client, "itunes": None}.get(source),
     )
 
     result = resolution.get_single_track_import_context("Song Two", "Artist Two")
@@ -134,12 +134,12 @@ def test_get_single_track_import_context_uses_explicit_override_first(monkeypatc
     )
     deezer_client = FakeClient()
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
     monkeypatch.setattr(
-        metadata_service,
+        metadata_registry,
         "get_client_for_source",
-        lambda source: {"deezer": deezer_client, "spotify": spotify_client, "itunes": None}.get(source),
+        lambda source, **kwargs: {"deezer": deezer_client, "spotify": spotify_client, "itunes": None}.get(source),
     )
 
     result = resolution.get_single_track_import_context(
@@ -167,12 +167,12 @@ def test_get_single_track_import_context_uses_explicit_override_source(monkeypat
     spotify_client = FakeClient()
     deezer_client = FakeClient()
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
     monkeypatch.setattr(
-        metadata_service,
+        metadata_registry,
         "get_client_for_source",
-        lambda source: {"deezer": deezer_client, "spotify": spotify_client, "itunes": itunes_client}.get(source),
+        lambda source, **kwargs: {"deezer": deezer_client, "spotify": spotify_client, "itunes": itunes_client}.get(source),
     )
 
     result = resolution.get_single_track_import_context(
@@ -199,12 +199,12 @@ def test_get_single_track_import_context_returns_fallback_payload_when_no_source
     spotify_client = FakeClient()
     itunes_client = FakeClient()
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
     monkeypatch.setattr(
-        metadata_service,
+        metadata_registry,
         "get_client_for_source",
-        lambda source: {"deezer": deezer_client, "spotify": spotify_client, "itunes": itunes_client}.get(source),
+        lambda source, **kwargs: {"deezer": deezer_client, "spotify": spotify_client, "itunes": itunes_client}.get(source),
     )
 
     result = resolution.get_single_track_import_context("Missing Song", "Missing Artist")
