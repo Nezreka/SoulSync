@@ -12,9 +12,10 @@ completes.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Optional
+
+from core.wishlist.presence import load_wishlist_keys as _load_wishlist_keys_shared
 
 logger = logging.getLogger(__name__)
 
@@ -47,43 +48,7 @@ def _resolve_plex_credentials(plex_client, config_manager) -> tuple[str, str]:
 
 
 def _load_wishlist_keys(cursor, profile_id: int) -> set[str]:
-    """Build a set of `name|||artist` keys from the wishlist for fast lookup.
-
-    Try the profile-aware schema first; fall back to the legacy schema if
-    profile_id column is missing (older DBs). Errors at any level are
-    swallowed — wishlist annotation is best-effort.
-    """
-    keys: set[str] = set()
-
-    def _absorb(rows):
-        for wr in rows:
-            try:
-                wd = json.loads(wr[0]) if isinstance(wr[0], str) else {}
-                wname = (wd.get('name') or '').lower()
-                wartists = wd.get('artists', [])
-                if wartists:
-                    first = wartists[0]
-                    wa = first.get('name', '') if isinstance(first, dict) else str(first)
-                else:
-                    wa = ''
-                if wname:
-                    keys.add(wname + '|||' + wa.lower().strip())
-            except Exception:
-                pass
-
-    try:
-        cursor.execute("SELECT spotify_data FROM wishlist_tracks WHERE profile_id = ?", (profile_id,))
-        _absorb(cursor.fetchall())
-        return keys
-    except Exception:
-        pass
-
-    try:
-        cursor.execute("SELECT spotify_data FROM wishlist_tracks")
-        _absorb(cursor.fetchall())
-    except Exception:
-        pass
-    return keys
+    return _load_wishlist_keys_shared(cursor, profile_id)
 
 
 def check_library_presence(
