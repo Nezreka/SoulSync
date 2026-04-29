@@ -41,14 +41,15 @@ if "config.settings" not in sys.modules:
     sys.modules["config"] = config_pkg
     sys.modules["config.settings"] = settings_mod
 
-from core import metadata_service
+from core.metadata import album_tracks as metadata_album_tracks
+from core.metadata import registry as metadata_registry
 
 
 @pytest.fixture(autouse=True)
 def _clear_metadata_client_cache():
-    metadata_service.clear_cached_metadata_clients()
+    metadata_registry.clear_cached_metadata_clients()
     yield
-    metadata_service.clear_cached_metadata_clients()
+    metadata_registry.clear_cached_metadata_clients()
 
 
 def _album(album_id="album-1", name="Album One", album_type="album"):
@@ -80,9 +81,9 @@ def _track(track_id="track-1", name="Track One"):
 def test_get_artist_album_tracks_uses_primary_source_priority(monkeypatch):
     calls = []
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: object())
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: object())
 
     def fake_get_album_for_source(source, album_id):
         calls.append(("album", source, album_id))
@@ -92,10 +93,10 @@ def test_get_artist_album_tracks_uses_primary_source_priority(monkeypatch):
         calls.append(("tracks", source, album_id))
         return {"items": [_track()]} if source == "deezer" and album_id == "album-1" else None
 
-    monkeypatch.setattr(metadata_service, "get_album_for_source", fake_get_album_for_source)
-    monkeypatch.setattr(metadata_service, "get_album_tracks_for_source", fake_get_album_tracks_for_source)
+    monkeypatch.setattr("core.metadata.album_tracks.get_album_for_source", fake_get_album_for_source)
+    monkeypatch.setattr("core.metadata.album_tracks.get_album_tracks_for_source", fake_get_album_tracks_for_source)
 
-    result = metadata_service.get_artist_album_tracks(
+    result = metadata_album_tracks.get_artist_album_tracks(
         "album-1",
         artist_name="Artist One",
         album_name="Album One",
@@ -114,9 +115,9 @@ def test_get_artist_album_tracks_uses_primary_source_priority(monkeypatch):
 def test_get_artist_album_tracks_resolves_database_album_reference(monkeypatch):
     calls = []
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: object())
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: object())
 
     def fake_get_album_for_source(source, album_id):
         calls.append(("album", source, album_id))
@@ -135,11 +136,11 @@ def test_get_artist_album_tracks_resolves_database_album_reference(monkeypatch):
         assert preferred_source == "itunes"
         return "itunes-123", "itunes"
 
-    monkeypatch.setattr(metadata_service, "get_album_for_source", fake_get_album_for_source)
-    monkeypatch.setattr(metadata_service, "get_album_tracks_for_source", fake_get_album_tracks_for_source)
-    monkeypatch.setattr(metadata_service, "resolve_album_reference", fake_resolve_album_reference)
+    monkeypatch.setattr("core.metadata.album_tracks.get_album_for_source", fake_get_album_for_source)
+    monkeypatch.setattr("core.metadata.album_tracks.get_album_tracks_for_source", fake_get_album_tracks_for_source)
+    monkeypatch.setattr("core.metadata.album_tracks.resolve_album_reference", fake_resolve_album_reference)
 
-    result = metadata_service.get_artist_album_tracks(
+    result = metadata_album_tracks.get_artist_album_tracks(
         "db-1",
         artist_name="Artist One",
         album_name="Album One",
@@ -189,10 +190,10 @@ def test_resolve_album_reference_prefers_stored_external_id(monkeypatch):
             return conn
 
     monkeypatch.setattr("database.music_database.get_database", lambda: _FakeDatabase())
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify"])
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify"])
 
-    resolved_id, resolved_source = metadata_service.resolve_album_reference("1", preferred_source="deezer")
+    resolved_id, resolved_source = metadata_album_tracks.resolve_album_reference("1", preferred_source="deezer")
 
     assert resolved_id == "deezer-abc"
     assert resolved_source == "deezer"
@@ -237,11 +238,11 @@ def test_resolve_album_reference_searches_by_name_when_no_external_id_exists(mon
 
     fake_client = _FakeSearchClient()
     monkeypatch.setattr("database.music_database.get_database", lambda: _FakeDatabase())
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "spotify"])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: fake_client if source == "deezer" else None)
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: fake_client if source == "deezer" else None)
 
-    resolved_id, resolved_source = metadata_service.resolve_album_reference("1", preferred_source="deezer")
+    resolved_id, resolved_source = metadata_album_tracks.resolve_album_reference("1", preferred_source="deezer")
 
     assert resolved_id == "searched-123"
     assert resolved_source == "deezer"

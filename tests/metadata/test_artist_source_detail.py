@@ -18,7 +18,7 @@ from core.artist_source_detail import build_source_only_artist_detail
 
 
 # ---------------------------------------------------------------------------
-# Fixtures — stubs for the metadata_service helpers the function calls
+# Fixtures — stubs for the metadata helpers the function calls
 # ---------------------------------------------------------------------------
 
 def _success_discography(**overrides):
@@ -41,13 +41,14 @@ def _empty_discography():
 
 @pytest.fixture
 def _stub_metadata(monkeypatch):
-    """Replace the metadata_service imports with controllable stubs.
+    """Replace the metadata imports with controllable stubs.
 
     The function imports ``get_artist_image_url`` and
-    ``get_artist_detail_discography`` lazily inside its body (deferred import),
-    so we patch on the metadata_service module directly.
+    ``get_artist_detail_discography`` from the concrete metadata modules, so we
+    patch those modules directly.
     """
-    from core import metadata_service
+    from core.metadata import artist_image as metadata_artist_image
+    from core.metadata import discography as metadata_discography
 
     state = {
         "image_url": None,
@@ -64,8 +65,8 @@ def _stub_metadata(monkeypatch):
         state["last_discog_call"] = (artist_id, artist_name)
         return state["discography"]
 
-    monkeypatch.setattr(metadata_service, "get_artist_image_url", fake_get_artist_image_url)
-    monkeypatch.setattr(metadata_service, "get_artist_detail_discography", fake_get_artist_detail_discography)
+    monkeypatch.setattr(metadata_artist_image, "get_artist_image_url", fake_get_artist_image_url)
+    monkeypatch.setattr(metadata_discography, "get_artist_detail_discography", fake_get_artist_detail_discography)
 
     return state
 
@@ -156,7 +157,7 @@ class TestPerSourceEnrichment:
         )
         assert payload["artist"]["genres"] == ["alt rock", "emo"]
         assert payload["artist"]["followers"] == 12345
-        # image_url falls back to Spotify's image when metadata_service returned None
+        # image_url falls back to Spotify's image when metadata returned None
         assert payload["artist"]["image_url"] == "https://sp/img.jpg"
 
     def test_deezer_extracts_genres_and_followers(self, _stub_metadata):

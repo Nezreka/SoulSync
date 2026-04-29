@@ -358,7 +358,7 @@ class WatchlistScanner:
     def metadata_service(self):
         """Get or create MetadataService instance (lazy loading)"""
         if self._metadata_service is None:
-            from core.metadata_service import MetadataService
+            from core.metadata.service import MetadataService
             self._metadata_service = MetadataService()
         return self._metadata_service
 
@@ -1642,7 +1642,7 @@ class WatchlistScanner:
                     return self._best_artist_match(results, artist_name)
 
             # Fallback: use cached Deezer client
-            from core.metadata_service import get_deezer_client
+            from core.metadata.registry import get_deezer_client
             client = get_deezer_client()
             results = client.search_artists(artist_name, limit=5)
             return self._best_artist_match(results, artist_name)
@@ -1653,7 +1653,7 @@ class WatchlistScanner:
     def _match_to_discogs(self, artist_name: str) -> Optional[str]:
         """Match artist name to Discogs ID using fuzzy name comparison."""
         try:
-            from core.metadata_service import get_discogs_client
+            from core.metadata.registry import get_discogs_client
             client = get_discogs_client()
             results = client.search_artists(artist_name, limit=5)
             return self._best_artist_match(results, artist_name)

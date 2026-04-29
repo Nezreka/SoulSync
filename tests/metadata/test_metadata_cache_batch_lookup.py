@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.metadata_cache import MetadataCache
+from core.metadata.cache import MetadataCache
 
 
 @pytest.fixture

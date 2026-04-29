@@ -3,7 +3,7 @@ import sys
 import types
 from types import SimpleNamespace
 
-# Stub optional Spotify dependency so metadata_service can import in tests.
+# Stub optional Spotify dependency so the metadata package can import in tests.
 if 'spotipy' not in sys.modules:
     spotipy = types.ModuleType('spotipy')
     oauth2 = types.ModuleType('spotipy.oauth2')
