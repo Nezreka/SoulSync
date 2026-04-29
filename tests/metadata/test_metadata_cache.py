@@ -40,15 +40,15 @@ if "config.settings" not in sys.modules:
     sys.modules["config"] = config_pkg
     sys.modules["config.settings"] = settings_mod
 
-from core import metadata_service
+from core.metadata import registry as metadata_registry
 from config.settings import config_manager
 
 
 @pytest.fixture(autouse=True)
 def _clear_metadata_client_cache():
-    metadata_service.clear_cached_metadata_clients()
+    metadata_registry.clear_cached_metadata_clients()
     yield
-    metadata_service.clear_cached_metadata_clients()
+    metadata_registry.clear_cached_metadata_clients()
 
 
 def test_primary_client_is_cached_for_same_source(monkeypatch):
@@ -58,11 +58,11 @@ def test_primary_client_is_cached_for_same_source(monkeypatch):
         def __init__(self):
             calls["deezer"] += 1
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
     monkeypatch.setattr("core.deezer_client.DeezerClient", FakeDeezerClient)
 
-    first = metadata_service.get_primary_client()
-    second = metadata_service.get_primary_client()
+    first = metadata_registry.get_primary_client()
+    second = metadata_registry.get_primary_client()
 
     assert first is second
     assert calls["deezer"] == 1
@@ -80,12 +80,12 @@ def test_primary_client_switches_cache_by_source(monkeypatch):
         def __init__(self):
             calls["itunes"] += 1
 
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: next(sources))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: next(sources))
     monkeypatch.setattr("core.deezer_client.DeezerClient", FakeDeezerClient)
-    monkeypatch.setattr(metadata_service, "iTunesClient", FakeITunesClient)
+    monkeypatch.setattr("core.itunes_client.iTunesClient", FakeITunesClient)
 
-    deezer_client = metadata_service.get_primary_client()
-    itunes_client = metadata_service.get_primary_client()
+    deezer_client = metadata_registry.get_primary_client()
+    itunes_client = metadata_registry.get_primary_client()
 
     assert deezer_client is not itunes_client
     assert calls["deezer"] == 1
@@ -103,8 +103,8 @@ def test_deezer_client_cache_tracks_token(monkeypatch):
     monkeypatch.setattr("core.deezer_client.DeezerClient", FakeDeezerClient)
     monkeypatch.setattr(config_manager, "get", lambda key, default=None: next(tokens) if key == "deezer.access_token" else default)
 
-    first = metadata_service.get_deezer_client()
-    second = metadata_service.get_deezer_client()
+    first = metadata_registry.get_deezer_client()
+    second = metadata_registry.get_deezer_client()
 
     assert first is not second
     assert calls["deezer"] == 2
@@ -119,28 +119,30 @@ class _FakeHydrabaseClient:
 
 
 def test_hydrabase_enabled_requires_connection_and_dev_mode(monkeypatch):
-    fake_ws = types.ModuleType("web_server")
-    fake_ws.hydrabase_client = _FakeHydrabaseClient(connected=True)
-    fake_ws.dev_mode_enabled = True
-    monkeypatch.setitem(sys.modules, "web_server", fake_ws)
+    metadata_registry.register_runtime_clients(
+        hydrabase_client=_FakeHydrabaseClient(connected=True),
+        dev_mode_enabled_provider=lambda: True,
+    )
 
-    assert metadata_service.is_hydrabase_enabled() is True
+    assert metadata_registry.is_hydrabase_enabled() is True
 
-    fake_ws.dev_mode_enabled = False
-    assert metadata_service.is_hydrabase_enabled() is False
+    metadata_registry.register_runtime_clients(dev_mode_enabled_provider=lambda: False)
+    assert metadata_registry.is_hydrabase_enabled() is False
 
-    fake_ws.dev_mode_enabled = True
-    fake_ws.hydrabase_client = _FakeHydrabaseClient(connected=False)
-    assert metadata_service.is_hydrabase_enabled() is False
+    metadata_registry.register_runtime_clients(
+        hydrabase_client=_FakeHydrabaseClient(connected=False),
+        dev_mode_enabled_provider=lambda: True,
+    )
+    assert metadata_registry.is_hydrabase_enabled() is False
 
 
 def test_get_client_for_source_hydrabase_requires_enablement(monkeypatch):
-    fake_ws = types.ModuleType("web_server")
-    fake_ws.hydrabase_client = _FakeHydrabaseClient(connected=True)
-    fake_ws.dev_mode_enabled = False
-    monkeypatch.setitem(sys.modules, "web_server", fake_ws)
+    metadata_registry.register_runtime_clients(
+        hydrabase_client=_FakeHydrabaseClient(connected=True),
+        dev_mode_enabled_provider=lambda: False,
+    )
 
-    assert metadata_service.get_client_for_source("hydrabase") is None
+    assert metadata_registry.get_client_for_source("hydrabase") is None
 
-    fake_ws.dev_mode_enabled = True
-    assert metadata_service.get_client_for_source("hydrabase") is fake_ws.hydrabase_client
+    metadata_registry.register_runtime_clients(dev_mode_enabled_provider=lambda: True)
+    assert metadata_registry.get_client_for_source("hydrabase") is metadata_registry.get_registered_runtime_client("hydrabase")
