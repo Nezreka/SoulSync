@@ -85,6 +85,7 @@ def _build_runtime(tracks, owned_matches=None, batch_map=None):
     executor = _FakeExecutor()
     logger = _FakeLogger()
     activity_calls = []
+    master_calls = []
     batch_map = batch_map or {}
 
     runtime = WishlistManualDownloadRuntime(
@@ -92,18 +93,57 @@ def _build_runtime(tracks, owned_matches=None, batch_map=None):
         download_batches=batch_map,
         tasks_lock=_FakeLock(),
         missing_download_executor=executor,
-        run_full_missing_tracks_process=lambda *args, **kwargs: None,
+        run_full_missing_tracks_process=lambda *args, **kwargs: master_calls.append((args, kwargs)),
         get_batch_max_concurrent=lambda: 4,
         add_activity_item=lambda *args: activity_calls.append(args),
         active_server="navidrome",
         logger=logger,
         profile_id=1,
     )
-    return runtime, wishlist_service, music_db, executor, logger, activity_calls, batch_map
+    return runtime, wishlist_service, music_db, executor, logger, activity_calls, batch_map, master_calls
+
+
+def _run_submitted_bg_job(executor):
+    """Execute the bg job the executor received — simulates ThreadPoolExecutor."""
+    assert len(executor.submissions) == 1, "expected exactly one bg submission"
+    fn, args, kwargs = executor.submissions[0]
+    fn(*args, **kwargs)
+
+
+def test_start_manual_wishlist_download_batch_returns_immediately_with_placeholder():
+    """Endpoint returns 200 immediately; cleanup runs in the bg job."""
+    runtime, service, _db, executor, _logger, activity_calls, batch_map, master_calls = _build_runtime(
+        tracks=[
+            {
+                "id": "track-1",
+                "name": "Song 1",
+                "artists": [{"name": "Artist 1"}],
+                "album": {"name": "Album 1", "album_type": "album"},
+            },
+        ]
+    )
+
+    payload, status = processing.start_manual_wishlist_download_batch(runtime)
+
+    # Synchronous response: 200 with batch_id, batch entry created with placeholder count.
+    assert status == 200
+    assert payload["success"] is True
+    assert "batch_id" in payload
+    assert batch_map[payload["batch_id"]]["analysis_total"] == 0  # placeholder
+    assert batch_map[payload["batch_id"]]["phase"] == "analysis"
+    assert batch_map[payload["batch_id"]]["force_download_all"] is True
+
+    # Cleanup has NOT yet run (no DB calls, no master worker invocation).
+    assert service.removed_ids == set()
+    assert master_calls == []
+    assert activity_calls == []
+
+    # The bg job is queued.
+    assert len(executor.submissions) == 1
 
 
 def test_start_manual_wishlist_download_batch_filters_track_ids_and_starts_batch():
-    runtime, _service, _db, executor, logger, activity_calls, batch_map = _build_runtime(
+    runtime, _service, _db, executor, logger, activity_calls, batch_map, master_calls = _build_runtime(
         tracks=[
             {
                 "id": "track-1",
@@ -129,19 +169,23 @@ def test_start_manual_wishlist_download_batch_filters_track_ids_and_starts_batch
     assert status == 200
     assert payload["success"] is True
     assert "batch_id" in payload
+
+    # Run the bg job that the executor would have run on a real thread.
+    _run_submitted_bg_job(executor)
+
     assert activity_calls == [("", "Wishlist Download Started", "1 tracks", "Now")]
-    assert len(executor.submissions) == 1
-    _submitted_fn, submitted_args, _submitted_kwargs = executor.submissions[0]
-    assert submitted_args[1] == "wishlist"
-    assert submitted_args[2][0]["id"] == "track-2"
-    assert submitted_args[2][0]["_original_index"] == 0
+    assert len(master_calls) == 1
+    master_args, _ = master_calls[0]
+    assert master_args[1] == "wishlist"
+    assert master_args[2][0]["id"] == "track-2"
+    assert master_args[2][0]["_original_index"] == 0
     assert batch_map[payload["batch_id"]]["analysis_total"] == 1
     assert batch_map[payload["batch_id"]]["force_download_all"] is True
     assert any("Filtered to 1 specific tracks by ID" in msg for msg in logger.info_messages)
 
 
 def test_start_manual_wishlist_download_batch_skips_enhance_tracks_during_cleanup():
-    runtime, service, _db, executor, logger, activity_calls, batch_map = _build_runtime(
+    runtime, service, _db, executor, logger, activity_calls, batch_map, master_calls = _build_runtime(
         tracks=[
             {
                 "id": "enhance-1",
@@ -164,10 +208,39 @@ def test_start_manual_wishlist_download_batch_skips_enhance_tracks_during_cleanu
 
     assert status == 200
     assert payload["success"] is True
+
+    # Run the bg job — cleanup happens here, not in the request handler.
+    _run_submitted_bg_job(executor)
+
     assert service.removed_ids == {"owned-1"}
-    assert len(executor.submissions) == 1
-    _submitted_fn, submitted_args, _submitted_kwargs = executor.submissions[0]
-    assert [track["id"] for track in submitted_args[2]] == ["enhance-1"]
+    assert len(master_calls) == 1
+    master_args, _ = master_calls[0]
+    assert [track["id"] for track in master_args[2]] == ["enhance-1"]
     assert batch_map[payload["batch_id"]]["analysis_total"] == 1
     assert activity_calls == [("", "Wishlist Download Started", "1 tracks", "Now")]
     assert any("Cleaned up 1 already-owned tracks" in msg for msg in logger.info_messages)
+
+
+def test_bg_job_marks_batch_complete_when_wishlist_empty_after_cleanup():
+    """If cleanup empties the wishlist, the bg job marks the batch complete (not error 400)."""
+    runtime, _service, _db, executor, _logger, _activity, batch_map, master_calls = _build_runtime(
+        tracks=[
+            {
+                "id": "owned-1",
+                "name": "Owned Song",
+                "artists": [{"name": "Artist B"}],
+                "album": {"name": "Owned Album", "album_type": "album"},
+            },
+        ],
+        owned_matches={("Owned Song", "Artist B")},
+    )
+
+    payload, status = processing.start_manual_wishlist_download_batch(runtime)
+    assert status == 200
+
+    _run_submitted_bg_job(executor)
+
+    # Cleanup removed the only track. Master worker never called. Batch marked complete.
+    assert master_calls == []
+    assert batch_map[payload["batch_id"]]["phase"] == "complete"
+    assert batch_map[payload["batch_id"]]["error"] == "No tracks in wishlist"
