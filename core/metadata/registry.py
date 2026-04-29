@@ -65,6 +65,12 @@ def clear_cached_metadata_clients() -> None:
         _client_cache.clear()
 
 
+def clear_cached_metadata_client(cache_key: str) -> None:
+    """Clear one lazily-created client singleton by cache key."""
+    with _client_cache_lock:
+        _client_cache.pop(cache_key, None)
+
+
 def _get_config_value(key: str, default: Any = None) -> Any:
     try:
         from config.settings import config_manager

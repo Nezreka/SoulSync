@@ -39,6 +39,7 @@ from core.metadata.discography import (
 from core.metadata.lookup import MetadataLookupOptions
 from core.metadata.registry import (
     METADATA_SOURCE_PRIORITY,
+    clear_cached_metadata_client,
     clear_cached_metadata_clients,
     get_client_for_source,
     get_deezer_client,
@@ -89,6 +90,7 @@ __all__ = [
     "check_album_completion",
     "check_artist_discography_completion",
     "check_single_completion",
+    "clear_cached_metadata_client",
     "clear_cached_metadata_clients",
     "get_album_for_source",
     "get_album_tracks_for_source",
