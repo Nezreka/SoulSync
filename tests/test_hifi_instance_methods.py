@@ -274,10 +274,10 @@ def test_reorder_hifi_instances_returns_true_on_empty_list(db):
     assert db.reorder_hifi_instances([]) is True
 
 
-def test_reorder_hifi_instances_returns_true_even_with_unknown_urls(db):
-    """UPDATE that matches 0 rows is not an error."""
+def test_reorder_hifi_instances_returns_false_with_unknown_urls(db):
+    """Reorder should fail when any URL doesn't exist."""
     _seed(db, instances=[("http://a.com", 0, 1)])
-    assert db.reorder_hifi_instances(["http://a.com", "http://phantom.com"]) is True
+    assert db.reorder_hifi_instances(["http://a.com", "http://phantom.com"]) is False
 
 
 # ── seed_hifi_instances ───────────────────────────────────────────────────
