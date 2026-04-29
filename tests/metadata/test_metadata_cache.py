@@ -47,8 +47,10 @@ from config.settings import config_manager
 @pytest.fixture(autouse=True)
 def _clear_metadata_client_cache():
     metadata_registry.clear_cached_metadata_clients()
+    metadata_registry.register_profile_spotify_credentials_provider(lambda profile_id: None)
     yield
     metadata_registry.clear_cached_metadata_clients()
+    metadata_registry.register_profile_spotify_credentials_provider(lambda profile_id: None)
 
 
 def test_primary_client_is_cached_for_same_source(monkeypatch):
@@ -108,6 +110,90 @@ def test_deezer_client_cache_tracks_token(monkeypatch):
 
     assert first is not second
     assert calls["deezer"] == 2
+
+
+def test_profile_spotify_client_is_cached_per_profile(monkeypatch):
+    calls = {"spotify": 0, "oauth": 0}
+    creds_by_profile = {
+        2: {"client_id": "cid-a", "client_secret": "sec-a", "redirect_uri": "uri-a"},
+        3: {"client_id": "cid-b", "client_secret": "sec-b", "redirect_uri": "uri-b"},
+    }
+
+    class FakeSpotifyClient:
+        def __init__(self):
+            calls["spotify"] += 1
+            self.sp = None
+            self.user_id = None
+
+    class FakeOAuth:
+        def __init__(self, *args, **kwargs):
+            calls["oauth"] += 1
+
+    class FakeSpotify:
+        def __init__(self, *args, **kwargs):
+            self.auth_manager = kwargs.get("auth_manager")
+
+    monkeypatch.setattr("core.spotify_client.SpotifyClient", FakeSpotifyClient)
+    monkeypatch.setattr(sys.modules["spotipy"].oauth2, "SpotifyOAuth", FakeOAuth)
+    monkeypatch.setattr(sys.modules["spotipy"], "Spotify", FakeSpotify)
+    metadata_registry.register_profile_spotify_credentials_provider(lambda profile_id: creds_by_profile.get(profile_id))
+
+    first = metadata_registry.get_spotify_client_for_profile(2)
+    second = metadata_registry.get_spotify_client_for_profile(2)
+    third = metadata_registry.get_spotify_client_for_profile(3)
+
+    assert first is second
+    assert first is not third
+    assert calls["spotify"] == 2
+    assert calls["oauth"] == 2
+
+
+def test_clear_cached_profile_spotify_client_only_affects_one_profile(monkeypatch):
+    calls = {"spotify": 0}
+    creds_by_profile = {
+        2: {"client_id": "cid-a", "client_secret": "sec-a", "redirect_uri": "uri-a"},
+        3: {"client_id": "cid-b", "client_secret": "sec-b", "redirect_uri": "uri-b"},
+    }
+
+    class FakeSpotifyClient:
+        def __init__(self):
+            calls["spotify"] += 1
+            self.sp = None
+            self.user_id = None
+
+    class FakeOAuth:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class FakeSpotify:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr("core.spotify_client.SpotifyClient", FakeSpotifyClient)
+    monkeypatch.setattr(sys.modules["spotipy"].oauth2, "SpotifyOAuth", FakeOAuth)
+    monkeypatch.setattr(sys.modules["spotipy"], "Spotify", FakeSpotify)
+    metadata_registry.register_profile_spotify_credentials_provider(lambda profile_id: creds_by_profile.get(profile_id))
+
+    first_profile = metadata_registry.get_spotify_client_for_profile(2)
+    other_profile = metadata_registry.get_spotify_client_for_profile(3)
+
+    metadata_registry.clear_cached_profile_spotify_client(2)
+
+    refreshed_profile = metadata_registry.get_spotify_client_for_profile(2)
+    same_other_profile = metadata_registry.get_spotify_client_for_profile(3)
+
+    assert refreshed_profile is not first_profile
+    assert same_other_profile is other_profile
+    assert calls["spotify"] == 3
+
+
+def test_profile_spotify_client_falls_back_to_global_when_no_credentials(monkeypatch):
+    global_client = object()
+
+    monkeypatch.setattr(metadata_registry, "get_spotify_client", lambda client_factory=None: global_client)
+    metadata_registry.register_profile_spotify_credentials_provider(lambda profile_id: None)
+
+    assert metadata_registry.get_spotify_client_for_profile(2) is global_client
 
 
 class _FakeHydrabaseClient:

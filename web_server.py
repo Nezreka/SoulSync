@@ -97,6 +97,7 @@ from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker
 from core.web_scan_manager import WebScanManager
 from core.metadata.cache import get_metadata_cache
+from core.metadata import registry as metadata_registry
 from core.metadata.registry import (
     clear_cached_metadata_client,
     get_spotify_client,
@@ -484,10 +485,6 @@ def admin_only(view_fn):
         return view_fn(*args, **kwargs)
     return wrapper
 
-# ── Per-profile Spotify client cache ──
-_profile_spotify_clients = {}  # profile_id -> SpotifyClient
-_profile_spotify_lock = threading.Lock()
-
 def get_spotify_client_for_profile(profile_id=None):
     """Get the Spotify client for the current profile.
 
@@ -497,53 +494,7 @@ def get_spotify_client_for_profile(profile_id=None):
     """
     if profile_id is None:
         profile_id = get_current_profile_id()
-
-    # Admin (profile 1) always uses global client
-    if profile_id == 1:
-        return spotify_client
-
-    # Check if this profile has custom Spotify credentials
-    try:
-        db = get_database()
-        creds = db.get_profile_spotify(profile_id)
-        if not creds or not creds.get('client_id'):
-            return spotify_client  # No custom creds — use global
-    except Exception:
-        return spotify_client
-
-    # Check cache (don't hold lock during auth check — could block on network)
-    with _profile_spotify_lock:
-        cached = _profile_spotify_clients.get(profile_id)
-    if cached and cached.sp is not None:
-        return cached
-
-    # Create a new SpotifyClient for this profile
-    try:
-        from spotipy.oauth2 import SpotifyOAuth
-        import spotipy
-
-        auth_manager = SpotifyOAuth(
-            client_id=creds['client_id'],
-            client_secret=creds['client_secret'],
-            redirect_uri=creds.get('redirect_uri', 'http://127.0.0.1:8888/callback'),
-            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
-            cache_path=f'config/.spotify_cache_profile_{profile_id}'
-        )
-
-        # Create a bare SpotifyClient and immediately set the profile-specific
-        # spotipy instance (overwrites the global-config one from __init__)
-        profile_client = SpotifyClient()
-        profile_client.sp = spotipy.Spotify(auth_manager=auth_manager, retries=0, requests_timeout=15)
-        profile_client.user_id = None  # Will be fetched lazily
-
-        with _profile_spotify_lock:
-            _profile_spotify_clients[profile_id] = profile_client
-
-        logger.info(f"Created per-profile Spotify client for profile {profile_id}")
-        return profile_client
-    except Exception as e:
-        logger.error(f"Failed to create per-profile Spotify client for profile {profile_id}: {e}")
-        return spotify_client  # Fall back to global
+    return metadata_registry.get_spotify_client_for_profile(profile_id)
 
 # Valid page IDs for profile permission validation
 VALID_PAGE_IDS = {'dashboard', 'sync', 'search', 'downloads', 'discover', 'artists', 'automations', 'library', 'import', 'settings', 'help'}
@@ -7619,8 +7570,7 @@ def spotify_callback():
                 token_info = auth_manager.get_access_token(auth_code)
                 if token_info:
                     # Invalidate cached profile client so it gets recreated with new tokens
-                    with _profile_spotify_lock:
-                        _profile_spotify_clients.pop(profile_id_from_state, None)
+                    metadata_registry.clear_cached_profile_spotify_client(profile_id_from_state)
                     add_activity_item("", "Spotify Auth Complete", f"Profile {profile_id_from_state} authenticated with Spotify", "Now")
                     return "<h1>Spotify Authentication Successful!</h1><p>Your personal Spotify account is now connected. You can close this window.</p>"
                 else:
@@ -28576,6 +28526,7 @@ def save_profile_spotify_creds():
         success = db.set_profile_spotify(profile_id, client_id, client_secret, redirect_uri)
 
         if success:
+            metadata_registry.clear_cached_profile_spotify_client(profile_id)
             return jsonify({'success': True})
         return jsonify({'success': False, 'error': 'Failed to save credentials'}), 500
     except Exception as e:
@@ -28597,6 +28548,7 @@ def delete_profile_spotify_creds():
                 WHERE id = ?
             """, (profile_id,))
             conn.commit()
+        metadata_registry.clear_cached_profile_spotify_client(profile_id)
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -39704,6 +39656,9 @@ except Exception as e:
 register_runtime_clients(
     hydrabase_client=hydrabase_client,
     dev_mode_enabled_provider=lambda: dev_mode_enabled,
+)
+metadata_registry.register_profile_spotify_credentials_provider(
+    lambda profile_id: get_database().get_profile_spotify(profile_id)
 )
 
 # --- Hydrabase Auto-Reconnect ---

@@ -8,6 +8,7 @@ instead of importing `web_server`.
 from __future__ import annotations
 
 import threading
+import hashlib
 from typing import Any, Callable, Dict, Optional
 
 from utils.logging_config import get_logger
@@ -28,6 +29,7 @@ _runtime_clients: Dict[str, Any] = {
     "hydrabase": None,
 }
 _dev_mode_enabled_provider: Callable[[], bool] = lambda: False
+_profile_spotify_credentials_provider: Callable[[int], Any] = lambda profile_id: None
 
 
 def register_runtime_clients(
@@ -51,6 +53,16 @@ def register_runtime_clients(
             _dev_mode_enabled_provider = dev_mode_enabled_provider or (lambda: False)
 
 
+def register_profile_spotify_credentials_provider(
+    provider: Optional[Callable[[int], Any]] = _UNSET,
+) -> None:
+    """Register a callable that returns per-profile Spotify credentials."""
+    global _profile_spotify_credentials_provider
+    with _runtime_clients_lock:
+        if provider is not _UNSET:
+            _profile_spotify_credentials_provider = provider or (lambda profile_id: None)
+
+
 def get_registered_runtime_client(name: str) -> Any:
     with _runtime_clients_lock:
         return _runtime_clients.get(name)
@@ -69,6 +81,14 @@ def clear_cached_metadata_client(cache_key: str) -> None:
     """Clear one lazily-created client singleton by cache key."""
     with _client_cache_lock:
         _client_cache.pop(cache_key, None)
+
+
+def clear_cached_profile_spotify_client(profile_id: int) -> None:
+    """Clear any cached Spotify client for a specific profile."""
+    prefix = f"spotify_profile::{profile_id}::"
+    with _client_cache_lock:
+        for key in [key for key in _client_cache if key.startswith(prefix)]:
+            _client_cache.pop(key, None)
 
 
 def _get_config_value(key: str, default: Any = None) -> Any:
@@ -130,6 +150,61 @@ def get_spotify_client(client_factory: Optional[MetadataClientFactory] = None):
             client = factory()
             _client_cache[cache_key] = client
         return client
+
+
+def _build_profile_spotify_cache_key(profile_id: int, creds: Dict[str, Any]) -> str:
+    fingerprint = hashlib.sha256(
+        f"{profile_id}:{creds.get('client_id', '')}:{creds.get('client_secret', '')}:{creds.get('redirect_uri', '')}".encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return f"spotify_profile::{profile_id}::{fingerprint}"
+
+
+def get_spotify_client_for_profile(profile_id: Optional[int] = None):
+    """Get a profile-specific Spotify client or fall back to the global one."""
+    if profile_id is None or profile_id == 1:
+        return get_spotify_client()
+
+    try:
+        creds = _profile_spotify_credentials_provider(profile_id)
+        if not creds or not creds.get("client_id"):
+            return get_spotify_client()
+    except Exception:
+        return get_spotify_client()
+
+    cache_key = _build_profile_spotify_cache_key(profile_id, creds)
+    with _client_cache_lock:
+        client = _client_cache.get(cache_key)
+        if client is not None and getattr(client, "sp", None) is not None:
+            return client
+
+    try:
+        from core.spotify_client import SpotifyClient
+        from spotipy.oauth2 import SpotifyOAuth
+        import spotipy
+
+        auth_manager = SpotifyOAuth(
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+            redirect_uri=creds.get("redirect_uri", "http://127.0.0.1:8888/callback"),
+            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+            cache_path=f"config/.spotify_cache_profile_{profile_id}",
+            state=f"profile_{profile_id}",
+        )
+
+        profile_client = SpotifyClient()
+        profile_client.sp = spotipy.Spotify(auth_manager=auth_manager, retries=0, requests_timeout=15)
+        profile_client.user_id = None
+
+        with _client_cache_lock:
+            _client_cache[cache_key] = profile_client
+
+        logger.info("Created per-profile Spotify client for profile %s", profile_id)
+        return profile_client
+    except Exception as e:
+        logger.error("Failed to create per-profile Spotify client for profile %s: %s", profile_id, e)
+        return get_spotify_client()
 
 
 def get_deezer_client(client_factory: Optional[MetadataClientFactory] = None):
