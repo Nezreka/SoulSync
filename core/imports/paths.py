@@ -191,6 +191,15 @@ def _replace_template_variables(template: str, context: dict) -> str:
                 except Exception:
                     pass
 
+    # $cdnum — smart CD label for multi-disc filenames. Produces "CD01" /
+    # "CD02" etc. when the album has 2+ discs, empty string otherwise.
+    # Empty output collapses gracefully via the trailing dash cleanup
+    # regex below, so single-disc albums don't end up with "CD01" literal
+    # in every name.
+    _total_discs = _coerce_int(clean_context.get("total_discs", 1), 1)
+    _disc_number = _coerce_int(clean_context.get("disc_number", 1), 1)
+    cdnum_value = f"CD{_disc_number:02d}" if _total_discs > 1 else ""
+
     bracket_map = {
         "albumartist": album_artist_value,
         "albumtype": clean_context.get("albumtype", "Album"),
@@ -200,6 +209,7 @@ def _replace_template_variables(template: str, context: dict) -> str:
         "album": clean_context.get("album", "Unknown Album"),
         "title": clean_context.get("title", "Unknown Track"),
         "track": f"{_coerce_int(clean_context.get('track_number', 1), 1):02d}",
+        "cdnum": cdnum_value,
         "disc": str(_coerce_int(clean_context.get("disc_number", 1), 1)),
         "discnum": str(_coerce_int(clean_context.get("disc_number", 1), 1)),
         "year": str(clean_context.get("year", "")),
@@ -215,6 +225,10 @@ def _replace_template_variables(template: str, context: dict) -> str:
     result = result.replace("$artist", clean_context.get("artist", "Unknown Artist"))
     result = result.replace("$album", clean_context.get("album", "Unknown Album"))
     result = result.replace("$title", clean_context.get("title", "Unknown Track"))
+    # $cdnum must replace before $track to follow the longest-prefix-first
+    # rule used throughout this function (no current $c* var collides, but
+    # ordering matches the web_server.py path-builder for parity).
+    result = result.replace("$cdnum", cdnum_value)
     result = result.replace("$track", f"{clean_context.get('track_number', 1):02d}")
     result = result.replace("$year", str(clean_context.get("year", "")))
 
@@ -248,6 +262,7 @@ def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, 
             part = part.replace("$quality", "")
             part = part.replace("$discnum", "")
             part = part.replace("$disc", "")
+            part = part.replace("$cdnum", "")
             part = re.sub(r"\s*\[\s*\]", "", part)
             part = re.sub(r"\s*\(\s*\)", "", part)
             part = re.sub(r"\s*\{\s*\}", "", part)
@@ -264,6 +279,9 @@ def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, 
         filename_base = re.sub(r"\s*\(\s*\)", "", filename_base)
         filename_base = re.sub(r"\s*\{\s*\}", "", filename_base)
         filename_base = re.sub(r"\s*-\s*$", "", filename_base)
+        # Leading dash cleanup — lets $cdnum at the start of a filename
+        # cleanly disappear on single-disc albums (empty-value case).
+        filename_base = re.sub(r"^\s*-\s*", "", filename_base)
         filename_base = re.sub(r"\s+", " ", filename_base).strip()
 
         sanitized_folders = [sanitize_filename(part) for part in cleaned_folders]
@@ -314,6 +332,7 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
             part = part.replace("$quality", "")
             part = part.replace("$discnum", "")
             part = part.replace("$disc", "")
+            part = part.replace("$cdnum", "")
             part = re.sub(r"\s*\[\s*\]", "", part)
             part = re.sub(r"\s*\(\s*\)", "", part)
             part = re.sub(r"\s*\{\s*\}", "", part)
@@ -330,6 +349,9 @@ def get_file_path_from_template(context: dict, template_type: str = "album_path"
         filename_base = re.sub(r"\s*\(\s*\)", "", filename_base)
         filename_base = re.sub(r"\s*\{\s*\}", "", filename_base)
         filename_base = re.sub(r"\s*-\s*$", "", filename_base)
+        # Leading dash cleanup — lets $cdnum at the start of a filename
+        # cleanly disappear on single-disc albums (empty-value case).
+        filename_base = re.sub(r"^\s*-\s*", "", filename_base)
         filename_base = re.sub(r"\s+", " ", filename_base).strip()
 
         sanitized_folders = [sanitize_filename(part) for part in cleaned_folders]
@@ -518,8 +540,20 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext):
                 except Exception as _disc_err:
                     logger.warning("[Multi-Disc] Could not resolve total_discs: %s", _disc_err)
 
-        album_template = _get_config_manager().get("file_organization.templates.album_path", "")
-        user_controls_disc = "$disc" in album_template
+        # Now that total_discs is fully resolved, expose it to the template
+        # so $cdnum can decide between "CDxx" and an empty string.
+        template_context["total_discs"] = total_discs
+
+        album_template = _get_config_manager().get("file_organization.templates", {}).get("album_path", "") or ""
+        # Suppress the auto-injected disc folder when the user already
+        # encodes the disc in the filename via $disc, $discnum, or $cdnum.
+        user_controls_disc = (
+            "$disc" in album_template
+            or "$cdnum" in album_template
+            or "${disc}" in album_template
+            or "${discnum}" in album_template
+            or "${cdnum}" in album_template
+        )
         disc_label = _get_config_manager().get("file_organization.disc_label", "Disc")
 
         folder_path, filename_base = get_file_path_from_template(template_context, "album_path")
