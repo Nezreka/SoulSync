@@ -60262,3 +60262,80 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
 #artist-detail-page .release-card.album-card .mb-card-icon:hover {
     opacity: 1;
 }
+
+/* ── HiFi API instances list (drag and drop) ── */
+#hifi-instances-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.hifi-instance-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    font-size: 0.82em;
+    user-select: none;
+    transition: all 0.2s;
+    cursor: grab;
+}
+.hifi-instance-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+.hifi-instance-item.dragging {
+    opacity: 0.4;
+    border-color: rgb(var(--accent-rgb));
+}
+.hifi-instance-item.drag-over {
+    border-color: rgb(var(--accent-rgb));
+    background: rgba(var(--accent-rgb), 0.08);
+}
+.hifi-instance-item.disabled {
+    opacity: 0.4;
+}
+.hifi-instance-grip {
+    color: rgba(255, 255, 255, 0.3);
+    cursor: grab;
+    flex-shrink: 0;
+    font-size: 1em;
+}
+.hifi-instance-url {
+    flex: 1;
+    color: rgba(255, 255, 255, 0.7);
+    font-family: monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.hifi-instance-toggle {
+    flex-shrink: 0;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: color 0.15s;
+}
+.hifi-instance-toggle.on {
+    color: #4caf50;
+}
+.hifi-instance-toggle.on:hover {
+    color: #66bb6a;
+}
+.hifi-instance-toggle.off {
+    color: #666;
+}
+.hifi-instance-toggle.off:hover {
+    color: #999;
+}
+.hifi-instance-remove {
+    flex-shrink: 0;
+    color: #f44336;
+    cursor: pointer;
+    font-size: 0.9em;
+    transition: color 0.15s;
+}
+.hifi-instance-remove:hover {
+    color: #ef5350;
+}

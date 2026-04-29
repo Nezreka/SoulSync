@@ -723,6 +723,17 @@ class MusicDatabase:
             except Exception:
                 pass
 
+            # HiFi API instances table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS hifi_instances (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT NOT NULL UNIQUE,
+                    priority INTEGER NOT NULL DEFAULT 0,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             conn.commit()
             logger.info("Database initialized successfully")
 
@@ -11593,6 +11604,86 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting issue counts: {e}")
             return {'open': 0, 'in_progress': 0, 'resolved': 0, 'dismissed': 0, 'total': 0}
+
+    # ===================== HiFi Instances =====================
+
+    def get_hifi_instances(self) -> List[Dict[str, Any]]:
+        """Get all enabled HiFi instances ordered by priority."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT url, priority, enabled FROM hifi_instances WHERE enabled = 1 ORDER BY priority ASC, id ASC")
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_all_hifi_instances(self) -> List[Dict[str, Any]]:
+        """Get all HiFi instances (including disabled) ordered by priority."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT url, priority, enabled FROM hifi_instances ORDER BY priority ASC, id ASC")
+        return [dict(row) for row in cursor.fetchall()]
+
+    def add_hifi_instance(self, url: str, priority: int = 0) -> bool:
+        """Add a new HiFi instance."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO hifi_instances (url, priority, enabled) VALUES (?, ?, 1)",
+            (url, priority)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def remove_hifi_instance(self, url: str) -> bool:
+        """Remove a HiFi instance."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM hifi_instances WHERE url = ?", (url,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def toggle_hifi_instance(self, url: str, enabled: bool) -> bool:
+        """Enable or disable a HiFi instance."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE hifi_instances SET enabled = ? WHERE url = ?", (1 if enabled else 0, url))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def reorder_hifi_instances(self, urls: List[str]) -> bool:
+        """Update priorities based on the given URL order.
+        Returns False if any URL does not exist in the database.
+        """
+        if not urls:
+            return True
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        placeholders = ",".join("?" for _ in urls)
+        cursor.execute(
+            f"SELECT url FROM hifi_instances WHERE url IN ({placeholders})",
+            urls
+        )
+        existing = {row["url"] for row in cursor.fetchall()}
+        missing = [u for u in urls if u not in existing]
+        if missing:
+            return False
+        for i, url in enumerate(urls):
+            cursor.execute("UPDATE hifi_instances SET priority = ? WHERE url = ?", (i, url))
+        conn.commit()
+        return True
+
+    def seed_hifi_instances(self, default_urls: List[str]) -> None:
+        """Insert default instances if the table is empty."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as cnt FROM hifi_instances")
+        count = cursor.fetchone()['cnt']
+        if count == 0:
+            for i, url in enumerate(default_urls):
+                cursor.execute(
+                    "INSERT OR IGNORE INTO hifi_instances (url, priority, enabled) VALUES (?, ?, 1)",
+                    (url, i)
+                )
+            conn.commit()
+            logger.info(f"Seeded {len(default_urls)} default HiFi instances")
 
 # Thread-safe singleton pattern for database access
 _database_instances: Dict[int, MusicDatabase] = {}  # Thread ID -> Database instance

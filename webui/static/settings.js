@@ -797,6 +797,7 @@ async function loadSettingsData() {
         document.getElementById('qobuz-allow-fallback').checked = settings.qobuz?.allow_fallback !== false;
         document.getElementById('hifi-download-quality').value = settings.hifi_download?.quality || 'lossless';
         document.getElementById('hifi-allow-fallback').checked = settings.hifi_download?.allow_fallback !== false;
+        loadHiFiInstances();
         document.getElementById('deezer-download-quality').value = settings.deezer_download?.quality || 'flac';
         document.getElementById('deezer-allow-fallback').checked = settings.deezer_download?.allow_fallback !== false;
         document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
@@ -1833,9 +1834,22 @@ function _genreWhitelistRender(genres) {
     const searchVal = (document.getElementById('genre-whitelist-search')?.value || '').toLowerCase();
     const filtered = searchVal ? _genreWhitelistCache.filter(g => g.toLowerCase().includes(searchVal)) : _genreWhitelistCache;
     container.innerHTML = filtered.map(g =>
-        `<span class="genre-chip">${escapeHtml(g)}<button class="genre-chip-x" onclick="_genreWhitelistRemove('${escapeHtml(g.replace(/'/g, "\\'"))}')">&times;</button></span>`
+        `<span class="genre-chip">${escapeHtml(g)}<button class="genre-chip-x" data-genre="${escapeHtml(g)}">&times;</button></span>`
     ).join('');
     if (countEl) countEl.textContent = `${_genreWhitelistCache.length} genres`;
+    _initGenreChipClickHandler();
+}
+
+function _initGenreChipClickHandler() {
+    const container = document.getElementById('genre-whitelist-chips');
+    if (!container) return;
+    container.onclick = (e) => {
+        const btn = e.target.closest('.genre-chip-x');
+        if (btn) {
+            e.preventDefault();
+            _genreWhitelistRemove(btn.dataset.genre);
+        }
+    };
 }
 
 function _genreWhitelistRemove(genre) {
@@ -2786,19 +2800,32 @@ function renderApiKeys(keys) {
     container.innerHTML = keys.map(k => `
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; margin-bottom: 4px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;">
             <div style="flex: 1; min-width: 0;">
-                <div style="font-size: 13px; color: #e0e0e0; font-weight: 500;">${k.label || 'Unnamed'}</div>
+                <div style="font-size: 13px; color: #e0e0e0; font-weight: 500;">${escapeHtml(k.label || 'Unnamed')}</div>
                 <div style="font-size: 11px; color: #666; margin-top: 2px;">
-                    <code>${k.key_prefix || 'sk_...'}...</code>
+                    <code>${escapeHtml(k.key_prefix || 'sk_...')}...</code>
                     &middot; Created ${k.created_at ? new Date(k.created_at).toLocaleDateString() : 'unknown'}
                     ${k.last_used_at ? '&middot; Last used ' + new Date(k.last_used_at).toLocaleDateString() : ''}
                 </div>
             </div>
-            <button onclick="revokeApiKey('${k.id}', '${(k.label || 'this key').replace(/'/g, "\\'")}')"
+            <button class="revoke-api-key-btn" data-key-id="${escapeHtml(k.id)}" data-key-label="${escapeHtml(k.label || 'this key')}"
                 style="padding: 4px 10px; background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.2); color: #ff5252; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap;">
                 Revoke
             </button>
         </div>
     `).join('');
+    _initApiKeyClickHandler();
+}
+
+function _initApiKeyClickHandler() {
+    const container = document.getElementById('api-keys-list');
+    if (!container) return;
+    container.onclick = (e) => {
+        const btn = e.target.closest('.revoke-api-key-btn');
+        if (btn) {
+            e.preventDefault();
+            revokeApiKey(btn.dataset.keyId, btn.dataset.keyLabel);
+        }
+    };
 }
 
 async function generateApiKey() {
@@ -3277,8 +3304,177 @@ async function testLidarrConnection() {
     }
 }
 
+async function loadHiFiInstances() {
+    const listEl = document.getElementById('hifi-instances-list');
+    if (!listEl) return;
+    try {
+        const resp = await fetch('/api/hifi/instances/list');
+        const data = await resp.json();
+        if (!data.instances || data.instances.length === 0) {
+            listEl.innerHTML = '<div style="color: rgba(255,255,255,0.4); font-size: 0.85em;">No instances configured.</div>';
+            return;
+        }
+        listEl.innerHTML = data.instances.map((inst, i) => {
+            const enabledClass = inst.enabled ? '' : 'hifi-instance-disabled';
+            const checkHtml = inst.enabled
+                ? `<span class="hifi-instance-toggle on" data-url="${escapeHtml(inst.url)}" title="Click to disable">&#x2714;</span>`
+                : `<span class="hifi-instance-toggle off" data-url="${escapeHtml(inst.url)}" title="Click to enable">&#x2718;</span>`;
+            return `<div class="hifi-instance-item${inst.enabled ? '' : ' disabled'}" draggable="true" data-url="${escapeHtml(inst.url)}">
+                <span class="hifi-instance-grip">&#x2630;</span>
+                <span class="hifi-instance-url">${escapeHtml(inst.url)}</span>
+                ${checkHtml}
+                <span class="hifi-instance-remove" data-url="${escapeHtml(inst.url)}" title="Remove instance">&#x2716;</span>
+            </div>`;
+        }).join('');
+        _initHiFiDragDrop();
+        _initHiFiClickHandlers();
+    } catch (e) {
+        listEl.innerHTML = `<div style="color:#f44336;font-size:0.85em;">Error loading instances: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function _initHiFiDragDrop() {
+    const listEl = document.getElementById('hifi-instances-list');
+    if (!listEl) return;
+    let dragIdx = null;
+
+    listEl.querySelectorAll('.hifi-instance-item').forEach((item, idx) => {
+        item.addEventListener('dragstart', (e) => {
+            dragIdx = idx;
+            item.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            dragIdx = null;
+            listEl.querySelectorAll('.hifi-instance-item').forEach(i => i.classList.remove('drag-over'));
+        });
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            item.classList.add('drag-over');
+        });
+        item.addEventListener('dragleave', () => {
+            item.classList.remove('drag-over');
+        });
+        item.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            item.classList.remove('drag-over');
+            if (dragIdx === null) return;
+            const items = [...listEl.querySelectorAll('.hifi-instance-item')];
+            const dragged = items[dragIdx];
+            if (dragIdx !== idx) {
+                if (dragIdx < idx) {
+                    item.after(dragged);
+                } else {
+                    item.before(dragged);
+                }
+                const urls = [...listEl.querySelectorAll('.hifi-instance-item')].map(el => el.dataset.url);
+                await _saveHiFiInstanceOrder(urls);
+            }
+        });
+    });
+}
+
+function _initHiFiClickHandlers() {
+    const listEl = document.getElementById('hifi-instances-list');
+    if (!listEl) return;
+    listEl.onclick = (e) => {
+        const toggle = e.target.closest('.hifi-instance-toggle');
+        if (toggle) {
+            e.preventDefault();
+            toggleHiFiInstance(toggle.dataset.url);
+            return;
+        }
+        const remove = e.target.closest('.hifi-instance-remove');
+        if (remove) {
+            e.preventDefault();
+            removeHiFiInstance(remove.dataset.url);
+        }
+    };
+}
+
+async function _saveHiFiInstanceOrder(urls) {
+    try {
+        await fetch('/api/hifi/instances/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urls })
+        });
+    } catch (e) {
+        console.error('Failed to save HiFi instance order:', e);
+    }
+}
+
+async function toggleHiFiInstance(url) {
+    const listEl = document.getElementById('hifi-instances-list');
+    if (!listEl) return;
+    const item = listEl.querySelector(`.hifi-instance-item[data-url="${url}"]`);
+    const toggle = item?.querySelector('.hifi-instance-toggle');
+    const currentlyEnabled = toggle?.classList.contains('on');
+    const newEnabled = !currentlyEnabled;
+    try {
+        const resp = await fetch('/api/hifi/instances/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, enabled: newEnabled })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            loadHiFiInstances();
+        } else {
+            alert(data.error || 'Failed to toggle instance');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function addHiFiInstance() {
+    const input = document.getElementById('hifi-new-instance');
+    if (!input) return;
+    const url = input.value.trim();
+    if (!url) return;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        alert('URL must start with http:// or https://');
+        return;
+    }
+    try {
+        const resp = await fetch('/api/hifi/instances', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            input.value = '';
+            loadHiFiInstances();
+        } else {
+            alert(data.error || 'Failed to add instance');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function removeHiFiInstance(url) {
+    try {
+        const resp = await fetch(`/api/hifi/instances?url=${encodeURIComponent(url)}`, {
+            method: 'DELETE'
+        });
+        const data = await resp.json();
+        if (data.success) {
+            loadHiFiInstances();
+        } else {
+            alert(data.error || 'Failed to remove instance');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
 async function checkHiFiInstances() {
-    const panel = document.getElementById('hifi-instances-panel');
+    const panel = document.getElementById('hifi-instances-status-panel');
     const btn = document.getElementById('hifi-instances-check-btn');
     if (!panel) return;
     panel.style.display = 'block';
