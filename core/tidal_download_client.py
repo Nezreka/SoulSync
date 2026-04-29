@@ -731,10 +731,9 @@ class TidalDownloadClient:
                             return None
 
                         logger.debug(f"Downloading init segment: {init_uri}")
-                        init_data = http_requests.get(init_uri, allow_redirects=True, timeout=30)
-                        init_data.raise_for_status()
-                        output_file.write(init_data.content)
-                        downloaded += len(init_data.content)
+                        init_data = self._download_segment_with_retry(init_uri)
+                        output_file.write(init_data)
+                        downloaded += len(init_data)
                         segments_completed += 1
 
                         self._update_download_progress(download_id, downloaded,
@@ -746,10 +745,9 @@ class TidalDownloadClient:
                             intermediate_path.unlink(missing_ok=True)
                             return None
 
-                        seg_resp = http_requests.get(segment_url, allow_redirects=True, timeout=30)
-                        seg_resp.raise_for_status()
-                        output_file.write(seg_resp.content)
-                        downloaded += len(seg_resp.content)
+                        segment_data = self._download_segment_with_retry(segment_url)
+                        output_file.write(segment_data)
+                        downloaded += len(segment_data)
                         segments_completed += 1
 
                         self._update_download_progress(download_id, downloaded,
@@ -792,6 +790,32 @@ class TidalDownloadClient:
 
         logger.error(f"All quality tiers exhausted for '{display_name}'")
         return None
+
+    def _download_segment_with_retry(self, url: str) -> bytes:
+        """Download a single HLS segment with 3 retries and 2s fixed backoff."""
+        last_error = None
+        for attempt in range(4):
+            try:
+                resp = http_requests.get(url, allow_redirects=True, timeout=30)
+                resp.raise_for_status()
+                return resp.content
+            except http_requests.exceptions.HTTPError as e:
+                status = e.response.status_code if e.response is not None else 0
+                if 400 <= status < 500:
+                    raise
+                last_error = e
+            except (http_requests.exceptions.Timeout,
+                    http_requests.exceptions.ConnectionError) as e:
+                last_error = e
+
+            if attempt < 3:
+                if self.shutdown_check and self.shutdown_check():
+                    raise RuntimeError("Shutdown requested")
+                logger.warning(f"Tidal segment download failed (attempt {attempt + 1}/4), "
+                              f"retrying in 2s: {url}")
+                time.sleep(2)
+
+        raise last_error
 
     def _update_download_progress(self, download_id: str, downloaded: int,
                                   segments_completed: int, total_segments: int,
