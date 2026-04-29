@@ -311,7 +311,66 @@ def start_manual_wishlist_download_batch(
     category: str | None = None,
     force_download_all: bool = False,
 ) -> tuple[Dict[str, Any], int]:
-    """Prepare and submit a manual wishlist batch."""
+    """Submit a manual wishlist batch.
+
+    The batch entry is created synchronously so the frontend can start polling
+    status immediately. The slow library-cleanup pass and master-worker hand-off
+    run in the background, freeing the request handler from a 30s+ block on
+    per-track DB checks for large wishlists.
+    """
+    logger = runtime.logger
+
+    try:
+        batch_id = str(uuid.uuid4())
+        playlist_id = "wishlist"
+        playlist_name = "Wishlist"
+
+        with runtime.tasks_lock:
+            runtime.download_batches[batch_id] = {
+                'phase': 'analysis',
+                'playlist_id': playlist_id,
+                'playlist_name': playlist_name,
+                'queue': [],
+                'active_count': 0,
+                'max_concurrent': runtime.get_batch_max_concurrent(),
+                'queue_index': 0,
+                # analysis_total starts at 0; the bg job updates it after cleanup
+                # finishes and the real track count is known.
+                'analysis_total': 0,
+                'analysis_processed': 0,
+                'analysis_results': [],
+                'permanently_failed_tracks': [],
+                'cancelled_tracks': set(),
+                'force_download_all': True,
+                'profile_id': runtime.profile_id,
+            }
+
+        runtime.missing_download_executor.submit(
+            _prepare_and_run_manual_wishlist_batch,
+            runtime,
+            batch_id,
+            track_ids,
+            category,
+        )
+
+        return {"success": True, "batch_id": batch_id}, 200
+
+    except Exception as e:
+        logger.error(f"Error starting wishlist download process: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return {"success": False, "error": str(e)}, 500
+
+
+def _prepare_and_run_manual_wishlist_batch(
+    runtime: WishlistManualDownloadRuntime,
+    batch_id: str,
+    track_ids,
+    category: str | None,
+) -> None:
+    """Background worker for the manual wishlist batch — does the slow cleanup
+    + sanitize + filter + master-worker hand-off off the request thread."""
     logger = runtime.logger
 
     try:
@@ -340,7 +399,12 @@ def start_manual_wishlist_download_batch(
 
         raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=manual_profile_id)
         if not raw_wishlist_tracks:
-            return {"success": False, "error": "No tracks in wishlist"}, 400
+            logger.warning("[Manual-Wishlist] No tracks in wishlist after cleanup — marking batch complete")
+            with runtime.tasks_lock:
+                if batch_id in runtime.download_batches:
+                    runtime.download_batches[batch_id]['phase'] = 'complete'
+                    runtime.download_batches[batch_id]['error'] = 'No tracks in wishlist'
+            return
 
         wishlist_tracks, duplicates_found = sanitize_and_dedupe_wishlist_tracks(raw_wishlist_tracks)
         if duplicates_found > 0:
@@ -372,41 +436,25 @@ def start_manual_wishlist_download_batch(
         for i, track in enumerate(wishlist_tracks):
             track['_original_index'] = i
 
+        # Update batch with the real track count now that filtering is done
+        with runtime.tasks_lock:
+            if batch_id in runtime.download_batches:
+                runtime.download_batches[batch_id]['analysis_total'] = len(wishlist_tracks)
+
         runtime.add_activity_item("", "Wishlist Download Started", f"{len(wishlist_tracks)} tracks", "Now")
 
-        batch_id = str(uuid.uuid4())
-        playlist_id = "wishlist"
-        playlist_name = "Wishlist"
-        task_queue = []
-        with runtime.tasks_lock:
-            runtime.download_batches[batch_id] = {
-                'phase': 'analysis',
-                'playlist_id': playlist_id,
-                'playlist_name': playlist_name,
-                'queue': task_queue,
-                'active_count': 0,
-                'max_concurrent': runtime.get_batch_max_concurrent(),
-                'queue_index': 0,
-                'analysis_total': len(wishlist_tracks),
-                'analysis_processed': 0,
-                'analysis_results': [],
-                'permanently_failed_tracks': [],
-                'cancelled_tracks': set(),
-                'force_download_all': True,
-                'profile_id': manual_profile_id,
-            }
-
         logger.info(f"Starting wishlist batch {batch_id} with {len(wishlist_tracks)} tracks")
-        runtime.missing_download_executor.submit(runtime.run_full_missing_tracks_process, batch_id, playlist_id, wishlist_tracks)
+        runtime.run_full_missing_tracks_process(batch_id, "wishlist", wishlist_tracks)
 
-        return {"success": True, "batch_id": batch_id}, 200
-
-    except Exception as e:
-        logger.error(f"Error starting wishlist download process: {e}")
+    except Exception as exc:
+        logger.error(f"Error preparing manual wishlist batch {batch_id}: {exc}")
         import traceback
 
         traceback.print_exc()
-        return {"success": False, "error": str(e)}, 500
+        with runtime.tasks_lock:
+            if batch_id in runtime.download_batches:
+                runtime.download_batches[batch_id]['phase'] = 'error'
+                runtime.download_batches[batch_id]['error'] = str(exc)
 
 
 def cleanup_wishlist_against_library(
