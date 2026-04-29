@@ -12,7 +12,7 @@ import re
 import time
 import threading
 import requests
-from core.metadata_cache import get_metadata_cache
+from core.metadata.cache import get_metadata_cache
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from functools import wraps

@@ -196,7 +196,7 @@ class RepairWorker:
     def metadata_cache(self):
         if self._metadata_cache is None:
             try:
-                from core.metadata_cache import get_metadata_cache
+                from core.metadata.cache import get_metadata_cache
                 self._metadata_cache = get_metadata_cache()
             except Exception as e:
                 logger.error("Failed to get metadata cache: %s", e)

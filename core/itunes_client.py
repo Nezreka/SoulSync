@@ -5,7 +5,7 @@ import threading
 from functools import wraps
 from dataclasses import dataclass
 from utils.logging_config import get_logger
-from core.metadata_cache import get_metadata_cache
+from core.metadata.cache import get_metadata_cache
 
 logger = get_logger("itunes_client")
 

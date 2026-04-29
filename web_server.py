@@ -96,7 +96,8 @@ from core.tidal_client import TidalClient # Added import for Tidal
 from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker
 from core.web_scan_manager import WebScanManager
-from core.metadata_cache import get_metadata_cache
+from core.metadata.cache import get_metadata_cache
+from core.metadata.registry import register_runtime_clients as register_metadata_runtime_clients
 from core.imports.context import (
     get_import_clean_album,
     get_import_clean_title,
@@ -6039,7 +6040,7 @@ _comparison_lock = threading.Lock()
 def _is_hydrabase_active():
     """Check if Hydrabase is connected and enabled for metadata use."""
     try:
-        from core.metadata_service import is_hydrabase_enabled
+        from core.metadata.registry import is_hydrabase_enabled
         return is_hydrabase_enabled()
     except Exception:
         return False
@@ -10274,7 +10275,8 @@ def get_artist_detail(artist_id):
         # Get source-priority discography for proper categorization and missing releases
         artist_detail_discography = None
         try:
-            from core.metadata_service import MetadataLookupOptions, get_artist_detail_discography as _get_artist_detail_discography
+            from core.metadata.lookup import MetadataLookupOptions
+            from core.metadata_service import get_artist_detail_discography as _get_artist_detail_discography
 
             artist_source_ids = {
                 'spotify': artist_info.get('spotify_artist_id'),
@@ -10510,7 +10512,8 @@ def get_artist_discography(artist_id):
             else:
                 effective_override_source = 'spotify'
 
-        from core.metadata_service import MetadataLookupOptions, get_artist_discography as _get_artist_discography
+        from core.metadata.lookup import MetadataLookupOptions
+        from core.metadata_service import get_artist_discography as _get_artist_discography
 
         discography = _get_artist_discography(
             artist_id,
@@ -25122,38 +25125,38 @@ deezer_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix
 
 def _get_deezer_client():
     """Get cached Deezer client."""
-    from core.metadata_service import get_deezer_client
+    from core.metadata.registry import get_deezer_client
     return get_deezer_client()
 
 def _get_itunes_client():
     """Get cached iTunes client."""
-    from core.metadata_service import get_itunes_client
+    from core.metadata.registry import get_itunes_client
     return get_itunes_client()
 
 def _get_discogs_client(token=None):
     """Get cached Discogs client."""
-    from core.metadata_service import get_discogs_client
+    from core.metadata.registry import get_discogs_client
     return get_discogs_client(token)
 
 def _get_metadata_fallback_source():
     """Get the configured primary metadata source.
     Returns 'spotify', 'itunes', 'deezer', 'discogs', or 'hydrabase'.
 
-    NOTE: This is a thin wrapper — canonical logic lives in core.metadata_service.get_primary_source().
+    NOTE: This is a thin wrapper — canonical logic lives in core.metadata.registry.get_primary_source().
     Kept as a local function because 70+ callers reference it by name."""
-    from core.metadata_service import get_primary_source
+    from core.metadata.registry import get_primary_source
     return get_primary_source()
 
 def _get_metadata_fallback_client():
     """Get the active metadata client based on settings.
     Returns a SpotifyClient, iTunesClient, DeezerClient, DiscogsClient, or HydrabaseClient instance."""
     source = _get_metadata_fallback_source()
+    from core.metadata.registry import get_client_for_source
+
+    client = get_client_for_source(source)
+    if client is not None:
+        return client
     if source == 'spotify':
-        if spotify_client and spotify_client.is_spotify_authenticated():
-            return spotify_client
-        # Spotify selected but not authed — fall back to deezer
-        return _get_deezer_client()
-    if source == 'deezer':
         return _get_deezer_client()
     if source == 'discogs':
         token = config_manager.get('discogs.token', '')
@@ -29094,7 +29097,7 @@ def start_watchlist_scan():
     """Start a watchlist scan for new releases"""
     try:
         # Check if MetadataService can provide a working client (Spotify OR fallback)
-        from core.metadata_service import MetadataService
+        from core.metadata.service import MetadataService
         metadata_service = MetadataService()
 
         # Get active provider - will be spotify or the configured fallback
@@ -29581,7 +29584,7 @@ def watchlist_artist_config(artist_id):
                 'preferred_metadata_source': result[17] if len(result) > 17 else None,
             }
 
-            from core.metadata_service import get_primary_source
+            from core.metadata.registry import get_primary_source
             return jsonify({
                 "success": True,
                 "config": config,
@@ -30332,7 +30335,7 @@ def _get_active_discovery_source():
 
     NOTE: Thin wrapper — canonical logic lives in core.metadata_service.get_primary_source().
     """
-    from core.metadata_service import get_primary_source
+    from core.metadata.registry import get_primary_source
     return get_primary_source()
 
 
@@ -36121,7 +36124,6 @@ def enrich_beatport_tracks():
         uncached_tracks = []
         uncached_indices = []
 
-        from core.metadata_cache import get_metadata_cache
         mcache = get_metadata_cache()
 
         for i, track in enumerate(tracks):
@@ -39694,6 +39696,12 @@ except Exception as e:
     hydrabase_worker = None
     hydrabase_client = None
 
+register_metadata_runtime_clients(
+    spotify_client=spotify_client,
+    hydrabase_client=hydrabase_client,
+    dev_mode_enabled_provider=lambda: dev_mode_enabled,
+)
+
 # --- Hydrabase Auto-Reconnect ---
 try:
     _hydra_cfg = config_manager.get_hydrabase_config()
@@ -40212,7 +40220,6 @@ def repair_findings_counts():
 def repair_cache_health():
     """Get metadata cache health stats for the repair dashboard"""
     try:
-        from core.metadata_cache import get_metadata_cache
         cache = get_metadata_cache()
         return jsonify(cache.get_health_stats()), 200
     except Exception as e:
@@ -40551,7 +40558,7 @@ def import_search_albums():
             return jsonify({'success': False, 'error': 'Missing query parameter'}), 400
 
         limit = min(int(request.args.get('limit', 12)), 50)
-        from core.metadata_service import get_primary_source
+        from core.metadata.registry import get_primary_source
 
         if get_primary_source() == 'hydrabase' and hydrabase_worker and dev_mode_enabled:
             hydrabase_worker.enqueue(query, 'albums')
