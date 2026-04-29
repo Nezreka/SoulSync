@@ -3414,7 +3414,7 @@ async function addHiFiInstance() {
 
 async function removeHiFiInstance(url) {
     try {
-        const resp = await fetch(`/api/hifi/instances/${encodeURIComponent(url)}`, {
+        const resp = await fetch(`/api/hifi/instances?url=${encodeURIComponent(url)}`, {
             method: 'DELETE'
         });
         const data = await resp.json();
