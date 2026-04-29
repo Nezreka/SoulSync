@@ -383,19 +383,12 @@ def _prepare_and_run_manual_wishlist_batch(
         if duplicates_removed > 0:
             logger.warning(f"[Manual-Wishlist] Removed {duplicates_removed} duplicate tracks")
 
-        logger.info("[Manual-Wishlist] Checking wishlist against library for already-owned tracks...")
-        cleanup_removed = remove_tracks_already_in_library(
-            wishlist_service,
-            SimpleNamespace(get_all_profiles=lambda: [{"id": manual_profile_id}]),
-            db,
-            runtime.active_server,
-            logger=logger,
-            skip_track_fn=lambda track: track.get('source_type') == 'enhance',
-            log_prefix="[Manual-Wishlist]",
-        )
-
-        if cleanup_removed > 0:
-            logger.info(f"[Manual-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
+        # NOTE: We deliberately do NOT call remove_tracks_already_in_library here.
+        # Wishlist tracks are already known-missing (force_download_all=True is set on
+        # the batch). The library check duplicates the work the master worker would
+        # skip, and on large wishlists costs ~1s per track in serial DB lookups.
+        # The standalone /api/wishlist/cleanup endpoint still runs that pass when
+        # users explicitly ask for maintenance.
 
         raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=manual_profile_id)
         if not raw_wishlist_tracks:
@@ -554,27 +547,19 @@ def process_wishlist_automatically(runtime: WishlistAutoProcessingRuntime, autom
                     if duplicates_removed > 0:
                         logger.warning(f"[Auto-Wishlist] Removed {duplicates_removed} duplicate tracks from profile {profile['id']}")
 
-                # CLEANUP: Remove tracks from wishlist that already exist in library
-                # This prevents wasting bandwidth on tracks we already have
-                logger.debug("[Auto-Wishlist] Checking wishlist against library for already-owned tracks...")
-                active_server = runtime.get_active_server()
-                cleanup_removed = remove_tracks_already_in_library(
-                    wishlist_service,
-                    database,
-                    music_database,
-                    active_server,
-                    logger=logger,
-                )
+                # NOTE: We deliberately do NOT call remove_tracks_already_in_library here.
+                # The batch sets force_download_all=True (see comment a few lines below),
+                # so wishlist tracks are treated as known-missing and the master worker
+                # skips per-track library lookups. Doing the same expensive scan here
+                # before submitting the batch defeats that optimization and adds
+                # ~1s per track in serial DB queries. The standalone
+                # /api/wishlist/cleanup endpoint still exposes that pass for users
+                # who want explicit maintenance.
+                runtime.update_automation_progress(automation_id, progress=25, phase='Preparing wishlist',
+                                                   log_line='Skipped library scan — wishlist tracks treated as known-missing',
+                                                   log_type='info')
 
-                if cleanup_removed > 0:
-                    logger.info(f"[Auto-Wishlist] Cleaned up {cleanup_removed} already-owned tracks from wishlist")
-                    runtime.update_automation_progress(automation_id, progress=25, phase='Cleaned up duplicates',
-                                                       log_line=f'Removed {cleanup_removed} already-owned tracks', log_type='success')
-                else:
-                    runtime.update_automation_progress(automation_id, progress=25, phase='Cleanup done',
-                                                       log_line='No duplicates or already-owned tracks found', log_type='skip')
-
-                # Get wishlist tracks for processing (after cleanup) - combine all profiles
+                # Get wishlist tracks for processing - combine all profiles
                 raw_wishlist_tracks = []
                 for profile in all_profiles:
                     raw_wishlist_tracks.extend(wishlist_service.get_wishlist_tracks_for_download(profile_id=profile['id']))

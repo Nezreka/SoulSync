@@ -184,8 +184,16 @@ def test_start_manual_wishlist_download_batch_filters_track_ids_and_starts_batch
     assert any("Filtered to 1 specific tracks by ID" in msg for msg in logger.info_messages)
 
 
-def test_start_manual_wishlist_download_batch_skips_enhance_tracks_during_cleanup():
-    runtime, service, _db, executor, logger, activity_calls, batch_map, master_calls = _build_runtime(
+def test_start_manual_wishlist_download_batch_does_not_run_library_cleanup():
+    """Manual flow does NOT scan the library for already-owned tracks.
+
+    The batch sets force_download_all=True so owned tracks get downloaded
+    anyway. Running remove_tracks_already_in_library here would just add a
+    serial DB query per track (~30s on a 24-track wishlist) and contradict
+    force_download_all. The standalone /api/wishlist/cleanup endpoint
+    still exposes that pass for users who want explicit maintenance.
+    """
+    runtime, service, db, executor, _logger, activity_calls, batch_map, master_calls = _build_runtime(
         tracks=[
             {
                 "id": "enhance-1",
@@ -209,30 +217,25 @@ def test_start_manual_wishlist_download_batch_skips_enhance_tracks_during_cleanu
     assert status == 200
     assert payload["success"] is True
 
-    # Run the bg job — cleanup happens here, not in the request handler.
     _run_submitted_bg_job(executor)
 
-    assert service.removed_ids == {"owned-1"}
+    # Owned-track removal pass does NOT run — wishlist still has the owned track.
+    assert service.removed_ids == set()
+    # The library check is skipped entirely — no per-track DB lookups.
+    assert db.track_checks == []
+
+    # All tracks are submitted to the master worker — including the "owned" one.
     assert len(master_calls) == 1
     master_args, _ = master_calls[0]
-    assert [track["id"] for track in master_args[2]] == ["enhance-1"]
-    assert batch_map[payload["batch_id"]]["analysis_total"] == 1
-    assert activity_calls == [("", "Wishlist Download Started", "1 tracks", "Now")]
-    assert any("Cleaned up 1 already-owned tracks" in msg for msg in logger.info_messages)
+    assert [track["id"] for track in master_args[2]] == ["enhance-1", "owned-1"]
+    assert batch_map[payload["batch_id"]]["analysis_total"] == 2
+    assert activity_calls == [("", "Wishlist Download Started", "2 tracks", "Now")]
 
 
-def test_bg_job_marks_batch_complete_when_wishlist_empty_after_cleanup():
-    """If cleanup empties the wishlist, the bg job marks the batch complete (not error 400)."""
+def test_bg_job_marks_batch_complete_when_wishlist_genuinely_empty():
+    """If the wishlist is empty before the manual click, the bg job marks the batch complete."""
     runtime, _service, _db, executor, _logger, _activity, batch_map, master_calls = _build_runtime(
-        tracks=[
-            {
-                "id": "owned-1",
-                "name": "Owned Song",
-                "artists": [{"name": "Artist B"}],
-                "album": {"name": "Owned Album", "album_type": "album"},
-            },
-        ],
-        owned_matches={("Owned Song", "Artist B")},
+        tracks=[],
     )
 
     payload, status = processing.start_manual_wishlist_download_batch(runtime)
@@ -240,7 +243,7 @@ def test_bg_job_marks_batch_complete_when_wishlist_empty_after_cleanup():
 
     _run_submitted_bg_job(executor)
 
-    # Cleanup removed the only track. Master worker never called. Batch marked complete.
+    # No tracks → master worker never called, batch marked complete with explanatory error.
     assert master_calls == []
     assert batch_map[payload["batch_id"]]["phase"] == "complete"
     assert batch_map[payload["batch_id"]]["error"] == "No tracks in wishlist"
