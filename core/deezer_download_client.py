@@ -411,7 +411,7 @@ class DeezerDownloadClient:
                     album_ids.add(str(aid))
             album_release_dates = {}
             try:
-                from core.metadata_cache import get_metadata_cache
+                from core.metadata.cache import get_metadata_cache
                 cache = get_metadata_cache()
             except Exception:
                 cache = None
