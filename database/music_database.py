@@ -11649,9 +11649,22 @@ class MusicDatabase:
         return cursor.rowcount > 0
 
     def reorder_hifi_instances(self, urls: List[str]) -> bool:
-        """Update priorities based on the given URL order."""
+        """Update priorities based on the given URL order.
+        Returns False if any URL does not exist in the database.
+        """
+        if not urls:
+            return True
         conn = self._get_connection()
         cursor = conn.cursor()
+        placeholders = ",".join("?" for _ in urls)
+        cursor.execute(
+            f"SELECT url FROM hifi_instances WHERE url IN ({placeholders})",
+            urls
+        )
+        existing = {row["url"] for row in cursor.fetchall()}
+        missing = [u for u in urls if u not in existing]
+        if missing:
+            return False
         for i, url in enumerate(urls):
             cursor.execute("UPDATE hifi_instances SET priority = ? WHERE url = ?", (i, url))
         conn.commit()

@@ -24782,7 +24782,8 @@ def hifi_reorder_instances():
             return jsonify({'success': False, 'error': 'URL list is required'}), 400
         from database.music_database import get_database
         db = get_database()
-        db.reorder_hifi_instances(urls)
+        if not db.reorder_hifi_instances(urls):
+            return jsonify({'success': False, 'error': 'One or more URLs not found'}), 400
         # Reload the client
         if soulseek_client and hasattr(soulseek_client, 'hifi') and soulseek_client.hifi:
             soulseek_client.hifi.reload_instances()
