@@ -28391,292 +28391,37 @@ def _run_youtube_discovery_worker(url_hash):
     return _discovery_youtube.run_youtube_discovery_worker(url_hash, _build_youtube_discovery_deps())
 
 
+# ListenBrainz discovery worker logic lives in core/discovery/listenbrainz.py.
+from core.discovery import listenbrainz as _discovery_listenbrainz
+
+
+def _build_listenbrainz_discovery_deps():
+    """Build the ListenbrainzDiscoveryDeps bundle from web_server.py globals on each call."""
+    return _discovery_listenbrainz.ListenbrainzDiscoveryDeps(
+        listenbrainz_playlist_states=listenbrainz_playlist_states,
+        spotify_client=spotify_client,
+        matching_engine=matching_engine,
+        pause_enrichment_workers=_pause_enrichment_workers,
+        resume_enrichment_workers=_resume_enrichment_workers,
+        get_active_discovery_source=_get_active_discovery_source,
+        get_metadata_fallback_client=_get_metadata_fallback_client,
+        get_discovery_cache_key=_get_discovery_cache_key,
+        get_database=get_database,
+        validate_discovery_cache_artist=_validate_discovery_cache_artist,
+        extract_artist_name=_extract_artist_name,
+        spotify_rate_limited=_spotify_rate_limited,
+        discovery_score_candidates=_discovery_score_candidates,
+        get_metadata_cache=get_metadata_cache,
+        build_discovery_wing_it_stub=_build_discovery_wing_it_stub,
+        add_activity_item=add_activity_item,
+    )
+
+
 def _run_listenbrainz_discovery_worker(state_key):
-    """Background worker for ListenBrainz music discovery process (Spotify preferred, iTunes fallback)"""
-    playlist_mbid = state_key.split(':', 1)[1] if ':' in state_key else state_key
-    _ew_state = {}
-    try:
-        _ew_state = _pause_enrichment_workers('ListenBrainz discovery')
-        state = listenbrainz_playlist_states[state_key]
-        playlist = state['playlist']
-        tracks = playlist['tracks']
+    return _discovery_listenbrainz.run_listenbrainz_discovery_worker(
+        state_key, _build_listenbrainz_discovery_deps()
+    )
 
-        # Determine which provider to use (Spotify preferred, iTunes fallback)
-        discovery_source = _get_active_discovery_source()
-        use_spotify = (discovery_source == 'spotify') and spotify_client and spotify_client.is_spotify_authenticated()
-
-        # Get fallback client
-        itunes_client = _get_metadata_fallback_client()
-
-        logger.info(f"Starting {discovery_source} discovery for {len(tracks)} ListenBrainz tracks...")
-
-        # Store the discovery source in state
-        state['discovery_source'] = discovery_source
-
-        # Process each track for discovery
-        for i, track in enumerate(tracks):
-            try:
-                # Check for cancellation
-                if state.get('phase') != 'discovering':
-                    logger.warning(f"ListenBrainz discovery cancelled (phase changed to '{state.get('phase')}')")
-                    return
-
-                # Update progress
-                state['discovery_progress'] = int((i / len(tracks)) * 100)
-
-                # Get cleaned track data from ListenBrainz
-                cleaned_title = track['track_name']
-                cleaned_artist = track['artist_name']
-                album_name = track.get('album_name', '')
-                duration_ms = track.get('duration_ms', 0)
-
-                logger.info(f"Searching {discovery_source} for: '{cleaned_artist}' - '{cleaned_title}'")
-
-                # Check discovery cache first
-                cache_key = _get_discovery_cache_key(cleaned_title, cleaned_artist)
-                try:
-                    cache_db = get_database()
-                    cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
-                    if cached_match and _validate_discovery_cache_artist(cleaned_artist, cached_match):
-                        logger.debug(f"CACHE HIT [{i+1}/{len(tracks)}]: {cleaned_artist} - {cleaned_title}")
-                        result = {
-                            'index': i,
-                            'lb_track': cleaned_title,
-                            'lb_artist': cleaned_artist,
-                            'status': 'Found',
-                            'status_class': 'found',
-                            'spotify_track': cached_match.get('name', ''),
-                            'spotify_artist': _extract_artist_name(cached_match.get('artists', [''])[0]) if cached_match.get('artists') else '',
-                            'spotify_album': cached_match.get('album', {}).get('name', '') if isinstance(cached_match.get('album'), dict) else cached_match.get('album', ''),
-                            'duration': f"{int(duration_ms) // 60000}:{(int(duration_ms) % 60000) // 1000:02d}" if duration_ms else '0:00',
-                            'discovery_source': discovery_source,
-                            'matched_data': cached_match,
-                            'spotify_data': cached_match
-                        }
-                        state['spotify_matches'] += 1
-                        state['discovery_results'].append(result)
-                        continue
-                except Exception as cache_err:
-                    logger.error(f"Cache lookup error: {cache_err}")
-
-                # Try multiple search strategies using matching engine
-                matched_track = None
-                best_confidence = 0.0
-                best_raw_track = None
-                min_confidence = 0.9
-                source_duration = duration_ms or 0
-
-                # Strategy 1: Use matching_engine search queries
-                try:
-                    temp_track = type('TempTrack', (), {
-                        'name': cleaned_title,
-                        'artists': [cleaned_artist],
-                        'album': album_name if album_name else None
-                    })()
-                    search_queries = matching_engine.generate_download_queries(temp_track)
-                    logger.info(f"Generated {len(search_queries)} search queries for ListenBrainz track")
-                except Exception as e:
-                    logger.error(f"Matching engine failed for ListenBrainz, falling back to basic query: {e}")
-                    search_queries = [f"{cleaned_artist} {cleaned_title}", cleaned_title]
-
-                for query_idx, search_query in enumerate(search_queries):
-                    try:
-                        logger.debug(f"ListenBrainz query {query_idx + 1}/{len(search_queries)}: {search_query}")
-
-                        search_results = None
-
-                        if use_spotify and not _spotify_rate_limited():
-                            search_results = spotify_client.search_tracks(search_query, limit=10)
-                        else:
-                            search_results = itunes_client.search_tracks(search_query, limit=10)
-
-                        if not search_results:
-                            continue
-
-                        # Score all results using the matching engine
-                        match, confidence, match_idx = _discovery_score_candidates(
-                            cleaned_title, cleaned_artist, source_duration, search_results
-                        )
-
-                        if match and confidence > best_confidence and confidence >= min_confidence:
-                            best_confidence = confidence
-                            matched_track = match
-                            if use_spotify and match.id:
-                                _cache = get_metadata_cache()
-                                best_raw_track = _cache.get_entity('spotify', 'track', match.id)
-                            else:
-                                best_raw_track = None
-                            logger.info(f"New best ListenBrainz match: {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
-
-                        if best_confidence >= 0.9:
-                            logger.info(f"High confidence ListenBrainz match found ({best_confidence:.3f}), stopping search")
-                            break
-
-                    except Exception as e:
-                        logger.debug(f"Error in ListenBrainz search for query '{search_query}': {e}")
-                        continue
-
-                if matched_track:
-                    logger.info(f"Strategy 1 ListenBrainz match: {matched_track.artists[0]} - {matched_track.name} (confidence: {best_confidence:.3f})")
-
-                # Strategy 2: Swapped search (if first failed) - score results properly
-                if not matched_track:
-                    logger.info("ListenBrainz Strategy 2: Trying swapped search (artist/title reversed)")
-                    if use_spotify:
-                        query = f"artist:{cleaned_title} track:{cleaned_artist}"
-                        fallback_results = spotify_client.search_tracks(query, limit=5)
-                    else:
-                        query = f"{cleaned_title} {cleaned_artist}"
-                        fallback_results = itunes_client.search_tracks(query, limit=5)
-                    if fallback_results:
-                        match, confidence, _ = _discovery_score_candidates(
-                            cleaned_title, cleaned_artist, source_duration, fallback_results
-                        )
-                        if match and confidence >= min_confidence:
-                            matched_track = match
-                            best_confidence = confidence
-                            logger.info(f"Strategy 2 ListenBrainz match (swapped): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
-
-                # Strategy 3: Album-based search (if still failed and we have album name) - score results properly
-                if not matched_track and album_name:
-                    logger.info(f"ListenBrainz Strategy 3: Trying album-based search: '{cleaned_artist} {album_name} {cleaned_title}'")
-                    if use_spotify:
-                        query = f"artist:{cleaned_artist} album:{album_name} track:{cleaned_title}"
-                        fallback_results = spotify_client.search_tracks(query, limit=5)
-                    else:
-                        query = f"{cleaned_artist} {album_name} {cleaned_title}"
-                        fallback_results = itunes_client.search_tracks(query, limit=5)
-                    if fallback_results:
-                        match, confidence, _ = _discovery_score_candidates(
-                            cleaned_title, cleaned_artist, source_duration, fallback_results
-                        )
-                        if match and confidence >= min_confidence:
-                            matched_track = match
-                            best_confidence = confidence
-                            logger.info(f"Strategy 3 ListenBrainz match (album): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
-
-                # Strategy 4: Extended search with higher limit (last resort)
-                if not matched_track:
-                    logger.info("ListenBrainz Strategy 4: Extended search with limit=50")
-                    query = f"{cleaned_artist} {cleaned_title}"
-                    if use_spotify:
-                        extended_results = spotify_client.search_tracks(query, limit=50)
-                    else:
-                        extended_results = itunes_client.search_tracks(query, limit=50)
-                    if extended_results:
-                        match, confidence, _ = _discovery_score_candidates(
-                            cleaned_title, cleaned_artist, source_duration, extended_results
-                        )
-                        if match and confidence >= min_confidence:
-                            matched_track = match
-                            best_confidence = confidence
-                            logger.info(f"Strategy 4 ListenBrainz match (extended): {match.artists[0]} - {match.name} (confidence: {confidence:.3f})")
-
-                # Create result entry
-                result = {
-                    'index': i,
-                    'lb_track': cleaned_title,
-                    'lb_artist': cleaned_artist,
-                    'status': 'Found' if matched_track else 'Not Found',
-                    'status_class': 'found' if matched_track else 'not-found',
-                    'spotify_track': matched_track.name if matched_track else '',
-                    'spotify_artist': _extract_artist_name(matched_track.artists[0]) if matched_track else '',
-                    'spotify_album': matched_track.album if matched_track else '',
-                    'duration': f"{int(duration_ms) // 60000}:{(int(duration_ms) % 60000) // 1000:02d}" if duration_ms else '0:00',
-                    'discovery_source': discovery_source,
-                    'confidence': best_confidence
-                }
-
-                if matched_track:
-                    state['spotify_matches'] += 1
-
-                    # Build album data based on provider
-                    if use_spotify and best_raw_track:
-                        album_data = best_raw_track.get('album', {})
-                    else:
-                        album_data = {
-                            'name': matched_track.album,
-                            'album_type': 'album',
-                            'release_date': getattr(matched_track, 'release_date', '') or '',
-                            'images': [{'url': matched_track.image_url}] if hasattr(matched_track, 'image_url') and matched_track.image_url else []
-                        }
-
-                    # Extract image URL for discovery pool display
-                    _yt_album_images = album_data.get('images', [])
-                    _yt_image_url = _yt_album_images[0].get('url', '') if _yt_album_images else (getattr(matched_track, 'image_url', '') or '')
-
-                    result['matched_data'] = {
-                        'id': matched_track.id,
-                        'name': matched_track.name,
-                        'artists': matched_track.artists,
-                        'album': album_data,
-                        'duration_ms': matched_track.duration_ms,
-                        'image_url': _yt_image_url,
-                        'source': discovery_source
-                    }
-                    result['spotify_data'] = result['matched_data']
-
-                    # Save to discovery cache (only high-confidence matches)
-                    if best_confidence >= 0.7:
-                        try:
-                            cache_db = get_database()
-                            cache_db.save_discovery_cache_match(
-                                cache_key[0], cache_key[1], discovery_source, best_confidence,
-                                result['matched_data'], cleaned_title, cleaned_artist
-                            )
-                            logger.info(f"CACHE SAVED: {cleaned_artist} - {cleaned_title} (confidence: {best_confidence:.3f})")
-                        except Exception as cache_err:
-                            logger.error(f"Cache save error: {cache_err}")
-
-                else:
-                    # Auto Wing It fallback — build stub from raw source data
-                    stub = _build_discovery_wing_it_stub(cleaned_title, cleaned_artist, duration_ms)
-                    result['status'] = 'Wing It'
-                    result['status_class'] = 'wing-it'
-                    result['spotify_track'] = cleaned_title
-                    result['spotify_artist'] = cleaned_artist
-                    result['spotify_album'] = ''
-                    result['matched_data'] = stub
-                    result['spotify_data'] = stub
-                    result['wing_it_fallback'] = True
-                    state['wing_it_count'] = state.get('wing_it_count', 0) + 1
-
-                state['discovery_results'].append(result)
-
-                logger.info(f"  {'' if matched_track else ''} Track {i+1}/{len(tracks)}: {result['status']}")
-
-            except Exception as e:
-                logger.error(f"Error processing track {i}: {e}")
-                result = {
-                    'index': i,
-                    'lb_track': track['track_name'],
-                    'lb_artist': track['artist_name'],
-                    'status': 'Error',
-                    'status_class': 'error',
-                    'spotify_track': '',
-                    'spotify_artist': '',
-                    'spotify_album': '',
-                    'duration': '0:00'
-                }
-                state['discovery_results'].append(result)
-
-        # Complete discovery
-        state['phase'] = 'discovered'
-        state['status'] = 'complete'
-        state['discovery_progress'] = 100
-
-        playlist_name = playlist.get('name') or playlist.get('title') or 'Unknown Playlist'
-        source_label = discovery_source.upper()
-        add_activity_item("", f"ListenBrainz Discovery Complete ({source_label})", f"'{playlist_name}' - {state['spotify_matches']}/{len(tracks)} tracks found", "Now")
-
-        logger.info(f"ListenBrainz discovery complete ({discovery_source}): {state['spotify_matches']}/{len(tracks)} tracks matched")
-
-    except Exception as e:
-        logger.error(f"Error in ListenBrainz discovery worker: {e}")
-        state['status'] = 'error'
-        state['phase'] = 'fresh'
-    finally:
-        _resume_enrichment_workers(_ew_state, 'ListenBrainz discovery')
 
 def _calculate_similarity(str1, str2):
     """Calculate string similarity using simple character overlap"""
