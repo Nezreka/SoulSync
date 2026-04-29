@@ -7,6 +7,7 @@ The parsing logic is identical in ``tidal_download_client.py``; these tests
 cover the shared behavior via ``hifi_client.HiFiClient``.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -356,12 +357,15 @@ def test_demux_flac_uses_tools_dir_fallback(client, tmp_path, monkeypatch):
     out = tmp_path / "output.flac"
 
     tools_dir = Path(__file__).parent.parent / "tools"
+    # _demux_flac picks the OS-specific binary name (ffmpeg.exe on Windows).
+    candidate_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    expected_candidate = tools_dir / candidate_name
 
     original_exists = Path.exists
     original_which = shutil.which
 
     def fake_exists(self):
-        if str(self) == str(tools_dir / "ffmpeg"):
+        if str(self) == str(expected_candidate):
             return True
         return original_exists(self)
 
@@ -381,4 +385,4 @@ def test_demux_flac_uses_tools_dir_fallback(client, tmp_path, monkeypatch):
             client._demux_flac(inp, out)
 
     call_args = mock_run.call_args[0][0]
-    assert call_args[0] == str(tools_dir / "ffmpeg")
+    assert call_args[0] == str(expected_candidate)
