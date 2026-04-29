@@ -94,7 +94,13 @@ from core.tidal_client import TidalClient # Added import for Tidal
 from core.matching_engine import MusicMatchingEngine
 from core.database_update_worker import DatabaseUpdateWorker
 from core.web_scan_manager import WebScanManager
-from core.metadata_cache import get_metadata_cache
+from core.metadata.cache import get_metadata_cache
+from core.metadata import registry as metadata_registry
+from core.metadata.registry import (
+    clear_cached_metadata_client,
+    get_spotify_client,
+    register_runtime_clients,
+)
 from core.imports.context import (
     get_import_clean_album,
     get_import_clean_title,
@@ -477,10 +483,6 @@ def admin_only(view_fn):
         return view_fn(*args, **kwargs)
     return wrapper
 
-# ── Per-profile Spotify client cache ──
-_profile_spotify_clients = {}  # profile_id -> SpotifyClient
-_profile_spotify_lock = threading.Lock()
-
 def get_spotify_client_for_profile(profile_id=None):
     """Get the Spotify client for the current profile.
 
@@ -490,53 +492,7 @@ def get_spotify_client_for_profile(profile_id=None):
     """
     if profile_id is None:
         profile_id = get_current_profile_id()
-
-    # Admin (profile 1) always uses global client
-    if profile_id == 1:
-        return spotify_client
-
-    # Check if this profile has custom Spotify credentials
-    try:
-        db = get_database()
-        creds = db.get_profile_spotify(profile_id)
-        if not creds or not creds.get('client_id'):
-            return spotify_client  # No custom creds — use global
-    except Exception:
-        return spotify_client
-
-    # Check cache (don't hold lock during auth check — could block on network)
-    with _profile_spotify_lock:
-        cached = _profile_spotify_clients.get(profile_id)
-    if cached and cached.sp is not None:
-        return cached
-
-    # Create a new SpotifyClient for this profile
-    try:
-        from spotipy.oauth2 import SpotifyOAuth
-        import spotipy
-
-        auth_manager = SpotifyOAuth(
-            client_id=creds['client_id'],
-            client_secret=creds['client_secret'],
-            redirect_uri=creds.get('redirect_uri', 'http://127.0.0.1:8888/callback'),
-            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
-            cache_path=f'config/.spotify_cache_profile_{profile_id}'
-        )
-
-        # Create a bare SpotifyClient and immediately set the profile-specific
-        # spotipy instance (overwrites the global-config one from __init__)
-        profile_client = SpotifyClient()
-        profile_client.sp = spotipy.Spotify(auth_manager=auth_manager, retries=0, requests_timeout=15)
-        profile_client.user_id = None  # Will be fetched lazily
-
-        with _profile_spotify_lock:
-            _profile_spotify_clients[profile_id] = profile_client
-
-        logger.info(f"Created per-profile Spotify client for profile {profile_id}")
-        return profile_client
-    except Exception as e:
-        logger.error(f"Failed to create per-profile Spotify client for profile {profile_id}: {e}")
-        return spotify_client  # Fall back to global
+    return metadata_registry.get_spotify_client_for_profile(profile_id)
 
 # Valid page IDs for profile permission validation
 VALID_PAGE_IDS = {'dashboard', 'sync', 'search', 'downloads', 'discover', 'artists', 'automations', 'library', 'import', 'settings', 'help'}
@@ -608,8 +564,8 @@ logger.info("Initializing SoulSync services for Web UI...")
 spotify_client = plex_client = jellyfin_client = navidrome_client = soulsync_library_client = soulseek_client = tidal_client = matching_engine = sync_service = web_scan_manager = None
 
 try:
-    spotify_client = SpotifyClient()
-    logger.info("  Spotify client initialized")
+    spotify_client = get_spotify_client()
+    logger.info("  Spotify client initialized via metadata registry")
 except Exception as e:
     logger.error(f"  Spotify client failed to initialize: {e}")
 
@@ -5810,7 +5766,7 @@ _comparison_lock = threading.Lock()
 def _is_hydrabase_active():
     """Check if Hydrabase is connected and enabled for metadata use."""
     try:
-        from core.metadata_service import is_hydrabase_enabled
+        from core.metadata.registry import is_hydrabase_enabled
         return is_hydrabase_enabled()
     except Exception:
         return False
@@ -7061,7 +7017,7 @@ def auth_spotify():
                 logger.error(f"Per-profile Spotify auth failed, falling back to global: {e}")
 
         # Global auth (admin or fallback)
-        temp_spotify_client = SpotifyClient()
+        temp_spotify_client = get_spotify_client()
         if temp_spotify_client.sp and temp_spotify_client.sp.auth_manager:
             # Get the authorization URL
             auth_url = temp_spotify_client.sp.auth_manager.get_authorize_url()
@@ -7385,8 +7341,7 @@ def spotify_callback():
                 token_info = auth_manager.get_access_token(auth_code)
                 if token_info:
                     # Invalidate cached profile client so it gets recreated with new tokens
-                    with _profile_spotify_lock:
-                        _profile_spotify_clients.pop(profile_id_from_state, None)
+                    metadata_registry.clear_cached_profile_spotify_client(profile_id_from_state)
                     add_activity_item("", "Spotify Auth Complete", f"Profile {profile_id_from_state} authenticated with Spotify", "Now")
                     return "<h1>Spotify Authentication Successful!</h1><p>Your personal Spotify account is now connected. You can close this window.</p>"
                 else:
@@ -7410,7 +7365,8 @@ def spotify_callback():
         if token_info:
             # CRITICAL: update the GLOBAL spotify_client, not a local variable
             global spotify_client
-            spotify_client = SpotifyClient()
+            clear_cached_metadata_client("spotify")
+            spotify_client = get_spotify_client()
             if spotify_client.is_spotify_authenticated():
                 # Clear any active rate limit ban and post-ban cooldown
                 # so Spotify is immediately usable after re-auth
@@ -10045,7 +10001,8 @@ def get_artist_detail(artist_id):
         # Get source-priority discography for proper categorization and missing releases
         artist_detail_discography = None
         try:
-            from core.metadata_service import MetadataLookupOptions, get_artist_detail_discography as _get_artist_detail_discography
+            from core.metadata.lookup import MetadataLookupOptions
+            from core.metadata_service import get_artist_detail_discography as _get_artist_detail_discography
 
             artist_source_ids = {
                 'spotify': artist_info.get('spotify_artist_id'),
@@ -10281,7 +10238,8 @@ def get_artist_discography(artist_id):
             else:
                 effective_override_source = 'spotify'
 
-        from core.metadata_service import MetadataLookupOptions, get_artist_discography as _get_artist_discography
+        from core.metadata.lookup import MetadataLookupOptions
+        from core.metadata_service import get_artist_discography as _get_artist_discography
 
         discography = _get_artist_discography(
             artist_id,
@@ -23762,38 +23720,38 @@ deezer_discovery_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix
 
 def _get_deezer_client():
     """Get cached Deezer client."""
-    from core.metadata_service import get_deezer_client
+    from core.metadata.registry import get_deezer_client
     return get_deezer_client()
 
 def _get_itunes_client():
     """Get cached iTunes client."""
-    from core.metadata_service import get_itunes_client
+    from core.metadata.registry import get_itunes_client
     return get_itunes_client()
 
 def _get_discogs_client(token=None):
     """Get cached Discogs client."""
-    from core.metadata_service import get_discogs_client
+    from core.metadata.registry import get_discogs_client
     return get_discogs_client(token)
 
 def _get_metadata_fallback_source():
     """Get the configured primary metadata source.
     Returns 'spotify', 'itunes', 'deezer', 'discogs', or 'hydrabase'.
 
-    NOTE: This is a thin wrapper — canonical logic lives in core.metadata_service.get_primary_source().
+    NOTE: This is a thin wrapper — canonical logic lives in core.metadata.registry.get_primary_source().
     Kept as a local function because 70+ callers reference it by name."""
-    from core.metadata_service import get_primary_source
+    from core.metadata.registry import get_primary_source
     return get_primary_source()
 
 def _get_metadata_fallback_client():
     """Get the active metadata client based on settings.
     Returns a SpotifyClient, iTunesClient, DeezerClient, DiscogsClient, or HydrabaseClient instance."""
     source = _get_metadata_fallback_source()
+    from core.metadata.registry import get_client_for_source
+
+    client = get_client_for_source(source)
+    if client is not None:
+        return client
     if source == 'spotify':
-        if spotify_client and spotify_client.is_spotify_authenticated():
-            return spotify_client
-        # Spotify selected but not authed — fall back to deezer
-        return _get_deezer_client()
-    if source == 'deezer':
         return _get_deezer_client()
     if source == 'discogs':
         token = config_manager.get('discogs.token', '')
@@ -27208,6 +27166,7 @@ def save_profile_spotify_creds():
         success = db.set_profile_spotify(profile_id, client_id, client_secret, redirect_uri)
 
         if success:
+            metadata_registry.clear_cached_profile_spotify_client(profile_id)
             return jsonify({'success': True})
         return jsonify({'success': False, 'error': 'Failed to save credentials'}), 500
     except Exception as e:
@@ -27229,6 +27188,7 @@ def delete_profile_spotify_creds():
                 WHERE id = ?
             """, (profile_id,))
             conn.commit()
+        metadata_registry.clear_cached_profile_spotify_client(profile_id)
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -27734,7 +27694,7 @@ def start_watchlist_scan():
     """Start a watchlist scan for new releases"""
     try:
         # Check if MetadataService can provide a working client (Spotify OR fallback)
-        from core.metadata_service import MetadataService
+        from core.metadata.service import MetadataService
         metadata_service = MetadataService()
 
         # Get active provider - will be spotify or the configured fallback
@@ -28221,7 +28181,7 @@ def watchlist_artist_config(artist_id):
                 'preferred_metadata_source': result[17] if len(result) > 17 else None,
             }
 
-            from core.metadata_service import get_primary_source
+            from core.metadata.registry import get_primary_source
             return jsonify({
                 "success": True,
                 "config": config,
@@ -28638,7 +28598,7 @@ def _get_active_discovery_source():
 
     NOTE: Thin wrapper — canonical logic lives in core.metadata_service.get_primary_source().
     """
-    from core.metadata_service import get_primary_source
+    from core.metadata.registry import get_primary_source
     return get_primary_source()
 
 
@@ -34427,7 +34387,6 @@ def enrich_beatport_tracks():
         uncached_tracks = []
         uncached_indices = []
 
-        from core.metadata_cache import get_metadata_cache
         mcache = get_metadata_cache()
 
         for i, track in enumerate(tracks):
@@ -36640,7 +36599,6 @@ def start_oauth_callback_servers():
 
                     # Manually trigger the token exchange using spotipy's auth manager
                     try:
-                        from core.spotify_client import SpotifyClient
                         from spotipy.oauth2 import SpotifyOAuth
                         from config.settings import config_manager
 
@@ -36664,7 +36622,8 @@ def start_oauth_callback_servers():
                         if token_info:
                             # Reinitialize the global client with new tokens
                             global spotify_client
-                            spotify_client = SpotifyClient()
+                            clear_cached_metadata_client("spotify")
+                            spotify_client = get_spotify_client()
 
                             if spotify_client.is_spotify_authenticated():
                                 # Clear rate limit ban + post-ban cooldown so Spotify is usable immediately
@@ -37719,6 +37678,14 @@ except Exception as e:
     hydrabase_worker = None
     hydrabase_client = None
 
+register_runtime_clients(
+    hydrabase_client=hydrabase_client,
+    dev_mode_enabled_provider=lambda: dev_mode_enabled,
+)
+metadata_registry.register_profile_spotify_credentials_provider(
+    lambda profile_id: get_database().get_profile_spotify(profile_id)
+)
+
 # --- Hydrabase Auto-Reconnect ---
 try:
     _hydra_cfg = config_manager.get_hydrabase_config()
@@ -38237,7 +38204,6 @@ def repair_findings_counts():
 def repair_cache_health():
     """Get metadata cache health stats for the repair dashboard"""
     try:
-        from core.metadata_cache import get_metadata_cache
         cache = get_metadata_cache()
         return jsonify(cache.get_health_stats()), 200
     except Exception as e:
@@ -38576,7 +38542,7 @@ def import_search_albums():
             return jsonify({'success': False, 'error': 'Missing query parameter'}), 400
 
         limit = min(int(request.args.get('limit', 12)), 50)
-        from core.metadata_service import get_primary_source
+        from core.metadata.registry import get_primary_source
 
         if get_primary_source() == 'hydrabase' and hydrabase_worker and dev_mode_enabled:
             hydrabase_worker.enqueue(query, 'albums')

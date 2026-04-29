@@ -4,16 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from core.metadata import registry as metadata_registry
 from utils.logging_config import get_logger
 
 
 logger = get_logger("imports.resolution")
-
-
-def _get_metadata_service():
-    from core import metadata_service
-
-    return metadata_service
 
 
 def _extract_lookup_value(value: Any, *names: str, default: Any = None) -> Any:
@@ -73,9 +68,8 @@ def _get_source_chain_for_lookup(
     source_override: Optional[str] = None,
     allow_fallback: bool = True,
 ) -> List[str]:
-    metadata_service = _get_metadata_service()
-    primary_source = metadata_service.get_primary_source()
-    source_chain = list(metadata_service.get_source_priority(primary_source))
+    primary_source = metadata_registry.get_primary_source()
+    source_chain = list(metadata_registry.get_source_priority(primary_source))
     override = (source_override or '').strip().lower()
 
     if override:
@@ -323,14 +317,13 @@ def get_single_track_import_context(
     source_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build an import context for singles using source-priority metadata lookup."""
-    metadata_service = _get_metadata_service()
     source_priority = _get_source_chain_for_lookup(source_override=source_override, allow_fallback=True)
     title = (title or '').strip()
     artist = (artist or '').strip()
 
     if override_id:
         chosen_source = (override_source or 'spotify').strip().lower() or 'spotify'
-        client = metadata_service.get_client_for_source(chosen_source)
+        client = metadata_registry.get_client_for_source(chosen_source)
         if client and hasattr(client, 'get_track_details'):
             try:
                 track_data = client.get_track_details(str(override_id))
@@ -358,7 +351,7 @@ def get_single_track_import_context(
                 logger.debug("Override track lookup failed on %s for %s: %s", chosen_source, override_id, exc)
 
     for source in source_priority:
-        client = metadata_service.get_client_for_source(source)
+        client = metadata_registry.get_client_for_source(source)
         if not client:
             continue
 

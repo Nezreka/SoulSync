@@ -40,7 +40,8 @@ if "config.settings" not in sys.modules:
 
 import types as pytypes
 
-from core import metadata_service
+from core.metadata import registry as metadata_registry
+from core.metadata import similar_artists as metadata_similar_artists
 
 
 class _FakeMusicMapResponse:
@@ -91,16 +92,16 @@ def test_iter_musicmap_similar_artist_events_uses_source_priority(monkeypatch):
     })
     spotify = _FakeSourceClient({})
 
-    monkeypatch.setattr(metadata_service.requests, "get", lambda *args, **kwargs: _FakeMusicMapResponse(html))
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "itunes", "spotify"])
+    monkeypatch.setattr(metadata_similar_artists.requests, "get", lambda *args, **kwargs: _FakeMusicMapResponse(html))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "itunes", "spotify"])
     monkeypatch.setattr(
-        metadata_service,
+        metadata_registry,
         "get_client_for_source",
-        lambda source: {"deezer": deezer, "itunes": itunes, "spotify": spotify}.get(source),
+        lambda source, **kwargs: {"deezer": deezer, "itunes": itunes, "spotify": spotify}.get(source),
     )
 
-    events = list(metadata_service.iter_musicmap_similar_artist_events("Artist One", limit=5))
+    events = list(metadata_similar_artists.iter_musicmap_similar_artist_events("Artist One", limit=5))
 
     assert events[0]["type"] == "start"
     assert events[0]["source_priority"] == ["deezer", "itunes", "spotify"]
@@ -151,12 +152,12 @@ def test_iter_musicmap_similar_artist_events_enriches_itunes_images(monkeypatch)
             }
 
     itunes = _ItunesClient()
-    monkeypatch.setattr(metadata_service.requests, "get", lambda *args, **kwargs: _FakeMusicMapResponse(html))
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "itunes")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: itunes if source == "itunes" else None)
+    monkeypatch.setattr(metadata_similar_artists.requests, "get", lambda *args, **kwargs: _FakeMusicMapResponse(html))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "itunes")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: itunes if source == "itunes" else None)
 
-    events = list(metadata_service.iter_musicmap_similar_artist_events("Artist One", limit=5))
+    events = list(metadata_similar_artists.iter_musicmap_similar_artist_events("Artist One", limit=5))
 
     artist_events = [event for event in events if event.get("type") == "artist"]
     assert len(artist_events) == 1
@@ -199,12 +200,12 @@ def test_iter_musicmap_similar_artist_events_falls_back_to_itunes_album_art(monk
             return "https://itunes.example/album-art.jpg"
 
     itunes = _ItunesClient()
-    monkeypatch.setattr(metadata_service.requests, "get", lambda *args, **kwargs: _FakeMusicMapResponse(html))
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "itunes")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: itunes if source == "itunes" else None)
+    monkeypatch.setattr(metadata_similar_artists.requests, "get", lambda *args, **kwargs: _FakeMusicMapResponse(html))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "itunes")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: itunes if source == "itunes" else None)
 
-    events = list(metadata_service.iter_musicmap_similar_artist_events("Artist One", limit=5))
+    events = list(metadata_similar_artists.iter_musicmap_similar_artist_events("Artist One", limit=5))
 
     artist_events = [event for event in events if event.get("type") == "artist"]
     assert len(artist_events) == 1
@@ -222,12 +223,12 @@ def test_get_musicmap_similar_artists_returns_not_found_when_musicmap_missing(mo
     </html>
     """
 
-    monkeypatch.setattr(metadata_service.requests, "get", lambda *args, **kwargs: _FakeMusicMapResponse(html))
-    monkeypatch.setattr(metadata_service, "get_primary_source", lambda: "deezer")
-    monkeypatch.setattr(metadata_service, "get_source_priority", lambda primary: [primary, "itunes"])
-    monkeypatch.setattr(metadata_service, "get_client_for_source", lambda source: object())
+    monkeypatch.setattr(metadata_similar_artists.requests, "get", lambda *args, **kwargs: _FakeMusicMapResponse(html))
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: object())
 
-    result = metadata_service.get_musicmap_similar_artists("Artist One", limit=5)
+    result = metadata_similar_artists.get_musicmap_similar_artists("Artist One", limit=5)
 
     assert result["success"] is False
     assert result["status_code"] == 404

@@ -23,7 +23,7 @@ from core.imports.context import (
     get_source_tag_names,
     normalize_import_context,
 )
-from core.metadata_service import get_itunes_client
+from core.metadata.registry import get_itunes_client
 from database.music_database import get_database
 from core.metadata.common import (
     get_config_manager,
