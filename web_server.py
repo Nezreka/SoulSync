@@ -16448,7 +16448,6 @@ def _build_quality_scanner_deps():
         quality_scanner_state=quality_scanner_state,
         quality_scanner_lock=quality_scanner_lock,
         QUALITY_TIERS=QUALITY_TIERS,
-        spotify_client=spotify_client,
         matching_engine=matching_engine,
         automation_engine=automation_engine,
         get_quality_tier_from_extension=_get_quality_tier_from_extension,

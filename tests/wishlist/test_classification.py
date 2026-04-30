@@ -13,6 +13,9 @@ from core.wishlist.classification import classify_wishlist_track
         ({"album": {"album_type": "compilation"}}, "albums"),
         ({"album": {"total_tracks": 4}}, "singles"),
         ({"album": {"total_tracks": 8}}, "albums"),
+        ({"album": {"total_tracks": "4"}}, "singles"),
+        ({"album": {"total_tracks": "8"}}, "albums"),
+        ({"album": {"total_tracks": "not-a-number"}}, "albums"),
         ({}, "albums"),
     ],
 )
