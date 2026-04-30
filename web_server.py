@@ -2004,7 +2004,7 @@ def _register_automation_handlers():
                     log_line='No cleanup needed', log_type='skip')
                 return {'status': 'completed'}
         except Exception as e:
-            return {'status': 'error', 'reason': str(e)}
+            return {'status': 'error', 'error': str(e)}
 
     def _auto_clean_completed_downloads(config):
         """Clear completed downloads and empty directories."""
