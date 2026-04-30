@@ -2,6 +2,7 @@ import copy
 import json
 import os
 import sqlite3
+import time
 from typing import Dict, Any, Optional
 from cryptography.fernet import Fernet, InvalidToken
 from pathlib import Path
@@ -639,8 +640,6 @@ class ConfigManager:
         file. The single 1s retry that used to live here gave up too
         early on HDD-backed Docker volumes.
         """
-        import time
-
         # Cumulative delay across attempts: 0.2 + 0.5 + 1.0 + 2.0 + 4.0 = 7.7s
         # plus the 30s busy_timeout that already runs inside each attempt.
         retry_delays = [0.2, 0.5, 1.0, 2.0, 4.0]
