@@ -20,7 +20,11 @@ def sanitize_and_dedupe_wishlist_tracks(
 
     for track in raw_tracks:
         sanitized_track = sanitizer(track)
-        spotify_track_id = sanitized_track.get('spotify_track_id') or sanitized_track.get('id')
+        spotify_track_id = (
+            sanitized_track.get('track_id')
+            or sanitized_track.get('spotify_track_id')
+            or sanitized_track.get('id')
+        )
 
         if spotify_track_id and spotify_track_id in seen_track_ids:
             duplicates_found += 1
@@ -45,7 +49,7 @@ def filter_wishlist_tracks_by_category(
 
     for track in tracks:
         track_category = classifier(track)
-        spotify_track_id = track.get('spotify_track_id') or track.get('id')
+        spotify_track_id = track.get('track_id') or track.get('spotify_track_id') or track.get('id')
         if category != track_category:
             continue
 

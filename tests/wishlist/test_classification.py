@@ -7,6 +7,7 @@ from core.wishlist.classification import classify_wishlist_track
     "spotify_data,expected",
     [
         ({"album": {"album_type": "single"}}, "singles"),
+        ({"track_data": {"album": {"album_type": "single"}}}, "singles"),
         ({"album": {"album_type": "ep"}}, "singles"),
         ({"album": {"album_type": "album"}}, "albums"),
         ({"album": {"album_type": "compilation"}}, "albums"),

@@ -6750,11 +6750,20 @@ class MusicDatabase:
 
     # Wishlist management methods
     
-    def add_to_wishlist(self, spotify_track_data: Dict[str, Any], failure_reason: str = "Download failed",
-                       source_type: str = "unknown", source_info: Dict[str, Any] = None,
-                       profile_id: int = 1) -> bool:
+    def add_to_wishlist(
+        self,
+        spotify_track_data: Dict[str, Any] = None,
+        failure_reason: str = "Download failed",
+        source_type: str = "unknown",
+        source_info: Dict[str, Any] = None,
+        profile_id: int = 1,
+        track_data: Dict[str, Any] = None,
+    ) -> bool:
         """Add a failed track to the wishlist for retry"""
         try:
+            if track_data is not None and spotify_track_data is None:
+                spotify_track_data = track_data
+
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 

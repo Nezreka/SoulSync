@@ -83,6 +83,40 @@ def test_check_and_remove_from_wishlist_uses_spotify_source_id():
     assert wishlist_service.removed == [("sp-track-1", True, None, 1)]
 
 
+def test_check_and_remove_from_wishlist_uses_non_spotify_source_id():
+    fake_db = SimpleNamespace(get_all_profiles=lambda: [{"id": 1}])
+    wishlist_service = _FakeWishlistService(
+        [
+            {
+                "wishlist_id": 11,
+                "spotify_track_id": "dz-track-1",
+                "id": "dz-track-1",
+                "name": "Song One",
+                "artists": [{"name": "Artist One"}],
+            }
+        ]
+    )
+
+    context = {
+        "source": "deezer",
+        "track_info": {
+            "deezer_track_id": "dz-track-1",
+            "name": "Song One",
+            "artists": [{"name": "Artist One"}],
+        },
+        "search_result": {},
+        "original_search_result": {},
+    }
+
+    resolution.check_and_remove_from_wishlist(
+        context,
+        wishlist_service=wishlist_service,
+        database=fake_db,
+    )
+
+    assert wishlist_service.removed == [("dz-track-1", True, None, 1)]
+
+
 def test_check_and_remove_from_wishlist_uses_wishlist_id_lookup():
     fake_db = SimpleNamespace(get_all_profiles=lambda: [{"id": 1}])
     wishlist_service = _FakeWishlistService(

@@ -6,7 +6,7 @@ Wishlist Service - High-level service for managing failed download track wishlis
 
 from typing import Any, Dict, List, Optional
 
-from core.wishlist.payloads import extract_spotify_track_from_modal_info
+from core.wishlist.payloads import extract_wishlist_track_from_modal_info
 from database.music_database import get_database
 from utils.logging_config import get_logger
 
@@ -44,10 +44,10 @@ class WishlistService:
             source_context: Additional context (playlist name, album info, etc.)
         """
         try:
-            # Extract Spotify track data from the track_info structure
-            spotify_track = extract_spotify_track_from_modal_info(track_info)
-            if not spotify_track:
-                logger.error("Could not extract Spotify track data from modal info")
+            # Extract track data from the modal structure.
+            track_data = extract_wishlist_track_from_modal_info(track_info)
+            if not track_data:
+                logger.error("Could not extract track data from modal info")
                 return False
 
             # Get failure reason from track_info if available
@@ -81,7 +81,7 @@ class WishlistService:
 
             # Add to wishlist via database
             return self.database.add_to_wishlist(
-                spotify_track_data=spotify_track,
+                spotify_track_data=track_data,
                 failure_reason=failure_reason,
                 source_type=source_type,
                 source_info=source_info,
@@ -92,29 +92,58 @@ class WishlistService:
             logger.error(f"Error adding failed track to wishlist: {e}")
             return False
 
-    def add_spotify_track_to_wishlist(
+    def add_track_to_wishlist(
         self,
-        spotify_track_data: Dict[str, Any],
-        failure_reason: str,
+        track_data: Dict[str, Any] = None,
+        spotify_track_data: Dict[str, Any] = None,
+        failure_reason: str = "",
         source_type: str = "manual",
         source_context: Dict[str, Any] = None,
         profile_id: int = 1,
     ) -> bool:
         """
-        Directly add a Spotify track to the wishlist.
+        Directly add a track to the wishlist.
 
         Args:
-            spotify_track_data: Full Spotify track data dictionary
+            track_data: Full track data dictionary
             failure_reason: Reason for the failure
             source_type: Source type ('playlist', 'album', 'manual')
             source_context: Additional context information
             profile_id: Profile to add to
         """
+        if track_data is None:
+            track_data = spotify_track_data
+
+        if not track_data:
+            logger.error("No track data provided for wishlist add")
+            return False
+
         return self.database.add_to_wishlist(
-            spotify_track_data=spotify_track_data,
+            track_data=track_data,
             failure_reason=failure_reason,
             source_type=source_type,
             source_info=source_context or {},
+            profile_id=profile_id,
+        )
+
+    def add_spotify_track_to_wishlist(
+        self,
+        spotify_track_data: Dict[str, Any] = None,
+        track_data: Dict[str, Any] = None,
+        failure_reason: str = "",
+        source_type: str = "manual",
+        source_context: Dict[str, Any] = None,
+        profile_id: int = 1,
+    ) -> bool:
+        """Backward-compatible wrapper for `add_track_to_wishlist`."""
+        if track_data is None:
+            track_data = spotify_track_data
+
+        return self.add_track_to_wishlist(
+            track_data=track_data,
+            failure_reason=failure_reason,
+            source_type=source_type,
+            source_context=source_context,
             profile_id=profile_id,
         )
 
@@ -132,30 +161,61 @@ class WishlistService:
             formatted_tracks = []
 
             for wishlist_track in wishlist_tracks:
-                spotify_data = wishlist_track["spotify_data"]
+                track_data = wishlist_track.get("track_data") or wishlist_track.get("spotify_data") or {}
+                if isinstance(track_data, str):
+                    try:
+                        import json
 
-                # Create a track object similar to what download modals expect
+                        track_data = json.loads(track_data)
+                    except Exception:
+                        track_data = {}
+                if not isinstance(track_data, dict):
+                    track_data = {}
+
+                track_id = wishlist_track.get("spotify_track_id") or wishlist_track.get("id") or track_data.get("id")
+                track_name = track_data.get("name", "Unknown Track")
+                artists = track_data.get("artists", [])
+                album = track_data.get("album") if isinstance(track_data.get("album"), dict) else {}
+                if isinstance(artists, list) and artists:
+                    first_artist = artists[0]
+                    if isinstance(first_artist, dict):
+                        artist_name = first_artist.get("name", "Unknown Artist")
+                    else:
+                        artist_name = str(first_artist)
+                else:
+                    artist_name = "Unknown Artist"
+                album_name = album.get("name", "") if isinstance(album, dict) else str(album) if album else ""
+
                 formatted_track = {
                     "wishlist_id": wishlist_track["id"],
+                    "track_id": track_id,
+                    "track_data": track_data,
+                    "track_name": track_name,
+                    "artist_name": artist_name,
+                    "album_name": album_name,
+                    "provider": (
+                        track_data.get("provider") or track_data.get("source")
+                        if isinstance(track_data, dict)
+                        else None
+                    ),
                     "spotify_track_id": wishlist_track["spotify_track_id"],
-                    "spotify_data": spotify_data,
+                    "spotify_data": track_data,
                     "failure_reason": wishlist_track["failure_reason"],
                     "retry_count": wishlist_track["retry_count"],
                     "date_added": wishlist_track["date_added"],
                     "last_attempted": wishlist_track["last_attempted"],
                     "source_type": wishlist_track["source_type"],
                     "source_info": wishlist_track["source_info"],
-                    # Format for modal compatibility (similar to Spotify Track objects)
-                    "id": spotify_data.get("id"),
-                    "name": spotify_data.get("name", "Unknown Track"),
-                    "artists": spotify_data.get("artists", []),
-                    "album": spotify_data.get("album") or {},
-                    "duration_ms": spotify_data.get("duration_ms", 0),
-                    "preview_url": spotify_data.get("preview_url"),
-                    "external_urls": spotify_data.get("external_urls", {}),
-                    "popularity": spotify_data.get("popularity", 0),
-                    "track_number": spotify_data.get("track_number", 1),
-                    "disc_number": spotify_data.get("disc_number", 1),
+                    "id": track_id,
+                    "name": track_name,
+                    "artists": artists,
+                    "album": album or {},
+                    "duration_ms": track_data.get("duration_ms", 0) if isinstance(track_data, dict) else 0,
+                    "preview_url": track_data.get("preview_url") if isinstance(track_data, dict) else None,
+                    "external_urls": track_data.get("external_urls", {}) if isinstance(track_data, dict) else {},
+                    "popularity": track_data.get("popularity", 0) if isinstance(track_data, dict) else 0,
+                    "track_number": track_data.get("track_number", 1) if isinstance(track_data, dict) else 1,
+                    "disc_number": track_data.get("disc_number", 1) if isinstance(track_data, dict) else 1,
                 }
 
                 formatted_tracks.append(formatted_track)
@@ -197,11 +257,15 @@ class WishlistService:
         return self.database.clear_wishlist(profile_id=profile_id)
 
     def check_track_in_wishlist(self, spotify_track_id: str) -> bool:
-        """Check if a track exists in the wishlist by Spotify track ID"""
+        """Check if a track exists in the wishlist by track ID."""
         try:
             wishlist_tracks = self.get_wishlist_tracks_for_download()
             for track in wishlist_tracks:
-                if track.get("spotify_track_id") == spotify_track_id or track.get("id") == spotify_track_id:
+                if (
+                    track.get("track_id") == spotify_track_id
+                    or track.get("spotify_track_id") == spotify_track_id
+                    or track.get("id") == spotify_track_id
+                ):
                     return True
             return False
         except Exception as e:
@@ -221,10 +285,9 @@ class WishlistService:
             normalized_artist_name = artist_name.lower().strip()
 
             for wl_track in wishlist_tracks:
-                wl_name = wl_track.get("name", "").lower().strip()
+                wl_name = (wl_track.get("track_name") or wl_track.get("name") or "").lower().strip()
                 wl_artists = wl_track.get("artists", [])
 
-                # Extract artist name from wishlist track
                 wl_artist_name = ""
                 if wl_artists:
                     if isinstance(wl_artists[0], dict):
@@ -267,7 +330,16 @@ class WishlistService:
 
                 # Keep track of recent failures (last 5)
                 if len(recent_failures) < 5:
-                    spotify_data = track["spotify_data"]
+                    spotify_data = track.get("track_data") or track["spotify_data"] or {}
+                    if isinstance(spotify_data, str):
+                        try:
+                            import json
+
+                            spotify_data = json.loads(spotify_data)
+                        except Exception:
+                            spotify_data = {}
+                    if not isinstance(spotify_data, dict):
+                        spotify_data = {}
                     recent_failures.append(
                         {
                             "name": spotify_data.get("name", "Unknown Track"),

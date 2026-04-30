@@ -88,6 +88,29 @@ def test_add_failed_track_from_modal_returns_false_when_no_spotify_track_found()
     assert fake_db.add_calls == []
 
 
+def test_add_spotify_track_to_wishlist_accepts_track_data_alias():
+    fake_db = _FakeWishlistDatabase()
+    service = _build_service(fake_db)
+
+    result = service.add_spotify_track_to_wishlist(
+        track_data={
+            "id": "sp-1",
+            "name": "Song One",
+            "artists": [{"name": "Artist One"}],
+            "album": {"name": "Album One"},
+        },
+        failure_reason="Download failed",
+        source_type="manual",
+        profile_id=2,
+    )
+
+    assert result is True
+    assert fake_db.add_calls[0]["track_data"]["id"] == "sp-1"
+    assert fake_db.add_calls[0]["failure_reason"] == "Download failed"
+    assert fake_db.add_calls[0]["source_type"] == "manual"
+    assert fake_db.add_calls[0]["profile_id"] == 2
+
+
 def test_get_wishlist_tracks_for_download_formats_modal_shape():
     fake_db = _FakeWishlistDatabase(
         tracks=[
@@ -123,7 +146,24 @@ def test_get_wishlist_tracks_for_download_formats_modal_shape():
     assert formatted_tracks == [
         {
             "wishlist_id": "wl-1",
+            "track_id": "sp-1",
             "spotify_track_id": "sp-1",
+            "track_data": {
+                "id": "sp-1",
+                "name": "Song One",
+                "artists": [{"name": "Artist One"}],
+                "album": {"name": "Album One"},
+                "duration_ms": 321,
+                "preview_url": "https://example.test/preview",
+                "external_urls": {"spotify": "https://open.spotify.com/track/sp-1"},
+                "popularity": 88,
+                "track_number": 7,
+                "disc_number": 2,
+            },
+            "track_name": "Song One",
+            "artist_name": "Artist One",
+            "album_name": "Album One",
+            "provider": None,
             "spotify_data": {
                 "id": "sp-1",
                 "name": "Song One",

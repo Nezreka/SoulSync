@@ -155,7 +155,7 @@ function closeDiscoveryFixModal() {
 }
 
 /**
- * Search for tracks in Spotify
+ * Search for tracks in the configured metadata source
  */
 async function searchDiscoveryFix() {
     if (!currentDiscoveryFix.identifier) {
@@ -948,7 +948,7 @@ async function handleAddToWishlist() {
 /**
  * Lazy-load per-track ownership indicators into an already-open wishlist modal.
  * Fetches ownership from the backend, then updates the modal DOM in-place.
- * If all tracks are owned (Spotify metadata discrepancy), also fixes the source card.
+ * If all tracks are owned (release-source discrepancy), also fixes the source card.
  */
 async function lazyLoadTrackOwnership(artistName, tracks, sourceCard, albumName = null) {
     const myVersion = wishlistModalVersion;
@@ -1042,7 +1042,7 @@ async function lazyLoadTrackOwnership(artistName, tracks, sourceCard, albumName 
             trackDetailEl.textContent = `${missingCount} of ${tracks.length} tracks missing`;
         }
 
-        // If ALL returned tracks are owned, this is a Spotify metadata discrepancy
+        // If ALL returned tracks are owned, this is a release-source discrepancy
         // (e.g. total_tracks says 15 but API only returns 14, and all 14 are owned)
         // Fix the source card to show complete
         if (missingCount === 0 && sourceCard && sourceCard._releaseData) {
@@ -1727,11 +1727,11 @@ function openMatchingModal(searchResult, isAlbumDownload = false, albumResult = 
     const artistStageTitle = document.getElementById('artist-stage-title');
 
     if (isAlbumDownload) {
-        modalTitle.textContent = 'Match Album Download to Spotify';
+        modalTitle.textContent = 'Match album download to release';
         artistStageTitle.textContent = 'Step 1: Select the correct Artist';
         document.getElementById('album-selection-stage').style.display = 'block';
     } else {
-        modalTitle.textContent = 'Match Download to Spotify';
+        modalTitle.textContent = 'Match track download to release';
         artistStageTitle.textContent = 'Select the correct Artist for this Single';
         document.getElementById('album-selection-stage').style.display = 'none';
     }
@@ -2460,17 +2460,17 @@ async function confirmMatch() {
                 }
             }
         } else {
-            // Single track download - fetch Spotify track for full metadata
-            confirmBtn.textContent = 'Searching Spotify...';
+            // Single track download - fetch release data for full details
+            confirmBtn.textContent = 'Searching release data...';
 
             try {
                 // Parse track name from Soulseek filename
                 const filename = downloadPayload.filename || downloadPayload.title || '';
                 const parsedMeta = parseTrackFilename(filename);
 
-                console.log(`🔍 Searching Spotify for: "${parsedMeta.title}" by ${currentMatchingData.selectedArtist.name}`);
+                console.log(`🔍 Searching release data for: "${parsedMeta.title}" by ${currentMatchingData.selectedArtist.name}`);
 
-                // Search Spotify for this track
+                // Search the configured provider for this track
                 const searchQuery = `track:${parsedMeta.title} artist:${currentMatchingData.selectedArtist.name}`;
                 const searchResponse = await fetch(`/api/spotify/search?q=${encodeURIComponent(searchQuery)}&type=track&limit=5`);
 
@@ -2524,8 +2524,8 @@ async function confirmMatch() {
                 }
 
             } catch (singleMatchError) {
-                console.error('❌ Spotify track matching failed, falling back to basic:', singleMatchError);
-                showToast('⚠️ Spotify matching failed, using basic metadata', 'warning');
+                console.error('❌ Release matching failed, falling back to basic:', singleMatchError);
+                showToast('⚠️ Release matching failed, using basic track data', 'warning');
 
                 // Fallback to basic matching (current behavior)
                 const response = await fetch('/api/download/matched', {
