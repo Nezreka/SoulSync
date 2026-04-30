@@ -26,6 +26,12 @@ class _FakeSoulseek:
         return True
 
 
+@pytest.fixture(autouse=True)
+def _no_sleep(monkeypatch):
+    """Keep stream-prep tests fast while still exercising the polling branches."""
+    monkeypatch.setattr(sp.time, 'sleep', lambda *_args, **_kwargs: None)
+
+
 def _build_deps(
     *,
     state=None,
