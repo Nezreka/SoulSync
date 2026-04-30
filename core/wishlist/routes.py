@@ -46,7 +46,7 @@ def _build_album_images(album: Dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-def _build_spotify_track_data(track: Dict[str, Any], album: Dict[str, Any]) -> Dict[str, Any]:
+def _build_track_data(track: Dict[str, Any], album: Dict[str, Any]) -> Dict[str, Any]:
     album_images = _build_album_images(album)
     return {
         "id": track.get("id"),
@@ -69,6 +69,11 @@ def _build_spotify_track_data(track: Dict[str, Any], album: Dict[str, Any]) -> D
         "preview_url": track.get("preview_url"),
         "external_urls": track.get("external_urls", {}),
     }
+
+
+def _build_spotify_track_data(track: Dict[str, Any], album: Dict[str, Any]) -> Dict[str, Any]:
+    """Backward-compatible wrapper for `_build_track_data`."""
+    return _build_track_data(track, album)
 
 
 def _load_track_spotify_data(track: Dict[str, Any]) -> Dict[str, Any]:
@@ -323,7 +328,7 @@ def remove_album_from_wishlist(
                     matched = True
 
             if matched:
-                spotify_track_id = track.get("spotify_track_id") or track.get("id")
+                spotify_track_id = track.get("track_id") or track.get("spotify_track_id") or track.get("id")
                 if spotify_track_id:
                     tracks_to_remove.append(spotify_track_id)
 
@@ -388,7 +393,7 @@ def add_album_track_to_wishlist(
         if not track or not artist or not album:
             return {"success": False, "error": "Missing required fields: track, artist, album"}, 400
 
-        spotify_track_data = _build_spotify_track_data(track, album)
+        track_data = _build_track_data(track, album)
 
         enhanced_source_context = {
             **(source_context or {}),
@@ -399,8 +404,8 @@ def add_album_track_to_wishlist(
             "added_via": "library_wishlist_modal",
         }
 
-        success = get_wishlist_service().add_spotify_track_to_wishlist(
-            spotify_track_data=spotify_track_data,
+        success = get_wishlist_service().add_track_to_wishlist(
+            track_data=track_data,
             failure_reason="Added from library (incomplete album)",
             source_type=source_type,
             source_context=enhanced_source_context,

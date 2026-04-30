@@ -287,12 +287,12 @@ def serialize_watchlist_artist(obj, fields: Optional[Set[str]] = None) -> dict:
 def serialize_wishlist_track(obj, fields: Optional[Set[str]] = None) -> dict:
     """Standardized wishlist track serialization."""
     d = _to_dict(obj)
-    spotify_data = d.get("spotify_data", {})
-    if isinstance(spotify_data, str):
+    track_data = d.get("track_data", d.get("spotify_data", {}))
+    if isinstance(track_data, str):
         try:
-            spotify_data = json.loads(spotify_data)
+            track_data = json.loads(track_data)
         except (json.JSONDecodeError, TypeError):
-            spotify_data = {}
+            track_data = {}
 
     source_info = d.get("source_info")
     if isinstance(source_info, str):
@@ -303,17 +303,23 @@ def serialize_wishlist_track(obj, fields: Optional[Set[str]] = None) -> dict:
 
     result = {
         "id": d.get("id"),
+        "track_id": d.get("track_id") or d.get("spotify_track_id") or d.get("id"),
         "spotify_track_id": d.get("spotify_track_id"),
-        "track_name": spotify_data.get("name", "Unknown") if isinstance(spotify_data, dict) else "Unknown",
+        "track_name": (
+            track_data.get("name", "Unknown") if isinstance(track_data, dict) else d.get("track_name", "Unknown")
+        ),
         "artist_name": ", ".join(
-            a.get("name", "") for a in spotify_data.get("artists", [])
-        ) if isinstance(spotify_data, dict) and isinstance(spotify_data.get("artists"), list) else "",
+            a.get("name", "") if isinstance(a, dict) else str(a)
+            for a in track_data.get("artists", [])
+        ) if isinstance(track_data, dict) and isinstance(track_data.get("artists"), list) else "",
         "album_name": (
-            spotify_data.get("album", {}).get("name")
-            if isinstance(spotify_data, dict) and isinstance(spotify_data.get("album"), dict)
+            track_data.get("album", {}).get("name")
+            if isinstance(track_data, dict) and isinstance(track_data.get("album"), dict)
             else None
         ),
-        "spotify_data": spotify_data,
+        "track_data": track_data,
+        "spotify_data": track_data,
+        "provider": track_data.get("provider") if isinstance(track_data, dict) else d.get("provider"),
         "failure_reason": d.get("failure_reason"),
         "retry_count": d.get("retry_count", 0),
         "last_attempted": _isoformat(d.get("last_attempted")),

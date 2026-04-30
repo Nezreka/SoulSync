@@ -45,16 +45,16 @@ def register_routes(bp):
     def add_to_wishlist():
         """Add a track to the wishlist.
 
-        Body: {"spotify_track_data": {...}, "failure_reason": "...", "source_type": "..."}
+        Body: {"track_data": {...}, "failure_reason": "...", "source_type": "..."}
         """
         body = request.get_json(silent=True) or {}
-        track_data = body.get("spotify_track_data")
+        track_data = body.get("track_data") or body.get("spotify_track_data")
         reason = body.get("failure_reason", "Added via API")
         source_type = body.get("source_type", "api")
         profile_id = parse_profile_id(request)
 
         if not track_data:
-            return api_error("BAD_REQUEST", "Missing 'spotify_track_data' in body.", 400)
+            return api_error("BAD_REQUEST", "Missing 'track_data' in body.", 400)
 
         try:
             from database.music_database import get_database
@@ -74,7 +74,7 @@ def register_routes(bp):
     @bp.route("/wishlist/<track_id>", methods=["DELETE"])
     @require_api_key
     def remove_from_wishlist(track_id):
-        """Remove a track from the wishlist by its Spotify track ID."""
+        """Remove a track from the wishlist by its track ID."""
         profile_id = parse_profile_id(request)
         try:
             from database.music_database import get_database

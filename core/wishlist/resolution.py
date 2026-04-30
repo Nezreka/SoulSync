@@ -57,17 +57,16 @@ def check_and_remove_from_wishlist(context: Dict[str, Any], wishlist_service=Non
         search_result = get_import_original_search(context) or get_import_search_result(context)
         track_id = None
 
-        if source == "spotify":
-            track_id = source_ids.get("track_id") or None
-            if track_id:
-                logger.info("[Wishlist] Found %s track ID from source_ids: %s", source_label, track_id)
+        track_id = source_ids.get("track_id") or None
+        if track_id:
+            logger.info("[Wishlist] Found %s track ID from source_ids: %s", source_label, track_id)
         elif "wishlist_id" in track_info:
             wishlist_id = track_info["wishlist_id"]
             logger.info("[Wishlist] Found wishlist_id in context: %s", wishlist_id)
             wishlist_tracks = _all_profile_wishlist_tracks(wishlist_service, database=database)
             for wishlist_track in wishlist_tracks:
                 if wishlist_track.get("wishlist_id") == wishlist_id:
-                    track_id = wishlist_track.get("spotify_track_id") or wishlist_track.get("id")
+                    track_id = wishlist_track.get("track_id") or wishlist_track.get("spotify_track_id") or wishlist_track.get("id")
                     logger.info("[Wishlist] Found track ID from wishlist entry: %s", track_id)
                     break
 
@@ -93,7 +92,7 @@ def check_and_remove_from_wishlist(context: Dict[str, Any], wishlist_service=Non
                         else:
                             wl_artist_name = str(wl_artists[0]).lower()
                     if wl_name == track_name.lower() and wl_artist_name == artist_name.lower():
-                        track_id = wishlist_track.get("spotify_track_id") or wishlist_track.get("id")
+                        track_id = wishlist_track.get("track_id") or wishlist_track.get("spotify_track_id") or wishlist_track.get("id")
                         logger.info("[Wishlist] Found fuzzy match - track ID: %s", track_id)
                         break
 
@@ -152,7 +151,11 @@ def check_and_remove_track_from_wishlist_by_metadata(
                             wl_artist_name = str(wl_artists[0]).lower()
 
                     if wl_name == track_name.lower() and wl_artist_name == primary_artist.lower():
-                        spotify_track_id = wishlist_track.get("spotify_track_id") or wishlist_track.get("id")
+                        spotify_track_id = (
+                            wishlist_track.get("track_id")
+                            or wishlist_track.get("spotify_track_id")
+                            or wishlist_track.get("id")
+                        )
                         if spotify_track_id:
                             removed = wishlist_service.mark_track_download_result(spotify_track_id, success=True)
                             if removed:

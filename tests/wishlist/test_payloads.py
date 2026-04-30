@@ -58,6 +58,20 @@ def test_ensure_spotify_track_format_builds_webui_shape():
     assert out["source"] == "webui_modal"
 
 
+def test_ensure_wishlist_track_format_aliases_the_spotify_helper():
+    track = {
+        "name": "Song",
+        "artist": "Artist One",
+        "album": {"name": "Album One"},
+    }
+
+    out = payloads.ensure_wishlist_track_format(track)
+
+    assert out["name"] == "Song"
+    assert out["artists"] == [{"name": "Artist One"}]
+    assert out["album"]["name"] == "Album One"
+
+
 def test_extract_spotify_track_from_modal_info_converts_trackresult_like_object():
     track_info = {
         "spotify_track": SimpleNamespace(
@@ -90,3 +104,20 @@ def test_extract_spotify_track_from_modal_info_reconstructs_from_slskd_result():
     assert out["name"] == "Song Three"
     assert out["artists"] == [{"name": "Artist Three"}]
     assert out["album"]["name"] == "Album Three"
+
+
+def test_extract_wishlist_track_from_modal_info_uses_track_data_key():
+    track_info = {
+        "track_data": {
+            "id": "track-1",
+            "name": "Song Four",
+            "artists": [{"name": "Artist Four"}],
+            "album": {"name": "Album Four"},
+        }
+    }
+
+    out = payloads.extract_wishlist_track_from_modal_info(track_info)
+
+    assert out["id"] == "track-1"
+    assert out["name"] == "Song Four"
+    assert out["artists"] == [{"name": "Artist Four"}]
