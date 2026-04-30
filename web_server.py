@@ -113,7 +113,7 @@ from core.imports.context import (
 from core.wishlist.payloads import (
     build_cancelled_task_wishlist_payload as _build_cancelled_task_wishlist_payload,
     build_failed_track_wishlist_context as _build_failed_track_wishlist_context,
-    ensure_spotify_track_format as _ensure_spotify_track_format,
+    ensure_wishlist_track_format as _ensure_wishlist_track_format,
     get_track_artist_name as _get_track_artist_name,
 )
 from core.wishlist.routes import (
@@ -17912,7 +17912,7 @@ def _build_lifecycle_deps():
         ),
         process_failed_to_wishlist=_process_failed_tracks_to_wishlist_exact,
         process_failed_to_wishlist_with_auto_completion=_process_failed_tracks_to_wishlist_exact_with_auto_completion,
-        ensure_spotify_track_format=_ensure_spotify_track_format,
+        ensure_wishlist_track_format=_ensure_wishlist_track_format,
         get_track_artist_name=_get_track_artist_name,
         check_and_remove_from_wishlist=_check_and_remove_from_wishlist,
         regenerate_batch_m3u=_regenerate_batch_m3u,
@@ -18008,9 +18008,9 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
 
                         # Skip wing-it fallback tracks — they had no real metadata match,
                         # so adding them to wishlist would just retry with the same raw data.
-                        # Check the track ID prefix since _ensure_spotify_track_format overwrites source.
-                        sp_track = failed_track_info.get('spotify_track', {})
-                        sp_id = sp_track.get('id', '') if isinstance(sp_track, dict) else ''
+                        # Check the track ID prefix since the wishlist payload helper overwrites source.
+                        track_data = failed_track_info.get('track_data') or failed_track_info.get('spotify_track', {})
+                        sp_id = track_data.get('id', '') if isinstance(track_data, dict) else ''
                         if str(sp_id).startswith('wing_it_'):
                             wing_it_skipped += 1
                             logger.info(f"[Wishlist Processing] Skipping wing-it track: {track_name}")
