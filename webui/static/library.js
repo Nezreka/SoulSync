@@ -1611,8 +1611,9 @@ function createReleaseCard(release) {
     const content = document.createElement("div");
     content.className = "album-card-content";
     const _esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const explicitTag = release.explicit === true ? '<span class="album-card-explicit">E</span>' : '';
     content.innerHTML = `
-        <div class="album-card-name" title="${_esc(release.title)}">${_esc(release.title)}</div>
+        <div class="album-card-name" title="${_esc(release.title)}">${_esc(release.title)}${explicitTag}</div>
         ${yearText ? `<div class="album-card-year">${_esc(yearText)}</div>` : ''}
     `;
     card.appendChild(content);
@@ -2204,9 +2205,16 @@ async function openDiscographyModal() {
                     <button class="discog-filter active" data-type="ep" onclick="toggleDiscogFilter(this)">EPs</button>
                     <button class="discog-filter active" data-type="single" onclick="toggleDiscogFilter(this)">Singles</button>
                 </div>
+                <select class="discog-sort-select" id="discog-sort-select" onchange="discogApplySort(this.value)" title="Sort releases">
+                    <option value="date-desc">Date ↓</option>
+                    <option value="date-asc">Date ↑</option>
+                    <option value="name-asc">Name A–Z</option>
+                    <option value="name-desc">Name Z–A</option>
+                </select>
                 <div class="discog-select-actions">
                     <button class="discog-select-btn" onclick="discogSelectAll(true)">Select All</button>
                     <button class="discog-select-btn" onclick="discogSelectAll(false)">Deselect All</button>
+                    <button class="discog-select-btn discog-select-best-btn" onclick="discogSelectBest()" title="Select one best version of each album (prefers explicit, expanded, more tracks)">Select Best</button>
                 </div>
             </div>
             <div class="discog-grid" id="discog-grid">
@@ -2250,17 +2258,18 @@ function _renderDiscogCard(release, index, completionData) {
     const checked = !isOwned;
     const statusClass = isOwned ? 'owned' : isPartial ? 'partial' : '';
     const statusIcon = isOwned ? '✓' : isPartial ? '◐' : '';
+    const explicitBadge = release.explicit === true ? '<span class="explicit-badge">E</span>' : '';
 
     const albumName = release.name || release.title || '';
     return `
-        <label class="discog-card ${statusClass}" data-type="${release._type}" style="animation-delay:${index * 0.03}s">
+        <label class="discog-card ${statusClass}" data-type="${release._type}" data-explicit="${release.explicit === true ? '1' : '0'}" data-tracks-count="${tracks}" data-release-date="${release.release_date || ''}" data-title="${_esc(albumName)}" style="animation-delay:${index * 0.03}s">
             <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
             <div class="discog-card-art">
                 ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
                 ${statusIcon ? `<span class="discog-card-status">${statusIcon}</span>` : ''}
             </div>
             <div class="discog-card-info">
-                <div class="discog-card-title">${_esc(albumName)}</div>
+                <div class="discog-card-title">${_esc(albumName)}${explicitBadge}</div>
                 <div class="discog-card-meta">${year}${year && tracks ? ' · ' : ''}${tracks ? tracks + ' tracks' : ''}</div>
             </div>
             <div class="discog-card-check"></div>
@@ -2286,6 +2295,87 @@ function discogSelectAll(select) {
     _updateDiscogFooterCount();
 }
 
+// Strip edition/variant suffixes to get a normalized base title for grouping.
+// Mirrors the Python _clean_title logic in metadata_service.py.
+function _discogNormalizeTitle(raw) {
+    let t = (raw || '').trim().toLowerCase();
+    const variantSuffix = /\s*[\(\[][^\(\)\[\]]*\b(?:edition|editions|deluxe|remaster|remastered|explicit|clean|version|anniversary|collector|expanded|redux)\b[^\(\)\[\]]*[\)\]]\s*$/i;
+    const legacySuffix = /\s*-\s*(explicit|clean|deluxe edition|single)\s*$/i;
+    let prev;
+    do {
+        prev = t;
+        t = t.replace(variantSuffix, '').replace(legacySuffix, '').trim();
+    } while (t !== prev);
+    return t.replace(/\s+/g, ' ').trim();
+}
+
+// Score a discog-card element — higher is better.
+// Returns a comparable array: [notCompilation, noVariantSuffix, explicitScore, trackCount, releaseDate]
+function _discogCardScore(card) {
+    const title = (card.dataset.title || '').toLowerCase();
+    const isExplicit = card.dataset.explicit === '1';
+    const isClean = !isExplicit && /\bclean\b/.test(title);
+    const trackCount = parseInt(card.dataset.tracksCount) || 0;
+    const releaseDate = card.dataset.releaseDate || '';
+    const variantKeyword = /\b(?:edition|editions|deluxe|remaster|remastered|explicit|clean|version|anniversary|collector|expanded|redux)\b/i;
+    const hasVariantSuffix = /[\(\[][^\)\]]*/.test(title) && variantKeyword.test(title);
+    const isCompilation = /\b(greatest hits|best of|collection|anthology|essential)\b/i.test(title);
+    return [
+        isCompilation ? 0 : 1,
+        hasVariantSuffix ? 0 : 1,
+        isExplicit ? 2 : (isClean ? 0 : 1),
+        trackCount,
+        releaseDate,
+    ];
+}
+
+function _scoreGt(a, b) {
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] > b[i]) return true;
+        if (a[i] < b[i]) return false;
+    }
+    return false;
+}
+
+function discogSelectBest() {
+    const cards = Array.from(document.querySelectorAll('.discog-card')).filter(
+        c => c.style.display !== 'none'
+    );
+
+    // Group cards by (type, normalizedTitle)
+    const groups = new Map();
+    const groupOrder = [];
+    cards.forEach(card => {
+        const type = card.dataset.type || 'album';
+        const rawTitle = card.dataset.title || '';
+        const key = type + '\x00' + _discogNormalizeTitle(rawTitle);
+        if (!groups.has(key)) {
+            groups.set(key, []);
+            groupOrder.push(key);
+        }
+        groups.get(key).push(card);
+    });
+
+    // Within each group, find the best card; uncheck all others
+    const bestCards = new Set();
+    groupOrder.forEach(key => {
+        const group = groups.get(key);
+        let best = group[0];
+        let bestScore = _discogCardScore(best);
+        for (let i = 1; i < group.length; i++) {
+            const s = _discogCardScore(group[i]);
+            if (_scoreGt(s, bestScore)) { best = group[i]; bestScore = s; }
+        }
+        bestCards.add(best);
+    });
+
+    cards.forEach(card => {
+        const cb = card.querySelector('.discog-card-cb');
+        if (cb) cb.checked = bestCards.has(card);
+    });
+    _updateDiscogFooterCount();
+}
+
 function _updateDiscogFooterCount() {
     const checked = document.querySelectorAll('.discog-card-cb:checked');
     let releases = 0, tracks = 0;
@@ -2301,6 +2391,23 @@ function _updateDiscogFooterCount() {
     if (btn) btn.textContent = releases > 0 ? `Add ${releases} to Wishlist` : 'Select releases';
     const submitBtn = document.getElementById('discog-submit-btn');
     if (submitBtn) submitBtn.disabled = releases === 0;
+}
+
+function discogApplySort(order) {
+    const grid = document.getElementById('discog-grid');
+    if (!grid) return;
+    const cards = Array.from(grid.querySelectorAll('.discog-card'));
+    cards.sort((a, b) => {
+        if (order === 'date-desc' || order === 'date-asc') {
+            const da = a.dataset.releaseDate || '';
+            const db = b.dataset.releaseDate || '';
+            return order === 'date-desc' ? db.localeCompare(da) : da.localeCompare(db);
+        }
+        const ta = (a.dataset.title || '').toLowerCase();
+        const tb = (b.dataset.title || '').toLowerCase();
+        return order === 'name-asc' ? ta.localeCompare(tb) : tb.localeCompare(ta);
+    });
+    cards.forEach(c => grid.appendChild(c));
 }
 
 async function startDiscographyDownload() {

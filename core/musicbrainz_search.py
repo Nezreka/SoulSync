@@ -57,6 +57,7 @@ class Album:
     album_type: str
     image_url: Optional[str] = None
     external_urls: Optional[Dict[str, str]] = None
+    explicit: Optional[bool] = None
 
 
 def _cover_art_url(mbid: str, scope: str = 'release') -> Optional[str]:

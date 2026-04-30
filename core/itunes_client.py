@@ -167,7 +167,8 @@ class Album:
     album_type: str
     image_url: Optional[str] = None
     external_urls: Optional[Dict[str, str]] = None
-    
+    explicit: Optional[bool] = None
+
     @classmethod
     def from_itunes_album(cls, album_data: Dict[str, Any]) -> 'Album':
         # Get highest quality artwork
@@ -209,7 +210,8 @@ class Album:
             total_tracks=track_count,
             album_type=album_type,
             image_url=image_url,
-            external_urls=external_urls if external_urls else None
+            external_urls=external_urls if external_urls else None,
+            explicit=album_data.get('collectionExplicitness') == 'explicit',
         )
 
 @dataclass
