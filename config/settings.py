@@ -220,7 +220,7 @@ class ConfigManager:
         """Re-save config to encrypt any plaintext sensitive values still in the DB."""
         try:
             # Read raw DB content to check if any sensitive value is still plaintext
-            conn = sqlite3.connect(str(self.database_path))
+            conn = self._connect_db()
             cursor = conn.cursor()
             cursor.execute("SELECT value FROM metadata WHERE key = 'app_config'")
             row = cursor.fetchone()
@@ -257,6 +257,19 @@ class ConfigManager:
         except Exception as e:
             logger.warning(f"Could not migrate encryption: {e}")
 
+    def _connect_db(self) -> sqlite3.Connection:
+        """Open a configured SQLite connection for the config DB.
+
+        Centralizes pragma setup so every connection gets WAL mode,
+        a 30s busy timeout, and synchronous=NORMAL (the safe pairing
+        with WAL that avoids unnecessary fsyncs on slow disks).
+        """
+        conn = sqlite3.connect(str(self.database_path), timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return conn
+
     def _ensure_database_exists(self):
         """Ensure database file and metadata table exist"""
         try:
@@ -264,8 +277,7 @@ class ConfigManager:
             self.database_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Connect to database (creates file if it doesn't exist)
-            conn = sqlite3.connect(str(self.database_path), timeout=30.0)
-            conn.execute("PRAGMA journal_mode=WAL")
+            conn = self._connect_db()
             cursor = conn.cursor()
 
             # Create metadata table if it doesn't exist
@@ -287,8 +299,7 @@ class ConfigManager:
         try:
             self._ensure_database_exists()
 
-            conn = sqlite3.connect(str(self.database_path), timeout=30.0)
-            conn.execute("PRAGMA journal_mode=WAL")
+            conn = self._connect_db()
             cursor = conn.cursor()
             cursor.execute("SELECT value FROM metadata WHERE key = 'app_config'")
             row = cursor.fetchone()
@@ -314,8 +325,7 @@ class ConfigManager:
         conn = None
         try:
             self._ensure_database_exists()
-            conn = sqlite3.connect(str(self.database_path), timeout=30.0)
-            conn.execute("PRAGMA journal_mode=WAL")
+            conn = self._connect_db()
             cursor = conn.cursor()
             cursor.execute("SELECT value FROM metadata WHERE key = 'log_level'")
             row = cursor.fetchone()
@@ -362,7 +372,13 @@ class ConfigManager:
         return config_data
 
     def _save_to_database(self, config_data: Dict[str, Any]) -> bool:
-        """Save configuration to database, encrypting sensitive values."""
+        """Save configuration to database, encrypting sensitive values.
+
+        Returns ``True`` on success. Transient ``database is locked``
+        failures are logged at DEBUG so the caller's retry loop owns the
+        user-visible error message — otherwise every retry would spam
+        ERROR-level logs even when the next attempt succeeds.
+        """
         conn = None
         try:
             self._ensure_database_exists()
@@ -370,9 +386,7 @@ class ConfigManager:
             # Encrypt sensitive values before writing (original dict is untouched)
             encrypted_data = self._encrypt_sensitive(config_data)
 
-            # Use longer timeout (30s) to handle contention from enrichment workers
-            conn = sqlite3.connect(str(self.database_path), timeout=30.0)
-            conn.execute("PRAGMA journal_mode=WAL")
+            conn = self._connect_db()
             cursor = conn.cursor()
 
             config_json = json.dumps(encrypted_data, indent=2)
@@ -384,6 +398,16 @@ class ConfigManager:
             conn.commit()
             return True
 
+        except sqlite3.OperationalError as e:
+            # SQLite raises OperationalError("database is locked") when the
+            # busy_timeout expires while another writer holds the lock.
+            # Log at DEBUG so the caller can decide whether the final
+            # outcome warrants an ERROR-level message.
+            if "locked" in str(e).lower():
+                logger.debug(f"Config DB locked, will retry: {e}")
+            else:
+                logger.error(f"Could not save config to database: {e}")
+            return False
         except Exception as e:
             logger.error(f"Could not save config to database: {e}")
             return False
@@ -607,25 +631,40 @@ class ConfigManager:
         self.config_data = self._apply_log_level_overrides(config_data)
 
     def _save_config(self):
-        """Save configuration to database with retry on lock."""
-        success = self._save_to_database(self.config_data)
+        """Save configuration to database with exponential-backoff retry on lock.
 
-        if not success:
-            # Retry once after a brief wait (handles transient lock contention)
-            import time
-            time.sleep(1)
-            success = self._save_to_database(self.config_data)
+        Spread retries over ~7 seconds so a long-held writer (enrichment
+        worker batch insert, library scan commit, etc.) on a slow disk
+        has time to release the lock before we fall back to the JSON
+        file. The single 1s retry that used to live here gave up too
+        early on HDD-backed Docker volumes.
+        """
+        import time
 
-        if not success:
-            # Fallback: Try to save to config.json if database fails
-            logger.warning("Database save failed - attempting file fallback")
-            try:
-                self.config_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self.config_path, 'w') as f:
-                    json.dump(self.config_data, f, indent=2)
-                logger.info("Configuration saved to config.json as fallback")
-            except Exception as e:
-                logger.error(f"Failed to save configuration: {e}")
+        # Cumulative delay across attempts: 0.2 + 0.5 + 1.0 + 2.0 + 4.0 = 7.7s
+        # plus the 30s busy_timeout that already runs inside each attempt.
+        retry_delays = [0.2, 0.5, 1.0, 2.0, 4.0]
+        if self._save_to_database(self.config_data):
+            return
+
+        for delay in retry_delays:
+            time.sleep(delay)
+            if self._save_to_database(self.config_data):
+                return
+
+        # All retries exhausted — fall back to config.json so the user
+        # doesn't lose their settings, then log a single error.
+        logger.error(
+            f"Config DB save failed after {len(retry_delays) + 1} attempts (database is locked) — "
+            "falling back to config.json"
+        )
+        try:
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.config_path, 'w') as f:
+                json.dump(self.config_data, f, indent=2)
+            logger.warning("Configuration saved to config.json as fallback")
+        except Exception as e:
+            logger.error(f"Failed to save configuration: {e}")
 
     def get(self, key: str, default: Any = None) -> Any:
         keys = key.split('.')
