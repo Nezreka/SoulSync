@@ -807,13 +807,23 @@ async function _explorerWishlistSubmit(artistSections) {
     for (const [artistId, data] of Object.entries(byArtist)) {
         // Sort by track count descending (deluxe editions first) BEFORE extracting IDs
         data.albums.sort((a, b) => b.tracks - a.tracks);
-        const albumIds = data.albums.map(a => a.id);
+        // Per-album metadata so the backend can resolve each album through its
+        // own source even when the explorer doesn't carry per-album source info.
+        const albumsPayload = data.albums.map(a => ({
+            id: a.id,
+            name: a.title || '',
+            artist_name: data.name,
+            source: null,
+        }));
 
         try {
             const response = await fetch(`/api/artist/${artistId}/download-discography`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ album_ids: albumIds, artist_name: data.name })
+                body: JSON.stringify({
+                    albums: albumsPayload,
+                    artist_name: data.name,
+                })
             });
 
             const reader = response.body.getReader();
