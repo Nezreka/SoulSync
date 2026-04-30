@@ -123,7 +123,24 @@ def test_get_wishlist_tracks_for_download_formats_modal_shape():
     assert formatted_tracks == [
         {
             "wishlist_id": "wl-1",
+            "track_id": "sp-1",
             "spotify_track_id": "sp-1",
+            "track_data": {
+                "id": "sp-1",
+                "name": "Song One",
+                "artists": [{"name": "Artist One"}],
+                "album": {"name": "Album One"},
+                "duration_ms": 321,
+                "preview_url": "https://example.test/preview",
+                "external_urls": {"spotify": "https://open.spotify.com/track/sp-1"},
+                "popularity": 88,
+                "track_number": 7,
+                "disc_number": 2,
+            },
+            "track_name": "Song One",
+            "artist_name": "Artist One",
+            "album_name": "Album One",
+            "provider": None,
             "spotify_data": {
                 "id": "sp-1",
                 "name": "Song One",
