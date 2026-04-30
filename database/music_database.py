@@ -5357,6 +5357,12 @@ class MusicDatabase:
             track.album_title = row['album_title']
             track.album_thumb_url = row['album_thumb_url'] if 'album_thumb_url' in row.keys() else ''
             track.server_source = row['server_source'] if 'server_source' in row.keys() else ''
+            # Per-track artist (from ID3 ARTIST tag) for compilations/soundtracks where
+            # the track artist differs from the album artist. Used by
+            # _calculate_track_confidence so soundtrack tracks credited to the song's
+            # actual performer match correctly when the album sits under a different
+            # primary artist (Plex's track.originalTitle, Jellyfin's ArtistItems[0]).
+            track.track_artist = row['track_artist'] if 'track_artist' in row.keys() else None
             tracks.append(track)
         return tracks
     
@@ -5541,13 +5547,22 @@ class MusicDatabase:
                         """, params)
 
                         for row in cursor.fetchall():
+                            # DatabaseTrack is a strict dataclass — only the declared
+                            # fields go in __init__; the joined artist/album/server
+                            # values are attached afterwards just like _rows_to_tracks
+                            # does. Building it the kwarg-soup way used to raise
+                            # TypeError on every fallback row, silently swallowed by
+                            # the outer except, so this path never matched anything.
                             db_track = DatabaseTrack(
-                                id=row['id'], title=row['title'], artist_name=row['artist_name'],
-                                album_title=row['album_title'], album_id=row['album_id'],
-                                track_number=row['track_number'], duration=row['duration'],
-                                file_path=row['file_path'], bitrate=row['bitrate'],
-                                artist_id=row['artist_id'], server_source=row['server_source']
+                                id=row['id'], album_id=row['album_id'], artist_id=row['artist_id'],
+                                title=row['title'], track_number=row['track_number'],
+                                duration=row['duration'], file_path=row['file_path'],
+                                bitrate=row['bitrate'],
                             )
+                            db_track.artist_name = row['artist_name']
+                            db_track.album_title = row['album_title']
+                            db_track.server_source = row['server_source']
+                            db_track.track_artist = row['track_artist'] if 'track_artist' in row.keys() else None
                             title_sim = max(
                                 self._string_similarity(self._normalize_for_comparison(title), self._normalize_for_comparison(db_track.title)),
                                 self._string_similarity(self._clean_track_title_for_comparison(title), self._clean_track_title_for_comparison(db_track.title))
@@ -6267,6 +6282,19 @@ class MusicDatabase:
             # Direct similarity with Unicode normalization
             title_similarity = self._string_similarity(search_title_norm, db_title_norm)
             artist_similarity = self._string_similarity(search_artist_norm, db_artist_norm)
+
+            # Soundtracks/compilations: the album-level artist (artists.name via JOIN)
+            # often differs from the per-track artist (e.g. Vaiana OST is filed under
+            # Lin-Manuel Miranda but "Where You Are" is performed by Christopher
+            # Jackson). Score against tracks.track_artist too and take the better
+            # match so playlist sync can find these.
+            db_track_artist = getattr(db_track, 'track_artist', None)
+            if db_track_artist:
+                db_track_artist_norm = self._normalize_for_comparison(db_track_artist)
+                artist_similarity = max(
+                    artist_similarity,
+                    self._string_similarity(search_artist_norm, db_track_artist_norm),
+                )
             
             # Also try with cleaned versions (removing parentheses, brackets, etc.)
             clean_search_title = self._clean_track_title_for_comparison(search_title)
