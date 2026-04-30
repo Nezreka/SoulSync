@@ -100,7 +100,7 @@ def _build_deps(
         submit_failed_to_wishlist_with_auto_completion=submit_failed_auto or rec('submit_failed_auto'),
         process_failed_to_wishlist=process_failed or rec('process_failed'),
         process_failed_to_wishlist_with_auto_completion=process_failed_auto or rec('process_failed_auto'),
-        ensure_spotify_track_format=lambda track: track,
+        ensure_wishlist_track_format=lambda track: track,
         get_track_artist_name=lambda track: 'Artist',
         check_and_remove_from_wishlist=rec('check_wishlist'),
         regenerate_batch_m3u=rec('regen_m3u'),
@@ -258,6 +258,8 @@ def test_on_complete_failed_task_appended_to_permanently_failed_tracks():
     lc.on_download_completed('b1', 't1', False, deps)
     assert len(download_batches['b1']['permanently_failed_tracks']) == 1
     assert download_batches['b1']['permanently_failed_tracks'][0]['track_name'] == 'Money'
+    assert download_batches['b1']['permanently_failed_tracks'][0]['track_data'] == {'name': 'Money'}
+    assert download_batches['b1']['permanently_failed_tracks'][0]['spotify_track'] == {'name': 'Money'}
 
 
 def test_on_complete_cancelled_task_added_to_cancelled_tracks():

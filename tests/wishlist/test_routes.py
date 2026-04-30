@@ -137,6 +137,10 @@ class _FakeWishlistService:
         self.removed.append((spotify_track_id, profile_id))
         return True
 
+    def add_track_to_wishlist(self, **kwargs):
+        self.add_calls.append(kwargs)
+        return True
+
     def add_spotify_track_to_wishlist(self, **kwargs):
         self.add_calls.append(kwargs)
         return True
@@ -479,11 +483,11 @@ def test_add_album_track_to_wishlist_builds_spotify_payload_and_merges_context()
         "album_name": "Album One",
         "added_via": "library_wishlist_modal",
     }
-    assert add_call["spotify_track_data"]["album"]["images"] == [
+    assert add_call["track_data"]["album"]["images"] == [
         {"url": "https://example.test/cover.jpg", "height": 640, "width": 640}
     ]
-    assert add_call["spotify_track_data"]["duration_ms"] == 1234
-    assert add_call["spotify_track_data"]["explicit"] is True
+    assert add_call["track_data"]["duration_ms"] == 1234
+    assert add_call["track_data"]["explicit"] is True
 
 
 def test_set_wishlist_cycle_rejects_invalid_cycle():

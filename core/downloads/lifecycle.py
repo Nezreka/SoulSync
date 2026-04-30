@@ -57,7 +57,6 @@ class LifecycleDeps:
     submit_failed_to_wishlist_with_auto_completion: Callable[[str], None]  # async — submits to executor
     process_failed_to_wishlist: Callable[[str], None]                 # sync — direct call (used by v2 path)
     process_failed_to_wishlist_with_auto_completion: Callable[[str], None]  # sync — direct call (used by v2 path)
-    ensure_spotify_track_format: Callable
     get_track_artist_name: Callable
     check_and_remove_from_wishlist: Callable
     regenerate_batch_m3u: Callable
@@ -65,6 +64,17 @@ class LifecycleDeps:
     tidal_discovery_states: dict
     deezer_discovery_states: dict
     spotify_public_discovery_states: dict
+    ensure_wishlist_track_format: Callable | None = None
+    ensure_spotify_track_format: Callable | None = None
+
+    def __post_init__(self) -> None:
+        if self.ensure_wishlist_track_format is None:
+            self.ensure_wishlist_track_format = self.ensure_spotify_track_format
+        if self.ensure_spotify_track_format is None:
+            self.ensure_spotify_track_format = self.ensure_wishlist_track_format
+
+        if self.ensure_wishlist_track_format is None:
+            raise ValueError("LifecycleDeps requires a wishlist track format helper")
 
 
 # ---------------------------------------------------------------------------
@@ -188,8 +198,8 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
                 # Build track_info structure matching sync.py's permanently_failed_tracks format
                 original_track_info = task.get('track_info', {})
 
-                # Ensure spotify_track has proper structure for wishlist service
-                spotify_track_data = deps.ensure_spotify_track_format(original_track_info)
+                # Ensure wishlist track has proper structure for wishlist service
+                wishlist_track_data = deps.ensure_wishlist_track_format(original_track_info)
 
                 track_info = {
                     'download_index': task.get('track_index', 0),
@@ -197,7 +207,8 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
                     'track_name': original_track_info.get('name', 'Unknown Track'),
                     'artist_name': deps.get_track_artist_name(original_track_info),
                     'retry_count': task.get('retry_count', 0),
-                    'spotify_track': spotify_track_data,  # Properly formatted spotify track for wishlist
+                    'track_data': wishlist_track_data,
+                    'spotify_track': wishlist_track_data,  # Backward-compatible alias for older callers
                     'failure_reason': 'Download cancelled' if task_status == 'cancelled' else ('No matching track found' if task_status == 'not_found' else 'Download failed'),
                     'candidates': task.get('cached_candidates', []),  # Include search results if available
                 }
