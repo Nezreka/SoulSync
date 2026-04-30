@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -35,18 +34,28 @@ class _FakeSpotifyTrack:
             self.external_urls = {}
 
 
-class _FakeSpotifyClient:
-    def __init__(self, results=None, authenticated=True):
+class _FakeMetadataClient:
+    def __init__(self, results=None):
         self._results = results if results is not None else []
-        self._authenticated = authenticated
         self.search_calls = []
 
-    def is_spotify_authenticated(self):
-        return self._authenticated
-
-    def search_tracks(self, query, limit=5):
-        self.search_calls.append((query, limit))
+    def search_tracks(self, query, limit=5, allow_fallback=True):
+        self.search_calls.append((query, limit, allow_fallback))
         return self._results
+
+
+_TEST_PRIMARY_SOURCE = 'spotify'
+_TEST_SOURCE_CLIENTS = {}
+
+
+@pytest.fixture(autouse=True)
+def _patch_source_resolution(monkeypatch):
+    monkeypatch.setattr(qs, 'get_primary_source', lambda: _TEST_PRIMARY_SOURCE)
+    monkeypatch.setattr(qs, 'get_client_for_source', lambda source, **_kwargs: _TEST_SOURCE_CLIENTS.get(source))
+    monkeypatch.setattr(qs.time, 'sleep', lambda *_args, **_kwargs: None)
+    yield
+    _TEST_SOURCE_CLIENTS.clear()
+    globals()['_TEST_PRIMARY_SOURCE'] = 'spotify'
 
 
 class _FakeMatchingEngine:
@@ -62,6 +71,14 @@ class _FakeMatchingEngine:
         if not a or not b:
             return 0.0
         return 0.95 if a in b or b in a else 0.0
+
+
+class _MultiQueryMatchingEngine(_FakeMatchingEngine):
+    def generate_download_queries(self, t):
+        return [
+            f"{t.artists[0]} {t.name} first",
+            f"{t.artists[0]} {t.name} second",
+        ]
 
 
 class _FakeAutomationEngine:
@@ -125,16 +142,22 @@ class _WatchlistArtist:
 def _build_deps(
     *,
     state=None,
-    spotify_results=None,
-    spotify_auth=True,
+    source_clients=None,
+    primary_source='spotify',
     quality_tier_result=('lossless', 1),
     automation=None,
 ):
+    globals()['_TEST_PRIMARY_SOURCE'] = primary_source
+    _TEST_SOURCE_CLIENTS.clear()
+    if source_clients is not None:
+        _TEST_SOURCE_CLIENTS.update(source_clients)
+    elif primary_source:
+        _TEST_SOURCE_CLIENTS[primary_source] = _FakeMetadataClient(results=[])
+
     deps = qs.QualityScannerDeps(
         quality_scanner_state=state if state is not None else {},
         quality_scanner_lock=threading.Lock(),
         QUALITY_TIERS={'lossless': {'tier': 1}, 'low_lossy': {'tier': 4}, 'lossy': {'tier': 3}},
-        spotify_client=_FakeSpotifyClient(results=spotify_results or [], authenticated=spotify_auth),
         matching_engine=_FakeMatchingEngine(),
         automation_engine=automation or _FakeAutomationEngine(),
         get_quality_tier_from_extension=lambda fp: quality_tier_result,
@@ -190,21 +213,21 @@ def test_no_watchlist_artists_short_circuit(mock_db_and_wishlist):
 
 
 # ---------------------------------------------------------------------------
-# Spotify auth gate
+# Provider availability gate
 # ---------------------------------------------------------------------------
 
-def test_unauthenticated_spotify_marks_error(mock_db_and_wishlist):
-    """Spotify not authenticated → state['status']='error'."""
+def test_no_available_provider_marks_error(mock_db_and_wishlist):
+    """No available metadata providers → state['status']='error'."""
     db, _ = mock_db_and_wishlist
     db._watchlist_artists = [_WatchlistArtist('A')]
     db._tracks = [_track_row()]
     state = {}
-    deps = _build_deps(state=state, spotify_auth=False)
+    deps = _build_deps(state=state, source_clients={}, quality_tier_result=('low_lossy', 4))
 
     qs.run_quality_scanner('watchlist', 1, deps)
 
     assert state['status'] == 'error'
-    assert 'authenticate' in state['error_message'].lower()
+    assert 'metadata provider' in state['error_message'].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -228,19 +251,83 @@ def test_high_quality_tracks_skipped(mock_db_and_wishlist):
 
 
 def test_low_quality_tracks_attempted(mock_db_and_wishlist):
-    """Low-quality tracks (tier_num > min) trigger Spotify search."""
+    """Low-quality tracks (tier_num > min) trigger a metadata search."""
     db, _ = mock_db_and_wishlist
     db._watchlist_artists = [_WatchlistArtist('Artist')]
     db._tracks = [_track_row(file_path='/x.mp3', artist_name='Artist', title='Track')]
     state = {}
     match = _FakeSpotifyTrack(name='Track', artists=['Artist'])
-    deps = _build_deps(state=state, quality_tier_result=('low_lossy', 4),
-                       spotify_results=[match])
+    spotify_client = _FakeMetadataClient(results=[match])
+    deps = _build_deps(
+        state=state,
+        quality_tier_result=('low_lossy', 4),
+        source_clients={'spotify': spotify_client},
+        primary_source='spotify',
+    )
 
     qs.run_quality_scanner('watchlist', 1, deps)
 
     assert state['low_quality'] == 1
-    assert deps.spotify_client.search_calls  # spotify queried
+    assert spotify_client.search_calls
+    assert spotify_client.search_calls[0][2] is False
+
+
+def test_client_lookup_happens_per_query(mock_db_and_wishlist, monkeypatch):
+    """Each generated query re-resolves the source client."""
+    db, _ = mock_db_and_wishlist
+    db._watchlist_artists = [_WatchlistArtist('Artist')]
+    db._tracks = [_track_row(file_path='/x.mp3', artist_name='Artist', title='Track')]
+    state = {}
+    spotify_client = _FakeMetadataClient(results=[])
+    lookups = []
+
+    monkeypatch.setattr(
+        qs,
+        'get_client_for_source',
+        lambda source, **_kwargs: (lookups.append(source), _TEST_SOURCE_CLIENTS.get(source))[1],
+    )
+
+    deps = _build_deps(
+        state=state,
+        quality_tier_result=('low_lossy', 4),
+        source_clients={'spotify': spotify_client},
+        primary_source='spotify',
+    )
+    deps.matching_engine = _MultiQueryMatchingEngine()
+
+    qs.run_quality_scanner('watchlist', 1, deps)
+
+    assert len(lookups) % 2 == 0
+    midpoint = len(lookups) // 2
+    assert lookups[:midpoint] == lookups[midpoint:]
+    assert len(spotify_client.search_calls) == 2
+
+
+def test_low_quality_tracks_follow_source_priority(mock_db_and_wishlist):
+    """Primary source is searched before Spotify."""
+    db, ws = mock_db_and_wishlist
+    db._watchlist_artists = [_WatchlistArtist('Artist')]
+    db._tracks = [_track_row(file_path='/x.mp3', artist_name='Artist', title='Track')]
+    state = {}
+    match = _FakeSpotifyTrack(name='Track', artists=['Artist'])
+    deezer_client = _FakeMetadataClient(results=[match])
+    spotify_client = _FakeMetadataClient(results=[])
+    deps = _build_deps(
+        state=state,
+        source_clients={'deezer': deezer_client, 'spotify': spotify_client},
+        primary_source='deezer',
+        quality_tier_result=('low_lossy', 4),
+    )
+
+    qs.run_quality_scanner('watchlist', 1, deps)
+
+    assert state['matched'] == 1
+    assert deezer_client.search_calls
+    assert spotify_client.search_calls == []
+    assert len(ws.added) == 1
+    add_args = ws.added[0]
+    assert add_args['track_data']['provider'] == 'deezer'
+    assert add_args['track_data']['source'] == 'deezer'
 
 
 # ---------------------------------------------------------------------------
@@ -254,8 +341,12 @@ def test_match_adds_to_wishlist(mock_db_and_wishlist):
     db._tracks = [_track_row(artist_name='Artist', title='Track', file_path='/x.mp3', bitrate=128)]
     state = {}
     match = _FakeSpotifyTrack(name='Track', artists=['Artist'])
-    deps = _build_deps(state=state, quality_tier_result=('low_lossy', 4),
-                       spotify_results=[match])
+    deps = _build_deps(
+        state=state,
+        quality_tier_result=('low_lossy', 4),
+        source_clients={'spotify': _FakeMetadataClient(results=[match])},
+        primary_source='spotify',
+    )
 
     qs.run_quality_scanner('watchlist', 1, deps)
 
@@ -273,8 +364,12 @@ def test_no_match_no_wishlist_add(mock_db_and_wishlist):
     db._tracks = [_track_row(artist_name='A', title='Z', file_path='/x.mp3')]
     state = {}
     # No spotify results → no match
-    deps = _build_deps(state=state, quality_tier_result=('low_lossy', 4),
-                       spotify_results=[])
+    deps = _build_deps(
+        state=state,
+        quality_tier_result=('low_lossy', 4),
+        source_clients={'spotify': _FakeMetadataClient(results=[])},
+        primary_source='spotify',
+    )
 
     qs.run_quality_scanner('watchlist', 1, deps)
 
