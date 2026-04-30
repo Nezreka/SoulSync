@@ -27,6 +27,29 @@ def _extract_track_data(track: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
+def _coerce_positive_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            try:
+                return int(float(text))
+            except ValueError:
+                return None
+    return None
+
+
 def classify_wishlist_track(track: Dict[str, Any]) -> str:
     """Classify a wishlist track as `singles` or `albums`."""
     track_data = _extract_track_data(track)
@@ -44,8 +67,9 @@ def classify_wishlist_track(track: Dict[str, Any]) -> str:
         return 'albums'
 
     # Fallback: track count heuristic
-    if total_tracks is not None and total_tracks > 0:
-        return 'singles' if total_tracks < 6 else 'albums'
+    total_tracks_value = _coerce_positive_int(total_tracks)
+    if total_tracks_value is not None and total_tracks_value > 0:
+        return 'singles' if total_tracks_value < 6 else 'albums'
 
     # No classification data — default to albums
     return 'albums'
