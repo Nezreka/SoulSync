@@ -87,10 +87,55 @@ def _normalize_track_artists(track_item: Any) -> list[dict]:
         if not artist_name and isinstance(artist, (str, bytes)):
             artist_name = artist
         if artist_name:
-            normalized.append({'name': str(artist_name)})
+            artist_data = {'name': str(artist_name)}
+            artist_images = _normalize_image_entries(_extract_lookup_value(artist, 'images', default=[]))
+            artist_image_url = _extract_lookup_value(artist, 'image_url', 'artist_image_url', default=None)
+            if artist_image_url and not artist_images:
+                artist_images = [{'url': str(artist_image_url)}]
+            if artist_images:
+                artist_data['images'] = artist_images
+                artist_data['image_url'] = artist_images[0].get('url')
+            normalized.append(artist_data)
 
     if not normalized:
         normalized.append({'name': 'Unknown Artist'})
+
+    return normalized
+
+
+def _normalize_image_entries(image_value: Any) -> list[dict]:
+    if not image_value:
+        return []
+
+    if isinstance(image_value, dict):
+        image_value = [image_value]
+    elif isinstance(image_value, (str, bytes)):
+        image_value = [image_value]
+    else:
+        try:
+            image_value = list(image_value)
+        except TypeError:
+            return []
+
+    normalized = []
+    seen_urls = set()
+    for image in image_value:
+        if isinstance(image, dict):
+            image_url = image.get('url') or image.get('image_url')
+            if not image_url:
+                continue
+            image_dict = dict(image)
+            image_dict['url'] = str(image_url)
+        elif isinstance(image, (str, bytes)):
+            image_dict = {'url': str(image)}
+        else:
+            continue
+
+        if image_dict['url'] in seen_urls:
+            continue
+
+        seen_urls.add(image_dict['url'])
+        normalized.append(image_dict)
 
     return normalized
 
@@ -102,7 +147,6 @@ def _normalize_track_album(track_item: Any) -> dict:
     else:
         album_data = {
             'name': _extract_lookup_value(album, 'name', 'title', default=str(album) if album else '') or '',
-            'images': _extract_lookup_value(album, 'images', default=[]) or [],
             'album_type': _extract_lookup_value(album, 'album_type', default='album') or 'album',
             'total_tracks': _extract_lookup_value(album, 'total_tracks', 'track_count', default=0) or 0,
             'release_date': _extract_lookup_value(album, 'release_date', default='') or '',
@@ -112,10 +156,30 @@ def _normalize_track_album(track_item: Any) -> dict:
     album_data.setdefault('album_type', _extract_lookup_value(track_item, 'album_type', default='album') or 'album')
     album_data.setdefault('total_tracks', _extract_lookup_value(track_item, 'total_tracks', 'track_count', default=0) or 0)
     album_data.setdefault('release_date', _extract_lookup_value(track_item, 'release_date', default='') or '')
-    if isinstance(album, dict):
-        album_data.setdefault('images', album.get('images', []) or [])
+
+    album_images = _normalize_image_entries(album_data.get('images'))
+    if not album_images and isinstance(album, dict):
+        album_images = _normalize_image_entries(
+            album.get('images')
+            or album.get('image_url')
+            or album.get('album_cover_url')
+            or album.get('cover_url')
+        )
+
+    if not album_images:
+        album_images = _normalize_image_entries(
+            _extract_lookup_value(track_item, 'images', default=None)
+            or _extract_lookup_value(track_item, 'image_url', default=None)
+            or _extract_lookup_value(track_item, 'album_cover_url', default=None)
+            or _extract_lookup_value(track_item, 'cover_url', default=None)
+        )
+
+    if album_images:
+        album_data['images'] = album_images
+        album_data.setdefault('image_url', album_images[0].get('url'))
     else:
-        album_data.setdefault('images', [])
+        album_data['images'] = []
+
     album_data.setdefault('artists', _normalize_track_artists(track_item))
     return album_data
 
@@ -126,6 +190,7 @@ def _normalize_track_match(track_item: Any, provider: str) -> dict:
         'name': _extract_lookup_value(track_item, 'name', 'title', default='Unknown Track') or 'Unknown Track',
         'artists': _normalize_track_artists(track_item),
         'album': _normalize_track_album(track_item),
+        'image_url': _extract_lookup_value(track_item, 'image_url', 'album_cover_url', default=None),
         'duration_ms': _extract_lookup_value(track_item, 'duration_ms', default=0) or 0,
         'track_number': _extract_lookup_value(track_item, 'track_number', default=1) or 1,
         'disc_number': _extract_lookup_value(track_item, 'disc_number', default=1) or 1,
@@ -135,6 +200,12 @@ def _normalize_track_match(track_item: Any, provider: str) -> dict:
         'provider': provider,
         'source': provider,
     }
+    if not track_data['image_url']:
+        album_images = track_data['album'].get('images') if isinstance(track_data['album'], dict) else []
+        if isinstance(album_images, list) and album_images:
+            first_image = album_images[0]
+            if isinstance(first_image, dict):
+                track_data['image_url'] = first_image.get('url')
     return ensure_wishlist_track_format(track_data)
 
 

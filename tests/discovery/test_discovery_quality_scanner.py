@@ -357,6 +357,42 @@ def test_match_adds_to_wishlist(mock_db_and_wishlist):
     assert add_args['source_context']['original_file_path'] == '/x.mp3'
 
 
+def test_match_preserves_album_and_artist_images(mock_db_and_wishlist):
+    """Image metadata from the provider payload should survive the wishlist handoff."""
+    db, ws = mock_db_and_wishlist
+    db._watchlist_artists = [_WatchlistArtist('Artist')]
+    db._tracks = [_track_row(artist_name='Artist', title='Track', file_path='/x.mp3', bitrate=128)]
+    state = {}
+    match = {
+        'id': 'sp-1',
+        'name': 'Track',
+        'artists': [{'name': 'Artist', 'image_url': 'https://example.test/artist.jpg'}],
+        'album': 'Album',
+        'image_url': 'https://example.test/cover.jpg',
+        'duration_ms': 200000,
+        'popularity': 50,
+        'external_urls': {},
+        'album_type': 'album',
+        'release_date': '2024-01-01',
+    }
+    deps = _build_deps(
+        state=state,
+        quality_tier_result=('low_lossy', 4),
+        source_clients={'spotify': _FakeMetadataClient(results=[match])},
+        primary_source='spotify',
+    )
+
+    qs.run_quality_scanner('watchlist', 1, deps)
+
+    assert state['matched'] == 1
+    assert len(ws.added) == 1
+    add_args = ws.added[0]
+    assert add_args['track_data']['image_url'] == 'https://example.test/cover.jpg'
+    assert add_args['track_data']['album']['image_url'] == 'https://example.test/cover.jpg'
+    assert add_args['track_data']['album']['images'] == [{'url': 'https://example.test/cover.jpg'}]
+    assert add_args['track_data']['artists'][0]['image_url'] == 'https://example.test/artist.jpg'
+
+
 def test_no_match_no_wishlist_add(mock_db_and_wishlist):
     """No match found → no wishlist add, matched stays 0."""
     db, ws = mock_db_and_wishlist
