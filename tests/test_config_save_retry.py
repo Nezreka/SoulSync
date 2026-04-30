@@ -24,14 +24,29 @@ from config.settings import ConfigManager
 
 @pytest.fixture
 def manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ConfigManager:
-    """Build a ConfigManager rooted at a tmp dir so every test starts clean."""
+    """Build a ConfigManager rooted at a tmp dir so every test starts clean.
+
+    CRITICAL: ConfigManager reads ``DATABASE_PATH`` (not ``SOULSYNC_DB_PATH``)
+    when picking the DB location. Setting the wrong env var here would let
+    tests reach the real ``database/music_library.db`` and clobber the
+    user's encrypted credentials. The ``database_path`` is also pinned
+    directly on the instance after construction as a defense-in-depth check
+    in case ConfigManager's resolution logic ever changes.
+    """
     config_path = tmp_path / "config.json"
     db_path = tmp_path / "database" / "music_library.db"
     monkeypatch.setenv("SOULSYNC_CONFIG_PATH", str(config_path))
-    monkeypatch.setenv("SOULSYNC_DB_PATH", str(db_path))
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
     mgr = ConfigManager(str(config_path))
+    # Defense-in-depth: pin the path on the instance so even if ConfigManager
+    # ignored the env var, the DB writes still land in the tmp directory.
+    mgr.database_path = db_path
+    mgr.config_path = config_path
     # Replace whatever was loaded with a known payload so we can assert on it
     mgr.config_data = {"plex": {"base_url": "http://example.test"}}
+    assert str(mgr.database_path).startswith(str(tmp_path)), (
+        "Test fixture would write to a non-tmp DB — refusing to run"
+    )
     return mgr
 
 
