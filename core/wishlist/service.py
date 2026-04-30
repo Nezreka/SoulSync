@@ -94,8 +94,9 @@ class WishlistService:
 
     def add_track_to_wishlist(
         self,
-        track_data: Dict[str, Any],
-        failure_reason: str,
+        track_data: Dict[str, Any] = None,
+        spotify_track_data: Dict[str, Any] = None,
+        failure_reason: str = "",
         source_type: str = "manual",
         source_context: Dict[str, Any] = None,
         profile_id: int = 1,
@@ -110,8 +111,15 @@ class WishlistService:
             source_context: Additional context information
             profile_id: Profile to add to
         """
+        if track_data is None:
+            track_data = spotify_track_data
+
+        if not track_data:
+            logger.error("No track data provided for wishlist add")
+            return False
+
         return self.database.add_to_wishlist(
-            spotify_track_data=track_data,
+            track_data=track_data,
             failure_reason=failure_reason,
             source_type=source_type,
             source_info=source_context or {},
@@ -120,15 +128,19 @@ class WishlistService:
 
     def add_spotify_track_to_wishlist(
         self,
-        spotify_track_data: Dict[str, Any],
-        failure_reason: str,
+        spotify_track_data: Dict[str, Any] = None,
+        track_data: Dict[str, Any] = None,
+        failure_reason: str = "",
         source_type: str = "manual",
         source_context: Dict[str, Any] = None,
         profile_id: int = 1,
     ) -> bool:
         """Backward-compatible wrapper for `add_track_to_wishlist`."""
+        if track_data is None:
+            track_data = spotify_track_data
+
         return self.add_track_to_wishlist(
-            track_data=spotify_track_data,
+            track_data=track_data,
             failure_reason=failure_reason,
             source_type=source_type,
             source_context=source_context,
