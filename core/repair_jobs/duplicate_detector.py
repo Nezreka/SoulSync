@@ -154,6 +154,18 @@ class DuplicateDetectorJob(RepairJob):
                     if ignore_cross_album and t1['album'] and t2['album'] and t1['album'] != t2['album']:
                         continue
 
+                    # Skip pairs that are the same physical file mounted at
+                    # different roots — e.g. /app/Transfer/... and /media/Music/...
+                    # when the user binds the same host directory into both
+                    # SoulSync and Plex containers. Both rows end up in the DB
+                    # (one from SoulSync's local scan, one from Plex's sync),
+                    # but they point at one file on disk.
+                    if _is_same_physical_file(
+                        t1['file_path'], t2['file_path'],
+                        t1['duration'], t2['duration'],
+                    ):
+                        continue
+
                     group.append(t2)
 
                 if len(group) >= 2:
@@ -229,3 +241,43 @@ def _normalize(text: str) -> str:
     t = text.lower()
     t = re.sub(r'[^a-z0-9() ]', '', t)
     return t.strip()
+
+
+def _is_same_physical_file(p1, p2, dur1, dur2) -> bool:
+    """Detect when two DB rows point at the same file mounted at different paths.
+
+    When a user binds the same host music directory into both SoulSync
+    (e.g. ``/app/Transfer``) and a media server like Plex (e.g.
+    ``/media/Music``), the SoulSync scan and the media-server library
+    sync each create a track row pointing at the same physical file
+    via different mount paths. The two rows then look like a fuzzy-
+    match duplicate to this job.
+
+    Returns True when:
+    - Both paths share the last 3 segments (filename + album + artist
+      folder), so they really are the same release on disk;
+    - The leading mount-root segments differ, ruling out the case
+      where one row is just a re-scan of the other path; and
+    - When both rows carry a duration, the durations agree within 1
+      second (defensive — different files at parallel paths would
+      almost always disagree on duration even slightly).
+    """
+    if not p1 or not p2:
+        return False
+    norm1 = str(p1).replace('\\', '/').rstrip('/')
+    norm2 = str(p2).replace('\\', '/').rstrip('/')
+    parts1 = [x for x in norm1.split('/') if x]
+    parts2 = [x for x in norm2.split('/') if x]
+    if len(parts1) < 3 or len(parts2) < 3:
+        return False
+    tail1 = [s.lower() for s in parts1[-3:]]
+    tail2 = [s.lower() for s in parts2[-3:]]
+    if tail1 != tail2:
+        return False
+    # Confirm mount roots actually differ, otherwise we'd skip
+    # legitimate duplicates that happen to share the trailing path.
+    if parts1[:-3] == parts2[:-3]:
+        return False
+    if dur1 and dur2 and abs(dur1 - dur2) > 1.0:
+        return False
+    return True
