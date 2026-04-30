@@ -8853,33 +8853,58 @@ def get_album_tracks(album_id):
 
 @app.route('/api/artist/<artist_id>/download-discography', methods=['POST'])
 def download_discography(artist_id):
-    """Add selected albums from an artist's discography to the wishlist."""
+    """Add selected albums from an artist's discography to the wishlist.
+
+    Resolves each album through the same source-aware path that the
+    individual-album flow uses, so albums whose IDs come from a
+    fallback/provider-specific source (e.g. Deezer-formatted IDs surfaced
+    via Hydrabase) don't fail with "Album not found" when the primary
+    source can't look them up directly.
+    """
     try:
         data = request.get_json()
-        if not data or 'album_ids' not in data:
-            return jsonify({"success": False, "error": "album_ids required"}), 400
+        if not data:
+            return jsonify({"success": False, "error": "request body required"}), 400
 
-        album_ids = data['album_ids']
+        # Preferred payload: per-album metadata so each album can be resolved
+        # through its own source. Falls back to the legacy album_ids list,
+        # in which case every album is looked up under the artist-level source.
+        albums_payload = data.get('albums')
+        legacy_album_ids = data.get('album_ids')
+        if not albums_payload and not legacy_album_ids:
+            return jsonify({"success": False, "error": "albums or album_ids required"}), 400
+
         artist_name = data.get('artist_name', 'Unknown Artist')
+        artist_source = (data.get('source') or '').strip().lower() or None
+
+        if albums_payload:
+            album_entries = [
+                {
+                    'id': str(a.get('id', '')),
+                    'name': a.get('name') or a.get('title') or '',
+                    'source': (a.get('source') or '').strip().lower() or artist_source,
+                    'artist_name': a.get('artist_name') or artist_name,
+                }
+                for a in albums_payload if a.get('id')
+            ]
+        else:
+            album_entries = [
+                {
+                    'id': str(aid),
+                    'name': '',
+                    'source': artist_source,
+                    'artist_name': artist_name,
+                }
+                for aid in legacy_album_ids if aid
+            ]
+
+        if not album_entries:
+            return jsonify({"success": False, "error": "no valid albums in payload"}), 400
 
         from database.music_database import MusicDatabase
+        from core.metadata.album_tracks import get_artist_album_tracks
         db = MusicDatabase()
         profile_id = get_current_profile_id()
-        active_server = config_manager.get_active_media_server()
-
-        # Resolve metadata client
-        client = None
-        if spotify_client and spotify_client.is_authenticated():
-            client = spotify_client
-        else:
-            fallback_src = _get_metadata_fallback_source()
-            if fallback_src == 'itunes':
-                client = _get_itunes_client()
-            elif fallback_src == 'deezer':
-                client = _get_deezer_client()
-
-        if not client:
-            return jsonify({"success": False, "error": "No metadata source available"}), 500
 
         total_added = 0
         total_skipped = 0
@@ -8887,27 +8912,48 @@ def download_discography(artist_id):
         def generate_ndjson():
             nonlocal total_added, total_skipped
 
-            for album_id in album_ids:
+            for entry in album_entries:
+                album_id = entry['id']
+                hint_album_name = entry['name']
+                hint_artist = entry['artist_name']
+                source_override = entry['source']
                 try:
-                    album_data = client.get_album(album_id)
-                    if not album_data:
-                        yield json.dumps({"album_id": album_id, "status": "error", "message": "Album not found"}) + '\n'
+                    result = get_artist_album_tracks(
+                        album_id,
+                        artist_name=hint_artist,
+                        album_name=hint_album_name,
+                        source_override=source_override,
+                    )
+
+                    if not result.get('success'):
+                        message = result.get('error') or 'Album not found'
+                        yield json.dumps({
+                            "album_id": album_id,
+                            "name": hint_album_name or album_id,
+                            "status": "error",
+                            "message": message,
+                        }) + '\n'
                         continue
 
-                    album_name = album_data.get('name', 'Unknown')
-                    album_images = album_data.get('images', [])
-                    album_type = album_data.get('album_type', 'album')
-                    release_date = album_data.get('release_date', '')
-                    album_artists = album_data.get('artists', [])
+                    album = result.get('album', {}) or {}
+                    tracks = result.get('tracks', []) or []
+                    album_name = album.get('name') or hint_album_name or 'Unknown'
+                    album_images = album.get('images') or (
+                        [{'url': album['image_url']}] if album.get('image_url') else []
+                    )
+                    album_type = album.get('album_type', 'album')
+                    release_date = album.get('release_date', '') or ''
+                    album_artists = album.get('artists') or [{'name': hint_artist}]
+                    resolved_album_id = result.get('resolved_album_id') or album.get('id') or album_id
+                    resolved_source = result.get('source') or source_override or 'unknown'
 
-                    tracks = album_data.get('tracks', {}).get('items', [])
                     if not tracks:
-                        tracks_data = client.get_album_tracks(album_id)
-                        if tracks_data and 'items' in tracks_data:
-                            tracks = tracks_data['items']
-
-                    if not tracks:
-                        yield json.dumps({"album_id": album_id, "name": album_name, "status": "error", "message": "No tracks"}) + '\n'
+                        yield json.dumps({
+                            "album_id": album_id,
+                            "name": album_name,
+                            "status": "error",
+                            "message": "No tracks",
+                        }) + '\n'
                         continue
 
                     added = 0
@@ -8915,24 +8961,23 @@ def download_discography(artist_id):
 
                     for track in tracks:
                         track_name = track.get('name', '')
-                        track_artists = track.get('artists', [])
-                        track_id = track.get('id', '')
-
                         if not track_name:
                             continue
+                        track_artists = track.get('artists', []) or album_artists
+                        track_id = track.get('id', '')
 
                         spotify_track_data = {
                             'id': track_id,
                             'name': track_name,
                             'artists': track_artists if isinstance(track_artists, list) else [{'name': str(track_artists)}],
                             'album': {
-                                'id': str(album_id),
+                                'id': str(resolved_album_id),
                                 'name': album_name,
                                 'artists': album_artists,
                                 'images': album_images,
                                 'album_type': album_type,
                                 'release_date': release_date,
-                                'total_tracks': len(tracks)
+                                'total_tracks': len(tracks),
                             },
                             'duration_ms': track.get('duration_ms', 0),
                             'explicit': track.get('explicit', False),
@@ -8941,7 +8986,8 @@ def download_discography(artist_id):
                             'uri': track.get('uri', ''),
                             'preview_url': track.get('preview_url'),
                             'external_urls': track.get('external_urls', {}),
-                            'is_local': False
+                            'is_local': False,
+                            '_source': resolved_source,
                         }
 
                         try:
@@ -8950,11 +8996,12 @@ def download_discography(artist_id):
                                 failure_reason="Added via Download Discography",
                                 source_type="discography",
                                 source_info=json.dumps({
-                                    'artist_name': artist_name,
+                                    'artist_name': hint_artist,
                                     'album_name': album_name,
-                                    'album_type': album_type
+                                    'album_type': album_type,
+                                    'source': resolved_source,
                                 }),
-                                profile_id=profile_id
+                                profile_id=profile_id,
                             )
                             if was_added:
                                 added += 1
@@ -8965,17 +9012,37 @@ def download_discography(artist_id):
 
                     total_added += added
                     total_skipped += skipped
-                    logger.warning(f"[Discography] {album_name}: {added} added, {skipped} skipped")
+                    logger.warning(
+                        f"[Discography] {album_name} ({resolved_source}): {added} added, {skipped} skipped"
+                    )
                     yield json.dumps({
-                        "album_id": album_id, "name": album_name, "status": "done",
-                        "tracks_added": added, "tracks_skipped": skipped, "tracks_total": len(tracks)
+                        "album_id": album_id,
+                        "name": album_name,
+                        "status": "done",
+                        "tracks_added": added,
+                        "tracks_skipped": skipped,
+                        "tracks_total": len(tracks),
+                        "source": resolved_source,
                     }) + '\n'
 
                 except Exception as album_err:
-                    yield json.dumps({"album_id": album_id, "status": "error", "message": str(album_err)}) + '\n'
+                    yield json.dumps({
+                        "album_id": album_id,
+                        "name": hint_album_name or album_id,
+                        "status": "error",
+                        "message": str(album_err),
+                    }) + '\n'
 
-            logger.warning(f"[Discography] Complete for {artist_name}: {total_added} tracks added, {total_skipped} skipped across {len(album_ids)} albums")
-            yield json.dumps({"status": "complete", "total_added": total_added, "total_skipped": total_skipped, "total_albums": len(album_ids)}) + '\n'
+            logger.warning(
+                f"[Discography] Complete for {artist_name}: {total_added} tracks added, "
+                f"{total_skipped} skipped across {len(album_entries)} albums"
+            )
+            yield json.dumps({
+                "status": "complete",
+                "total_added": total_added,
+                "total_skipped": total_skipped,
+                "total_albums": len(album_entries),
+            }) + '\n'
 
         return app.response_class(generate_ndjson(), mimetype='application/x-ndjson', headers={'X-Accel-Buffering': 'no'})
 
