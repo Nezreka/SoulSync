@@ -3108,16 +3108,18 @@ async function _forceServiceStatusRefresh() {
 }
 
 let _spotifyAuthCompletionListenerInstalled = false;
+window._spotifyAuthWindow = window._spotifyAuthWindow || null;
 
 function initializeSpotifyAuthCompletionListener() {
     if (_spotifyAuthCompletionListenerInstalled) return;
     _spotifyAuthCompletionListenerInstalled = true;
 
     window.addEventListener('message', async event => {
-        if (event.origin !== window.location.origin) return;
         if (!event.data || event.data.type !== 'spotify-auth-complete') return;
+        if (window._spotifyAuthWindow && event.source && event.source !== window._spotifyAuthWindow) return;
 
         try {
+            window._spotifyAuthWindow = null;
             await _forceServiceStatusRefresh();
         } catch (error) {
             console.warn('Could not refresh Spotify status after auth completion:', error);

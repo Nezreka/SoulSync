@@ -3079,7 +3079,7 @@ async function authenticateSpotify() {
         // Save settings first to ensure client_id/client_secret are persisted
         await saveSettings();
         showToast('Spotify authentication started', 'success');
-        window.open('/auth/spotify', '_blank');
+        window._spotifyAuthWindow = window.open('/auth/spotify', '_blank');
     } catch (error) {
         console.error('Error authenticating Spotify:', error);
         showToast('Failed to start Spotify authentication', 'error', 'gs-connecting');

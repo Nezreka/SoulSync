@@ -5539,7 +5539,6 @@ def auth_spotify():
 
                 <script>
                     window.addEventListener('message', function(event) {{
-                        if (event.origin !== window.location.origin) return;
                         if (!event.data || event.data.type !== 'spotify-auth-complete') return;
                         setTimeout(() => window.close(), 300);
                     }});
@@ -5734,7 +5733,7 @@ def _spotify_auth_success_page(detail_text: str) -> str:
       (function() {{
         try {{
           if (window.opener && !window.opener.closed) {{
-            window.opener.postMessage({{ type: 'spotify-auth-complete' }}, window.location.origin);
+            window.opener.postMessage({{ type: 'spotify-auth-complete' }}, '*');
           }}
         }} catch (error) {{
           console.warn('Unable to notify opener about Spotify auth completion', error);
