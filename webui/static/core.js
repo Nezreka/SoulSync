@@ -476,6 +476,12 @@ function handleServiceStatusUpdate(data) {
     if (typeof syncSpotifySettingsAuthState === 'function') {
         syncSpotifySettingsAuthState(data?.spotify || null);
     }
+    if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
+        syncPrimaryMetadataSourceAvailability(data?.spotify || null);
+    }
+    if (typeof sanitizeMetadataSourceSelection === 'function') {
+        sanitizeMetadataSourceSelection({ quiet: true });
+    }
 
     // Same logic as fetchAndUpdateServiceStatus response handler
     updateServiceStatus('spotify', data.spotify);

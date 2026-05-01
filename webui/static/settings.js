@@ -58,8 +58,25 @@ function syncMetadataSourceSelection(source) {
     select.dataset.lastValidSource = source;
 }
 
-function focusSpotifySettingsSection() {
-    const card = document.querySelector('#settings-page .stg-service[data-service="spotify"]');
+function _isMetadataSourceSelectable(source) {
+    if (source === 'spotify') {
+        return _lastServiceStatus?.spotify?.authenticated === true;
+    }
+    if (source === 'discogs') {
+        const token = document.getElementById('discogs-token');
+        return !!token?.value?.trim();
+    }
+    return true;
+}
+
+function _metadataSourceFallback(source) {
+    if (source === 'spotify') return 'deezer';
+    if (source === 'discogs') return 'itunes';
+    return 'itunes';
+}
+
+function focusServiceSettingsSection(service, message) {
+    const card = document.querySelector(`#settings-page .stg-service[data-service="${service}"]`);
     if (!card) return;
 
     const header = card.querySelector('.stg-service-header');
@@ -74,7 +91,39 @@ function focusSpotifySettingsSection() {
         firstControl.focus({ preventScroll: true });
     }
 
-    showToast('Spotify must be authenticated before it can be selected as the primary metadata source.', 'warning');
+    if (message) {
+        showToast(message, 'warning');
+    }
+}
+
+function sanitizeMetadataSourceSelection({ quiet = true } = {}) {
+    const select = document.getElementById('metadata-fallback-source');
+    if (!select) return false;
+
+    const selectedSource = select.value || 'itunes';
+    if (_isMetadataSourceSelectable(selectedSource)) {
+        select.dataset.lastValidSource = selectedSource;
+        return false;
+    }
+
+    const lastValid = select.dataset.lastValidSource;
+    const fallbackSource = lastValid && lastValid !== selectedSource && _isMetadataSourceSelectable(lastValid)
+        ? lastValid
+        : _metadataSourceFallback(selectedSource);
+
+    if (fallbackSource && fallbackSource !== selectedSource) {
+        select.value = fallbackSource;
+    }
+    select.dataset.lastValidSource = fallbackSource;
+
+    if (!quiet) {
+        const message = selectedSource === 'discogs'
+            ? 'Discogs requires a personal access token before it can be selected as the primary metadata source.'
+            : 'Spotify must be authenticated before it can be selected as the primary metadata source.';
+        focusServiceSettingsSection(selectedSource, message);
+    }
+
+    return true;
 }
 
 function handleMetadataSourceChange(event) {
@@ -82,22 +131,12 @@ function handleMetadataSourceChange(event) {
     if (!select || select.id !== 'metadata-fallback-source') return;
 
     const selectedSource = select.value;
-    if (selectedSource !== 'spotify') {
+    if (_isMetadataSourceSelectable(selectedSource)) {
         select.dataset.lastValidSource = selectedSource;
         return;
     }
 
-    const spotifySessionActive = _lastServiceStatus?.spotify?.authenticated === true;
-    if (spotifySessionActive) {
-        select.dataset.lastValidSource = selectedSource;
-        return;
-    }
-
-    const fallbackSource = select.dataset.lastValidSource || _lastServiceStatus?.spotify?.source || 'deezer';
-    if (fallbackSource && fallbackSource !== 'spotify') {
-        select.value = fallbackSource;
-    }
-    focusSpotifySettingsSection();
+    sanitizeMetadataSourceSelection({ quiet: false });
 }
 
 function initializeSettings() {
@@ -130,6 +169,15 @@ function initializeSettings() {
     if (metadataSourceSelect) {
         metadataSourceSelect.addEventListener('change', handleMetadataSourceChange);
     }
+    const discogsTokenInput = document.getElementById('discogs-token');
+    if (discogsTokenInput) {
+        discogsTokenInput.addEventListener('input', () => {
+            if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
+                syncPrimaryMetadataSourceAvailability(_lastServiceStatus?.spotify || null);
+            }
+            sanitizeMetadataSourceSelection({ quiet: true });
+        });
+    }
 
     // Server toggle buttons
     const plexToggle = document.getElementById('plex-toggle');
@@ -158,11 +206,12 @@ function initializeSettings() {
     // Test connection buttons
     // Test button event listeners removed - they use onclick attributes in HTML to avoid double firing
 
-    if (typeof syncSpotifyMetadataSourceAvailability === 'function') {
-        syncSpotifyMetadataSourceAvailability(_lastServiceStatus?.spotify || null);
+    if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
+        syncPrimaryMetadataSourceAvailability(_lastServiceStatus?.spotify || null);
     }
     syncSpotifySettingsAuthState(_lastServiceStatus?.spotify || null);
     syncMetadataSourceSelection(_lastServiceStatus?.spotify?.source);
+    sanitizeMetadataSourceSelection({ quiet: true });
     if (metadataSourceSelect) {
         metadataSourceSelect.dataset.lastValidSource = metadataSourceSelect.value;
     }
@@ -2491,6 +2540,8 @@ async function saveSettings(quiet = false) {
     }
 
     const metadataSourceSelect = document.getElementById('metadata-fallback-source');
+    const discogsTokenInput = document.getElementById('discogs-token');
+    const discogsTokenPresent = !!discogsTokenInput?.value?.trim();
     let metadataSource = metadataSourceSelect?.value || 'itunes';
     const spotifySessionActive = _lastServiceStatus?.spotify?.authenticated === true;
     if (metadataSource === 'spotify' && !spotifySessionActive) {
@@ -2498,6 +2549,12 @@ async function saveSettings(quiet = false) {
         if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
         if (!quiet) {
             showToast('Spotify is disconnected, so Deezer is used as the primary metadata source.', 'warning');
+        }
+    } else if (metadataSource === 'discogs' && !discogsTokenPresent) {
+        metadataSource = 'itunes';
+        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
+        if (!quiet) {
+            showToast('Discogs requires a personal access token before it can be selected as the primary metadata source.', 'warning');
         }
     }
 
