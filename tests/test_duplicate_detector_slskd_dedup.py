@@ -261,3 +261,167 @@ class TestExistingTitlePassUnchanged:
             context=ctx,
         )
         assert result.findings_created == 0
+
+
+# ---------------------------------------------------------------------------
+# Filename-pass safety net — different-song false-positive prevention
+# ---------------------------------------------------------------------------
+
+
+class TestFilenamePassDoesNotGroupStrangers:
+    """Two unrelated songs that happen to share a canonical filename
+    (e.g. ``Yellow.mp3`` by Coldplay vs by some other artist) must not
+    be grouped just because their filenames match."""
+
+    def test_different_durations_block_grouping(self):
+        """Same source download = identical duration. A 3+ second gap
+        means they're different recordings even when filenames agree."""
+        job = DuplicateDetectorJob()
+        ctx = _FakeContext()
+
+        coldplay = _make_track(
+            1, title="Yellow", artist="Coldplay", album="Parachutes",
+            file_path="/lib/Coldplay/Parachutes/Yellow.mp3", duration=266.0,
+        )
+        other = _make_track(
+            2, title="Yellow", artist="Bob's Band", album="Bob's Album",
+            file_path="/lib/Bobs Band/Bobs Album/Yellow.mp3", duration=180.0,
+        )
+
+        result = SimpleNamespace(scanned=0, findings_created=0, errors=0)
+        job._scan_bucket(
+            bucket_tracks=[coldplay, other],
+            require_metadata_match=False,
+            title_threshold=0.85,
+            artist_threshold=0.80,
+            ignore_cross_album=False,
+            found_groups=set(),
+            processed_holder={'count': 0},
+            total=2,
+            result=result,
+            context=ctx,
+        )
+        assert result.findings_created == 0
+
+    def test_matching_durations_pass_grouping(self):
+        """When durations agree (within 3s) the filename match is
+        accepted even in the no-metadata-match pass."""
+        job = DuplicateDetectorJob()
+        ctx = _FakeContext()
+
+        a = _make_track(
+            1, title="Song", artist="Artist", album="Album",
+            file_path="/lib/Album/Song.mp3", duration=200.0,
+        )
+        b = _make_track(
+            2, title="garbage parsed title", artist="",
+            album="", file_path="/lib/Album/Song_639122324339578022.mp3",
+            duration=200.5,
+        )
+
+        result = SimpleNamespace(scanned=0, findings_created=0, errors=0)
+        job._scan_bucket(
+            bucket_tracks=[a, b],
+            require_metadata_match=False,
+            title_threshold=0.85,
+            artist_threshold=0.80,
+            ignore_cross_album=False,
+            found_groups=set(),
+            processed_holder={'count': 0},
+            total=2,
+            result=result,
+            context=ctx,
+        )
+        assert result.findings_created == 1
+
+    def test_missing_duration_falls_back_to_artist_check(self):
+        """When a row has no duration data we can't use that gate —
+        fall back to a relaxed artist similarity check so that genuine
+        dedup orphans (which usually share artist) still get caught."""
+        job = DuplicateDetectorJob()
+        ctx = _FakeContext()
+
+        a = _make_track(
+            1, title="Song", artist="John Swihart", album="OST",
+            file_path="/lib/OST/song.mp3", duration=None,
+        )
+        b = _make_track(
+            2, title="Song", artist="John Swihart", album="OST",
+            file_path="/lib/OST/song_639122324339578022.mp3", duration=None,
+        )
+
+        result = SimpleNamespace(scanned=0, findings_created=0, errors=0)
+        job._scan_bucket(
+            bucket_tracks=[a, b],
+            require_metadata_match=False,
+            title_threshold=0.85,
+            artist_threshold=0.80,
+            ignore_cross_album=False,
+            found_groups=set(),
+            processed_holder={'count': 0},
+            total=2,
+            result=result,
+            context=ctx,
+        )
+        assert result.findings_created == 1
+
+    def test_missing_duration_with_different_artists_blocked(self):
+        """Fallback artist check rejects pairs whose artists clearly
+        disagree — guards against the strangers-with-same-filename case
+        when no duration data is available."""
+        job = DuplicateDetectorJob()
+        ctx = _FakeContext()
+
+        a = _make_track(
+            1, title="Yellow", artist="Coldplay", album="Parachutes",
+            file_path="/lib/A/Yellow.mp3", duration=None,
+        )
+        b = _make_track(
+            2, title="Yellow", artist="Bob's Band", album="Bob's Album",
+            file_path="/lib/B/Yellow.mp3", duration=None,
+        )
+
+        result = SimpleNamespace(scanned=0, findings_created=0, errors=0)
+        job._scan_bucket(
+            bucket_tracks=[a, b],
+            require_metadata_match=False,
+            title_threshold=0.85,
+            artist_threshold=0.80,
+            ignore_cross_album=False,
+            found_groups=set(),
+            processed_holder={'count': 0},
+            total=2,
+            result=result,
+            context=ctx,
+        )
+        assert result.findings_created == 0
+
+    def test_missing_both_signals_skips_pair(self):
+        """No duration on either side AND at least one artist blank —
+        not enough signal to safely group, so skip."""
+        job = DuplicateDetectorJob()
+        ctx = _FakeContext()
+
+        a = _make_track(
+            1, title="Song", artist="Real Artist", album="",
+            file_path="/lib/A/Song.mp3", duration=None,
+        )
+        b = _make_track(
+            2, title="garbage", artist="", album="",
+            file_path="/lib/B/Song.mp3", duration=None,
+        )
+
+        result = SimpleNamespace(scanned=0, findings_created=0, errors=0)
+        job._scan_bucket(
+            bucket_tracks=[a, b],
+            require_metadata_match=False,
+            title_threshold=0.85,
+            artist_threshold=0.80,
+            ignore_cross_album=False,
+            found_groups=set(),
+            processed_holder={'count': 0},
+            total=2,
+            result=result,
+            context=ctx,
+        )
+        assert result.findings_created == 0
