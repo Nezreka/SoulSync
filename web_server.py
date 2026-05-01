@@ -5718,27 +5718,42 @@ def auth_tidal():
         return f"<h1>Tidal Authentication Error</h1><p>{str(e)}</p>", 500
 
 
-def _spotify_auth_success_page(detail_text: str) -> str:
-    """Return the post-auth success page and notify the opener."""
+def _spotify_auth_result_page(detail_text: str, authenticated: bool = True) -> str:
+    """Return the post-auth page and notify the opener."""
+    title = "Spotify Authentication Successful" if authenticated else "Spotify Authentication Completed"
+    heading = title
+    close_script = """
+        setTimeout(() => window.close(), 300);
+    """ if authenticated else """
+        const closeBtn = document.getElementById('close-window-btn');
+        if (closeBtn) {
+          closeBtn.addEventListener('click', () => window.close());
+        }
+    """
     return f"""<!doctype html>
 <html>
   <head>
     <meta charset="utf-8">
-    <title>Spotify Authentication Successful</title>
+    <title>{title}</title>
   </head>
   <body>
-    <h1>Spotify Authentication Successful</h1>
+    <h1>{heading}</h1>
     <p>{detail_text}</p>
+    {'<button id="close-window-btn" type="button">Close window</button>' if not authenticated else ''}
     <script>
       (function() {{
         try {{
           if (window.opener && !window.opener.closed) {{
-            window.opener.postMessage({{ type: 'spotify-auth-complete' }}, '*');
+            window.opener.postMessage({{
+              type: 'spotify-auth-complete',
+              authenticated: {str(authenticated).lower()},
+              detail: {detail_text!r}
+            }}, '*');
           }}
         }} catch (error) {{
           console.warn('Unable to notify opener about Spotify auth completion', error);
         }}
-        setTimeout(() => window.close(), 300);
+        {close_script}
       }})();
     </script>
   </body>
@@ -5803,10 +5818,22 @@ def spotify_callback():
                 )
                 token_info = auth_manager.get_access_token(auth_code)
                 if token_info:
-                    # Invalidate cached profile client so it gets recreated with new tokens
                     metadata_registry.clear_cached_profile_spotify_client(profile_id_from_state)
-                    add_activity_item("", "Spotify Auth Complete", f"Profile {profile_id_from_state} authenticated with Spotify", "Now")
-                    return _spotify_auth_success_page("Your personal Spotify account is now connected. You can close this window.")
+                    profile_client = metadata_registry.get_spotify_client_for_profile(profile_id_from_state)
+                    profile_authenticated = bool(profile_client and profile_client.is_spotify_authenticated())
+                    if profile_authenticated:
+                        if profile_client:
+                            profile_client._invalidate_auth_cache()
+                        add_activity_item("", "Spotify Auth Complete", f"Profile {profile_id_from_state} authenticated with Spotify", "Now")
+                        return _spotify_auth_result_page("Your personal Spotify account is now connected. You can close this window.", authenticated=True)
+                    if profile_client:
+                        profile_client._invalidate_auth_cache()
+                    _status_cache_timestamps['spotify'] = 0
+                    add_activity_item("", "Spotify Auth Warning", f"Profile {profile_id_from_state} completed OAuth but Spotify did not confirm an authenticated session", "Now")
+                    return _spotify_auth_result_page(
+                        "Spotify authorization completed, but SoulSync could not confirm an authenticated Spotify session for this profile. You can close this window and try Authenticate again.",
+                        authenticated=False,
+                    )
                 else:
                     raise Exception("Failed to exchange authorization code for access token")
 
@@ -5843,9 +5870,16 @@ def spotify_callback():
                     spotify_enrichment_worker.client.reload_config()
                     spotify_enrichment_worker.client._invalidate_auth_cache()
                 add_activity_item("", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
-                return _spotify_auth_success_page("You can close this window.")
+                return _spotify_auth_result_page("You can close this window.", authenticated=True)
             else:
-                raise Exception("Token exchange succeeded but authentication validation failed")
+                logger.warning("Spotify OAuth token exchange succeeded but authentication validation failed")
+                spotify_client._invalidate_auth_cache()
+                _status_cache_timestamps['spotify'] = 0
+                add_activity_item("", "Spotify Auth Warning", "OAuth completed, but Spotify did not confirm an authenticated session", "Now")
+                return _spotify_auth_result_page(
+                    "Spotify authorization completed, but SoulSync could not confirm an authenticated Spotify session. You can close this window and try Authenticate again.",
+                    authenticated=False,
+                )
         else:
             raise Exception("Failed to exchange authorization code for access token")
     except Exception as e:
@@ -31989,9 +32023,19 @@ def start_oauth_callback_servers():
                                 self.send_response(200)
                                 self.send_header('Content-type', 'text/html')
                                 self.end_headers()
-                                self.wfile.write(_spotify_auth_success_page("You can close this window.").encode("utf-8"))
+                                self.wfile.write(_spotify_auth_result_page("You can close this window.", authenticated=True).encode("utf-8"))
                             else:
-                                raise Exception("Token exchange succeeded but authentication validation failed")
+                                _oauth_logger.warning("Spotify token exchange succeeded but authentication validation failed")
+                                spotify_client._invalidate_auth_cache()
+                                _status_cache_timestamps['spotify'] = 0
+                                add_activity_item("", "Spotify Auth Warning", "OAuth completed, but Spotify did not confirm an authenticated session", "Now")
+                                self.send_response(200)
+                                self.send_header('Content-type', 'text/html')
+                                self.end_headers()
+                                self.wfile.write(_spotify_auth_result_page(
+                                    "Spotify authorization completed, but SoulSync could not confirm an authenticated Spotify session. You can close this window and try Authenticate again.",
+                                    authenticated=False,
+                                ).encode("utf-8"))
                         else:
                             raise Exception("Failed to exchange authorization code for access token")
                     except Exception as e:

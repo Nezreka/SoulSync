@@ -3121,6 +3121,12 @@ function initializeSpotifyAuthCompletionListener() {
         try {
             window._spotifyAuthWindow = null;
             await _forceServiceStatusRefresh();
+            if (event.data.authenticated === false) {
+                showToast(
+                    event.data.detail || 'Spotify authorization completed, but no authenticated session was detected.',
+                    'warning'
+                );
+            }
         } catch (error) {
             console.warn('Could not refresh Spotify status after auth completion:', error);
         }
