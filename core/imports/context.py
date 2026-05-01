@@ -320,8 +320,24 @@ def build_import_album_info(
     normalized_album = str(album_name or "").strip().lower()
     normalized_title = str(clean_track_name or "").strip().lower()
     normalized_artist = str(artist_name or "").strip().lower()
+
+    # Route through album_path when the metadata source has explicitly
+    # identified the release type (single / EP / compilation). The
+    # ``total_tracks > 1`` heuristic below catches normal multi-track
+    # albums even without explicit type info, but it can't catch
+    # singles (1 track, album name often equal to title) so they
+    # used to fall through to single_path — which doesn't honour the
+    # ``$albumtype`` template variable. Result: users with a
+    # ``${albumtype}s/...`` template saw an "Albums" folder and never
+    # any "Singles" or "EPs" folder. ``"album"`` is excluded from this
+    # check because it's the default fallback when album_type is
+    # missing — only treat values that came from a real source as
+    # explicit.
+    explicit_release_type = (album_type or "").strip().lower() in ("single", "ep", "compilation")
+
     is_album = bool(
         force_album
+        or explicit_release_type
         or (
             normalized_album
             and total_tracks
