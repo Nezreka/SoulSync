@@ -227,6 +227,28 @@ class DuplicateDetectorJob(RepairJob):
                         continue
                     if ignore_cross_album and t1['album'] and t2['album'] and t1['album'] != t2['album']:
                         continue
+                else:
+                    # Filename-bucket pass: filename agreement is strong but
+                    # not infallible — two different songs that happen to
+                    # share a canonical filename (``Yellow.mp3`` by Coldplay
+                    # vs by Bob's Album) would get grouped without a sanity
+                    # check. Require duration agreement (within 3s) when
+                    # both rows have it; same source download = identical
+                    # duration. If either side is missing duration data,
+                    # fall back to a relaxed artist similarity check so we
+                    # don't blindly group strangers.
+                    if t1['duration'] and t2['duration']:
+                        if abs(t1['duration'] - t2['duration']) > 3.0:
+                            continue
+                    elif t1['norm_artist'] and t2['norm_artist']:
+                        artist_sim = SequenceMatcher(None, t1['norm_artist'], t2['norm_artist']).ratio()
+                        if artist_sim < 0.6:
+                            continue
+                    # else: both durations missing AND at least one artist
+                    # is blank — too little signal, skip to avoid false
+                    # positives.
+                    elif not t1['norm_artist'] or not t2['norm_artist']:
+                        continue
 
                 if _is_same_physical_file(
                     t1['file_path'], t2['file_path'],
