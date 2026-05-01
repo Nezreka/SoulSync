@@ -56,6 +56,7 @@ class TestServiceStatus:
         assert 'media_server' in data
         assert 'soulseek' in data
         assert 'active_media_server' in data
+        assert 'authenticated' in data['spotify']
 
     def test_status_matches_http(self, test_app, shared_state):
         """Socket event data matches HTTP endpoint response exactly."""

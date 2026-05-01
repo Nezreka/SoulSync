@@ -2979,8 +2979,8 @@ async function _checkSetupStatus() {
         const resp = await fetch('/status');
         if (resp.ok) {
             const data = await resp.json();
-            // Metadata source: spotify.connected is always true (iTunes fallback), check .source
-            if (data.spotify?.connected && data.spotify?.source) {
+            // Metadata source is available when status reports a source.
+            if (data.spotify?.source) {
                 results['metadata-source'] = results['metadata-source'] || Date.now();
                 _markSetupComplete('metadata-source');
             }

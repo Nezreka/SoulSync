@@ -3693,7 +3693,7 @@
                                 <div class="api-service-frame">
                                     <h4 class="service-title" style="color: #e8e8e8;">Metadata Source</h4>
                                     <div class="form-group">
-                                        <label>Primary Source:</label>
+                                        <label>Primary metadata source:</label>
                                         <select id="metadata-fallback-source">
                                             <option value="spotify">Spotify</option>
                                             <option value="itunes">iTunes / Apple Music</option>
@@ -3702,7 +3702,7 @@
                                         </select>
                                     </div>
                                     <div class="callback-info">
-                                        <div class="callback-help">The primary source for artist, album, and track metadata. Spotify requires authentication below. Discogs requires a personal token.</div>
+                                        <div class="callback-help">Choose the primary source for artist, album, and track metadata. Spotify can only be selected while an active Spotify session exists. Discogs requires a personal token.</div>
                                     </div>
                                 </div>
 
@@ -3741,10 +3741,6 @@
                                             <button class="auth-button disconnect-button" id="spotify-disconnect-btn"
                                                 onclick="disconnectSpotify()" style="display: none;">🔌
                                                 Disconnect</button>
-                                            <button class="auth-button disconnect-button"
-                                                onclick="clearSpotifyCacheAndFallback()"
-                                                title="Clear Spotify token cache and switch to your configured fallback metadata source">🗑️
-                                                Clear Cache &amp; Use Fallback</button>
                                         </div>
                                     </div>
                                 </div>
@@ -7864,13 +7860,13 @@
                         <span class="rate-limit-value rate-limit-countdown" id="rate-limit-countdown">—</span>
                     </div>
                 </div>
-                <p class="rate-limit-hint">You can wait for the ban to expire (the app uses Apple Music in the meantime) or disconnect Spotify to clear the ban immediately.</p>
+                <p class="rate-limit-hint">While rate limiting is active, Spotify-specific features are unavailable. You can wait for the ban to expire or disconnect Spotify to clear it immediately.</p>
             </div>
             <div class="confirm-modal-actions rate-limit-modal-actions">
                 <button class="modal-button modal-button--secondary" onclick="closeRateLimitModal()">Dismiss</button>
                 <button class="modal-button rate-limit-disconnect-btn" onclick="disconnectSpotifyFromRateLimit()">
-                    Disconnect Spotify
-                    <span class="rate-limit-disconnect-sub">Clear ban, pause enrichment &amp; switch to fallback source</span>
+                    Disconnect
+                    <span class="rate-limit-disconnect-sub">Clear the ban and pause Spotify-specific features</span>
                 </button>
             </div>
         </div>
