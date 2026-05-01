@@ -5652,7 +5652,21 @@ def auth_tidal():
             # Show instructions for remote/docker access
             page_title = "Tidal Authentication (Remote/Docker)"
             step_1_text = "Click the link below to authenticate with Tidal"
-            
+
+            # Pull the actual Tidal callback port from the same place the
+            # OAuth URL was built. Using a hardcoded 8888 here used to
+            # mislead users into saving Spotify's port into their Tidal
+            # redirect URI, which then gave Tidal error 1002 (invalid
+            # redirect URI) on every auth attempt.
+            try:
+                from urllib.parse import urlparse as _urlparse
+                _parsed = _urlparse(temp_tidal_client.redirect_uri)
+                tidal_port = _parsed.port or int(
+                    os.environ.get('SOULSYNC_TIDAL_CALLBACK_PORT', 8889)
+                )
+            except Exception:
+                tidal_port = int(os.environ.get('SOULSYNC_TIDAL_CALLBACK_PORT', 8889))
+
             return f'''
             <html>
             <head>
@@ -5680,11 +5694,11 @@ def auth_tidal():
                 <p><a href="{auth_url}" target="_blank" style="font-size: 18px; color: #000000;">{auth_url}</a></p>
                 <hr>
                 <p><strong>Step 2:</strong> After authorizing, you'll see a blank page or an error. The URL will look like:</p>
-                <code>http://127.0.0.1:8888/tidal/callback?code=...</code>
+                <code>http://127.0.0.1:{tidal_port}/tidal/callback?code=...</code>
                 <p><strong>Step 3:</strong> Change <code style="display: inline; background: #ffe6e6; padding: 2px 6px;">127.0.0.1</code> to <code style="display: inline; background: #e8f5e9; padding: 2px 6px;">{host}</code> and press Enter:
                     <button class="copy-btn" onclick="copyIP()">Copy IP</button>
                 </p>
-                <code class="highlight">http://{host}:8888/tidal/callback?code=...</code>
+                <code class="highlight">http://{host}:{tidal_port}/tidal/callback?code=...</code>
                 <p>Authentication will then complete!</p>
 
                 <script>
