@@ -3442,20 +3442,58 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     '2.4.1': [
-        // --- post-2.4.0 dev work — entries hidden by _getLatestWhatsNewVersion until the build version bumps ---
-        { date: 'Unreleased — 2.4.1 dev cycle' },
-        { title: 'Lock Down Socket.IO CORS', desc: 'socket.io was accepting websocket connections from any origin (cors=*). now defaults to same-origin only. if your websocket fails after updating, the server logs a clear warning with the rejected origin — add it to settings → security → allowed websocket origins.', page: 'settings' },
+        // --- May 1, 2026 — patch release ---
+        { date: 'May 1, 2026 — 2.4.1 release' },
+
+        // --- Watchlist / wishlist correctness ---
+        { title: 'Watchlist No Longer Re-Downloads Compilation Tracks', desc: 'spotify and your media server name compilation albums differently — "napoleon dynamite (music from the motion picture)" vs "napoleon dynamite ost". the watchlist scanner used a strict 0.85 fuzzy threshold against the raw names, which always failed for soundtracks / deluxe-editions, so it kept re-adding the same track to the wishlist on every scan. one user reported the same song downloaded 7 times. now strips qualifier parentheticals (music from..., ost, deluxe edition, remastered) before comparing, with a volume / disc / part guard so vol 1 vs vol 2 still count as different.', page: 'watchlist' },
+        { title: 'Duplicate Detector Catches slskd Dedup Orphans', desc: 'when a track downloaded multiple times, slskd appended "_<timestamp>" to each copy and the media-server scan often parsed inconsistent titles for them — so the duplicate detector\'s title-bucket pass never compared them. added a second pass that re-buckets leftover tracks by canonical filename stem (slskd dedup tail stripped). seven copies of the same song in one folder now get caught as one duplicate group.', page: 'library' },
+        { title: 'Clean Up slskd Dedup Orphans After Import', desc: 'slskd appends "_<timestamp>" to a download when the destination file already exists (retried partials, the same track in multiple playlists, etc.). the canonical file imported fine but the timestamp-suffixed siblings sat in the downloads folder forever. now they get pruned right after each successful import.', page: 'downloads' },
+        { title: 'Bulk Watchlist Add: Try Every Source ID Before Failing', desc: 'bulk-add to watchlist used to give up if your active metadata source didn\'t resolve the artist. now falls back through every cached source id (spotify, deezer, itunes, discogs, hydrabase) before declaring failure. fixes adds going dead when one source rate-limited.', page: 'watchlist' },
+        { title: 'Wishlist Respects Configured Providers', desc: 'wishlist UI was hardcoded to spotify in some places — labels, retry copy, source defaults. now mirrors your active primary metadata source so deezer / itunes / discogs / hydrabase users see consistent text everywhere.', page: 'sync' },
+        { title: 'Quality Scanner Respects Primary Metadata Provider', desc: 'quality scanner queried spotify regardless of your configured primary source, leaking spotify api calls and ignoring discogs/hydrabase data. refactored to honor the primary provider for matching; artwork preserved on wishlist handoff.', page: 'library' },
+        { title: 'Wishlist Track Counts Coerced Before Category Checks', desc: 'wishlist could crash on category gating when a track count came back as a string from one source vs an int from another. now coerces to int before checking single / EP / album thresholds.' },
+
+        // --- Match engine correctness ---
+        { title: 'Featured-Artist Tracks Match Across Discography Completion', desc: 'tracks where the watched artist is a feature (not the primary) used to be treated as missing during discography completion checks. now matches against the per-track artist list so guest spots count.', page: 'library' },
+        { title: 'Soundtrack Tracks Match Against Per-Track Artist', desc: 'OST/compilation tracks were matched against the album\'s primary artist (often "Various Artists") instead of the actual track artist. fixed — soundtrack tracks now match against the track\'s real artist credit, and the dead fallback path that used to swallow the miss is gone.', page: 'library' },
+
+        // --- Spotify auth flow rework (kettui PR) ---
+        { title: 'Spotify Auth Flow: Clearer UI + Reliable Sync', desc: 'rewrote the spotify connection flow on settings → connections. separated "needs auth" / "connecting" / "connected" states with explicit labels, fixed completion-sync races where the page would say connected before the token finished saving, and surfaces auth-completion failures as toasts instead of silent fails. service status reads are simpler and more honest about state.', page: 'settings' },
+        { title: 'Spotify Worker Pauses on Non-Spotify Primary', desc: 'spotify enrichment worker kept running and burning api budget even when spotify wasn\'t your primary source. now pauses unless spotify is selected. also cut the per-day budget cap from a higher value to 500 calls so accidental quota burns are bounded.', page: 'dashboard' },
+        { title: 'Tidal Auth Instructions Show Tidal\'s Callback Port', desc: 'tidal connect screen displayed spotify\'s callback port number in its setup steps. fixed to show tidal\'s actual port so the redirect URI users set up actually works.', page: 'settings' },
+
+        // --- Discogs ---
+        { title: 'Discogs Primary Source Gated by Token', desc: 'selecting discogs as your primary metadata source without a token now reverts gracefully instead of erroring on every call. token presence is the gate — set it on settings → connections to enable discogs as primary.', page: 'settings' },
+
+        // --- Imports ---
+        { title: 'Parallel Singles Import (3 Workers)', desc: 'singles / EP imports used to process serially. now run through a 3-worker thread pool so a long backlog of liked-songs imports finishes ~3x faster. also routes singles + EPs through the album_path template so they file correctly.', page: 'sync' },
+
+        // --- Duplicate detector ---
+        { title: 'Same-Physical-File Duplicates No Longer Flagged', desc: 'if you bind-mount the same music folder into both soulsync (e.g. /app/Transfer) and plex (e.g. /media/Music), each row in the DB pointed at the same file via a different mount root and showed up as a "duplicate". detector now recognizes this — same trailing path segments + matching durations + different mount roots = filtered out.', page: 'library' },
+
+        // --- Bug fixes ---
+        { title: 'Fix Config DB Lock Spam on Slow Disks (#434)', desc: 'on slow / heavily-loaded disks, sqlite settings DB writes raced and spammed the log with "database is locked" errors every few seconds. added a retry loop with exponential backoff and bounded retry count. silent on healthy systems, recovers on slow ones.', page: 'settings' },
+        { title: 'Fix Bulk Discography Losing Album Source Context (#399)', desc: 'bulk discography downloads weren\'t carrying the album\'s source provider through the pipeline, so downstream lookups defaulted to the wrong source. fixed by threading source context through every step.', page: 'sync' },
+        { title: 'Beatport Tab Hidden Temporarily', desc: 'beatport rolled out cloudflare turnstile on every public page, so the scraper that powered the beatport tab now hits a bot challenge instead of html. their official oauth api is locked behind partner registration that isn\'t open to the public. hid the tab on sync until we find a workaround — backend endpoints are kept in code so revival is a one-line html change.', page: 'sync' },
+        { title: 'Surface Handler-Returned Errors in Automation last_error', desc: 'automation actions could return an error string but the engine swallowed it — last_error stayed blank, debugging was painful. now propagates returned errors into last_error so you can see what failed and why.', page: 'stats' },
+        { title: 'Silence Shutdown-Time Logger Noise in CI', desc: 'pytest closes log handles before atexit runs — produced "I/O operation on closed file" stack traces in CI stderr on every test run. registered a final atexit handler that toggles logging.raiseExceptions off so shutdown is silent.' },
+
+        // --- Performance / infra ---
+        { title: 'Service Worker for Cover Art + Installable PWA', desc: 'cover art used to re-fetch from the CDN on every library / discover page visit. now a service worker caches images locally — second visit serves art instantly from disk, no network hit. also added a PWA manifest so soulsync can be installed to home screen / desktop as a standalone app (chrome / edge / safari → install soulsync). cache versioned so future strategy changes invalidate cleanly.' },
+        { title: 'Browser Caching for Static Assets + Discover Pages', desc: 'static assets (js / css / icons) now get a 1-year browser cache instead of revalidating on every page load. safe because the existing ?v=static_v cache-bust query changes every server restart, so deploys still ship live. discover pages (hero, similar artists, recent releases, deep cuts) now cache 5 minutes browser-side so toggling between sections doesn\'t re-fetch everything.', page: 'discover' },
         { title: 'Faster Docker Startup — yt-dlp Pinned', desc: 'docker startup used to run `pip install -U yt-dlp` on every container start. removed that — yt-dlp is now pinned in requirements.txt so startup is fast and reproducible. tradeoff: youtube fixes ship via soulsync releases now instead of next container restart.' },
+
+        // --- Security ---
+        { title: 'Lock Down Socket.IO CORS', desc: 'socket.io was accepting websocket connections from any origin (cors=*). now defaults to same-origin only. if your websocket fails after updating, the server logs a clear warning with the rejected origin — add it to settings → security → allowed websocket origins.', page: 'settings' },
         { title: 'Settings Endpoints: Admin-Only', desc: 'the /api/settings endpoints (read, write, log-level, config-status, verify) had no auth gate — any logged-in profile could read or change service tokens, oauth secrets, api keys. now admin-only. single-admin setups (no multi-profile config) work transparently as before.', page: 'settings' },
-        { title: 'Browser Caching for Static Assets + Discover Pages', desc: 'static assets (js/css/icons) now get a 1-year browser cache instead of revalidating on every page load. safe because the existing ?v=static_v cache-bust query changes every server restart, so deploys still ship live. discover pages (hero, similar artists, recent releases, deep cuts, etc.) now cache 5 minutes browser-side so toggling between sections doesn\'t re-fetch everything. faster repeat loads, fewer round-trips.', page: 'discover' },
-        { title: 'Service Worker for Cover Art + Installable PWA', desc: 'cover art used to re-fetch from the cdn on every library / discover page visit. now a service worker caches images locally — second visit serves art instantly from disk, no network hit. also added a pwa manifest so soulsync can be installed to home screen / desktop as a standalone app (chrome / edge / safari → install soulsync). cache versioned so future strategy changes invalidate cleanly.' },
-        { title: 'Stats Endpoints Lifted to core/stats', desc: 'internal — moved /api/stats/* and /api/listening-stats/* logic out of web_server.py into core/stats/queries.py with full test coverage. no behavior change. step toward breaking up the web_server.py monolith.' },
-        { title: 'Search Endpoints Lifted to core/search', desc: 'internal — moved /api/search and /api/enhanced-search/* logic into core/search/ (cache, sources, library_check, stream, basic, orchestrator). 612 fewer lines in web_server.py, 94 new tests. no behavior change.' },
-        { title: 'Automation Endpoints Lifted to core/automation', desc: 'internal — moved /api/automations/* CRUD + run + history routes, progress tracking helpers, and signal collection into core/automation/ (api, progress, signals). 383 fewer lines in web_server.py, 72 new tests. action handler registration stays put — those closures are tangled with feature implementations.' },
-        { title: 'Clean Up slskd Dedup Orphans After Import', desc: 'slskd appends "_<timestamp>" to a download when the destination file already exists (e.g. retried partials, the same track in multiple playlists). the canonical file imported fine but the timestamp-suffixed siblings sat in the downloads folder forever. now they get pruned right after each successful import.', page: 'downloads' },
-        { title: 'Beatport Tab Hidden Temporarily', desc: 'beatport rolled out cloudflare turnstile on every public page, so the scraper that powered the beatport tab now hits a bot challenge instead of html. their official oauth api is locked behind partner registration that isn\'t open to the public. hid the tab on sync until we find a workaround — backend endpoints are still in code so revival is a one-line html change.', page: 'sync' },
-        { title: 'Watchlist No Longer Re-Downloads Compilation Tracks', desc: 'spotify and your media server name compilation albums differently — "napoleon dynamite (music from the motion picture)" vs "napoleon dynamite ost". the watchlist scanner used a strict 0.85 fuzzy threshold against the raw names, which always failed for soundtracks/deluxe-editions, so it kept re-adding the same track to the wishlist every 30 minutes. one user saw the same song download 7 times. now strips qualifier parentheticals (music from..., ost, deluxe edition, remastered) before comparing.', page: 'watchlist' },
-        { title: 'Duplicate Detector Catches slskd Dedup Orphans', desc: 'when a track downloaded multiple times, slskd appended "_<timestamp>" to each copy and the media-server scan often parsed inconsistent titles for them — so the duplicate detector\'s title-bucket pass never compared them. added a second pass that re-buckets leftover tracks by canonical filename stem (with the slskd dedup tail stripped). seven copies of the same song in one folder now get caught as one duplicate group.', page: 'library' },
+
+        // --- Internal / refactoring ---
+        { title: 'Major web_server.py Decomposition', desc: 'internal — pulled ~30 routes / workers / helpers out of web_server.py into focused modules under core/ (search, automation, stats, discovery, library, downloads, workers, artists, connection, debug, watchlist auto-scan, retag, redownload, library service search, duplicate cleaner, monitor, validation, staging, etc.). meaningfully smaller monolith, better unit-testable seams, no behavior change.' },
+        { title: 'Metadata Helpers Reorganized into Packages', desc: 'internal — metadata helpers and runtime client management moved into proper packages (core/metadata/, core/imports/), with profile spotify cache living in the registry. clearer ownership, fewer cross-module reach-ins.' },
+        { title: 'Stats Endpoints Lifted to core/stats', desc: 'internal — moved /api/stats/* and /api/listening-stats/* logic out of web_server.py into core/stats/queries.py with full test coverage.' },
+        { title: 'Search Endpoints Lifted to core/search', desc: 'internal — moved /api/search and /api/enhanced-search/* logic into core/search/ (cache, sources, library_check, stream, basic, orchestrator). 612 fewer lines in web_server.py, 94 new tests.' },
+        { title: 'Automation Endpoints Lifted to core/automation', desc: 'internal — moved /api/automations/* CRUD + run + history routes, progress tracking helpers, and signal collection into core/automation/ (api, progress, signals). 383 fewer lines in web_server.py, 72 new tests.' },
     ],
     '2.4.0': [
         // --- April 26, 2026 — Search & Artists unification + reorganize queue ---
@@ -3711,6 +3749,132 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: "Watchlist No Longer Re-Downloads Compilations",
+        description: "compilation / soundtrack tracks were getting redownloaded on every watchlist scan because the album-name fuzzy check failed on naming drift between spotify and your media server.",
+        features: [
+            "• example: spotify says \"napoleon dynamite (music from the motion picture)\", navidrome says \"napoleon dynamite ost\" — old check scored 0.49, redownloaded daily",
+            "• now strips qualifier parentheticals (music from..., ost, deluxe edition, remastered, anniversary, etc.) before comparing",
+            "• volume / disc / part guard so vol 1 vs vol 2 still count as different",
+            "• one user reported the same song downloaded 7 times — fix kills the loop",
+        ],
+        usage_note: "no settings to change — applies on next watchlist scan",
+    },
+    {
+        title: "Duplicate Detector + Cleanup for slskd Dedup Orphans",
+        description: "two-step fix for the dupe accumulation problem — stop new orphans from being created, and catch the existing ones.",
+        features: [
+            "• new cleanup pass after every successful import scans the source directory for slskd \"_<timestamp>\" siblings of the canonical file and deletes them",
+            "• duplicate detector got a new second pass that re-buckets leftover tracks by canonical filename stem so dedup orphans get caught even when the media-server scan parsed inconsistent titles for them",
+            "• safety net: if both rows have a duration must agree within 3s, otherwise relaxed artist check, otherwise skip",
+            "• existing same-physical-file guard still runs so bind-mount setups (plex + soulsync sharing a folder) aren\'t flagged",
+            "• also: same-physical-file dupe filter ships independently — bind-mounted setups stop seeing every file flagged twice",
+        ],
+    },
+    {
+        title: "Spotify Auth Flow Reworked",
+        description: "rewrote the spotify connection flow on settings → connections so the state is honest about itself.",
+        features: [
+            "• explicit \"needs auth\" / \"connecting\" / \"connected\" states with consistent labels",
+            "• fixed completion-sync race where the page said connected before the token finished saving",
+            "• auth-completion failures surface as toasts instead of silent fails",
+            "• service status reads simplified — fewer ways for the UI to drift from reality",
+            "• spotify enrichment worker now pauses when spotify isn\'t your primary source (was burning api budget regardless)",
+            "• per-day spotify call budget cut to 500 to bound accidental quota burns",
+        ],
+    },
+    {
+        title: "Match Engine: Featured Artists + Soundtracks",
+        description: "two long-standing gaps in the matching logic that caused false \"missing\" verdicts.",
+        features: [
+            "• featured-artist tracks now match across discography completion checks — a guest spot on someone else\'s track no longer reports as missing for the watched artist",
+            "• OST / compilation tracks now match against the per-track artist credit instead of the album\'s primary (which was usually \"Various Artists\")",
+            "• fixed a dead fallback path that used to silently swallow these missed matches",
+        ],
+    },
+    {
+        title: "Beatport Tab Hidden Temporarily",
+        description: "beatport rolled out cloudflare turnstile on every public page and locked their official api behind partner registration that isn\'t open to the public.",
+        features: [
+            "• every /api/beatport/* call was 500ing because the scraper got a bot challenge instead of html",
+            "• tested both curl_cffi (chrome131 impersonate) and cloudscraper — both fail",
+            "• tab hidden on sync, backend endpoints kept in code so revival is one html change",
+            "• will revisit when beatport relaxes cf or a workaround surfaces",
+        ],
+    },
+    {
+        title: "Provider-Neutral Wishlist + Quality Scanner",
+        description: "two more spots that hardcoded spotify even when you had a different primary source configured.",
+        features: [
+            "• wishlist UI labels, retry copy, and source defaults now mirror your active primary source",
+            "• quality scanner refactored to query the configured primary instead of always spotify — no more leaked api calls and discogs / hydrabase data finally gets used",
+            "• artwork preserved on quality-scanner → wishlist handoff",
+            "• bulk watchlist add now falls back through every cached source ID before declaring failure (no more dead adds when one source rate-limits)",
+        ],
+    },
+    {
+        title: "Parallel Singles Import (3 Workers)",
+        description: "long backlogs of liked-songs single imports finish ~3x faster.",
+        features: [
+            "• singles / EP imports run through a 3-worker thread pool instead of serial",
+            "• singles + EPs now route through the album_path template so they file correctly (was using a different code path that drifted out of date)",
+        ],
+    },
+    {
+        title: "Service Worker for Cover Art + Installable PWA",
+        description: "cover art now caches locally and soulsync installs as a standalone app.",
+        features: [
+            "• service worker caches cover art on disk — second visit to any page serves art instantly, no network round trip",
+            "• PWA manifest added — chrome / edge / safari → install soulsync makes it a standalone app on your home screen / desktop",
+            "• cache versioned so future strategy changes invalidate cleanly",
+            "• also: static assets (js / css / icons) cache 1 year browser-side; discover pages cache 5 minutes — fewer round trips, faster repeat loads",
+        ],
+    },
+    {
+        title: "Security Tightenings",
+        description: "two endpoint hardenings.",
+        features: [
+            "• socket.io now defaults to same-origin only (was cors=*) — if your websocket fails, server logs the rejected origin so you can add it to settings → security → allowed websocket origins",
+            "• /api/settings endpoints (read, write, log-level, config-status, verify) are now admin-only — single-admin setups work transparently",
+        ],
+    },
+    {
+        title: "Bug Fix Round-Up",
+        description: "smaller fixes that landed during the cycle.",
+        features: [
+            "• #434 — config DB lock spam on slow disks, fixed with bounded retry + exponential backoff",
+            "• #399 — bulk discography losing album source context as it threaded through the pipeline",
+            "• tidal auth instructions now show tidal\'s callback port (was showing spotify\'s)",
+            "• discogs primary source gracefully reverts when no token is configured",
+            "• automation handler-returned errors now surface in last_error instead of being swallowed",
+            "• wishlist track counts coerced before category gating so mixed-type values don\'t crash",
+            "• faster docker startup — yt-dlp pinned in requirements.txt instead of pip-installed on every container start",
+            "• shutdown-time logger noise silenced so CI stderr stops carrying \"I/O on closed file\" tracebacks",
+        ],
+    },
+    {
+        title: "Major Internal: web_server.py Decomposition",
+        description: "internal — large monolith broken up into focused modules under core/. behavior unchanged, but the codebase is meaningfully more testable and easier to navigate.",
+        features: [
+            "• ~30 routes / workers / helpers lifted out of web_server.py into core/search, core/automation, core/stats, core/discovery, core/library, core/downloads, core/workers, core/artists, core/imports, core/watchlist, core/connection, core/debug",
+            "• metadata helpers reorganized into core/metadata/ package; profile spotify cache lives in registry now",
+            "• search endpoints lift: 612 fewer lines in web_server.py, 94 new tests",
+            "• automation endpoints lift: 383 fewer lines in web_server.py, 72 new tests",
+            "• step-by-step toward retiring the monolith, no behavior change in any individual lift",
+        ],
+    },
+    {
+        title: "Earlier in v2.4 — Reorganize, Search, Sync polish",
+        description: "highlights from the 2.4.0 cycle that landed before this patch.",
+        features: [
+            "• reorganize is now a queue with a live status panel — spam-click all you want, items run one at a time and you can keep browsing",
+            "• search page got a row of source icons above the bar — typing only searches the active source instead of fanning out to all of them",
+            "• per-query source cache + cache dots — switching back to a source you already searched is instant",
+            "• fix: \"maduk — leave a light on\" on tidal was downloading tom walker\'s song of the same name with maduk\'s metadata embedded — tightened the candidate artist gate and acoustid verification",
+            "• tidal: rejects silent quality downgrades (320kbps when you asked for hires)",
+            "• spotify: bumped post-ban cooldown from 5 to 30 minutes — first call after a ban was getting re-banned within seconds",
+        ],
+    },
     {
         title: "Reorganize Queue Polish",
         description: "cleaned up some race conditions in the queue. behavior is solid now.",
@@ -4007,7 +4171,7 @@ function _getLatestWhatsNewVersion() {
     const versions = Object.keys(WHATS_NEW)
         .filter(v => _compareVersions(v, buildVer) <= 0)
         .sort((a, b) => _compareVersions(b, a));
-    return versions[0] || '2.4.0';
+    return versions[0] || '2.4.1';
 }
 
 function openWhatsNew() {
