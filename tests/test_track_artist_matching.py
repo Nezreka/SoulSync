@@ -151,6 +151,57 @@ def test_search_tracks_attaches_track_artist(db_with_soundtrack: MusicDatabase) 
     assert track.artist_name == "Lin-Manuel Miranda"
 
 
+def test_album_aware_fallback_does_not_over_match_wrong_album(tmp_path: Path) -> None:
+    """Fallback must reject when the album-name hint doesn't actually
+    match the row's album. Otherwise re-enabling the previously-dead
+    fallback would surface false positives whenever the search title
+    happens to exist on a different album.
+
+    Album threshold is 0.8 — a clearly different album name like
+    "Some Other Album" must not pass.
+    """
+    db_path = tmp_path / "negative_fallback.db"
+    db = MusicDatabase(database_path=str(db_path))
+
+    conn = db._get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
+        ("ar-y", "Madonna", "plex"),
+    )
+    cursor.execute(
+        "INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, ?)",
+        ("al-y", "ar-y", "Ray of Light", "plex"),
+    )
+    cursor.execute(
+        """
+        INSERT INTO tracks (
+            id, album_id, artist_id, title, track_number, duration,
+            file_path, bitrate, server_source, track_artist
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        ("tr-y", "al-y", "ar-y", "Frozen", 1, 200000,
+         "/m/frozen.mp3", 320, "plex", None),
+    )
+    conn.commit()
+    conn.close()
+
+    # Search by a clearly different artist + a totally unrelated album
+    # hint. Main path scores low artist similarity → falls through to
+    # the album-aware fallback. Fallback's 0.8 album-title floor must
+    # reject "Disney Hits" against "Ray of Light".
+    track, _ = db.check_track_exists(
+        title="Frozen",
+        artist="Idina Menzel",
+        confidence_threshold=0.7,
+        album="Disney Hits",
+    )
+    assert track is None, (
+        "fallback must reject mismatched album hints — otherwise "
+        "re-enabling the previously-dead path leaks false positives"
+    )
+
+
 def test_album_aware_fallback_actually_works(tmp_path: Path) -> None:
     """The album-aware fallback path used to TypeError on every row
     because DatabaseTrack(...) was called with kwargs that don't exist
