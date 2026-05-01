@@ -27,8 +27,8 @@ beautifulsoup4>=4.12.0
 # System monitoring
 psutil>=6.0.0
 
-# YouTube support
-yt-dlp>=2024.12.13
+# YouTube support — pinned for reproducible builds; bump per release. See #367.
+yt-dlp==2026.3.17
 
 # Lyrics support
 lrclibapi>=0.3.1

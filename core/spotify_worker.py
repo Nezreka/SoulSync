@@ -55,8 +55,13 @@ class SpotifyWorker:
         self.inter_item_sleep = 1.5       # Between top-level items (each can trigger 5+ paginated calls)
         self.batch_inter_item_sleep = 0.1  # Between local matches within a batch (no API calls)
 
-        # Daily budget — caps how many items this worker processes per calendar day
-        self.daily_budget = 3000
+        # Daily budget — caps how many items this worker processes per calendar day.
+        # Lowered from 3000 to 500 after Spotify's February 2026 API tightening
+        # (/v1/search max limit cut from 50 to 10) increased the per-track API call
+        # cost. Sustained 3000-item runs were tripping Spotify's automated abuse
+        # detection and earning multi-hour 429 bans. 500/day keeps the worker
+        # productive without crossing the threshold.
+        self.daily_budget = 500
         self._daily_items_processed = 0
         self._daily_date = date.today()
 

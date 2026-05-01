@@ -9,7 +9,7 @@ Used by ``/api/artist-detail/<id>`` when the URL is called with a ``source``
 query parameter and the library DB lookup misses. Enriches the response with
 whatever metadata we can pull on demand:
 
-  * Image URL (via ``metadata_service.get_artist_image_url``)
+  * Image URL (via ``core.metadata.artist_image.get_artist_image_url``)
   * Source-specific artist info — genres + follower count from the named
     source's ``get_artist`` / ``get_artist_info`` helper
   * Last.fm bio + listeners + playcount + URL (by artist name)
@@ -27,6 +27,9 @@ import logging
 from typing import Any, Dict, Optional, Tuple
 
 from core.artist_source_lookup import SOURCE_ID_FIELD
+from core.metadata import artist_image as metadata_artist_image
+from core.metadata import discography as metadata_discography
+from core.metadata.lookup import MetadataLookupOptions
 
 logger = logging.getLogger("artist_source_detail")
 
@@ -48,21 +51,12 @@ def build_source_only_artist_detail(
     ``jsonify`` or equivalent. Status is 200 on success, 404 when the
     source's discography lookup returned no releases.
     """
-    # Deferred import — keeps the top-level module importable in test rigs
-    # that stub out only what they need (same pattern `_find_library_artist`
-    # uses).
-    from core.metadata_service import (
-        MetadataLookupOptions,
-        get_artist_detail_discography,
-        get_artist_image_url,
-    )
-
     resolved_name = (artist_name or artist_id or "").strip()
 
     # 1. Image URL via the same helper /api/artist/<id>/image uses.
     image_url: Optional[str] = None
     try:
-        image_url = get_artist_image_url(artist_id, source_override=source)
+        image_url = metadata_artist_image.get_artist_image_url(artist_id, source_override=source)
     except Exception as e:
         logger.debug(f"Artist image lookup failed for {source}:{artist_id}: {e}")
 
@@ -124,7 +118,7 @@ def build_source_only_artist_detail(
     # 4. Discography from the specified source. Skip variant dedup so the
     #    page shows every release the source returns — matches the inline
     #    Artists-page behaviour that this view was modelled after.
-    discography_result = get_artist_detail_discography(
+    discography_result = metadata_discography.get_artist_detail_discography(
         artist_id,
         artist_name=resolved_name or artist_id,
         options=MetadataLookupOptions(

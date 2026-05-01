@@ -1903,6 +1903,19 @@ async function checkAdminPinRequired() {
     }
 }
 
+// Service worker registration. Runs as soon as the JS parses (doesn't
+// need to wait for DOMContentLoaded). Cache-first image strategy +
+// stale-while-revalidate static shell — see /sw.js for details. Skipped
+// when the API isn't available (older browsers, file:// origin) or when
+// the page is loaded from a non-secure origin (SW requires HTTPS or
+// localhost).
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+            .catch((err) => console.warn('[SW] registration failed:', err));
+    });
+}
+
 document.addEventListener('DOMContentLoaded', async function () {
     console.log('SoulSync WebUI initializing...');
 
@@ -1957,6 +1970,9 @@ function initApp() {
     initExpandedPlayer();
     initializeSyncPage();
     initializeWatchlist();
+    if (typeof initializeSpotifyAuthCompletionListener === 'function') {
+        initializeSpotifyAuthCompletionListener();
+    }
 
 
     // Initialize WebSocket connection (falls back to HTTP polling if unavailable)
@@ -2358,4 +2374,3 @@ async function loadPageData(pageId) {
 // Old updateStatusIndicator function removed - replaced by updateSidebarServiceStatus
 
 // ===============================
-

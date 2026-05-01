@@ -50,6 +50,95 @@ function handleManualSaveClick() {
     saveSettings(false);
 }
 
+function syncMetadataSourceSelection(source) {
+    const select = document.getElementById('metadata-fallback-source');
+    if (!select || !source) return;
+    const option = select.querySelector(`option[value="${source}"]`);
+    if (option) select.value = source;
+    select.dataset.lastValidSource = source;
+}
+
+function _isMetadataSourceSelectable(source) {
+    if (source === 'spotify') {
+        return _lastServiceStatus?.spotify?.authenticated === true;
+    }
+    if (source === 'discogs') {
+        const token = document.getElementById('discogs-token');
+        return !!token?.value?.trim();
+    }
+    return true;
+}
+
+function _metadataSourceFallback(source) {
+    if (source === 'spotify') return 'deezer';
+    if (source === 'discogs') return 'itunes';
+    return 'itunes';
+}
+
+function focusServiceSettingsSection(service, message) {
+    const card = document.querySelector(`#settings-page .stg-service[data-service="${service}"]`);
+    if (!card) return;
+
+    const header = card.querySelector('.stg-service-header');
+    if (!card.classList.contains('expanded') && header) {
+        toggleStgService(header);
+    }
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    const firstControl = card.querySelector('input, button');
+    if (firstControl) {
+        firstControl.focus({ preventScroll: true });
+    }
+
+    if (message) {
+        showToast(message, 'warning');
+    }
+}
+
+function sanitizeMetadataSourceSelection({ quiet = true } = {}) {
+    const select = document.getElementById('metadata-fallback-source');
+    if (!select) return false;
+
+    const selectedSource = select.value || 'itunes';
+    if (_isMetadataSourceSelectable(selectedSource)) {
+        select.dataset.lastValidSource = selectedSource;
+        return false;
+    }
+
+    const lastValid = select.dataset.lastValidSource;
+    const fallbackSource = lastValid && lastValid !== selectedSource && _isMetadataSourceSelectable(lastValid)
+        ? lastValid
+        : _metadataSourceFallback(selectedSource);
+
+    if (fallbackSource && fallbackSource !== selectedSource) {
+        select.value = fallbackSource;
+    }
+    select.dataset.lastValidSource = fallbackSource;
+
+    if (!quiet) {
+        const message = selectedSource === 'discogs'
+            ? 'Discogs requires a personal access token before it can be selected as the primary metadata source.'
+            : 'Spotify must be authenticated before it can be selected as the primary metadata source.';
+        focusServiceSettingsSection(selectedSource, message);
+    }
+
+    return true;
+}
+
+function handleMetadataSourceChange(event) {
+    const select = event.target;
+    if (!select || select.id !== 'metadata-fallback-source') return;
+
+    const selectedSource = select.value;
+    if (_isMetadataSourceSelectable(selectedSource)) {
+        select.dataset.lastValidSource = selectedSource;
+        return;
+    }
+
+    sanitizeMetadataSourceSelection({ quiet: false });
+}
+
 function initializeSettings() {
     // This function is called when the settings page is loaded.
     // It attaches event listeners to all interactive elements on the page.
@@ -73,6 +162,20 @@ function initializeSettings() {
         });
         settingsPage.querySelectorAll('input[type="checkbox"], select').forEach(input => {
             input.addEventListener('change', debouncedAutoSaveSettings);
+        });
+    }
+
+    const metadataSourceSelect = document.getElementById('metadata-fallback-source');
+    if (metadataSourceSelect) {
+        metadataSourceSelect.addEventListener('change', handleMetadataSourceChange);
+    }
+    const discogsTokenInput = document.getElementById('discogs-token');
+    if (discogsTokenInput) {
+        discogsTokenInput.addEventListener('input', () => {
+            if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
+                syncPrimaryMetadataSourceAvailability(_lastServiceStatus?.spotify || null);
+            }
+            sanitizeMetadataSourceSelection({ quiet: true });
         });
     }
 
@@ -102,6 +205,16 @@ function initializeSettings() {
 
     // Test connection buttons
     // Test button event listeners removed - they use onclick attributes in HTML to avoid double firing
+
+    if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
+        syncPrimaryMetadataSourceAvailability(_lastServiceStatus?.spotify || null);
+    }
+    syncSpotifySettingsAuthState(_lastServiceStatus?.spotify || null);
+    syncMetadataSourceSelection(_lastServiceStatus?.spotify?.source);
+    sanitizeMetadataSourceSelection({ quiet: true });
+    if (metadataSourceSelect) {
+        metadataSourceSelect.dataset.lastValidSource = metadataSourceSelect.value;
+    }
 }
 
 function resetFileOrganizationTemplates() {
@@ -295,8 +408,34 @@ async function applyServiceStatusGradients() {
                 else header.appendChild(spinner);
             }
         });
+        syncSpotifySettingsAuthState(_lastServiceStatus?.spotify || null);
     } catch (e) {
         console.warn('[Settings Status] Failed to apply gradients:', e);
+    }
+}
+
+function syncSpotifySettingsAuthState(statusData) {
+    if (!statusData) return;
+
+    const card = document.querySelector('#settings-page .stg-service[data-service="spotify"]');
+    if (!card) return;
+
+    const header = card.querySelector('.stg-service-header');
+    const dot = card.querySelector('.stg-service-dot');
+    if (!header && !dot) return;
+
+    const authenticated = statusData?.authenticated === true;
+    const rateLimited = !!(statusData?.rate_limited && statusData?.rate_limit);
+    const cooldown = !!(statusData?.post_ban_cooldown > 0);
+    const needsAttention = !authenticated || rateLimited || cooldown;
+
+    if (header) {
+        header.classList.toggle('status-configured', !needsAttention);
+        header.classList.toggle('status-missing', needsAttention);
+    }
+
+    if (dot) {
+        dot.style.color = needsAttention ? '#f1c40f' : '#1DB954';
     }
 }
 
@@ -797,6 +936,7 @@ async function loadSettingsData() {
         document.getElementById('qobuz-allow-fallback').checked = settings.qobuz?.allow_fallback !== false;
         document.getElementById('hifi-download-quality').value = settings.hifi_download?.quality || 'lossless';
         document.getElementById('hifi-allow-fallback').checked = settings.hifi_download?.allow_fallback !== false;
+        loadHiFiInstances();
         document.getElementById('deezer-download-quality').value = settings.deezer_download?.quality || 'flac';
         document.getElementById('deezer-allow-fallback').checked = settings.deezer_download?.allow_fallback !== false;
         document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
@@ -995,6 +1135,11 @@ async function loadSettingsData() {
         try {
             const requirePin = settings.security?.require_pin_on_launch || false;
             document.getElementById('security-require-pin').checked = requirePin;
+
+            // CORS origins — stored verbatim as the user typed (string).
+            const corsOrigins = settings.security?.cors_origins || '';
+            const corsField = document.getElementById('security-cors-origins');
+            if (corsField) corsField.value = corsOrigins;
 
             // Check if admin has a PIN set
             const profilesRes = await fetch('/api/profiles');
@@ -1828,9 +1973,22 @@ function _genreWhitelistRender(genres) {
     const searchVal = (document.getElementById('genre-whitelist-search')?.value || '').toLowerCase();
     const filtered = searchVal ? _genreWhitelistCache.filter(g => g.toLowerCase().includes(searchVal)) : _genreWhitelistCache;
     container.innerHTML = filtered.map(g =>
-        `<span class="genre-chip">${escapeHtml(g)}<button class="genre-chip-x" onclick="_genreWhitelistRemove('${escapeHtml(g.replace(/'/g, "\\'"))}')">&times;</button></span>`
+        `<span class="genre-chip">${escapeHtml(g)}<button class="genre-chip-x" data-genre="${escapeHtml(g)}">&times;</button></span>`
     ).join('');
     if (countEl) countEl.textContent = `${_genreWhitelistCache.length} genres`;
+    _initGenreChipClickHandler();
+}
+
+function _initGenreChipClickHandler() {
+    const container = document.getElementById('genre-whitelist-chips');
+    if (!container) return;
+    container.onclick = (e) => {
+        const btn = e.target.closest('.genre-chip-x');
+        if (btn) {
+            e.preventDefault();
+            _genreWhitelistRemove(btn.dataset.genre);
+        }
+    };
 }
 
 function _genreWhitelistRemove(genre) {
@@ -2381,6 +2539,25 @@ async function saveSettings(quiet = false) {
         activeServer = 'soulsync';
     }
 
+    const metadataSourceSelect = document.getElementById('metadata-fallback-source');
+    const discogsTokenInput = document.getElementById('discogs-token');
+    const discogsTokenPresent = !!discogsTokenInput?.value?.trim();
+    let metadataSource = metadataSourceSelect?.value || 'itunes';
+    const spotifySessionActive = _lastServiceStatus?.spotify?.authenticated === true;
+    if (metadataSource === 'spotify' && !spotifySessionActive) {
+        metadataSource = 'deezer';
+        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
+        if (!quiet) {
+            showToast('Spotify is disconnected, so Deezer is used as the primary metadata source.', 'warning');
+        }
+    } else if (metadataSource === 'discogs' && !discogsTokenPresent) {
+        metadataSource = 'itunes';
+        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
+        if (!quiet) {
+            showToast('Discogs requires a personal access token before it can be selected as the primary metadata source.', 'warning');
+        }
+    }
+
     const settings = {
         active_media_server: activeServer,
         spotify: {
@@ -2453,7 +2630,7 @@ async function saveSettings(quiet = false) {
             token: document.getElementById('discogs-token').value,
         },
         metadata: {
-            fallback_source: document.getElementById('metadata-fallback-source').value || 'itunes'
+            fallback_source: metadataSource
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
@@ -2587,8 +2764,31 @@ async function saveSettings(quiet = false) {
         },
         security: {
             require_pin_on_launch: document.getElementById('security-require-pin')?.checked || false,
+            cors_origins: document.getElementById('security-cors-origins')?.value?.trim() || '',
         }
     };
+
+    // Validate cors_origins entries — backend silently filters malformed
+    // values, so warn the user up-front if any line doesn't look like a
+    // URL (or the special '*' token). One-shot toast; doesn't block save.
+    const corsRaw = settings.security.cors_origins;
+    if (corsRaw) {
+        const entries = corsRaw.replace(/\n/g, ',').split(',')
+            .map(s => s.trim())
+            .filter(s => s);
+        const invalid = entries.filter(e => {
+            if (e === '*') return false;
+            // Accept scheme://host[:port] only — no path, query, or fragment.
+            // Engineio compares Origin against {scheme}://{host} exactly.
+            return !/^https?:\/\/[^\s/?#]+$/i.test(e);
+        });
+        if (invalid.length) {
+            showToast(
+                `Allowed Origins: ${invalid.length} entr${invalid.length === 1 ? 'y looks' : 'ies look'} malformed (need full URL like https://soulsync.example.com, no trailing slash). Saving anyway — they\'ll be ignored.`,
+                'warning'
+            );
+        }
+    }
 
     try {
         if (!quiet) showLoadingOverlay('Saving settings...');
@@ -2758,19 +2958,32 @@ function renderApiKeys(keys) {
     container.innerHTML = keys.map(k => `
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; margin-bottom: 4px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;">
             <div style="flex: 1; min-width: 0;">
-                <div style="font-size: 13px; color: #e0e0e0; font-weight: 500;">${k.label || 'Unnamed'}</div>
+                <div style="font-size: 13px; color: #e0e0e0; font-weight: 500;">${escapeHtml(k.label || 'Unnamed')}</div>
                 <div style="font-size: 11px; color: #666; margin-top: 2px;">
-                    <code>${k.key_prefix || 'sk_...'}...</code>
+                    <code>${escapeHtml(k.key_prefix || 'sk_...')}...</code>
                     &middot; Created ${k.created_at ? new Date(k.created_at).toLocaleDateString() : 'unknown'}
                     ${k.last_used_at ? '&middot; Last used ' + new Date(k.last_used_at).toLocaleDateString() : ''}
                 </div>
             </div>
-            <button onclick="revokeApiKey('${k.id}', '${(k.label || 'this key').replace(/'/g, "\\'")}')"
+            <button class="revoke-api-key-btn" data-key-id="${escapeHtml(k.id)}" data-key-label="${escapeHtml(k.label || 'this key')}"
                 style="padding: 4px 10px; background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.2); color: #ff5252; border-radius: 4px; cursor: pointer; font-size: 11px; white-space: nowrap;">
                 Revoke
             </button>
         </div>
     `).join('');
+    _initApiKeyClickHandler();
+}
+
+function _initApiKeyClickHandler() {
+    const container = document.getElementById('api-keys-list');
+    if (!container) return;
+    container.onclick = (e) => {
+        const btn = e.target.closest('.revoke-api-key-btn');
+        if (btn) {
+            e.preventDefault();
+            revokeApiKey(btn.dataset.keyId, btn.dataset.keyLabel);
+        }
+    };
 }
 
 async function generateApiKey() {
@@ -3001,7 +3214,7 @@ async function authenticateSpotify() {
         // Save settings first to ensure client_id/client_secret are persisted
         await saveSettings();
         showToast('Spotify authentication started', 'success');
-        window.open('/auth/spotify', '_blank');
+        window._spotifyAuthWindow = window.open('/auth/spotify', '_blank');
     } catch (error) {
         console.error('Error authenticating Spotify:', error);
         showToast('Failed to start Spotify authentication', 'error', 'gs-connecting');
@@ -3011,8 +3224,10 @@ async function authenticateSpotify() {
 }
 
 async function disconnectSpotify() {
-    const fallbackName = currentMusicSourceName !== 'Spotify' ? currentMusicSourceName : 'the configured fallback source';
-    if (!await showConfirmDialog({ title: 'Disconnect Spotify', message: `Disconnect Spotify? The app will switch to ${fallbackName} for metadata.` })) {
+    if (!await showConfirmDialog({
+        title: 'Disconnect Spotify',
+        message: 'Disconnect Spotify? Spotify-specific actions will stop until you reauthenticate.'
+    })) {
         return;
     }
     try {
@@ -3020,7 +3235,8 @@ async function disconnectSpotify() {
         const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
         const data = await response.json();
         if (data.success) {
-            showToast(`Spotify disconnected. Now using ${fallbackName}.`, 'success');
+            showToast(data.message || 'Spotify disconnected.', 'success');
+            syncMetadataSourceSelection(data.source || 'deezer');
             // Immediately refresh status to update UI
             await fetchAndUpdateServiceStatus();
         } else {
@@ -3029,29 +3245,6 @@ async function disconnectSpotify() {
     } catch (error) {
         console.error('Error disconnecting Spotify:', error);
         showToast('Failed to disconnect Spotify', 'error');
-    } finally {
-        hideLoadingOverlay();
-    }
-}
-
-async function clearSpotifyCacheAndFallback() {
-    const fallbackName = currentMusicSourceName !== 'Spotify' ? currentMusicSourceName : 'the configured fallback source';
-    if (!await showConfirmDialog({
-        title: 'Clear Spotify Cache',
-        message: `This will clear the Spotify token cache and switch metadata to ${fallbackName}. You can re-authenticate later.`
-    })) return;
-    try {
-        showLoadingOverlay('Clearing Spotify cache...');
-        const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
-        const data = await response.json();
-        if (data.success) {
-            showToast(data.message || `Switched to ${fallbackName}`, 'success');
-            await fetchAndUpdateServiceStatus();
-        } else {
-            showToast(`Failed: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        showToast('Failed to clear Spotify cache', 'error');
     } finally {
         hideLoadingOverlay();
     }
@@ -3143,7 +3336,8 @@ async function disconnectSpotifyFromRateLimit() {
         const data = await response.json();
         if (data.success) {
             _spotifyRateLimitShown = false;
-            showToast(`Spotify disconnected. Now using ${currentMusicSourceName}.`, 'success');
+            showToast(data.message || 'Spotify disconnected.', 'success');
+            syncMetadataSourceSelection(data.source || 'deezer');
             await fetchAndUpdateServiceStatus();
             if (currentPage === 'discover') {
                 loadDiscoverPage();
@@ -3249,8 +3443,177 @@ async function testLidarrConnection() {
     }
 }
 
+async function loadHiFiInstances() {
+    const listEl = document.getElementById('hifi-instances-list');
+    if (!listEl) return;
+    try {
+        const resp = await fetch('/api/hifi/instances/list');
+        const data = await resp.json();
+        if (!data.instances || data.instances.length === 0) {
+            listEl.innerHTML = '<div style="color: rgba(255,255,255,0.4); font-size: 0.85em;">No instances configured.</div>';
+            return;
+        }
+        listEl.innerHTML = data.instances.map((inst, i) => {
+            const enabledClass = inst.enabled ? '' : 'hifi-instance-disabled';
+            const checkHtml = inst.enabled
+                ? `<span class="hifi-instance-toggle on" data-url="${escapeHtml(inst.url)}" title="Click to disable">&#x2714;</span>`
+                : `<span class="hifi-instance-toggle off" data-url="${escapeHtml(inst.url)}" title="Click to enable">&#x2718;</span>`;
+            return `<div class="hifi-instance-item${inst.enabled ? '' : ' disabled'}" draggable="true" data-url="${escapeHtml(inst.url)}">
+                <span class="hifi-instance-grip">&#x2630;</span>
+                <span class="hifi-instance-url">${escapeHtml(inst.url)}</span>
+                ${checkHtml}
+                <span class="hifi-instance-remove" data-url="${escapeHtml(inst.url)}" title="Remove instance">&#x2716;</span>
+            </div>`;
+        }).join('');
+        _initHiFiDragDrop();
+        _initHiFiClickHandlers();
+    } catch (e) {
+        listEl.innerHTML = `<div style="color:#f44336;font-size:0.85em;">Error loading instances: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function _initHiFiDragDrop() {
+    const listEl = document.getElementById('hifi-instances-list');
+    if (!listEl) return;
+    let dragIdx = null;
+
+    listEl.querySelectorAll('.hifi-instance-item').forEach((item, idx) => {
+        item.addEventListener('dragstart', (e) => {
+            dragIdx = idx;
+            item.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            dragIdx = null;
+            listEl.querySelectorAll('.hifi-instance-item').forEach(i => i.classList.remove('drag-over'));
+        });
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            item.classList.add('drag-over');
+        });
+        item.addEventListener('dragleave', () => {
+            item.classList.remove('drag-over');
+        });
+        item.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            item.classList.remove('drag-over');
+            if (dragIdx === null) return;
+            const items = [...listEl.querySelectorAll('.hifi-instance-item')];
+            const dragged = items[dragIdx];
+            if (dragIdx !== idx) {
+                if (dragIdx < idx) {
+                    item.after(dragged);
+                } else {
+                    item.before(dragged);
+                }
+                const urls = [...listEl.querySelectorAll('.hifi-instance-item')].map(el => el.dataset.url);
+                await _saveHiFiInstanceOrder(urls);
+            }
+        });
+    });
+}
+
+function _initHiFiClickHandlers() {
+    const listEl = document.getElementById('hifi-instances-list');
+    if (!listEl) return;
+    listEl.onclick = (e) => {
+        const toggle = e.target.closest('.hifi-instance-toggle');
+        if (toggle) {
+            e.preventDefault();
+            toggleHiFiInstance(toggle.dataset.url);
+            return;
+        }
+        const remove = e.target.closest('.hifi-instance-remove');
+        if (remove) {
+            e.preventDefault();
+            removeHiFiInstance(remove.dataset.url);
+        }
+    };
+}
+
+async function _saveHiFiInstanceOrder(urls) {
+    try {
+        await fetch('/api/hifi/instances/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urls })
+        });
+    } catch (e) {
+        console.error('Failed to save HiFi instance order:', e);
+    }
+}
+
+async function toggleHiFiInstance(url) {
+    const listEl = document.getElementById('hifi-instances-list');
+    if (!listEl) return;
+    const item = listEl.querySelector(`.hifi-instance-item[data-url="${url}"]`);
+    const toggle = item?.querySelector('.hifi-instance-toggle');
+    const currentlyEnabled = toggle?.classList.contains('on');
+    const newEnabled = !currentlyEnabled;
+    try {
+        const resp = await fetch('/api/hifi/instances/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, enabled: newEnabled })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            loadHiFiInstances();
+        } else {
+            alert(data.error || 'Failed to toggle instance');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function addHiFiInstance() {
+    const input = document.getElementById('hifi-new-instance');
+    if (!input) return;
+    const url = input.value.trim();
+    if (!url) return;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        alert('URL must start with http:// or https://');
+        return;
+    }
+    try {
+        const resp = await fetch('/api/hifi/instances', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            input.value = '';
+            loadHiFiInstances();
+        } else {
+            alert(data.error || 'Failed to add instance');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+async function removeHiFiInstance(url) {
+    try {
+        const resp = await fetch(`/api/hifi/instances?url=${encodeURIComponent(url)}`, {
+            method: 'DELETE'
+        });
+        const data = await resp.json();
+        if (data.success) {
+            loadHiFiInstances();
+        } else {
+            alert(data.error || 'Failed to remove instance');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
 async function checkHiFiInstances() {
-    const panel = document.getElementById('hifi-instances-panel');
+    const panel = document.getElementById('hifi-instances-status-panel');
     const btn = document.getElementById('hifi-instances-check-btn');
     if (!panel) return;
     panel.style.display = 'block';
@@ -3655,4 +4018,3 @@ function togglePathLock(pathType, btn) {
 
 
 // ===============================
-

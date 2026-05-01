@@ -69,10 +69,6 @@ chown -R soulsync:soulsync /app/config /app/data /app/logs /app/downloads /app/T
 
 echo "✅ Configuration initialized successfully"
 
-# Auto-update yt-dlp — YouTube changes their API frequently and stale versions break downloads
-echo "🔄 Updating yt-dlp..."
-pip install -U yt-dlp --quiet --no-cache-dir 2>/dev/null && echo "   ✅ yt-dlp updated" || echo "   ⚠️ yt-dlp update failed (will use existing version)"
-
 # Display final user info
 echo "👤 Running as:"
 echo "   User: $(id -u soulsync):$(id -g soulsync) ($(id -un soulsync):$(id -gn soulsync))"

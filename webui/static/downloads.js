@@ -5752,27 +5752,26 @@ async function showVersionInfo() {
         } catch (e) { /* ignore */ }
     }
 
+    // Build version data straight from helper.js — single source of truth.
+    // No backend round-trip; the changelog content is shipped in the same
+    // bundle the browser already loaded.
+    const version = (typeof _getCurrentVersion === 'function')
+        ? _getCurrentVersion()
+        : (btn ? btn.textContent.trim().replace('v', '') : '');
+    const sections = (typeof VERSION_MODAL_SECTIONS !== 'undefined')
+        ? VERSION_MODAL_SECTIONS
+        : [];
+    const versionData = {
+        version,
+        title: "What's New in SoulSync",
+        subtitle: version ? `Version ${version} — Latest Changes` : 'Latest Changes',
+        sections,
+    };
+
     try {
-        console.log('Fetching version info...');
-
-        // Fetch version data from API
-        const response = await fetch('/api/version-info');
-        if (!response.ok) {
-            throw new Error('Failed to fetch version info');
-        }
-
-        const versionData = await response.json();
-        console.log('Version data received:', versionData);
-
-        // Populate modal content
         populateVersionModal(versionData, hadUpdate ? updateInfo : null);
-
-        // Show modal
         const modalOverlay = document.getElementById('version-modal-overlay');
-        modalOverlay.classList.remove('hidden');
-
-        console.log('Version modal opened');
-
+        if (modalOverlay) modalOverlay.classList.remove('hidden');
     } catch (error) {
         console.error('Error showing version info:', error);
         showToast('Failed to load version information', 'error');

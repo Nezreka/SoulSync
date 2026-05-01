@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from utils.logging_config import get_logger
 from config.settings import config_manager
+from core.imports.filename import parse_filename_metadata
 
 logger = get_logger("soulseek_client")
 
@@ -87,60 +88,17 @@ class TrackResult(SearchResult):
     
     def _parse_filename_metadata(self):
         """Extract artist, title, album from filename patterns"""
-        import re
-        import os
-        
-        # Get just the filename without extension and path
-        base_name = os.path.splitext(os.path.basename(self.filename))[0]
-        
-        # Common patterns for track naming
-        patterns = [
-            r'^(\d+)\s*[-\.]\s*(.+?)\s*[-–]\s*(.+)$',  # "01 - Artist - Title" or "01. Artist - Title"
-            r'^(.+?)\s*[-–]\s*(.+)$',  # "Artist - Title"
-            r'^(\d+)\s*[-\.]\s*(.+)$',  # "01 - Title" or "01. Title"
-        ]
-        
-        for pattern in patterns:
-            match = re.match(pattern, base_name)
-            if match:
-                groups = match.groups()
-                if len(groups) == 3:  # Track number, artist, title
-                    try:
-                        self.track_number = int(groups[0])
-                        self.artist = self.artist or groups[1].strip()
-                        self.title = self.title or groups[2].strip()
-                    except ValueError:
-                        # First group might not be a number
-                        self.artist = self.artist or groups[0].strip()
-                        self.title = self.title or f"{groups[1]} - {groups[2]}".strip()
-                elif len(groups) == 2:
-                    if groups[0].isdigit():  # Track number and title
-                        try:
-                            self.track_number = int(groups[0])
-                            self.title = self.title or groups[1].strip()
-                        except ValueError:
-                            pass
-                    else:  # Artist and title
-                        self.artist = self.artist or groups[0].strip()
-                        self.title = self.title or groups[1].strip()
-                break
-        
-        # Fallback: use filename as title if nothing was extracted
-        if not self.title:
-            self.title = base_name
-        
-        # Try to extract album from directory path
-        if not self.album and '/' in self.filename:
-            path_parts = self.filename.split('/')
-            if len(path_parts) >= 2:
-                # Look for album-like directory names
-                for part in reversed(path_parts[:-1]):  # Exclude filename
-                    if part and not part.startswith('@'):  # Skip system directories
-                        # Clean up common patterns
-                        cleaned = re.sub(r'^\d+\s*[-\.]\s*', '', part)  # Remove leading numbers
-                        if len(cleaned) > 3:  # Must be substantial
-                            self.album = cleaned
-                            break
+        parsed = parse_filename_metadata(self.filename)
+        if not self.artist and parsed.get("artist"):
+            self.artist = parsed["artist"]
+        if not self.title and parsed.get("title"):
+            self.title = parsed["title"]
+        if not self.album and parsed.get("album"):
+            self.album = parsed["album"]
+        if self.track_number is None:
+            track_number = parsed.get("track_number")
+            if track_number is not None:
+                self.track_number = track_number
 
 @dataclass
 class AlbumResult:

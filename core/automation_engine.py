@@ -515,7 +515,17 @@ class AutomationEngine:
 
         # Update run stats (no reschedule — event triggers don't use timers)
         last_result = json.dumps({k: v for k, v in merged.items() if not k.startswith('_')})
-        error = result.get('error') if result.get('status') == 'error' else None
+        # Surface every failure mode to last_error: handlers in this codebase use
+        # 'error', 'reason', or 'message' interchangeably when returning gracefully.
+        if result.get('status') == 'error':
+            error = (
+                result.get('error')
+                or result.get('reason')
+                or result.get('message')
+                or 'Handler reported failure'
+            )
+        else:
+            error = None
         self.db.update_automation_run(automation_id, error=error, last_result=last_result)
 
         if self._history_record_fn:
@@ -609,6 +619,17 @@ class AutomationEngine:
         try:
             result = handler_info['handler'](action_config) or {}
             logger.info(f"Automation '{auto['name']}' (id={automation_id}) executed: {result.get('status', 'ok')}")
+            # Handlers may signal failure by RETURNING {'status': 'error', ...} instead of
+            # raising. Surface that to the DB so `last_error` reflects every failure mode,
+            # not just uncaught exceptions. Falls back through ('error', 'reason', 'message')
+            # because handlers in this codebase aren't consistent about which key they set.
+            if result.get('status') == 'error':
+                error = (
+                    result.get('error')
+                    or result.get('reason')
+                    or result.get('message')
+                    or 'Handler reported failure'
+                )
         except Exception as e:
             error = str(e)
             result = {'status': 'error', 'error': error}
