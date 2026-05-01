@@ -55,6 +55,49 @@ function syncMetadataSourceSelection(source) {
     if (!select || !source) return;
     const option = select.querySelector(`option[value="${source}"]`);
     if (option) select.value = source;
+    select.dataset.lastValidSource = source;
+}
+
+function focusSpotifySettingsSection() {
+    const card = document.querySelector('#settings-page .stg-service[data-service="spotify"]');
+    if (!card) return;
+
+    const header = card.querySelector('.stg-service-header');
+    if (!card.classList.contains('expanded') && header) {
+        toggleStgService(header);
+    }
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    const firstControl = card.querySelector('input, button');
+    if (firstControl) {
+        firstControl.focus({ preventScroll: true });
+    }
+
+    showToast('Spotify must be authenticated before it can be selected as the primary metadata source.', 'warning');
+}
+
+function handleMetadataSourceChange(event) {
+    const select = event.target;
+    if (!select || select.id !== 'metadata-fallback-source') return;
+
+    const selectedSource = select.value;
+    if (selectedSource !== 'spotify') {
+        select.dataset.lastValidSource = selectedSource;
+        return;
+    }
+
+    const spotifySessionActive = _lastServiceStatus?.spotify?.authenticated === true;
+    if (spotifySessionActive) {
+        select.dataset.lastValidSource = selectedSource;
+        return;
+    }
+
+    const fallbackSource = select.dataset.lastValidSource || _lastServiceStatus?.spotify?.source || 'deezer';
+    if (fallbackSource && fallbackSource !== 'spotify') {
+        select.value = fallbackSource;
+    }
+    focusSpotifySettingsSection();
 }
 
 function initializeSettings() {
@@ -81,6 +124,11 @@ function initializeSettings() {
         settingsPage.querySelectorAll('input[type="checkbox"], select').forEach(input => {
             input.addEventListener('change', debouncedAutoSaveSettings);
         });
+    }
+
+    const metadataSourceSelect = document.getElementById('metadata-fallback-source');
+    if (metadataSourceSelect) {
+        metadataSourceSelect.addEventListener('change', handleMetadataSourceChange);
     }
 
     // Server toggle buttons
@@ -115,6 +163,9 @@ function initializeSettings() {
     }
     syncSpotifySettingsAuthState(_lastServiceStatus?.spotify || null);
     syncMetadataSourceSelection(_lastServiceStatus?.spotify?.source);
+    if (metadataSourceSelect) {
+        metadataSourceSelect.dataset.lastValidSource = metadataSourceSelect.value;
+    }
 }
 
 function resetFileOrganizationTemplates() {
@@ -315,6 +366,8 @@ async function applyServiceStatusGradients() {
 }
 
 function syncSpotifySettingsAuthState(statusData) {
+    if (!statusData) return;
+
     const card = document.querySelector('#settings-page .stg-service[data-service="spotify"]');
     if (!card) return;
 
