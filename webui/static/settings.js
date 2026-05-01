@@ -3066,8 +3066,10 @@ async function authenticateSpotify() {
 }
 
 async function disconnectSpotify() {
-    const fallbackName = currentMusicSourceName !== 'Spotify' ? currentMusicSourceName : 'the configured fallback source';
-    if (!await showConfirmDialog({ title: 'Disconnect Spotify', message: `Disconnect Spotify? The app will switch to ${fallbackName} for metadata.` })) {
+    if (!await showConfirmDialog({
+        title: 'Disconnect Spotify',
+        message: 'Disconnect Spotify? Spotify-specific actions will stop until you reauthenticate.'
+    })) {
         return;
     }
     try {
@@ -3075,7 +3077,7 @@ async function disconnectSpotify() {
         const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
         const data = await response.json();
         if (data.success) {
-            showToast(`Spotify disconnected. Now using ${fallbackName}.`, 'success');
+            showToast(data.message || 'Spotify disconnected.', 'success');
             // Immediately refresh status to update UI
             await fetchAndUpdateServiceStatus();
         } else {
@@ -3084,29 +3086,6 @@ async function disconnectSpotify() {
     } catch (error) {
         console.error('Error disconnecting Spotify:', error);
         showToast('Failed to disconnect Spotify', 'error');
-    } finally {
-        hideLoadingOverlay();
-    }
-}
-
-async function clearSpotifyCacheAndFallback() {
-    const fallbackName = currentMusicSourceName !== 'Spotify' ? currentMusicSourceName : 'the configured fallback source';
-    if (!await showConfirmDialog({
-        title: 'Clear Spotify Cache',
-        message: `This will clear the Spotify token cache and switch metadata to ${fallbackName}. You can re-authenticate later.`
-    })) return;
-    try {
-        showLoadingOverlay('Clearing Spotify cache...');
-        const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
-        const data = await response.json();
-        if (data.success) {
-            showToast(data.message || `Switched to ${fallbackName}`, 'success');
-            await fetchAndUpdateServiceStatus();
-        } else {
-            showToast(`Failed: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        showToast('Failed to clear Spotify cache', 'error');
     } finally {
         hideLoadingOverlay();
     }
@@ -3198,7 +3177,7 @@ async function disconnectSpotifyFromRateLimit() {
         const data = await response.json();
         if (data.success) {
             _spotifyRateLimitShown = false;
-            showToast(`Spotify disconnected. Now using ${currentMusicSourceName}.`, 'success');
+            showToast(data.message || 'Spotify disconnected.', 'success');
             await fetchAndUpdateServiceStatus();
             if (currentPage === 'discover') {
                 loadDiscoverPage();
@@ -3879,4 +3858,3 @@ function togglePathLock(pathType, btn) {
 
 
 // ===============================
-

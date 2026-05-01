@@ -17,7 +17,7 @@ from flask_socketio import SocketIO, join_room, leave_room
 # ---------------------------------------------------------------------------
 
 _DEFAULT_STATUS_CACHE = {
-    'spotify': {'connected': True, 'response_time': 12.5, 'source': 'spotify'},
+    'spotify': {'connected': True, 'authenticated': True, 'response_time': 12.5, 'source': 'spotify'},
     'media_server': {'connected': True, 'response_time': 8.1, 'type': 'plex'},
     'soulseek': {'connected': True, 'response_time': 5.3, 'source': 'soulseek'},
 }
