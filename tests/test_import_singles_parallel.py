@@ -19,9 +19,42 @@ These tests pin the new behaviour:
   caller (the test verifies that behaviour through the route).
 """
 
+import logging
 from unittest.mock import patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _restore_soulsync_logger_state():
+    """Snapshot the ``soulsync`` logger config before this file's tests
+    run and restore it afterwards.
+
+    Importing ``web_server`` calls ``utils.logging_config.setup_logging``
+    at module-init time, which clears + re-installs handlers on the
+    ``soulsync`` logger and pins its level to whatever the user's
+    config said. That mutation leaks across tests in the same pytest
+    process and broke
+    ``test_library_reorganize_orchestrator::test_watchdog_warns_about_stuck_workers``
+    that runs later alphabetically and relies on caplog capturing
+    ``soulsync.library_reorganize`` warnings via root-logger
+    propagation.
+
+    Without this fixture, my file ran first alphabetically, mutated
+    the global soulsync logger, and the watchdog test downstream
+    saw ``caplog.records == []``. Snapshot + restore keeps the
+    pollution scoped to this file's tests only.
+    """
+    soulsync_logger = logging.getLogger("soulsync")
+    saved_handlers = list(soulsync_logger.handlers)
+    saved_level = soulsync_logger.level
+    saved_propagate = soulsync_logger.propagate
+    try:
+        yield
+    finally:
+        soulsync_logger.handlers = saved_handlers
+        soulsync_logger.setLevel(saved_level)
+        soulsync_logger.propagate = saved_propagate
 
 
 # ---------------------------------------------------------------------------
