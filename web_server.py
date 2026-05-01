@@ -24834,15 +24834,16 @@ def watchlist_all_unwatched_library_artists():
         skipped_no_id = 0
         skipped_already = 0
 
+        # Try the active source's ID first, fall back through every other
+        # supported source. Pre-fix this loop required the active source's
+        # ID and silently dropped library artists that only had iTunes,
+        # Deezer, or Discogs IDs — surfaced as "Library and Watchlist not
+        # syncing correctly" on Discord because the bulk add reported
+        # "Added X" with no breakdown of why others were rejected.
+        from core.watchlist.source_picker import pick_artist_id_for_watchlist
+
         for artist in unwatched_artists:
-            # Use only the active source's ID — matches frontend modal filtering
-            artist_id = None
-            if active_source == 'spotify':
-                artist_id = artist.get('spotify_artist_id')
-            elif active_source == 'itunes':
-                artist_id = artist.get('itunes_artist_id')
-            elif active_source == 'deezer':
-                artist_id = artist.get('deezer_id')
+            artist_id, picked_source = pick_artist_id_for_watchlist(artist, active_source)
 
             if not artist_id:
                 skipped_no_id += 1
@@ -24857,8 +24858,7 @@ def watchlist_all_unwatched_library_artists():
                 skipped_already += 1
                 continue
 
-            src = active_source if active_source in ('spotify', 'itunes', 'deezer') else _get_metadata_fallback_source()
-            success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=src)
+            success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=picked_source)
             if success:
                 added += 1
                 # Use library thumb_url if available (no HTTP calls needed)
