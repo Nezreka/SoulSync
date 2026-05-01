@@ -3148,6 +3148,12 @@ async function fetchAndUpdateServiceStatus() {
         if (typeof syncSpotifySettingsAuthState === 'function') {
             syncSpotifySettingsAuthState(data?.spotify || null);
         }
+        if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
+            syncPrimaryMetadataSourceAvailability(data?.spotify || null);
+        }
+        if (typeof sanitizeMetadataSourceSelection === 'function') {
+            sanitizeMetadataSourceSelection({ quiet: true });
+        }
 
         // Update service status indicators and text (dashboard)
         updateServiceStatus('spotify', data.spotify);
@@ -3190,20 +3196,32 @@ async function fetchAndUpdateServiceStatus() {
     }
 }
 
-function syncSpotifyMetadataSourceAvailability(statusData) {
+function syncPrimaryMetadataSourceAvailability(statusData) {
     const select = document.getElementById('metadata-fallback-source');
     if (!select) return;
     if (!statusData) return;
 
     const spotifyOption = select.querySelector('option[value="spotify"]');
-    if (!spotifyOption) return;
+    const discogsOption = select.querySelector('option[value="discogs"]');
 
     const spotifyAvailable = statusData?.authenticated === true;
-    spotifyOption.dataset.unavailable = spotifyAvailable ? 'false' : 'true';
-    spotifyOption.textContent = spotifyAvailable ? 'Spotify' : '🔒 Spotify';
-    spotifyOption.title = spotifyAvailable
-        ? 'Spotify'
-        : 'Spotify authentication is required before this source can be selected.';
+    if (spotifyOption) {
+        spotifyOption.dataset.unavailable = spotifyAvailable ? 'false' : 'true';
+        spotifyOption.textContent = spotifyAvailable ? 'Spotify' : '🔒 Spotify';
+        spotifyOption.title = spotifyAvailable
+            ? 'Spotify'
+            : 'Spotify authentication is required before this source can be selected.';
+    }
+
+    if (discogsOption) {
+        const discogsToken = document.getElementById('discogs-token');
+        const discogsAvailable = !!discogsToken?.value?.trim();
+        discogsOption.dataset.unavailable = discogsAvailable ? 'false' : 'true';
+        discogsOption.textContent = discogsAvailable ? 'Discogs' : '🔒 Discogs';
+        discogsOption.title = discogsAvailable
+            ? 'Discogs'
+            : 'Discogs personal access token is required before this source can be selected.';
+    }
 }
 
 function getMetadataSourceLabel(source) {
@@ -3304,7 +3322,7 @@ function updateServiceStatus(service, statusData) {
             disconnectBtn.style.display = spotifySessionActive ? '' : 'none';
         }
 
-        syncSpotifyMetadataSourceAvailability(statusData);
+        syncPrimaryMetadataSourceAvailability(statusData);
     }
 
     // Update download source title on dashboard card
