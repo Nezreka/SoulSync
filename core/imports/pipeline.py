@@ -12,6 +12,7 @@ from typing import Any
 from config.settings import config_manager
 from core.imports.file_ops import (
     cleanup_empty_directories,
+    cleanup_slskd_dedup_siblings,
     create_lossy_copy,
     downsample_hires_flac,
     get_audio_quality_string,
@@ -238,6 +239,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
             safe_move_file(file_path, destination)
             logger.info(f"Moved simple download to: {destination}")
+            cleanup_slskd_dedup_siblings(file_path)
 
             with matched_context_lock:
                 if context_key in matched_downloads_context:
@@ -402,6 +404,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             logger.info(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
             safe_move_file(file_path, final_path)
             context['_final_processed_path'] = final_path
+            cleanup_slskd_dedup_siblings(file_path)
 
             if config_manager.get('post_processing.replaygain_enabled', False):
                 try:
@@ -665,6 +668,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             raise FileNotFoundError(f"Source file vanished before move and destination does not exist: {file_path}")
 
         safe_move_file(file_path, final_path)
+        cleanup_slskd_dedup_siblings(file_path)
 
         if is_enhance_download and _enhance_source_info.get('original_file_path'):
             original_enhance_path = _enhance_source_info['original_file_path']

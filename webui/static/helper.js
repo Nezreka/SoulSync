@@ -3452,6 +3452,7 @@ const WHATS_NEW = {
         { title: 'Stats Endpoints Lifted to core/stats', desc: 'internal — moved /api/stats/* and /api/listening-stats/* logic out of web_server.py into core/stats/queries.py with full test coverage. no behavior change. step toward breaking up the web_server.py monolith.' },
         { title: 'Search Endpoints Lifted to core/search', desc: 'internal — moved /api/search and /api/enhanced-search/* logic into core/search/ (cache, sources, library_check, stream, basic, orchestrator). 612 fewer lines in web_server.py, 94 new tests. no behavior change.' },
         { title: 'Automation Endpoints Lifted to core/automation', desc: 'internal — moved /api/automations/* CRUD + run + history routes, progress tracking helpers, and signal collection into core/automation/ (api, progress, signals). 383 fewer lines in web_server.py, 72 new tests. action handler registration stays put — those closures are tangled with feature implementations.' },
+        { title: 'Clean Up slskd Dedup Orphans After Import', desc: 'slskd appends "_<timestamp>" to a download when the destination file already exists (e.g. retried partials, the same track in multiple playlists). the canonical file imported fine but the timestamp-suffixed siblings sat in the downloads folder forever. now they get pruned right after each successful import.', page: 'downloads' },
     ],
     '2.4.0': [
         // --- April 26, 2026 — Search & Artists unification + reorganize queue ---
