@@ -3145,6 +3145,10 @@ async function fetchAndUpdateServiceStatus() {
         // Cache for library status card
         _lastServiceStatus = data;
 
+        if (typeof syncSpotifySettingsAuthState === 'function') {
+            syncSpotifySettingsAuthState(data?.spotify || null);
+        }
+
         // Update service status indicators and text (dashboard)
         updateServiceStatus('spotify', data.spotify);
         updateServiceStatus('media-server', data.media_server);
