@@ -124,12 +124,14 @@ SOURCE_TAG_CONFIG = {
     "AUDIODB_TRACK_ID": "audiodb.tags.track_id",
     "TIDAL_TRACK_ID": "tidal.tags.track_id",
     "TIDAL_ARTIST_ID": "tidal.tags.artist_id",
+    "HIFI_TRACK_ID": "hifi.tags.track_id",
+    "HIFI_ARTIST_ID": "hifi.tags.artist_id",
     "QOBUZ_TRACK_ID": "qobuz.tags.track_id",
     "QOBUZ_ARTIST_ID": "qobuz.tags.artist_id",
     "GENIUS_TRACK_ID": "genius.tags.track_id",
 }
 
-DEFAULT_SOURCE_ORDER = ["musicbrainz", "deezer", "audiodb", "tidal", "qobuz", "lastfm", "genius"]
+DEFAULT_SOURCE_ORDER = ["musicbrainz", "deezer", "audiodb", "tidal", "hifi", "qobuz", "lastfm", "genius"]
 
 ID3_TAG_MAP = {
     "MUSICBRAINZ_RECORDING_ID": ("UFID", "http://musicbrainz.org"),
@@ -465,6 +467,41 @@ def _process_tidal_source(pp: dict, metadata: dict, cfg, runtime, track_title: s
                 pp["release_year"] = td_release[:4]
 
 
+def _process_hifi_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
+    if cfg.get("hifi.embed_tags", True) is False:
+        return
+    if not track_title or not artist_name:
+        return
+
+    hifi_client = getattr(runtime, "hifi_client", None)
+    if not hifi_client:
+        return
+    hifi_results = _call_source_lookup("HiFi track", hifi_client.search_tracks, track_title, artist_name)
+    if hifi_results and len(hifi_results) > 0:
+        hifi_track = hifi_results[0]
+        if _names_match(hifi_track.get("title", ""), track_title):
+            hifi_track_id = hifi_track.get("id")
+            if hifi_track_id:
+                pp["id_tags"]["HIFI_TRACK_ID"] = str(hifi_track_id)
+            hifi_artist_id = hifi_track.get("artist_id")
+            if hifi_artist_id:
+                pp["id_tags"]["HIFI_ARTIST_ID"] = str(hifi_artist_id)
+            if hifi_track_id:
+                hifi_details = _call_source_lookup("HiFi track details", hifi_client.get_track_info, hifi_track_id)
+                if hifi_details:
+                    hifi_isrc = hifi_details.get("isrc")
+                    if hifi_isrc:
+                        pp["hifi_isrc"] = hifi_isrc
+            if not pp["release_year"]:
+                hifi_album_id = hifi_track.get("album_id")
+                if hifi_album_id:
+                    hifi_album = _call_source_lookup("HiFi album", hifi_client.get_album, hifi_album_id)
+                    if hifi_album:
+                        hifi_release = str(hifi_album.get("release_date", "") or "")
+                        if len(hifi_release) >= 4 and hifi_release[:4].isdigit():
+                            pp["release_year"] = hifi_release[:4]
+
+
 def _process_qobuz_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
     if cfg.get("qobuz.embed_tags", True) is False:
         return
@@ -572,6 +609,8 @@ def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, 
         _process_audiodb_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "tidal":
         _process_tidal_source(pp, metadata, cfg, runtime, track_title, artist_name)
+    elif source_name == "hifi":
+        _process_hifi_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "qobuz":
         _process_qobuz_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "lastfm":
@@ -699,6 +738,8 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         isrc_candidates.append(("Deezer", pp["deezer_isrc"]))
     if pp["tidal_isrc"] and _tag_enabled(cfg, "tidal.tags.isrc"):
         isrc_candidates.append(("Tidal", pp["tidal_isrc"]))
+    if pp["hifi_isrc"] and _tag_enabled(cfg, "hifi.tags.isrc"):
+        isrc_candidates.append(("HiFi", pp["hifi_isrc"]))
     if pp["qobuz_isrc"] and _tag_enabled(cfg, "qobuz.tags.isrc"):
         isrc_candidates.append(("Qobuz", pp["qobuz_isrc"]))
     if isrc_candidates:
@@ -968,6 +1009,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             "audiodb_genre": None,
             "tidal_isrc": None,
             "tidal_copyright": None,
+            "hifi_isrc": None,
             "qobuz_isrc": None,
             "qobuz_copyright": None,
             "qobuz_label": None,

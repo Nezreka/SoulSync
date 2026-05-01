@@ -257,6 +257,8 @@ def get_source_tag_names(source: str) -> Dict[str, Optional[str]]:
         return {"track": None, "artist": None, "album": None}
     if source_name == "discogs":
         return {"track": None, "artist": None, "album": None}
+    if source_name == "hifi":
+        return {"track": "HIFI_TRACK_ID", "artist": "HIFI_ARTIST_ID", "album": None}
     return {"track": None, "artist": None, "album": None}
 
 
@@ -272,6 +274,8 @@ def get_library_source_id_columns(source: str) -> Dict[str, Optional[str]]:
         return {"artist": "soul_id", "album": "soul_id", "track": "soul_id", "track_album": "album_soul_id"}
     if source_name == "discogs":
         return {"artist": "discogs_id", "album": "discogs_id", "track": None}
+    if source_name == "hifi":
+        return {"artist": "hifi_artist_id", "album": None, "track": "hifi_track_id"}
     return {}
 
 
