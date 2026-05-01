@@ -113,6 +113,7 @@ function initializeSettings() {
     if (typeof syncSpotifyMetadataSourceAvailability === 'function') {
         syncSpotifyMetadataSourceAvailability(_lastServiceStatus?.spotify || null);
     }
+    syncSpotifySettingsAuthState(_lastServiceStatus?.spotify || null);
     syncMetadataSourceSelection(_lastServiceStatus?.spotify?.source);
 }
 
@@ -307,8 +308,32 @@ async function applyServiceStatusGradients() {
                 else header.appendChild(spinner);
             }
         });
+        syncSpotifySettingsAuthState(_lastServiceStatus?.spotify || null);
     } catch (e) {
         console.warn('[Settings Status] Failed to apply gradients:', e);
+    }
+}
+
+function syncSpotifySettingsAuthState(statusData) {
+    const card = document.querySelector('#settings-page .stg-service[data-service="spotify"]');
+    if (!card) return;
+
+    const header = card.querySelector('.stg-service-header');
+    const dot = card.querySelector('.stg-service-dot');
+    if (!header && !dot) return;
+
+    const authenticated = statusData?.authenticated === true;
+    const rateLimited = !!(statusData?.rate_limited && statusData?.rate_limit);
+    const cooldown = !!(statusData?.post_ban_cooldown > 0);
+    const needsAttention = !authenticated || rateLimited || cooldown;
+
+    if (header) {
+        header.classList.toggle('status-configured', !needsAttention);
+        header.classList.toggle('status-missing', needsAttention);
+    }
+
+    if (dot) {
+        dot.style.color = needsAttention ? '#f1c40f' : '#1DB954';
     }
 }
 
