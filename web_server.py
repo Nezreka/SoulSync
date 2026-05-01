@@ -14313,7 +14313,18 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
         context,
         artist,
         album_info,
-        runtime=metadata_runtime or _build_metadata_enrichment_runtime(),
+        runtime=metadata_runtime or _build_metadata_enrichment_runtime(
+            mb_worker=mb_worker,
+            deezer_worker=deezer_worker,
+            audiodb_worker=audiodb_worker,
+            tidal_client=tidal_client,
+            qobuz_enrichment_worker=qobuz_enrichment_worker,
+            lastfm_worker=lastfm_worker,
+            genius_worker=genius_worker,
+            spotify_enrichment_worker=spotify_enrichment_worker,
+            itunes_enrichment_worker=itunes_enrichment_worker,
+            hifi_client=soulseek_client.hifi if soulseek_client else None,
+        ),
     )
 
 
@@ -14407,7 +14418,18 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         task_id,
         batch_id,
         _build_import_pipeline_runtime(),
-        _build_metadata_enrichment_runtime(),
+        _build_metadata_enrichment_runtime(
+            mb_worker=mb_worker,
+            deezer_worker=deezer_worker,
+            audiodb_worker=audiodb_worker,
+            tidal_client=tidal_client,
+            qobuz_enrichment_worker=qobuz_enrichment_worker,
+            lastfm_worker=lastfm_worker,
+            genius_worker=genius_worker,
+            spotify_enrichment_worker=spotify_enrichment_worker,
+            itunes_enrichment_worker=itunes_enrichment_worker,
+            hifi_client=soulseek_client.hifi if soulseek_client else None,
+        ),
     )
 
 
@@ -14520,7 +14542,18 @@ def _post_process_matched_download(context_key, context, file_path):
         context,
         file_path,
         _build_import_pipeline_runtime(),
-        metadata_runtime=_build_metadata_enrichment_runtime(),
+        metadata_runtime=_build_metadata_enrichment_runtime(
+            mb_worker=mb_worker,
+            deezer_worker=deezer_worker,
+            audiodb_worker=audiodb_worker,
+            tidal_client=tidal_client,
+            qobuz_enrichment_worker=qobuz_enrichment_worker,
+            lastfm_worker=lastfm_worker,
+            genius_worker=genius_worker,
+            spotify_enrichment_worker=spotify_enrichment_worker,
+            itunes_enrichment_worker=itunes_enrichment_worker,
+            hifi_client=soulseek_client.hifi if soulseek_client else None,
+        ),
     )
 
 # Track stale transfer keys (completed in slskd but no context — e.g., from before app restart)
