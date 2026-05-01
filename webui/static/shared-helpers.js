@@ -3199,8 +3199,11 @@ function syncSpotifyMetadataSourceAvailability(statusData) {
     if (!spotifyOption) return;
 
     const spotifyAvailable = statusData?.authenticated === true;
-    spotifyOption.disabled = !spotifyAvailable;
     spotifyOption.dataset.unavailable = spotifyAvailable ? 'false' : 'true';
+    spotifyOption.textContent = spotifyAvailable ? 'Spotify' : '🔒 Spotify';
+    spotifyOption.title = spotifyAvailable
+        ? 'Spotify'
+        : 'Spotify authentication is required before this source can be selected.';
 }
 
 function getMetadataSourceLabel(source) {
