@@ -4944,15 +4944,29 @@ class MusicDatabase:
                 plex_original = getattr(track_obj, 'originalTitle', None)
                 if plex_original and plex_original.strip():
                     track_artist = plex_original.strip()
-                # Jellyfin/Emby: ArtistItems[0] is the track artist, may differ from album artist
+                # Jellyfin/Emby: store ALL ArtistItems, not just [0]. A track
+                # like "Super Single" by Artist1 feat. Artist2 has both names in
+                # ArtistItems; if we kept only the first, completion checks for
+                # Artist2's discography (where the same track also appears as a
+                # single) would never find this row in the library. Joining with
+                # "; " matches Jellyfin's own UI convention and lets the search
+                # path treat each name as a separate artist credit.
                 if not track_artist and hasattr(track_obj, '_data'):
                     raw = getattr(track_obj, '_data', {}) or {}
                     artist_items = raw.get('ArtistItems', [])
                     if artist_items:
-                        jf_track_artist = artist_items[0].get('Name', '')
+                        jf_track_artist_names = [
+                            a.get('Name', '') for a in artist_items if a.get('Name')
+                        ]
+                        jf_track_artist = '; '.join(jf_track_artist_names)
                         album_artists = raw.get('AlbumArtists', [])
                         jf_album_artist = album_artists[0].get('Name', '') if album_artists else ''
-                        if jf_track_artist and jf_track_artist != jf_album_artist:
+                        # Store when the track has multiple artists OR when the
+                        # single-artist credit differs from the album artist.
+                        if jf_track_artist and (
+                            len(jf_track_artist_names) > 1
+                            or jf_track_artist != jf_album_artist
+                        ):
                             track_artist = jf_track_artist
                 # Navidrome/Subsonic: artist attribute is per-track
                 if not track_artist and hasattr(track_obj, 'artist') and isinstance(getattr(track_obj, 'artist', None), str):
@@ -6288,13 +6302,33 @@ class MusicDatabase:
             # Lin-Manuel Miranda but "Where You Are" is performed by Christopher
             # Jackson). Score against tracks.track_artist too and take the better
             # match so playlist sync can find these.
+            #
+            # Featured artists: tracks with multiple credits ("Artist1, Artist2",
+            # "Artist1 feat. Artist2", "Artist1 & Artist2") split on common
+            # delimiters and score each piece independently. Without this, a
+            # discography completion check for Artist2 would miss a track stored
+            # in the library under Artist1's album with a "feat. Artist2" credit.
             db_track_artist = getattr(db_track, 'track_artist', None)
             if db_track_artist:
                 db_track_artist_norm = self._normalize_for_comparison(db_track_artist)
-                artist_similarity = max(
-                    artist_similarity,
-                    self._string_similarity(search_artist_norm, db_track_artist_norm),
+                # Whole-string similarity first as the floor.
+                track_artist_sim = self._string_similarity(search_artist_norm, db_track_artist_norm)
+                # Then split on multi-artist delimiters and score each piece —
+                # Spotify's "feat.", "ft.", commas, semicolons, ampersands, and
+                # "x" between names all show up here in real-world tags.
+                pieces = re.split(
+                    r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*',
+                    db_track_artist_norm,
+                    flags=re.IGNORECASE,
                 )
+                for piece in pieces:
+                    piece = piece.strip()
+                    if not piece:
+                        continue
+                    piece_sim = self._string_similarity(search_artist_norm, piece)
+                    if piece_sim > track_artist_sim:
+                        track_artist_sim = piece_sim
+                artist_similarity = max(artist_similarity, track_artist_sim)
             
             # Also try with cleaned versions (removing parentheses, brackets, etc.)
             clean_search_title = self._clean_track_title_for_comparison(search_title)
