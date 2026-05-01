@@ -50,6 +50,13 @@ function handleManualSaveClick() {
     saveSettings(false);
 }
 
+function syncMetadataSourceSelection(source) {
+    const select = document.getElementById('metadata-fallback-source');
+    if (!select || !source) return;
+    const option = select.querySelector(`option[value="${source}"]`);
+    if (option) select.value = source;
+}
+
 function initializeSettings() {
     // This function is called when the settings page is loaded.
     // It attaches event listeners to all interactive elements on the page.
@@ -102,6 +109,11 @@ function initializeSettings() {
 
     // Test connection buttons
     // Test button event listeners removed - they use onclick attributes in HTML to avoid double firing
+
+    if (typeof syncSpotifyMetadataSourceAvailability === 'function') {
+        syncSpotifyMetadataSourceAvailability(_lastServiceStatus?.spotify || null);
+    }
+    syncMetadataSourceSelection(_lastServiceStatus?.spotify?.source);
 }
 
 function resetFileOrganizationTemplates() {
@@ -2400,6 +2412,17 @@ async function saveSettings(quiet = false) {
         activeServer = 'soulsync';
     }
 
+    const metadataSourceSelect = document.getElementById('metadata-fallback-source');
+    let metadataSource = metadataSourceSelect?.value || 'itunes';
+    const spotifyDisconnected = _lastServiceStatus?.spotify?.connected === false;
+    if (metadataSource === 'spotify' && spotifyDisconnected) {
+        metadataSource = 'deezer';
+        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
+        if (!quiet) {
+            showToast('Spotify is disconnected, so Deezer is used as the primary metadata source.', 'warning');
+        }
+    }
+
     const settings = {
         active_media_server: activeServer,
         spotify: {
@@ -2472,7 +2495,7 @@ async function saveSettings(quiet = false) {
             token: document.getElementById('discogs-token').value,
         },
         metadata: {
-            fallback_source: document.getElementById('metadata-fallback-source').value || 'itunes'
+            fallback_source: metadataSource
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
@@ -3078,6 +3101,7 @@ async function disconnectSpotify() {
         const data = await response.json();
         if (data.success) {
             showToast(data.message || 'Spotify disconnected.', 'success');
+            syncMetadataSourceSelection(data.source || 'deezer');
             // Immediately refresh status to update UI
             await fetchAndUpdateServiceStatus();
         } else {
@@ -3178,6 +3202,7 @@ async function disconnectSpotifyFromRateLimit() {
         if (data.success) {
             _spotifyRateLimitShown = false;
             showToast(data.message || 'Spotify disconnected.', 'success');
+            syncMetadataSourceSelection(data.source || 'deezer');
             await fetchAndUpdateServiceStatus();
             if (currentPage === 'discover') {
                 loadDiscoverPage();
