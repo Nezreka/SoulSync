@@ -9,6 +9,7 @@ from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
 import re
 import time
+from difflib import SequenceMatcher
 import requests
 from bs4 import BeautifulSoup
 from database.music_database import get_database, WatchlistArtist
@@ -287,6 +288,111 @@ def is_compilation_album(album_name: str) -> bool:
             return True
 
     return False
+
+# Common qualifying parentheticals appended to album names by Spotify /
+# Deezer / iTunes / Discogs that the user's media server (Plex / Navidrome /
+# Jellyfin) typically strips out of the file tags. Without normalization,
+# fuzzy-comparing the two sides reports a false "different album" verdict —
+# the watchlist scanner then thinks the track is missing and re-downloads
+# it on every scan.
+_ALBUM_QUALIFIER_PATTERNS = [
+    r'\bmusic\s+from(?:\s+the)?(?:\s+motion\s+picture)?\b',
+    r'\boriginal\s+(?:motion\s+picture\s+)?(?:soundtrack|score)\b',
+    r'\bsoundtrack(?:\s+from(?:\s+the)?(?:\s+motion\s+picture)?)?\b',
+    r'\bo\.?s\.?t\.?\b',
+    r'\bdeluxe(?:\s+(?:edition|version))?\b',
+    r'\bexpanded(?:\s+edition)?\b',
+    r'\bremaster(?:ed)?(?:\s+(?:\d{4}|edition))?\b',
+    r'\banniversary(?:\s+edition)?\b',
+    r'\bspecial\s+edition\b',
+    r'\bbonus\s+(?:track\s+)?(?:edition|version)\b',
+    r'\bextended(?:\s+(?:edition|version))?\b',
+    r'\bexplicit\b',
+    r'\bclean\s+version\b',
+]
+_ALBUM_QUALIFIER_RE = re.compile(
+    '|'.join(_ALBUM_QUALIFIER_PATTERNS),
+    re.IGNORECASE,
+)
+
+
+def _normalize_album_for_match(name: str) -> str:
+    """Return a canonical form of an album name suitable for fuzzy comparison.
+
+    Strips qualifying parentheticals (``(Music From The Motion Picture)``,
+    ``[Deluxe Edition]``, ``- Remastered 2011``, etc.) and any leftover
+    bracketed groups, lowercases, collapses whitespace. The output is meant
+    for comparison only — never display.
+    """
+    if not name:
+        return ""
+    cleaned = name
+    # Strip the well-known qualifier phrases regardless of whether they
+    # sit in brackets, after a dash, or bare.
+    cleaned = _ALBUM_QUALIFIER_RE.sub(' ', cleaned)
+    # Then strip any other parenthesized / bracketed groups whatsoever —
+    # they're almost always edition or commentary noise, not part of the
+    # album's identifying name.
+    cleaned = re.sub(r'\s*[\(\[][^\)\]]*[\)\]]\s*', ' ', cleaned)
+    # Trailing dash-clauses ("Album - Remastered", "Album - Live")
+    cleaned = re.sub(r'\s*-\s*[^-]+$', '', cleaned)
+    cleaned = re.sub(r'[^a-z0-9 ]+', ' ', cleaned.lower())
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
+
+_VOLUME_MARKER_RE = re.compile(
+    r'\b(?:vol(?:ume)?|pt|part|disc|book|chapter|episode)\.?\s*(\d+)\b|\b(\d+)\s*$',
+    re.IGNORECASE,
+)
+
+
+def _extract_volume_marker(normalized_name: str):
+    """Pull the trailing volume / part / disc / standalone-number marker out
+    of a normalized album name. Used to reject ``"Greatest Hits Volume 1"``
+    vs ``"Greatest Hits Volume 2"`` matches that would otherwise pass a
+    fuzzy ratio test on the heavily-shared prefix.
+    """
+    if not normalized_name:
+        return None
+    matches = list(_VOLUME_MARKER_RE.finditer(normalized_name))
+    if not matches:
+        return None
+    last = matches[-1]
+    return last.group(1) or last.group(2)
+
+
+def _albums_likely_match(spotify_album: str, lib_album: str, threshold: float = 0.6) -> bool:
+    """Return True when two album names plausibly identify the same release.
+
+    Designed to swallow naming drift between metadata sources and the
+    media-server tag scan: ``"Napoleon Dynamite (Music From The Motion
+    Picture)"`` vs ``"Napoleon Dynamite OST"`` should be the same album,
+    not two — otherwise the watchlist scanner downloads the track again
+    every 30 minutes.
+    """
+    if not spotify_album or not lib_album:
+        return False
+    norm_a = _normalize_album_for_match(spotify_album)
+    norm_b = _normalize_album_for_match(lib_album)
+    if not norm_a or not norm_b:
+        return False
+    # Volume / part / disc markers must agree when both sides have one.
+    # Otherwise ``"Greatest Hits Volume 1"`` and ``"Greatest Hits Volume 2"``
+    # would slip past every fuzzy threshold on the shared prefix.
+    vol_a = _extract_volume_marker(norm_a)
+    vol_b = _extract_volume_marker(norm_b)
+    if vol_a and vol_b and vol_a != vol_b:
+        return False
+    if norm_a == norm_b:
+        return True
+    # After normalization the shorter name often becomes a prefix /
+    # substring of the longer one ("napoleon dynamite" ⊂ "napoleon
+    # dynamite music from the motion picture" before stripping).
+    if norm_a in norm_b or norm_b in norm_a:
+        return True
+    return SequenceMatcher(None, norm_a, norm_b).ratio() >= threshold
+
 
 @dataclass
 class ScanResult:
@@ -1961,17 +2067,21 @@ class WatchlistScanner:
                     db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=search_album)
 
                     if db_track and confidence >= 0.7:
-                        # When allow_duplicates is on, only skip if the exact same album
+                        # When allow_duplicates is on, only skip if we believe
+                        # the library copy is on the same album the watchlist
+                        # is asking about. Album name drift between Spotify
+                        # and the media-server scan ("Napoleon Dynamite (Music
+                        # From The Motion Picture)" vs "Napoleon Dynamite OST")
+                        # used to fail a strict 0.85 fuzzy threshold and force
+                        # an infinite redownload loop.
                         if allow_duplicates and album_name:
                             lib_album = getattr(db_track, 'album_title', '') or ''
                             if lib_album:
-                                from difflib import SequenceMatcher
-                                album_sim = SequenceMatcher(None, album_name.lower(), lib_album.lower()).ratio()
-                                if album_sim < 0.85:
-                                    logger.info(f"[AllowDup] Different album — allowing: '{original_title}' (wanted: '{album_name}', library: '{lib_album}', sim: {album_sim:.2f})")
-                                    continue  # Different album — allow it
+                                if _albums_likely_match(album_name, lib_album):
+                                    logger.info(f"[AllowDup] Album match — skipping: '{original_title}' (wanted: '{album_name}', library: '{lib_album}')")
                                 else:
-                                    logger.info(f"[AllowDup] Same album — skipping: '{original_title}' (wanted: '{album_name}', library: '{lib_album}', sim: {album_sim:.2f})")
+                                    logger.info(f"[AllowDup] Different album — allowing: '{original_title}' (wanted: '{album_name}', library: '{lib_album}')")
+                                    continue  # Different album — allow it
                             else:
                                 # No album info in library — can't compare, allow it
                                 logger.info(f"[AllowDup] No album info in library — allowing: '{original_title}'")
