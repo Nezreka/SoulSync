@@ -746,6 +746,15 @@ retag_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="RetagWork
 # Shared task/batch state now lives in core.runtime_state.
 missing_download_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="MissingTrackWorker")
 
+# Parallelizes the per-file metadata-lookup + post-processing in
+# /api/import/singles/process. Single-file work is dominated by
+# Spotify/iTunes/Deezer search round-trips so 3 workers give a near-
+# linear speedup on a typical user's network without saturating any
+# one provider's rate limit. Each file is independent (unique
+# context_key, separate disk path), and the downstream pipeline
+# already serializes DB access through its own SQLite locks.
+import_singles_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="ImportSingleWorker")
+
 # Automatic Wishlist / Watchlist Processing Flags
 # Processing state flags (guards/recovery - timers are now managed by AutomationEngine)
 wishlist_auto_processing = False
@@ -2897,6 +2906,7 @@ def _shutdown_runtime_components():
         (retag_executor, "retag executor"),
         (sync_executor, "sync executor"),
         (missing_download_executor, "missing download executor"),
+        (import_singles_executor, "import singles executor"),
         (tidal_discovery_executor, "tidal discovery executor"),
         (deezer_discovery_executor, "deezer discovery executor"),
         (spotify_public_discovery_executor, "spotify public discovery executor"),
@@ -2931,9 +2941,25 @@ def _atexit_shutdown():
     except Exception:
         pass
 
+
+def _atexit_silence_shutdown_logger_errors():
+    # Pytest tears down log file handles before atexit fires, so every
+    # "Shutting down ..." line a worker emits while stopping crashes
+    # Python's logger with "I/O operation on closed file" and floods
+    # CI stderr. The messages themselves are best-effort debug
+    # breadcrumbs, not data we need to preserve at process exit.
+    # Registered last so atexit's LIFO order makes this run FIRST,
+    # ahead of cleanup_monitor / _atexit_shutdown / _atexit_save_history.
+    import logging as _logging
+    _logging.raiseExceptions = False
+
 atexit.register(_atexit_save_history)
 atexit.register(_atexit_shutdown)
 atexit.register(cleanup_monitor)
+# atexit runs in LIFO order — register the silencer LAST so it runs
+# FIRST, before any other shutdown handler emits its "Shutting down"
+# log line into a stream pytest already closed.
+atexit.register(_atexit_silence_shutdown_logger_errors)
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
@@ -34101,9 +34127,80 @@ def import_search_tracks():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _process_single_import_file(file_info):
+    """Worker function: validate, resolve metadata, post-process one file.
+
+    Returns ``("ok", title)`` on success, ``("error", message)`` on
+    failure, or ``("skip", reason)`` for files that need to be reported
+    but didn't actually run the pipeline. The caller aggregates these.
+    Designed to be safe to run concurrently from a ThreadPoolExecutor
+    — each file gets its own UUID context_key, downstream DB writes
+    serialize via SQLite's busy_timeout, and file-system ops touch
+    distinct destination paths.
+    """
+    file_path = file_info.get('full_path', '')
+    if not os.path.isfile(file_path):
+        return ("error", f"File not found: {file_info.get('filename', '?')}")
+
+    title = file_info.get('title', '')
+    artist = file_info.get('artist', '')
+    manual_match = file_info.get('manual_match')
+    if manual_match is not None and not isinstance(manual_match, dict):
+        manual_match = None
+
+    manual_match_source = ''
+    manual_match_id = None
+    if manual_match:
+        manual_match_source = str(manual_match.get('source') or '').strip().lower()
+        manual_match_id = str(manual_match.get('id') or '').strip()
+        if not manual_match_id or not manual_match_source:
+            return ("error", f"Malformed manual match for file: {file_info.get('filename', '?')}")
+
+    if not title and not manual_match:
+        parsed = parse_filename_metadata(file_info.get('filename', ''))
+        title = parsed.get('title') or os.path.splitext(file_info.get('filename', 'Unknown'))[0]
+        if not artist:
+            artist = parsed.get('artist', '')
+
+    from core.imports.resolution import get_single_track_import_context
+
+    try:
+        resolved = get_single_track_import_context(
+            title,
+            artist,
+            override_id=manual_match_id,
+            override_source=manual_match_source,
+        )
+        context = normalize_import_context(resolved['context'])
+        artist_data = get_import_context_artist(context)
+        track_data = get_import_track_info(context)
+        final_title = track_data.get('name', title)
+        final_artist = artist_data.get('name', artist)
+
+        context_key = f"import_single_{uuid.uuid4().hex[:8]}"
+        _post_process_matched_download(context_key, context, file_path)
+        logger.info(
+            "Import single processed: %s by %s (source=%s)",
+            final_title,
+            final_artist,
+            resolved.get('source') or 'local',
+        )
+        return ("ok", final_title)
+    except Exception as proc_err:
+        err_msg = f"{title}: {str(proc_err)}"
+        logger.error(f"Import single processing error: {err_msg}")
+        return ("error", err_msg)
+
+
 @app.route('/api/import/singles/process', methods=['POST'])
 def import_singles_process():
-    """Process individual staging files as singles through the post-processing pipeline."""
+    """Process individual staging files as singles through the post-processing pipeline.
+
+    Files are processed in parallel through the
+    ``import_singles_executor`` (3 workers). Per-file work is dominated
+    by metadata search round-trips, so parallelizing gives a near-
+    linear speedup without saturating any one provider's rate limits.
+    """
     try:
         data = request.get_json()
         files = data.get('files', [])
@@ -34114,63 +34211,30 @@ def import_singles_process():
         processed = 0
         errors = []
 
-        for file_info in files:
-            file_path = file_info.get('full_path', '')
-            if not os.path.isfile(file_path):
-                errors.append(f"File not found: {file_info.get('filename', '?')}")
-                continue
+        # Submit all files at once so the executor pulls 3 at a time.
+        # as_completed yields in finish order; we don't need ordering
+        # because the caller just wants a count + error list.
+        future_to_filename = {
+            import_singles_executor.submit(_process_single_import_file, file_info):
+                file_info.get('filename', '?')
+            for file_info in files
+        }
 
-            title = file_info.get('title', '')
-            artist = file_info.get('artist', '')
-            manual_match = file_info.get('manual_match')
-            if manual_match is not None and not isinstance(manual_match, dict):
-                manual_match = None
-
-            manual_match_source = ''
-            manual_match_id = None
-            if manual_match:
-                manual_match_source = str(manual_match.get('source') or '').strip().lower()
-                manual_match_id = str(manual_match.get('id') or '').strip()
-                if not manual_match_id or not manual_match_source:
-                    errors.append(f"Malformed manual match for file: {file_info.get('filename', '?')}")
-                    continue
-
-            # Fallback to filename parsing if no metadata
-            if not title and not manual_match:
-                parsed = parse_filename_metadata(file_info.get('filename', ''))
-                title = parsed.get('title') or os.path.splitext(file_info.get('filename', 'Unknown'))[0]
-                if not artist:
-                    artist = parsed.get('artist', '')
-
-            from core.imports.resolution import get_single_track_import_context
-
-            resolved = get_single_track_import_context(
-                title,
-                artist,
-                override_id=manual_match_id,
-                override_source=manual_match_source,
-            )
-            context = normalize_import_context(resolved['context'])
-            artist_data = get_import_context_artist(context)
-            track_data = get_import_track_info(context)
-            final_title = track_data.get('name', title)
-            final_artist = artist_data.get('name', artist)
-
-            context_key = f"import_single_{uuid.uuid4().hex[:8]}"
-
+        for future in as_completed(future_to_filename):
             try:
-                _post_process_matched_download(context_key, context, file_path)
-                processed += 1
-                logger.info(
-                    "Import single processed: %s by %s (source=%s)",
-                    final_title,
-                    final_artist,
-                    resolved.get('source') or 'local',
+                outcome, payload = future.result()
+            except Exception as worker_err:
+                # Catch-all for anything the worker itself didn't catch
+                # (shouldn't happen — _process_single_import_file wraps
+                # its own pipeline call — but defensive).
+                errors.append(
+                    f"{future_to_filename[future]}: worker crashed: {worker_err}"
                 )
-            except Exception as proc_err:
-                err_msg = f"{title}: {str(proc_err)}"
-                errors.append(err_msg)
-                logger.error(f"Import single processing error: {err_msg}")
+                continue
+            if outcome == "ok":
+                processed += 1
+            else:
+                errors.append(payload)
 
         add_activity_item("", "Singles Imported", f"{processed}/{len(files)} tracks processed", "Now")
 
