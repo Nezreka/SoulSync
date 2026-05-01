@@ -309,7 +309,7 @@ def get_spotify_disconnect_source(configured_source: Optional[str] = None) -> st
 
 def get_metadata_source_label(source: str) -> str:
     """Return a human-readable label for a metadata source."""
-    return METADATA_SOURCE_LABELS.get(source, source.replace("_", " ").title())
+    return METADATA_SOURCE_LABELS.get(source, "Unmapped")
 
 
 def get_source_priority(preferred_source: str):

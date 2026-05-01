@@ -22,5 +22,5 @@ def test_metadata_source_label_maps_known_sources():
     assert registry.get_metadata_source_label("hydrabase") == "Hydrabase"
 
 
-def test_metadata_source_label_falls_back_to_title_case():
-    assert registry.get_metadata_source_label("apple_music") == "Apple Music"
+def test_metadata_source_label_falls_back_to_unmapped():
+    assert registry.get_metadata_source_label("apple_music") == "Unmapped"
