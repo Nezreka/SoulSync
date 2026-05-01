@@ -2941,9 +2941,25 @@ def _atexit_shutdown():
     except Exception:
         pass
 
+
+def _atexit_silence_shutdown_logger_errors():
+    # Pytest tears down log file handles before atexit fires, so every
+    # "Shutting down ..." line a worker emits while stopping crashes
+    # Python's logger with "I/O operation on closed file" and floods
+    # CI stderr. The messages themselves are best-effort debug
+    # breadcrumbs, not data we need to preserve at process exit.
+    # Registered last so atexit's LIFO order makes this run FIRST,
+    # ahead of cleanup_monitor / _atexit_shutdown / _atexit_save_history.
+    import logging as _logging
+    _logging.raiseExceptions = False
+
 atexit.register(_atexit_save_history)
 atexit.register(_atexit_shutdown)
 atexit.register(cleanup_monitor)
+# atexit runs in LIFO order — register the silencer LAST so it runs
+# FIRST, before any other shutdown handler emits its "Shutting down"
+# log line into a stream pytest already closed.
+atexit.register(_atexit_silence_shutdown_logger_errors)
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
