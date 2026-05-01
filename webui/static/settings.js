@@ -2414,8 +2414,8 @@ async function saveSettings(quiet = false) {
 
     const metadataSourceSelect = document.getElementById('metadata-fallback-source');
     let metadataSource = metadataSourceSelect?.value || 'itunes';
-    const spotifyDisconnected = _lastServiceStatus?.spotify?.connected === false;
-    if (metadataSource === 'spotify' && spotifyDisconnected) {
+    const spotifySessionActive = _lastServiceStatus?.spotify?.authenticated === true;
+    if (metadataSource === 'spotify' && !spotifySessionActive) {
         metadataSource = 'deezer';
         if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
         if (!quiet) {
