@@ -50,6 +50,95 @@ function handleManualSaveClick() {
     saveSettings(false);
 }
 
+function syncMetadataSourceSelection(source) {
+    const select = document.getElementById('metadata-fallback-source');
+    if (!select || !source) return;
+    const option = select.querySelector(`option[value="${source}"]`);
+    if (option) select.value = source;
+    select.dataset.lastValidSource = source;
+}
+
+function _isMetadataSourceSelectable(source) {
+    if (source === 'spotify') {
+        return _lastServiceStatus?.spotify?.authenticated === true;
+    }
+    if (source === 'discogs') {
+        const token = document.getElementById('discogs-token');
+        return !!token?.value?.trim();
+    }
+    return true;
+}
+
+function _metadataSourceFallback(source) {
+    if (source === 'spotify') return 'deezer';
+    if (source === 'discogs') return 'itunes';
+    return 'itunes';
+}
+
+function focusServiceSettingsSection(service, message) {
+    const card = document.querySelector(`#settings-page .stg-service[data-service="${service}"]`);
+    if (!card) return;
+
+    const header = card.querySelector('.stg-service-header');
+    if (!card.classList.contains('expanded') && header) {
+        toggleStgService(header);
+    }
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    const firstControl = card.querySelector('input, button');
+    if (firstControl) {
+        firstControl.focus({ preventScroll: true });
+    }
+
+    if (message) {
+        showToast(message, 'warning');
+    }
+}
+
+function sanitizeMetadataSourceSelection({ quiet = true } = {}) {
+    const select = document.getElementById('metadata-fallback-source');
+    if (!select) return false;
+
+    const selectedSource = select.value || 'itunes';
+    if (_isMetadataSourceSelectable(selectedSource)) {
+        select.dataset.lastValidSource = selectedSource;
+        return false;
+    }
+
+    const lastValid = select.dataset.lastValidSource;
+    const fallbackSource = lastValid && lastValid !== selectedSource && _isMetadataSourceSelectable(lastValid)
+        ? lastValid
+        : _metadataSourceFallback(selectedSource);
+
+    if (fallbackSource && fallbackSource !== selectedSource) {
+        select.value = fallbackSource;
+    }
+    select.dataset.lastValidSource = fallbackSource;
+
+    if (!quiet) {
+        const message = selectedSource === 'discogs'
+            ? 'Discogs requires a personal access token before it can be selected as the primary metadata source.'
+            : 'Spotify must be authenticated before it can be selected as the primary metadata source.';
+        focusServiceSettingsSection(selectedSource, message);
+    }
+
+    return true;
+}
+
+function handleMetadataSourceChange(event) {
+    const select = event.target;
+    if (!select || select.id !== 'metadata-fallback-source') return;
+
+    const selectedSource = select.value;
+    if (_isMetadataSourceSelectable(selectedSource)) {
+        select.dataset.lastValidSource = selectedSource;
+        return;
+    }
+
+    sanitizeMetadataSourceSelection({ quiet: false });
+}
+
 function initializeSettings() {
     // This function is called when the settings page is loaded.
     // It attaches event listeners to all interactive elements on the page.
@@ -73,6 +162,20 @@ function initializeSettings() {
         });
         settingsPage.querySelectorAll('input[type="checkbox"], select').forEach(input => {
             input.addEventListener('change', debouncedAutoSaveSettings);
+        });
+    }
+
+    const metadataSourceSelect = document.getElementById('metadata-fallback-source');
+    if (metadataSourceSelect) {
+        metadataSourceSelect.addEventListener('change', handleMetadataSourceChange);
+    }
+    const discogsTokenInput = document.getElementById('discogs-token');
+    if (discogsTokenInput) {
+        discogsTokenInput.addEventListener('input', () => {
+            if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
+                syncPrimaryMetadataSourceAvailability(_lastServiceStatus?.spotify || null);
+            }
+            sanitizeMetadataSourceSelection({ quiet: true });
         });
     }
 
@@ -102,6 +205,16 @@ function initializeSettings() {
 
     // Test connection buttons
     // Test button event listeners removed - they use onclick attributes in HTML to avoid double firing
+
+    if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
+        syncPrimaryMetadataSourceAvailability(_lastServiceStatus?.spotify || null);
+    }
+    syncSpotifySettingsAuthState(_lastServiceStatus?.spotify || null);
+    syncMetadataSourceSelection(_lastServiceStatus?.spotify?.source);
+    sanitizeMetadataSourceSelection({ quiet: true });
+    if (metadataSourceSelect) {
+        metadataSourceSelect.dataset.lastValidSource = metadataSourceSelect.value;
+    }
 }
 
 function resetFileOrganizationTemplates() {
@@ -295,8 +408,34 @@ async function applyServiceStatusGradients() {
                 else header.appendChild(spinner);
             }
         });
+        syncSpotifySettingsAuthState(_lastServiceStatus?.spotify || null);
     } catch (e) {
         console.warn('[Settings Status] Failed to apply gradients:', e);
+    }
+}
+
+function syncSpotifySettingsAuthState(statusData) {
+    if (!statusData) return;
+
+    const card = document.querySelector('#settings-page .stg-service[data-service="spotify"]');
+    if (!card) return;
+
+    const header = card.querySelector('.stg-service-header');
+    const dot = card.querySelector('.stg-service-dot');
+    if (!header && !dot) return;
+
+    const authenticated = statusData?.authenticated === true;
+    const rateLimited = !!(statusData?.rate_limited && statusData?.rate_limit);
+    const cooldown = !!(statusData?.post_ban_cooldown > 0);
+    const needsAttention = !authenticated || rateLimited || cooldown;
+
+    if (header) {
+        header.classList.toggle('status-configured', !needsAttention);
+        header.classList.toggle('status-missing', needsAttention);
+    }
+
+    if (dot) {
+        dot.style.color = needsAttention ? '#f1c40f' : '#1DB954';
     }
 }
 
@@ -2400,6 +2539,25 @@ async function saveSettings(quiet = false) {
         activeServer = 'soulsync';
     }
 
+    const metadataSourceSelect = document.getElementById('metadata-fallback-source');
+    const discogsTokenInput = document.getElementById('discogs-token');
+    const discogsTokenPresent = !!discogsTokenInput?.value?.trim();
+    let metadataSource = metadataSourceSelect?.value || 'itunes';
+    const spotifySessionActive = _lastServiceStatus?.spotify?.authenticated === true;
+    if (metadataSource === 'spotify' && !spotifySessionActive) {
+        metadataSource = 'deezer';
+        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
+        if (!quiet) {
+            showToast('Spotify is disconnected, so Deezer is used as the primary metadata source.', 'warning');
+        }
+    } else if (metadataSource === 'discogs' && !discogsTokenPresent) {
+        metadataSource = 'itunes';
+        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
+        if (!quiet) {
+            showToast('Discogs requires a personal access token before it can be selected as the primary metadata source.', 'warning');
+        }
+    }
+
     const settings = {
         active_media_server: activeServer,
         spotify: {
@@ -2472,7 +2630,7 @@ async function saveSettings(quiet = false) {
             token: document.getElementById('discogs-token').value,
         },
         metadata: {
-            fallback_source: document.getElementById('metadata-fallback-source').value || 'itunes'
+            fallback_source: metadataSource
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
@@ -3056,7 +3214,7 @@ async function authenticateSpotify() {
         // Save settings first to ensure client_id/client_secret are persisted
         await saveSettings();
         showToast('Spotify authentication started', 'success');
-        window.open('/auth/spotify', '_blank');
+        window._spotifyAuthWindow = window.open('/auth/spotify', '_blank');
     } catch (error) {
         console.error('Error authenticating Spotify:', error);
         showToast('Failed to start Spotify authentication', 'error', 'gs-connecting');
@@ -3066,8 +3224,10 @@ async function authenticateSpotify() {
 }
 
 async function disconnectSpotify() {
-    const fallbackName = currentMusicSourceName !== 'Spotify' ? currentMusicSourceName : 'the configured fallback source';
-    if (!await showConfirmDialog({ title: 'Disconnect Spotify', message: `Disconnect Spotify? The app will switch to ${fallbackName} for metadata.` })) {
+    if (!await showConfirmDialog({
+        title: 'Disconnect Spotify',
+        message: 'Disconnect Spotify? Spotify-specific actions will stop until you reauthenticate.'
+    })) {
         return;
     }
     try {
@@ -3075,7 +3235,8 @@ async function disconnectSpotify() {
         const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
         const data = await response.json();
         if (data.success) {
-            showToast(`Spotify disconnected. Now using ${fallbackName}.`, 'success');
+            showToast(data.message || 'Spotify disconnected.', 'success');
+            syncMetadataSourceSelection(data.source || 'deezer');
             // Immediately refresh status to update UI
             await fetchAndUpdateServiceStatus();
         } else {
@@ -3084,29 +3245,6 @@ async function disconnectSpotify() {
     } catch (error) {
         console.error('Error disconnecting Spotify:', error);
         showToast('Failed to disconnect Spotify', 'error');
-    } finally {
-        hideLoadingOverlay();
-    }
-}
-
-async function clearSpotifyCacheAndFallback() {
-    const fallbackName = currentMusicSourceName !== 'Spotify' ? currentMusicSourceName : 'the configured fallback source';
-    if (!await showConfirmDialog({
-        title: 'Clear Spotify Cache',
-        message: `This will clear the Spotify token cache and switch metadata to ${fallbackName}. You can re-authenticate later.`
-    })) return;
-    try {
-        showLoadingOverlay('Clearing Spotify cache...');
-        const response = await fetch('/api/spotify/disconnect', { method: 'POST' });
-        const data = await response.json();
-        if (data.success) {
-            showToast(data.message || `Switched to ${fallbackName}`, 'success');
-            await fetchAndUpdateServiceStatus();
-        } else {
-            showToast(`Failed: ${data.error}`, 'error');
-        }
-    } catch (error) {
-        showToast('Failed to clear Spotify cache', 'error');
     } finally {
         hideLoadingOverlay();
     }
@@ -3198,7 +3336,8 @@ async function disconnectSpotifyFromRateLimit() {
         const data = await response.json();
         if (data.success) {
             _spotifyRateLimitShown = false;
-            showToast(`Spotify disconnected. Now using ${currentMusicSourceName}.`, 'success');
+            showToast(data.message || 'Spotify disconnected.', 'success');
+            syncMetadataSourceSelection(data.source || 'deezer');
             await fetchAndUpdateServiceStatus();
             if (currentPage === 'discover') {
                 loadDiscoverPage();
@@ -3879,4 +4018,3 @@ function togglePathLock(pathType, btn) {
 
 
 // ===============================
-

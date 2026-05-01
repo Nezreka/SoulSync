@@ -1970,6 +1970,9 @@ function initApp() {
     initExpandedPlayer();
     initializeSyncPage();
     initializeWatchlist();
+    if (typeof initializeSpotifyAuthCompletionListener === 'function') {
+        initializeSpotifyAuthCompletionListener();
+    }
 
 
     // Initialize WebSocket connection (falls back to HTTP polling if unavailable)
@@ -2371,4 +2374,3 @@ async function loadPageData(pageId) {
 // Old updateStatusIndicator function removed - replaced by updateSidebarServiceStatus
 
 // ===============================
-

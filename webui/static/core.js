@@ -473,6 +473,16 @@ function handleServiceStatusUpdate(data) {
     // Cache for library status card
     _lastServiceStatus = data;
 
+    if (typeof syncSpotifySettingsAuthState === 'function') {
+        syncSpotifySettingsAuthState(data?.spotify || null);
+    }
+    if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
+        syncPrimaryMetadataSourceAvailability(data?.spotify || null);
+    }
+    if (typeof sanitizeMetadataSourceSelection === 'function') {
+        sanitizeMetadataSourceSelection({ quiet: true });
+    }
+
     // Same logic as fetchAndUpdateServiceStatus response handler
     updateServiceStatus('spotify', data.spotify);
     updateServiceStatus('media-server', data.media_server);
@@ -876,4 +886,3 @@ let _lastServiceStatus = null;
 let _isSoulsyncStandalone = false;  // Global flag: true when no media server (sync buttons hidden)
 
 // ===============================
-
