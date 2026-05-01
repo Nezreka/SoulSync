@@ -3194,10 +3194,15 @@ function updateServiceStatus(service, statusData) {
             currentMusicSourceName = sourceName;
         }
 
-        // Show/hide Spotify disconnect button based on connection state
+        // Keep the Spotify action buttons aligned with the actual auth session.
+        const spotifySessionActive = statusData.authenticated === true || (statusData.authenticated === undefined && statusData.source === 'spotify');
+        const authBtn = document.querySelector('button[onclick="authenticateSpotify()"]');
         const disconnectBtn = document.getElementById('spotify-disconnect-btn');
+        if (authBtn) {
+            authBtn.style.display = spotifySessionActive ? 'none' : '';
+        }
         if (disconnectBtn) {
-            disconnectBtn.style.display = statusData.source === 'spotify' ? '' : 'none';
+            disconnectBtn.style.display = spotifySessionActive ? '' : 'none';
         }
     }
 

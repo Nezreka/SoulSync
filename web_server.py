@@ -98,7 +98,9 @@ from core.metadata.cache import get_metadata_cache
 from core.metadata import registry as metadata_registry
 from core.metadata.registry import (
     clear_cached_metadata_client,
+    get_metadata_source_label,
     get_spotify_client,
+    get_spotify_disconnect_source,
     register_runtime_clients,
 )
 from core.imports.context import (
@@ -800,11 +802,11 @@ _idle_since = {}
 _IDLE_GRACE_SECONDS = 5
 
 _status_cache = {
-    'spotify': {'connected': False, 'response_time': 0, 'source': 'itunes'},
+    'spotify': {'connected': False, 'authenticated': False, 'response_time': 0, 'source': 'itunes'},
     'media_server': {'connected': False, 'response_time': 0, 'type': None},
     'soulseek': {'connected': False, 'response_time': 0},
 }
-_status_cache_timestamps = {
+_status_cache_timestamps: dict[str, float] = {
     'spotify': 0,
     'media_server': 0,
     'soulseek': 0,
@@ -3424,6 +3426,7 @@ def get_status():
             is_rate_limited = spotify_client.is_rate_limited() if spotify_client else False
             rate_limit_info = spotify_client.get_rate_limit_info() if (spotify_client and is_rate_limited) else None
             cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
+            spotify_session_active = bool(spotify_client and getattr(spotify_client, 'sp', None) is not None)
 
             # Read configured source once — no auth validation here, we do that explicitly below
             configured_source = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
@@ -3445,6 +3448,7 @@ def get_status():
 
             _status_cache['spotify'] = {
                 'connected': True,  # Always true — iTunes fallback is always available
+                'authenticated': spotify_session_active,
                 'response_time': round(spotify_response_time, 1),
                 'source': music_source,
                 'rate_limited': is_rate_limited,
@@ -4773,7 +4777,9 @@ def test_connection_endpoint():
     if success:
         current_time = time.time()
         if service == 'spotify':
+            spotify_session_active = bool(spotify_client and getattr(spotify_client, 'sp', None) is not None)
             _status_cache['spotify']['connected'] = True
+            _status_cache['spotify']['authenticated'] = spotify_session_active
             _status_cache['spotify']['source'] = _get_metadata_fallback_source()
             _status_cache_timestamps['spotify'] = current_time
             logger.info("Updated Spotify status cache after successful test")
@@ -4939,7 +4945,9 @@ def test_dashboard_connection_endpoint():
     if success:
         current_time = time.time()
         if service == 'spotify':
+            spotify_session_active = bool(spotify_client and getattr(spotify_client, 'sp', None) is not None)
             _status_cache['spotify']['connected'] = True
+            _status_cache['spotify']['authenticated'] = spotify_session_active
             _status_cache['spotify']['source'] = _get_metadata_fallback_source()
             _status_cache_timestamps['spotify'] = current_time
             logger.info("Updated Spotify status cache after successful dashboard test")
@@ -5838,7 +5846,7 @@ def spotify_callback():
 
 @app.route('/api/spotify/disconnect', methods=['POST'])
 def spotify_disconnect():
-    """Disconnect Spotify and fall back to iTunes/Apple Music"""
+    """Disconnect Spotify and keep using the active primary metadata source."""
     global spotify_client
     try:
         # Pause enrichment worker before disconnecting to prevent it from hammering API
@@ -5846,18 +5854,20 @@ def spotify_disconnect():
             spotify_enrichment_worker.pause()
         spotify_client.disconnect()
         # Immediately update status cache so UI reflects the change
-        fallback_src = _get_metadata_fallback_source()
+        active_source = get_spotify_disconnect_source()
+        source_label = get_metadata_source_label(active_source)
         _status_cache['spotify'] = {
-            'connected': True,  # Fallback source is always available
+            'connected': False,
+            'authenticated': False,
             'response_time': 0,
-            'source': fallback_src,
+            'source': active_source,
             'rate_limited': False,
-            'rate_limit': None
+            'rate_limit': None,
+            'post_ban_cooldown': None
         }
         _status_cache_timestamps['spotify'] = time.time()
-        fallback_label = 'Deezer' if fallback_src == 'deezer' else 'Discogs' if fallback_src == 'discogs' else 'iTunes'
-        add_activity_item("", "Spotify Disconnected", f"Switched to {fallback_label} metadata source", "Now")
-        return jsonify({'success': True, 'message': f'Spotify disconnected. Now using {fallback_label}.'})
+        add_activity_item("", "Spotify Disconnected", f"Using {source_label} for metadata", "Now")
+        return jsonify({'success': True, 'message': f'Spotify disconnected. Using {source_label} for metadata.', 'source': active_source, 'authenticated': False})
     except Exception as e:
         logger.error(f"Error disconnecting Spotify: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500

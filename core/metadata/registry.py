@@ -18,6 +18,13 @@ logger = get_logger("metadata.registry")
 MetadataClientFactory = Callable[[], Any]
 
 METADATA_SOURCE_PRIORITY = ("deezer", "itunes", "spotify", "discogs", "hydrabase")
+METADATA_SOURCE_LABELS = {
+    "spotify": "Spotify",
+    "itunes": "iTunes",
+    "deezer": "Deezer",
+    "discogs": "Discogs",
+    "hydrabase": "Hydrabase",
+}
 
 _UNSET = object()
 _client_cache_lock = threading.RLock()
@@ -291,6 +298,17 @@ def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] =
             return "deezer"
 
     return source
+
+
+def get_spotify_disconnect_source() -> str:
+    """Return the active metadata source after Spotify is disconnected."""
+    source = get_primary_source()
+    return "deezer" if source == "spotify" else source
+
+
+def get_metadata_source_label(source: str) -> str:
+    """Return a human-readable label for a metadata source."""
+    return METADATA_SOURCE_LABELS.get(source, source.replace("_", " ").title())
 
 
 def get_source_priority(preferred_source: str):
