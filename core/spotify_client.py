@@ -8,7 +8,7 @@ from functools import wraps
 from dataclasses import dataclass
 from utils.logging_config import get_logger
 from config.settings import config_manager
-from core.metadata_cache import get_metadata_cache
+from core.metadata.cache import get_metadata_cache
 
 logger = get_logger("spotify_client")
 

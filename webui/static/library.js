@@ -2251,15 +2251,16 @@ function _renderDiscogCard(release, index, completionData) {
     const statusClass = isOwned ? 'owned' : isPartial ? 'partial' : '';
     const statusIcon = isOwned ? '✓' : isPartial ? '◐' : '';
 
+    const albumName = release.name || release.title || '';
     return `
         <label class="discog-card ${statusClass}" data-type="${release._type}" style="animation-delay:${index * 0.03}s">
-            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
+            <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
             <div class="discog-card-art">
                 ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
                 ${statusIcon ? `<span class="discog-card-status">${statusIcon}</span>` : ''}
             </div>
             <div class="discog-card-info">
-                <div class="discog-card-title">${_esc(release.name)}</div>
+                <div class="discog-card-title">${_esc(albumName)}</div>
                 <div class="discog-card-meta">${year}${year && tracks ? ' · ' : ''}${tracks ? tracks + ' tracks' : ''}</div>
             </div>
             <div class="discog-card-check"></div>
@@ -2319,6 +2320,7 @@ async function startDiscographyDownload() {
         if (cb.closest('.discog-card').style.display !== 'none') {
             albumEntries.push({
                 id: cb.dataset.albumId,
+                name: cb.dataset.albumName || '',
                 tracks: parseInt(cb.dataset.tracks) || 0
             });
         }
@@ -2326,9 +2328,8 @@ async function startDiscographyDownload() {
     // Sort by track count descending — process Deluxe/expanded editions first
     // so their tracks get added before standard editions (which then get deduped)
     albumEntries.sort((a, b) => b.tracks - a.tracks);
-    const albumIds = albumEntries.map(e => e.id);
 
-    if (albumIds.length === 0) return;
+    if (albumEntries.length === 0) return;
 
     // Switch to progress view
     const grid = document.getElementById('discog-grid');
@@ -2379,11 +2380,26 @@ async function startDiscographyDownload() {
     // Mark all items as active
     document.querySelectorAll('.discog-progress-item').forEach(item => item.classList.add('active'));
 
+    // Per-album metadata so the backend can resolve each album through its
+    // own source — fixes albums whose IDs come from a fallback/provider-specific
+    // source (e.g. Deezer-formatted IDs surfaced via Hydrabase).
+    const sourceForBatch = (artist.source || artistsPageState.sourceOverride || '').toString().toLowerCase() || null;
+    const albumsPayload = albumEntries.map(e => ({
+        id: e.id,
+        name: e.name,
+        artist_name: artist.name,
+        source: sourceForBatch,
+    }));
+
     try {
         const response = await fetch(`/api/artist/${artist.id}/download-discography`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ album_ids: albumIds, artist_name: artist.name })
+            body: JSON.stringify({
+                albums: albumsPayload,
+                artist_name: artist.name,
+                source: sourceForBatch,
+            })
         });
 
         const reader = response.body.getReader();

@@ -1,9 +1,11 @@
 """Duplicate Track Detector Job — finds potential duplicate tracks in the library."""
 
+import os
 import re
 from collections import defaultdict
 from difflib import SequenceMatcher
 
+from core.imports.file_ops import _strip_slskd_dedup_suffix
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -106,103 +108,60 @@ class DuplicateDetectorJob(RepairJob):
 
         # Find duplicates within each bucket
         found_groups = set()  # Track IDs already in a group
-        processed = 0
+        processed_holder = {'count': 0}
 
         if context.report_progress:
             context.report_progress(phase=f'Comparing {total} tracks...', total=total)
 
+        # Pass 1 — bucket by normalized-title prefix (existing behavior).
         for _bucket_key, bucket_tracks in buckets.items():
             if context.check_stop():
                 return result
+            self._scan_bucket(
+                bucket_tracks=bucket_tracks,
+                require_metadata_match=True,
+                title_threshold=title_threshold,
+                artist_threshold=artist_threshold,
+                ignore_cross_album=ignore_cross_album,
+                found_groups=found_groups,
+                processed_holder=processed_holder,
+                total=total,
+                result=result,
+                context=context,
+            )
 
-            for i, t1 in enumerate(bucket_tracks):
-                if context.check_stop():
-                    return result
-
-                processed += 1
-                result.scanned += 1
-
-                if context.report_progress and processed % 100 == 0:
-                    context.report_progress(
-                        scanned=processed, total=total,
-                        phase=f'Comparing {processed} / {total}',
-                        log_line=f'Checking: {t1["title"]} — {t1["artist"]}',
-                        log_type='info'
-                    )
-
-                if t1['id'] in found_groups:
-                    continue
-
-                group = [t1]
-
-                for j in range(i + 1, len(bucket_tracks)):
-                    t2 = bucket_tracks[j]
-                    if t2['id'] in found_groups:
-                        continue
-
-                    # Compare titles
-                    title_sim = SequenceMatcher(None, t1['norm_title'], t2['norm_title']).ratio()
-                    if title_sim < title_threshold:
-                        continue
-
-                    # Compare artists
-                    artist_sim = SequenceMatcher(None, t1['norm_artist'], t2['norm_artist']).ratio()
-                    if artist_sim < artist_threshold:
-                        continue
-
-                    # Skip cross-album duplicates — same song on different albums is intentional
-                    if ignore_cross_album and t1['album'] and t2['album'] and t1['album'] != t2['album']:
-                        continue
-
-                    group.append(t2)
-
-                if len(group) >= 2:
-                    # Found a duplicate group
-                    for t in group:
-                        found_groups.add(t['id'])
-
-                    if context.report_progress:
-                        context.report_progress(
-                            log_line=f'Duplicate: {t1["title"]} — {len(group)} copies',
-                            log_type='skip'
-                        )
-
-                    if context.create_finding:
-                        try:
-                            # Sort group by quality (highest bitrate first)
-                            group.sort(key=lambda t: (t['bitrate'] or 0), reverse=True)
-
-                            context.create_finding(
-                                job_id=self.job_id,
-                                finding_type='duplicate_tracks',
-                                severity='info',
-                                entity_type='track',
-                                entity_id=str(group[0]['id']),
-                                file_path=group[0]['file_path'],
-                                title=f'Duplicate: {group[0]["title"]} by {group[0]["artist"]}',
-                                description=f'{len(group)} copies found with similar title/artist',
-                                details={
-                                    'tracks': [{
-                                        'id': t['id'],
-                                        'title': t['title'],
-                                        'artist': t['artist'],
-                                        'album': t['album'],
-                                        'file_path': t['file_path'],
-                                        'bitrate': t['bitrate'],
-                                        'duration': t['duration'],
-                                    } for t in group],
-                                    'count': len(group),
-                                    'album_thumb_url': group[0].get('album_thumb_url'),
-                                    'artist_thumb_url': group[0].get('artist_thumb_url'),
-                                }
-                            )
-                            result.findings_created += 1
-                        except Exception as e:
-                            logger.debug("Error creating duplicate finding: %s", e)
-                            result.errors += 1
-
-            if context.update_progress and processed % 200 == 0:
-                context.update_progress(processed, total)
+        # Pass 2 — re-bucket leftover tracks by canonical filename stem
+        # (slskd dedup suffix stripped). Catches dupes whose tag metadata
+        # disagrees because some copies were never properly tagged after
+        # download — e.g. ``Song.flac`` and ``Song_<19-digit-ts>.flac``
+        # land in the library with identical filenames sans the slskd
+        # dedup tail but get inconsistent ID3 titles from the media-server
+        # rescan. Pass-1 buckets them apart by title so they never get
+        # compared. Discord-reported scenario: 7 copies of one OST track
+        # accumulating in one folder, only 1 caught by the detector.
+        filename_buckets = self._build_filename_buckets(
+            buckets=buckets,
+            found_groups=found_groups,
+        )
+        for _fname_key, fname_tracks in filename_buckets.items():
+            if context.check_stop():
+                return result
+            # Filename match is itself strong evidence — a shared canonical
+            # stem means the files came from the same source download.
+            # Drop the metadata gates so dedup orphans get caught even
+            # when their tag titles disagree.
+            self._scan_bucket(
+                bucket_tracks=fname_tracks,
+                require_metadata_match=False,
+                title_threshold=title_threshold,
+                artist_threshold=artist_threshold,
+                ignore_cross_album=ignore_cross_album,
+                found_groups=found_groups,
+                processed_holder=processed_holder,
+                total=total,
+                result=result,
+                context=context,
+            )
 
         if context.update_progress:
             context.update_progress(total, total)
@@ -210,6 +169,164 @@ class DuplicateDetectorJob(RepairJob):
         logger.info("Duplicate scan: %d tracks checked, %d duplicate groups found",
                      result.scanned, result.findings_created)
         return result
+
+    def _scan_bucket(
+        self,
+        *,
+        bucket_tracks,
+        require_metadata_match,
+        title_threshold,
+        artist_threshold,
+        ignore_cross_album,
+        found_groups,
+        processed_holder,
+        total,
+        result,
+        context,
+    ) -> None:
+        """Compare every pair within a bucket; emit duplicate groups.
+
+        ``require_metadata_match`` gates the title / artist similarity
+        thresholds and the cross-album guard. Pass ``False`` for buckets
+        whose grouping is already strong evidence (e.g. shared canonical
+        filename) so that dedup orphans with broken / missing tags still
+        get caught.
+        """
+        for i, t1 in enumerate(bucket_tracks):
+            if context.check_stop():
+                return
+
+            processed_holder['count'] += 1
+            result.scanned += 1
+            processed = processed_holder['count']
+
+            if context.report_progress and processed % 100 == 0:
+                context.report_progress(
+                    scanned=processed, total=total,
+                    phase=f'Comparing {processed} / {total}',
+                    log_line=f'Checking: {t1["title"]} — {t1["artist"]}',
+                    log_type='info'
+                )
+
+            if t1['id'] in found_groups:
+                continue
+
+            group = [t1]
+
+            for j in range(i + 1, len(bucket_tracks)):
+                t2 = bucket_tracks[j]
+                if t2['id'] in found_groups:
+                    continue
+
+                if require_metadata_match:
+                    title_sim = SequenceMatcher(None, t1['norm_title'], t2['norm_title']).ratio()
+                    if title_sim < title_threshold:
+                        continue
+                    artist_sim = SequenceMatcher(None, t1['norm_artist'], t2['norm_artist']).ratio()
+                    if artist_sim < artist_threshold:
+                        continue
+                    if ignore_cross_album and t1['album'] and t2['album'] and t1['album'] != t2['album']:
+                        continue
+                else:
+                    # Filename-bucket pass: filename agreement is strong but
+                    # not infallible — two different songs that happen to
+                    # share a canonical filename (``Yellow.mp3`` by Coldplay
+                    # vs by Bob's Album) would get grouped without a sanity
+                    # check. Require duration agreement (within 3s) when
+                    # both rows have it; same source download = identical
+                    # duration. If either side is missing duration data,
+                    # fall back to a relaxed artist similarity check so we
+                    # don't blindly group strangers.
+                    if t1['duration'] and t2['duration']:
+                        if abs(t1['duration'] - t2['duration']) > 3.0:
+                            continue
+                    elif t1['norm_artist'] and t2['norm_artist']:
+                        artist_sim = SequenceMatcher(None, t1['norm_artist'], t2['norm_artist']).ratio()
+                        if artist_sim < 0.6:
+                            continue
+                    # else: both durations missing AND at least one artist
+                    # is blank — too little signal, skip to avoid false
+                    # positives.
+                    elif not t1['norm_artist'] or not t2['norm_artist']:
+                        continue
+
+                if _is_same_physical_file(
+                    t1['file_path'], t2['file_path'],
+                    t1['duration'], t2['duration'],
+                ):
+                    continue
+
+                group.append(t2)
+
+            if len(group) >= 2:
+                for t in group:
+                    found_groups.add(t['id'])
+
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=f'Duplicate: {t1["title"]} — {len(group)} copies',
+                        log_type='skip'
+                    )
+
+                if context.create_finding:
+                    try:
+                        group.sort(key=lambda t: (t['bitrate'] or 0), reverse=True)
+                        context.create_finding(
+                            job_id=self.job_id,
+                            finding_type='duplicate_tracks',
+                            severity='info',
+                            entity_type='track',
+                            entity_id=str(group[0]['id']),
+                            file_path=group[0]['file_path'],
+                            title=f'Duplicate: {group[0]["title"]} by {group[0]["artist"]}',
+                            description=f'{len(group)} copies found with similar title/artist',
+                            details={
+                                'tracks': [{
+                                    'id': t['id'],
+                                    'title': t['title'],
+                                    'artist': t['artist'],
+                                    'album': t['album'],
+                                    'file_path': t['file_path'],
+                                    'bitrate': t['bitrate'],
+                                    'duration': t['duration'],
+                                } for t in group],
+                                'count': len(group),
+                                'album_thumb_url': group[0].get('album_thumb_url'),
+                                'artist_thumb_url': group[0].get('artist_thumb_url'),
+                            }
+                        )
+                        result.findings_created += 1
+                    except Exception as e:
+                        logger.debug("Error creating duplicate finding: %s", e)
+                        result.errors += 1
+
+        if context.update_progress and processed_holder['count'] % 200 == 0:
+            context.update_progress(processed_holder['count'], total)
+
+    def _build_filename_buckets(self, *, buckets, found_groups):
+        """Re-bucket all tracks by canonical filename stem.
+
+        The slskd dedup suffix (``_<19+ digit timestamp>``) is stripped so
+        ``Song.flac`` and ``Song_639122324339578022.flac`` collapse to the
+        same key. Singleton buckets (only one track) are dropped — they
+        carry no comparison value.
+        """
+        filename_buckets = defaultdict(list)
+        for bucket_tracks in buckets.values():
+            for track in bucket_tracks:
+                if track['id'] in found_groups:
+                    continue
+                fp = track.get('file_path') or ''
+                if not fp:
+                    continue
+                basename = os.path.basename(str(fp).replace('\\', '/'))
+                stem, ext = os.path.splitext(basename)
+                if not stem:
+                    continue
+                canonical = _strip_slskd_dedup_suffix(stem)
+                key = (canonical.lower(), ext.lower())
+                filename_buckets[key].append(track)
+        return {k: v for k, v in filename_buckets.items() if len(v) >= 2}
 
     def _get_settings(self, context: JobContext) -> dict:
         if not context.config_manager:
@@ -229,3 +346,43 @@ def _normalize(text: str) -> str:
     t = text.lower()
     t = re.sub(r'[^a-z0-9() ]', '', t)
     return t.strip()
+
+
+def _is_same_physical_file(p1, p2, dur1, dur2) -> bool:
+    """Detect when two DB rows point at the same file mounted at different paths.
+
+    When a user binds the same host music directory into both SoulSync
+    (e.g. ``/app/Transfer``) and a media server like Plex (e.g.
+    ``/media/Music``), the SoulSync scan and the media-server library
+    sync each create a track row pointing at the same physical file
+    via different mount paths. The two rows then look like a fuzzy-
+    match duplicate to this job.
+
+    Returns True when:
+    - Both paths share the last 3 segments (filename + album + artist
+      folder), so they really are the same release on disk;
+    - The leading mount-root segments differ, ruling out the case
+      where one row is just a re-scan of the other path; and
+    - When both rows carry a duration, the durations agree within 1
+      second (defensive — different files at parallel paths would
+      almost always disagree on duration even slightly).
+    """
+    if not p1 or not p2:
+        return False
+    norm1 = str(p1).replace('\\', '/').rstrip('/')
+    norm2 = str(p2).replace('\\', '/').rstrip('/')
+    parts1 = [x for x in norm1.split('/') if x]
+    parts2 = [x for x in norm2.split('/') if x]
+    if len(parts1) < 3 or len(parts2) < 3:
+        return False
+    tail1 = [s.lower() for s in parts1[-3:]]
+    tail2 = [s.lower() for s in parts2[-3:]]
+    if tail1 != tail2:
+        return False
+    # Confirm mount roots actually differ, otherwise we'd skip
+    # legitimate duplicates that happen to share the trailing path.
+    if parts1[:-3] == parts2[:-3]:
+        return False
+    if dur1 and dur2 and abs(dur1 - dur2) > 1.0:
+        return False
+    return True

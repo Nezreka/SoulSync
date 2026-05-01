@@ -457,12 +457,25 @@ class DownloadOrchestrator:
             True if successful
         """
         results = []
-        for client in [self.soulseek, self.youtube, self.tidal, self.qobuz, self.hifi, self.deezer_dl, self.lidarr]:
-            if client:
-                try:
-                    results.append(await client.clear_all_completed_downloads())
-                except Exception:
-                    pass
+        for name, client in [
+            ("soulseek", self.soulseek),
+            ("youtube", self.youtube),
+            ("tidal", self.tidal),
+            ("qobuz", self.qobuz),
+            ("hifi", self.hifi),
+            ("deezer_dl", self.deezer_dl),
+            ("lidarr", self.lidarr),
+        ]:
+            if not client:
+                continue
+            if hasattr(client, "is_configured") and not client.is_configured():
+                logger.debug("Skipping %s clear_all_completed_downloads (not configured)", name)
+                continue
+            try:
+                results.append(await client.clear_all_completed_downloads())
+            except Exception as exc:
+                logger.warning("%s clear_all_completed_downloads failed: %s", name, exc)
+                results.append(False)
 
         return all(results) if results else True
 

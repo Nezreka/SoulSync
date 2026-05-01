@@ -723,6 +723,17 @@ class MusicDatabase:
             except Exception:
                 pass
 
+            # HiFi API instances table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS hifi_instances (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT NOT NULL UNIQUE,
+                    priority INTEGER NOT NULL DEFAULT 0,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             conn.commit()
             logger.info("Database initialized successfully")
 
@@ -4933,15 +4944,29 @@ class MusicDatabase:
                 plex_original = getattr(track_obj, 'originalTitle', None)
                 if plex_original and plex_original.strip():
                     track_artist = plex_original.strip()
-                # Jellyfin/Emby: ArtistItems[0] is the track artist, may differ from album artist
+                # Jellyfin/Emby: store ALL ArtistItems, not just [0]. A track
+                # like "Super Single" by Artist1 feat. Artist2 has both names in
+                # ArtistItems; if we kept only the first, completion checks for
+                # Artist2's discography (where the same track also appears as a
+                # single) would never find this row in the library. Joining with
+                # "; " matches Jellyfin's own UI convention and lets the search
+                # path treat each name as a separate artist credit.
                 if not track_artist and hasattr(track_obj, '_data'):
                     raw = getattr(track_obj, '_data', {}) or {}
                     artist_items = raw.get('ArtistItems', [])
                     if artist_items:
-                        jf_track_artist = artist_items[0].get('Name', '')
+                        jf_track_artist_names = [
+                            a.get('Name', '') for a in artist_items if a.get('Name')
+                        ]
+                        jf_track_artist = '; '.join(jf_track_artist_names)
                         album_artists = raw.get('AlbumArtists', [])
                         jf_album_artist = album_artists[0].get('Name', '') if album_artists else ''
-                        if jf_track_artist and jf_track_artist != jf_album_artist:
+                        # Store when the track has multiple artists OR when the
+                        # single-artist credit differs from the album artist.
+                        if jf_track_artist and (
+                            len(jf_track_artist_names) > 1
+                            or jf_track_artist != jf_album_artist
+                        ):
                             track_artist = jf_track_artist
                 # Navidrome/Subsonic: artist attribute is per-track
                 if not track_artist and hasattr(track_obj, 'artist') and isinstance(getattr(track_obj, 'artist', None), str):
@@ -5346,6 +5371,12 @@ class MusicDatabase:
             track.album_title = row['album_title']
             track.album_thumb_url = row['album_thumb_url'] if 'album_thumb_url' in row.keys() else ''
             track.server_source = row['server_source'] if 'server_source' in row.keys() else ''
+            # Per-track artist (from ID3 ARTIST tag) for compilations/soundtracks where
+            # the track artist differs from the album artist. Used by
+            # _calculate_track_confidence so soundtrack tracks credited to the song's
+            # actual performer match correctly when the album sits under a different
+            # primary artist (Plex's track.originalTitle, Jellyfin's ArtistItems[0]).
+            track.track_artist = row['track_artist'] if 'track_artist' in row.keys() else None
             tracks.append(track)
         return tracks
     
@@ -5530,13 +5561,22 @@ class MusicDatabase:
                         """, params)
 
                         for row in cursor.fetchall():
+                            # DatabaseTrack is a strict dataclass — only the declared
+                            # fields go in __init__; the joined artist/album/server
+                            # values are attached afterwards just like _rows_to_tracks
+                            # does. Building it the kwarg-soup way used to raise
+                            # TypeError on every fallback row, silently swallowed by
+                            # the outer except, so this path never matched anything.
                             db_track = DatabaseTrack(
-                                id=row['id'], title=row['title'], artist_name=row['artist_name'],
-                                album_title=row['album_title'], album_id=row['album_id'],
-                                track_number=row['track_number'], duration=row['duration'],
-                                file_path=row['file_path'], bitrate=row['bitrate'],
-                                artist_id=row['artist_id'], server_source=row['server_source']
+                                id=row['id'], album_id=row['album_id'], artist_id=row['artist_id'],
+                                title=row['title'], track_number=row['track_number'],
+                                duration=row['duration'], file_path=row['file_path'],
+                                bitrate=row['bitrate'],
                             )
+                            db_track.artist_name = row['artist_name']
+                            db_track.album_title = row['album_title']
+                            db_track.server_source = row['server_source']
+                            db_track.track_artist = row['track_artist'] if 'track_artist' in row.keys() else None
                             title_sim = max(
                                 self._string_similarity(self._normalize_for_comparison(title), self._normalize_for_comparison(db_track.title)),
                                 self._string_similarity(self._clean_track_title_for_comparison(title), self._clean_track_title_for_comparison(db_track.title))
@@ -6256,6 +6296,39 @@ class MusicDatabase:
             # Direct similarity with Unicode normalization
             title_similarity = self._string_similarity(search_title_norm, db_title_norm)
             artist_similarity = self._string_similarity(search_artist_norm, db_artist_norm)
+
+            # Soundtracks/compilations: the album-level artist (artists.name via JOIN)
+            # often differs from the per-track artist (e.g. Vaiana OST is filed under
+            # Lin-Manuel Miranda but "Where You Are" is performed by Christopher
+            # Jackson). Score against tracks.track_artist too and take the better
+            # match so playlist sync can find these.
+            #
+            # Featured artists: tracks with multiple credits ("Artist1, Artist2",
+            # "Artist1 feat. Artist2", "Artist1 & Artist2") split on common
+            # delimiters and score each piece independently. Without this, a
+            # discography completion check for Artist2 would miss a track stored
+            # in the library under Artist1's album with a "feat. Artist2" credit.
+            db_track_artist = getattr(db_track, 'track_artist', None)
+            if db_track_artist:
+                db_track_artist_norm = self._normalize_for_comparison(db_track_artist)
+                # Whole-string similarity first as the floor.
+                track_artist_sim = self._string_similarity(search_artist_norm, db_track_artist_norm)
+                # Then split on multi-artist delimiters and score each piece —
+                # Spotify's "feat.", "ft.", commas, semicolons, ampersands, and
+                # "x" between names all show up here in real-world tags.
+                pieces = re.split(
+                    r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*',
+                    db_track_artist_norm,
+                    flags=re.IGNORECASE,
+                )
+                for piece in pieces:
+                    piece = piece.strip()
+                    if not piece:
+                        continue
+                    piece_sim = self._string_similarity(search_artist_norm, piece)
+                    if piece_sim > track_artist_sim:
+                        track_artist_sim = piece_sim
+                artist_similarity = max(artist_similarity, track_artist_sim)
             
             # Also try with cleaned versions (removing parentheses, brackets, etc.)
             clean_search_title = self._clean_track_title_for_comparison(search_title)
@@ -6739,11 +6812,20 @@ class MusicDatabase:
 
     # Wishlist management methods
     
-    def add_to_wishlist(self, spotify_track_data: Dict[str, Any], failure_reason: str = "Download failed",
-                       source_type: str = "unknown", source_info: Dict[str, Any] = None,
-                       profile_id: int = 1) -> bool:
+    def add_to_wishlist(
+        self,
+        spotify_track_data: Dict[str, Any] = None,
+        failure_reason: str = "Download failed",
+        source_type: str = "unknown",
+        source_info: Dict[str, Any] = None,
+        profile_id: int = 1,
+        track_data: Dict[str, Any] = None,
+    ) -> bool:
         """Add a failed track to the wishlist for retry"""
         try:
+            if track_data is not None and spotify_track_data is None:
+                spotify_track_data = track_data
+
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
@@ -11593,6 +11675,86 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting issue counts: {e}")
             return {'open': 0, 'in_progress': 0, 'resolved': 0, 'dismissed': 0, 'total': 0}
+
+    # ===================== HiFi Instances =====================
+
+    def get_hifi_instances(self) -> List[Dict[str, Any]]:
+        """Get all enabled HiFi instances ordered by priority."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT url, priority, enabled FROM hifi_instances WHERE enabled = 1 ORDER BY priority ASC, id ASC")
+        return [dict(row) for row in cursor.fetchall()]
+
+    def get_all_hifi_instances(self) -> List[Dict[str, Any]]:
+        """Get all HiFi instances (including disabled) ordered by priority."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT url, priority, enabled FROM hifi_instances ORDER BY priority ASC, id ASC")
+        return [dict(row) for row in cursor.fetchall()]
+
+    def add_hifi_instance(self, url: str, priority: int = 0) -> bool:
+        """Add a new HiFi instance."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO hifi_instances (url, priority, enabled) VALUES (?, ?, 1)",
+            (url, priority)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def remove_hifi_instance(self, url: str) -> bool:
+        """Remove a HiFi instance."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM hifi_instances WHERE url = ?", (url,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def toggle_hifi_instance(self, url: str, enabled: bool) -> bool:
+        """Enable or disable a HiFi instance."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE hifi_instances SET enabled = ? WHERE url = ?", (1 if enabled else 0, url))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def reorder_hifi_instances(self, urls: List[str]) -> bool:
+        """Update priorities based on the given URL order.
+        Returns False if any URL does not exist in the database.
+        """
+        if not urls:
+            return True
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        placeholders = ",".join("?" for _ in urls)
+        cursor.execute(
+            f"SELECT url FROM hifi_instances WHERE url IN ({placeholders})",
+            urls
+        )
+        existing = {row["url"] for row in cursor.fetchall()}
+        missing = [u for u in urls if u not in existing]
+        if missing:
+            return False
+        for i, url in enumerate(urls):
+            cursor.execute("UPDATE hifi_instances SET priority = ? WHERE url = ?", (i, url))
+        conn.commit()
+        return True
+
+    def seed_hifi_instances(self, default_urls: List[str]) -> None:
+        """Insert default instances if the table is empty."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as cnt FROM hifi_instances")
+        count = cursor.fetchone()['cnt']
+        if count == 0:
+            for i, url in enumerate(default_urls):
+                cursor.execute(
+                    "INSERT OR IGNORE INTO hifi_instances (url, priority, enabled) VALUES (?, ?, 1)",
+                    (url, i)
+                )
+            conn.commit()
+            logger.info(f"Seeded {len(default_urls)} default HiFi instances")
 
 # Thread-safe singleton pattern for database access
 _database_instances: Dict[int, MusicDatabase] = {}  # Thread ID -> Database instance

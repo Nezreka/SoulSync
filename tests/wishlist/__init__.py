@@ -1,0 +1,1 @@
+"""Wishlist resolver tests."""

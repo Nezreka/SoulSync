@@ -6,6 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
     <title>SoulSync - Music Sync & Manager</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png', v=static_v) }}">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json', v=static_v) }}">
+    <meta name="theme-color" content="#1db954">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa-icon-192.png', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
@@ -270,7 +273,7 @@
 
             <!-- Version Section -->
             <div class="version-section">
-                <button class="version-button" onclick="showVersionInfo()">v2.4.0</button>
+                <button class="version-button" onclick="showVersionInfo()">v2.4.1</button>
             </div>
 
             <!-- Status Section -->
@@ -871,7 +874,12 @@
                             <button class="sync-tab-button" data-tab="youtube">
                                 <span class="tab-icon youtube-icon"></span> YouTube
                             </button>
-                            <button class="sync-tab-button" data-tab="beatport">
+                            <!-- Beatport tab hidden: Beatport added Cloudflare Turnstile to all
+                                 public pages and locked their official OAuth API behind partner
+                                 registration. No working server-side scrape or auth path right now.
+                                 Tab content + backend endpoints are kept intact for fast revival
+                                 once a workaround is found. -->
+                            <button class="sync-tab-button" data-tab="beatport" style="display: none;">
                                 <span class="tab-icon beatport-icon"></span> Beatport
                             </button>
                             <button class="sync-tab-button" data-tab="import-file">
@@ -3690,7 +3698,7 @@
                                 <div class="api-service-frame">
                                     <h4 class="service-title" style="color: #e8e8e8;">Metadata Source</h4>
                                     <div class="form-group">
-                                        <label>Primary Source:</label>
+                                        <label>Primary metadata source:</label>
                                         <select id="metadata-fallback-source">
                                             <option value="spotify">Spotify</option>
                                             <option value="itunes">iTunes / Apple Music</option>
@@ -3699,7 +3707,7 @@
                                         </select>
                                     </div>
                                     <div class="callback-info">
-                                        <div class="callback-help">The primary source for artist, album, and track metadata. Spotify requires authentication below. Discogs requires a personal token.</div>
+                                        <div class="callback-help">Choose the primary source for artist, album, and track metadata. Spotify can only be selected while an active Spotify session exists. Discogs requires a personal token.</div>
                                     </div>
                                 </div>
 
@@ -3738,10 +3746,6 @@
                                             <button class="auth-button disconnect-button" id="spotify-disconnect-btn"
                                                 onclick="disconnectSpotify()" style="display: none;">🔌
                                                 Disconnect</button>
-                                            <button class="auth-button disconnect-button"
-                                                onclick="clearSpotifyCacheAndFallback()"
-                                                title="Clear Spotify token cache and switch to your configured fallback metadata source">🗑️
-                                                Clear Cache &amp; Use Fallback</button>
                                         </div>
                                     </div>
                                 </div>
@@ -4619,8 +4623,13 @@
                                     </div>
                                     <div class="form-group">
                                         <label>API Instances:</label>
+                                        <div id="hifi-instances-list" style="margin-bottom: 8px;"></div>
+                                        <div style="display:flex;gap:8px;margin-bottom:8px;">
+                                            <input type="url" id="hifi-new-instance" class="form-input" placeholder="https://example.com" style="flex:1;">
+                                            <button class="test-button" onclick="addHiFiInstance()">Add</button>
+                                        </div>
                                         <button class="test-button" onclick="checkHiFiInstances()" id="hifi-instances-check-btn" style="margin-bottom: 8px;">Check All Instances</button>
-                                        <div id="hifi-instances-panel" style="display: none;"></div>
+                                        <div id="hifi-instances-status-panel" style="display: none;"></div>
                                     </div>
                                 </div>
 
@@ -5408,6 +5417,14 @@
 
                                 <div class="form-group" id="security-change-pin-section" style="display: none;">
                                     <button class="auth-button" onclick="showChangeSecurityPin()">Change PIN</button>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="security-cors-origins">Allowed WebSocket Origins:</label>
+                                    <textarea id="security-cors-origins" rows="3" placeholder="https://soulsync.example.com&#10;http://192.168.1.5:8888" style="width: 100%; font-family: monospace; font-size: 12px;"></textarea>
+                                    <div class="setting-help-text">
+                                        Origins (full URL, no trailing slash) allowed to open WebSocket connections to this instance — one per line, or comma-separated. Leave empty for same-origin only (the secure default; works for direct access and most reverse-proxy setups). Add your public domain here if you reach SoulSync via a reverse proxy or custom domain and the WebSocket fails to connect. Use <code>*</code> on its own line to allow any origin (insecure — only do this if you understand why you need it).
+                                    </div>
                                 </div>
                             </div>
 
@@ -7050,7 +7067,7 @@
     <div class="modal-overlay hidden" id="matching-modal-overlay">
         <div class="matching-modal" id="matching-modal">
             <div class="matching-modal-header">
-                <h2 id="matching-modal-title">Match Download to Spotify</h2>
+                <h2 id="matching-modal-title">Match track download to release</h2>
                 <button class="matching-modal-close" onclick="closeMatchingModal()">✕</button>
             </div>
 
@@ -7150,7 +7167,7 @@
             <!-- Header -->
             <div class="version-modal-header">
                 <h2 class="version-modal-title">What's New in SoulSync</h2>
-                <div class="version-modal-subtitle">Version 2.3 — Latest Changes</div>
+                <div class="version-modal-subtitle">Version 2.4.1 — Latest Changes</div>
             </div>
 
             <!-- Content Area with Scroll -->
@@ -7848,13 +7865,13 @@
                         <span class="rate-limit-value rate-limit-countdown" id="rate-limit-countdown">—</span>
                     </div>
                 </div>
-                <p class="rate-limit-hint">You can wait for the ban to expire (the app uses Apple Music in the meantime) or disconnect Spotify to clear the ban immediately.</p>
+                <p class="rate-limit-hint">While rate limiting is active, Spotify-specific features are unavailable. You can wait for the ban to expire or disconnect Spotify to clear it immediately.</p>
             </div>
             <div class="confirm-modal-actions rate-limit-modal-actions">
                 <button class="modal-button modal-button--secondary" onclick="closeRateLimitModal()">Dismiss</button>
                 <button class="modal-button rate-limit-disconnect-btn" onclick="disconnectSpotifyFromRateLimit()">
-                    Disconnect Spotify
-                    <span class="rate-limit-disconnect-sub">Clear ban, pause enrichment &amp; switch to fallback source</span>
+                    Disconnect
+                    <span class="rate-limit-disconnect-sub">Clear the ban and pause Spotify-specific features</span>
                 </button>
             </div>
         </div>
