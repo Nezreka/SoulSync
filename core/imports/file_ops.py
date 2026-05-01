@@ -4,14 +4,102 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
 from pathlib import Path
+from typing import Iterable, List
 
 from config.settings import config_manager
 
 logger = logging.getLogger("imports.file_ops")
+
+
+# slskd appends "_<19-digit unix-nanosecond timestamp>" to a downloaded
+# filename when the destination already contains a file with the same
+# name (concurrent downloads of the same track, partial-file retries
+# after a connection drop, cancelled-then-redownloaded files, the same
+# track surfacing in multiple synced playlists, etc.). The original
+# canonical file usually gets imported and moved into the library while
+# the timestamp-suffixed siblings sit orphaned in the downloads folder
+# forever. Match the suffix conservatively (≥ 18 digits) so genuine
+# user filenames containing trailing numbers don't get hit.
+_SLSKD_DEDUP_SUFFIX_RE = re.compile(r"_\d{18,}$")
+
+
+def _strip_slskd_dedup_suffix(stem: str) -> str:
+    """Return the canonical stem with any slskd dedup suffix removed."""
+    return _SLSKD_DEDUP_SUFFIX_RE.sub("", stem)
+
+
+def cleanup_slskd_dedup_siblings(source_path) -> List[str]:
+    """Remove orphan ``<basename>_<timestamp>.<ext>`` siblings of a just-
+    imported file from the source directory.
+
+    Call this AFTER a successful import (the canonical file has already
+    moved away) using the path the canonical file came from. Looks at
+    siblings in the same directory whose stem, with the slskd dedup
+    suffix stripped, equals the imported file's canonical stem and the
+    same extension. Deletes them.
+
+    Returns the list of deleted paths so the caller can log a summary.
+    Failures (permissions, racing reader, etc.) are swallowed
+    individually so a single locked file doesn't block the rest of the
+    cleanup.
+    """
+    source = Path(source_path)
+    parent = source.parent
+    if not parent.is_dir():
+        return []
+
+    canonical_name = source.name
+    canonical_stem, canonical_ext = os.path.splitext(canonical_name)
+    # If the imported file ITSELF already had a dedup suffix, the
+    # "canonical" name is the stripped form — every other sibling that
+    # also strips down to it is redundant.
+    canonical_stem = _strip_slskd_dedup_suffix(canonical_stem)
+
+    deleted: List[str] = []
+    try:
+        children: Iterable[Path] = list(parent.iterdir())
+    except OSError as e:
+        logger.debug(f"[Dedup Cleanup] could not list {parent}: {e}")
+        return []
+
+    for sibling in children:
+        if not sibling.is_file():
+            continue
+        # Skip the imported file itself if it's still on disk (it
+        # shouldn't be — caller invokes us after the move — but the
+        # check is cheap and keeps the function safe to call from
+        # other contexts later).
+        if sibling.name == canonical_name:
+            continue
+        sib_stem, sib_ext = os.path.splitext(sibling.name)
+        if sib_ext.lower() != canonical_ext.lower():
+            continue
+        sib_canonical_stem = _strip_slskd_dedup_suffix(sib_stem)
+        if sib_canonical_stem != canonical_stem:
+            continue
+        # Defensive: don't delete a file that doesn't actually carry
+        # the slskd dedup suffix — that would imply it's a legitimate
+        # different file the user intentionally placed there.
+        if sib_stem == sib_canonical_stem:
+            continue
+        try:
+            sibling.unlink()
+            deleted.append(str(sibling))
+        except OSError as e:
+            logger.debug(f"[Dedup Cleanup] could not remove {sibling}: {e}")
+
+    if deleted:
+        logger.info(
+            "[Dedup Cleanup] removed %d slskd dedup orphan(s) for %r",
+            len(deleted),
+            canonical_name,
+        )
+    return deleted
 
 
 def safe_move_file(src, dst):
