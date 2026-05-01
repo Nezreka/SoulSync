@@ -300,9 +300,10 @@ def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] =
     return source
 
 
-def get_spotify_disconnect_source() -> str:
+def get_spotify_disconnect_source(configured_source: Optional[str] = None) -> str:
     """Return the active metadata source after Spotify is disconnected."""
-    source = get_primary_source()
+    source = configured_source if configured_source is not None else _get_config_value("metadata.fallback_source", "deezer")
+    source = source or "deezer"
     return "deezer" if source == "spotify" else source
 
 

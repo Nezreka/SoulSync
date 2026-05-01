@@ -3107,6 +3107,24 @@ async function _forceServiceStatusRefresh() {
     }
 }
 
+let _spotifyAuthCompletionListenerInstalled = false;
+
+function initializeSpotifyAuthCompletionListener() {
+    if (_spotifyAuthCompletionListenerInstalled) return;
+    _spotifyAuthCompletionListenerInstalled = true;
+
+    window.addEventListener('message', async event => {
+        if (event.origin !== window.location.origin) return;
+        if (!event.data || event.data.type !== 'spotify-auth-complete') return;
+
+        try {
+            await _forceServiceStatusRefresh();
+        } catch (error) {
+            console.warn('Could not refresh Spotify status after auth completion:', error);
+        }
+    });
+}
+
 async function fetchAndUpdateServiceStatus() {
     if (document.hidden) return; // Skip polling when tab is not visible
     if (socketConnected) return; // WebSocket is pushing updates — skip HTTP poll
@@ -3160,6 +3178,19 @@ async function fetchAndUpdateServiceStatus() {
     }
 }
 
+function syncSpotifyMetadataSourceAvailability(statusData) {
+    const select = document.getElementById('metadata-fallback-source');
+    if (!select) return;
+    if (!statusData) return;
+
+    const spotifyOption = select.querySelector('option[value="spotify"]');
+    if (!spotifyOption) return;
+
+    const spotifyAvailable = statusData?.connected === true;
+    spotifyOption.disabled = !spotifyAvailable;
+    spotifyOption.dataset.unavailable = spotifyAvailable ? 'false' : 'true';
+}
+
 function updateServiceStatus(service, statusData) {
     const indicator = document.getElementById(`${service}-status-indicator`);
     const statusText = document.getElementById(`${service}-status-text`);
@@ -3204,6 +3235,8 @@ function updateServiceStatus(service, statusData) {
         if (disconnectBtn) {
             disconnectBtn.style.display = spotifySessionActive ? '' : 'none';
         }
+
+        syncSpotifyMetadataSourceAvailability(statusData);
     }
 
     // Update download source title on dashboard card

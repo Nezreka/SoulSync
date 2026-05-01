@@ -3426,7 +3426,7 @@ def get_status():
             is_rate_limited = spotify_client.is_rate_limited() if spotify_client else False
             rate_limit_info = spotify_client.get_rate_limit_info() if (spotify_client and is_rate_limited) else None
             cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
-            spotify_session_active = bool(spotify_client and getattr(spotify_client, 'sp', None) is not None)
+            spotify_session_active = spotify_client.is_spotify_authenticated() if spotify_client else False
 
             # Read configured source once — no auth validation here, we do that explicitly below
             configured_source = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
@@ -3447,7 +3447,7 @@ def get_status():
                     music_source = configured_source
 
             _status_cache['spotify'] = {
-                'connected': True,  # Always true — iTunes fallback is always available
+                'connected': spotify_session_active,
                 'authenticated': spotify_session_active,
                 'response_time': round(spotify_response_time, 1),
                 'source': music_source,
@@ -4777,7 +4777,7 @@ def test_connection_endpoint():
     if success:
         current_time = time.time()
         if service == 'spotify':
-            spotify_session_active = bool(spotify_client and getattr(spotify_client, 'sp', None) is not None)
+            spotify_session_active = spotify_client.is_spotify_authenticated() if spotify_client else False
             _status_cache['spotify']['connected'] = True
             _status_cache['spotify']['authenticated'] = spotify_session_active
             _status_cache['spotify']['source'] = _get_metadata_fallback_source()
@@ -4945,7 +4945,7 @@ def test_dashboard_connection_endpoint():
     if success:
         current_time = time.time()
         if service == 'spotify':
-            spotify_session_active = bool(spotify_client and getattr(spotify_client, 'sp', None) is not None)
+            spotify_session_active = spotify_client.is_spotify_authenticated() if spotify_client else False
             _status_cache['spotify']['connected'] = True
             _status_cache['spotify']['authenticated'] = spotify_session_active
             _status_cache['spotify']['source'] = _get_metadata_fallback_source()
@@ -5480,101 +5480,85 @@ def auth_spotify():
                 '127.0.0.1' not in configured_uri and 'localhost' not in configured_uri
             )
 
-            if is_remote or is_docker:
-                # Show instructions for remote/docker access
-                if uses_main_port:
-                    # redirect_uri already points to port 8008 or a custom domain —
-                    # callback will come through the main Flask app, no manual steps needed
-                    return f'''
-                    <html>
-                    <head>
-                        <style>
-                            body {{ font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }}
-                            code {{ background: #f0f0f0; padding: 4px 8px; border-radius: 3px; }}
-                            .info {{ background: #e3f2fd; border-left: 4px solid #2196F3; padding: 12px 16px; margin: 16px 0; border-radius: 4px; }}
-                        </style>
-                    </head>
-                    <body>
-                        <h1>Spotify Authentication</h1>
-                        <p>Click the link below to authenticate with Spotify:</p>
-                        <p><a href="{auth_url}" target="_blank" style="font-size: 18px; color: #1DB954;">Authenticate with Spotify</a></p>
-                        <div class="info">
-                            <strong>Redirect URI:</strong> <code>{configured_uri}</code><br>
-                            <small>After authorizing, Spotify will redirect back automatically. Make sure this URL matches your Spotify Dashboard redirect URI.</small>
-                        </div>
-                        <p>After authentication completes, you can close this window and return to SoulSync.</p>
-                    </body>
-                    </html>
-                    '''
-                else:
-                    # redirect_uri points to the standalone callback server — show manual steps AND suggest switching
-                    import re as _re
-                    _port_match = _re.search(r':(\d+)/', configured_uri)
-                    callback_server_port = _port_match.group(1) if _port_match else str(os.environ.get('SOULSYNC_SPOTIFY_CALLBACK_PORT', '8888'))
-                    return f'''
-                    <html>
-                    <head>
-                        <style>
-                            body {{ font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }}
-                            code {{ background: #f0f0f0; padding: 10px; display: block; margin: 10px 0; }}
-                            .highlight {{ background: #e8f5e9; }}
-                            .warning {{ background: #fff3e0; border-left: 4px solid #ff9800; padding: 12px 16px; margin: 16px 0; border-radius: 4px; }}
-                            .copy-btn {{
-                                background: #1DB954;
-                                color: white;
-                                border: none;
-                                padding: 8px 16px;
-                                cursor: pointer;
-                                border-radius: 4px;
-                                font-size: 14px;
-                                margin-left: 10px;
-                            }}
-                            .copy-btn:hover {{ background: #1ed760; }}
-                            .copied {{ background: #4CAF50 !important; }}
-                        </style>
-                    </head>
-                    <body>
-                        <h1>Spotify Authentication (Remote/Docker)</h1>
+            if not (is_remote or is_docker):
+                return redirect(auth_url)
 
-                        <div class="warning">
-                            <strong>Using a reverse proxy?</strong> Your redirect URI is set to <code style="display:inline; padding: 2px 6px;">{configured_uri}</code>
-                            which uses port {callback_server_port}. If you're behind a reverse proxy (Caddy, Nginx, Traefik), change the
-                            redirect URI in SoulSync settings to use your proxy URL on the main port instead, e.g.:<br>
-                            <code style="display:inline; padding: 2px 6px; background: #e8f5e9;">https://{host}/callback</code><br>
-                            Then update the same URI in your <a href="https://developer.spotify.com/dashboard" target="_blank">Spotify Dashboard</a>.
-                            This avoids the need for manual URL editing below.
-                        </div>
+            if uses_main_port:
+                # The OAuth callback returns to the app itself, so there is no
+                # need to keep an intermediate page open.
+                return redirect(auth_url)
 
-                        <p><strong>Step 1:</strong> Click the link below to authenticate with Spotify</p>
-                        <p><a href="{auth_url}" target="_blank" style="font-size: 18px; color: #1DB954;">{auth_url}</a></p>
-                        <hr>
-                        <p><strong>Step 2:</strong> After authorizing, you'll see a blank page. The URL will look like:</p>
-                        <code>http://127.0.0.1:{callback_server_port}/callback?code=...</code>
-                        <p><strong>Step 3:</strong> Change <code style="display: inline; background: #ffe6e6; padding: 2px 6px;">127.0.0.1</code> to <code style="display: inline; background: #e8f5e9; padding: 2px 6px;">{host}</code> and press Enter:
-                            <button class="copy-btn" onclick="copyIP()">Copy IP</button>
-                        </p>
-                        <code class="highlight">http://{host}:{callback_server_port}/callback?code=...</code>
-                        <p>Authentication will then complete!</p>
+            # redirect_uri points to the standalone callback server — show manual steps AND suggest switching
+            import re as _re
+            _port_match = _re.search(r':(\d+)/', configured_uri)
+            callback_server_port = _port_match.group(1) if _port_match else str(os.environ.get('SOULSYNC_SPOTIFY_CALLBACK_PORT', '8888'))
+            return f'''
+            <html>
+            <head>
+                <style>
+                    body {{ font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }}
+                    code {{ background: #f0f0f0; padding: 10px; display: block; margin: 10px 0; }}
+                    .highlight {{ background: #e8f5e9; }}
+                    .warning {{ background: #fff3e0; border-left: 4px solid #ff9800; padding: 12px 16px; margin: 16px 0; border-radius: 4px; }}
+                    .copy-btn {{
+                        background: #1DB954;
+                        color: white;
+                        border: none;
+                        padding: 8px 16px;
+                        cursor: pointer;
+                        border-radius: 4px;
+                        font-size: 14px;
+                        margin-left: 10px;
+                    }}
+                    .copy-btn:hover {{ background: #1ed760; }}
+                    .copied {{ background: #4CAF50 !important; }}
+                </style>
+            </head>
+            <body>
+                <h1>Spotify Authentication (Remote/Docker)</h1>
 
-                        <script>
-                            function copyIP() {{
-                                navigator.clipboard.writeText('{host}').then(() => {{
-                                    const btn = event.target;
-                                    btn.textContent = 'Copied!';
-                                    btn.classList.add('copied');
-                                    setTimeout(() => {{
-                                        btn.textContent = 'Copy IP';
-                                        btn.classList.remove('copied');
-                                    }}, 2000);
-                                }});
-                            }}
-                        </script>
-                    </body>
-                    </html>
-                    '''
-            else:
-                # Local access - simple message
-                return f'<h1>Spotify Authentication</h1><p>Click the link below to authenticate:</p><p><a href="{auth_url}" target="_blank">{auth_url}</a></p><p>After authentication, return to the app.</p>'
+                <div class="warning">
+                    <strong>Using a reverse proxy?</strong> Your redirect URI is set to <code style="display:inline; padding: 2px 6px;">{configured_uri}</code>
+                    which uses port {callback_server_port}. If you're behind a reverse proxy (Caddy, Nginx, Traefik), change the
+                    redirect URI in SoulSync settings to use your proxy URL on the main port instead, e.g.:<br>
+                    <code style="display:inline; padding: 2px 6px; background: #e8f5e9;">https://{host}/callback</code><br>
+                    Then update the same URI in your <a href="https://developer.spotify.com/dashboard" target="_blank">Spotify Dashboard</a>.
+                    This avoids the need for manual URL editing below.
+                </div>
+
+                <p><strong>Step 1:</strong> Click the link below to authenticate with Spotify</p>
+                <p><a href="{auth_url}" target="_blank" style="font-size: 18px; color: #1DB954;">{auth_url}</a></p>
+                <hr>
+                <p><strong>Step 2:</strong> After authorizing, you'll see a blank page. The URL will look like:</p>
+                <code>http://127.0.0.1:{callback_server_port}/callback?code=...</code>
+                <p><strong>Step 3:</strong> Change <code style="display: inline; background: #ffe6e6; padding: 2px 6px;">127.0.0.1</code> to <code style="display: inline; background: #e8f5e9; padding: 2px 6px;">{host}</code> and press Enter:
+                    <button class="copy-btn" onclick="copyIP()">Copy IP</button>
+                </p>
+                <code class="highlight">http://{host}:{callback_server_port}/callback?code=...</code>
+                <p>Authentication will then complete!</p>
+
+                <script>
+                    window.addEventListener('message', function(event) {{
+                        if (event.origin !== window.location.origin) return;
+                        if (!event.data || event.data.type !== 'spotify-auth-complete') return;
+                        setTimeout(() => window.close(), 300);
+                    }});
+
+                    function copyIP() {{
+                        navigator.clipboard.writeText('{host}').then(() => {{
+                            const btn = event.target;
+                            btn.textContent = 'Copied!';
+                            btn.classList.add('copied');
+                            setTimeout(() => {{
+                                btn.textContent = 'Copy IP';
+                                btn.classList.remove('copied');
+                            }}, 2000);
+                        }});
+                    }}
+                </script>
+            </body>
+            </html>
+            '''
         else:
             return "<h1>Spotify Authentication Failed</h1><p>Could not initialize Spotify client. Check your credentials.</p>", 400
     except Exception as e:
@@ -5735,6 +5719,33 @@ def auth_tidal():
         return f"<h1>Tidal Authentication Error</h1><p>{str(e)}</p>", 500
 
 
+def _spotify_auth_success_page(detail_text: str) -> str:
+    """Return the post-auth success page and notify the opener."""
+    return f"""<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Spotify Authentication Successful</title>
+  </head>
+  <body>
+    <h1>Spotify Authentication Successful</h1>
+    <p>{detail_text}</p>
+    <script>
+      (function() {{
+        try {{
+          if (window.opener && !window.opener.closed) {{
+            window.opener.postMessage({{ type: 'spotify-auth-complete' }}, window.location.origin);
+          }}
+        }} catch (error) {{
+          console.warn('Unable to notify opener about Spotify auth completion', error);
+        }}
+        setTimeout(() => window.close(), 300);
+      }})();
+    </script>
+  </body>
+</html>"""
+
+
 @app.route('/callback')
 def spotify_callback():
     """
@@ -5796,7 +5807,7 @@ def spotify_callback():
                     # Invalidate cached profile client so it gets recreated with new tokens
                     metadata_registry.clear_cached_profile_spotify_client(profile_id_from_state)
                     add_activity_item("", "Spotify Auth Complete", f"Profile {profile_id_from_state} authenticated with Spotify", "Now")
-                    return "<h1>Spotify Authentication Successful!</h1><p>Your personal Spotify account is now connected. You can close this window.</p>"
+                    return _spotify_auth_success_page("Your personal Spotify account is now connected. You can close this window.")
                 else:
                     raise Exception("Failed to exchange authorization code for access token")
 
@@ -5833,7 +5844,7 @@ def spotify_callback():
                     spotify_enrichment_worker.client.reload_config()
                     spotify_enrichment_worker.client._invalidate_auth_cache()
                 add_activity_item("", "Spotify Auth Complete", "Successfully authenticated with Spotify", "Now")
-                return "<h1>Spotify Authentication Successful!</h1><p>You can close this window.</p>"
+                return _spotify_auth_success_page("You can close this window.")
             else:
                 raise Exception("Token exchange succeeded but authentication validation failed")
         else:
@@ -5849,13 +5860,16 @@ def spotify_disconnect():
     """Disconnect Spotify and keep using the active primary metadata source."""
     global spotify_client
     try:
+        configured_source = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
         # Pause enrichment worker before disconnecting to prevent it from hammering API
         if spotify_enrichment_worker:
             spotify_enrichment_worker.pause()
         spotify_client.disconnect()
         # Immediately update status cache so UI reflects the change
-        active_source = get_spotify_disconnect_source()
+        active_source = get_spotify_disconnect_source(configured_source)
         source_label = get_metadata_source_label(active_source)
+        if configured_source == 'spotify':
+            config_manager.set('metadata.fallback_source', active_source)
         _status_cache['spotify'] = {
             'connected': False,
             'authenticated': False,
@@ -5867,7 +5881,13 @@ def spotify_disconnect():
         }
         _status_cache_timestamps['spotify'] = time.time()
         add_activity_item("", "Spotify Disconnected", f"Using {source_label} for metadata", "Now")
-        return jsonify({'success': True, 'message': f'Spotify disconnected. Using {source_label} for metadata.', 'source': active_source, 'authenticated': False})
+        return jsonify({
+            'success': True,
+            'message': f'Spotify disconnected. Using {source_label} for metadata.',
+            'source': active_source,
+            'authenticated': False,
+            'primary_source_changed': configured_source == 'spotify'
+        })
     except Exception as e:
         logger.error(f"Error disconnecting Spotify: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -31970,7 +31990,7 @@ def start_oauth_callback_servers():
                                 self.send_response(200)
                                 self.send_header('Content-type', 'text/html')
                                 self.end_headers()
-                                self.wfile.write(b'<h1>Spotify Authentication Successful!</h1><p>You can close this window.</p>')
+                                self.wfile.write(_spotify_auth_success_page("You can close this window.").encode("utf-8"))
                             else:
                                 raise Exception("Token exchange succeeded but authentication validation failed")
                         else:
