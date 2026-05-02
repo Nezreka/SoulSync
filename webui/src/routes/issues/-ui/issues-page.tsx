@@ -8,11 +8,7 @@ import { useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { IssueCounts, IssueRecord, IssueStatus } from '../-issues.types';
 
-import {
-  issueCountsQueryOptions,
-  issueDetailQueryOptions,
-  issueListQueryOptions,
-} from '../-issues.api';
+import { issueCountsQueryOptions, issueListQueryOptions } from '../-issues.api';
 import {
   CLOSE_EVENT,
   REFRESH_EVENT,
@@ -85,10 +81,6 @@ export function IssuesPage() {
     ...issueListQueryOptions(profileId, normalizedSearch),
     enabled: profileId > 0,
   });
-  const selectedIssueQuery = useQuery({
-    ...issueDetailQueryOptions(profileId, selectedIssueId ?? 0),
-    enabled: profileId > 0 && selectedIssueId !== null,
-  });
 
   if (!bridge || !profile || !bridge.isPageAllowed('issues')) {
     return null;
@@ -130,9 +122,7 @@ export function IssuesPage() {
       />
       <IssueDetailModal
         isAdmin={profile.isAdmin}
-        issue={selectedIssueQuery.data ?? null}
-        isLoading={selectedIssueQuery.isLoading}
-        error={selectedIssueQuery.error}
+        issueId={selectedIssueId}
         onClose={() => clearIssueSelection(navigate)}
         onMutationSuccess={() => {
           clearIssueSelection(navigate);
