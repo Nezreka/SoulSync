@@ -80,6 +80,10 @@ describe('issues route', () => {
                   artist_name: 'Artist',
                   thumb_url: 'https://example.com/thumb.jpg',
                   spotify_album_id: 'abc123',
+                  track_number: 1,
+                  duration: 245,
+                  format: 'FLAC',
+                  bitrate: 1411,
                 },
                 created_at: '2026-04-03 10:30:00',
                 reporter_name: 'Ada',
@@ -101,14 +105,18 @@ describe('issues route', () => {
               status: 'open',
               priority: 'normal',
               snapshot_data: {
-                title: 'Album Name',
-                artist_name: 'Artist',
-                thumb_url: 'https://example.com/thumb.jpg',
-                spotify_album_id: 'abc123',
+                  title: 'Album Name',
+                  artist_name: 'Artist',
+                  thumb_url: 'https://example.com/thumb.jpg',
+                  spotify_album_id: 'abc123',
+                  track_number: 1,
+                  duration: 245,
+                  format: 'FLAC',
+                  bitrate: 1411,
+                },
+                created_at: '2026-04-03 10:30:00',
+                reporter_name: 'Ada',
               },
-              created_at: '2026-04-03 10:30:00',
-              reporter_name: 'Ada',
-            },
           });
         }
         if (url.includes('/api/spotify/album/abc123')) {
@@ -247,5 +255,12 @@ describe('issues route', () => {
         ),
       ).toBe(true);
     });
+  });
+
+  it('does not render track details for album issues', async () => {
+    renderIssuesRoute(['/issues?issueId=7']);
+
+    await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('Issue #7'));
+    expect(screen.queryByText('Track Details')).not.toBeInTheDocument();
   });
 });

@@ -415,6 +415,44 @@
   max-width: 750px;
   width: 95vw;
   max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 16px;
+}
+
+.issueDetailModal .modalHeader {
+  padding: 20px 24px;
+  gap: 16px;
+}
+
+.issueDetailModal .modalHeaderTitle {
+  margin: 0;
+  font-size: 18px;
+}
+
+.issueDetailModal .modalClose {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  font-size: 16px;
+}
+
+.issueDetailModal .modalBody {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  max-height: calc(85vh - 120px);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.issueDetailModal .modalFooter {
+  padding: 16px 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 8px;
 }
 
 .reportIssueModal {
@@ -536,6 +574,22 @@
   margin-top: 2px;
 }
 
+.issueHeroGenres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.issueHeroGenreTag {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .issueDetailInfoBar {
   display: flex;
   align-items: center;
@@ -553,6 +607,10 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.issueDetailInfoRight {
+  font-size: 12px;
 }
 
 .issueDetailCategory {
@@ -583,6 +641,14 @@
   color: rgba(255, 255, 255, 0.4);
   margin-bottom: 8px;
   font-weight: 500;
+}
+
+.issueDetailSectionCount {
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 10px;
+  text-transform: none;
+  margin-left: 4px;
 }
 
 .issueDetailTitleText {
@@ -666,30 +732,61 @@
   margin-bottom: 14px;
 }
 
+.issueActionDownload,
+.issueActionWishlist,
+.modalButtonSecondary,
+.modalButtonPrimary,
+.modalButtonProgress,
+.modalButtonResolve,
+.modalButtonDismiss,
+.modalButtonReopen,
+.modalButtonDelete {
+  min-height: auto;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
 .issueActionDownload {
   background: rgba(var(--accent-light-rgb), 0.12);
   color: rgb(var(--accent-light-rgb));
-  border-color: rgba(var(--accent-light-rgb), 0.25);
 }
 
 .issueActionDownload:hover:not(:disabled) {
   background: rgba(var(--accent-light-rgb), 0.22);
-  border-color: rgba(var(--accent-light-rgb), 0.4);
 }
 
 .issueActionWishlist {
   background: rgba(255, 165, 0, 0.1);
   color: #ffa500;
-  border-color: rgba(255, 165, 0, 0.2);
 }
 
 .issueActionWishlist:hover:not(:disabled) {
   background: rgba(255, 165, 0, 0.2);
-  border-color: rgba(255, 165, 0, 0.35);
 }
 
 .issueDetailResponseTextarea {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+  resize: vertical;
   min-height: 70px;
+  font-family: inherit;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+  line-height: 1.5;
+}
+
+.issueDetailResponseTextarea:focus {
+  border-color: rgba(var(--accent-light-rgb), 0.5);
 }
 
 .issueDetailAdminResponse {
@@ -706,12 +803,14 @@
 .issueExternalLinks {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px;
+  margin-top: 8px;
 }
 
 .issueExternalLink {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   padding: 6px 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
@@ -725,29 +824,97 @@
   background: rgba(255, 255, 255, 0.1);
 }
 
-.issueDetailTracklist {
-  display: grid;
-  gap: 6px;
+.issueExternalLinkService {
+  font-weight: 600;
 }
 
-.issueDetailTracklistRow,
-.issueDetailTracklistDisc {
+.issueExternalLinkType {
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.issueExternalLinkSpotify {
+  background: rgba(30, 215, 96, 0.1);
+  color: #1ed760;
+}
+
+.issueExternalLinkSpotify:hover {
+  background: rgba(30, 215, 96, 0.2);
+}
+
+.issueExternalLinkMusicBrainz {
+  background: rgba(186, 81, 163, 0.1);
+  color: #d4a0cb;
+}
+
+.issueExternalLinkMusicBrainz:hover {
+  background: rgba(186, 81, 163, 0.2);
+}
+
+.issueExternalLinkDeezer {
+  background: rgba(160, 54, 255, 0.1);
+  color: #c88eff;
+}
+
+.issueExternalLinkDeezer:hover {
+  background: rgba(160, 54, 255, 0.2);
+}
+
+.issueExternalLinkTidal {
+  background: rgba(0, 255, 255, 0.08);
+  color: #66ffff;
+}
+
+.issueExternalLinkTidal:hover {
+  background: rgba(0, 255, 255, 0.15);
+}
+
+.issueExternalLinkQobuz {
+  background: rgba(0, 130, 200, 0.1);
+  color: #5bb8e8;
+}
+
+.issueExternalLinkQobuz:hover {
+  background: rgba(0, 130, 200, 0.2);
+}
+
+.issueDetailTracklist {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto auto;
-  gap: 10px;
-  align-items: center;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  gap: 0;
+  background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  font-size: 12px;
+  border-radius: 10px;
+  padding: 6px 0;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .issueDetailTracklistDisc {
   display: block;
-  color: rgba(255, 255, 255, 0.45);
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.35);
+  padding: 8px 14px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.issueDetailTracklistDisc:first-child {
+  border-top: none;
+  padding-top: 4px;
+}
+
+.issueDetailTracklistRow {
+  display: flex;
+  align-items: center;
+  padding: 4px 14px;
+  gap: 10px;
+  transition: background 0.15s;
+}
+
+.issueDetailTracklistRow:hover {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .issueDetailTracklistNum,
@@ -756,12 +923,36 @@
   color: rgba(255, 255, 255, 0.42);
 }
 
+.issueDetailTracklistNum {
+  font-size: 12px;
+  min-width: 22px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
 .issueDetailTracklistTitle {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.82);
+}
+
+.issueDetailTracklistDur {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
+  flex-shrink: 0;
+  min-width: 36px;
+  text-align: right;
+}
+
+.issueDetailTracklistMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .issueTrackBadge {
@@ -772,7 +963,34 @@
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.65);
   font-size: 10px;
-  margin-left: 4px;
+  margin-left: 0;
+}
+
+.issueTrackBadgeFlac {
+  background: rgba(255, 184, 77, 0.15);
+  color: #ffb84d;
+}
+
+.issueTrackBadgeMp3 {
+  background: rgba(var(--accent-rgb), 0.15);
+  color: rgb(var(--accent-light-rgb));
+}
+
+.issueTrackBadgeOther {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.issueTrackBadgeHigh {
+  color: rgb(var(--accent-light-rgb));
+}
+
+.issueTrackBadgeMedium {
+  color: #ffb84d;
+}
+
+.issueTrackBadgeLow {
+  color: #ff6b6b;
 }
 
 .reportIssueEntityInfo {
@@ -802,7 +1020,12 @@
 }
 
 .modalButtonSecondary {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.modalButtonSecondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .modalButtonPrimary {
@@ -819,31 +1042,31 @@
 .modalButtonProgress {
   background: rgba(77, 166, 255, 0.15);
   color: #4da6ff;
-  border-color: rgba(77, 166, 255, 0.25);
 }
 
 .modalButtonResolve {
   background: rgba(74, 222, 128, 0.15);
   color: #4ade80;
-  border-color: rgba(74, 222, 128, 0.25);
 }
 
 .modalButtonDismiss {
-  background: rgba(239, 68, 68, 0.14);
-  color: #ffd0d0;
-  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(136, 136, 136, 0.15);
+  color: #888;
+  border-color: rgba(136, 136, 136, 0.3);
+}
+
+.modalButtonDismiss:hover:not(:disabled) {
+  background: rgba(136, 136, 136, 0.25);
 }
 
 .modalButtonReopen {
   background: rgba(var(--accent-light-rgb), 0.15);
   color: #fff;
-  border-color: rgba(var(--accent-light-rgb), 0.3);
 }
 
 .modalButtonDelete {
   background: rgba(239, 68, 68, 0.14);
   color: #ffd0d0;
-  border-color: rgba(239, 68, 68, 0.28);
 }
 
 .modalButtonDelete:hover:not(:disabled),
@@ -931,6 +1154,18 @@
   .modalFooter {
     flex-direction: column;
     align-items: stretch;
+    padding: 0 18px 18px;
+  }
+
+  .issueDetailModal {
+    max-height: calc(100vh - 24px);
+  }
+
+  .issueDetailModal .modalBody {
+    padding: 18px;
+  }
+
+  .issueDetailModal .modalFooter {
     padding: 0 18px 18px;
   }
 
