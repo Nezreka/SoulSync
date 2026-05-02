@@ -3323,6 +3323,20 @@ function updateServiceStatus(service, statusData) {
         }
 
         syncPrimaryMetadataSourceAvailability(statusData);
+
+        const responseTimeElement = document.getElementById('spotify-response-time');
+        if (responseTimeElement) {
+            const responseTime = statusData.response_time;
+            responseTimeElement.textContent = responseTime !== undefined && responseTime !== null
+                ? `Response: ${responseTime}ms`
+                : 'Response: --';
+        }
+
+        const testButton = document.querySelector('#spotify-service-card .service-card-button');
+        if (testButton) {
+            const source = statusData.source || 'spotify';
+            testButton.setAttribute('onclick', `testDashboardConnection('${source}')`);
+        }
     }
 
     // Update download source title on dashboard card

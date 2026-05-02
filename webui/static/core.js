@@ -885,4 +885,8 @@ const API = {
 let _lastServiceStatus = null;
 let _isSoulsyncStandalone = false;  // Global flag: true when no media server (sync buttons hidden)
 
+function getActiveMetadataSource() {
+    return _lastServiceStatus?.spotify?.source || 'spotify';
+}
+
 // ===============================
