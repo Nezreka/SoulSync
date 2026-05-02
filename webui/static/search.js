@@ -1178,14 +1178,15 @@ async function loadInitialData() {
             : homePage;
 
         // Always apply the target page to the legacy shell chrome.
-        // When the router is present, skipRouteChange keeps the URL stable
-        // while still syncing the active page/nav state for direct loads.
         const router = getWebRouter();
         const route = router?.routeManifest?.find((entry) => entry.pageId === targetPage);
 
         if (route?.kind === 'react') {
             showReactHost(targetPage);
             setActivePageChrome(targetPage);
+            if (window.location.pathname !== route.path) {
+                history.replaceState({ page: targetPage }, '', route.path);
+            }
             return;
         }
 

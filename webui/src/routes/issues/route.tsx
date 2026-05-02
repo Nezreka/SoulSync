@@ -4,6 +4,7 @@ import { getProfileHomePath, getShellProfileContext } from '@/platform/shell/bri
 
 import {
   issueCountsQueryOptions,
+  issueDetailQueryOptions,
   issueListQueryOptions,
   normalizeIssuesSearch,
 } from './-issues.helpers';
@@ -17,7 +18,11 @@ export const Route = createFileRoute('/issues')({
       throw redirect({ href: getProfileHomePath(bridge), replace: true });
     }
   },
-  loaderDeps: ({ search }) => search,
+  loaderDeps: ({ search }) => ({
+    status: search.status,
+    category: search.category,
+    issueId: search.issueId ?? null,
+  }),
   loader: async ({ context, deps }) => {
     const profile = getShellProfileContext(context.platform.getShellBridge());
     if (!profile) return;
@@ -25,6 +30,9 @@ export const Route = createFileRoute('/issues')({
     await Promise.all([
       context.queryClient.ensureQueryData(issueCountsQueryOptions(profile.profileId)),
       context.queryClient.ensureQueryData(issueListQueryOptions(profile.profileId, deps)),
+      deps.issueId
+        ? context.queryClient.ensureQueryData(issueDetailQueryOptions(profile.profileId, deps.issueId))
+        : Promise.resolve(),
     ]);
   },
   component: IssuesPage,

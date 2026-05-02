@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 
 import { Select } from '@/components/form';
 import { getShellProfileContext } from '@/platform/shell/bridge';
@@ -30,16 +30,31 @@ import { Route } from '../route';
 import { IssueDetailModal } from './issue-detail-modal';
 import styles from './issues-page.module.css';
 
+type NavigateFunction = ReturnType<typeof useNavigate>;
+
+function clearIssueSelection(navigate: NavigateFunction) {
+  void navigate({
+    search: (prev) => normalizeIssuesSearch({ ...prev, issueId: undefined }),
+    replace: true,
+  });
+}
+
 export function IssuesPage() {
   const bridge = useReactPageShell('issues');
   const queryClient = useQueryClient();
   const navigate = useNavigate({ from: Route.fullPath });
   const search = Route.useSearch();
   const normalizedSearch = normalizeIssuesSearch(search);
-  const [selectedIssueId, setSelectedIssueId] = useState<number | null>(null);
+  const selectedIssueId = normalizedSearch.issueId ? Number(normalizedSearch.issueId) : null;
 
   const profile = getShellProfileContext(bridge);
   const profileId = profile?.profileId ?? 0;
+
+  const openIssue = (issueId: number) => {
+    void navigate({
+      search: (prev) => normalizeIssuesSearch({ ...prev, issueId }),
+    });
+  };
 
   useEffect(() => {
     const handleRefresh = () => {
@@ -47,7 +62,7 @@ export function IssuesPage() {
     };
 
     const handleClose = () => {
-      setSelectedIssueId(null);
+      clearIssueSelection(navigate);
     };
 
     window.addEventListener(REFRESH_EVENT, handleRefresh);
@@ -56,7 +71,7 @@ export function IssuesPage() {
       window.removeEventListener(REFRESH_EVENT, handleRefresh);
       window.removeEventListener(CLOSE_EVENT, handleClose);
     };
-  }, [queryClient]);
+  }, [navigate, queryClient]);
 
   const countsQuery = useQuery({
     ...issueCountsQueryOptions(profileId),
@@ -86,14 +101,22 @@ export function IssuesPage() {
         issuesLoading={issuesQuery.isLoading}
         onCategoryChange={(category) =>
           void navigate({
-            search: (prev) => normalizeIssuesSearch({ ...prev, category }),
+            search: (prev) =>
+              normalizeIssuesSearch({
+                ...prev,
+                category,
+              }),
             replace: true,
           })
         }
-        onIssueSelect={setSelectedIssueId}
+        onIssueSelect={openIssue}
         onStatusChange={(status) =>
           void navigate({
-            search: (prev) => normalizeIssuesSearch({ ...prev, status }),
+            search: (prev) =>
+              normalizeIssuesSearch({
+                ...prev,
+                status,
+              }),
             replace: true,
           })
         }
@@ -104,9 +127,9 @@ export function IssuesPage() {
         issue={selectedIssueQuery.data ?? null}
         isLoading={selectedIssueQuery.isLoading}
         error={selectedIssueQuery.error}
-        onClose={() => setSelectedIssueId(null)}
+        onClose={() => clearIssueSelection(navigate)}
         onMutationSuccess={() => {
-          setSelectedIssueId(null);
+          clearIssueSelection(navigate);
           dispatchIssuesRefreshEvent();
         }}
         profileId={profile.profileId}
@@ -148,7 +171,7 @@ function IssueBoard({
 
   return (
     <div className={styles.issuesContainer} data-testid="issues-board">
-      <div className={styles.issuesHeader}>
+      <div className={styles.issuesHeader} id="issues-header">
         <div className={styles.issuesHeaderLeft}>
           <h2 className={styles.issuesTitle}>Issues</h2>
           <p className={styles.issuesSubtitle} id="issues-subtitle">
@@ -201,7 +224,7 @@ function IssueBoard({
         </div>
       </div>
 
-      <div className={styles.issuesStats} data-testid="issue-counts">
+      <div className={styles.issuesStats} id="issues-stats" data-testid="issue-counts">
         <div className={`${styles.issuesStatCard} ${styles.issuesStatOpen}`}>
           <div className={styles.issuesStatNumber}>{safeCounts.open}</div>
           <div className={styles.issuesStatLabel}>Open</div>
@@ -224,33 +247,33 @@ function IssueBoard({
         </div>
       </div>
 
-      {issuesLoading ? (
-        <div className={styles.issuesLoading}>
-          <div className={styles.issuesSpinner} />
-          Loading issues...
-        </div>
-      ) : issuesError ? (
-        <div className={styles.issuesEmpty}>
-          <div className={styles.issuesEmptyTitle}>Failed to load issues</div>
-          <div className={styles.issuesEmptyText}>
-            {issuesError instanceof Error ? issuesError.message : 'Unknown error'}
+      <div className={styles.issuesList} id="issues-list" data-testid="issue-list">
+        {issuesLoading ? (
+          <div className={styles.issuesLoading}>
+            <div className={styles.issuesSpinner} />
+            Loading issues...
           </div>
-        </div>
-      ) : issues.length === 0 ? (
-        <div className={styles.issuesEmpty}>
-          <div className={styles.issuesEmptyIcon} aria-hidden="true">
-            🔍
+        ) : issuesError ? (
+          <div className={styles.issuesEmpty}>
+            <div className={styles.issuesEmptyTitle}>Failed to load issues</div>
+            <div className={styles.issuesEmptyText}>
+              {issuesError instanceof Error ? issuesError.message : 'Unknown error'}
+            </div>
           </div>
-          <div className={styles.issuesEmptyTitle}>No issues found</div>
-          <div className={styles.issuesEmptyText}>
-            {statusFilter !== 'open' || categoryFilter !== 'all'
-              ? 'Try adjusting your filters'
-              : 'No issues have been reported yet'}
+        ) : issues.length === 0 ? (
+          <div className={styles.issuesEmpty}>
+            <div className={styles.issuesEmptyIcon} aria-hidden="true">
+              🔍
+            </div>
+            <div className={styles.issuesEmptyTitle}>No issues found</div>
+            <div className={styles.issuesEmptyText}>
+              {statusFilter !== 'open' || categoryFilter !== 'all'
+                ? 'Try adjusting your filters'
+                : 'No issues have been reported yet'}
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className={styles.issuesList} data-testid="issue-list">
-          {issues.map((issue) => {
+        ) : (
+          issues.map((issue) => {
             const snapshot = parseSnapshot(issue.snapshot_data);
             const artwork = getIssueArtwork(snapshot);
             const entityName = getEntityName(issue, snapshot);
@@ -331,9 +354,9 @@ function IssueBoard({
                 </div>
               </button>
             );
-          })}
-        </div>
-      )}
+          })
+        )}
+      </div>
     </div>
   );
 }
