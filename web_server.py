@@ -5,7 +5,6 @@ import json
 import asyncio
 import requests
 import socket
-import ipaddress
 import subprocess
 import platform
 import threading
@@ -18,7 +17,7 @@ import collections
 import functools
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g, abort
@@ -96,6 +95,8 @@ from core.database_update_worker import DatabaseUpdateWorker
 from core.web_scan_manager import WebScanManager
 from core.metadata.cache import get_metadata_cache
 from core.metadata import registry as metadata_registry
+from core.metadata import is_internal_image_host
+from core.metadata import normalize_image_url as fix_artist_image_url
 from core.metadata.registry import (
     clear_cached_metadata_client,
     get_metadata_source_label,
@@ -8088,163 +8089,6 @@ def maintain_search_history():
     except Exception as e:
         logger.error(f"Error maintaining search history: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
-
-def fix_artist_image_url(thumb_url):
-    """Convert media-server image URLs into browser-safe URLs."""
-    if not thumb_url:
-        return None
-
-    try:
-        # Check if it's a localhost URL or relative path that needs fixing
-        needs_fixing = (
-            thumb_url.startswith('http://localhost:') or
-            thumb_url.startswith('https://localhost:') or
-            thumb_url.startswith('http://127.0.0.1:') or
-            thumb_url.startswith('https://127.0.0.1:') or
-            thumb_url.startswith('http://host.docker.internal:') or
-            thumb_url.startswith('https://host.docker.internal:') or
-            (thumb_url.startswith('http://') and _is_internal_image_host(thumb_url)) or
-            thumb_url.startswith('/library/') or  # Plex relative paths
-            thumb_url.startswith('/Items/') or    # Jellyfin relative paths
-            thumb_url.startswith('/api/') or      # Old Navidrome API paths
-            thumb_url.startswith('/rest/')        # Navidrome Subsonic API paths
-        )
-
-        if needs_fixing:
-            active_server = config_manager.get_active_media_server()
-            logger.debug(f"Fixing URL: {thumb_url}, Active server: {active_server}")
-
-            if active_server == 'plex':
-                plex_config = config_manager.get_plex_config()
-                plex_base_url = plex_config.get('base_url', '')
-                plex_token = plex_config.get('token', '')
-                logger.info(f"Plex config - base_url: {plex_base_url}, token: {plex_token[:10]}...")
-
-                if plex_base_url and plex_token:
-                    # Extract the path from URL
-                    if thumb_url.startswith('/library/'):
-                        # Already a path
-                        path = thumb_url
-                    else:
-                        # Full localhost URL, extract path
-                        from urllib.parse import urlparse
-                        parsed = urlparse(thumb_url)
-                        path = parsed.path
-
-                    # Construct proper Plex URL with token
-                    fixed_url = f"{plex_base_url.rstrip('/')}{path}?X-Plex-Token={plex_token}"
-                    logger.info(f"Fixed URL: {fixed_url}")
-                    return _browser_safe_image_url(fixed_url)
-
-            elif active_server == 'jellyfin':
-                jellyfin_config = config_manager.get_jellyfin_config()
-                jellyfin_base_url = jellyfin_config.get('base_url', '')
-                jellyfin_token = jellyfin_config.get('api_key', '')
-                logger.info(f"Jellyfin config - base_url: {jellyfin_base_url}, token: {jellyfin_token[:10] if jellyfin_token else 'None'}...")
-
-                if jellyfin_base_url:
-                    # Extract the path from URL
-                    if thumb_url.startswith('/Items/') or thumb_url.startswith('/api/'):
-                        # Already a path
-                        path = thumb_url
-                    else:
-                        # Full localhost URL, extract path
-                        from urllib.parse import urlparse
-                        parsed = urlparse(thumb_url)
-                        path = parsed.path
-
-                    # Construct proper Jellyfin URL with token
-                    if jellyfin_token:
-                        separator = '&' if '?' in path else '?'
-                        fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}{separator}X-Emby-Token={jellyfin_token}"
-                    else:
-                        fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}"
-                    logger.info(f"Fixed URL: {fixed_url}")
-                    return _browser_safe_image_url(fixed_url)
-
-            elif active_server == 'navidrome':
-                navidrome_config = config_manager.get_navidrome_config()
-                navidrome_base_url = navidrome_config.get('base_url', '')
-                navidrome_username = navidrome_config.get('username', '')
-                navidrome_password = navidrome_config.get('password', '')
-                logger.info(f"Navidrome config - base_url: {navidrome_base_url}, username: {navidrome_username}")
-
-                if navidrome_base_url and navidrome_username and navidrome_password:
-                    # Extract the path from URL
-                    if thumb_url.startswith('/rest/'):
-                        # Already a Subsonic API path
-                        path = thumb_url
-                    else:
-                        # Full localhost URL, extract path
-                        from urllib.parse import urlparse
-                        parsed = urlparse(thumb_url)
-                        path = parsed.path
-
-                    # Generate Subsonic API authentication
-                    import hashlib
-                    import secrets
-                    salt = secrets.token_hex(6)
-                    token = hashlib.md5((navidrome_password + salt).encode()).hexdigest()
-
-                    # Add authentication parameters to the URL
-                    separator = '&' if '?' in path else '?'
-                    auth_params = f"u={navidrome_username}&t={token}&s={salt}&v=1.16.1&c=SoulSync&f=json"
-
-                    # Construct proper Navidrome Subsonic URL
-                    fixed_url = f"{navidrome_base_url.rstrip('/')}{path}{separator}{auth_params}"
-                    logger.info(f"Fixed URL: {fixed_url}")
-                    return _browser_safe_image_url(fixed_url)
-
-            logger.warning(f"No configuration found for {active_server} or unsupported server type")
-
-        # Return a browser-safe URL even if no server-specific rebuild was possible.
-        return _browser_safe_image_url(thumb_url)
-
-    except Exception as e:
-        logger.error(f"Error fixing image URL '{thumb_url}': {e}")
-        return _browser_safe_image_url(thumb_url)
-
-
-def _is_internal_image_host(url: str) -> bool:
-    """Return True when an image URL points at a host the browser likely cannot reach directly."""
-    try:
-        parsed = urlparse(url)
-        host = (parsed.hostname or '').strip('[]').lower()
-        if not host:
-            return False
-
-        if host in {'localhost', '127.0.0.1', '::1', 'host.docker.internal'}:
-            return True
-
-        # Single-label hosts are usually Docker service names or local LAN aliases.
-        if '.' not in host:
-            return True
-
-        try:
-            ip = ipaddress.ip_address(host)
-            return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved
-        except ValueError:
-            return False
-    except Exception:
-        return False
-
-
-def _browser_safe_image_url(url: str) -> str:
-    """Return a browser-safe image URL, proxying internal hosts through SoulSync."""
-    if not url:
-        return url
-
-    if url.startswith('/api/image-proxy?url='):
-        return url
-
-    if url.startswith('http://') or url.startswith('https://'):
-        if _is_internal_image_host(url):
-            return f"/api/image-proxy?url={quote(url, safe='')}"
-        return url
-
-    # Relative media-server paths should already have been expanded before this point.
-    return url
-
 @app.route('/api/library/history')
 def get_library_history():
     """Get persistent library history (downloads and server imports)."""
@@ -27898,7 +27742,7 @@ def image_proxy():
         'img.discogs.com', 'i.discogs.com',  # Discogs
         'localhost', '127.0.0.1', 'host.docker.internal',  # Local/Docker media servers
     ]
-    if not any(host == h or host.endswith('.' + h) for h in allowed_hosts) and not _is_internal_image_host(url):
+    if not any(host == h or host.endswith('.' + h) for h in allowed_hosts) and not is_internal_image_host(url):
         return '', 403
     try:
         resp = requests.get(url, timeout=10, stream=True, headers={
