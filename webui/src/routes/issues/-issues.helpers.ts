@@ -1,8 +1,4 @@
-import type {
-  IssueRecord,
-  IssuesSearch,
-  IssueSnapshot,
-} from './-issues.types';
+import type { IssueRecord, IssuesSearch, IssueSnapshot } from './-issues.types';
 
 export const REFRESH_EVENT = 'ss:issues-refresh';
 export const CLOSE_EVENT = 'ss:issues-close-detail';
@@ -116,15 +112,13 @@ export function normalizeIssuesSearch(search: IssuesSearch | undefined): Normali
       status === 'dismissed'
         ? status
         : DEFAULT_ISSUES_SEARCH.status,
-    category: typeof category === 'string' && ISSUE_CATEGORY_KEYS.has(category)
-      ? category
-      : 'all',
+    category: typeof category === 'string' && ISSUE_CATEGORY_KEYS.has(category) ? category : 'all',
     issueId:
-      (typeof issueId === 'number' && Number.isInteger(issueId) && issueId > 0)
+      typeof issueId === 'number' && Number.isInteger(issueId) && issueId > 0
         ? issueId
-        : (typeof issueId === 'string' && /^[1-9]\d*$/.test(issueId)
-            ? Number(issueId)
-            : undefined),
+        : typeof issueId === 'string' && /^[1-9]\d*$/.test(issueId)
+          ? Number(issueId)
+          : undefined,
   };
 }
 

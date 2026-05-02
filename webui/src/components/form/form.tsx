@@ -1,17 +1,18 @@
+import { Button as BaseButton } from '@base-ui/react/button';
+import { Field } from '@base-ui/react/field';
+import { Input as BaseInput } from '@base-ui/react/input';
+import { Toggle as BaseToggle } from '@base-ui/react/toggle';
+import clsx from 'clsx';
 import {
   forwardRef,
+  type ComponentPropsWithoutRef,
   type ButtonHTMLAttributes,
-  type InputHTMLAttributes,
   type SelectHTMLAttributes,
   type ReactNode,
   type TextareaHTMLAttributes,
 } from 'react';
 
 import styles from './form.module.css';
-
-function mergeClassNames(...classNames: Array<string | false | null | undefined>) {
-  return classNames.filter(Boolean).join(' ');
-}
 
 export interface FormFieldProps {
   children: ReactNode;
@@ -31,30 +32,36 @@ export function FormField({
   label,
 }: FormFieldProps) {
   return (
-    <div className={mergeClassNames(styles.field, className)}>
+    <Field.Root className={clsx(styles.field, className)}>
       <div className={styles.fieldHeader}>
         {htmlFor ? (
           <label className={styles.fieldLabel} htmlFor={htmlFor}>
             {label}
           </label>
         ) : (
-          <div className={styles.fieldLabel}>{label}</div>
+          <Field.Label className={styles.fieldLabel}>{label}</Field.Label>
         )}
-        {helperText ? <div className={styles.fieldHelper}>{helperText}</div> : null}
+        {helperText ? (
+          <Field.Description className={styles.fieldHelper}>{helperText}</Field.Description>
+        ) : null}
       </div>
       <div className={styles.fieldControl}>{children}</div>
       {error ? <FormError message={error} /> : null}
-    </div>
+    </Field.Root>
   );
 }
 
-export type TextInputProps = InputHTMLAttributes<HTMLInputElement>;
+type BaseInputProps = ComponentPropsWithoutRef<typeof BaseInput>;
+
+export type TextInputProps = Omit<BaseInputProps, 'className'> & {
+  className?: string;
+};
 
 export const TextInput = forwardRef<HTMLInputElement, TextInputProps>(function TextInput(
   { className, ...props },
   ref,
 ) {
-  return <input ref={ref} className={mergeClassNames(styles.textInput, className)} {...props} />;
+  return <BaseInput ref={ref} className={clsx(styles.textInput, className)} {...props} />;
 });
 
 export type TextAreaProps = TextareaHTMLAttributes<HTMLTextAreaElement>;
@@ -63,7 +70,7 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(function 
   { className, ...props },
   ref,
 ) {
-  return <textarea ref={ref} className={mergeClassNames(styles.textArea, className)} {...props} />;
+  return <textarea ref={ref} className={clsx(styles.textArea, className)} {...props} />;
 });
 
 export type SelectProps = SelectHTMLAttributes<HTMLSelectElement>;
@@ -72,7 +79,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select
   { className, ...props },
   ref,
 ) {
-  return <select ref={ref} className={mergeClassNames(styles.select, className)} {...props} />;
+  return <select ref={ref} className={clsx(styles.select, className)} {...props} />;
 });
 
 export function OptionCardGroup({
@@ -82,14 +89,19 @@ export function OptionCardGroup({
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={mergeClassNames(styles.optionCardGroup, className)}>{children}</div>;
+  return <div className={clsx(styles.optionCardGroup, className)}>{children}</div>;
 }
 
-export interface OptionCardProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'title'> {
+export interface OptionCardProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  'title' | 'value'
+> {
+  className?: string;
   description?: ReactNode;
   icon?: ReactNode;
   selected?: boolean;
   title?: ReactNode;
+  value?: string;
 }
 
 export const OptionCard = forwardRef<HTMLButtonElement, OptionCardProps>(function OptionCard(
@@ -97,14 +109,10 @@ export const OptionCard = forwardRef<HTMLButtonElement, OptionCardProps>(functio
   ref,
 ) {
   return (
-    <button
+    <BaseToggle
       ref={ref}
-      aria-pressed={selected}
-      className={mergeClassNames(
-        styles.optionCard,
-        selected && styles.optionCardSelected,
-        className,
-      )}
+      pressed={selected}
+      className={clsx(styles.optionCard, selected && styles.optionCardSelected, className)}
       type={type}
       {...props}
     >
@@ -117,7 +125,7 @@ export const OptionCard = forwardRef<HTMLButtonElement, OptionCardProps>(functio
           </div>
         </>
       )}
-    </button>
+    </BaseToggle>
   );
 });
 
@@ -128,11 +136,13 @@ export function OptionButtonGroup({
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={mergeClassNames(styles.optionButtonGroup, className)}>{children}</div>;
+  return <div className={clsx(styles.optionButtonGroup, className)}>{children}</div>;
 }
 
-export interface OptionButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+export interface OptionButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'value'> {
+  className?: string;
   selected?: boolean;
+  value?: string;
 }
 
 export const OptionButton = forwardRef<HTMLButtonElement, OptionButtonProps>(function OptionButton(
@@ -140,48 +150,41 @@ export const OptionButton = forwardRef<HTMLButtonElement, OptionButtonProps>(fun
   ref,
 ) {
   return (
-    <button
+    <BaseToggle
       ref={ref}
-      aria-pressed={selected}
-      className={mergeClassNames(
-        styles.optionButton,
-        selected && styles.optionButtonSelected,
-        className,
-      )}
+      pressed={selected}
+      className={clsx(styles.optionButton, selected && styles.optionButtonSelected, className)}
       type={type}
       {...props}
     >
       {children}
-    </button>
+    </BaseToggle>
   );
 });
 
-export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement>;
+type BaseButtonProps = ComponentPropsWithoutRef<typeof BaseButton>;
+
+export type ButtonProps = Omit<BaseButtonProps, 'className'> & {
+  className?: string;
+};
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { className, type = 'button', ...props },
   ref,
 ) {
-  return (
-    <button
-      ref={ref}
-      className={mergeClassNames(styles.button, className)}
-      type={type}
-      {...props}
-    />
-  );
+  return <BaseButton ref={ref} className={clsx(styles.button, className)} type={type} {...props} />;
 });
 
 export function FormError({ className, message }: { className?: string; message?: ReactNode }) {
   if (!message) return null;
 
   return (
-    <div className={mergeClassNames(styles.formError, className)} role="alert">
+    <div className={clsx(styles.formError, className)} role="alert">
       {message}
     </div>
   );
 }
 
 export function FormActions({ className, children }: { children: ReactNode; className?: string }) {
-  return <div className={mergeClassNames(styles.formActions, className)}>{children}</div>;
+  return <div className={clsx(styles.formActions, className)}>{children}</div>;
 }

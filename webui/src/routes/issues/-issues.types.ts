@@ -32,6 +32,8 @@ export interface IssueSnapshot {
   track_deezer_id?: string;
   artist_tidal_id?: string;
   album_tidal_id?: string;
+  artist_qobuz_id?: string | number;
+  album_qobuz_id?: string | number;
 }
 
 export interface IssueRecord {

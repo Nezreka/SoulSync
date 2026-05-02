@@ -2,6 +2,7 @@ import { queryOptions } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
 
+import type { NormalizedIssuesSearch } from './-issues.helpers';
 import type {
   CreateIssuePayload,
   IssueCounts,
@@ -10,8 +11,6 @@ import type {
   IssueListResponse,
   IssueRecord,
 } from './-issues.types';
-
-import type { NormalizedIssuesSearch } from './-issues.helpers';
 
 const DEFAULT_LIMIT = 100;
 

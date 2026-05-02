@@ -9,6 +9,7 @@ import {
 
 import type { IssueRecord } from '../-issues.types';
 
+import { deleteIssue, updateIssue } from '../-issues.api';
 import {
   formatIssueDate,
   formatStatusLabel,
@@ -17,7 +18,6 @@ import {
   ISSUE_CATEGORY_META,
   parseSnapshot,
 } from '../-issues.helpers';
-import { deleteIssue, updateIssue } from '../-issues.api';
 import styles from './issue-detail-modal.module.css';
 
 export function IssueDetailModal({
@@ -51,9 +51,8 @@ export function IssueDetailModal({
       return;
     }
 
-    previouslyFocusedElementRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+    previouslyFocusedElementRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     const focusModal = () => {
       const modal = modalRef.current;
@@ -213,7 +212,11 @@ export function IssueDetailModal({
           className={styles.modalButtonReopen}
           type="button"
           onClick={() =>
-            updateMutation.mutate({ issueId: issue.id, status: 'open', adminResponse })
+            updateMutation.mutate({
+              issueId: issue.id,
+              status: 'open',
+              adminResponse,
+            })
           }
           disabled={updateMutation.isPending}
         >
@@ -381,7 +384,9 @@ export function IssueDetailModal({
 
               <div className={styles.issueDetailInfoBar}>
                 <div className={styles.issueDetailInfoLeft}>
-                  <span className={`${styles.issuePriorityDot} ${getPriorityDotClassName(priorityClassName)}`} />
+                  <span
+                    className={`${styles.issuePriorityDot} ${getPriorityDotClassName(priorityClassName)}`}
+                  />
                   <span
                     className={`${styles.issueStatusBadge} ${getStatusClassName(issue.status)}`}
                   >
@@ -465,11 +470,12 @@ export function IssueDetailModal({
               {trackRows.length > 0 ? (
                 <div className={styles.issueDetailSection}>
                   <div className={styles.issueDetailSectionTitle}>
-                    Track Listing <span className={styles.issueDetailSectionCount}>{trackRows.length} tracks</span>
+                    Track Listing{' '}
+                    <span className={styles.issueDetailSectionCount}>
+                      {trackRows.length} tracks
+                    </span>
                   </div>
-                  <div className={styles.issueDetailTracklist}>
-                    {renderTrackListing(trackRows)}
-                  </div>
+                  <div className={styles.issueDetailTracklist}>{renderTrackListing(trackRows)}</div>
                 </div>
               ) : null}
 
@@ -564,13 +570,12 @@ function renderTrackListing(trackRows: Array<Record<string, unknown>>) {
     const formatClassName = getTrackFormatClassName(format);
     const bitrateClassName = getTrackBitrateClassName(bitrateValue, format);
     nodes.push(
-      <div className={styles.issueDetailTracklistRow} key={String(track.id || `${track.title}-${index}`)}>
-        <span className={styles.issueDetailTracklistNum}>
-          {String(track.track_number || '-')}
-        </span>
-        <span className={styles.issueDetailTracklistTitle}>
-          {String(track.title || 'Unknown')}
-        </span>
+      <div
+        className={styles.issueDetailTracklistRow}
+        key={String(track.id || `${track.title}-${index}`)}
+      >
+        <span className={styles.issueDetailTracklistNum}>{String(track.track_number || '-')}</span>
+        <span className={styles.issueDetailTracklistTitle}>{String(track.title || 'Unknown')}</span>
         <span className={styles.issueDetailTracklistDur}>{duration}</span>
         <span className={styles.issueDetailTracklistMeta}>
           {format ? (
@@ -630,21 +635,19 @@ function formatDuration(value: unknown): string {
 }
 
 function getExternalLinks(snapshot: ReturnType<typeof parseSnapshot>) {
-  const links: Array<
-    | {
-        className:
-          | 'issueExternalLinkSpotify'
-          | 'issueExternalLinkMusicBrainz'
-          | 'issueExternalLinkDeezer'
-          | 'issueExternalLinkTidal'
-          | 'issueExternalLinkQobuz';
-        id?: string | number;
-        label: string;
-        service: string;
-        type: string;
-        url?: string;
-      }
-  > = [];
+  const links: Array<{
+    className:
+      | 'issueExternalLinkSpotify'
+      | 'issueExternalLinkMusicBrainz'
+      | 'issueExternalLinkDeezer'
+      | 'issueExternalLinkTidal'
+      | 'issueExternalLinkQobuz';
+    id?: string | number;
+    label: string;
+    service: string;
+    type: string;
+    url?: string;
+  }> = [];
   if (snapshot.spotify_artist_id) {
     links.push({
       className: 'issueExternalLinkSpotify',
@@ -789,15 +792,27 @@ function getAlbumMetaParts(
 function getTrackMetaItems(snapshot: ReturnType<typeof parseSnapshot>) {
   const items: Array<{ icon: string; label: string; value: string }> = [];
   if (snapshot.track_number) {
-    items.push({ icon: '#', label: 'Track', value: String(snapshot.track_number) });
+    items.push({
+      icon: '#',
+      label: 'Track',
+      value: String(snapshot.track_number),
+    });
   }
   const duration = formatDuration(snapshot.duration);
   if (duration) items.push({ icon: 'T', label: 'Duration', value: duration });
   if (snapshot.format) items.push({ icon: 'F', label: 'Format', value: String(snapshot.format) });
   if (snapshot.bitrate)
-    items.push({ icon: 'B', label: 'Bitrate', value: `${snapshot.bitrate} kbps` });
+    items.push({
+      icon: 'B',
+      label: 'Bitrate',
+      value: `${snapshot.bitrate} kbps`,
+    });
   if (snapshot.bpm) items.push({ icon: 'M', label: 'BPM', value: String(snapshot.bpm) });
   if (snapshot.quality)
-    items.push({ icon: 'Q', label: 'Quality', value: String(snapshot.quality) });
+    items.push({
+      icon: 'Q',
+      label: 'Quality',
+      value: String(snapshot.quality),
+    });
   return items;
 }
