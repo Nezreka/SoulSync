@@ -105,6 +105,8 @@ from core.metadata.registry import (
 )
 from core.metadata.status import (
     get_status_snapshot as get_metadata_status_snapshot,
+    get_spotify_status,
+    publish_spotify_status,
     invalidate_metadata_status_caches,
 )
 from core.imports.context import (
@@ -4152,6 +4154,14 @@ def handle_settings():
                 genius_worker._init_client()
             if tidal_enrichment_worker:
                 tidal_enrichment_worker.client = tidal_client
+            if 'spotify' in new_settings:
+                publish_spotify_status(
+                    connected=False,
+                    authenticated=False,
+                    rate_limited=False,
+                    rate_limit=None,
+                    post_ban_cooldown=None,
+                )
             # Invalidate status cache so next poll reflects new settings (e.g. fallback source change)
             invalidate_metadata_status_caches()
             logger.info("Service clients re-initialized with new settings.")
@@ -5906,15 +5916,20 @@ def spotify_disconnect():
 def spotify_rate_limit_status():
     """Get Spotify rate limit ban details"""
     try:
-        info = spotify_client.get_rate_limit_info()
+        info = get_spotify_status(spotify_client=spotify_client)
+        rate_limit_info = info.get('rate_limit')
         if info:
-            return jsonify({
-                'rate_limited': True,
-                'remaining_seconds': info['remaining_seconds'],
-                'retry_after': info['retry_after'],
-                'endpoint': info['endpoint'],
-                'expires_at': info['expires_at']
-            })
+            payload = {
+                'rate_limited': bool(info.get('rate_limited')),
+            }
+            if rate_limit_info:
+                payload.update({
+                    'remaining_seconds': rate_limit_info.get('remaining_seconds', 0),
+                    'retry_after': rate_limit_info.get('retry_after'),
+                    'endpoint': rate_limit_info.get('endpoint'),
+                    'expires_at': rate_limit_info.get('expires_at'),
+                })
+            return jsonify(payload)
         return jsonify({'rate_limited': False})
     except Exception as e:
         logger.error(f"Error getting Spotify rate limit status: {e}")
@@ -34378,12 +34393,12 @@ def _emit_rate_monitor_loop():
 
             # Add Spotify rate limit state
             try:
-                if spotify_client:
-                    rl_info = spotify_client.get_rate_limit_info()
-                    if rl_info:
-                        payload['spotify']['rate_limited'] = True
-                        payload['spotify']['rl_remaining'] = rl_info.get('remaining_seconds', 0)
-                        payload['spotify']['rl_endpoint'] = rl_info.get('endpoint', '')
+                spotify_status = get_spotify_status(spotify_client=spotify_client)
+                rl_info = spotify_status.get('rate_limit')
+                if spotify_status.get('rate_limited') and rl_info:
+                    payload['spotify']['rate_limited'] = True
+                    payload['spotify']['rl_remaining'] = rl_info.get('remaining_seconds', 0)
+                    payload['spotify']['rl_endpoint'] = rl_info.get('endpoint', '')
             except Exception:
                 pass
 

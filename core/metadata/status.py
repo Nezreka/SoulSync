@@ -6,7 +6,6 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
-from config.settings import config_manager
 from utils.logging_config import get_logger
 
 from core.metadata.registry import get_primary_source_status
@@ -14,8 +13,8 @@ from core.metadata.registry import get_primary_source_status
 logger = get_logger("metadata.status")
 
 METADATA_SOURCE_STATUS_TTL = 120
-SPOTIFY_STATUS_TTL_ACTIVE = 15
-SPOTIFY_STATUS_TTL_IDLE = 300
+
+_UNSET = object()
 
 _status_lock = threading.RLock()
 _metadata_source_status_cache: Dict[str, Any] = {
@@ -32,21 +31,80 @@ _spotify_status_cache: Dict[str, Any] = {
     "post_ban_cooldown": None,
 }
 _spotify_status_timestamp = 0.0
-
-
-def _get_config_value(key: str, default: Any = None) -> Any:
-    try:
-        return config_manager.get(key, default)
-    except Exception:
-        return default
+_spotify_status_initialized = False
+_spotify_rate_limit_expires_at = 0.0
+_spotify_post_ban_cooldown_expires_at = 0.0
 
 
 def invalidate_metadata_status_caches() -> None:
-    """Mark the cached metadata-source and Spotify status snapshots stale."""
-    global _metadata_source_status_timestamp, _spotify_status_timestamp
+    """Mark the cached metadata-source snapshot stale."""
+    global _metadata_source_status_timestamp
     with _status_lock:
         _metadata_source_status_timestamp = 0.0
-        _spotify_status_timestamp = 0.0
+
+
+def publish_spotify_status(
+    *,
+    connected: Any = _UNSET,
+    authenticated: Any = _UNSET,
+    rate_limited: Any = _UNSET,
+    rate_limit: Any = _UNSET,
+    post_ban_cooldown: Any = _UNSET,
+) -> Dict[str, Any]:
+    """Update the cached Spotify status snapshot from an event."""
+    global _spotify_status_timestamp, _spotify_status_initialized
+    global _spotify_rate_limit_expires_at, _spotify_post_ban_cooldown_expires_at
+
+    with _status_lock:
+        if connected is not _UNSET:
+            _spotify_status_cache["connected"] = connected
+        if authenticated is not _UNSET:
+            _spotify_status_cache["authenticated"] = authenticated
+        if rate_limited is not _UNSET:
+            _spotify_status_cache["rate_limited"] = rate_limited
+        if rate_limit is not _UNSET:
+            _spotify_status_cache["rate_limit"] = rate_limit
+            if rate_limit and isinstance(rate_limit, dict):
+                _spotify_rate_limit_expires_at = float(rate_limit.get("expires_at") or 0.0)
+            else:
+                _spotify_rate_limit_expires_at = 0.0
+        if post_ban_cooldown is not _UNSET:
+            _spotify_status_cache["post_ban_cooldown"] = post_ban_cooldown
+            if post_ban_cooldown is not None:
+                _spotify_post_ban_cooldown_expires_at = time.time() + max(0, float(post_ban_cooldown))
+            else:
+                _spotify_post_ban_cooldown_expires_at = 0.0
+        _spotify_status_timestamp = time.time()
+        _spotify_status_initialized = True
+        _normalize_spotify_status_locked(_spotify_status_timestamp)
+        return dict(_spotify_status_cache)
+
+
+def refresh_spotify_status_from_client(spotify_client: Optional[Any]) -> Dict[str, Any]:
+    """Probe Spotify once to seed the cache when no event has populated it yet."""
+    if spotify_client is None:
+        with _status_lock:
+            return dict(_spotify_status_cache)
+
+    try:
+        is_rate_limited = spotify_client.is_rate_limited() if spotify_client else False
+        rate_limit_info = spotify_client.get_rate_limit_info() if (spotify_client and is_rate_limited) else None
+        cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
+        authenticated = spotify_client.is_spotify_authenticated() if spotify_client else False
+    except Exception as exc:
+        logger.debug("Spotify status probe failed: %s", exc)
+        authenticated = False
+        is_rate_limited = False
+        rate_limit_info = None
+        cooldown_remaining = 0
+
+    return publish_spotify_status(
+        connected=authenticated,
+        authenticated=authenticated,
+        rate_limited=is_rate_limited,
+        rate_limit=rate_limit_info,
+        post_ban_cooldown=cooldown_remaining if cooldown_remaining > 0 else None,
+    )
 
 
 def get_metadata_source_status() -> Dict[str, Any]:
@@ -75,36 +133,42 @@ def get_metadata_source_status() -> Dict[str, Any]:
 
 def get_spotify_status(spotify_client: Optional[Any] = None) -> Dict[str, Any]:
     """Return a cached Spotify-specific status snapshot."""
-    global _spotify_status_timestamp
-
-    current_time = time.time()
-    configured_source = _get_config_value("metadata.fallback_source", "deezer") or "deezer"
-    ttl = SPOTIFY_STATUS_TTL_ACTIVE if configured_source == "spotify" else SPOTIFY_STATUS_TTL_IDLE
-
     with _status_lock:
-        if _spotify_status_timestamp and current_time - _spotify_status_timestamp <= ttl:
+        if _spotify_status_initialized:
+            _normalize_spotify_status_locked(time.time())
             return dict(_spotify_status_cache)
 
-    try:
-        is_rate_limited = spotify_client.is_rate_limited() if spotify_client else False
-        rate_limit_info = spotify_client.get_rate_limit_info() if (spotify_client and is_rate_limited) else None
-        cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
-        authenticated = spotify_client.is_spotify_authenticated() if spotify_client else False
+    return refresh_spotify_status_from_client(spotify_client)
 
-        with _status_lock:
-            _spotify_status_cache.update({
-                "connected": authenticated,
-                "authenticated": authenticated,
-                "rate_limited": is_rate_limited,
-                "rate_limit": rate_limit_info,
-                "post_ban_cooldown": cooldown_remaining if cooldown_remaining > 0 else None,
-            })
-            _spotify_status_timestamp = current_time
-    except Exception as exc:
-        logger.debug("Spotify status refresh failed: %s", exc)
 
-    with _status_lock:
-        return dict(_spotify_status_cache)
+def _normalize_spotify_status_locked(current_time: float) -> None:
+    """Update derived Spotify status fields and clear expired ban state."""
+    global _spotify_rate_limit_expires_at, _spotify_post_ban_cooldown_expires_at
+
+    rate_limit = _spotify_status_cache.get("rate_limit")
+    if _spotify_status_cache.get("rate_limited") and rate_limit and isinstance(rate_limit, dict):
+        expires_at = float(rate_limit.get("expires_at") or 0.0)
+        if expires_at > 0:
+            remaining = int(max(0, expires_at - current_time))
+            if remaining > 0:
+                _spotify_status_cache["rate_limit"] = {**rate_limit, "remaining_seconds": remaining}
+                _spotify_rate_limit_expires_at = expires_at
+            else:
+                _spotify_status_cache["rate_limited"] = False
+                _spotify_status_cache["rate_limit"] = None
+                _spotify_rate_limit_expires_at = 0.0
+    elif _spotify_rate_limit_expires_at and current_time >= _spotify_rate_limit_expires_at:
+        _spotify_status_cache["rate_limited"] = False
+        _spotify_status_cache["rate_limit"] = None
+        _spotify_rate_limit_expires_at = 0.0
+
+    if _spotify_post_ban_cooldown_expires_at > 0:
+        remaining = int(max(0, _spotify_post_ban_cooldown_expires_at - current_time))
+        if remaining > 0:
+            _spotify_status_cache["post_ban_cooldown"] = remaining
+        else:
+            _spotify_status_cache["post_ban_cooldown"] = None
+            _spotify_post_ban_cooldown_expires_at = 0.0
 
 
 def get_status_snapshot(spotify_client: Optional[Any] = None) -> Dict[str, Any]:

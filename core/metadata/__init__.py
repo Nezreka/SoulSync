@@ -42,8 +42,6 @@ from core.metadata.registry import (
 )
 from core.metadata.status import (
     METADATA_SOURCE_STATUS_TTL,
-    SPOTIFY_STATUS_TTL_ACTIVE,
-    SPOTIFY_STATUS_TTL_IDLE,
     get_metadata_source_status,
     get_spotify_status,
     get_status_snapshot,
@@ -98,7 +96,5 @@ __all__ = [
     "register_profile_spotify_credentials_provider",
     "register_runtime_clients",
     "resolve_album_reference",
-    "SPOTIFY_STATUS_TTL_ACTIVE",
-    "SPOTIFY_STATUS_TTL_IDLE",
     "invalidate_metadata_status_caches",
 ]

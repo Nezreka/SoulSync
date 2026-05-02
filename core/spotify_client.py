@@ -138,6 +138,18 @@ def _set_global_rate_limit(retry_after_seconds, endpoint_name, has_real_header=F
                 )
             except Exception:
                 pass
+    try:
+        from core.metadata.status import publish_spotify_status
+
+        publish_spotify_status(
+            connected=False,
+            authenticated=True,
+            rate_limited=True,
+            rate_limit=_get_rate_limit_info(),
+            post_ban_cooldown=_get_post_ban_cooldown_remaining() or None,
+        )
+    except Exception:
+        pass
 
 
 def _is_globally_rate_limited():
@@ -210,6 +222,16 @@ def _clear_rate_limit():
         _rate_limit_hit_count = 0
         _rate_limit_first_hit = 0
     logger.info("Global rate limit ban cleared (including post-ban cooldown)")
+    try:
+        from core.metadata.status import publish_spotify_status
+
+        publish_spotify_status(
+            rate_limited=False,
+            rate_limit=None,
+            post_ban_cooldown=None,
+        )
+    except Exception:
+        pass
 
 
 def _detect_and_set_rate_limit(exception, endpoint_name="unknown"):
@@ -603,13 +625,38 @@ class SpotifyClient:
         """Check if Spotify client is specifically authenticated (not just iTunes fallback).
         Results are cached for 60 seconds to avoid excessive API calls.
         During rate limit bans and post-ban cooldown, returns False without making API calls."""
+        rate_limited_state = False
         if self.sp is None:
+            try:
+                from core.metadata.status import publish_spotify_status
+
+                publish_spotify_status(
+                    connected=False,
+                    authenticated=False,
+                    rate_limited=_is_globally_rate_limited(),
+                    rate_limit=_get_rate_limit_info(),
+                    post_ban_cooldown=_get_post_ban_cooldown_remaining() or None,
+                )
+            except Exception:
+                pass
             return False
 
         # If globally rate limited, report as NOT authenticated so callers
         # skip Spotify and fall through to iTunes fallback naturally.
         # This prevents any API calls that could extend the ban.
         if _is_globally_rate_limited():
+            try:
+                from core.metadata.status import publish_spotify_status
+
+                publish_spotify_status(
+                    connected=False,
+                    authenticated=True,
+                    rate_limited=True,
+                    rate_limit=_get_rate_limit_info(),
+                    post_ban_cooldown=_get_post_ban_cooldown_remaining() or None,
+                )
+            except Exception:
+                pass
             return False
 
         # Post-ban cooldown: after a ban expires, don't probe Spotify immediately.
@@ -618,11 +665,35 @@ class SpotifyClient:
         if _is_in_post_ban_cooldown():
             remaining = _get_post_ban_cooldown_remaining()
             logger.debug(f"Post-ban cooldown active ({remaining}s left), skipping auth probe")
+            try:
+                from core.metadata.status import publish_spotify_status
+
+                publish_spotify_status(
+                    connected=False,
+                    authenticated=True,
+                    rate_limited=False,
+                    rate_limit=None,
+                    post_ban_cooldown=remaining or None,
+                )
+            except Exception:
+                pass
             return False
 
         # Check cache first (lock only for brief read)
         with self._auth_cache_lock:
             if self._auth_cached_result is not None and (time.time() - self._auth_cache_time) < self._AUTH_CACHE_TTL:
+                try:
+                    from core.metadata.status import publish_spotify_status
+
+                    publish_spotify_status(
+                        connected=self._auth_cached_result,
+                        authenticated=self._auth_cached_result,
+                        rate_limited=False,
+                        rate_limit=None,
+                        post_ban_cooldown=None,
+                    )
+                except Exception:
+                    pass
                 return self._auth_cached_result
 
         # Cache miss — make API call outside the lock.
@@ -637,6 +708,18 @@ class SpotifyClient:
                 with self._auth_cache_lock:
                     self._auth_cached_result = False
                     self._auth_cache_time = time.time()
+                try:
+                    from core.metadata.status import publish_spotify_status
+
+                    publish_spotify_status(
+                        connected=False,
+                        authenticated=False,
+                        rate_limited=False,
+                        rate_limit=None,
+                        post_ban_cooldown=None,
+                    )
+                except Exception:
+                    pass
                 return False
         except Exception:
             pass
@@ -668,6 +751,7 @@ class SpotifyClient:
                 ban_duration = max(delay, _BASE_UNKNOWN_BAN)
                 _set_global_rate_limit(ban_duration, 'is_spotify_authenticated', has_real_header=has_real_header)
                 logger.warning(f"Auth probe rate limited — activating {ban_duration}s global ban")
+                rate_limited_state = True
                 result = True
             else:
                 logger.debug(f"Spotify authentication check failed: {e}")
@@ -676,6 +760,19 @@ class SpotifyClient:
         with self._auth_cache_lock:
             self._auth_cached_result = result
             self._auth_cache_time = time.time()
+
+        try:
+            from core.metadata.status import publish_spotify_status
+
+            publish_spotify_status(
+                connected=result,
+                authenticated=result,
+                rate_limited=rate_limited_state,
+                rate_limit=_get_rate_limit_info() if rate_limited_state else None,
+                post_ban_cooldown=None,
+            )
+        except Exception:
+            pass
 
         return result
 
@@ -686,6 +783,18 @@ class SpotifyClient:
         self.user_id = None
         self._invalidate_auth_cache()
         _clear_rate_limit()
+        try:
+            from core.metadata.status import publish_spotify_status
+
+            publish_spotify_status(
+                connected=False,
+                authenticated=False,
+                rate_limited=False,
+                rate_limit=None,
+                post_ban_cooldown=None,
+            )
+        except Exception:
+            pass
 
         cache_path = 'config/.spotify_cache'
         try:
