@@ -89,5 +89,5 @@ npm run check
 npm run fix
 ```
 
-If you want a convenience wrapper, the repo root also includes `./dev.sh`.
-It starts both halves together and is most useful on Linux, macOS, and WSL.
+If you want a convenience launcher, the repo root includes `python dev.py`
+for any OS and `./dev.sh` as a Unix shell wrapper.

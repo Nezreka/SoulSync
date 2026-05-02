@@ -307,8 +307,8 @@ Run tests separately when needed:
 python -m pytest
 ```
 
-If you want a convenience launcher, `./dev.sh` starts both halves together.
-It is most useful on Linux, macOS, and WSL.
+If you want a convenience launcher, `python dev.py` starts both halves together
+on any OS. `./dev.sh` remains available as a Unix shell wrapper.
 
 ---
 
