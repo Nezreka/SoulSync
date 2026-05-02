@@ -4378,17 +4378,6 @@ const TROUBLESHOOT_RULES = [
             'Consider switching to iTunes temporarily to continue working'
         ]
     },
-    {
-        selector: '.issue-card.status-open, .issues-stat-open',
-        title: 'Open Issues in Library',
-        steps: [
-            'Open issues have been reported for tracks in your library',
-            'Go to the Issues page to review and resolve them',
-            'Common issues: wrong track downloaded, bad metadata, low audio quality',
-            'Each issue has fix suggestions and action buttons'
-        ],
-        action: { label: 'View Issues', fn: () => navigateToPage('issues') }
-    },
 ];
 
 function activateTroubleshootMode() {

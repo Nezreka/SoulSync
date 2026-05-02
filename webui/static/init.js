@@ -1,5 +1,20 @@
 // INITIALIZATION
 // ===============================
+let navigationEpoch = 0;
+
+function notifyPageWillChange(nextPageId) {
+    const fromPageId = typeof currentPage === 'string' ? currentPage : null;
+    if (fromPageId === nextPageId) return;
+
+    window.dispatchEvent(
+        new CustomEvent(PAGE_WILL_CHANGE_EVENT, {
+            detail: {
+                fromPageId,
+                toPageId: nextPageId,
+            },
+        }),
+    );
+}
 
 // ---- Accent Color System ----
 
@@ -186,55 +201,54 @@ function applyReduceEffects(enabled) {
 
 // ── Profile System ─────────────────────────────────────────────
 let currentProfile = null;
+const PROFILE_CONTEXT_CHANGED_EVENT = 'ss:webui-profile-context-changed';
 
-// Normalize legacy allowed_pages entries so the profile edit forms (which are
-// built from the new pageLabels map containing 'search') don't drop access
-// when saving a profile that was stored before the Search page rename.
-// 'downloads' was the old Search id, 'artists' was the retired inline page.
-function _normalizeLegacyAllowedPages(pages) {
-    if (!Array.isArray(pages)) return pages;
-    const mapped = pages.map(id => (id === 'downloads' || id === 'artists') ? 'search' : id);
-    return [...new Set(mapped)];
+function notifyProfileContextChanged() {
+    window.dispatchEvent(new CustomEvent(PROFILE_CONTEXT_CHANGED_EVENT));
 }
 
-function _normalizeLegacyHomePage(homePage) {
-    if (homePage === 'downloads' || homePage === 'artists') return 'search';
-    return homePage;
+function setCurrentProfile(profile) {
+    currentProfile = profile;
+    updateProfileIndicator();
+    notifyProfileContextChanged();
+}
+
+// Temporary compatibility shim until existing profile rows are migrated to
+// the current page ids.
+const LEGACY_PROFILE_PAGE_ALIASES = {
+    downloads: 'search',
+    artists: 'search',
+};
+
+function normalizeProfilePageId(pageId) {
+    return LEGACY_PROFILE_PAGE_ALIASES[pageId] || pageId;
+}
+
+function normalizeProfilePageList(pageIds) {
+    if (!Array.isArray(pageIds)) return pageIds;
+    return pageIds.map(normalizeProfilePageId);
 }
 
 function getProfileHomePage() {
     if (!currentProfile) return 'dashboard';
-    // Legacy profiles stored the Search page as either 'downloads' (the old id
-    // before the rename) or 'artists' (the retired inline Artists page).
-    // Both fold into the unified Search page now.
-    let home = currentProfile.home_page;
-    if (home === 'downloads' || home === 'artists') home = 'search';
-    if (home) return home;
+    if (currentProfile.home_page) return normalizeProfilePageId(currentProfile.home_page);
     return currentProfile.is_admin ? 'dashboard' : 'discover';
 }
 
 function isPageAllowed(pageId) {
     if (!currentProfile) return true;
     if (currentProfile.id === 1) return true;
-    if (pageId === 'help' || pageId === 'issues') return true;
-    if (pageId === 'settings') return currentProfile.is_admin;
-    if (pageId === 'artist-detail') {
-        // artist-detail is reachable from both Library and Search results, so
-        // either grant unlocks it. Without this, a Search-only profile couldn't
-        // open a source artist, and a legacy artists-only profile would hit the
-        // home-redirect recursion path below.
-        const ap = currentProfile.allowed_pages;
+    const normalizedPageId = normalizeProfilePageId(pageId);
+    if (normalizedPageId === 'help' || normalizedPageId === 'issues') return true;
+    if (normalizedPageId === 'settings') return currentProfile.is_admin;
+    if (normalizedPageId === 'artist-detail') {
+        const ap = normalizeProfilePageList(currentProfile.allowed_pages);
         if (!ap) return true;
-        return ap.includes('library') || ap.includes('search')
-            || ap.includes('downloads') || ap.includes('artists');
+        return ap.includes('library') || ap.includes('search');
     }
-    const ap = currentProfile.allowed_pages;
+    const ap = normalizeProfilePageList(currentProfile.allowed_pages);
     if (!ap) return true; // null = all pages
-    if (ap.includes(pageId)) return true;
-    // Legacy compat: 'downloads' (old Search id) and 'artists' (retired inline
-    // Artists page) both fold into the unified 'search' page.
-    if (pageId === 'search' && (ap.includes('downloads') || ap.includes('artists'))) return true;
-    if ((pageId === 'downloads' || pageId === 'artists') && ap.includes('search')) return true;
+    if (ap.includes(normalizedPageId)) return true;
     return false;
 }
 
@@ -242,6 +256,92 @@ function canDownload() {
     if (!currentProfile) return true;
     if (currentProfile.id === 1) return true;
     return currentProfile.can_download !== false && currentProfile.can_download !== 0;
+}
+
+function getCurrentProfileContext() {
+    if (!currentProfile) return null;
+    return {
+        profileId: currentProfile.id,
+        isAdmin: !!currentProfile.is_admin,
+    };
+}
+
+function getWebRouter() {
+    return window.SoulSyncWebRouter ?? null;
+}
+
+function showLegacyPage(pageId) {
+    document.querySelectorAll('.page').forEach(page => {
+        page.classList.remove('active');
+    });
+    const page = document.getElementById(`${pageId}-page`);
+    if (page) {
+        page.classList.add('active');
+    }
+    const reactHost = document.getElementById('webui-react-root');
+    if (reactHost) {
+        reactHost.classList.remove('active');
+    }
+}
+
+function setActivePageChrome(pageId) {
+    document.querySelectorAll('.nav-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    const navButton = document.querySelector(`[data-page="${pageId}"]`);
+    if (navButton) {
+        navButton.classList.add('active');
+    } else if (pageId === 'artist-detail') {
+        // Artist detail is a Library context, so keep the sidebar anchored there.
+        const libraryBtn = document.querySelector('[data-page="library"]');
+        if (libraryBtn) {
+            libraryBtn.classList.add('active');
+        }
+    }
+    currentPage = pageId;
+    if (typeof _updateSidebarLibraryBreadcrumb === 'function') _updateSidebarLibraryBreadcrumb();
+    if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
+    const downloadSidebar = document.getElementById('discover-download-sidebar');
+    if (downloadSidebar) {
+        if (pageId === 'discover') {
+            const activeDownloads = typeof discoverDownloads !== 'undefined'
+                ? Object.keys(discoverDownloads).length
+                : 0;
+            if (activeDownloads > 0 && typeof updateDiscoverDownloadBar === 'function') {
+                updateDiscoverDownloadBar();
+            }
+        } else {
+            downloadSidebar.classList.add('hidden');
+        }
+    }
+    if (window.pageParticles && window._particlesEnabled !== false) window.pageParticles.setPage(pageId);
+    if (window.workerOrbs) window.workerOrbs.setPage(pageId);
+}
+
+function showReactHost(pageId) {
+    document.querySelectorAll('.page').forEach(page => {
+        page.classList.remove('active');
+    });
+    const host = document.getElementById('webui-react-root');
+    if (host) {
+        host.classList.add('active');
+    }
+    currentPage = pageId;
+    if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
+    if (window.pageParticles && window._particlesEnabled !== false) window.pageParticles.setPage(pageId);
+    if (window.workerOrbs) window.workerOrbs.setPage(pageId);
+}
+
+function activatePage(pageId, options = {}) {
+    const forceReload = options.forceReload === true;
+    const pageElement = document.getElementById(`${pageId}-page`);
+    const isPageVisible = pageElement ? pageElement.classList.contains('active') : false;
+
+    if (!forceReload && pageId === currentPage && isPageVisible) return;
+
+    showLegacyPage(pageId);
+    setActivePageChrome(pageId);
+    loadPageData(pageId);
 }
 
 function renderProfileAvatar(el, profile) {
@@ -273,8 +373,7 @@ async function initProfileSystem() {
         const currentRes = await fetch('/api/profiles/current');
         const currentData = await currentRes.json();
         if (currentData.success && currentData.profile) {
-            currentProfile = currentData.profile;
-            updateProfileIndicator();
+            setCurrentProfile(currentData.profile);
 
             // Check if launch PIN is required
             if (currentData.launch_pin_required) {
@@ -705,10 +804,9 @@ function showPinDialog(profile) {
                     window.location.reload();
                     return;
                 }
-                currentProfile = data.profile;
                 dialog.style.display = 'none';
                 hideProfilePicker();
-                updateProfileIndicator();
+                setCurrentProfile(data.profile);
                 initApp();
                 return;
             } else {
@@ -755,8 +853,7 @@ async function selectProfile(profileId) {
         });
         const data = await res.json();
         if (data.success) {
-            currentProfile = data.profile;
-            updateProfileIndicator();
+            setCurrentProfile(data.profile);
             // Join profile-scoped WebSocket room for watchlist/wishlist count updates
             if (socket && socket.connected) {
                 socket.emit('profile:join', { profile_id: profileId, old_profile_id: oldProfileId });
@@ -1381,6 +1478,96 @@ function _invalidateListenBrainzCache() {
     }
 }
 
+const PROFILE_PAGE_LABELS = {
+    dashboard: 'Dashboard',
+    sync: 'Sync',
+    search: 'Search',
+    discover: 'Discover',
+    watchlist: 'Watchlist',
+    wishlist: 'Wishlist',
+    automations: 'Automations',
+    'active-downloads': 'Downloads',
+    library: 'Library',
+    stats: 'Listening Stats',
+    'playlist-explorer': 'Playlist Explorer',
+    import: 'Import',
+    tools: 'Tools',
+    hydrabase: 'Hydrabase',
+    issues: 'Issues',
+    help: 'Help & Docs',
+    settings: 'Settings',
+    'artist-detail': 'Artist Detail',
+};
+
+function getProfilePageLabel(pageId) {
+    return PROFILE_PAGE_LABELS[pageId] || pageId.split('-').map(part => part ? part[0].toUpperCase() + part.slice(1) : part).join(' ');
+}
+
+function getProfilePageSelectOptions(profileSettings = {}) {
+    const options = [];
+    const seen = new Set();
+    const homeSelect = document.getElementById('new-profile-home-page');
+    const normalizedHomePage = normalizeProfilePageId(profileSettings.home_page);
+
+    if (homeSelect) {
+        homeSelect.querySelectorAll('option').forEach(option => {
+            if (!option.value || seen.has(option.value)) return;
+            options.push({
+                value: option.value,
+                label: option.textContent?.trim() || getProfilePageLabel(option.value),
+            });
+            seen.add(option.value);
+        });
+    }
+
+    if (normalizedHomePage && !seen.has(normalizedHomePage)) {
+        options.push({
+            value: normalizedHomePage,
+            label: getProfilePageLabel(normalizedHomePage),
+        });
+        seen.add(normalizedHomePage);
+    }
+
+    return options;
+}
+
+function getProfilePageAccessOptions(profileSettings = {}) {
+    const options = [];
+    const seen = new Set();
+    const allowedSet = Array.isArray(profileSettings.allowed_pages)
+        ? new Set(normalizeProfilePageList(profileSettings.allowed_pages))
+        : null;
+    const accessContainer = document.getElementById('new-profile-allowed-pages');
+
+    if (accessContainer) {
+        accessContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            if (seen.has(cb.value)) return;
+            options.push({
+                value: cb.value,
+                label: cb.parentElement?.textContent?.trim() || getProfilePageLabel(cb.value),
+                checked: cb.disabled ? true : (allowedSet ? allowedSet.has(cb.value) : true),
+                disabled: cb.disabled,
+            });
+            seen.add(cb.value);
+        });
+    }
+
+    if (allowedSet) {
+        allowedSet.forEach(pageId => {
+            if (seen.has(pageId)) return;
+            options.push({
+                value: pageId,
+                label: getProfilePageLabel(pageId),
+                checked: true,
+                disabled: false,
+            });
+            seen.add(pageId);
+        });
+    }
+
+    return options;
+}
+
 function initProfileManagement() {
     const manageBtn = document.getElementById('manage-profiles-btn');
     const closeBtn = document.getElementById('profile-manage-close');
@@ -1597,13 +1784,8 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     const isAdmin = currentProfile && currentProfile.is_admin;
     const isEditingAdmin = profileSettings.is_admin;
     const editColors = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#14b8a6'];
-    // 'search' replaces the legacy 'downloads'/'artists' ids; legacy values are
-    // normalized on read below so saving a legacy profile upgrades it.
-    const pageLabels = {
-        dashboard: 'Dashboard', sync: 'Sync', search: 'Search', discover: 'Discover',
-        automations: 'Automations', library: 'Library', stats: 'Listening Stats',
-        'playlist-explorer': 'Playlist Explorer', import: 'Import', help: 'Help & Docs'
-    };
+    const pageSelectOptions = getProfilePageSelectOptions(profileSettings);
+    const pageAccessOptions = getProfilePageAccessOptions(profileSettings);
 
     const form = document.createElement('div');
     form.id = 'profile-edit-form';
@@ -1653,16 +1835,12 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
     defaultOpt.value = '';
     defaultOpt.textContent = isEditingAdmin ? 'Default (Dashboard)' : 'Default (Discover)';
     homeSelect.appendChild(defaultOpt);
-    // Normalize legacy ids so the form shows the right options/selection for
-    // profiles saved before the Search page rename.
-    const allowedSet = _normalizeLegacyAllowedPages(profileSettings.allowed_pages);
-    const normalizedHome = _normalizeLegacyHomePage(profileSettings.home_page);
-    Object.entries(pageLabels).forEach(([id, label]) => {
-        if (allowedSet && !allowedSet.includes(id)) return; // Skip non-permitted
+    const normalizedHome = profileSettings.home_page;
+    pageSelectOptions.forEach(({ value, label }) => {
         const opt = document.createElement('option');
-        opt.value = id;
+        opt.value = value;
         opt.textContent = label;
-        if (id === normalizedHome) opt.selected = true;
+        if (value === normalizedHome) opt.selected = true;
         homeSelect.appendChild(opt);
     });
     form.appendChild(homeSelect);
@@ -1678,26 +1856,18 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
 
         const apContainer = document.createElement('div');
         apContainer.className = 'profile-page-checkboxes';
-        Object.entries(pageLabels).forEach(([id, label]) => {
+        pageAccessOptions.forEach(({ value, label, checked, disabled }) => {
             const lbl = document.createElement('label');
             const cb = document.createElement('input');
             cb.type = 'checkbox';
-            cb.value = id;
-            cb.checked = !allowedSet || allowedSet.includes(id);
+            cb.value = value;
+            cb.checked = checked;
+            cb.disabled = disabled;
             lbl.appendChild(cb);
             lbl.appendChild(document.createTextNode(' ' + label));
             apContainer.appendChild(lbl);
             pageCheckboxes.push(cb);
         });
-        // Always-on help
-        const helpLbl = document.createElement('label');
-        const helpCb = document.createElement('input');
-        helpCb.type = 'checkbox';
-        helpCb.checked = true;
-        helpCb.disabled = true;
-        helpLbl.appendChild(helpCb);
-        helpLbl.appendChild(document.createTextNode(' Help & Docs'));
-        apContainer.appendChild(helpLbl);
         form.appendChild(apContainer);
 
         const dlLabel = document.createElement('label');
@@ -1727,8 +1897,9 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
 
         // Admin-only fields
         if (isAdmin && !isEditingAdmin && pageCheckboxes.length) {
-            const allChecked = pageCheckboxes.every(cb => cb.checked);
-            payload.allowed_pages = allChecked ? null : pageCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
+            const editablePageCheckboxes = pageCheckboxes.filter(cb => !cb.disabled);
+            const allChecked = editablePageCheckboxes.every(cb => cb.checked);
+            payload.allowed_pages = allChecked ? null : editablePageCheckboxes.filter(cb => cb.checked).map(cb => cb.value);
             payload.can_download = canDlCheckbox ? canDlCheckbox.checked : true;
         }
 
@@ -1749,6 +1920,7 @@ function showProfileEditForm(profileId, currentName, currentColor, currentAvatar
                     if (payload.allowed_pages !== undefined) currentProfile.allowed_pages = payload.allowed_pages;
                     if (payload.can_download !== undefined) currentProfile.can_download = payload.can_download;
                     updateProfileIndicator();
+                    notifyProfileContextChanged();
                 }
                 loadProfileManageList();
             } else {
@@ -1787,8 +1959,6 @@ function showSelfEditForm() {
     const existing = document.getElementById('self-edit-form');
     if (existing) existing.remove();
 
-    // 'search' replaces the legacy 'downloads'/'artists' ids; legacy values are
-    // normalized on read below so saving a legacy profile upgrades it.
     const pageLabels = {
         dashboard: 'Dashboard', sync: 'Sync', search: 'Search', discover: 'Discover',
         automations: 'Automations', library: 'Library', stats: 'Listening Stats',
@@ -1826,16 +1996,12 @@ function showSelfEditForm() {
     defaultOpt.value = '';
     defaultOpt.textContent = 'Default (Discover)';
     homeSelect.appendChild(defaultOpt);
-    // Normalize legacy ids so the form shows the right options/selection for
-    // profiles saved before the Search page rename.
-    const ap = _normalizeLegacyAllowedPages(currentProfile.allowed_pages);
-    const normalizedHome = _normalizeLegacyHomePage(currentProfile.home_page);
-    Object.entries(pageLabels).forEach(([id, label]) => {
-        if (ap && !ap.includes(id)) return;
+    const normalizedHome = currentProfile.home_page;
+    getProfilePageSelectOptions({ home_page: normalizedHome }).forEach(({ value, label }) => {
         const opt = document.createElement('option');
-        opt.value = id;
+        opt.value = value;
         opt.textContent = label;
-        if (id === normalizedHome) opt.selected = true;
+        if (value === normalizedHome) opt.selected = true;
         homeSelect.appendChild(opt);
     });
     form.appendChild(homeSelect);
@@ -2003,9 +2169,6 @@ function initApp() {
     // Start always-on download polling (batched, minimal overhead)
     startGlobalDownloadPolling();
 
-    // Load issues badge count
-    loadIssuesBadge();
-
     // Load initial data
     loadInitialData();
 
@@ -2037,22 +2200,20 @@ function initializeNavigation() {
         });
     });
 
-    window.addEventListener('popstate', (event) => {
-        const page = (event.state && event.state.page) || _getPageFromPath();
-        if (page && page !== currentPage) {
-            navigateToPage(page, { skipPushState: true });
-        }
-    });
 }
 
 const _DEEPLINK_VALID_PAGES = new Set([
-    'dashboard', 'sync', 'search', 'downloads', 'discover', 'artists', 'automations',
+    'dashboard', 'sync', 'search', 'discover', 'automations',
     'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
     'hydrabase', 'tools'
 ]);
 
 function _getPageFromPath() {
+    const router = getWebRouter();
+    const resolved = router?.resolvePageId?.(window.location.pathname);
+    if (resolved) return resolved;
+
     const path = window.location.pathname.replace(/^\/+|\/+$/g, '');
     if (!path) return 'dashboard';
     const basePage = path.split('/')[0];
@@ -2163,95 +2324,54 @@ function initializeWatchlist() {
 }
 
 function navigateToPage(pageId, options = {}) {
-    // Backwards-compat aliases — both legacy ids fold into the unified Search page.
-    // 'downloads' was the Search page's old id; 'artists' was the retired inline
-    // Artists page, now replaced by clicking artists from the unified Search.
-    if (pageId === 'downloads' || pageId === 'artists') pageId = 'search';
+    navigationEpoch += 1;
 
-    if (pageId === currentPage) return;
+    if (!options.forceReload && pageId === currentPage) return;
 
     // Permission guard — redirect to home page if not allowed
     if (!isPageAllowed(pageId)) {
         const home = getProfileHomePage();
         if (home !== currentPage && isPageAllowed(home)) {
-            navigateToPage(home);
+            navigateToPage(home, options);
         }
         return;
     }
 
-    // Update navigation buttons (only if there's a nav button for this page).
-    // Pages reachable from many surfaces (artist-detail, playlist-explorer)
-    // intentionally have no [data-page] match here — the sidebar shouldn't
-    // imply a section the user didn't actually navigate via.
-    document.querySelectorAll('.nav-button').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    const navButton = document.querySelector(`[data-page="${pageId}"]`);
-    if (navButton) {
-        navButton.classList.add('active');
-    } else if (pageId === 'artist-detail') {
-        // Artist-detail is a "pseudo-page" reachable from Library, Search,
-        // or the global search popover — it has no [data-page] match. Treat
-        // it as a Library context so the sidebar still anchors the user
-        // somewhere instead of showing a blank active state.
-        const libraryBtn = document.querySelector('[data-page="library"]');
-        if (libraryBtn) libraryBtn.classList.add('active');
+    const router = getWebRouter();
+    if (router && !options.skipRouteChange) {
+        notifyPageWillChange(pageId);
+        const route = router.routeManifest?.find((entry) => entry.pageId === pageId);
+        if (route?.kind === 'react') {
+            showReactHost(pageId);
+            setActivePageChrome(pageId);
+        }
+        return router.navigateToPage(pageId, { replace: options.replace === true });
     }
 
-    // Update pages
-    document.querySelectorAll('.page').forEach(page => {
-        page.classList.remove('active');
-    });
-    document.getElementById(`${pageId}-page`).classList.add('active');
-
-    currentPage = pageId;
-
-    // Refresh the Library button label so artist-detail shows a breadcrumb
-    // ("Library / Artist Name") and other pages show plain "Library".
-    if (typeof _updateSidebarLibraryBreadcrumb === 'function') {
-        _updateSidebarLibraryBreadcrumb();
+    // Fallback path for initial bootstrap or environments without TanStack routing.
+    const route = router?.routeManifest?.find((entry) => entry.pageId === pageId);
+    notifyPageWillChange(pageId);
+    const legacyPageElement = document.getElementById(`${pageId}-page`);
+    if (route?.kind === 'react' || !legacyPageElement) {
+        showReactHost(pageId);
+        setActivePageChrome(pageId);
+    } else {
+        activatePage(pageId, { forceReload: options.forceReload === true });
     }
 
     if (!options.skipPushState) {
         const urlPath = pageId === 'dashboard' ? '/' : '/' + pageId;
         if (window.location.pathname !== urlPath) {
-            history.pushState({ page: pageId }, '', urlPath);
-        }
-    }
-
-    // Show/hide global search bar (hide on search page where the unified search lives)
-    if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
-
-    // Show/hide discover download sidebar based on page
-    const downloadSidebar = document.getElementById('discover-download-sidebar');
-    if (downloadSidebar) {
-        if (pageId === 'discover') {
-            // Show sidebar on discover page if there are active downloads
-            const activeDownloads = Object.keys(discoverDownloads || {}).length;
-            console.log(`📊 [NAVIGATE] Discover page - ${activeDownloads} active downloads`);
-            if (activeDownloads > 0) {
-                // Update the sidebar UI to render the bubbles
-                console.log(`🔄 [NAVIGATE] Updating discover download bar UI`);
-                updateDiscoverDownloadBar();
+            if (options.replace === true) {
+                history.replaceState({ page: pageId }, '', urlPath);
+            } else {
+                history.pushState({ page: pageId }, '', urlPath);
             }
-        } else {
-            // Always hide sidebar on other pages
-            downloadSidebar.classList.add('hidden');
         }
     }
 
-    // Load page-specific data
-    loadPageData(pageId);
-
-    // Update page background particles
-    if (window.pageParticles && window._particlesEnabled !== false) window.pageParticles.setPage(pageId);
-
-    // Update worker orbs
-    if (window.workerOrbs) window.workerOrbs.setPage(pageId);
+    return true;
 }
-
-// REPLACE your old loadPageData function with this one:
-// REPLACE your old loadPageData function with this corrected one
 
 async function loadPageData(pageId) {
     try {
@@ -2281,7 +2401,6 @@ async function loadPageData(pageId) {
                 initializeSearchModeToggle();
                 initializeFilters();
                 break;
-            // 'artists' page retired — aliased to 'search' at the top of navigateToPage
             case 'active-downloads':
                 loadActiveDownloadsPage();
                 break;
@@ -2364,9 +2483,6 @@ async function loadPageData(pageId) {
             case 'automations':
                 await loadAutomations();
                 break;
-            case 'issues':
-                await loadIssuesPage();
-                break;
             case 'help':
                 initializeDocsPage();
                 break;
@@ -2376,14 +2492,3 @@ async function loadPageData(pageId) {
         showToast(`Failed to load ${pageId} data`, 'error');
     }
 }
-
-// ===============================
-// SERVICE STATUS MONITORING
-// ===============================
-
-// Legacy function - now handled by fetchAndUpdateServiceStatus
-// Keeping this for compatibility but it's no longer actively used
-
-// Old updateStatusIndicator function removed - replaced by updateSidebarServiceStatus
-
-// ===============================

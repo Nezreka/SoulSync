@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g, abort
+from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger, setup_logging
 from utils.async_helpers import run_async
@@ -97,6 +97,7 @@ from core.metadata.cache import get_metadata_cache
 from core.metadata import registry as metadata_registry
 from core.metadata import is_internal_image_host
 from core.metadata import normalize_image_url as fix_artist_image_url
+from core.webui import build_webui_vite_assets, should_serve_webui_spa
 from core.metadata.registry import (
     clear_cached_metadata_client,
     get_metadata_source_label,
@@ -292,13 +293,12 @@ app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 
 
-# Cache-bust query string for static assets — appended to every
-# url_for('static', ...) URL via the context processor below. Computed
-# once per process start so each server restart invalidates the
-# browser's cached copy of every JS/CSS file. This is the surefire
-# fix for "user has stale JS even after Ctrl+Shift+R" — the URL
-# itself changes, so the browser cannot reuse a previously-cached
-# response no matter what its Cache-Control header said.
+# Cache-bust query string for static assets. Computed once per process
+# start so each server restart invalidates the browser's cached copy of
+# every JS/CSS file. This is the surefire fix for "user has stale JS
+# even after Ctrl+Shift+R" — the URL itself changes, so the browser
+# cannot reuse a previously-cached response no matter what its
+# Cache-Control header said.
 import time as _cache_bust_time
 _STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
 
@@ -361,6 +361,11 @@ def _log_rejected_socketio_origin():
         request.headers.get('X-Forwarded-Proto', ''),
     )
 
+@app.context_processor
+def inject_webui_assets():
+    return {
+        'vite_assets': build_webui_vite_assets,
+    }
 
 # --- Profile Context (before_request hook) ---
 @app.before_request
@@ -504,7 +509,26 @@ def get_spotify_client_for_profile(profile_id=None):
     return metadata_registry.get_spotify_client_for_profile(profile_id)
 
 # Valid page IDs for profile permission validation
-VALID_PAGE_IDS = {'dashboard', 'sync', 'search', 'downloads', 'discover', 'artists', 'automations', 'library', 'import', 'settings', 'help'}
+VALID_PAGE_IDS = {
+    'dashboard',
+    'sync',
+    'search',
+    'discover',
+    'playlist-explorer',
+    'watchlist',
+    'wishlist',
+    'automations',
+    'active-downloads',
+    'library',
+    'tools',
+    'artist-detail',
+    'stats',
+    'import',
+    'settings',
+    'help',
+    'hydrabase',
+    'issues',
+}
 
 def check_download_permission():
     """Check if current profile has download permission. Returns error response or None if allowed."""
@@ -3309,9 +3333,9 @@ def service_worker():
 @app.route('/<path:page>')
 def spa_catch_all(page):
     # Serve index.html for client-side routes; let Flask handle real routes first.
-    if page.startswith(('api/', 'static/', 'auth/', 'callback', 'deezer/', 'tidal/', 'status')):
+    if not should_serve_webui_spa(f'/{page}'):
         abort(404)
-    return render_template('index.html')
+    return index()
 
 # --- API Endpoints ---
 
@@ -34716,8 +34740,11 @@ def start_runtime_services():
 # Direct execution: python web_server.py (dev/Windows fallback)
 # Production should use: gunicorn -c gunicorn.conf.py wsgi:application
 if _DIRECT_RUN:
+    web_run_host = os.environ.get('SOULSYNC_WEB_BIND_HOST', '0.0.0.0')
+    web_run_port = int(os.environ.get('SOULSYNC_WEB_BIND_PORT', '8008'))
+    display_host = '127.0.0.1' if web_run_host in {'0.0.0.0', '::'} else web_run_host
     logger.info("Starting SoulSync Web UI Server...")
-    logger.info("Open your browser and navigate to http://127.0.0.1:8008")
+    logger.info(f"Open your browser and navigate to http://{display_host}:{web_run_port}")
     logger.info("Tip: For production, use gunicorn -c gunicorn.conf.py wsgi:application")
     start_runtime_services()
-    socketio.run(app, host='0.0.0.0', port=8008, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host=web_run_host, port=web_run_port, debug=False, allow_unsafe_werkzeug=True)
