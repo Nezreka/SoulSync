@@ -297,7 +297,7 @@ Use two terminals so the backend and Vite stay independent:
    ```bash
    cd webui
    npm ci
-   npm run dev -- --host 127.0.0.1 --port 5173
+   npm run dev
    ```
    Vite hot reloads the React side when you change webui files.
 
@@ -437,22 +437,9 @@ SoulSync uses a `dev` → `main` flow:
 
 ### Running locally
 
-```bash
-python -m pip install -r requirements-dev.txt
-python -m ruff check .       # must be 0 errors
-python -m pytest             # all tests must pass
-```
+Use the [Local Development](#local-development) section above for the full repo-wide setup and the portable dev launcher.
 
-For web UI development, keep the backend and Vite dev server in separate terminals:
-
-```bash
-gunicorn -c gunicorn.dev.conf.py wsgi:application
-cd webui
-npm install
-npm run dev -- --host 127.0.0.1 --port 5173
-```
-
-If you want a convenience wrapper, `./dev.sh` starts both halves together.
+For web UI work, see [webui/README.md](webui/README.md). It keeps the React-side notes close to the app while this file stays the single place for repo-wide dev instructions.
 
 Ruff config lives in `pyproject.toml`. The ruleset is intentionally lenient — it catches real bugs (undefined names, import shadowing, closure-in-loop) without style nits.
 

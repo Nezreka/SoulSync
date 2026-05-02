@@ -67,27 +67,8 @@ That order avoids load-time references to missing globals and keeps the React si
 
 ## Development
 
-The recommended dev flow keeps the backend and frontend separate:
+The repo root now owns the full local-dev instructions. Start there for the
+portable launcher and backend/frontend setup:
 
-1. Start the Python backend:
-   ```bash
-   gunicorn -c gunicorn.dev.conf.py wsgi:application
-   ```
-   The dev Gunicorn config watches backend files and restarts the Python server when they change.
-2. Start the Vite dev server in another terminal:
-   ```bash
-   cd webui
-   npm ci
-   npm run dev -- --host 127.0.0.1 --port 5173
-   ```
-   Vite hot reloads the React side when you change webui files.
-
-For linting and formatting, use:
-
-```bash
-npm run check
-npm run fix
-```
-
-If you want a convenience launcher, the repo root includes `python dev.py`
-for any OS and `./dev.sh` as a Unix shell wrapper.
+1. [README.md](../README.md) for the end-to-end dev flow
+2. `npm run check` and `npm run fix` for React-side linting and formatting
