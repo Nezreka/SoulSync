@@ -60,7 +60,7 @@ function syncMetadataSourceSelection(source) {
 
 function _isMetadataSourceSelectable(source) {
     if (source === 'spotify') {
-        return _lastStatusPayload?.metadata_source?.authenticated === true;
+        return _lastStatusPayload?.spotify?.authenticated === true;
     }
     if (source === 'discogs') {
         const token = document.getElementById('discogs-token');
@@ -173,7 +173,7 @@ function initializeSettings() {
     if (discogsTokenInput) {
         discogsTokenInput.addEventListener('input', () => {
             if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
-                syncPrimaryMetadataSourceAvailability(_lastStatusPayload?.metadata_source || null);
+                syncPrimaryMetadataSourceAvailability(_lastStatusPayload?.spotify || null);
             }
             sanitizeMetadataSourceSelection({ quiet: true });
         });
@@ -207,9 +207,9 @@ function initializeSettings() {
     // Test button event listeners removed - they use onclick attributes in HTML to avoid double firing
 
     if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
-        syncPrimaryMetadataSourceAvailability(_lastStatusPayload?.metadata_source || null);
+        syncPrimaryMetadataSourceAvailability(_lastStatusPayload?.spotify || null);
     }
-    syncSpotifySettingsAuthState(_lastStatusPayload?.metadata_source || null);
+    syncSpotifySettingsAuthState(_lastStatusPayload?.spotify || null);
     syncMetadataSourceSelection(_lastStatusPayload?.metadata_source?.source);
     sanitizeMetadataSourceSelection({ quiet: true });
     if (metadataSourceSelect) {
@@ -408,7 +408,7 @@ async function applyServiceStatusGradients() {
                 else header.appendChild(spinner);
             }
         });
-        syncSpotifySettingsAuthState(_lastStatusPayload?.metadata_source || null);
+        syncSpotifySettingsAuthState(_lastStatusPayload?.spotify || null);
     } catch (e) {
         console.warn('[Settings Status] Failed to apply gradients:', e);
     }
@@ -2544,7 +2544,7 @@ async function saveSettings(quiet = false) {
     const discogsTokenInput = document.getElementById('discogs-token');
     const discogsTokenPresent = !!discogsTokenInput?.value?.trim();
     let metadataSource = metadataSourceSelect?.value || 'itunes';
-    const spotifySessionActive = _lastStatusPayload?.metadata_source?.authenticated === true;
+    const spotifySessionActive = _lastStatusPayload?.spotify?.authenticated === true;
     if (metadataSource === 'spotify' && !spotifySessionActive) {
         metadataSource = 'deezer';
         if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
