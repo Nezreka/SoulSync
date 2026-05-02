@@ -17,15 +17,17 @@ import {
   getEntityName,
   getIssueArtwork,
   getPriorityClassName,
-  issueCountsQueryOptions,
-  issueDetailQueryOptions,
-  issueListQueryOptions,
+  formatIssueDate,
   ISSUE_CATEGORY_META,
   ISSUE_STATUS_META,
   normalizeIssuesSearch,
   parseSnapshot,
-  formatIssueDate,
 } from '../-issues.helpers';
+import {
+  issueCountsQueryOptions,
+  issueDetailQueryOptions,
+  issueListQueryOptions,
+} from '../-issues.api';
 import { Route } from '../route';
 import { IssueDetailModal } from './issue-detail-modal';
 import styles from './issues-page.module.css';
