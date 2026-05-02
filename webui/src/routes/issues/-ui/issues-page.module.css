@@ -44,10 +44,6 @@
   flex-wrap: wrap;
 }
 
-.issuesFilterSelect {
-  min-width: 130px;
-}
-
 .issuesStats {
   display: flex;
   gap: 10px;
@@ -664,117 +660,6 @@
   border-color: rgba(255, 165, 0, 0.35);
 }
 
-.issueDetailResponseTextarea {
-  width: 100%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #fff;
-  padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  outline: none;
-  resize: vertical;
-  min-height: 70px;
-  font-family: inherit;
-  transition: border-color 0.2s;
-  box-sizing: border-box;
-}
-
-.issueDetailResponseTextarea:focus {
-  border-color: rgba(var(--accent-light-rgb), 0.5);
-}
-
-.modalFooter {
-  display: flex;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 0 22px 22px;
-}
-
-.modalButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px 16px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
-  color: #fff;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-family: inherit;
-}
-
-.modalButton:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.modalButtonSecondary {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.modalButtonPrimary {
-  background: linear-gradient(
-    135deg,
-    rgba(var(--accent-rgb), 0.95),
-    rgba(var(--accent-light-rgb), 0.85)
-  );
-  color: #08110b;
-  border-color: transparent;
-  font-weight: 700;
-}
-
-.modalButtonDanger {
-  background: rgba(239, 68, 68, 0.14);
-  border-color: rgba(239, 68, 68, 0.28);
-  color: #ffd0d0;
-}
-
-.modalButtonGhost {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.modalButtonProgress {
-  background: rgba(77, 166, 255, 0.15);
-  color: #4da6ff;
-  border-color: rgba(77, 166, 255, 0.25);
-}
-
-.modalButtonResolve {
-  background: rgba(74, 222, 128, 0.15);
-  color: #4ade80;
-  border-color: rgba(74, 222, 128, 0.25);
-}
-
-.modalButtonDismiss {
-  background: rgba(239, 68, 68, 0.14);
-  color: #ffd0d0;
-  border-color: rgba(239, 68, 68, 0.28);
-}
-
-.modalButtonReopen {
-  background: rgba(var(--accent-light-rgb), 0.15);
-  color: #fff;
-  border-color: rgba(var(--accent-light-rgb), 0.3);
-}
-
-.modalButtonDelete {
-  background: rgba(239, 68, 68, 0.14);
-  color: #ffd0d0;
-  border-color: rgba(239, 68, 68, 0.28);
-}
-
-.modalButtonDelete:hover:not(:disabled),
-.modalButtonDanger:hover:not(:disabled),
-.modalButtonProgress:hover:not(:disabled),
-.modalButtonResolve:hover:not(:disabled),
-.modalButtonDismiss:hover:not(:disabled),
-.modalButtonReopen:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-
 @media (max-width: 900px) {
   .issuesStats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -809,11 +694,6 @@
     width: 100%;
   }
 
-  .issuesFilterSelect {
-    min-width: 100%;
-    width: 100%;
-  }
-
   .issuesStats {
     display: grid;
     grid-template-columns: repeat(1, minmax(0, 1fr));
@@ -841,30 +721,5 @@
     align-items: flex-start;
     flex-direction: row;
     justify-content: space-between;
-  }
-
-  .modal {
-    max-height: calc(100vh - 24px);
-    border-radius: 22px;
-  }
-
-  .modalBody {
-    padding: 18px;
-  }
-
-  .modalFooter {
-    padding: 0 18px 18px;
-  }
-
-  .issueDetailMetaGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .issueMetaValue {
-    max-width: 80px;
-  }
-
-  .issueActionButtons {
-    justify-content: center;
   }
 }
