@@ -279,17 +279,17 @@
             <!-- Status Section -->
             <div class="status-section">
                 <h4 class="status-title">Service Status</h4>
-                <div class="status-indicator" id="metadata-source-indicator">
+                <div class="status-indicator" id="metadata-source-indicator" data-status-ready="false">
                     <span class="status-dot disconnected"></span>
-                    <span class="status-name" id="metadata-source-name">Spotify</span>
+                    <span class="status-name" id="metadata-source-name">Metadata Source</span>
                 </div>
-                <div class="status-indicator" id="media-server-indicator">
+                <div class="status-indicator" id="media-server-indicator" data-status-ready="false">
                     <span class="status-dot disconnected"></span>
-                    <span class="status-name" id="media-server-name">Plex</span>
+                    <span class="status-name" id="media-server-name">Media Server</span>
                 </div>
-                <div class="status-indicator" id="soulseek-indicator">
+                <div class="status-indicator" id="soulseek-indicator" data-status-ready="false">
                     <span class="status-dot disconnected"></span>
-                    <span class="status-name" id="download-source-name">Soulseek</span>
+                    <span class="status-name" id="download-source-name">Download Source</span>
                 </div>
             </div>
         </div>
@@ -616,9 +616,9 @@
                     <div class="dashboard-section">
                         <h3 class="section-title">Service Status</h3>
                         <div class="service-status-grid">
-                            <div class="service-card" id="metadata-source-service-card">
+                            <div class="service-card" id="metadata-source-service-card" data-status-ready="false">
                                 <div class="service-card-header">
-                                    <span class="service-card-title" id="metadata-source-title">Spotify</span>
+                                    <span class="service-card-title" id="metadata-source-title">Metadata Source</span>
                                     <span class="service-card-indicator disconnected"
                                         id="metadata-source-status-indicator">●</span>
                                 </div>
@@ -629,9 +629,9 @@
                                         onclick="testDashboardConnection(getActiveMetadataSource())">Test Connection</button>
                                 </div>
                             </div>
-                            <div class="service-card" id="media-server-service-card">
+                            <div class="service-card" id="media-server-service-card" data-status-ready="false">
                                 <div class="service-card-header">
-                                    <span class="service-card-title" id="media-server-service-name">Server</span>
+                                    <span class="service-card-title" id="media-server-service-name">Media Server</span>
                                     <span class="service-card-indicator disconnected"
                                         id="media-server-status-indicator">●</span>
                                 </div>
@@ -642,9 +642,9 @@
                                         Connection</button>
                                 </div>
                             </div>
-                            <div class="service-card" id="soulseek-service-card">
+                            <div class="service-card" id="soulseek-service-card" data-status-ready="false">
                                 <div class="service-card-header">
-                                    <span class="service-card-title" id="download-source-title">Soulseek</span>
+                                    <span class="service-card-title" id="download-source-title">Download Source</span>
                                     <span class="service-card-indicator disconnected"
                                         id="soulseek-status-indicator">●</span>
                                 </div>

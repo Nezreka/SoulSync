@@ -2820,6 +2820,19 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-weight: 400;
 }
 
+.status-indicator[data-status-ready="false"] .status-dot,
+.status-indicator[data-status-ready="false"] .status-name,
+.service-card[data-status-ready="false"] .service-card-title,
+.service-card[data-status-ready="false"] .service-card-indicator,
+.service-card[data-status-ready="false"] .service-card-status-text,
+.service-card[data-status-ready="false"] .service-card-response-time {
+    visibility: hidden;
+}
+
+#metadata-source-service-card[data-status-ready="false"] .service-card-button {
+    visibility: hidden;
+}
+
 /* =====================================
    MAIN CONTENT AREA STYLING  
    ===================================== */

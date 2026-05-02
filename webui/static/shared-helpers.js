@@ -3282,8 +3282,13 @@ function getMetadataSourcePresentation(metadataStatus, spotifyStatus) {
 }
 
 function updateServiceStatus(service, statusData, spotifyStatus = null) {
+    const serviceCard = document.getElementById(`${service}-service-card`);
     const indicator = document.getElementById(`${service}-status-indicator`);
     const statusText = document.getElementById(`${service}-status-text`);
+
+    if (serviceCard) {
+        serviceCard.dataset.statusReady = 'true';
+    }
 
     if (indicator && statusText) {
         if (service === 'metadata-source') {
@@ -3353,6 +3358,7 @@ function updateServiceStatus(service, statusData, spotifyStatus = null) {
 function updateSidebarServiceStatus(service, statusData, spotifyStatus = null) {
     const indicator = document.getElementById(`${service}-indicator`);
     if (indicator) {
+        indicator.dataset.statusReady = 'true';
         const dot = indicator.querySelector('.status-dot');
         const nameElement = indicator.querySelector('.status-name');
 
