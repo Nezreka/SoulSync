@@ -36,6 +36,7 @@ type NavigateFunction = ReturnType<typeof useNavigate>;
 
 function clearIssueSelection(navigate: NavigateFunction) {
   void navigate({
+    to: Route.fullPath,
     search: (prev) => normalizeIssuesSearch({ ...prev, issueId: undefined }),
     replace: true,
   });
@@ -54,6 +55,7 @@ export function IssuesPage() {
 
   const openIssue = (issueId: number) => {
     void navigate({
+      to: Route.fullPath,
       search: (prev) => normalizeIssuesSearch({ ...prev, issueId }),
     });
   };
@@ -103,6 +105,7 @@ export function IssuesPage() {
         issuesLoading={issuesQuery.isLoading}
         onCategoryChange={(category) =>
           void navigate({
+            to: Route.fullPath,
             search: (prev) =>
               normalizeIssuesSearch({
                 ...prev,
@@ -114,6 +117,7 @@ export function IssuesPage() {
         onIssueSelect={openIssue}
         onStatusChange={(status) =>
           void navigate({
+            to: Route.fullPath,
             search: (prev) =>
               normalizeIssuesSearch({
                 ...prev,

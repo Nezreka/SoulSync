@@ -1,11 +1,10 @@
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 
+import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
 import {
   Button,
-  FormActions,
   FormError,
   FormField,
   OptionButton,
@@ -95,7 +94,7 @@ export function IssueDomainHost() {
 
   if (!reportPayload) return null;
 
-  return createPortal(
+  return (
     <ReportIssueModal
       key={`${reportPayload.entityType}:${reportPayload.entityId}`}
       payload={reportPayload}
@@ -105,8 +104,7 @@ export function IssueDomainHost() {
         setReportPayload(null);
         void queryClient.invalidateQueries({ queryKey: ISSUE_DOMAIN_QUERY_KEY });
       }}
-    />,
-    document.body,
+    />
   );
 }
 
@@ -169,37 +167,26 @@ function ReportIssueModal({
   });
 
   return (
-    <div
-      className={styles.modalOverlay}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="report-issue-title"
-      onClick={onClose}
+    <DialogFrame
+      open={true}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          onClose();
+        }
+      }}
+      className={styles.reportIssueDialog}
+      closeLabel="Close report issue modal"
     >
-      <form
-        className={`${styles.modal} ${styles.reportIssueModal}`}
-        onClick={(event) => event.stopPropagation()}
-        onSubmit={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          void form.handleSubmit().catch(() => undefined);
-        }}
-      >
-        <div className={styles.modalHeader}>
-          <h3 className={styles.modalHeaderTitle} id="report-issue-title">
-            Report Issue - {entityLabel}
-          </h3>
-          <button
-            className={styles.modalClose}
-            type="button"
-            onClick={onClose}
-            aria-label="Close report issue modal"
-          >
-            &times;
-          </button>
-        </div>
-
-        <div className={styles.modalBody}>
+      <DialogHeader title={`Report Issue - ${entityLabel}`} closeLabel="Close report issue modal" />
+      <DialogBody>
+        <form
+          className={styles.reportIssueForm}
+          onSubmit={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void form.handleSubmit().catch(() => undefined);
+          }}
+        >
           <div className={styles.reportIssueEntityInfo}>
             <div className={styles.reportIssueEntityName}>{payload.entityName}</div>
             {payload.artistName ? (
@@ -322,35 +309,35 @@ function ReportIssueModal({
               return <FormError message={error} />;
             }}
           </form.Subscribe>
-        </div>
 
-        <FormActions className={styles.modalFooter}>
-          <Button className={styles.modalButtonSecondary} type="button" onClick={onClose}>
-            Cancel
-          </Button>
-          <form.Subscribe
-            selector={(state) => ({
-              category: state.values.category,
-              isSubmitting: state.isSubmitting,
-              title: state.values.title,
-            })}
-          >
-            {(state) => {
-              const isSubmitting = state.isSubmitting || createMutation.isPending;
-              return (
-                <Button
-                  className={styles.modalButtonPrimary}
-                  type="submit"
-                  disabled={!state.category || !state.title.trim() || isSubmitting}
-                >
-                  {isSubmitting ? 'Submitting...' : 'Submit Issue'}
-                </Button>
-              );
-            }}
-          </form.Subscribe>
-        </FormActions>
-      </form>
-    </div>
+          <DialogFooter>
+            <Button className={styles.modalButtonSecondary} type="button" onClick={onClose}>
+              Cancel
+            </Button>
+            <form.Subscribe
+              selector={(state) => ({
+                category: state.values.category,
+                isSubmitting: state.isSubmitting,
+                title: state.values.title,
+              })}
+            >
+              {(state) => {
+                const isSubmitting = state.isSubmitting || createMutation.isPending;
+                return (
+                  <Button
+                    className={styles.modalButtonPrimary}
+                    type="submit"
+                    disabled={!state.category || !state.title.trim() || isSubmitting}
+                  >
+                    {isSubmitting ? 'Submitting...' : 'Submit Issue'}
+                  </Button>
+                );
+              }}
+            </form.Subscribe>
+          </DialogFooter>
+        </form>
+      </DialogBody>
+    </DialogFrame>
   );
 }
 
