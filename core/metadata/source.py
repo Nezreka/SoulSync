@@ -454,6 +454,9 @@ def _process_tidal_source(pp: dict, metadata: dict, cfg, runtime, track_title: s
             td_details = _call_source_lookup("Tidal track details", tidal_client.get_track, str(td_track_id))
             if td_details:
                 pp["tidal_isrc"] = td_details.get("isrc")
+                td_bpm = td_details.get("bpm")
+                if td_bpm and td_bpm > 0:
+                    pp["tidal_bpm"] = td_bpm
                 td_copyright = td_details.get("copyright")
                 if isinstance(td_copyright, dict):
                     td_copyright = td_copyright.get("text", td_copyright.get("name", ""))
@@ -492,6 +495,12 @@ def _process_hifi_source(pp: dict, metadata: dict, cfg, runtime, track_title: st
                     hifi_isrc = hifi_details.get("isrc")
                     if hifi_isrc:
                         pp["hifi_isrc"] = hifi_isrc
+                    hifi_bpm = hifi_details.get("bpm")
+                    if hifi_bpm and hifi_bpm > 0:
+                        pp["hifi_bpm"] = hifi_bpm
+                    hifi_copyright = hifi_details.get("copyright")
+                    if hifi_copyright:
+                        pp["hifi_copyright"] = hifi_copyright
             if not pp["release_year"]:
                 hifi_album_id = hifi_track.get("album_id")
                 if hifi_album_id:
@@ -673,15 +682,23 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             audio_file["\xa9day"] = [release_year]
         logger.info("Date tag: %s", release_year)
 
-    if _tag_enabled(cfg, "deezer.tags.bpm") and pp["deezer_bpm"] and pp["deezer_bpm"] > 0:
-        bpm_int = int(pp["deezer_bpm"])
+    bpm_candidates = []
+    if pp["deezer_bpm"] and pp["deezer_bpm"] > 0 and _tag_enabled(cfg, "deezer.tags.bpm"):
+        bpm_candidates.append(("Deezer", pp["deezer_bpm"]))
+    if pp["tidal_bpm"] and pp["tidal_bpm"] > 0 and _tag_enabled(cfg, "tidal.tags.bpm"):
+        bpm_candidates.append(("Tidal", pp["tidal_bpm"]))
+    if pp["hifi_bpm"] and pp["hifi_bpm"] > 0 and _tag_enabled(cfg, "hifi.tags.bpm"):
+        bpm_candidates.append(("HiFi", pp["hifi_bpm"]))
+    if bpm_candidates:
+        bpm_source, bpm_val = bpm_candidates[0]
+        bpm_int = int(bpm_val)
         if isinstance(audio_file.tags, symbols.ID3):
             audio_file.tags.add(symbols.TBPM(encoding=3, text=[str(bpm_int)]))
         elif is_vorbis_like(audio_file, symbols):
             audio_file["BPM"] = [str(bpm_int)]
         elif isinstance(audio_file, symbols.MP4):
             audio_file["tmpo"] = [bpm_int]
-        logger.info("BPM: %s", bpm_int)
+        logger.info("BPM (%s): %s", bpm_source, bpm_int)
 
     if _tag_enabled(cfg, "audiodb.tags.mood") and pp["audiodb_mood"]:
         if isinstance(audio_file.tags, symbols.ID3):
@@ -757,6 +774,8 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         copyright_candidates.append(("Tidal", pp["tidal_copyright"]))
     if pp["qobuz_copyright"] and _tag_enabled(cfg, "qobuz.tags.copyright"):
         copyright_candidates.append(("Qobuz", pp["qobuz_copyright"]))
+    if pp["hifi_copyright"] and _tag_enabled(cfg, "hifi.tags.copyright"):
+        copyright_candidates.append(("HiFi", pp["hifi_copyright"]))
     if copyright_candidates:
         copyright_source, final_copyright = copyright_candidates[0]
         if isinstance(audio_file.tags, symbols.ID3):
@@ -1004,6 +1023,9 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             "isrc": None,
             "deezer_bpm": None,
             "deezer_isrc": None,
+            "tidal_bpm": None,
+            "hifi_bpm": None,
+            "hifi_copyright": None,
             "audiodb_mood": None,
             "audiodb_style": None,
             "audiodb_genre": None,
@@ -1028,7 +1050,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         for source_name in source_order:
             _process_source_enrichment(source_name, pp, metadata, cfg, runtime, track_title, artist_name)
 
-        if not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["audiodb_mood"] and not pp["audiodb_style"]:
+        if not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"]:
             return
 
         release_year = _write_embedded_metadata(audio_file, metadata, pp, cfg, symbols)

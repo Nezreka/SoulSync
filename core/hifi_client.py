@@ -322,6 +322,8 @@ class HiFiClient:
             'duration_ms': int(duration_ms) if duration_ms else 0,
             'track_number': item.get('trackNumber', item.get('track_number')),
             'isrc': item.get('isrc'),
+            'bpm': item.get('bpm'),
+            'copyright': item.get('copyright'),
             'explicit': item.get('explicit', False),
             'quality': item.get('audioQuality', item.get('quality', '')),
         }
