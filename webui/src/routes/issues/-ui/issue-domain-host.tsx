@@ -23,10 +23,12 @@ import type { IssuePriority, IssueReportPayload } from '../-issues.types';
 import {
   REFRESH_EVENT,
   createDefaultIssueTitle,
-  createIssue,
   getIssueCategoriesForEntity,
-  issueCountsQueryOptions,
 } from '../-issues.helpers';
+import {
+  createIssue,
+  issueCountsQueryOptions,
+} from '../-issues.api';
 import styles from './issue-detail-modal.module.css';
 
 const ISSUE_DOMAIN_QUERY_KEY = ['issues'] as const;

@@ -10,15 +10,14 @@ import {
 import type { IssueRecord } from '../-issues.types';
 
 import {
-  deleteIssue,
   formatIssueDate,
   formatStatusLabel,
   getIssueArtwork,
   getPriorityClassName,
   ISSUE_CATEGORY_META,
   parseSnapshot,
-  updateIssue,
 } from '../-issues.helpers';
+import { deleteIssue, updateIssue } from '../-issues.api';
 import styles from './issue-detail-modal.module.css';
 
 export function IssueDetailModal({
