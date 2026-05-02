@@ -64,6 +64,28 @@ function activateLegacyPath(pathname) {
     activatePage(targetPage, { forceReload: true });
 }
 
+function syncActivePageFromLocation() {
+    const router = getWebRouter();
+    const targetPage = router?.resolvePageId?.(window.location.pathname) || _getPageFromPath(window.location.pathname);
+    if (!targetPage) return;
+
+    if (!isPageAllowed(targetPage)) {
+        const home = getProfileHomePage();
+        if (home !== targetPage) {
+            navigateToPage(home, { replace: true });
+        }
+        return;
+    }
+
+    const route = router?.routeManifest?.find((entry) => entry.pageId === targetPage);
+    if (route?.kind === 'react') {
+        showReactHost(targetPage);
+    } else {
+        showLegacyPage(targetPage);
+    }
+    setActivePageChrome(targetPage);
+}
+
 const SHELL_BRIDGE_READY_EVENT = 'ss:webui-shell-bridge-ready';
 
 function openDownloadMissingAlbumWorkflow(input) {
@@ -130,4 +152,5 @@ window.SoulSyncWebShellBridge = {
     },
 };
 
+window.addEventListener('popstate', syncActivePageFromLocation);
 window.dispatchEvent(new CustomEvent(SHELL_BRIDGE_READY_EVENT));
