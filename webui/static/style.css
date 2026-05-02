@@ -491,6 +491,42 @@ body {
     font-weight: 600;
 }
 
+/* Library breadcrumb — when on the artist-detail pseudo-page, the Library
+   button label rewrites to "Library / <Artist>". The accent color stays on
+   the "Library" root; the separator and artist name are dimmed so the
+   anchor word remains scannable at a glance. JS truncates long names and
+   sets the full name as a `title` attribute for hover. */
+.nav-text[data-breadcrumb] {
+    display: inline-flex;
+    align-items: baseline;
+    max-width: 100%;
+    min-width: 0;
+}
+.nav-text[data-breadcrumb] .nav-text-root {
+    color: inherit;
+    flex-shrink: 0;
+}
+.nav-text[data-breadcrumb] .nav-text-sep {
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 400;
+    flex-shrink: 0;
+}
+.nav-button.active .nav-text[data-breadcrumb] .nav-text-sep {
+    color: rgba(255, 255, 255, 0.45);
+}
+.nav-text[data-breadcrumb] .nav-text-context {
+    color: rgba(255, 255, 255, 0.75);
+    font-weight: 500;
+    font-style: italic;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.nav-button.active .nav-text[data-breadcrumb] .nav-text-context {
+    color: rgba(255, 255, 255, 0.85);
+}
+
 /* Sidebar Spacer */
 .sidebar-spacer {
     flex: 1;
