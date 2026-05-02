@@ -3445,6 +3445,7 @@ const WHATS_NEW = {
         // --- post-2.4.1 dev work — entries hidden by _getLatestWhatsNewVersion until the build version bumps ---
         { date: 'Unreleased — 2.4.2 dev cycle' },
         { title: 'Sidebar Library Button Shows Artist Breadcrumb', desc: 'when you open an artist detail page (from library, search, or the global search popover), the sidebar Library button now lights up and rewrites its label to "Library / Artist Name" — long names truncate with an ellipsis and the full name shows on hover. revertes to plain "Library" when you leave. purely visual, no functionality change.', page: 'library' },
+        { title: 'Enrichment Bubble Routes Consolidated', desc: 'internal — every dashboard enrichment bubble (musicbrainz, spotify, itunes, deezer, discogs, audiodb, lastfm, genius, tidal, qobuz) used to hit its own per-service status / pause / resume route in web_server.py. unified them under a single registry-driven endpoint set: /api/enrichment/<service>/<action>. spotify\'s rate-limit guard, lastfm/genius yield-override behavior, and tidal/qobuz extra status fields are encoded as data on the registry. 27 new tests cover the registry behavior. old per-service routes still respond as fallback during the soak — they get deleted in a follow-up patch.' },
     ],
     '2.4.1': [
         // --- May 1, 2026 — patch release ---
