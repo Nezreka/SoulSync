@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
@@ -10,7 +10,7 @@ import {
 
 import type { IssueRecord } from '../-issues.types';
 
-import { deleteIssue, updateIssue } from '../-issues.api';
+import { deleteIssue, issueDetailQueryOptions, updateIssue } from '../-issues.api';
 import {
   formatIssueDate,
   formatStatusLabel,
@@ -22,24 +22,27 @@ import {
 import styles from './issue-detail-modal.module.css';
 
 export function IssueDetailModal({
-  error,
   isAdmin,
-  isLoading,
-  issue,
+  issueId,
   onClose,
   onMutationSuccess,
   profileId,
 }: {
-  error: unknown;
   isAdmin: boolean;
-  isLoading: boolean;
-  issue: IssueRecord | null;
+  issueId: number | null;
   onClose: () => void;
   onMutationSuccess: () => void;
   profileId: number;
 }) {
+  const selectedIssueQuery = useQuery({
+    ...issueDetailQueryOptions(profileId, issueId ?? 0),
+    enabled: profileId > 0 && issueId !== null,
+  });
+  const issue = selectedIssueQuery.data ?? null;
+  const queryError = selectedIssueQuery.error;
+  const queryLoading = selectedIssueQuery.isLoading;
   const [adminResponse, setAdminResponse] = useState('');
-  const isOpen = Boolean(issue || isLoading || error);
+  const isOpen = Boolean(issueId || queryLoading || queryError);
 
   useEffect(() => {
     setAdminResponse(issue?.admin_response || '');
@@ -171,7 +174,7 @@ export function IssueDetailModal({
     return null;
   }, [adminResponse, deleteMutation, isAdmin, issue, updateMutation]);
 
-  if (!issue && !isLoading && !error) {
+  if (!issue && !queryLoading && !queryError) {
     return null;
   }
 
@@ -210,16 +213,16 @@ export function IssueDetailModal({
         closeLabel="Close issue detail"
       />
       <DialogBody>
-        {isLoading ? (
+        {queryLoading ? (
           <div className={styles.issuesLoading}>
             <div className={styles.issuesSpinner} />
             Loading issue details...
           </div>
-        ) : error ? (
+        ) : queryError ? (
           <div className={styles.issuesEmpty}>
             <div className={styles.issuesEmptyTitle}>Failed to load issue</div>
             <div className={styles.issuesEmptyText}>
-              {error instanceof Error ? error.message : 'Unknown error'}
+              {queryError instanceof Error ? queryError.message : 'Unknown error'}
             </div>
           </div>
         ) : issue ? (
@@ -414,7 +417,7 @@ export function IssueDetailModal({
         <Button className={styles.modalButtonSecondary} type="button" onClick={onClose}>
           Close
         </Button>
-        {!isLoading && !error && issue && (
+        {issue && (
           <>
             {statusButtons}
             {isAdmin && (
