@@ -1052,9 +1052,9 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if cached_meta.get("source") == "hifi":
             if _tag_enabled(cfg, "hifi.embed_tags"):
                 if cfg.get("hifi.tags.track_id", True) and cached_meta.get("track_id"):
-                    pp["id_tags"]["HIFI_TRACK_ID"] = str(cached_meta["track_id"])
+                    pp["id_tags"]["TIDAL_TRACK_ID"] = str(cached_meta["track_id"])
                 if cfg.get("hifi.tags.artist_id", True) and cached_meta.get("artist_id"):
-                    pp["id_tags"]["HIFI_ARTIST_ID"] = str(cached_meta["artist_id"])
+                    pp["id_tags"]["TIDAL_ARTIST_ID"] = str(cached_meta["artist_id"])
                 if cfg.get("hifi.tags.isrc", True) and cached_meta.get("isrc"):
                     pp["hifi_isrc"] = cached_meta["isrc"]
                 if cfg.get("hifi.tags.bpm", True) and cached_meta.get("bpm"):
