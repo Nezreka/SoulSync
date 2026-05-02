@@ -53,10 +53,12 @@ class TestServiceStatus:
         assert len(status_events) >= 1
         data = status_events[0]['args'][0]
         assert 'metadata_source' in data
+        assert 'spotify' in data
         assert 'media_server' in data
         assert 'soulseek' in data
         assert 'active_media_server' in data
-        assert 'authenticated' in data['metadata_source']
+        assert 'source' in data['metadata_source']
+        assert 'authenticated' in data['spotify']
 
     def test_status_matches_http(self, test_app, shared_state):
         """Socket event data matches HTTP endpoint response exactly."""
@@ -74,6 +76,7 @@ class TestServiceStatus:
         ws_data = status_events[0]['args'][0]
 
         assert ws_data['metadata_source'] == http_data['metadata_source']
+        assert ws_data['spotify'] == http_data['spotify']
         assert ws_data['media_server'] == http_data['media_server']
         assert ws_data['soulseek'] == http_data['soulseek']
         assert ws_data['active_media_server'] == http_data['active_media_server']

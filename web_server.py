@@ -811,7 +811,7 @@ _idle_since = {}
 _IDLE_GRACE_SECONDS = 5
 
 _status_cache = {
-    'metadata_source': {'connected': False, 'authenticated': False, 'response_time': 0, 'source': 'itunes'},
+    'metadata_source': {'connected': False, 'response_time': 0, 'source': 'itunes'},
     'media_server': {'connected': False, 'response_time': 0, 'type': None},
     'soulseek': {'connected': False, 'response_time': 0},
 }
@@ -3446,41 +3446,9 @@ def get_status():
         current_time = time.time()
         active_server = config_manager.get_active_media_server()
 
-        # Test Spotify - with caching to avoid excessive API calls
+        # Test primary metadata provider and Spotify separately
         if current_time - _status_cache_timestamps['metadata_source'] > STATUS_CACHE_TTL:
-            # Guard against spotify_client being None (partial init)
-            is_rate_limited = spotify_client.is_rate_limited() if spotify_client else False
-            rate_limit_info = spotify_client.get_rate_limit_info() if (spotify_client and is_rate_limited) else None
-            cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
-            metadata_source_authenticated = spotify_client.is_spotify_authenticated() if spotify_client else False
-
-            # Read configured source once — no auth validation here, we do that explicitly below
-            configured_source = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
-
-            if is_rate_limited or cooldown_remaining > 0:
-                # During rate limit or post-ban cooldown, skip the auth probe entirely.
-                # Probing Spotify here would reset the rate limit timer.
-                music_source = 'deezer' if configured_source == 'spotify' else configured_source
-                metadata_source_response_time = 0
-            else:
-                metadata_source_start = time.time()
-                metadata_source_connected = spotify_client.is_spotify_authenticated() if spotify_client else False
-                metadata_source_response_time = (time.time() - metadata_source_start) * 1000
-                # Use configured source; fall back to deezer only if Spotify isn't authenticated
-                if configured_source == 'spotify':
-                    music_source = 'spotify' if metadata_source_connected else 'deezer'
-                else:
-                    music_source = configured_source
-
-            _status_cache['metadata_source'] = {
-                'connected': metadata_source_authenticated,
-                'authenticated': metadata_source_authenticated,
-                'response_time': round(metadata_source_response_time, 1),
-                'source': music_source,
-                'rate_limited': is_rate_limited,
-                'rate_limit': rate_limit_info,
-                'post_ban_cooldown': cooldown_remaining if cooldown_remaining > 0 else None
-            }
+            _status_cache['metadata_source'] = metadata_registry.get_primary_source_status()
             _status_cache_timestamps['metadata_source'] = current_time
         # else: use cached value
 
@@ -3557,6 +3525,7 @@ def get_status():
 
         status_data = {
             'metadata_source': _status_cache['metadata_source'],
+            'spotify': _build_spotify_status_payload(),
             'media_server': _status_cache['media_server'],
             'soulseek': _status_cache['soulseek'],
             'active_media_server': active_server,
@@ -4804,10 +4773,7 @@ def test_connection_endpoint():
         current_time = time.time()
         if service == 'spotify':
             spotify_session_active = spotify_client.is_spotify_authenticated() if spotify_client else False
-            _status_cache['metadata_source']['connected'] = True
-            _status_cache['metadata_source']['authenticated'] = spotify_session_active
-            _status_cache['metadata_source']['source'] = _get_metadata_fallback_source()
-            _status_cache_timestamps['metadata_source'] = current_time
+            _status_cache_timestamps['metadata_source'] = 0
             logger.info("Updated Spotify status cache after successful test")
         elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
             _status_cache['media_server']['connected'] = True
@@ -4972,10 +4938,7 @@ def test_dashboard_connection_endpoint():
         current_time = time.time()
         if service == 'spotify':
             spotify_session_active = spotify_client.is_spotify_authenticated() if spotify_client else False
-            _status_cache['metadata_source']['connected'] = True
-            _status_cache['metadata_source']['authenticated'] = spotify_session_active
-            _status_cache['metadata_source']['source'] = _get_metadata_fallback_source()
-            _status_cache_timestamps['metadata_source'] = current_time
+            _status_cache_timestamps['metadata_source'] = 0
             logger.info("Updated Spotify status cache after successful dashboard test")
         elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
             _status_cache['media_server']['connected'] = True
@@ -5929,16 +5892,7 @@ def spotify_disconnect():
         source_label = get_metadata_source_label(active_source)
         if configured_source == 'spotify':
             config_manager.set('metadata.fallback_source', active_source)
-        _status_cache['metadata_source'] = {
-            'connected': False,
-            'authenticated': False,
-            'response_time': 0,
-            'source': active_source,
-            'rate_limited': False,
-            'rate_limit': None,
-            'post_ban_cooldown': None
-        }
-        _status_cache_timestamps['metadata_source'] = time.time()
+        _status_cache_timestamps['metadata_source'] = 0
         add_activity_item("", "Spotify Disconnected", f"Using {source_label} for metadata", "Now")
         return jsonify({
             'success': True,
@@ -34050,17 +34004,8 @@ def _build_status_payload():
     download_mode = config_manager.get('download_source.mode', 'hybrid')
     soulseek_data = dict(_status_cache.get('soulseek', {}))
     soulseek_data['source'] = download_mode
-
-    # Always include fresh rate limit info (it changes over time as ban expires)
-    # Call is_rate_limited() first to ensure ban-end timestamp is recorded for cooldown
     metadata_source_data = dict(_status_cache.get('metadata_source', {}))
-    is_rl = spotify_client.is_rate_limited() if spotify_client else False
-    rate_limit_info = spotify_client.get_rate_limit_info() if is_rl else None
-    cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
-    metadata_source_data['rate_limited'] = is_rl
-    metadata_source_data['rate_limit'] = rate_limit_info
-    if cooldown_remaining > 0:
-        metadata_source_data['post_ban_cooldown'] = cooldown_remaining
+    spotify_data = _build_spotify_status_payload()
 
     # Count active downloads for nav badge
     active_dl_count = 0
@@ -34074,12 +34019,36 @@ def _build_status_payload():
 
     return {
         'metadata_source': metadata_source_data,
+        'spotify': spotify_data,
         'media_server': _status_cache.get('media_server', {}),
         'soulseek': soulseek_data,
         'active_media_server': config_manager.get_active_media_server(),
         'enrichment': _get_enrichment_status(),
         'active_downloads': active_dl_count,
     }
+
+def _build_spotify_status_payload():
+    """Build a Spotify-specific status snapshot for auth and rate-limit state."""
+    status_data = {}
+
+    try:
+        # Always include fresh rate limit info because it can change independently of cache TTL.
+        is_rate_limited = spotify_client.is_rate_limited() if spotify_client else False
+        rate_limit_info = spotify_client.get_rate_limit_info() if (spotify_client and is_rate_limited) else None
+        cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
+        authenticated = spotify_client.is_spotify_authenticated() if spotify_client else False
+
+        status_data.update({
+            'connected': authenticated,
+            'authenticated': authenticated,
+            'rate_limited': is_rate_limited,
+            'rate_limit': rate_limit_info,
+            'post_ban_cooldown': cooldown_remaining if cooldown_remaining > 0 else None,
+        })
+    except Exception:
+        pass
+
+    return status_data
 
 def _build_watchlist_count_payload(profile_id=1):
     """Build the same payload used by GET /api/watchlist/count."""

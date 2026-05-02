@@ -17,7 +17,8 @@ from flask_socketio import SocketIO, join_room, leave_room
 # ---------------------------------------------------------------------------
 
 _DEFAULT_STATUS_CACHE = {
-    'metadata_source': {'connected': True, 'authenticated': True, 'response_time': 12.5, 'source': 'spotify'},
+    'metadata_source': {'connected': True, 'response_time': 12.5, 'source': 'spotify'},
+    'spotify': {'connected': True, 'authenticated': True, 'rate_limited': False, 'rate_limit': None, 'post_ban_cooldown': None},
     'media_server': {'connected': True, 'response_time': 8.1, 'type': 'plex'},
     'soulseek': {'connected': True, 'response_time': 5.3, 'source': 'soulseek'},
 }
@@ -256,6 +257,7 @@ wishlist_stats_state = copy.deepcopy(_DEFAULT_WISHLIST_STATS)
 def _build_status_payload():
     return {
         'metadata_source': dict(_status_cache['metadata_source']),
+        'spotify': dict(_status_cache['spotify']),
         'media_server': dict(_status_cache['media_server']),
         'soulseek': dict(_status_cache['soulseek']),
         'active_media_server': _status_cache['media_server'].get('type', 'plex'),

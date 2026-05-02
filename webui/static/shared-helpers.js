@@ -3146,22 +3146,22 @@ async function fetchAndUpdateServiceStatus() {
         _lastStatusPayload = data;
 
         if (typeof syncSpotifySettingsAuthState === 'function') {
-            syncSpotifySettingsAuthState(data?.metadata_source || null);
+            syncSpotifySettingsAuthState(data?.spotify || null);
         }
         if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
-            syncPrimaryMetadataSourceAvailability(data?.metadata_source || null);
+            syncPrimaryMetadataSourceAvailability(data?.spotify || null);
         }
         if (typeof sanitizeMetadataSourceSelection === 'function') {
             sanitizeMetadataSourceSelection({ quiet: true });
         }
 
         // Update service status indicators and text (dashboard)
-        updateServiceStatus('spotify', data.metadata_source);
+        updateServiceStatus('spotify', data.metadata_source, data.spotify);
         updateServiceStatus('media-server', data.media_server);
         updateServiceStatus('soulseek', data.soulseek);
 
         // Update sidebar service status indicators
-        updateSidebarServiceStatus('spotify', data.metadata_source);
+        updateSidebarServiceStatus('spotify', data.metadata_source, data.spotify);
         updateSidebarServiceStatus('media-server', data.media_server);
         updateSidebarServiceStatus('soulseek', data.soulseek);
 
@@ -3185,8 +3185,8 @@ async function fetchAndUpdateServiceStatus() {
         if (data.enrichment) renderEnrichmentCards(data.enrichment);
 
         // Check for Spotify rate limit
-        if (data.metadata_source && data.metadata_source.rate_limited && data.metadata_source.rate_limit) {
-            handleSpotifyRateLimit(data.metadata_source.rate_limit);
+        if (data.spotify && data.spotify.rate_limited && data.spotify.rate_limit) {
+            handleSpotifyRateLimit(data.spotify.rate_limit);
         } else if (_spotifyRateLimitShown) {
             handleSpotifyRateLimit(null);
         }
@@ -3232,14 +3232,16 @@ function getMetadataSourceLabel(source) {
     return 'Unmapped';
 }
 
-function getSpotifyStatusPresentation(statusData) {
-    const sourceLabel = getMetadataSourceLabel(statusData?.source);
-    const rateLimited = !!(statusData?.rate_limited && statusData?.rate_limit);
-    const cooldown = !!(statusData?.post_ban_cooldown > 0);
-    const sessionActive = statusData?.authenticated === true || (statusData?.authenticated === undefined && statusData?.source === 'spotify');
+function getMetadataSourcePresentation(metadataStatus, spotifyStatus) {
+    const source = metadataStatus?.source;
+    const sourceLabel = getMetadataSourceLabel(source);
+    const connected = metadataStatus?.connected === true;
+    const sessionActive = spotifyStatus?.authenticated === true || (source === 'spotify' && connected);
+    const rateLimited = !!(source === 'spotify' && spotifyStatus?.rate_limited && spotifyStatus?.rate_limit);
+    const cooldown = !!(source === 'spotify' && spotifyStatus?.post_ban_cooldown > 0);
 
     if (rateLimited) {
-        const remaining = statusData.rate_limit?.remaining_seconds || 0;
+        const remaining = spotifyStatus.rate_limit?.remaining_seconds || 0;
         return {
             statusClass: 'rate-limited',
             statusText: `Spotify paused \u2014 ${formatRateLimitDuration(remaining)}`,
@@ -3250,7 +3252,7 @@ function getSpotifyStatusPresentation(statusData) {
     }
 
     if (cooldown) {
-        const remaining = statusData.post_ban_cooldown;
+        const remaining = spotifyStatus.post_ban_cooldown;
         return {
             statusClass: 'rate-limited',
             statusText: `Spotify recovering \u2014 ${formatRateLimitDuration(remaining)}`,
@@ -3260,32 +3262,32 @@ function getSpotifyStatusPresentation(statusData) {
         };
     }
 
-    if (statusData?.source && statusData.source !== 'spotify') {
+    if (source) {
         return {
-            statusClass: 'connected',
-            statusText: sourceLabel,
-            dotClass: 'connected',
-            dotTitle: sourceLabel,
+            statusClass: connected ? 'connected' : 'disconnected',
+            statusText: connected ? (source === 'spotify' ? `Connected (${metadataStatus?.response_time}ms)` : sourceLabel) : 'Disconnected',
+            dotClass: connected ? 'connected' : 'disconnected',
+            dotTitle: connected ? sourceLabel : 'Disconnected',
             sessionActive
         };
     }
 
     return {
-        statusClass: 'connected',
-        statusText: `Connected (${statusData?.response_time}ms)`,
-        dotClass: 'connected',
-        dotTitle: '',
+        statusClass: 'disconnected',
+        statusText: 'Disconnected',
+        dotClass: 'disconnected',
+        dotTitle: 'Disconnected',
         sessionActive
     };
 }
 
-function updateServiceStatus(service, statusData) {
+function updateServiceStatus(service, statusData, spotifyStatus = null) {
     const indicator = document.getElementById(`${service}-status-indicator`);
     const statusText = document.getElementById(`${service}-status-text`);
 
     if (indicator && statusText) {
         if (service === 'spotify') {
-            const presentation = getSpotifyStatusPresentation(statusData || {});
+            const presentation = getMetadataSourcePresentation(statusData || {}, spotifyStatus || {});
             indicator.className = `service-card-indicator ${presentation.statusClass}`;
             statusText.textContent = presentation.statusText;
             statusText.className = `service-card-status-text ${presentation.statusClass}`;
@@ -3312,7 +3314,7 @@ function updateServiceStatus(service, statusData) {
         }
 
         // Keep the Spotify action buttons aligned with the actual auth session.
-        const spotifySessionActive = getSpotifyStatusPresentation(statusData || {}).sessionActive;
+        const spotifySessionActive = spotifyStatus?.authenticated === true;
         const authBtn = document.querySelector('button[onclick="authenticateSpotify()"]');
         const disconnectBtn = document.getElementById('spotify-disconnect-btn');
         if (authBtn) {
@@ -3322,7 +3324,7 @@ function updateServiceStatus(service, statusData) {
             disconnectBtn.style.display = spotifySessionActive ? '' : 'none';
         }
 
-        syncPrimaryMetadataSourceAvailability(statusData);
+        syncPrimaryMetadataSourceAvailability(spotifyStatus);
 
         const responseTimeElement = document.getElementById('spotify-response-time');
         if (responseTimeElement) {
@@ -3348,7 +3350,7 @@ function updateServiceStatus(service, statusData) {
     }
 }
 
-function updateSidebarServiceStatus(service, statusData) {
+function updateSidebarServiceStatus(service, statusData, spotifyStatus = null) {
     const indicator = document.getElementById(`${service}-indicator`);
     if (indicator) {
         const dot = indicator.querySelector('.status-dot');
@@ -3356,7 +3358,7 @@ function updateSidebarServiceStatus(service, statusData) {
 
         if (dot) {
             if (service === 'spotify') {
-                const presentation = getSpotifyStatusPresentation(statusData || {});
+                const presentation = getMetadataSourcePresentation(statusData || {}, spotifyStatus || {});
                 dot.className = `status-dot ${presentation.dotClass}`;
                 dot.title = presentation.dotTitle;
             } else {
