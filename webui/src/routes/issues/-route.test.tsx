@@ -28,12 +28,16 @@ function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
   };
 }
 
-function renderIssuesRoute() {
+function renderIssuesRoute(initialEntries = ['/issues']) {
   const queryClient = createAppQueryClient();
-  const history = createMemoryHistory({ initialEntries: ['/issues'] });
+  const history = createMemoryHistory({ initialEntries });
   const router = createAppRouter({ history, queryClient });
 
-  return render(<AppRouterProvider router={router} queryClient={queryClient} />);
+  return {
+    history,
+    router,
+    ...render(<AppRouterProvider router={router} queryClient={queryClient} />),
+  };
 }
 
 const workflowActions = {
@@ -136,6 +140,11 @@ describe('issues route', () => {
     expect(await screen.findByTestId('issue-card-7')).toHaveTextContent('Bad tags');
   });
 
+  it('loads the detail modal from the route search state', async () => {
+    renderIssuesRoute(['/issues?issueId=7']);
+    await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('Issue #7'));
+  });
+
   it('stores filters in route search state', async () => {
     renderIssuesRoute();
     const status = await screen.findByRole('combobox', { name: /status/i });
@@ -144,11 +153,40 @@ describe('issues route', () => {
   });
 
   it('opens and closes the detail modal', async () => {
-    renderIssuesRoute();
+    const { history } = renderIssuesRoute();
     fireEvent.click(await screen.findByTestId('issue-card-7'));
     await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('Issue #7'));
+    await waitFor(() => expect(history.location.search).toContain('issueId=7'));
     fireEvent.click(screen.getByRole('button', { name: /close issue detail/i }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(history.location.search).toBe('?status=open&category=all'));
+  });
+
+  it('closes the detail modal with Escape', async () => {
+    const { history } = renderIssuesRoute();
+    fireEvent.click(await screen.findByTestId('issue-card-7'));
+    await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('Issue #7'));
+    await waitFor(() => expect(history.location.search).toContain('issueId=7'));
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(history.location.search).toBe('?status=open&category=all'));
+  });
+
+  it('traps focus inside the detail modal', async () => {
+    renderIssuesRoute();
+    fireEvent.click(await screen.findByTestId('issue-card-7'));
+
+    const closeButton = await screen.findByRole('button', { name: /close issue detail/i });
+    const deleteButton = await screen.findByRole('button', { name: /delete/i });
+
+    deleteButton.focus();
+    expect(deleteButton).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: 'Tab' });
+
+    expect(closeButton).toHaveFocus();
   });
 
   it('invokes the shared workflow adapter for admin downloads', async () => {

@@ -89,6 +89,12 @@ export const ISSUE_CATEGORY_META: Record<
   },
 };
 
+const ISSUE_CATEGORY_KEYS = new Set(Object.keys(ISSUE_CATEGORY_META));
+
+export type NormalizedIssuesSearch = Required<Pick<IssuesSearch, 'status' | 'category'>> & {
+  issueId?: number;
+};
+
 export const ISSUE_STATUS_META: Record<string, { label: string; className: string }> = {
   open: { label: 'Open', className: 'is-open' },
   in_progress: { label: 'In Progress', className: 'is-progress' },
@@ -113,9 +119,10 @@ export function createDefaultIssueTitle(category: string, entityName: string): s
   return `${label}: ${entityName || 'Unknown'}`;
 }
 
-export function normalizeIssuesSearch(search: IssuesSearch | undefined): Required<IssuesSearch> {
+export function normalizeIssuesSearch(search: IssuesSearch | undefined): NormalizedIssuesSearch {
   const status = search?.status;
   const category = search?.category;
+  const issueId = search?.issueId;
 
   return {
     status:
@@ -126,7 +133,15 @@ export function normalizeIssuesSearch(search: IssuesSearch | undefined): Require
       status === 'dismissed'
         ? status
         : DEFAULT_ISSUES_SEARCH.status,
-    category: typeof category === 'string' && category.length > 0 ? category : 'all',
+    category: typeof category === 'string' && ISSUE_CATEGORY_KEYS.has(category)
+      ? category
+      : 'all',
+    issueId:
+      (typeof issueId === 'number' && Number.isInteger(issueId) && issueId > 0)
+        ? issueId
+        : (typeof issueId === 'string' && /^[1-9]\d*$/.test(issueId)
+            ? Number(issueId)
+            : undefined),
   };
 }
 
@@ -144,7 +159,7 @@ export async function fetchIssueCounts(profileId: number): Promise<IssueCounts> 
 
 export async function fetchIssueList(
   profileId: number,
-  search: Required<IssuesSearch>,
+  search: Pick<NormalizedIssuesSearch, 'status' | 'category'>,
 ): Promise<IssueListResponse> {
   const params = new URLSearchParams();
   params.set('limit', String(DEFAULT_LIMIT));
@@ -240,7 +255,10 @@ export function issueCountsQueryOptions(profileId: number) {
   });
 }
 
-export function issueListQueryOptions(profileId: number, search: Required<IssuesSearch>) {
+export function issueListQueryOptions(
+  profileId: number,
+  search: Pick<NormalizedIssuesSearch, 'status' | 'category'>,
+) {
   return queryOptions({
     queryKey: ['issues', 'list', profileId, search.status, search.category],
     queryFn: () => fetchIssueList(profileId, search),

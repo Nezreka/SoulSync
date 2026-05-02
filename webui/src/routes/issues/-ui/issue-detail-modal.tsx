@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button, FormField, TextArea } from '@/components/form';
 import {
@@ -40,10 +40,87 @@ export function IssueDetailModal({
   profileId: number;
 }) {
   const [adminResponse, setAdminResponse] = useState('');
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
+  const isOpen = Boolean(issue || isLoading || error);
 
   useEffect(() => {
     setAdminResponse(issue?.admin_response || '');
   }, [issue?.admin_response, issue?.id]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    previouslyFocusedElementRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+
+    const focusModal = () => {
+      const modal = modalRef.current;
+      if (!modal) return;
+
+      const focusable = getFocusableElements(modal);
+      (focusable[0] || modal).focus();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+
+      const modal = modalRef.current;
+      if (!modal) return;
+
+      const focusable = getFocusableElements(modal);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        modal.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeElement = document.activeElement;
+
+      if (event.shiftKey) {
+        if (activeElement === first || !modal.contains(activeElement)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    const onFocusIn = (event: FocusEvent) => {
+      const modal = modalRef.current;
+      if (!modal) return;
+      if (event.target instanceof Node && !modal.contains(event.target)) {
+        const focusable = getFocusableElements(modal);
+        (focusable[0] || modal).focus();
+      }
+    };
+
+    const raf = requestAnimationFrame(focusModal);
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('focusin', onFocusIn);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('focusin', onFocusIn);
+      previouslyFocusedElementRef.current?.focus?.();
+      previouslyFocusedElementRef.current = null;
+    };
+  }, [isOpen, onClose]);
 
   const updateMutation = useMutation({
     mutationFn: async (payload: { issueId: number; status: string; adminResponse: string }) => {
@@ -197,6 +274,8 @@ export function IssueDetailModal({
     >
       <div
         className={`${styles.modal} ${styles.issueDetailModal}`}
+        ref={modalRef}
+        tabIndex={-1}
         onClick={(event) => event.stopPropagation()}
       >
         <div className={styles.modalHeader}>
@@ -522,6 +601,21 @@ export function IssueDetailModal({
       </div>
     </div>
   );
+}
+
+function getFocusableElements(container: HTMLElement) {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(
+      [
+        'button:not([disabled])',
+        '[href]',
+        'input:not([disabled])',
+        'select:not([disabled])',
+        'textarea:not([disabled])',
+        '[tabindex]:not([tabindex="-1"])',
+      ].join(','),
+    ),
+  ).filter((element) => element.tabIndex >= 0);
 }
 
 function getStatusClassName(status: string) {

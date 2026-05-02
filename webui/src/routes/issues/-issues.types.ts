@@ -84,6 +84,7 @@ export interface IssueCountsResponse {
 
 export interface IssuesSearch {
   category?: string;
+  issueId?: string | number;
   status?: IssueStatus | 'all';
 }
 
