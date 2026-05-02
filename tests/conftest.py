@@ -313,11 +313,11 @@ ENRICHMENT_WORKERS = [
 ]
 
 ENRICHMENT_ENDPOINTS = {
-    'musicbrainz': '/api/musicbrainz/status',
-    'audiodb': '/api/audiodb/status',
-    'deezer': '/api/deezer/status',
-    'spotify-enrichment': '/api/spotify-enrichment/status',
-    'itunes-enrichment': '/api/itunes-enrichment/status',
+    'musicbrainz': '/api/enrichment/musicbrainz/status',
+    'audiodb': '/api/enrichment/audiodb/status',
+    'deezer': '/api/enrichment/deezer/status',
+    'spotify-enrichment': '/api/enrichment/spotify/status',
+    'itunes-enrichment': '/api/enrichment/itunes/status',
     'hydrabase': '/api/hydrabase-worker/status',
     'repair': '/api/repair/status',
 }
@@ -576,23 +576,23 @@ def test_app():
 
     # --- Phase 3 HTTP endpoints (enrichment workers) ---
 
-    @app.route('/api/musicbrainz/status')
+    @app.route('/api/enrichment/musicbrainz/status')
     def musicbrainz_status():
         return jsonify(_build_enrichment_status('musicbrainz'))
 
-    @app.route('/api/audiodb/status')
+    @app.route('/api/enrichment/audiodb/status')
     def audiodb_status():
         return jsonify(_build_enrichment_status('audiodb'))
 
-    @app.route('/api/deezer/status')
+    @app.route('/api/enrichment/deezer/status')
     def deezer_status():
         return jsonify(_build_enrichment_status('deezer'))
 
-    @app.route('/api/spotify-enrichment/status')
+    @app.route('/api/enrichment/spotify/status')
     def spotify_enrichment_status():
         return jsonify(_build_enrichment_status('spotify-enrichment'))
 
-    @app.route('/api/itunes-enrichment/status')
+    @app.route('/api/enrichment/itunes/status')
     def itunes_enrichment_status():
         return jsonify(_build_enrichment_status('itunes-enrichment'))
 
