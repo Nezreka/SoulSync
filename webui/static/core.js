@@ -471,24 +471,24 @@ function initializeWebSocket() {
 
 function handleServiceStatusUpdate(data) {
     // Cache for library status card
-    _lastServiceStatus = data;
+    _lastStatusPayload = data;
 
     if (typeof syncSpotifySettingsAuthState === 'function') {
-        syncSpotifySettingsAuthState(data?.spotify || null);
+        syncSpotifySettingsAuthState(data?.metadata_source || null);
     }
     if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
-        syncPrimaryMetadataSourceAvailability(data?.spotify || null);
+        syncPrimaryMetadataSourceAvailability(data?.metadata_source || null);
     }
     if (typeof sanitizeMetadataSourceSelection === 'function') {
         sanitizeMetadataSourceSelection({ quiet: true });
     }
 
     // Same logic as fetchAndUpdateServiceStatus response handler
-    updateServiceStatus('spotify', data.spotify);
+    updateServiceStatus('spotify', data.metadata_source);
     updateServiceStatus('media-server', data.media_server);
     updateServiceStatus('soulseek', data.soulseek);
 
-    updateSidebarServiceStatus('spotify', data.spotify);
+    updateSidebarServiceStatus('spotify', data.metadata_source);
     updateSidebarServiceStatus('media-server', data.media_server);
     updateSidebarServiceStatus('soulseek', data.soulseek);
 
@@ -514,10 +514,10 @@ function handleServiceStatusUpdate(data) {
     if (data.enrichment) renderEnrichmentCards(data.enrichment);
 
     // Spotify rate limit / cooldown / recovery
-    if (data.spotify?.rate_limited && data.spotify.rate_limit) {
-        handleSpotifyRateLimit(data.spotify.rate_limit);
+    if (data.metadata_source?.rate_limited && data.metadata_source.rate_limit) {
+        handleSpotifyRateLimit(data.metadata_source.rate_limit);
         _spotifyInCooldown = false;
-    } else if (data.spotify?.post_ban_cooldown > 0) {
+    } else if (data.metadata_source?.post_ban_cooldown > 0) {
         if (_spotifyRateLimitShown && !_spotifyInCooldown) {
             _spotifyRateLimitShown = false;
             _spotifyInCooldown = true;
@@ -881,12 +881,12 @@ const API = {
     }
 };
 
-// Track last service status for library card (used by websocket handler in core + artists)
-let _lastServiceStatus = null;
+// Track the last `/status` payload (shared service snapshot used across the UI)
+let _lastStatusPayload = null;
 let _isSoulsyncStandalone = false;  // Global flag: true when no media server (sync buttons hidden)
 
 function getActiveMetadataSource() {
-    return _lastServiceStatus?.spotify?.source || 'spotify';
+    return _lastStatusPayload?.metadata_source?.source || 'spotify';
 }
 
 // ===============================
