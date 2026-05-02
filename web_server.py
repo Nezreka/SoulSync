@@ -19971,6 +19971,22 @@ def tidal_download_auth_status():
 # QOBUZ AUTH ENDPOINTS
 # ===================================================================
 
+def _sync_qobuz_credentials_to_worker():
+    """Push the just-saved Qobuz session into the enrichment worker's
+    QobuzClient. Two separate client instances run side by side (one for
+    the auth endpoints, one for the worker thread); without this sync the
+    worker's instance never sees the new token until the next process
+    restart, which is what made the dashboard indicator stay yellow and
+    the connection test return ``Qobuz not authenticated`` after a
+    successful Connect."""
+    try:
+        worker = qobuz_enrichment_worker if 'qobuz_enrichment_worker' in globals() else None
+        if worker and getattr(worker, 'client', None):
+            worker.client.reload_credentials()
+    except Exception as e:
+        logger.debug(f"Could not sync Qobuz credentials to enrichment worker: {e}")
+
+
 @app.route('/api/qobuz/auth/login', methods=['POST'])
 def qobuz_auth_login():
     """Login to Qobuz with email/password."""
@@ -19986,6 +20002,7 @@ def qobuz_auth_login():
         result = qobuz.login(email, password)
 
         if result['status'] == 'success':
+            _sync_qobuz_credentials_to_worker()
             return jsonify({"success": True, **result})
         else:
             return jsonify({"success": False, "error": result.get('message', 'Login failed')}), 400
@@ -20008,6 +20025,7 @@ def qobuz_auth_token():
         result = qobuz.login_with_token(token)
 
         if result['status'] == 'success':
+            _sync_qobuz_credentials_to_worker()
             return jsonify({"success": True, **result})
         else:
             return jsonify({"success": False, "error": result.get('message', 'Token login failed')}), 400
@@ -20038,6 +20056,7 @@ def qobuz_auth_logout():
     """Logout from Qobuz."""
     try:
         soulseek_client.qobuz.logout()
+        _sync_qobuz_credentials_to_worker()
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

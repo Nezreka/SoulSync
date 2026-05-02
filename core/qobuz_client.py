@@ -516,6 +516,45 @@ class QobuzClient:
         config_manager.set('qobuz.session', {})
         logger.info("Qobuz session cleared")
 
+    def reload_credentials(self) -> None:
+        """Pull session state from config without making a network probe.
+
+        SoulSync runs two ``QobuzClient`` instances side by side — one wired
+        through ``soulseek_client.qobuz`` for the auth-flow endpoints, and a
+        second owned by the enrichment worker for thread safety. When the user
+        logs in via ``/api/qobuz/auth/login`` or ``/api/qobuz/auth/token`` only
+        the auth-flow instance's in-memory state is updated; the worker's
+        instance still believes itself unauthenticated, which is what made the
+        dashboard "yellow" indicator and the connection-test step report
+        ``Qobuz not authenticated`` even after a successful Connect.
+
+        Call this on the worker's client immediately after a successful login
+        (and on logout, to clear) to keep the two instances in lockstep.
+        Unlike ``_restore_session`` this does not validate the token over the
+        network — the caller has just authenticated, so the token is known
+        good.
+        """
+        saved = config_manager.get('qobuz.session', {}) or {}
+        new_app_id = saved.get('app_id', '') or None
+        new_app_secret = saved.get('app_secret', '') or None
+        new_token = saved.get('user_auth_token', '') or None
+
+        self.app_id = new_app_id
+        self.app_secret = new_app_secret
+        self.user_auth_token = new_token
+
+        if new_app_id:
+            self.session.headers['X-App-Id'] = new_app_id
+        else:
+            self.session.headers.pop('X-App-Id', None)
+
+        if new_token:
+            self.session.headers['X-User-Auth-Token'] = new_token
+        else:
+            self.session.headers.pop('X-User-Auth-Token', None)
+            self.user_info = None
+            self._auth_error = None
+
     def is_authenticated(self) -> bool:
         """Check if we have a valid Qobuz session."""
         return bool(self.user_auth_token and self.app_id and self.app_secret)
