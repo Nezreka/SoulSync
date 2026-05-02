@@ -279,9 +279,9 @@
             <!-- Status Section -->
             <div class="status-section">
                 <h4 class="status-title">Service Status</h4>
-                <div class="status-indicator" id="spotify-indicator">
+                <div class="status-indicator" id="metadata-source-indicator">
                     <span class="status-dot disconnected"></span>
-                    <span class="status-name" id="music-source-name">Spotify</span>
+                    <span class="status-name" id="metadata-source-name">Spotify</span>
                 </div>
                 <div class="status-indicator" id="media-server-indicator">
                     <span class="status-dot disconnected"></span>
@@ -616,14 +616,14 @@
                     <div class="dashboard-section">
                         <h3 class="section-title">Service Status</h3>
                         <div class="service-status-grid">
-                            <div class="service-card" id="spotify-service-card">
+                            <div class="service-card" id="metadata-source-service-card">
                                 <div class="service-card-header">
-                                    <span class="service-card-title" id="music-source-title">Spotify</span>
+                                    <span class="service-card-title" id="metadata-source-title">Spotify</span>
                                     <span class="service-card-indicator disconnected"
-                                        id="spotify-status-indicator">●</span>
+                                        id="metadata-source-status-indicator">●</span>
                                 </div>
-                                <p class="service-card-status-text" id="spotify-status-text">Disconnected</p>
-                                <p class="service-card-response-time" id="spotify-response-time">Response: --</p>
+                                <p class="service-card-status-text" id="metadata-source-status-text">Disconnected</p>
+                                <p class="service-card-response-time" id="metadata-source-response-time">Response: --</p>
                                 <div class="service-card-footer">
                                     <button class="service-card-button"
                                         onclick="testDashboardConnection(getActiveMetadataSource())">Test Connection</button>
