@@ -978,6 +978,7 @@ async function loadSettingsData() {
         document.getElementById('embed-qobuz').checked = settings.qobuz?.embed_tags !== false;
         document.getElementById('embed-lastfm').checked = settings.lastfm?.embed_tags !== false;
         document.getElementById('embed-genius').checked = settings.genius?.embed_tags !== false;
+        document.getElementById('embed-hifi').checked = settings.hifi?.embed_tags !== false;
         // Load per-tag toggles from data-config attributes
         document.querySelectorAll('[data-config]').forEach(cb => {
             const path = cb.dataset.config.split('.');
@@ -986,7 +987,7 @@ async function loadSettingsData() {
             cb.checked = val !== false;
         });
         // Apply service disabled state to child tags
-        ['spotify', 'itunes', 'musicbrainz', 'deezer', 'audiodb', 'tidal', 'qobuz', 'lastfm', 'genius'].forEach(svc => {
+        ['spotify', 'itunes', 'musicbrainz', 'deezer', 'audiodb', 'tidal', 'qobuz', 'lastfm', 'genius', 'hifi'].forEach(svc => {
             const master = document.getElementById('embed-' + svc);
             if (master) toggleServiceTags(master, svc);
         });
@@ -2652,6 +2653,10 @@ async function saveSettings(quiet = false) {
         hifi_download: {
             quality: document.getElementById('hifi-download-quality').value || 'lossless',
             allow_fallback: document.getElementById('hifi-allow-fallback').checked,
+        },
+        hifi: {
+            embed_tags: document.getElementById('embed-hifi').checked,
+            tags: _collectServiceTags('hifi')
         },
         deezer_download: {
             quality: document.getElementById('deezer-download-quality').value || 'flac',
