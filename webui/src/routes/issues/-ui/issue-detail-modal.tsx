@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
+import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
 import { Button } from '@/components/form';
 import {
   launchAlbumDownloadWorkflow,
@@ -38,86 +39,11 @@ export function IssueDetailModal({
   profileId: number;
 }) {
   const [adminResponse, setAdminResponse] = useState('');
-  const modalRef = useRef<HTMLDivElement | null>(null);
-  const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
   const isOpen = Boolean(issue || isLoading || error);
 
   useEffect(() => {
     setAdminResponse(issue?.admin_response || '');
   }, [issue?.admin_response, issue?.id]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-
-    previouslyFocusedElementRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-
-    const focusModal = () => {
-      const modal = modalRef.current;
-      if (!modal) return;
-
-      const focusable = getFocusableElements(modal);
-      (focusable[0] || modal).focus();
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-        return;
-      }
-
-      if (event.key !== 'Tab') return;
-
-      const modal = modalRef.current;
-      if (!modal) return;
-
-      const focusable = getFocusableElements(modal);
-      if (focusable.length === 0) {
-        event.preventDefault();
-        modal.focus();
-        return;
-      }
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const activeElement = document.activeElement;
-
-      if (event.shiftKey) {
-        if (activeElement === first || !modal.contains(activeElement)) {
-          event.preventDefault();
-          last.focus();
-        }
-      } else if (activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    const onFocusIn = (event: FocusEvent) => {
-      const modal = modalRef.current;
-      if (!modal) return;
-      if (event.target instanceof Node && !modal.contains(event.target)) {
-        const focusable = getFocusableElements(modal);
-        (focusable[0] || modal).focus();
-      }
-    };
-
-    const raf = requestAnimationFrame(focusModal);
-    document.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('focusin', onFocusIn);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('focusin', onFocusIn);
-      previouslyFocusedElementRef.current?.focus?.();
-      previouslyFocusedElementRef.current = null;
-    };
-  }, [isOpen, onClose]);
 
   const updateMutation = useMutation({
     mutationFn: async (payload: { issueId: number; status: string; adminResponse: string }) => {
@@ -270,281 +196,246 @@ export function IssueDetailModal({
   };
 
   return (
-    <div
-      className={styles.modalOverlay}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="issue-detail-title"
-      onClick={onClose}
+    <DialogFrame
+      open={isOpen}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          onClose();
+        }
+      }}
+      className={styles.issueDetailDialog}
     >
-      <div
-        className={`${styles.modal} ${styles.issueDetailModal}`}
-        ref={modalRef}
-        tabIndex={-1}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className={styles.modalHeader}>
-          <h3 className={styles.modalHeaderTitle} id="issue-detail-title">
-            {issue ? `Issue #${issue.id}` : 'Issue details'}
-          </h3>
-          <button
-            className={styles.modalClose}
-            type="button"
-            onClick={onClose}
-            aria-label="Close issue detail"
-          >
-            &times;
-          </button>
-        </div>
-
-        <div className={styles.modalBody}>
-          {isLoading ? (
-            <div className={styles.issuesLoading}>
-              <div className={styles.issuesSpinner} />
-              Loading issue details...
+      <DialogHeader
+        title={issue ? `Issue #${issue.id}` : 'Issue details'}
+        closeLabel="Close issue detail"
+      />
+      <DialogBody>
+        {isLoading ? (
+          <div className={styles.issuesLoading}>
+            <div className={styles.issuesSpinner} />
+            Loading issue details...
+          </div>
+        ) : error ? (
+          <div className={styles.issuesEmpty}>
+            <div className={styles.issuesEmptyTitle}>Failed to load issue</div>
+            <div className={styles.issuesEmptyText}>
+              {error instanceof Error ? error.message : 'Unknown error'}
             </div>
-          ) : error ? (
-            <div className={styles.issuesEmpty}>
-              <div className={styles.issuesEmptyTitle}>Failed to load issue</div>
-              <div className={styles.issuesEmptyText}>
-                {error instanceof Error ? error.message : 'Unknown error'}
+          </div>
+        ) : issue ? (
+          <>
+            <div className={styles.issueHero}>
+              <div className={styles.issueHeroArtGroup}>
+                {issue.entity_type === 'artist' && issueArtwork ? (
+                  <img className={styles.issueHeroArtistThumb} src={issueArtwork} alt="" />
+                ) : null}
+                {issueArtwork ? (
+                  <img className={styles.issueHeroAlbumArt} src={issueArtwork} alt="" />
+                ) : (
+                  <div className={styles.issueHeroAlbumPlaceholder}>
+                    {ISSUE_CATEGORY_META[issue.category]?.icon || 'OT'}
+                  </div>
+                )}
               </div>
-            </div>
-          ) : issue ? (
-            <>
-              <div className={styles.issueHero}>
-                <div className={styles.issueHeroArtGroup}>
-                  {issue.entity_type === 'artist' && issueArtwork ? (
-                    <img className={styles.issueHeroArtistThumb} src={issueArtwork} alt="" />
-                  ) : null}
-                  {issueArtwork ? (
-                    <img className={styles.issueHeroAlbumArt} src={issueArtwork} alt="" />
-                  ) : (
-                    <div className={styles.issueHeroAlbumPlaceholder}>
-                      {ISSUE_CATEGORY_META[issue.category]?.icon || 'OT'}
-                    </div>
+              <div className={styles.issueHeroInfo}>
+                {issue.entity_type !== 'artist' && snapshot.artist_name ? (
+                  <div className={styles.issueHeroArtist}>{String(snapshot.artist_name)}</div>
+                ) : null}
+                <div className={styles.issueHeroAlbum}>
+                  {String(
+                    issue.entity_type === 'artist'
+                      ? snapshot.name || issue.title
+                      : snapshot.album_title || snapshot.title || issue.title,
                   )}
                 </div>
-                <div className={styles.issueHeroInfo}>
-                  {issue.entity_type !== 'artist' && snapshot.artist_name ? (
-                    <div className={styles.issueHeroArtist}>{String(snapshot.artist_name)}</div>
-                  ) : null}
-                  <div className={styles.issueHeroAlbum}>
-                    {String(
-                      issue.entity_type === 'artist'
-                        ? snapshot.name || issue.title
-                        : snapshot.album_title || snapshot.title || issue.title,
-                    )}
-                  </div>
-                  {issue.entity_type === 'track' ? (
-                    <div className={styles.issueHeroTrackName}>♪ {issue.title}</div>
-                  ) : null}
-                  {issue.entity_type !== 'artist' && albumMetaParts.length > 0 ? (
-                    <div className={styles.issueHeroMeta}>{albumMetaParts.join(' - ')}</div>
-                  ) : null}
-                  {genreTags.length > 0 ? (
-                    <div className={styles.issueHeroGenres}>
-                      {genreTags.map((genre) => (
-                        <span className={styles.issueHeroGenreTag} key={String(genre)}>
-                          {String(genre)}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                  {externalLinks.length > 0 ? (
-                    <div className={styles.issueExternalLinks}>
-                      {externalLinks.map((link) =>
-                        link.url ? (
-                          <a
-                            key={`${link.service}-${link.type}-${link.label}`}
-                            className={`${styles.issueExternalLink} ${styles[link.className]}`}
-                            href={link.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            title={`${link.service} ${link.type}`}
-                          >
-                            <span className={styles.issueExternalLinkService}>{link.service}</span>
-                            <span className={styles.issueExternalLinkType}>{link.type}</span>
-                          </a>
-                        ) : (
-                          <span
-                            key={`${link.service}-${link.type}-${link.label}`}
-                            className={`${styles.issueExternalLink} ${styles[link.className]}`}
-                            title={`${link.service} ${link.type}: ${link.id}`}
-                          >
-                            <span className={styles.issueExternalLinkService}>{link.service}</span>
-                            <span className={styles.issueExternalLinkType}>{link.type}</span>
-                          </span>
-                        ),
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className={styles.issueDetailInfoBar}>
-                <div className={styles.issueDetailInfoLeft}>
-                  <span
-                    className={`${styles.issuePriorityDot} ${getPriorityDotClassName(priorityClassName)}`}
-                  />
-                  <span
-                    className={`${styles.issueStatusBadge} ${getStatusClassName(issue.status)}`}
-                  >
-                    {formatStatusLabel(issue.status)}
-                  </span>
-                  <span className={styles.issueDetailCategory}>{issueCategoryLabel}</span>
-                </div>
-                <div className={styles.issueDetailInfoRight}>
-                  <span className={styles.issueDetailDate}>
-                    Reported {formatIssueDate(issue.created_at)}
-                  </span>
-                  {issue.resolved_at ? (
-                    <span className={styles.issueDetailDate}>
-                      Resolved {formatIssueDate(issue.resolved_at)}
-                    </span>
-                  ) : null}
-                  {issue.reporter_name && isAdmin ? (
-                    <span className={styles.issueDetailProfile}>by {issue.reporter_name}</span>
-                  ) : null}
-                </div>
-              </div>
-
-              {issue.entity_type !== 'artist' && isAdmin && (
-                <div className={styles.issueDetailSection}>
-                  <div className={styles.issueDetailSectionTitle}>Admin Actions</div>
-                  <div className={styles.issueActionButtons}>
-                    <Button
-                      className={styles.issueActionDownload}
-                      type="button"
-                      disabled={downloadWorkflowMutation.isPending}
-                      onClick={() => downloadWorkflowMutation.mutate(albumWorkflowInput)}
-                    >
-                      {downloadWorkflowMutation.isPending ? 'Loading...' : 'Download Album'}
-                    </Button>
-                    <Button
-                      className={styles.issueActionWishlist}
-                      type="button"
-                      disabled={wishlistWorkflowMutation.isPending}
-                      onClick={() => wishlistWorkflowMutation.mutate(albumWorkflowInput)}
-                    >
-                      {wishlistWorkflowMutation.isPending ? 'Loading...' : 'Add to Wishlist'}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              <div className={styles.issueDetailSection}>
-                <div className={styles.issueDetailSectionTitle}>Issue</div>
-                <div className={styles.issueDetailTitleText}>{issue.title}</div>
-                <div
-                  className={
-                    issue.description ? styles.issueDetailDescription : styles.issueDetailNoDesc
-                  }
-                >
-                  {issue.description || 'No additional details provided'}
-                </div>
-              </div>
-
-              {issue.entity_type === 'track' && trackMetaItems.length > 0 ? (
-                <div className={styles.issueDetailSection}>
-                  <div className={styles.issueDetailSectionTitle}>Track Details</div>
-                  <div className={styles.issueDetailMetaGrid}>
-                    {trackMetaItems.map((item) => (
-                      <div className={styles.issueMetaItem} key={item.label}>
-                        <span className={styles.issueMetaIcon}>{item.icon}</span>
-                        <span className={styles.issueMetaLabel}>{item.label}</span>
-                        <span className={styles.issueMetaValue}>{item.value}</span>
-                      </div>
+                {issue.entity_type === 'track' ? (
+                  <div className={styles.issueHeroTrackName}>♪ {issue.title}</div>
+                ) : null}
+                {issue.entity_type !== 'artist' && albumMetaParts.length > 0 ? (
+                  <div className={styles.issueHeroMeta}>{albumMetaParts.join(' - ')}</div>
+                ) : null}
+                {genreTags.length > 0 ? (
+                  <div className={styles.issueHeroGenres}>
+                    {genreTags.map((genre) => (
+                      <span className={styles.issueHeroGenreTag} key={String(genre)}>
+                        {String(genre)}
+                      </span>
                     ))}
                   </div>
-                </div>
-              ) : null}
-
-              {snapshot.file_path ? (
-                <div className={styles.issueDetailSection}>
-                  <div className={styles.issueDetailSectionTitle}>File Path</div>
-                  <div className={styles.issueDetailFilepath}>{String(snapshot.file_path)}</div>
-                </div>
-              ) : null}
-
-              {trackRows.length > 0 ? (
-                <div className={styles.issueDetailSection}>
-                  <div className={styles.issueDetailSectionTitle}>
-                    Track Listing{' '}
-                    <span className={styles.issueDetailSectionCount}>
-                      {trackRows.length} tracks
-                    </span>
+                ) : null}
+                {externalLinks.length > 0 ? (
+                  <div className={styles.issueExternalLinks}>
+                    {externalLinks.map((link) =>
+                      link.url ? (
+                        <a
+                          key={`${link.service}-${link.type}-${link.label}`}
+                          className={`${styles.issueExternalLink} ${styles[link.className]}`}
+                          href={link.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={`${link.service} ${link.type}`}
+                        >
+                          <span className={styles.issueExternalLinkService}>{link.service}</span>
+                          <span className={styles.issueExternalLinkType}>{link.type}</span>
+                        </a>
+                      ) : (
+                        <span
+                          key={`${link.service}-${link.type}-${link.label}`}
+                          className={`${styles.issueExternalLink} ${styles[link.className]}`}
+                          title={`${link.service} ${link.type}: ${link.id}`}
+                        >
+                          <span className={styles.issueExternalLinkService}>{link.service}</span>
+                          <span className={styles.issueExternalLinkType}>{link.type}</span>
+                        </span>
+                      ),
+                    )}
                   </div>
-                  <div className={styles.issueDetailTracklist}>{renderTrackListing(trackRows)}</div>
-                </div>
-              ) : null}
+                ) : null}
+              </div>
+            </div>
 
-              {isAdmin && (
-                <div className={styles.issueDetailSection}>
-                  <div className={styles.issueDetailSectionTitle}>Admin Response</div>
-                  <textarea
-                    className={styles.issueDetailResponseTextarea}
-                    id="issue-detail-response-input"
-                    value={adminResponse}
-                    onChange={(event) => setAdminResponse(event.target.value)}
-                    placeholder="Write a response to the reporter..."
-                    rows={3}
-                  />
-                </div>
-              )}
+            <div className={styles.issueDetailInfoBar}>
+              <div className={styles.issueDetailInfoLeft}>
+                <span
+                  className={`${styles.issuePriorityDot} ${getPriorityDotClassName(priorityClassName)}`}
+                />
+                <span className={`${styles.issueStatusBadge} ${getStatusClassName(issue.status)}`}>
+                  {formatStatusLabel(issue.status)}
+                </span>
+                <span className={styles.issueDetailCategory}>{issueCategoryLabel}</span>
+              </div>
+              <div className={styles.issueDetailInfoRight}>
+                <span className={styles.issueDetailDate}>
+                  Reported {formatIssueDate(issue.created_at)}
+                </span>
+                {issue.resolved_at ? (
+                  <span className={styles.issueDetailDate}>
+                    Resolved {formatIssueDate(issue.resolved_at)}
+                  </span>
+                ) : null}
+                {issue.reporter_name && isAdmin ? (
+                  <span className={styles.issueDetailProfile}>by {issue.reporter_name}</span>
+                ) : null}
+              </div>
+            </div>
 
-              {!isAdmin && issue.admin_response ? (
-                <div className={styles.issueDetailSection}>
-                  <div className={styles.issueDetailSectionTitle}>Admin Response</div>
-                  <div className={styles.issueDetailAdminResponse}>{issue.admin_response}</div>
+            {issue.entity_type !== 'artist' && isAdmin && (
+              <div className={styles.issueDetailSection}>
+                <div className={styles.issueDetailSectionTitle}>Admin Actions</div>
+                <div className={styles.issueActionButtons}>
+                  <Button
+                    className={styles.issueActionDownload}
+                    type="button"
+                    disabled={downloadWorkflowMutation.isPending}
+                    onClick={() => downloadWorkflowMutation.mutate(albumWorkflowInput)}
+                  >
+                    {downloadWorkflowMutation.isPending ? 'Loading...' : 'Download Album'}
+                  </Button>
+                  <Button
+                    className={styles.issueActionWishlist}
+                    type="button"
+                    disabled={wishlistWorkflowMutation.isPending}
+                    onClick={() => wishlistWorkflowMutation.mutate(albumWorkflowInput)}
+                  >
+                    {wishlistWorkflowMutation.isPending ? 'Loading...' : 'Add to Wishlist'}
+                  </Button>
                 </div>
-              ) : null}
-            </>
-          ) : null}
-        </div>
+              </div>
+            )}
 
-        <div className={styles.modalFooter}>
-          <Button className={styles.modalButtonSecondary} type="button" onClick={onClose}>
-            Close
-          </Button>
-          {!isLoading && !error && issue && (
-            <>
-              {statusButtons}
-              {isAdmin && (
-                <Button
-                  className={styles.modalButtonDelete}
-                  type="button"
-                  onClick={() => {
-                    if (window.confirm('Delete this issue?')) {
-                      deleteMutation.mutate(issue.id);
-                    }
-                  }}
-                  disabled={deleteMutation.isPending}
-                >
-                  Delete
-                </Button>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+            <div className={styles.issueDetailSection}>
+              <div className={styles.issueDetailSectionTitle}>Issue</div>
+              <div className={styles.issueDetailTitleText}>{issue.title}</div>
+              <div
+                className={
+                  issue.description ? styles.issueDetailDescription : styles.issueDetailNoDesc
+                }
+              >
+                {issue.description || 'No additional details provided'}
+              </div>
+            </div>
+
+            {issue.entity_type === 'track' && trackMetaItems.length > 0 ? (
+              <div className={styles.issueDetailSection}>
+                <div className={styles.issueDetailSectionTitle}>Track Details</div>
+                <div className={styles.issueDetailMetaGrid}>
+                  {trackMetaItems.map((item) => (
+                    <div className={styles.issueMetaItem} key={item.label}>
+                      <span className={styles.issueMetaIcon}>{item.icon}</span>
+                      <span className={styles.issueMetaLabel}>{item.label}</span>
+                      <span className={styles.issueMetaValue}>{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {snapshot.file_path ? (
+              <div className={styles.issueDetailSection}>
+                <div className={styles.issueDetailSectionTitle}>File Path</div>
+                <div className={styles.issueDetailFilepath}>{String(snapshot.file_path)}</div>
+              </div>
+            ) : null}
+
+            {trackRows.length > 0 ? (
+              <div className={styles.issueDetailSection}>
+                <div className={styles.issueDetailSectionTitle}>
+                  Track Listing{' '}
+                  <span className={styles.issueDetailSectionCount}>{trackRows.length} tracks</span>
+                </div>
+                <div className={styles.issueDetailTracklist}>{renderTrackListing(trackRows)}</div>
+              </div>
+            ) : null}
+
+            {isAdmin && (
+              <div className={styles.issueDetailSection}>
+                <div className={styles.issueDetailSectionTitle}>Admin Response</div>
+                <textarea
+                  className={styles.issueDetailResponseTextarea}
+                  id="issue-detail-response-input"
+                  value={adminResponse}
+                  onChange={(event) => setAdminResponse(event.target.value)}
+                  placeholder="Write a response to the reporter..."
+                  rows={3}
+                />
+              </div>
+            )}
+
+            {!isAdmin && issue.admin_response ? (
+              <div className={styles.issueDetailSection}>
+                <div className={styles.issueDetailSectionTitle}>Admin Response</div>
+                <div className={styles.issueDetailAdminResponse}>{issue.admin_response}</div>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </DialogBody>
+      <DialogFooter>
+        <Button className={styles.modalButtonSecondary} type="button" onClick={onClose}>
+          Close
+        </Button>
+        {!isLoading && !error && issue && (
+          <>
+            {statusButtons}
+            {isAdmin && (
+              <Button
+                className={styles.modalButtonDelete}
+                type="button"
+                onClick={() => {
+                  if (window.confirm('Delete this issue?')) {
+                    deleteMutation.mutate(issue.id);
+                  }
+                }}
+                disabled={deleteMutation.isPending}
+              >
+                Delete
+              </Button>
+            )}
+          </>
+        )}
+      </DialogFooter>
+    </DialogFrame>
   );
-}
-
-function getFocusableElements(container: HTMLElement) {
-  return Array.from(
-    container.querySelectorAll<HTMLElement>(
-      [
-        'button:not([disabled])',
-        '[href]',
-        'input:not([disabled])',
-        'select:not([disabled])',
-        'textarea:not([disabled])',
-        '[tabindex]:not([tabindex="-1"])',
-      ].join(','),
-    ),
-  ).filter((element) => element.tabIndex >= 0);
 }
 
 function renderTrackListing(trackRows: Array<Record<string, unknown>>) {

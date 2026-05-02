@@ -390,102 +390,18 @@
   box-shadow: 0 0 6px rgba(255, 77, 77, 0.4);
 }
 
-.modalOverlay {
-  position: fixed;
-  inset: 0;
-  z-index: 11000;
-  background: rgba(5, 9, 16, 0.76);
-  backdrop-filter: blur(18px);
-  display: grid;
-  place-items: center;
-  padding: 18px;
-}
-
-.modal {
-  width: min(1060px, 100%);
-  max-height: min(90vh, 980px);
-  overflow: auto;
-  border-radius: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: linear-gradient(180deg, rgba(16, 22, 34, 0.98), rgba(12, 16, 25, 0.98));
-  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.45);
-}
-
-.issueDetailModal {
+.issueDetailDialog {
   max-width: 750px;
   width: 95vw;
   max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 16px;
 }
 
-.issueDetailModal .modalHeader {
-  padding: 20px 24px;
-  gap: 16px;
-}
-
-.issueDetailModal .modalHeaderTitle {
-  margin: 0;
-  font-size: 18px;
-}
-
-.issueDetailModal .modalClose {
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 50%;
-  font-size: 16px;
-}
-
-.issueDetailModal .modalBody {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  max-height: calc(85vh - 120px);
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.issueDetailModal .modalFooter {
-  padding: 16px 24px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  gap: 8px;
-}
-
-.reportIssueModal {
+.reportIssueDialog {
   max-width: 680px;
   width: 95vw;
 }
 
-.modalHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 20px 22px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.modalHeaderTitle {
-  margin: 0 0 8px;
-  font-size: 1.4rem;
-}
-
-.modalClose {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
-  color: #fff;
-  border-radius: 14px;
-  width: 40px;
-  height: 40px;
-  cursor: pointer;
-}
-
-.modalBody {
-  padding: 22px;
+.reportIssueForm {
   display: grid;
   gap: 18px;
 }
@@ -1011,14 +927,6 @@
   font-size: 13px;
 }
 
-.modalFooter {
-  display: flex;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 0 22px 22px;
-}
-
 .modalButtonSecondary {
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.8);
@@ -1142,31 +1050,8 @@
     width: 100%;
   }
 
-  .modal {
+  .issueDetailDialog {
     max-height: calc(100vh - 24px);
-    border-radius: 22px;
-  }
-
-  .modalBody {
-    padding: 18px;
-  }
-
-  .modalFooter {
-    flex-direction: column;
-    align-items: stretch;
-    padding: 0 18px 18px;
-  }
-
-  .issueDetailModal {
-    max-height: calc(100vh - 24px);
-  }
-
-  .issueDetailModal .modalBody {
-    padding: 18px;
-  }
-
-  .issueDetailModal .modalFooter {
-    padding: 0 18px 18px;
   }
 
   .issueDetailMetaGrid {
@@ -1183,8 +1068,7 @@
     justify-content: center;
   }
 
-  .issueActionButtons > button,
-  .modalFooter > button {
+  .issueActionButtons > button {
     width: 100%;
   }
 
