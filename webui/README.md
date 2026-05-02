@@ -65,6 +65,70 @@ That order avoids load-time references to missing globals and keeps the React si
   - a legacy fallback path in `webui/static/init.js`
   - bridge glue or handoff logic in `webui/static/shell-bridge.js`
 
+## Folder Layout
+
+The React webui uses a small set of predictable folders so route slices stay easy to extend,
+test, and understand.
+
+```text
+webui/src/
+  app/         React bootstrap, router, query client, shared API client
+  components/  Shared UI primitives
+  platform/    Shell bridge and browser/platform integration
+  routes/      Route-local code and TanStack Router pages
+  test/        Shared test utilities and setup helpers
+```
+
+### Route Slices
+
+- Keep route-specific code inside `webui/src/routes/<route>/`.
+- Put the routing entry in `route.tsx`.
+- Put route-local UI in a `-ui/` folder.
+- Prefix non-routing files with `-` so TanStack Router ignores them.
+- Keep the route slice small and cohesive.
+- Prefer a few files with clear responsibilities over many tiny files with overlapping names.
+
+Example:
+
+```text
+webui/src/routes/issues/
+  route.tsx
+  -issues.types.ts
+  -issues.api.ts
+  -issues.helpers.ts
+  -issues.api.test.ts
+  -issues.helpers.test.ts
+  -ui/
+    issues-page.tsx
+    issue-detail-modal.tsx
+    issue-domain-host.tsx
+```
+
+The initial `issues` slice is the model to follow:
+
+- `-issues.api.ts` holds request code and query options
+- `-issues.helpers.ts` holds pure normalization and formatting
+- `-issues.types.ts` holds shared types
+- `-ui/` holds the page, modal, and legacy handoff UI
+
+### Shared Code
+
+- Put reusable UI in `webui/src/components/`.
+- Put shell integration in `webui/src/platform/`.
+- Put bootstrap and app-wide wiring in `webui/src/app/`.
+- Move code up a level only when it is genuinely shared.
+- Avoid creating new conventions that overlap with existing ones.
+
+### Testing Choices
+
+We have a lot of testing tools available, but we do not need all of them for every feature.
+
+- Use plain unit tests for pure functions and small transforms.
+- Use React component or route tests when the behavior lives in the UI or router.
+- Use MSW-backed tests when request shape, response handling, or error handling matters.
+- Use Playwright when the behavior is best proven end-to-end with the server and browser together.
+- Prefer the smallest test setup that still proves the thing that can regress.
+
 ## Development
 
 The repo root now owns the full local-dev instructions. Start there for the
