@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g, url_for
+from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from utils.logging_config import get_logger, setup_logging
 from utils.async_helpers import run_async
@@ -97,6 +97,7 @@ from core.metadata.cache import get_metadata_cache
 from core.metadata import registry as metadata_registry
 from core.metadata import is_internal_image_host
 from core.metadata import normalize_image_url as fix_artist_image_url
+from core.webui import build_webui_vite_assets, should_serve_webui_spa
 from core.metadata.registry import (
     clear_cached_metadata_client,
     get_metadata_source_label,
@@ -292,13 +293,12 @@ app.jinja_env.auto_reload = DEV_STATIC_NO_CACHE
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 
 
-# Cache-bust query string for static assets — appended to every
-# url_for('static', ...) URL via the context processor below. Computed
-# once per process start so each server restart invalidates the
-# browser's cached copy of every JS/CSS file. This is the surefire
-# fix for "user has stale JS even after Ctrl+Shift+R" — the URL
-# itself changes, so the browser cannot reuse a previously-cached
-# response no matter what its Cache-Control header said.
+# Cache-bust query string for static assets. Computed once per process
+# start so each server restart invalidates the browser's cached copy of
+# every JS/CSS file. This is the surefire fix for "user has stale JS
+# even after Ctrl+Shift+R" — the URL itself changes, so the browser
+# cannot reuse a previously-cached response no matter what its
+# Cache-Control header said.
 import time as _cache_bust_time
 _STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
 
@@ -361,100 +361,10 @@ def _log_rejected_socketio_origin():
         request.headers.get('X-Forwarded-Proto', ''),
     )
 
-# --- WebUI asset injection ---
-_webui_vite_manifest = None
-_webui_vite_manifest_mtime = None
-_webui_vite_entry = 'src/app/main.tsx'
-_webui_vite_manifest_path = Path(base_dir) / 'webui' / 'static' / 'dist' / '.vite' / 'manifest.json'
-_webui_vite_dev = os.environ.get('SOULSYNC_WEBUI_VITE_DEV', '').lower() in ('1', 'true', 'yes', 'on')
-_webui_vite_url = os.environ.get('SOULSYNC_WEBUI_VITE_URL', 'http://127.0.0.1:5173').rstrip('/')
-_webui_vite_base = '/static/dist/'
-
-def _should_serve_webui_spa(pathname: str) -> bool:
-    normalized = pathname.rstrip('/') or '/'
-    excluded_exact_paths = {'/callback', '/status'}
-    excluded_prefixes = (
-        '/api',
-        '/auth',
-        '/callback/',
-        '/deezer/',
-        '/socket.io',
-        '/static',
-        '/stream',
-        '/tidal/',
-    )
-
-    if normalized in excluded_exact_paths:
-        return False
-
-    return not normalized.startswith(excluded_prefixes)
-
-
-def _webui_vite_dev_asset_url(asset_path: str) -> str:
-    return f'{_webui_vite_url}{_webui_vite_base.rstrip("/")}/{asset_path.lstrip("/")}'
-
-
-def _load_webui_vite_manifest():
-    global _webui_vite_manifest, _webui_vite_manifest_mtime
-
-    manifest_mtime = None
-    if _webui_vite_manifest_path.exists():
-        try:
-            manifest_mtime = _webui_vite_manifest_path.stat().st_mtime
-        except OSError:
-            manifest_mtime = None
-
-    if _webui_vite_manifest is not None and manifest_mtime == _webui_vite_manifest_mtime:
-        return _webui_vite_manifest
-
-    if _webui_vite_manifest_path.exists():
-        try:
-            with _webui_vite_manifest_path.open('r', encoding='utf-8') as handle:
-                _webui_vite_manifest = json.load(handle)
-            _webui_vite_manifest_mtime = manifest_mtime
-        except Exception as exc:
-            logger.warning(f"Failed to load webui manifest: {exc}")
-            _webui_vite_manifest = {}
-            _webui_vite_manifest_mtime = manifest_mtime
-    else:
-        _webui_vite_manifest = {}
-        _webui_vite_manifest_mtime = None
-    return _webui_vite_manifest
-
-
-def _build_webui_vite_assets(placement='body'):
-    if placement not in ('head', 'body'):
-        return ''
-
-    if _webui_vite_dev:
-        if placement == 'head':
-            return ''
-        return '\n'.join([
-            f'<script type="module" src="{_webui_vite_dev_asset_url("@vite/client")}"></script>',
-            f'<script type="module" src="{_webui_vite_dev_asset_url(_webui_vite_entry)}"></script>',
-        ])
-
-    manifest = _load_webui_vite_manifest()
-    entry = manifest.get(_webui_vite_entry)
-    if not entry:
-        return ''
-
-    if placement == 'head':
-        head_assets = []
-        for css_file in entry.get('css', []):
-            head_assets.append(f'<link rel="stylesheet" href="{url_for("static", filename=f"dist/{css_file}")}">')
-        return '\n'.join(head_assets)
-
-    entry_file = entry.get('file')
-    if not entry_file:
-        return ''
-    return f'<script type="module" src="{url_for("static", filename=f"dist/{entry_file}")}"></script>'
-
-
 @app.context_processor
 def inject_webui_assets():
     return {
-        'vite_assets': _build_webui_vite_assets,
+        'vite_assets': build_webui_vite_assets,
     }
 
 # --- Profile Context (before_request hook) ---
@@ -3423,7 +3333,7 @@ def service_worker():
 @app.route('/<path:page>')
 def spa_catch_all(page):
     # Serve index.html for client-side routes; let Flask handle real routes first.
-    if not _should_serve_webui_spa(f'/{page}'):
+    if not should_serve_webui_spa(f'/{page}'):
         abort(404)
     return index()
 
