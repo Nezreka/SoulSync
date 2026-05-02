@@ -2189,6 +2189,13 @@ function navigateToPage(pageId, options = {}) {
     const navButton = document.querySelector(`[data-page="${pageId}"]`);
     if (navButton) {
         navButton.classList.add('active');
+    } else if (pageId === 'artist-detail') {
+        // Artist-detail is a "pseudo-page" reachable from Library, Search,
+        // or the global search popover — it has no [data-page] match. Treat
+        // it as a Library context so the sidebar still anchors the user
+        // somewhere instead of showing a blank active state.
+        const libraryBtn = document.querySelector('[data-page="library"]');
+        if (libraryBtn) libraryBtn.classList.add('active');
     }
 
     // Update pages
@@ -2198,6 +2205,12 @@ function navigateToPage(pageId, options = {}) {
     document.getElementById(`${pageId}-page`).classList.add('active');
 
     currentPage = pageId;
+
+    // Refresh the Library button label so artist-detail shows a breadcrumb
+    // ("Library / Artist Name") and other pages show plain "Library".
+    if (typeof _updateSidebarLibraryBreadcrumb === 'function') {
+        _updateSidebarLibraryBreadcrumb();
+    }
 
     if (!options.skipPushState) {
         const urlPath = pageId === 'dashboard' ? '/' : '/' + pageId;
