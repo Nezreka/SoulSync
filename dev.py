@@ -318,7 +318,7 @@ def watch_and_run_backend() -> None:
 def main() -> int:
     if not (ROOT_DIR / 'webui' / 'node_modules').is_dir():
         print('webui/node_modules is missing.')
-        print('Run: cd webui && npm install')
+        print('Run: cd webui && npm ci')
         return 1
 
     vite_proc = start_vite()

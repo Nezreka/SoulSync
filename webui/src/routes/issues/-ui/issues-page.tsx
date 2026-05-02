@@ -9,6 +9,11 @@ import { useReactPageShell } from '@/platform/shell/route-controllers';
 import type { IssueCounts, IssueRecord, IssueStatus } from '../-issues.types';
 
 import {
+  issueCountsQueryOptions,
+  issueDetailQueryOptions,
+  issueListQueryOptions,
+} from '../-issues.api';
+import {
   CLOSE_EVENT,
   REFRESH_EVENT,
   dispatchIssuesRefreshEvent,
@@ -23,11 +28,6 @@ import {
   normalizeIssuesSearch,
   parseSnapshot,
 } from '../-issues.helpers';
-import {
-  issueCountsQueryOptions,
-  issueDetailQueryOptions,
-  issueListQueryOptions,
-} from '../-issues.api';
 import { Route } from '../route';
 import { IssueDetailModal } from './issue-detail-modal';
 import styles from './issues-page.module.css';

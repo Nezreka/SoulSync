@@ -57,7 +57,13 @@ describe('issues route', () => {
         if (url.includes('/api/issues/counts')) {
           return createResponse({
             success: true,
-            counts: { open: 2, in_progress: 1, resolved: 0, dismissed: 0, total: 3 },
+            counts: {
+              open: 2,
+              in_progress: 1,
+              resolved: 0,
+              dismissed: 0,
+              total: 3,
+            },
           });
         }
         if (url.includes('/api/issues?')) {
@@ -105,18 +111,18 @@ describe('issues route', () => {
               status: 'open',
               priority: 'normal',
               snapshot_data: {
-                  title: 'Album Name',
-                  artist_name: 'Artist',
-                  thumb_url: 'https://example.com/thumb.jpg',
-                  spotify_album_id: 'abc123',
-                  track_number: 1,
-                  duration: 245,
-                  format: 'FLAC',
-                  bitrate: 1411,
-                },
-                created_at: '2026-04-03 10:30:00',
-                reporter_name: 'Ada',
+                title: 'Album Name',
+                artist_name: 'Artist',
+                thumb_url: 'https://example.com/thumb.jpg',
+                spotify_album_id: 'abc123',
+                track_number: 1,
+                duration: 245,
+                format: 'FLAC',
+                bitrate: 1411,
               },
+              created_at: '2026-04-03 10:30:00',
+              reporter_name: 'Ada',
+            },
           });
         }
         if (url.includes('/api/spotify/album/abc123')) {
@@ -151,6 +157,10 @@ describe('issues route', () => {
   it('loads the detail modal from the route search state', async () => {
     renderIssuesRoute(['/issues?issueId=7']);
     await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('Issue #7'));
+    expect(await screen.findByTitle('Spotify Album')).toHaveAttribute(
+      'href',
+      'https://open.spotify.com/album/abc123',
+    );
   });
 
   it('stores filters in route search state', async () => {
@@ -186,7 +196,9 @@ describe('issues route', () => {
     renderIssuesRoute();
     fireEvent.click(await screen.findByTestId('issue-card-7'));
 
-    const closeButton = await screen.findByRole('button', { name: /close issue detail/i });
+    const closeButton = await screen.findByRole('button', {
+      name: /close issue detail/i,
+    });
     const deleteButton = await screen.findByRole('button', { name: /delete/i });
 
     deleteButton.focus();
@@ -240,7 +252,9 @@ describe('issues route', () => {
 
     fireEvent.change(titleInput, { target: { value: 'Custom report title' } });
     fireEvent.blur(titleInput);
-    fireEvent.change(descriptionInput, { target: { value: 'Detailed reproduction notes' } });
+    fireEvent.change(descriptionInput, {
+      target: { value: 'Detailed reproduction notes' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /high/i }));
     fireEvent.click(screen.getByRole('button', { name: /wrong metadata/i }));
     expect(titleInput).toHaveValue('Custom report title');
