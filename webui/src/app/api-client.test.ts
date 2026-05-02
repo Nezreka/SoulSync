@@ -1,8 +1,7 @@
-import { describe, expect, it, vi } from 'vite-plus/test';
+import type { ResponsePromise } from 'ky';
 
 import { HTTPError } from 'ky';
-
-import type { ResponsePromise } from 'ky';
+import { describe, expect, it, vi } from 'vite-plus/test';
 
 import { readJson } from './api-client';
 
@@ -46,9 +45,6 @@ describe('readJson', () => {
     const result = readJson(promise);
 
     await expect(result).rejects.toBe(error);
-    await expect(result).rejects.toHaveProperty(
-      'message',
-      error.message,
-    );
+    await expect(result).rejects.toHaveProperty('message', error.message);
   });
 });

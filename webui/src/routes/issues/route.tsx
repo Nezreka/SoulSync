@@ -31,7 +31,9 @@ export const Route = createFileRoute('/issues')({
       context.queryClient.ensureQueryData(issueCountsQueryOptions(profile.profileId)),
       context.queryClient.ensureQueryData(issueListQueryOptions(profile.profileId, deps)),
       deps.issueId
-        ? context.queryClient.ensureQueryData(issueDetailQueryOptions(profile.profileId, deps.issueId))
+        ? context.queryClient.ensureQueryData(
+            issueDetailQueryOptions(profile.profileId, deps.issueId),
+          )
         : Promise.resolve(),
     ]);
   },
