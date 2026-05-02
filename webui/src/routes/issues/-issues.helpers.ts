@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 
-import { apiClient, parseJsonResponse } from '@/app/api-client';
+import { apiClient, readJson } from '@/app/api-client';
 
 import type {
   IssueCounts,
@@ -18,10 +18,10 @@ const DEFAULT_LIMIT = 100;
 export const REFRESH_EVENT = 'ss:issues-refresh';
 export const CLOSE_EVENT = 'ss:issues-close-detail';
 
-export const DEFAULT_ISSUES_SEARCH: Required<IssuesSearch> = {
+export const DEFAULT_ISSUES_SEARCH = {
   status: 'open',
   category: 'all',
-};
+} satisfies Required<Pick<IssuesSearch, 'status' | 'category'>>;
 
 export const ISSUE_CATEGORY_META: Record<
   string,
@@ -146,7 +146,7 @@ export function normalizeIssuesSearch(search: IssuesSearch | undefined): Normali
 }
 
 export async function fetchIssueCounts(profileId: number): Promise<IssueCounts> {
-  const payload = await parseJsonResponse<IssueCountsResponse>(
+  const payload = await readJson<IssueCountsResponse>(
     apiClient.get('issues/counts', {
       headers: createIssueHeaders(profileId),
     }),
@@ -170,7 +170,7 @@ export async function fetchIssueList(
     params.set('category', search.category);
   }
 
-  const payload = await parseJsonResponse<IssueListResponse>(
+  const payload = await readJson<IssueListResponse>(
     apiClient.get('issues', {
       headers: createIssueHeaders(profileId),
       searchParams: params,
@@ -183,7 +183,7 @@ export async function fetchIssueList(
 }
 
 export async function fetchIssue(profileId: number, issueId: number): Promise<IssueRecord> {
-  const payload = await parseJsonResponse<IssueDetailResponse>(
+  const payload = await readJson<IssueDetailResponse>(
     apiClient.get(`issues/${issueId}`, {
       headers: createIssueHeaders(profileId),
     }),
@@ -199,7 +199,7 @@ export async function updateIssue(
   issueId: number,
   updates: { status?: string; admin_response?: string },
 ): Promise<void> {
-  const payload = await parseJsonResponse<{ success: boolean; error?: string }>(
+  const payload = await readJson<{ success: boolean; error?: string }>(
     apiClient.put(`issues/${issueId}`, {
       headers: createIssueHeaders(profileId),
       json: updates,
@@ -214,7 +214,7 @@ export async function createIssue(
   profileId: number,
   payload: CreateIssuePayload,
 ): Promise<IssueRecord | null> {
-  const response = await parseJsonResponse<{
+  const response = await readJson<{
     success: boolean;
     issue?: IssueRecord;
     error?: string;
@@ -238,7 +238,7 @@ export async function createIssue(
 }
 
 export async function deleteIssue(profileId: number, issueId: number): Promise<void> {
-  const payload = await parseJsonResponse<{ success: boolean; error?: string }>(
+  const payload = await readJson<{ success: boolean; error?: string }>(
     apiClient.delete(`issues/${issueId}`, {
       headers: createIssueHeaders(profileId),
     }),
