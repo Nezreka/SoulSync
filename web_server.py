@@ -5,7 +5,6 @@ import json
 import asyncio
 import requests
 import socket
-import ipaddress
 import subprocess
 import platform
 import threading
@@ -18,7 +17,7 @@ import collections
 import functools
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g, abort
@@ -96,12 +95,20 @@ from core.database_update_worker import DatabaseUpdateWorker
 from core.web_scan_manager import WebScanManager
 from core.metadata.cache import get_metadata_cache
 from core.metadata import registry as metadata_registry
+from core.metadata import is_internal_image_host
+from core.metadata import normalize_image_url as fix_artist_image_url
 from core.metadata.registry import (
     clear_cached_metadata_client,
     get_metadata_source_label,
     get_spotify_client,
     get_spotify_disconnect_source,
     register_runtime_clients,
+)
+from core.metadata.status import (
+    get_status_snapshot as get_metadata_status_snapshot,
+    get_spotify_status,
+    publish_spotify_status,
+    invalidate_metadata_status_caches,
 )
 from core.imports.context import (
     get_import_clean_album,
@@ -811,12 +818,10 @@ _idle_since = {}
 _IDLE_GRACE_SECONDS = 5
 
 _status_cache = {
-    'spotify': {'connected': False, 'authenticated': False, 'response_time': 0, 'source': 'itunes'},
     'media_server': {'connected': False, 'response_time': 0, 'type': None},
     'soulseek': {'connected': False, 'response_time': 0},
 }
 _status_cache_timestamps: dict[str, float] = {
-    'spotify': 0,
     'media_server': 0,
     'soulseek': 0,
 }
@@ -3446,43 +3451,7 @@ def get_status():
         current_time = time.time()
         active_server = config_manager.get_active_media_server()
 
-        # Test Spotify - with caching to avoid excessive API calls
-        if current_time - _status_cache_timestamps['spotify'] > STATUS_CACHE_TTL:
-            # Guard against spotify_client being None (partial init)
-            is_rate_limited = spotify_client.is_rate_limited() if spotify_client else False
-            rate_limit_info = spotify_client.get_rate_limit_info() if (spotify_client and is_rate_limited) else None
-            cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
-            spotify_session_active = spotify_client.is_spotify_authenticated() if spotify_client else False
-
-            # Read configured source once — no auth validation here, we do that explicitly below
-            configured_source = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
-
-            if is_rate_limited or cooldown_remaining > 0:
-                # During rate limit or post-ban cooldown, skip the auth probe entirely.
-                # Probing Spotify here would reset the rate limit timer.
-                music_source = 'deezer' if configured_source == 'spotify' else configured_source
-                spotify_response_time = 0
-            else:
-                spotify_start = time.time()
-                spotify_connected = spotify_client.is_spotify_authenticated() if spotify_client else False
-                spotify_response_time = (time.time() - spotify_start) * 1000
-                # Use configured source; fall back to deezer only if Spotify isn't authenticated
-                if configured_source == 'spotify':
-                    music_source = 'spotify' if spotify_connected else 'deezer'
-                else:
-                    music_source = configured_source
-
-            _status_cache['spotify'] = {
-                'connected': spotify_session_active,
-                'authenticated': spotify_session_active,
-                'response_time': round(spotify_response_time, 1),
-                'source': music_source,
-                'rate_limited': is_rate_limited,
-                'rate_limit': rate_limit_info,
-                'post_ban_cooldown': cooldown_remaining if cooldown_remaining > 0 else None
-            }
-            _status_cache_timestamps['spotify'] = current_time
-        # else: use cached value
+        metadata_status = get_metadata_status_snapshot(spotify_client=spotify_client)
 
         # Test media server - use EXISTING instances (they have internal caching)
         # Media server clients already cache connection checks internally
@@ -3556,7 +3525,8 @@ def get_status():
                     active_dl_count += 1
 
         status_data = {
-            'spotify': _status_cache['spotify'],
+            'metadata_source': metadata_status['metadata_source'],
+            'spotify': metadata_status['spotify'],
             'media_server': _status_cache['media_server'],
             'soulseek': _status_cache['soulseek'],
             'active_media_server': active_server,
@@ -4185,8 +4155,16 @@ def handle_settings():
                 genius_worker._init_client()
             if tidal_enrichment_worker:
                 tidal_enrichment_worker.client = tidal_client
+            if 'spotify' in new_settings:
+                publish_spotify_status(
+                    connected=False,
+                    authenticated=False,
+                    rate_limited=False,
+                    rate_limit=None,
+                    post_ban_cooldown=None,
+                )
             # Invalidate status cache so next poll reflects new settings (e.g. fallback source change)
-            _status_cache_timestamps['spotify'] = 0
+            invalidate_metadata_status_caches()
             logger.info("Service clients re-initialized with new settings.")
             return jsonify({"success": True, "message": "Settings saved successfully."})
         except Exception as e:
@@ -4803,11 +4781,7 @@ def test_connection_endpoint():
     if success:
         current_time = time.time()
         if service == 'spotify':
-            spotify_session_active = spotify_client.is_spotify_authenticated() if spotify_client else False
-            _status_cache['spotify']['connected'] = True
-            _status_cache['spotify']['authenticated'] = spotify_session_active
-            _status_cache['spotify']['source'] = _get_metadata_fallback_source()
-            _status_cache_timestamps['spotify'] = current_time
+            invalidate_metadata_status_caches()
             logger.info("Updated Spotify status cache after successful test")
         elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
             _status_cache['media_server']['connected'] = True
@@ -4971,11 +4945,7 @@ def test_dashboard_connection_endpoint():
     if success:
         current_time = time.time()
         if service == 'spotify':
-            spotify_session_active = spotify_client.is_spotify_authenticated() if spotify_client else False
-            _status_cache['spotify']['connected'] = True
-            _status_cache['spotify']['authenticated'] = spotify_session_active
-            _status_cache['spotify']['source'] = _get_metadata_fallback_source()
-            _status_cache_timestamps['spotify'] = current_time
+            invalidate_metadata_status_caches()
             logger.info("Updated Spotify status cache after successful dashboard test")
         elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
             _status_cache['media_server']['connected'] = True
@@ -5854,7 +5824,7 @@ def spotify_callback():
                         return _spotify_auth_result_page("Your personal Spotify account is now connected. You can close this window.", authenticated=True)
                     if profile_client:
                         profile_client._invalidate_auth_cache()
-                    _status_cache_timestamps['spotify'] = 0
+                    invalidate_metadata_status_caches()
                     add_activity_item("", "Spotify Auth Warning", f"Profile {profile_id_from_state} completed OAuth but Spotify did not confirm an authenticated session", "Now")
                     return _spotify_auth_result_page(
                         "Spotify authorization completed, but SoulSync could not confirm an authenticated Spotify session for this profile. You can close this window and try Authenticate again.",
@@ -5890,7 +5860,7 @@ def spotify_callback():
                 _clear_rate_limit()
                 spotify_client._invalidate_auth_cache()
                 # Invalidate status cache so next poll picks up the new connection
-                _status_cache_timestamps['spotify'] = 0
+                invalidate_metadata_status_caches()
                 # Refresh enrichment worker's client so it picks up new auth
                 if spotify_enrichment_worker and hasattr(spotify_enrichment_worker, 'client'):
                     spotify_enrichment_worker.client.reload_config()
@@ -5900,7 +5870,7 @@ def spotify_callback():
             else:
                 logger.warning("Spotify OAuth token exchange succeeded but authentication validation failed")
                 spotify_client._invalidate_auth_cache()
-                _status_cache_timestamps['spotify'] = 0
+                invalidate_metadata_status_caches()
                 add_activity_item("", "Spotify Auth Warning", "OAuth completed, but Spotify did not confirm an authenticated session", "Now")
                 return _spotify_auth_result_page(
                     "Spotify authorization completed, but SoulSync could not confirm an authenticated Spotify session. You can close this window and try Authenticate again.",
@@ -5929,16 +5899,7 @@ def spotify_disconnect():
         source_label = get_metadata_source_label(active_source)
         if configured_source == 'spotify':
             config_manager.set('metadata.fallback_source', active_source)
-        _status_cache['spotify'] = {
-            'connected': False,
-            'authenticated': False,
-            'response_time': 0,
-            'source': active_source,
-            'rate_limited': False,
-            'rate_limit': None,
-            'post_ban_cooldown': None
-        }
-        _status_cache_timestamps['spotify'] = time.time()
+        invalidate_metadata_status_caches()
         add_activity_item("", "Spotify Disconnected", f"Using {source_label} for metadata", "Now")
         return jsonify({
             'success': True,
@@ -5956,15 +5917,20 @@ def spotify_disconnect():
 def spotify_rate_limit_status():
     """Get Spotify rate limit ban details"""
     try:
-        info = spotify_client.get_rate_limit_info()
+        info = get_spotify_status(spotify_client=spotify_client)
+        rate_limit_info = info.get('rate_limit')
         if info:
-            return jsonify({
-                'rate_limited': True,
-                'remaining_seconds': info['remaining_seconds'],
-                'retry_after': info['retry_after'],
-                'endpoint': info['endpoint'],
-                'expires_at': info['expires_at']
-            })
+            payload = {
+                'rate_limited': bool(info.get('rate_limited')),
+            }
+            if rate_limit_info:
+                payload.update({
+                    'remaining_seconds': rate_limit_info.get('remaining_seconds', 0),
+                    'retry_after': rate_limit_info.get('retry_after'),
+                    'endpoint': rate_limit_info.get('endpoint'),
+                    'expires_at': rate_limit_info.get('expires_at'),
+                })
+            return jsonify(payload)
         return jsonify({'rate_limited': False})
     except Exception as e:
         logger.error(f"Error getting Spotify rate limit status: {e}")
@@ -8123,163 +8089,6 @@ def maintain_search_history():
     except Exception as e:
         logger.error(f"Error maintaining search history: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
-
-def fix_artist_image_url(thumb_url):
-    """Convert media-server image URLs into browser-safe URLs."""
-    if not thumb_url:
-        return None
-
-    try:
-        # Check if it's a localhost URL or relative path that needs fixing
-        needs_fixing = (
-            thumb_url.startswith('http://localhost:') or
-            thumb_url.startswith('https://localhost:') or
-            thumb_url.startswith('http://127.0.0.1:') or
-            thumb_url.startswith('https://127.0.0.1:') or
-            thumb_url.startswith('http://host.docker.internal:') or
-            thumb_url.startswith('https://host.docker.internal:') or
-            (thumb_url.startswith('http://') and _is_internal_image_host(thumb_url)) or
-            thumb_url.startswith('/library/') or  # Plex relative paths
-            thumb_url.startswith('/Items/') or    # Jellyfin relative paths
-            thumb_url.startswith('/api/') or      # Old Navidrome API paths
-            thumb_url.startswith('/rest/')        # Navidrome Subsonic API paths
-        )
-
-        if needs_fixing:
-            active_server = config_manager.get_active_media_server()
-            logger.debug(f"Fixing URL: {thumb_url}, Active server: {active_server}")
-
-            if active_server == 'plex':
-                plex_config = config_manager.get_plex_config()
-                plex_base_url = plex_config.get('base_url', '')
-                plex_token = plex_config.get('token', '')
-                logger.info(f"Plex config - base_url: {plex_base_url}, token: {plex_token[:10]}...")
-
-                if plex_base_url and plex_token:
-                    # Extract the path from URL
-                    if thumb_url.startswith('/library/'):
-                        # Already a path
-                        path = thumb_url
-                    else:
-                        # Full localhost URL, extract path
-                        from urllib.parse import urlparse
-                        parsed = urlparse(thumb_url)
-                        path = parsed.path
-
-                    # Construct proper Plex URL with token
-                    fixed_url = f"{plex_base_url.rstrip('/')}{path}?X-Plex-Token={plex_token}"
-                    logger.info(f"Fixed URL: {fixed_url}")
-                    return _browser_safe_image_url(fixed_url)
-
-            elif active_server == 'jellyfin':
-                jellyfin_config = config_manager.get_jellyfin_config()
-                jellyfin_base_url = jellyfin_config.get('base_url', '')
-                jellyfin_token = jellyfin_config.get('api_key', '')
-                logger.info(f"Jellyfin config - base_url: {jellyfin_base_url}, token: {jellyfin_token[:10] if jellyfin_token else 'None'}...")
-
-                if jellyfin_base_url:
-                    # Extract the path from URL
-                    if thumb_url.startswith('/Items/') or thumb_url.startswith('/api/'):
-                        # Already a path
-                        path = thumb_url
-                    else:
-                        # Full localhost URL, extract path
-                        from urllib.parse import urlparse
-                        parsed = urlparse(thumb_url)
-                        path = parsed.path
-
-                    # Construct proper Jellyfin URL with token
-                    if jellyfin_token:
-                        separator = '&' if '?' in path else '?'
-                        fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}{separator}X-Emby-Token={jellyfin_token}"
-                    else:
-                        fixed_url = f"{jellyfin_base_url.rstrip('/')}{path}"
-                    logger.info(f"Fixed URL: {fixed_url}")
-                    return _browser_safe_image_url(fixed_url)
-
-            elif active_server == 'navidrome':
-                navidrome_config = config_manager.get_navidrome_config()
-                navidrome_base_url = navidrome_config.get('base_url', '')
-                navidrome_username = navidrome_config.get('username', '')
-                navidrome_password = navidrome_config.get('password', '')
-                logger.info(f"Navidrome config - base_url: {navidrome_base_url}, username: {navidrome_username}")
-
-                if navidrome_base_url and navidrome_username and navidrome_password:
-                    # Extract the path from URL
-                    if thumb_url.startswith('/rest/'):
-                        # Already a Subsonic API path
-                        path = thumb_url
-                    else:
-                        # Full localhost URL, extract path
-                        from urllib.parse import urlparse
-                        parsed = urlparse(thumb_url)
-                        path = parsed.path
-
-                    # Generate Subsonic API authentication
-                    import hashlib
-                    import secrets
-                    salt = secrets.token_hex(6)
-                    token = hashlib.md5((navidrome_password + salt).encode()).hexdigest()
-
-                    # Add authentication parameters to the URL
-                    separator = '&' if '?' in path else '?'
-                    auth_params = f"u={navidrome_username}&t={token}&s={salt}&v=1.16.1&c=SoulSync&f=json"
-
-                    # Construct proper Navidrome Subsonic URL
-                    fixed_url = f"{navidrome_base_url.rstrip('/')}{path}{separator}{auth_params}"
-                    logger.info(f"Fixed URL: {fixed_url}")
-                    return _browser_safe_image_url(fixed_url)
-
-            logger.warning(f"No configuration found for {active_server} or unsupported server type")
-
-        # Return a browser-safe URL even if no server-specific rebuild was possible.
-        return _browser_safe_image_url(thumb_url)
-
-    except Exception as e:
-        logger.error(f"Error fixing image URL '{thumb_url}': {e}")
-        return _browser_safe_image_url(thumb_url)
-
-
-def _is_internal_image_host(url: str) -> bool:
-    """Return True when an image URL points at a host the browser likely cannot reach directly."""
-    try:
-        parsed = urlparse(url)
-        host = (parsed.hostname or '').strip('[]').lower()
-        if not host:
-            return False
-
-        if host in {'localhost', '127.0.0.1', '::1', 'host.docker.internal'}:
-            return True
-
-        # Single-label hosts are usually Docker service names or local LAN aliases.
-        if '.' not in host:
-            return True
-
-        try:
-            ip = ipaddress.ip_address(host)
-            return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved
-        except ValueError:
-            return False
-    except Exception:
-        return False
-
-
-def _browser_safe_image_url(url: str) -> str:
-    """Return a browser-safe image URL, proxying internal hosts through SoulSync."""
-    if not url:
-        return url
-
-    if url.startswith('/api/image-proxy?url='):
-        return url
-
-    if url.startswith('http://') or url.startswith('https://'):
-        if _is_internal_image_host(url):
-            return f"/api/image-proxy?url={quote(url, safe='')}"
-        return url
-
-    # Relative media-server paths should already have been expanded before this point.
-    return url
-
 @app.route('/api/library/history')
 def get_library_history():
     """Get persistent library history (downloads and server imports)."""
@@ -27933,7 +27742,7 @@ def image_proxy():
         'img.discogs.com', 'i.discogs.com',  # Discogs
         'localhost', '127.0.0.1', 'host.docker.internal',  # Local/Docker media servers
     ]
-    if not any(host == h or host.endswith('.' + h) for h in allowed_hosts) and not _is_internal_image_host(url):
+    if not any(host == h or host.endswith('.' + h) for h in allowed_hosts) and not is_internal_image_host(url):
         return '', 403
     try:
         resp = requests.get(url, timeout=10, stream=True, headers={
@@ -32073,7 +31882,7 @@ def start_oauth_callback_servers():
                                 _clear_rate_limit()
                                 spotify_client._invalidate_auth_cache()
                                 # Invalidate status cache so next poll picks up the new connection
-                                _status_cache_timestamps['spotify'] = 0
+                                invalidate_metadata_status_caches()
                                 # Refresh enrichment worker's client so it picks up new auth
                                 if spotify_enrichment_worker and hasattr(spotify_enrichment_worker, 'client'):
                                     spotify_enrichment_worker.client.reload_config()
@@ -32086,7 +31895,7 @@ def start_oauth_callback_servers():
                             else:
                                 _oauth_logger.warning("Spotify token exchange succeeded but authentication validation failed")
                                 spotify_client._invalidate_auth_cache()
-                                _status_cache_timestamps['spotify'] = 0
+                                invalidate_metadata_status_caches()
                                 add_activity_item("", "Spotify Auth Warning", "OAuth completed, but Spotify did not confirm an authenticated session", "Now")
                                 self.send_response(200)
                                 self.send_header('Content-type', 'text/html')
@@ -34050,17 +33859,7 @@ def _build_status_payload():
     download_mode = config_manager.get('download_source.mode', 'hybrid')
     soulseek_data = dict(_status_cache.get('soulseek', {}))
     soulseek_data['source'] = download_mode
-
-    # Always include fresh rate limit info (it changes over time as ban expires)
-    # Call is_rate_limited() first to ensure ban-end timestamp is recorded for cooldown
-    spotify_data = dict(_status_cache.get('spotify', {}))
-    is_rl = spotify_client.is_rate_limited() if spotify_client else False
-    rate_limit_info = spotify_client.get_rate_limit_info() if is_rl else None
-    cooldown_remaining = spotify_client.get_post_ban_cooldown_remaining() if spotify_client else 0
-    spotify_data['rate_limited'] = is_rl
-    spotify_data['rate_limit'] = rate_limit_info
-    if cooldown_remaining > 0:
-        spotify_data['post_ban_cooldown'] = cooldown_remaining
+    metadata_status = get_metadata_status_snapshot(spotify_client=spotify_client)
 
     # Count active downloads for nav badge
     active_dl_count = 0
@@ -34073,7 +33872,8 @@ def _build_status_payload():
         pass
 
     return {
-        'spotify': spotify_data,
+        'metadata_source': metadata_status['metadata_source'],
+        'spotify': metadata_status['spotify'],
         'media_server': _status_cache.get('media_server', {}),
         'soulseek': soulseek_data,
         'active_media_server': config_manager.get_active_media_server(),
@@ -34437,12 +34237,12 @@ def _emit_rate_monitor_loop():
 
             # Add Spotify rate limit state
             try:
-                if spotify_client:
-                    rl_info = spotify_client.get_rate_limit_info()
-                    if rl_info:
-                        payload['spotify']['rate_limited'] = True
-                        payload['spotify']['rl_remaining'] = rl_info.get('remaining_seconds', 0)
-                        payload['spotify']['rl_endpoint'] = rl_info.get('endpoint', '')
+                spotify_status = get_spotify_status(spotify_client=spotify_client)
+                rl_info = spotify_status.get('rate_limit')
+                if spotify_status.get('rate_limited') and rl_info:
+                    payload['spotify']['rate_limited'] = True
+                    payload['spotify']['rl_remaining'] = rl_info.get('remaining_seconds', 0)
+                    payload['spotify']['rl_endpoint'] = rl_info.get('endpoint', '')
             except Exception:
                 pass
 

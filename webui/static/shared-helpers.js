@@ -3143,7 +3143,7 @@ async function fetchAndUpdateServiceStatus() {
         const data = await response.json();
 
         // Cache for library status card
-        _lastServiceStatus = data;
+        _lastStatusPayload = data;
 
         if (typeof syncSpotifySettingsAuthState === 'function') {
             syncSpotifySettingsAuthState(data?.spotify || null);
@@ -3156,12 +3156,12 @@ async function fetchAndUpdateServiceStatus() {
         }
 
         // Update service status indicators and text (dashboard)
-        updateServiceStatus('spotify', data.spotify);
+        updateServiceStatus('metadata-source', data.metadata_source, data.spotify);
         updateServiceStatus('media-server', data.media_server);
         updateServiceStatus('soulseek', data.soulseek);
 
         // Update sidebar service status indicators
-        updateSidebarServiceStatus('spotify', data.spotify);
+        updateSidebarServiceStatus('metadata-source', data.metadata_source, data.spotify);
         updateSidebarServiceStatus('media-server', data.media_server);
         updateSidebarServiceStatus('soulseek', data.soulseek);
 
@@ -3232,14 +3232,16 @@ function getMetadataSourceLabel(source) {
     return 'Unmapped';
 }
 
-function getSpotifyStatusPresentation(statusData) {
-    const sourceLabel = getMetadataSourceLabel(statusData?.source);
-    const rateLimited = !!(statusData?.rate_limited && statusData?.rate_limit);
-    const cooldown = !!(statusData?.post_ban_cooldown > 0);
-    const sessionActive = statusData?.authenticated === true || (statusData?.authenticated === undefined && statusData?.source === 'spotify');
+function getMetadataSourcePresentation(metadataStatus, spotifyStatus) {
+    const source = metadataStatus?.source;
+    const sourceLabel = getMetadataSourceLabel(source);
+    const connected = metadataStatus?.connected === true;
+    const sessionActive = spotifyStatus?.authenticated === true || (source === 'spotify' && connected);
+    const rateLimited = !!(source === 'spotify' && spotifyStatus?.rate_limited && spotifyStatus?.rate_limit);
+    const cooldown = !!(source === 'spotify' && spotifyStatus?.post_ban_cooldown > 0);
 
     if (rateLimited) {
-        const remaining = statusData.rate_limit?.remaining_seconds || 0;
+        const remaining = spotifyStatus.rate_limit?.remaining_seconds || 0;
         return {
             statusClass: 'rate-limited',
             statusText: `Spotify paused \u2014 ${formatRateLimitDuration(remaining)}`,
@@ -3250,7 +3252,7 @@ function getSpotifyStatusPresentation(statusData) {
     }
 
     if (cooldown) {
-        const remaining = statusData.post_ban_cooldown;
+        const remaining = spotifyStatus.post_ban_cooldown;
         return {
             statusClass: 'rate-limited',
             statusText: `Spotify recovering \u2014 ${formatRateLimitDuration(remaining)}`,
@@ -3260,32 +3262,37 @@ function getSpotifyStatusPresentation(statusData) {
         };
     }
 
-    if (statusData?.source && statusData.source !== 'spotify') {
+    if (source) {
         return {
-            statusClass: 'connected',
-            statusText: sourceLabel,
-            dotClass: 'connected',
-            dotTitle: sourceLabel,
+            statusClass: connected ? 'connected' : 'disconnected',
+            statusText: connected ? (source === 'spotify' ? `Connected (${metadataStatus?.response_time}ms)` : sourceLabel) : 'Disconnected',
+            dotClass: connected ? 'connected' : 'disconnected',
+            dotTitle: connected ? sourceLabel : 'Disconnected',
             sessionActive
         };
     }
 
     return {
-        statusClass: 'connected',
-        statusText: `Connected (${statusData?.response_time}ms)`,
-        dotClass: 'connected',
-        dotTitle: '',
+        statusClass: 'disconnected',
+        statusText: 'Disconnected',
+        dotClass: 'disconnected',
+        dotTitle: 'Disconnected',
         sessionActive
     };
 }
 
-function updateServiceStatus(service, statusData) {
+function updateServiceStatus(service, statusData, spotifyStatus = null) {
+    const serviceCard = document.getElementById(`${service}-service-card`);
     const indicator = document.getElementById(`${service}-status-indicator`);
     const statusText = document.getElementById(`${service}-status-text`);
 
+    if (serviceCard) {
+        serviceCard.dataset.statusReady = 'true';
+    }
+
     if (indicator && statusText) {
-        if (service === 'spotify') {
-            const presentation = getSpotifyStatusPresentation(statusData || {});
+        if (service === 'metadata-source') {
+            const presentation = getMetadataSourcePresentation(statusData || {}, spotifyStatus || {});
             indicator.className = `service-card-indicator ${presentation.statusClass}`;
             statusText.textContent = presentation.statusText;
             statusText.className = `service-card-status-text ${presentation.statusClass}`;
@@ -3303,8 +3310,8 @@ function updateServiceStatus(service, statusData) {
     }
 
     // Update music source title based on active source
-    if (service === 'spotify' && statusData.source) {
-        const musicSourceTitleElement = document.getElementById('music-source-title');
+    if (service === 'metadata-source' && statusData.source) {
+        const musicSourceTitleElement = document.getElementById('metadata-source-title');
         if (musicSourceTitleElement) {
             const sourceName = getMetadataSourceLabel(statusData.source);
             musicSourceTitleElement.textContent = sourceName;
@@ -3312,7 +3319,7 @@ function updateServiceStatus(service, statusData) {
         }
 
         // Keep the Spotify action buttons aligned with the actual auth session.
-        const spotifySessionActive = getSpotifyStatusPresentation(statusData || {}).sessionActive;
+        const spotifySessionActive = spotifyStatus?.authenticated === true;
         const authBtn = document.querySelector('button[onclick="authenticateSpotify()"]');
         const disconnectBtn = document.getElementById('spotify-disconnect-btn');
         if (authBtn) {
@@ -3322,7 +3329,21 @@ function updateServiceStatus(service, statusData) {
             disconnectBtn.style.display = spotifySessionActive ? '' : 'none';
         }
 
-        syncPrimaryMetadataSourceAvailability(statusData);
+        syncPrimaryMetadataSourceAvailability(spotifyStatus);
+
+        const responseTimeElement = document.getElementById('metadata-source-response-time');
+        if (responseTimeElement) {
+            const responseTime = statusData.response_time;
+            responseTimeElement.textContent = responseTime !== undefined && responseTime !== null
+                ? `Response: ${responseTime}ms`
+                : 'Response: --';
+        }
+
+        const testButton = document.querySelector('#metadata-source-service-card .service-card-button');
+        if (testButton) {
+            const source = statusData.source || 'spotify';
+            testButton.setAttribute('onclick', `testDashboardConnection('${source}')`);
+        }
     }
 
     // Update download source title on dashboard card
@@ -3334,15 +3355,16 @@ function updateServiceStatus(service, statusData) {
     }
 }
 
-function updateSidebarServiceStatus(service, statusData) {
+function updateSidebarServiceStatus(service, statusData, spotifyStatus = null) {
     const indicator = document.getElementById(`${service}-indicator`);
     if (indicator) {
+        indicator.dataset.statusReady = 'true';
         const dot = indicator.querySelector('.status-dot');
         const nameElement = indicator.querySelector('.status-name');
 
         if (dot) {
-            if (service === 'spotify') {
-                const presentation = getSpotifyStatusPresentation(statusData || {});
+            if (service === 'metadata-source') {
+                const presentation = getMetadataSourcePresentation(statusData || {}, spotifyStatus || {});
                 dot.className = `status-dot ${presentation.dotClass}`;
                 dot.title = presentation.dotTitle;
             } else {
@@ -3361,8 +3383,8 @@ function updateSidebarServiceStatus(service, statusData) {
         }
 
         // Update music source name in sidebar based on active source
-        if (service === 'spotify' && statusData.source) {
-            const musicSourceNameElement = document.getElementById('music-source-name');
+        if (service === 'metadata-source' && statusData.source) {
+            const musicSourceNameElement = document.getElementById('metadata-source-name');
             if (musicSourceNameElement) {
                 const sourceName = getMetadataSourceLabel(statusData.source);
                 musicSourceNameElement.textContent = sourceName;
