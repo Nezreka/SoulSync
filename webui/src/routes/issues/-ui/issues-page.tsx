@@ -180,7 +180,6 @@ function IssueBoard({
           <div className={styles.issuesFilters} id="issues-filters">
             <Select
               id="issues-filter-status"
-              className={styles.issuesFilterSelect}
               aria-label="Status"
               value={statusFilter}
               onChange={(event) => onStatusChange(event.target.value as IssueStatus | 'all')}
@@ -193,7 +192,6 @@ function IssueBoard({
             </Select>
             <Select
               id="issues-filter-category"
-              className={styles.issuesFilterSelect}
               aria-label="Category"
               value={categoryFilter}
               onChange={(event) => onCategoryChange(event.target.value)}
