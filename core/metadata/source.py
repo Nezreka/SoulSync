@@ -1045,6 +1045,24 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if not isinstance(source_order, list) or not source_order:
             source_order = DEFAULT_SOURCE_ORDER
 
+        # If this download came from HiFi, use cached metadata from the download
+        # pipeline instead of re-searching the HiFi API.
+        original_search = get_import_original_search(context)
+        cached_meta = original_search.get("_source_metadata") or {}
+        if cached_meta.get("source") == "hifi":
+            if _tag_enabled(cfg, "hifi.embed_tags"):
+                if cfg.get("hifi.tags.track_id", True) and cached_meta.get("track_id"):
+                    pp["id_tags"]["HIFI_TRACK_ID"] = str(cached_meta["track_id"])
+                if cfg.get("hifi.tags.artist_id", True) and cached_meta.get("artist_id"):
+                    pp["id_tags"]["HIFI_ARTIST_ID"] = str(cached_meta["artist_id"])
+                if cfg.get("hifi.tags.isrc", True) and cached_meta.get("isrc"):
+                    pp["hifi_isrc"] = cached_meta["isrc"]
+                if cfg.get("hifi.tags.bpm", True) and cached_meta.get("bpm"):
+                    pp["hifi_bpm"] = cached_meta["bpm"]
+                if cfg.get("hifi.tags.copyright", True) and cached_meta.get("copyright"):
+                    pp["hifi_copyright"] = cached_meta["copyright"]
+            source_order = [s for s in source_order if s != "hifi"]
+
         db = get_database()
 
         for source_name in source_order:

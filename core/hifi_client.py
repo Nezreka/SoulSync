@@ -559,6 +559,15 @@ class HiFiClient:
             title=track.get('title'),
             album=track.get('album'),
             track_number=track.get('track_number'),
+            _source_metadata={
+                'source': 'hifi',
+                'track_id': track.get('id'),
+                'artist_id': track.get('artist_id'),
+                'album_id': track.get('album_id'),
+                'isrc': track.get('isrc'),
+                'bpm': track.get('bpm'),
+                'copyright': track.get('copyright'),
+            },
         )
 
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
