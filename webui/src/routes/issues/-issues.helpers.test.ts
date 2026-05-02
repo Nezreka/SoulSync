@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test';
 
-import { normalizeIssuesSearch } from './-issues.helpers';
+import { ISSUE_CATEGORY_META, normalizeIssuesSearch } from './-issues.helpers';
 
 describe('normalizeIssuesSearch', () => {
   it('falls back to all for unknown categories', () => {
@@ -31,5 +31,11 @@ describe('normalizeIssuesSearch', () => {
       category: 'all',
       issueId: 7,
     });
+  });
+
+  it('keeps the legacy category icons', () => {
+    expect(ISSUE_CATEGORY_META.wrong_metadata.icon).toBe('✎');
+    expect(ISSUE_CATEGORY_META.wrong_cover.icon).toBe('📷');
+    expect(ISSUE_CATEGORY_META.audio_quality.icon).toBe('🎵');
   });
 });

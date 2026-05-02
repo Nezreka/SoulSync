@@ -236,7 +236,7 @@ export function IssueDetailModal({
                   <img className={styles.issueHeroAlbumArt} src={issueArtwork} alt="" />
                 ) : (
                   <div className={styles.issueHeroAlbumPlaceholder}>
-                    {ISSUE_CATEGORY_META[issue.category]?.icon || 'OT'}
+                    {ISSUE_CATEGORY_META[issue.category]?.icon || ISSUE_CATEGORY_META.other.icon}
                   </div>
                 )}
               </div>
