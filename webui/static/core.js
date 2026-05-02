@@ -1,5 +1,7 @@
 // SoulSync WebUI JavaScript - Replicating PyQt6 GUI Functionality
 
+const PAGE_WILL_CHANGE_EVENT = 'ss:webui-page-will-change';
+
 // Global state management
 let currentPage = 'dashboard';
 let currentTrack = null;
