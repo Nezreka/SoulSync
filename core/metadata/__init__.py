@@ -8,6 +8,7 @@ from core.metadata.album_tracks import (
     resolve_album_reference,
 )
 from core.metadata.artist_image import get_artist_image_url
+from core.metadata.artwork import is_internal_image_host, normalize_image_url
 from core.metadata.cache import MetadataCache, get_metadata_cache
 from core.metadata.completion import (
     check_album_completion,
@@ -93,8 +94,10 @@ __all__ = [
     "iter_artist_discography_completion_events",
     "iter_musicmap_similar_artist_events",
     "is_hydrabase_enabled",
+    "is_internal_image_host",
     "register_profile_spotify_credentials_provider",
     "register_runtime_clients",
+    "normalize_image_url",
     "resolve_album_reference",
     "invalidate_metadata_status_caches",
 ]
