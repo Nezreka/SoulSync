@@ -66,6 +66,39 @@ function activateLegacyPath(pathname) {
 
 const SHELL_BRIDGE_READY_EVENT = 'ss:webui-shell-bridge-ready';
 
+function openDownloadMissingAlbumWorkflow(input) {
+    if (typeof openDownloadMissingModalForArtistAlbum !== 'function') {
+        throw new Error('Download workflow host is not ready yet');
+    }
+
+    return openDownloadMissingModalForArtistAlbum(
+        input.virtualPlaylistId,
+        input.playlistName,
+        input.tracks,
+        input.album,
+        input.artist,
+        false,
+    );
+}
+
+function openAddToWishlistAlbumWorkflow(input) {
+    if (typeof openAddToWishlistModal !== 'function') {
+        throw new Error('Wishlist workflow host is not ready yet');
+    }
+
+    return openAddToWishlistModal(input.album, input.artist, input.tracks, input.albumType);
+}
+
+window.SoulSyncWorkflowActions = {
+    openDownloadMissingAlbum: openDownloadMissingAlbumWorkflow,
+    openAddToWishlistAlbum: openAddToWishlistAlbumWorkflow,
+    notify(message, type) {
+        if (typeof showToast === 'function') {
+            showToast(message, type);
+        }
+    },
+};
+
 window.SoulSyncWebShellBridge = {
     getCurrentPageId() {
         return currentPage || getWebRouter()?.resolvePageId?.(window.location.pathname) || _getPageFromPath();
