@@ -3156,12 +3156,12 @@ async function fetchAndUpdateServiceStatus() {
         }
 
         // Update service status indicators and text (dashboard)
-        updateServiceStatus('spotify', data.metadata_source, data.spotify);
+        updateServiceStatus('metadata-source', data.metadata_source, data.spotify);
         updateServiceStatus('media-server', data.media_server);
         updateServiceStatus('soulseek', data.soulseek);
 
         // Update sidebar service status indicators
-        updateSidebarServiceStatus('spotify', data.metadata_source, data.spotify);
+        updateSidebarServiceStatus('metadata-source', data.metadata_source, data.spotify);
         updateSidebarServiceStatus('media-server', data.media_server);
         updateSidebarServiceStatus('soulseek', data.soulseek);
 
@@ -3286,7 +3286,7 @@ function updateServiceStatus(service, statusData, spotifyStatus = null) {
     const statusText = document.getElementById(`${service}-status-text`);
 
     if (indicator && statusText) {
-        if (service === 'spotify') {
+        if (service === 'metadata-source') {
             const presentation = getMetadataSourcePresentation(statusData || {}, spotifyStatus || {});
             indicator.className = `service-card-indicator ${presentation.statusClass}`;
             statusText.textContent = presentation.statusText;
@@ -3305,8 +3305,8 @@ function updateServiceStatus(service, statusData, spotifyStatus = null) {
     }
 
     // Update music source title based on active source
-    if (service === 'spotify' && statusData.source) {
-        const musicSourceTitleElement = document.getElementById('music-source-title');
+    if (service === 'metadata-source' && statusData.source) {
+        const musicSourceTitleElement = document.getElementById('metadata-source-title');
         if (musicSourceTitleElement) {
             const sourceName = getMetadataSourceLabel(statusData.source);
             musicSourceTitleElement.textContent = sourceName;
@@ -3326,7 +3326,7 @@ function updateServiceStatus(service, statusData, spotifyStatus = null) {
 
         syncPrimaryMetadataSourceAvailability(spotifyStatus);
 
-        const responseTimeElement = document.getElementById('spotify-response-time');
+        const responseTimeElement = document.getElementById('metadata-source-response-time');
         if (responseTimeElement) {
             const responseTime = statusData.response_time;
             responseTimeElement.textContent = responseTime !== undefined && responseTime !== null
@@ -3334,7 +3334,7 @@ function updateServiceStatus(service, statusData, spotifyStatus = null) {
                 : 'Response: --';
         }
 
-        const testButton = document.querySelector('#spotify-service-card .service-card-button');
+        const testButton = document.querySelector('#metadata-source-service-card .service-card-button');
         if (testButton) {
             const source = statusData.source || 'spotify';
             testButton.setAttribute('onclick', `testDashboardConnection('${source}')`);
@@ -3357,7 +3357,7 @@ function updateSidebarServiceStatus(service, statusData, spotifyStatus = null) {
         const nameElement = indicator.querySelector('.status-name');
 
         if (dot) {
-            if (service === 'spotify') {
+            if (service === 'metadata-source') {
                 const presentation = getMetadataSourcePresentation(statusData || {}, spotifyStatus || {});
                 dot.className = `status-dot ${presentation.dotClass}`;
                 dot.title = presentation.dotTitle;
@@ -3377,8 +3377,8 @@ function updateSidebarServiceStatus(service, statusData, spotifyStatus = null) {
         }
 
         // Update music source name in sidebar based on active source
-        if (service === 'spotify' && statusData.source) {
-            const musicSourceNameElement = document.getElementById('music-source-name');
+        if (service === 'metadata-source' && statusData.source) {
+            const musicSourceNameElement = document.getElementById('metadata-source-name');
             if (musicSourceNameElement) {
                 const sourceName = getMetadataSourceLabel(statusData.source);
                 musicSourceNameElement.textContent = sourceName;

@@ -484,11 +484,11 @@ function handleServiceStatusUpdate(data) {
     }
 
     // Same logic as fetchAndUpdateServiceStatus response handler
-    updateServiceStatus('spotify', data.metadata_source, data.spotify);
+    updateServiceStatus('metadata-source', data.metadata_source, data.spotify);
     updateServiceStatus('media-server', data.media_server);
     updateServiceStatus('soulseek', data.soulseek);
 
-    updateSidebarServiceStatus('spotify', data.metadata_source, data.spotify);
+    updateSidebarServiceStatus('metadata-source', data.metadata_source, data.spotify);
     updateSidebarServiceStatus('media-server', data.media_server);
     updateSidebarServiceStatus('soulseek', data.soulseek);
 
