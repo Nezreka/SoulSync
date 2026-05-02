@@ -32,6 +32,20 @@ def _first_id_value(*values: Any) -> str:
     return ""
 
 
+def _first_source_aware_id(source: str, *values: Any) -> str:
+    source_name = (source or "").strip().lower()
+    for value in values:
+        if value in (None, ""):
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        if source_name.startswith("spotify") and text.isdigit():
+            continue
+        return text
+    return ""
+
+
 def extract_artist_name(artist: Any) -> str:
     if isinstance(artist, dict):
         return str(artist.get("name", "") or "")
@@ -209,6 +223,7 @@ def get_import_has_full_metadata(context: Optional[Dict[str, Any]]) -> bool:
 
 
 def get_import_source_ids(context: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    source = get_import_source(context)
     track_info = get_import_track_info(context)
     original_search = get_import_original_search(context)
     search_result = get_import_search_result(context)
@@ -216,7 +231,8 @@ def get_import_source_ids(context: Optional[Dict[str, Any]]) -> Dict[str, str]:
     album = get_import_context_album(context)
 
     return {
-        "track_id": _first_id_value(
+        "track_id": _first_source_aware_id(
+            source,
             _first_value(track_info, "id", "track_id", "trackId", "source_track_id", default=""),
             _first_value(track_info, "spotify_track_id", "itunes_track_id", "deezer_id", "deezer_track_id", "discogs_id", "soul_id", default=""),
             _first_value(original_search, "id", "track_id", "source_track_id", default=""),
@@ -224,7 +240,8 @@ def get_import_source_ids(context: Optional[Dict[str, Any]]) -> Dict[str, str]:
             _first_value(search_result, "id", "track_id", "source_track_id", default=""),
             _first_value(search_result, "spotify_track_id", "itunes_track_id", "deezer_id", "deezer_track_id", "discogs_id", "soul_id", default=""),
         ),
-        "artist_id": _first_id_value(
+        "artist_id": _first_source_aware_id(
+            source,
             _first_value(artist, "id", "artist_id", "source_artist_id", default=""),
             _first_value(artist, "spotify_artist_id", "itunes_artist_id", "deezer_id", "deezer_artist_id", "discogs_id", "soul_id", default=""),
             _first_value(original_search, "artist_id", "source_artist_id", default=""),
@@ -232,7 +249,8 @@ def get_import_source_ids(context: Optional[Dict[str, Any]]) -> Dict[str, str]:
             _first_value(search_result, "artist_id", "source_artist_id", default=""),
             _first_value(search_result, "spotify_artist_id", "itunes_artist_id", "deezer_id", "deezer_artist_id", "discogs_id", "soul_id", default=""),
         ),
-        "album_id": _first_id_value(
+        "album_id": _first_source_aware_id(
+            source,
             _first_value(album, "id", "album_id", "collectionId", "source_album_id", default=""),
             _first_value(album, "spotify_album_id", "itunes_album_id", "deezer_id", "deezer_album_id", "discogs_id", "soul_id", "album_soul_id", "hydrabase_album_id", default=""),
             _first_value(original_search, "album_id", "source_album_id", default=""),
