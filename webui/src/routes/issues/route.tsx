@@ -6,8 +6,8 @@ import {
   issueCountsQueryOptions,
   issueDetailQueryOptions,
   issueListQueryOptions,
-  normalizeIssuesSearch,
-} from './-issues.helpers';
+} from './-issues.api';
+import { normalizeIssuesSearch } from './-issues.helpers';
 import { IssuesPage } from './-ui/issues-page';
 
 export const Route = createFileRoute('/issues')({
