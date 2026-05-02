@@ -22,11 +22,11 @@ WORKERS = [
 
 # Endpoint URLs keyed by worker name
 ENDPOINTS = {
-    'musicbrainz': '/api/musicbrainz/status',
-    'audiodb': '/api/audiodb/status',
-    'deezer': '/api/deezer/status',
-    'spotify-enrichment': '/api/spotify-enrichment/status',
-    'itunes-enrichment': '/api/itunes-enrichment/status',
+    'musicbrainz': '/api/enrichment/musicbrainz/status',
+    'audiodb': '/api/enrichment/audiodb/status',
+    'deezer': '/api/enrichment/deezer/status',
+    'spotify-enrichment': '/api/enrichment/spotify/status',
+    'itunes-enrichment': '/api/enrichment/itunes/status',
     'hydrabase': '/api/hydrabase-worker/status',
     'repair': '/api/repair/status',
 }

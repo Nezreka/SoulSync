@@ -32248,57 +32248,9 @@ except Exception as e:
     logger.error(f"MusicBrainz worker initialization failed: {e}")
     mb_worker = None
 
-# --- MusicBrainz API Endpoints ---
-
-@app.route('/api/musicbrainz/status', methods=['GET'])
-def musicbrainz_status():
-    """Get MusicBrainz enrichment status for UI polling"""
-    try:
-        if mb_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-        
-        status = mb_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting MusicBrainz status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/musicbrainz/pause', methods=['POST'])
-def musicbrainz_pause():
-    """Pause MusicBrainz enrichment worker (finishes current match first)"""
-    try:
-        if mb_worker is None:
-            return jsonify({'error': 'MusicBrainz worker not initialized'}), 400
-        
-        mb_worker.pause()
-        config_manager.set('musicbrainz_enrichment_paused', True)
-        logger.info("MusicBrainz worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing MusicBrainz worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/musicbrainz/resume', methods=['POST'])
-def musicbrainz_resume():
-    """Resume MusicBrainz enrichment worker"""
-    try:
-        if mb_worker is None:
-            return jsonify({'error': 'MusicBrainz worker not initialized'}), 400
-        
-        mb_worker.resume()
-        config_manager.set('musicbrainz_enrichment_paused', False)
-        logger.info("MusicBrainz worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming MusicBrainz worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# MusicBrainz status / pause / resume routes are now served by the
+# generic enrichment blueprint registered in core/enrichment/api.py
+# under /api/enrichment/musicbrainz/{status,pause,resume}.
 
 # ================================================================================================
 # END MUSICBRAINZ INTEGRATION
@@ -32325,57 +32277,8 @@ except Exception as e:
     logger.error(f"AudioDB worker initialization failed: {e}")
     audiodb_worker = None
 
-# --- AudioDB API Endpoints ---
-
-@app.route('/api/audiodb/status', methods=['GET'])
-def audiodb_status():
-    """Get AudioDB enrichment status for UI polling"""
-    try:
-        if audiodb_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = audiodb_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting AudioDB status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/audiodb/pause', methods=['POST'])
-def audiodb_pause():
-    """Pause AudioDB enrichment worker"""
-    try:
-        if audiodb_worker is None:
-            return jsonify({'error': 'AudioDB worker not initialized'}), 400
-
-        audiodb_worker.pause()
-        config_manager.set('audiodb_enrichment_paused', True)
-        logger.info("AudioDB worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing AudioDB worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/audiodb/resume', methods=['POST'])
-def audiodb_resume():
-    """Resume AudioDB enrichment worker"""
-    try:
-        if audiodb_worker is None:
-            return jsonify({'error': 'AudioDB worker not initialized'}), 400
-
-        audiodb_worker.resume()
-        config_manager.set('audiodb_enrichment_paused', False)
-        logger.info("AudioDB worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming AudioDB worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# AudioDB status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/audiodb/{status,pause,resume}.
 
 # ================================================================================================
 # END AUDIODB INTEGRATION
@@ -32398,47 +32301,8 @@ except Exception as e:
     logger.error(f"Discogs worker initialization failed: {e}")
     discogs_worker = None
 
-# --- Discogs API Endpoints ---
-
-@app.route('/api/discogs/status', methods=['GET'])
-def discogs_status():
-    """Get Discogs enrichment status for UI polling"""
-    try:
-        if discogs_worker is None:
-            return jsonify({
-                'enabled': False, 'running': False, 'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-            }), 200
-        return jsonify(discogs_worker.get_stats()), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/discogs/pause', methods=['POST'])
-def discogs_pause():
-    """Pause Discogs enrichment worker"""
-    try:
-        if discogs_worker is None:
-            return jsonify({'error': 'Discogs worker not initialized'}), 400
-        discogs_worker.pause()
-        config_manager.set('discogs_enrichment_paused', True)
-        logger.info("Discogs worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/discogs/resume', methods=['POST'])
-def discogs_resume():
-    """Resume Discogs enrichment worker"""
-    try:
-        if discogs_worker is None:
-            return jsonify({'error': 'Discogs worker not initialized'}), 400
-        discogs_worker.resume()
-        config_manager.set('discogs_enrichment_paused', False)
-        logger.info("Discogs worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# Discogs status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/discogs/{status,pause,resume}.
 
 # ================================================================================================
 # DEEZER ENRICHMENT INTEGRATION
@@ -32460,57 +32324,8 @@ except Exception as e:
     logger.error(f"Deezer worker initialization failed: {e}")
     deezer_worker = None
 
-# --- Deezer API Endpoints ---
-
-@app.route('/api/deezer/status', methods=['GET'])
-def deezer_status():
-    """Get Deezer enrichment status for UI polling"""
-    try:
-        if deezer_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = deezer_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting Deezer status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/deezer/pause', methods=['POST'])
-def deezer_pause():
-    """Pause Deezer enrichment worker"""
-    try:
-        if deezer_worker is None:
-            return jsonify({'error': 'Deezer worker not initialized'}), 400
-
-        deezer_worker.pause()
-        config_manager.set('deezer_enrichment_paused', True)
-        logger.info("Deezer worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing Deezer worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/deezer/resume', methods=['POST'])
-def deezer_resume():
-    """Resume Deezer enrichment worker"""
-    try:
-        if deezer_worker is None:
-            return jsonify({'error': 'Deezer worker not initialized'}), 400
-
-        deezer_worker.resume()
-        config_manager.set('deezer_enrichment_paused', False)
-        logger.info("Deezer worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming Deezer worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# Deezer status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/deezer/{status,pause,resume}.
 
 # ================================================================================================
 # END DEEZER INTEGRATION
@@ -32569,66 +32384,10 @@ def get_rate_monitor_history(service_key):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# --- Spotify API Endpoints ---
-
-@app.route('/api/spotify-enrichment/status', methods=['GET'])
-def spotify_enrichment_status():
-    """Get Spotify enrichment status for UI polling"""
-    try:
-        if spotify_enrichment_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = spotify_enrichment_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting Spotify enrichment status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/spotify-enrichment/pause', methods=['POST'])
-def spotify_enrichment_pause():
-    """Pause Spotify enrichment worker"""
-    try:
-        if spotify_enrichment_worker is None:
-            return jsonify({'error': 'Spotify enrichment worker not initialized'}), 400
-
-        spotify_enrichment_worker.pause()
-        config_manager.set('spotify_enrichment_paused', True)
-        # Drop any auto-pause marker so the post-download resume loop won't
-        # override this explicit user pause.
-        _download_auto_paused.discard('spotify-enrichment')
-        logger.info("Spotify enrichment worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing Spotify enrichment worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/spotify-enrichment/resume', methods=['POST'])
-def spotify_enrichment_resume():
-    """Resume Spotify enrichment worker"""
-    try:
-        if spotify_enrichment_worker is None:
-            return jsonify({'error': 'Spotify enrichment worker not initialized'}), 400
-
-        # Block resume while Spotify is rate limited
-        if _spotify_rate_limited():
-            return jsonify({'error': 'Cannot resume while Spotify is rate limited', 'rate_limited': True}), 429
-
-        spotify_enrichment_worker.resume()
-        config_manager.set('spotify_enrichment_paused', False)
-        _download_auto_paused.discard('spotify-enrichment')
-        _download_yield_override.add('spotify-enrichment')  # User override — don't re-pause during this download session
-        logger.info("Spotify enrichment worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming Spotify enrichment worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# Spotify status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/spotify/{status,pause,resume}.
+# The rate-limit guard, auto-pause token cleanup, and yield-override behavior
+# are encoded on the EnrichmentService descriptor (see core/enrichment/services.py).
 
 # ================================================================================================
 # END SPOTIFY ENRICHMENT INTEGRATION
@@ -32655,57 +32414,8 @@ except Exception as e:
     logger.error(f"iTunes enrichment worker initialization failed: {e}")
     itunes_enrichment_worker = None
 
-# --- iTunes API Endpoints ---
-
-@app.route('/api/itunes-enrichment/status', methods=['GET'])
-def itunes_enrichment_status():
-    """Get iTunes enrichment status for UI polling"""
-    try:
-        if itunes_enrichment_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = itunes_enrichment_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting iTunes enrichment status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/itunes-enrichment/pause', methods=['POST'])
-def itunes_enrichment_pause():
-    """Pause iTunes enrichment worker"""
-    try:
-        if itunes_enrichment_worker is None:
-            return jsonify({'error': 'iTunes enrichment worker not initialized'}), 400
-
-        itunes_enrichment_worker.pause()
-        config_manager.set('itunes_enrichment_paused', True)
-        logger.info("iTunes enrichment worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing iTunes enrichment worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/itunes-enrichment/resume', methods=['POST'])
-def itunes_enrichment_resume():
-    """Resume iTunes enrichment worker"""
-    try:
-        if itunes_enrichment_worker is None:
-            return jsonify({'error': 'iTunes enrichment worker not initialized'}), 400
-
-        itunes_enrichment_worker.resume()
-        config_manager.set('itunes_enrichment_paused', False)
-        logger.info("iTunes enrichment worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming iTunes enrichment worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# iTunes status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/itunes/{status,pause,resume}.
 
 # ================================================================================================
 # END ITUNES ENRICHMENT INTEGRATION
@@ -32731,62 +32441,10 @@ except Exception as e:
     logger.error(f"Last.fm worker initialization failed: {e}")
     lastfm_worker = None
 
-# --- Last.fm API Endpoints ---
-
-@app.route('/api/lastfm-enrichment/status', methods=['GET'])
-def lastfm_enrichment_status():
-    """Get Last.fm enrichment status for UI polling"""
-    try:
-        if lastfm_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = lastfm_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting Last.fm enrichment status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/lastfm-enrichment/pause', methods=['POST'])
-def lastfm_enrichment_pause():
-    """Pause Last.fm enrichment worker"""
-    try:
-        if lastfm_worker is None:
-            return jsonify({'error': 'Last.fm worker not initialized'}), 400
-
-        lastfm_worker.pause()
-        config_manager.set('lastfm_enrichment_paused', True)
-        # Drop any auto-pause marker so the post-download resume loop won't
-        # override this explicit user pause.
-        _download_auto_paused.discard('lastfm-enrichment')
-        logger.info("Last.fm worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing Last.fm worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/lastfm-enrichment/resume', methods=['POST'])
-def lastfm_enrichment_resume():
-    """Resume Last.fm enrichment worker"""
-    try:
-        if lastfm_worker is None:
-            return jsonify({'error': 'Last.fm worker not initialized'}), 400
-
-        lastfm_worker.resume()
-        config_manager.set('lastfm_enrichment_paused', False)
-        _download_auto_paused.discard('lastfm-enrichment')
-        _download_yield_override.add('lastfm-enrichment')  # User override — don't re-pause during this download session
-        logger.info("Last.fm worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming Last.fm worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# Last.fm status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/lastfm/{status,pause,resume}.
+# The auto-pause token cleanup + yield-override behavior is encoded on the
+# EnrichmentService descriptor (see core/enrichment/services.py).
 
 @app.route('/api/artist/<artist_id>/lastfm-top-tracks', methods=['GET'])
 def get_artist_lastfm_top_tracks(artist_id):
@@ -32879,60 +32537,10 @@ except Exception as e:
 
 # --- Genius API Endpoints ---
 
-@app.route('/api/genius-enrichment/status', methods=['GET'])
-def genius_enrichment_status():
-    """Get Genius enrichment status for UI polling"""
-    try:
-        if genius_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = genius_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting Genius enrichment status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/genius-enrichment/pause', methods=['POST'])
-def genius_enrichment_pause():
-    """Pause Genius enrichment worker"""
-    try:
-        if genius_worker is None:
-            return jsonify({'error': 'Genius worker not initialized'}), 400
-
-        genius_worker.pause()
-        config_manager.set('genius_enrichment_paused', True)
-        # Drop any auto-pause marker so the post-download resume loop won't
-        # override this explicit user pause.
-        _download_auto_paused.discard('genius-enrichment')
-        logger.info("Genius worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing Genius worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/genius-enrichment/resume', methods=['POST'])
-def genius_enrichment_resume():
-    """Resume Genius enrichment worker"""
-    try:
-        if genius_worker is None:
-            return jsonify({'error': 'Genius worker not initialized'}), 400
-
-        genius_worker.resume()
-        config_manager.set('genius_enrichment_paused', False)
-        _download_auto_paused.discard('genius-enrichment')
-        _download_yield_override.add('genius-enrichment')  # User override — don't re-pause during this download session
-        logger.info("Genius worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming Genius worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# Genius status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/genius/{status,pause,resume}.
+# The auto-pause token cleanup + yield-override behavior is encoded on the
+# EnrichmentService descriptor (see core/enrichment/services.py).
 
 # ================================================================================================
 # END GENIUS ENRICHMENT INTEGRATION
@@ -32957,58 +32565,10 @@ except Exception as e:
     logger.error(f"Tidal worker initialization failed: {e}")
     tidal_enrichment_worker = None
 
-# --- Tidal Enrichment API Endpoints ---
-
-@app.route('/api/tidal-enrichment/status', methods=['GET'])
-def tidal_enrichment_status():
-    """Get Tidal enrichment status for UI polling"""
-    try:
-        if tidal_enrichment_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'authenticated': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = tidal_enrichment_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting Tidal enrichment status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/tidal-enrichment/pause', methods=['POST'])
-def tidal_enrichment_pause():
-    """Pause Tidal enrichment worker"""
-    try:
-        if tidal_enrichment_worker is None:
-            return jsonify({'error': 'Tidal worker not initialized'}), 400
-
-        tidal_enrichment_worker.pause()
-        config_manager.set('tidal_enrichment_paused', True)
-        logger.info("Tidal worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing Tidal worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/tidal-enrichment/resume', methods=['POST'])
-def tidal_enrichment_resume():
-    """Resume Tidal enrichment worker"""
-    try:
-        if tidal_enrichment_worker is None:
-            return jsonify({'error': 'Tidal worker not initialized'}), 400
-
-        tidal_enrichment_worker.resume()
-        config_manager.set('tidal_enrichment_paused', False)
-        logger.info("Tidal worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming Tidal worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# Tidal status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/tidal/{status,pause,resume}.
+# The 'authenticated': False fallback field is encoded on the
+# EnrichmentService descriptor (see core/enrichment/services.py).
 
 # ================================================================================================
 # QOBUZ ENRICHMENT WORKER
@@ -33043,58 +32603,10 @@ _init_service_search(
     audiodb_worker_obj=audiodb_worker,
 )
 
-# --- Qobuz Enrichment API Endpoints ---
-
-@app.route('/api/qobuz-enrichment/status', methods=['GET'])
-def qobuz_enrichment_status():
-    """Get Qobuz enrichment status for UI polling"""
-    try:
-        if qobuz_enrichment_worker is None:
-            return jsonify({
-                'enabled': False,
-                'running': False,
-                'paused': False,
-                'authenticated': False,
-                'current_item': None,
-                'stats': {'matched': 0, 'not_found': 0, 'pending': 0, 'errors': 0},
-                'progress': {}
-            }), 200
-
-        status = qobuz_enrichment_worker.get_stats()
-        return jsonify(status), 200
-    except Exception as e:
-        logger.error(f"Error getting Qobuz enrichment status: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/qobuz-enrichment/pause', methods=['POST'])
-def qobuz_enrichment_pause():
-    """Pause Qobuz enrichment worker"""
-    try:
-        if qobuz_enrichment_worker is None:
-            return jsonify({'error': 'Qobuz worker not initialized'}), 400
-
-        qobuz_enrichment_worker.pause()
-        config_manager.set('qobuz_enrichment_paused', True)
-        logger.info("Qobuz worker paused via UI")
-        return jsonify({'status': 'paused'}), 200
-    except Exception as e:
-        logger.error(f"Error pausing Qobuz worker: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/qobuz-enrichment/resume', methods=['POST'])
-def qobuz_enrichment_resume():
-    """Resume Qobuz enrichment worker"""
-    try:
-        if qobuz_enrichment_worker is None:
-            return jsonify({'error': 'Qobuz worker not initialized'}), 400
-
-        qobuz_enrichment_worker.resume()
-        config_manager.set('qobuz_enrichment_paused', False)
-        logger.info("Qobuz worker resumed via UI")
-        return jsonify({'status': 'running'}), 200
-    except Exception as e:
-        logger.error(f"Error resuming Qobuz worker: {e}")
-        return jsonify({'error': str(e)}), 500
+# Qobuz status / pause / resume routes are now served by the
+# generic enrichment blueprint at /api/enrichment/qobuz/{status,pause,resume}.
+# The 'authenticated': False fallback field is encoded on the
+# EnrichmentService descriptor (see core/enrichment/services.py).
 
 # ================================================================================================
 # END TIDAL/QOBUZ ENRICHMENT INTEGRATION
