@@ -2054,11 +2054,43 @@ class WatchlistScanner:
                 title_variations.append(base_title)
             
             unique_title_variations = list(dict.fromkeys(title_variations))
-            
+
             # Search for each artist with each title variation
             from config.settings import config_manager
             active_server = config_manager.get_active_media_server()
             allow_duplicates = config_manager.get('wishlist.allow_duplicate_tracks', True)
+
+            # Provider-neutral external-ID short-circuit: before doing
+            # title+artist+album fuzzy comparison, ask the library if any
+            # row carries a matching external ID (Spotify, Deezer, iTunes,
+            # Tidal, Qobuz, MusicBrainz, AudioDB, Hydrabase, ISRC). When
+            # the library has stale album metadata for an existing file
+            # (e.g. file tagged on the wrong album by an old import), the
+            # fuzzy block declares the track missing and re-downloads it
+            # on every scan — but the file's external IDs unambiguously
+            # identify it as the same recording. See plan-watchlist-id-
+            # match.md for the reported scenario.
+            try:
+                from core.library.track_identity import (
+                    extract_external_ids,
+                    find_library_track_by_external_id,
+                )
+                source_ids = extract_external_ids(track)
+                if source_ids:
+                    matched = find_library_track_by_external_id(
+                        self.database,
+                        external_ids=source_ids,
+                        server_source=active_server,
+                    )
+                    if matched is not None:
+                        logger.info(
+                            f"[ExtID Match] Track found in library by external ID: "
+                            f"'{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' "
+                            f"(matched on: {', '.join(sorted(source_ids.keys()))})"
+                        )
+                        return False  # Track exists in library
+            except Exception as ext_id_err:
+                logger.debug(f"External-ID match probe failed (falling through to fuzzy): {ext_id_err}")
 
             for artist_name in artists_to_search:
                 for query_title in unique_title_variations:
