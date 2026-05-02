@@ -700,6 +700,27 @@ let artistDetailPageState = {
     enhancedTrackSort: {}
 };
 
+function clearArtistDetailPageState() {
+    if (artistDetailPageState.completionController) {
+        artistDetailPageState.completionController.abort();
+        artistDetailPageState.completionController = null;
+    }
+
+    artistDetailPageState.currentArtistId = null;
+    artistDetailPageState.currentArtistName = null;
+    artistDetailPageState.currentArtistSource = null;
+    artistDetailPageState.originStack = [];
+}
+
+if (typeof window !== 'undefined') {
+    window.addEventListener(PAGE_WILL_CHANGE_EVENT, (event) => {
+        const detail = event.detail || {};
+        if (detail.fromPageId === 'artist-detail' && detail.toPageId !== 'artist-detail') {
+            clearArtistDetailPageState();
+        }
+    });
+}
+
 // Discography filter state
 let discographyFilterState = {
     categories: { albums: true, eps: true, singles: true },

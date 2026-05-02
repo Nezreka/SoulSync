@@ -13,10 +13,11 @@ async function selectProfile(page: Page, baseURL: string, profileId = 1) {
 async function waitForShellRoute(page: Page, pageId: string) {
   if (pageId === 'issues') {
     await expect
-      .poll(async () =>
-        page.evaluate(() => document.querySelector('.page.active')?.id ?? ''),
-      )
+      .poll(async () => page.evaluate(() => document.querySelector('.page.active')?.id ?? ''), {
+        timeout: 15000,
+      })
       .toBe('webui-react-root');
+    await expect(page.getByTestId('issues-board')).toBeVisible({ timeout: 15000 });
     return;
   }
 
@@ -105,4 +106,28 @@ test('browser history restores top-level routes', async ({ page, baseURL }) => {
   await page.goForward();
   await waitForShellRoute(page, 'issues');
   await expect(page).toHaveURL(/\/issues(?:\?status=open&category=all)?$/);
+});
+
+test('browser history leaves artist detail when going back to library', async ({
+  page,
+  baseURL,
+}) => {
+  if (!baseURL) {
+    test.skip();
+    return;
+  }
+
+  await selectProfile(page, baseURL);
+
+  await page.goto(new URL('/library', baseURL).toString(), { waitUntil: 'domcontentloaded' });
+  await waitForShellRoute(page, 'library');
+  await expect.poll(async () => page.locator('.library-artist-card').count()).toBeGreaterThan(0);
+
+  await page.locator('.library-artist-card').first().click();
+  await waitForShellRoute(page, 'artist-detail');
+  await expect(page).toHaveURL(/\/artist-detail$/);
+
+  await page.goBack();
+  await waitForShellRoute(page, 'library');
+  await expect(page).toHaveURL(/\/library$/);
 });

@@ -1,5 +1,20 @@
 // INITIALIZATION
 // ===============================
+let navigationEpoch = 0;
+
+function notifyPageWillChange(nextPageId) {
+    const fromPageId = typeof currentPage === 'string' ? currentPage : null;
+    if (fromPageId === nextPageId) return;
+
+    window.dispatchEvent(
+        new CustomEvent(PAGE_WILL_CHANGE_EVENT, {
+            detail: {
+                fromPageId,
+                toPageId: nextPageId,
+            },
+        }),
+    );
+}
 
 // ---- Accent Color System ----
 
@@ -2309,6 +2324,8 @@ function initializeWatchlist() {
 }
 
 function navigateToPage(pageId, options = {}) {
+    navigationEpoch += 1;
+
     if (!options.forceReload && pageId === currentPage) return;
 
     // Permission guard — redirect to home page if not allowed
@@ -2322,11 +2339,25 @@ function navigateToPage(pageId, options = {}) {
 
     const router = getWebRouter();
     if (router && !options.skipRouteChange) {
+        notifyPageWillChange(pageId);
+        const route = router.routeManifest?.find((entry) => entry.pageId === pageId);
+        if (route?.kind === 'react') {
+            showReactHost(pageId);
+            setActivePageChrome(pageId);
+        }
         return router.navigateToPage(pageId, { replace: options.replace === true });
     }
 
     // Fallback path for initial bootstrap or environments without TanStack routing.
-    activatePage(pageId, { forceReload: options.forceReload === true });
+    const route = router?.routeManifest?.find((entry) => entry.pageId === pageId);
+    notifyPageWillChange(pageId);
+    const legacyPageElement = document.getElementById(`${pageId}-page`);
+    if (route?.kind === 'react' || !legacyPageElement) {
+        showReactHost(pageId);
+        setActivePageChrome(pageId);
+    } else {
+        activatePage(pageId, { forceReload: options.forceReload === true });
+    }
 
     if (!options.skipPushState) {
         const urlPath = pageId === 'dashboard' ? '/' : '/' + pageId;

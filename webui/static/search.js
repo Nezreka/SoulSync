@@ -1161,6 +1161,9 @@ async function startDownload(index) {
 
 async function loadInitialData() {
     try {
+        const initialPath = window.location.pathname;
+        const initialNavigationEpoch = navigationEpoch;
+
         // Load artist bubble state first
         await hydrateArtistBubblesFromSnapshot();
 
@@ -1176,6 +1179,10 @@ async function loadInitialData() {
         const targetPage = (urlPage && urlPage !== 'dashboard' && isPageAllowed(urlPage))
             ? urlPage
             : homePage;
+
+        if (window.location.pathname !== initialPath || navigationEpoch !== initialNavigationEpoch) {
+            return;
+        }
 
         // Always apply the target page to the legacy shell chrome.
         const router = getWebRouter();

@@ -61,6 +61,7 @@ function activateLegacyPath(pathname) {
         return;
     }
 
+    notifyPageWillChange(targetPage);
     activatePage(targetPage, { forceReload: true });
 }
 
@@ -77,6 +78,7 @@ function syncActivePageFromLocation() {
         return;
     }
 
+    notifyPageWillChange(targetPage);
     const route = router?.routeManifest?.find((entry) => entry.pageId === targetPage);
     if (route?.kind === 'react') {
         showReactHost(targetPage);
