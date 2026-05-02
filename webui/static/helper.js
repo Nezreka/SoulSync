@@ -3441,6 +3441,11 @@ function closeHelperSearch() {
 // projects that span multiple commits before shipping. Strip the flag at
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
+    '2.4.2': [
+        // --- post-2.4.1 dev work — entries hidden by _getLatestWhatsNewVersion until the build version bumps ---
+        { date: 'Unreleased — 2.4.2 dev cycle' },
+        { title: 'Sidebar Library Button Shows Artist Breadcrumb', desc: 'when you open an artist detail page (from library, search, or the global search popover), the sidebar Library button now lights up and rewrites its label to "Library / Artist Name" — long names truncate with an ellipsis and the full name shows on hover. revertes to plain "Library" when you leave. purely visual, no functionality change.', page: 'library' },
+    ],
     '2.4.1': [
         // --- May 1, 2026 — patch release ---
         { date: 'May 1, 2026 — 2.4.1 release' },

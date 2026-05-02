@@ -707,6 +707,63 @@ let discographyFilterState = {
     ownership: 'all'  // 'all', 'owned', 'missing'
 };
 
+// Maximum visible characters of an artist name in the sidebar Library
+// breadcrumb. Names longer than this get truncated with an ellipsis so the
+// nav button width stays consistent across the rest of the sidebar.
+const _SIDEBAR_BREADCRUMB_ARTIST_MAXLEN = 14;
+
+
+function _updateSidebarLibraryBreadcrumb() {
+    // Rewrite the Library nav button label between plain "Library" and a
+    // "Library / <Artist>" breadcrumb depending on whether the user is on
+    // the artist-detail pseudo-page. Pure visual — touches no app state.
+    const btn = document.querySelector('[data-page="library"]');
+    if (!btn) return;
+    const textEl = btn.querySelector('.nav-text');
+    if (!textEl) return;
+
+    const onArtistDetail = (typeof currentPage === 'string' && currentPage === 'artist-detail');
+    const artistName = onArtistDetail ? (artistDetailPageState.currentArtistName || '') : '';
+
+    if (!onArtistDetail || !artistName) {
+        // Default state: plain "Library" label. Use textContent so we wipe
+        // any previously-injected breadcrumb spans cleanly.
+        textEl.textContent = 'Library';
+        textEl.removeAttribute('data-breadcrumb');
+        return;
+    }
+
+    // Truncate long names so the button width stays consistent.
+    let display = artistName;
+    if (display.length > _SIDEBAR_BREADCRUMB_ARTIST_MAXLEN) {
+        display = display.slice(0, _SIDEBAR_BREADCRUMB_ARTIST_MAXLEN - 1).trimEnd() + '…';
+    }
+
+    // Render via inline spans so CSS can style the root / separator / context
+    // independently. Escape via textContent on individual spans.
+    textEl.setAttribute('data-breadcrumb', '1');
+    textEl.textContent = '';
+    const root = document.createElement('span');
+    root.className = 'nav-text-root';
+    root.textContent = 'Library';
+    const sep = document.createElement('span');
+    sep.className = 'nav-text-sep';
+    sep.textContent = ' / ';
+    const ctx = document.createElement('span');
+    ctx.className = 'nav-text-context';
+    ctx.textContent = display;
+    ctx.title = artistName;  // full name on hover
+    textEl.appendChild(root);
+    textEl.appendChild(sep);
+    textEl.appendChild(ctx);
+}
+
+// Expose so init.js navigateToPage can call it without a circular import.
+if (typeof window !== 'undefined') {
+    window._updateSidebarLibraryBreadcrumb = _updateSidebarLibraryBreadcrumb;
+}
+
+
 // Friendly labels for the dynamic "← Back to X" button on the artist-detail page.
 // Page id (the value of currentPage) -> button label.
 const _ARTIST_DETAIL_BACK_LABELS = {
@@ -894,6 +951,14 @@ function initializeArtistDetailPage() {
 
 async function loadArtistDetailData(artistId, artistName) {
     console.log(`🔄 Loading artist detail data for: ${artistName} (ID: ${artistId})`);
+
+    // Refresh the sidebar Library breadcrumb so it picks up the new artist
+    // name. Covers same-page navigation between artists (similar-artist
+    // chain) where navigateToPage doesn't fire because the page id stays
+    // 'artist-detail'.
+    if (typeof _updateSidebarLibraryBreadcrumb === 'function') {
+        _updateSidebarLibraryBreadcrumb();
+    }
 
     // Reset discography filters to defaults
     resetDiscographyFilters();
