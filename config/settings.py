@@ -495,6 +495,16 @@ class ConfigManager:
             "hifi_download": {
                 "quality": "lossless",  # Options: "low", "high", "lossless", "hires"
             },
+            "hifi": {
+                "embed_tags": True,
+                "tags": {
+                    "track_id": True,
+                    "artist_id": True,
+                    "isrc": True,
+                    "bpm": True,
+                    "copyright": True,
+                }
+            },
             "lidarr_download": {
                 "url": "",
                 "api_key": "",

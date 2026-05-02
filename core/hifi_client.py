@@ -282,24 +282,30 @@ class HiFiClient:
 
     def _parse_track(self, item: dict) -> Dict:
         artist_name = 'Unknown Artist'
+        artist_id = None
         artists_raw = item.get('artists', item.get('artist'))
         if isinstance(artists_raw, list):
             names = []
             for a in artists_raw:
                 if isinstance(a, dict):
                     names.append(a.get('name', ''))
+                    if artist_id is None:
+                        artist_id = a.get('id')
                 elif isinstance(a, str):
                     names.append(a)
             artist_name = ', '.join(n for n in names if n) or 'Unknown Artist'
         elif isinstance(artists_raw, dict):
             artist_name = artists_raw.get('name', 'Unknown Artist')
+            artist_id = artists_raw.get('id')
         elif isinstance(artists_raw, str):
             artist_name = artists_raw
 
         album_raw = item.get('album', {})
         album_name = ''
+        album_id = None
         if isinstance(album_raw, dict):
             album_name = album_raw.get('title', album_raw.get('name', ''))
+            album_id = album_raw.get('id')
         elif isinstance(album_raw, str):
             album_name = album_raw
 
@@ -308,12 +314,16 @@ class HiFiClient:
 
         return {
             'id': item.get('id'),
+            'artist_id': artist_id,
+            'album_id': album_id,
             'title': item.get('title', item.get('name', 'Unknown')),
             'artist': artist_name,
             'album': album_name,
             'duration_ms': int(duration_ms) if duration_ms else 0,
             'track_number': item.get('trackNumber', item.get('track_number')),
             'isrc': item.get('isrc'),
+            'bpm': item.get('bpm'),
+            'copyright': item.get('copyright'),
             'explicit': item.get('explicit', False),
             'quality': item.get('audioQuality', item.get('quality', '')),
         }
@@ -549,6 +559,15 @@ class HiFiClient:
             title=track.get('title'),
             album=track.get('album'),
             track_number=track.get('track_number'),
+            _source_metadata={
+                'source': 'hifi',
+                'track_id': track.get('id'),
+                'artist_id': track.get('artist_id'),
+                'album_id': track.get('album_id'),
+                'isrc': track.get('isrc'),
+                'bpm': track.get('bpm'),
+                'copyright': track.get('copyright'),
+            },
         )
 
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:

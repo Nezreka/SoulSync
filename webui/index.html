@@ -5217,13 +5217,14 @@
                                                 <label class="checkbox-label" onclick="event.stopPropagation()">
                                                     <input type="checkbox" id="embed-tidal" checked onchange="toggleServiceTags(this, 'tidal')"> Tidal
                                                 </label>
-                                                <span class="tag-service-count">4 tags</span>
+                                                <span class="tag-service-count">5 tags</span>
                                             </div>
                                             <div class="tag-service-body" style="display:none;">
                                                 <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.track_id" checked> Track ID</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.artist_id" checked> Artist ID</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.isrc" checked> ISRC</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.copyright" checked> Copyright</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="tidal.tags.bpm" checked> BPM</label>
                                             </div>
                                         </div>
 
@@ -5272,6 +5273,24 @@
                                             <div class="tag-service-body" style="display:none;">
                                                 <label class="checkbox-label"><input type="checkbox" data-config="genius.tags.track_id" checked> Track ID</label>
                                                 <label class="checkbox-label"><input type="checkbox" data-config="genius.tags.url" checked> URL</label>
+                                            </div>
+                                        </div>
+
+                                        <!-- HiFi -->
+                                        <div class="tag-service-group">
+                                            <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                <span class="tag-group-arrow">&#9654;</span>
+                                                <label class="checkbox-label" onclick="event.stopPropagation()">
+                                                    <input type="checkbox" id="embed-hifi" checked onchange="toggleServiceTags(this, 'hifi')"> HiFi
+                                                </label>
+                                                <span class="tag-service-count">5 tags</span>
+                                            </div>
+                                            <div class="tag-service-body" style="display:none;">
+                                                <label class="checkbox-label"><input type="checkbox" data-config="hifi.tags.track_id" checked> Track ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="hifi.tags.artist_id" checked> Artist ID</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="hifi.tags.isrc" checked> ISRC</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="hifi.tags.bpm" checked> BPM</label>
+                                                <label class="checkbox-label"><input type="checkbox" data-config="hifi.tags.copyright" checked> Copyright</label>
                                             </div>
                                         </div>
 

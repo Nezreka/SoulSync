@@ -432,6 +432,14 @@ class TidalDownloadClient:
             title=title,
             album=album_name,
             track_number=track.track_num,
+            _source_metadata={
+                'source': 'tidal',
+                'track_id': track.id,
+                'artist_id': track.artist.id if track.artist else None,
+                'isrc': track.isrc or None,
+                'bpm': track.bpm if track.bpm and track.bpm > 0 else None,
+                'copyright': track.copyright or None,
+            },
         )
 
         return track_result
