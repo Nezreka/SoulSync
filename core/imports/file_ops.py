@@ -440,6 +440,28 @@ def create_lossy_copy(final_path):
                     audio.save()
             except Exception as tag_err:
                 logger.error(f"[Lossy Copy] Could not update QUALITY tag: {tag_err}")
+
+            # Honor the lossy_copy.delete_original setting — without this
+            # the original FLAC was always kept alongside the converted
+            # MP3/OPUS/AAC even when the user explicitly opted into a
+            # lossy-only library (Discord-reported by CAL).
+            if config_manager.get("lossy_copy.delete_original", False):
+                if os.path.normpath(out_path) != os.path.normpath(final_path):
+                    try:
+                        os.remove(final_path)
+                        logger.info(
+                            f"[Lossy Copy] Deleted original lossless source after conversion: "
+                            f"{os.path.basename(final_path)}"
+                        )
+                    except FileNotFoundError:
+                        # Already gone — concurrent cleanup or another worker
+                        # handled it. Not an error.
+                        pass
+                    except Exception as del_err:
+                        logger.error(
+                            f"[Lossy Copy] Could not delete original after conversion "
+                            f"({os.path.basename(final_path)}): {del_err}"
+                        )
             return out_path
 
         logger.error(f"[Lossy Copy] ffmpeg failed: {result.stderr[:200]}")
