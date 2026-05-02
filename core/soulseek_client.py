@@ -79,6 +79,7 @@ class TrackResult(SearchResult):
     title: Optional[str] = None
     album: Optional[str] = None
     track_number: Optional[int] = None
+    _source_metadata: Optional[Dict[str, Any]] = None
     
     def __post_init__(self):
         self.result_type = "track"
