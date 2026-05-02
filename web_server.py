@@ -34830,8 +34830,11 @@ def start_runtime_services():
 # Direct execution: python web_server.py (dev/Windows fallback)
 # Production should use: gunicorn -c gunicorn.conf.py wsgi:application
 if _DIRECT_RUN:
+    web_run_host = os.environ.get('SOULSYNC_WEB_BIND_HOST', '0.0.0.0')
+    web_run_port = int(os.environ.get('SOULSYNC_WEB_BIND_PORT', '8008'))
+    display_host = '127.0.0.1' if web_run_host in {'0.0.0.0', '::'} else web_run_host
     logger.info("Starting SoulSync Web UI Server...")
-    logger.info("Open your browser and navigate to http://127.0.0.1:8008")
+    logger.info(f"Open your browser and navigate to http://{display_host}:{web_run_port}")
     logger.info("Tip: For production, use gunicorn -c gunicorn.conf.py wsgi:application")
     start_runtime_services()
-    socketio.run(app, host='0.0.0.0', port=8008, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host=web_run_host, port=web_run_port, debug=False, allow_unsafe_werkzeug=True)
