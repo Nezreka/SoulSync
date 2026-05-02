@@ -97,6 +97,9 @@ def _build_discography_release_dict(release: Any, artist_id: str) -> Optional[Di
     album_type = _extract_lookup_value(release, 'album_type', default='album') or 'album'
     release_date = _extract_lookup_value(release, 'release_date')
 
+    raw_explicit = _extract_lookup_value(release, 'explicit')
+    explicit: Optional[bool] = bool(raw_explicit) if raw_explicit is not None else None
+
     return {
         'id': release_id,
         'name': _extract_lookup_value(release, 'name', 'title', default=release_id),
@@ -106,6 +109,7 @@ def _build_discography_release_dict(release: Any, artist_id: str) -> Optional[Di
         'image_url': _extract_lookup_value(release, 'image_url', 'thumb_url', 'cover_image'),
         'total_tracks': _extract_lookup_value(release, 'total_tracks', default=0) or 0,
         'external_urls': _extract_lookup_value(release, 'external_urls', default={}) or {},
+        'explicit': explicit,
     }
 
 
@@ -359,6 +363,9 @@ def _build_artist_detail_release_card(release: Dict[str, Any]) -> Optional[Dict[
         if release_year is not None:
             release_year = str(release_year)
 
+    raw_explicit = _extract_lookup_value(release, 'explicit')
+    card_explicit: Optional[bool] = bool(raw_explicit) if raw_explicit is not None else None
+
     card = {
         'id': release_id,
         'name': _extract_lookup_value(release, 'name', 'title', default=release_id),
@@ -369,6 +376,7 @@ def _build_artist_detail_release_card(release: Dict[str, Any]) -> Optional[Dict[
         'track_count': _extract_lookup_value(release, 'track_count', 'total_tracks', default=0) or 0,
         'owned': None,
         'track_completion': 'checking',
+        'explicit': card_explicit,
     }
 
     if release_date:

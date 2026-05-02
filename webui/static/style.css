@@ -45118,6 +45118,16 @@ textarea.enhanced-meta-field-input {
     color: rgb(var(--accent-light-rgb));
 }
 
+.discog-sort-select {
+    padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.4); cursor: pointer; transition: all 0.15s ease;
+    font-family: inherit; appearance: none; -webkit-appearance: none;
+    outline: none;
+}
+.discog-sort-select:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.15); }
+.discog-sort-select option { background: #1a1a2e; color: #fff; }
+
 .discog-select-actions { display: flex; gap: 6px; }
 
 .discog-select-btn {
@@ -45128,6 +45138,16 @@ textarea.enhanced-meta-field-input {
 }
 
 .discog-select-btn:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.15); }
+
+.discog-select-best-btn {
+    border-color: rgba(var(--accent-rgb), 0.25);
+    color: rgba(var(--accent-light-rgb), 0.7);
+}
+.discog-select-best-btn:hover {
+    background: rgba(var(--accent-rgb), 0.08);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: rgb(var(--accent-light-rgb));
+}
 
 /* Album grid */
 .discog-section-header {
@@ -45151,7 +45171,7 @@ textarea.enhanced-meta-field-input {
 }
 
 .discog-card {
-    display: flex; align-items: center; gap: 10px;
+    display: flex; align-items: flex-start; gap: 10px;
     padding: 8px 10px; border-radius: 10px;
     background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04);
     cursor: pointer; transition: all 0.15s ease;
@@ -45188,10 +45208,26 @@ textarea.enhanced-meta-field-input {
 
 .discog-card-title {
     font-size: 13px; font-weight: 600; color: #fff;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    white-space: normal; word-break: break-word;
 }
 
 .discog-card-meta { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 2px; }
+
+.explicit-badge {
+    display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 0.04em;
+    padding: 1px 4px; border-radius: 3px; vertical-align: middle; margin-left: 5px;
+    background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.55);
+    border: 1px solid rgba(255,255,255,0.15); line-height: 1.4; flex-shrink: 0;
+    font-family: inherit;
+}
+
+.album-card-explicit {
+    display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 0.04em;
+    padding: 1px 4px; border-radius: 3px; vertical-align: middle; margin-left: 4px;
+    background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.55);
+    border: 1px solid rgba(255,255,255,0.2); line-height: 1.4;
+    font-family: inherit; text-shadow: none;
+}
 
 .discog-card-check {
     width: 20px; height: 20px; border-radius: 6px; flex-shrink: 0;

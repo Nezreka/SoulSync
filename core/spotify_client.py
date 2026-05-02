@@ -429,6 +429,7 @@ class Album:
     image_url: Optional[str] = None
     external_urls: Optional[Dict[str, str]] = None
     artist_ids: Optional[List[str]] = None
+    explicit: Optional[bool] = None
 
     @classmethod
     def from_spotify_album(cls, album_data: Dict[str, Any]) -> 'Album':
