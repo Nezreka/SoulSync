@@ -52,11 +52,11 @@ class TestServiceStatus:
         status_events = [e for e in received if e['name'] == 'status:update']
         assert len(status_events) >= 1
         data = status_events[0]['args'][0]
-        assert 'spotify' in data
+        assert 'metadata_source' in data
         assert 'media_server' in data
         assert 'soulseek' in data
         assert 'active_media_server' in data
-        assert 'authenticated' in data['spotify']
+        assert 'authenticated' in data['metadata_source']
 
     def test_status_matches_http(self, test_app, shared_state):
         """Socket event data matches HTTP endpoint response exactly."""
@@ -73,7 +73,7 @@ class TestServiceStatus:
         assert len(status_events) >= 1
         ws_data = status_events[0]['args'][0]
 
-        assert ws_data['spotify'] == http_data['spotify']
+        assert ws_data['metadata_source'] == http_data['metadata_source']
         assert ws_data['media_server'] == http_data['media_server']
         assert ws_data['soulseek'] == http_data['soulseek']
         assert ws_data['active_media_server'] == http_data['active_media_server']
@@ -86,13 +86,13 @@ class TestServiceStatus:
         build = shared_state['build_status_payload']
 
         # Mutate cache
-        status_cache['spotify']['source'] = 'itunes'
+        status_cache['metadata_source']['source'] = 'itunes'
 
         socketio.emit('status:update', build())
         received = client.get_received()
         status_events = [e for e in received if e['name'] == 'status:update']
         data = status_events[-1]['args'][0]
-        assert data['spotify']['source'] == 'itunes'
+        assert data['metadata_source']['source'] == 'itunes'
 
 
 # =========================================================================

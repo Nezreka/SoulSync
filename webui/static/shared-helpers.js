@@ -3143,25 +3143,25 @@ async function fetchAndUpdateServiceStatus() {
         const data = await response.json();
 
         // Cache for library status card
-        _lastServiceStatus = data;
+        _lastStatusPayload = data;
 
         if (typeof syncSpotifySettingsAuthState === 'function') {
-            syncSpotifySettingsAuthState(data?.spotify || null);
+            syncSpotifySettingsAuthState(data?.metadata_source || null);
         }
         if (typeof syncPrimaryMetadataSourceAvailability === 'function') {
-            syncPrimaryMetadataSourceAvailability(data?.spotify || null);
+            syncPrimaryMetadataSourceAvailability(data?.metadata_source || null);
         }
         if (typeof sanitizeMetadataSourceSelection === 'function') {
             sanitizeMetadataSourceSelection({ quiet: true });
         }
 
         // Update service status indicators and text (dashboard)
-        updateServiceStatus('spotify', data.spotify);
+        updateServiceStatus('spotify', data.metadata_source);
         updateServiceStatus('media-server', data.media_server);
         updateServiceStatus('soulseek', data.soulseek);
 
         // Update sidebar service status indicators
-        updateSidebarServiceStatus('spotify', data.spotify);
+        updateSidebarServiceStatus('spotify', data.metadata_source);
         updateSidebarServiceStatus('media-server', data.media_server);
         updateSidebarServiceStatus('soulseek', data.soulseek);
 
@@ -3185,8 +3185,8 @@ async function fetchAndUpdateServiceStatus() {
         if (data.enrichment) renderEnrichmentCards(data.enrichment);
 
         // Check for Spotify rate limit
-        if (data.spotify && data.spotify.rate_limited && data.spotify.rate_limit) {
-            handleSpotifyRateLimit(data.spotify.rate_limit);
+        if (data.metadata_source && data.metadata_source.rate_limited && data.metadata_source.rate_limit) {
+            handleSpotifyRateLimit(data.metadata_source.rate_limit);
         } else if (_spotifyRateLimitShown) {
             handleSpotifyRateLimit(null);
         }

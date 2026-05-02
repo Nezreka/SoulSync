@@ -2974,13 +2974,13 @@ async function _checkSetupStatus() {
     const completion = _getSetupCompletion();
     const results = { ...completion };
 
-    // ── /status — checks services (spotify, media_server, soulseek) ─────
+    // ── /status — checks metadata_source, media_server, soulseek ────────
     try {
         const resp = await fetch('/status');
         if (resp.ok) {
             const data = await resp.json();
             // Metadata source is available when status reports a source.
-            if (data.spotify?.source) {
+            if (data.metadata_source?.source) {
                 results['metadata-source'] = results['metadata-source'] || Date.now();
                 _markSetupComplete('metadata-source');
             }
