@@ -34754,6 +34754,104 @@ _download_auto_paused = set()
 _download_yield_override = set()  # Workers the user explicitly resumed during downloads — don't re-pause
 
 
+# ---------------------------------------------------------------------------
+# Enrichment service registry
+# ---------------------------------------------------------------------------
+# Generic ``/api/enrichment/<service_id>/{status,pause,resume}`` routes that
+# replace 30 near-identical per-service routes scattered through this file.
+# The old per-service routes still exist below as a fallback during the
+# soak period; PR-2 deletes them once the dashboard has cut over to the
+# generic ones. See `core/enrichment/services.py` for the registry.
+from core.enrichment.api import (
+    configure as _configure_enrichment_api,
+    create_blueprint as _create_enrichment_blueprint,
+)
+from core.enrichment.services import (
+    EnrichmentService as _EnrichmentService,
+    register_services as _register_enrichment_services,
+)
+
+
+def _spotify_resume_pre_check():
+    """Mirror the inline Spotify rate-limit guard from the legacy
+    ``/api/spotify-enrichment/resume`` route. Returns
+    ``(429, message)`` to short-circuit when banned, ``None`` when ok."""
+    try:
+        if _spotify_rate_limited():
+            return (429, 'Cannot resume while Spotify is rate limited')
+    except Exception:
+        pass
+    return None
+
+
+_register_enrichment_services([
+    _EnrichmentService(
+        id='musicbrainz', display_name='MusicBrainz',
+        worker_getter=lambda: mb_worker,
+        config_paused_key='musicbrainz_enrichment_paused',
+    ),
+    _EnrichmentService(
+        id='audiodb', display_name='AudioDB',
+        worker_getter=lambda: audiodb_worker,
+        config_paused_key='audiodb_enrichment_paused',
+    ),
+    _EnrichmentService(
+        id='discogs', display_name='Discogs',
+        worker_getter=lambda: discogs_worker,
+        config_paused_key='discogs_enrichment_paused',
+    ),
+    _EnrichmentService(
+        id='deezer', display_name='Deezer',
+        worker_getter=lambda: deezer_worker,
+        config_paused_key='deezer_enrichment_paused',
+    ),
+    _EnrichmentService(
+        id='spotify', display_name='Spotify',
+        worker_getter=lambda: spotify_enrichment_worker,
+        config_paused_key='spotify_enrichment_paused',
+        pre_resume_check=_spotify_resume_pre_check,
+        auto_pause_token='spotify-enrichment',
+    ),
+    _EnrichmentService(
+        id='itunes', display_name='iTunes',
+        worker_getter=lambda: itunes_enrichment_worker,
+        config_paused_key='itunes_enrichment_paused',
+    ),
+    _EnrichmentService(
+        id='lastfm', display_name='Last.fm',
+        worker_getter=lambda: lastfm_worker,
+        config_paused_key='lastfm_enrichment_paused',
+        auto_pause_token='lastfm-enrichment',
+    ),
+    _EnrichmentService(
+        id='genius', display_name='Genius',
+        worker_getter=lambda: genius_worker,
+        config_paused_key='genius_enrichment_paused',
+        auto_pause_token='genius-enrichment',
+    ),
+    _EnrichmentService(
+        id='tidal', display_name='Tidal',
+        worker_getter=lambda: tidal_enrichment_worker,
+        config_paused_key='tidal_enrichment_paused',
+        extra_status_defaults={'authenticated': False},
+    ),
+    _EnrichmentService(
+        id='qobuz', display_name='Qobuz',
+        worker_getter=lambda: qobuz_enrichment_worker,
+        config_paused_key='qobuz_enrichment_paused',
+        extra_status_defaults={'authenticated': False},
+    ),
+])
+
+_configure_enrichment_api(
+    config_set=lambda key, value: config_manager.set(key, value),
+    auto_paused_discard=lambda token: _download_auto_paused.discard(token),
+    yield_override_add=lambda token: _download_yield_override.add(token),
+)
+
+app.register_blueprint(_create_enrichment_blueprint())
+
+
 def _emit_rate_monitor_loop():
     """Background thread that pushes API call rate data every 1 second for speedometer gauges.
     Also includes enrichment worker status so the combined cards have everything."""
