@@ -1063,6 +1063,22 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
                     pp["hifi_copyright"] = cached_meta["copyright"]
             source_order = [s for s in source_order if s != "hifi"]
 
+        # If this download came from Tidal, use cached metadata from the download
+        # pipeline instead of re-searching the Tidal API.
+        if cached_meta.get("source") == "tidal":
+            if _tag_enabled(cfg, "tidal.embed_tags"):
+                if cfg.get("tidal.tags.track_id", True) and cached_meta.get("track_id"):
+                    pp["id_tags"]["TIDAL_TRACK_ID"] = str(cached_meta["track_id"])
+                if cfg.get("tidal.tags.artist_id", True) and cached_meta.get("artist_id"):
+                    pp["id_tags"]["TIDAL_ARTIST_ID"] = str(cached_meta["artist_id"])
+                if cfg.get("tidal.tags.isrc", True) and cached_meta.get("isrc"):
+                    pp["tidal_isrc"] = cached_meta["isrc"]
+                if cfg.get("tidal.tags.bpm", True) and cached_meta.get("bpm"):
+                    pp["tidal_bpm"] = cached_meta["bpm"]
+                if cfg.get("tidal.tags.copyright", True) and cached_meta.get("copyright"):
+                    pp["tidal_copyright"] = cached_meta["copyright"]
+            source_order = [s for s in source_order if s != "tidal"]
+
         db = get_database()
 
         for source_name in source_order:
