@@ -74,7 +74,7 @@
   width: auto;
   min-width: 130px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: 10px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.035)),
     rgba(255, 255, 255, 0.05);
@@ -93,9 +93,9 @@
     10px 6px;
   color: #fff;
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.5;
-  padding: 12px 34px 12px 14px;
+  padding: 8px 32px 8px 12px;
   transition:
     border-color 0.18s ease,
     background 0.18s ease,
@@ -244,16 +244,16 @@
   justify-content: center;
   gap: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.05);
   color: #fff;
   cursor: pointer;
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.2;
-  min-height: 42px;
-  padding: 10px 16px;
+  min-height: 36px;
+  padding: 8px 12px;
   transition:
     transform 0.18s ease,
     border-color 0.18s ease,
@@ -289,6 +289,6 @@
 .formActions {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
 }
