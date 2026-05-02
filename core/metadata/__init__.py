@@ -8,6 +8,7 @@ from core.metadata.album_tracks import (
     resolve_album_reference,
 )
 from core.metadata.artist_image import get_artist_image_url
+from core.metadata.artwork import is_internal_image_host, normalize_image_url
 from core.metadata.cache import MetadataCache, get_metadata_cache
 from core.metadata.completion import (
     check_album_completion,
@@ -40,6 +41,13 @@ from core.metadata.registry import (
     register_profile_spotify_credentials_provider,
     register_runtime_clients,
 )
+from core.metadata.status import (
+    METADATA_SOURCE_STATUS_TTL,
+    get_metadata_source_status,
+    get_spotify_status,
+    get_status_snapshot,
+    invalidate_metadata_status_caches,
+)
 from core.metadata.service import MetadataProvider, MetadataService, get_metadata_service
 from core.metadata.similar_artists import (
     get_musicmap_similar_artists,
@@ -48,6 +56,7 @@ from core.metadata.similar_artists import (
 
 __all__ = [
     "METADATA_SOURCE_PRIORITY",
+    "METADATA_SOURCE_STATUS_TTL",
     "MetadataCache",
     "MetadataLookupOptions",
     "MetadataProvider",
@@ -71,6 +80,7 @@ __all__ = [
     "get_hydrabase_client",
     "get_itunes_client",
     "get_metadata_cache",
+    "get_metadata_source_status",
     "get_metadata_service",
     "get_musicmap_similar_artists",
     "get_primary_client",
@@ -78,11 +88,16 @@ __all__ = [
     "get_spotify_client_for_profile",
     "get_registered_runtime_client",
     "get_spotify_client",
+    "get_spotify_status",
     "get_source_priority",
+    "get_status_snapshot",
     "iter_artist_discography_completion_events",
     "iter_musicmap_similar_artist_events",
     "is_hydrabase_enabled",
+    "is_internal_image_host",
     "register_profile_spotify_credentials_provider",
     "register_runtime_clients",
+    "normalize_image_url",
     "resolve_album_reference",
+    "invalidate_metadata_status_caches",
 ]

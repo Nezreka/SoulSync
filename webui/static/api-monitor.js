@@ -1837,6 +1837,19 @@ function startWatchlistCountdownTimer(initialSeconds) {
     }
 
     let remainingSeconds = initialSeconds;
+    const timerElement = document.getElementById('watchlist-next-auto-timer');
+    const updateTimerText = (seconds) => {
+        if (!timerElement) return;
+        const countdownText = seconds > 0 ? formatCountdownTime(seconds) : '';
+        timerElement.textContent = `Next Auto${countdownText ? ': ' + countdownText : ''}`;
+    };
+
+    // If there is no scheduled next run, don't keep polling the endpoint every second.
+    if (remainingSeconds <= 0) {
+        updateTimerText(0);
+        watchlistCountdownInterval = null;
+        return;
+    }
 
     watchlistCountdownInterval = setInterval(async () => {
         remainingSeconds--;
@@ -1846,23 +1859,23 @@ function startWatchlistCountdownTimer(initialSeconds) {
             try {
                 const response = await fetch('/api/watchlist/count');
                 const data = await response.json();
-                remainingSeconds = data.next_run_in_seconds || 0;
+                const nextRunSeconds = data.next_run_in_seconds || 0;
 
-                const timerElement = document.getElementById('watchlist-next-auto-timer');
-                if (timerElement) {
-                    const countdownText = formatCountdownTime(remainingSeconds);
-                    timerElement.textContent = `Next Auto${countdownText ? ': ' + countdownText : ''}`;
+                if (nextRunSeconds > 0) {
+                    remainingSeconds = nextRunSeconds;
+                    updateTimerText(remainingSeconds);
+                } else {
+                    // No scheduled auto-run; stop polling until the page is refreshed
+                    clearInterval(watchlistCountdownInterval);
+                    watchlistCountdownInterval = null;
+                    updateTimerText(0);
                 }
             } catch (error) {
                 console.debug('Error updating watchlist countdown:', error);
             }
         } else {
             // Update the display
-            const timerElement = document.getElementById('watchlist-next-auto-timer');
-            if (timerElement) {
-                const countdownText = formatCountdownTime(remainingSeconds);
-                timerElement.textContent = `Next Auto${countdownText ? ': ' + countdownText : ''}`;
-            }
+            updateTimerText(remainingSeconds);
         }
     }, 1000); // Update every second
 }
@@ -3791,4 +3804,3 @@ function cleanupSyncPageLogs() {
 // --- Global Cleanup on Page Unload ---
 // Note: Automatic wishlist processing now runs server-side and continues even when browser is closed
 // ===============================
-

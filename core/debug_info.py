@@ -300,23 +300,24 @@ def get_debug_info():
     # API rate monitor — current calls/min, 24h totals, peaks, rate limit events
     try:
         from core.api_call_tracker import api_call_tracker
+        from core.metadata.status import get_spotify_status
         rates = api_call_tracker.get_all_rates()
         info['api_rates'] = rates
         # Rich 24h debug summary with peaks, totals, per-endpoint breakdown, events
         info['api_debug_summary'] = api_call_tracker.get_debug_summary()
         # Spotify rate limit details
-        if spotify_client:
-            rl_info = spotify_client.get_rate_limit_info()
-            if rl_info:
-                info['spotify_rate_limit'] = {
-                    'active': True,
-                    'remaining_seconds': rl_info.get('remaining_seconds', 0),
-                    'retry_after': rl_info.get('retry_after', 0),
-                    'endpoint': rl_info.get('endpoint', ''),
-                    'expires_at': rl_info.get('expires_at', ''),
-                }
-            else:
-                info['spotify_rate_limit'] = {'active': False}
+        spotify_status = get_spotify_status(spotify_client=spotify_client)
+        rl_info = spotify_status.get('rate_limit')
+        if spotify_status.get('rate_limited') and rl_info:
+            info['spotify_rate_limit'] = {
+                'active': True,
+                'remaining_seconds': rl_info.get('remaining_seconds', 0),
+                'retry_after': rl_info.get('retry_after', 0),
+                'endpoint': rl_info.get('endpoint', ''),
+                'expires_at': rl_info.get('expires_at', ''),
+            }
+        else:
+            info['spotify_rate_limit'] = {'active': False}
     except Exception:
         info['api_rates'] = {}
         info['api_debug_summary'] = {}

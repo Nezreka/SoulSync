@@ -173,7 +173,7 @@ const HELPER_CONTENT = {
         title: 'Support & Community',
         description: 'Links to the SoulSync community Discord, GitHub issues for bug reports, and documentation resources.',
     },
-    '#spotify-indicator': {
+    '#metadata-source-indicator': {
         title: 'Metadata Source',
         description: 'Connection status of your primary metadata source. This service provides artist, album, and track information for searches, enrichment, and discovery.',
         tips: [
@@ -236,7 +236,7 @@ const HELPER_CONTENT = {
 
     // ─── DASHBOARD: SERVICE CARDS ───────────────────────────────────
 
-    '#spotify-service-card': {
+    '#metadata-source-service-card': {
         title: 'Metadata Source Status',
         description: 'Detailed connection info for your active metadata source. Shows connection state, response latency, and allows manual connection testing.',
         tips: [
@@ -2375,7 +2375,7 @@ const HELPER_TOURS = {
             { page: 'dashboard', selector: '#wishlist-button', title: 'Wishlist', description: 'Tracks queued for download. Failed downloads, watchlist discoveries, and manual additions all land here for retry.' },
 
             // Service cards
-            { page: 'dashboard', selector: '#spotify-service-card', title: 'Metadata Source', description: 'Shows your metadata source connection (Spotify, iTunes, or Deezer). This determines where album, artist, and track info comes from. Click "Test Connection" to verify.' },
+            { page: 'dashboard', selector: '#metadata-source-service-card', title: 'Metadata Source', description: 'Shows your metadata source connection (Spotify, iTunes, or Deezer). This determines where album, artist, and track info comes from. Click "Test Connection" to verify.' },
             { page: 'dashboard', selector: '#media-server-service-card', title: 'Media Server', description: 'Your media server (Plex, Jellyfin, or Navidrome). This is where your music library lives. SoulSync reads your collection and sends downloads here.' },
             { page: 'dashboard', selector: '#soulseek-service-card', title: 'Download Source', description: 'Your primary download source status. In hybrid mode, shows the first source in your priority chain.' },
 
@@ -2974,13 +2974,13 @@ async function _checkSetupStatus() {
     const completion = _getSetupCompletion();
     const results = { ...completion };
 
-    // ── /status — checks services (spotify, media_server, soulseek) ─────
+    // ── /status — checks metadata_source, media_server, soulseek ────────
     try {
         const resp = await fetch('/status');
         if (resp.ok) {
             const data = await resp.json();
             // Metadata source is available when status reports a source.
-            if (data.spotify?.source) {
+            if (data.metadata_source?.source) {
                 results['metadata-source'] = results['metadata-source'] || Date.now();
                 _markSetupComplete('metadata-source');
             }
@@ -4336,7 +4336,7 @@ function _updateHelperBadge() {
 
 const TROUBLESHOOT_RULES = [
     {
-        selector: '#spotify-service-card .status-dot.disconnected, #spotify-service-card .status-dot.error',
+        selector: '#metadata-source-service-card .service-card-indicator.disconnected, #metadata-source-service-card .service-card-indicator.error',
         title: 'Metadata Source Disconnected',
         steps: [
             'Go to Settings → Connections and verify your API credentials',
@@ -4347,7 +4347,7 @@ const TROUBLESHOOT_RULES = [
         action: { label: 'Open Settings', fn: () => navigateToPage('settings') }
     },
     {
-        selector: '#media-server-service-card .status-dot.disconnected, #media-server-service-card .status-dot.error',
+        selector: '#media-server-service-card .service-card-indicator.disconnected, #media-server-service-card .service-card-indicator.error',
         title: 'Media Server Disconnected',
         steps: [
             'Check that your media server (Plex/Jellyfin/Navidrome) is running',
@@ -4358,7 +4358,7 @@ const TROUBLESHOOT_RULES = [
         action: { label: 'Open Settings', fn: () => navigateToPage('settings') }
     },
     {
-        selector: '#soulseek-service-card .status-dot.disconnected, #soulseek-service-card .status-dot.error',
+        selector: '#soulseek-service-card .service-card-indicator.disconnected, #soulseek-service-card .service-card-indicator.error',
         title: 'Download Source Disconnected',
         steps: [
             'Verify your Soulseek/download client is running and reachable',
