@@ -500,7 +500,6 @@ class ConfigManager:
                 "tags": {
                     "track_id": True,
                     "artist_id": True,
-                    "album_id": True,
                     "isrc": True,
                     "bpm": True,
                     "copyright": True,
