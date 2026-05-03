@@ -16,3 +16,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Tests can use assert, magic values, etc.
 "tests/**" = ["B", "F"]
+
+[tool.pytest.ini_options]
+markers = [
+    "soundcloud_live: live SoundCloud integration test (network-dependent, run with -m soundcloud_live)",
+]
