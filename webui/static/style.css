@@ -59723,6 +59723,7 @@ body.reduce-effects *::after {
 .auto-import-completed { border-left: 3px solid #4ade80; }
 .auto-import-review { border-left: 3px solid #fbbf24; }
 .auto-import-failed { border-left: 3px solid #f87171; }
+.auto-import-processing { border-left: 3px solid #60a5fa; }
 
 .auto-import-card-art {
     width: 56px; height: 56px;
@@ -59980,6 +59981,26 @@ body.reduce-effects *::after {
 .auto-import-badge-review { background: rgba(251,191,36,0.1); color: #fbbf24; }
 .auto-import-badge-failed { background: rgba(248,113,113,0.1); color: #f87171; }
 .auto-import-badge-neutral { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4); }
+.auto-import-badge-processing {
+    background: rgba(96,165,250,0.12);
+    color: #60a5fa;
+    animation: auto-import-badge-pulse 1.6s ease-in-out infinite;
+}
+@keyframes auto-import-badge-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+.auto-import-track-row-active {
+    background: rgba(96,165,250,0.08);
+    border-left: 2px solid #60a5fa;
+    padding-left: 6px;
+    margin-left: -8px;
+    border-radius: 3px;
+}
+.auto-import-track-row-active .auto-import-track-name { color: #60a5fa; font-weight: 600; }
+.auto-import-track-row-done .auto-import-track-name,
+.auto-import-track-row-done .auto-import-track-file { opacity: 0.4; }
 
 .auto-import-actions {
     display: flex; gap: 4px; margin-top: 4px;
