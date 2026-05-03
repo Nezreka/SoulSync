@@ -67,15 +67,23 @@ def _get(track: Any, *names: str) -> Optional[str]:
     return None
 
 
-def extract_external_ids(track: Any) -> Dict[str, str]:
+def extract_external_ids(track: Any, source_hint: Optional[str] = None) -> Dict[str, str]:
     """Pull every recognized external ID off a metadata-source track.
 
     Handles the source-source naming drift: Spotify tracks expose ``id``
     as the Spotify track ID; Deezer tracks expose ``id`` as the Deezer
     track ID; iTunes tracks may use ``trackId`` or ``id``. The disamb-
-    iguating field is ``provider`` / ``source``. Tracks coming from a
-    SoulSync internal pipeline often carry every known ID set to its
-    source-specific value — we just collect whatever's there.
+    iguating field is ``provider`` / ``source`` / ``_source``. Tracks
+    coming from a SoulSync internal pipeline often carry every known ID
+    set to its source-specific value — we just collect whatever's there.
+
+    ``source_hint`` is the caller's known answer to "where did this
+    track dict come from?" — used as a fallback when the track itself
+    doesn't carry a provider / source / _source field. Spotify and
+    iTunes return raw API responses without provider tags, so the
+    watchlist scanner passes ``get_primary_source()`` here to make sure
+    a Spotify-primary scan isn't silently no-opping just because the
+    raw API track has no provider key.
 
     Returns a dict mapping conceptual ID name → ID value. Keys present
     in ``EXTERNAL_ID_COLUMNS``. Empty dict when no IDs are available.
@@ -106,8 +114,13 @@ def extract_external_ids(track: Any) -> Dict[str, str]:
 
     # Provider field tells us which native ``id`` belongs to. Without
     # this, a Deezer track's ``id`` field would be silently ignored
-    # (we wouldn't know to map it to deezer_id).
-    provider = (_get(track, 'provider', 'source') or '').lower()
+    # (we wouldn't know to map it to deezer_id). Convention varies by
+    # client: Spotify-shaped tracks usually have no provider field,
+    # Deezer / Discogs / Hydrabase clients tag tracks with ``_source``,
+    # internal pipeline normalization may use ``source`` or ``provider``.
+    # Fall back to the caller's source_hint when the track has no
+    # provider field of its own (Spotify / iTunes raw API responses).
+    provider = (_get(track, 'provider', 'source', '_source') or source_hint or '').lower()
     native_id = _get(track, 'id')
     if native_id and provider:
         provider_to_key = {
