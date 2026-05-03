@@ -36,6 +36,11 @@ class FolderCandidate:
     disc_structure: Dict[int, List[str]] = field(default_factory=dict)  # disc_num -> files
     folder_hash: str = ''
     is_single: bool = False  # True for loose files in staging root
+    # True when the candidate "folder" is the staging root itself (user dropped
+    # disc folders directly into staging without an album wrapper). The name is
+    # meaningless ("Staging", "Music", etc.) — folder-name identification must
+    # be skipped or it will false-match against random albums.
+    is_staging_root: bool = False
 
 
 def _compute_folder_hash(audio_files: List[str]) -> str:
@@ -58,7 +63,11 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
         if audio and audio.tags:
             tags = audio.tags
             result['title'] = (tags.get('title', [''])[0] or '').strip()
-            result['artist'] = (tags.get('artist', [''])[0] or tags.get('albumartist', [''])[0] or '').strip()
+            # Prefer albumartist for album-level identification (per-track artist
+            # often includes features like "Kendrick Lamar, Drake" which fragment
+            # consensus when grouping tracks into an album). Fall back to artist
+            # for files that lack albumartist.
+            result['artist'] = (tags.get('albumartist', [''])[0] or tags.get('artist', [''])[0] or '').strip()
             result['album'] = (tags.get('album', [''])[0] or '').strip()
             # Date/year — try 'date' first, fall back to 'year'
             date_str = (tags.get('date', [''])[0] or tags.get('year', [''])[0] or '').strip()
@@ -385,10 +394,10 @@ class AutoImportWorker:
     def _enumerate_folders(self, staging: str) -> List[FolderCandidate]:
         """Find album folder and single file candidates in staging directory (recursive)."""
         candidates = []
-        self._scan_directory(staging, candidates)
+        self._scan_directory(staging, candidates, staging_root=staging)
         return candidates
 
-    def _scan_directory(self, directory: str, candidates: List[FolderCandidate]):
+    def _scan_directory(self, directory: str, candidates: List[FolderCandidate], staging_root: str = ''):
         """Recursively scan a directory for album folders and loose audio files."""
         try:
             entries = sorted(os.listdir(directory))
@@ -444,12 +453,45 @@ class AutoImportWorker:
                     disc_structure=disc_structure, folder_hash=folder_hash
                 ))
         else:
-            # No audio files here — recurse into subdirectories
-            for sub_name, sub_path in subdirs:
-                # Skip disc folders at this level (they'll be handled by the parent album)
-                if DISC_FOLDER_RE.match(sub_name):
-                    continue
-                self._scan_directory(sub_path, candidates)
+            # No loose audio files. If the only subdirs are disc folders,
+            # treat THIS directory as the album candidate (multi-disc album
+            # with no album-level loose files — common when a user drops
+            # `Album/Disc 1/`, `Album/Disc 2/` straight into staging, or
+            # drops `Disc 1/`, `Disc 2/` with the staging dir itself as
+            # the album root).
+            disc_subdirs = [(n, p) for n, p in subdirs if DISC_FOLDER_RE.match(n)]
+            non_disc_subdirs = [(n, p) for n, p in subdirs if not DISC_FOLDER_RE.match(n)]
+
+            if disc_subdirs and not non_disc_subdirs:
+                disc_structure = {}
+                audio_files = []
+                for sub_name, sub_path in disc_subdirs:
+                    disc_num = int(DISC_FOLDER_RE.match(sub_name).group(1))
+                    try:
+                        disc_files = [os.path.join(sub_path, f) for f in sorted(os.listdir(sub_path))
+                                      if os.path.isfile(os.path.join(sub_path, f))
+                                      and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
+                    except OSError:
+                        disc_files = []
+                    if disc_files:
+                        disc_structure[disc_num] = disc_files
+                        audio_files.extend(disc_files)
+
+                if audio_files:
+                    folder_name = os.path.basename(directory)
+                    folder_hash = _compute_folder_hash(audio_files)
+                    is_staging_root = bool(staging_root) and os.path.normpath(directory) == os.path.normpath(staging_root)
+                    candidates.append(FolderCandidate(
+                        path=directory, name=folder_name, audio_files=audio_files,
+                        disc_structure=disc_structure, folder_hash=folder_hash,
+                        is_staging_root=is_staging_root,
+                    ))
+                return
+
+            # Otherwise recurse into non-disc subdirs (disc folders only
+            # ever attach to a parent album, never stand alone).
+            for sub_name, sub_path in non_disc_subdirs:
+                self._scan_directory(sub_path, candidates, staging_root=staging_root)
 
     def _is_folder_stable(self, candidate: FolderCandidate) -> bool:
         """Check if folder contents have stopped changing."""
@@ -491,10 +533,15 @@ class AutoImportWorker:
         if tag_result:
             return tag_result
 
-        # Strategy 2: Parse folder name
-        folder_result = self._identify_from_folder_name(candidate)
-        if folder_result:
-            return folder_result
+        # Strategy 2: Parse folder name (skip when the candidate is the staging
+        # root itself — the folder name is meaningless and will false-match
+        # against random albums in the metadata source).
+        if candidate.is_staging_root:
+            logger.info(f"[Auto-Import] Skipping folder-name identification for staging root '{candidate.name}' — would false-match. Falling through to AcoustID.")
+        else:
+            folder_result = self._identify_from_folder_name(candidate)
+            if folder_result:
+                return folder_result
 
         # Strategy 3: AcoustID fingerprint
         acoustid_result = self._identify_from_acoustid(candidate)
@@ -684,29 +731,47 @@ class AutoImportWorker:
     def _identify_from_tags(self, candidate: FolderCandidate) -> Optional[Dict]:
         """Try to identify album from embedded file tags."""
         tags_list = []
-        for f in candidate.audio_files[:20]:  # Cap at 20 files
+        sampled = candidate.audio_files[:20]  # Cap at 20 files
+        for f in sampled:
             tags = _read_file_tags(f)
             if tags['album'] and tags['artist']:
                 tags_list.append(tags)
 
-        if len(tags_list) < max(1, len(candidate.audio_files) * 0.5):
+        if len(tags_list) < max(1, len(sampled) * 0.5):
+            logger.info(f"[Auto-Import] Tag identification rejected for '{candidate.name}' — only {len(tags_list)}/{len(sampled)} files have album+artist tags (need >=50%)")
             return None  # Less than 50% of files have usable tags
 
-        # Check consistency — most common album+artist
-        album_artist_counts = {}
+        # Group by album first (album-level identity). Per-track artist often
+        # varies due to features ("Artist", "Artist, Drake", etc.) so grouping
+        # by (album, artist) fragments consensus on a real album. Pick the
+        # dominant album, then within that album pick the most-common artist
+        # (which will usually be the album's primary artist).
+        album_counts = {}
         for t in tags_list:
-            key = (t['album'].lower().strip(), t['artist'].lower().strip())
-            album_artist_counts[key] = album_artist_counts.get(key, 0) + 1
+            album_key = t['album'].lower().strip()
+            album_counts[album_key] = album_counts.get(album_key, 0) + 1
 
-        if not album_artist_counts:
+        if not album_counts:
             return None
 
-        best_key, best_count = max(album_artist_counts.items(), key=lambda x: x[1])
-        if best_count < len(tags_list) * 0.6:
-            return None  # Tags too inconsistent
+        best_album, best_album_count = max(album_counts.items(), key=lambda x: x[1])
+        if best_album_count < len(tags_list) * 0.6:
+            sample = ', '.join([f"'{a}' x{c}" for a, c in sorted(album_counts.items(), key=lambda x: -x[1])[:3]])
+            logger.info(f"[Auto-Import] Tag identification rejected for '{candidate.name}' — best album '{best_album}' only {best_album_count}/{len(tags_list)} files (need >=60%). Top albums: {sample}")
+            return None
 
-        album_name, artist_name = best_key
-        return self._search_metadata_source(artist_name, album_name, 'tags', candidate)
+        # Most-common artist among files matching the dominant album
+        artist_counts = {}
+        for t in tags_list:
+            if t['album'].lower().strip() == best_album:
+                a = t['artist'].lower().strip()
+                if a:
+                    artist_counts[a] = artist_counts.get(a, 0) + 1
+        if not artist_counts:
+            return None
+        artist_name, _ = max(artist_counts.items(), key=lambda x: x[1])
+
+        return self._search_metadata_source(artist_name, best_album, 'tags', candidate)
 
     def _identify_from_folder_name(self, candidate: FolderCandidate) -> Optional[Dict]:
         """Try to identify album from folder name."""
