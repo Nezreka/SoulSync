@@ -85,6 +85,12 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     fake_acoustid.VerificationResult = types.SimpleNamespace(FAIL="FAIL")
 
     monkeypatch.setitem(sys.modules, "core.acoustid_verification", fake_acoustid)
+    # The integrity layer would reject these 5-byte fixture files; bypass
+    # it since these tests cover plumbing (notification + metadata_runtime
+    # forwarding), not integrity behavior.
+    from core.imports.file_integrity import IntegrityResult
+    monkeypatch.setattr(import_pipeline, "check_audio_integrity",
+                        lambda *_a, **_kw: IntegrityResult(ok=True, checks={"size_bytes": 5, "actual_length_s": 0}))
     monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config(str(transfer_root)))
     monkeypatch.setattr(import_pipeline, "add_activity_item", lambda *args, **kwargs: activity_calls.append((args, kwargs)))
     monkeypatch.setattr(import_pipeline, "emit_track_downloaded", lambda *args, **kwargs: None)
@@ -175,6 +181,11 @@ def test_post_process_matched_download_forwards_separate_metadata_runtime(tmp_pa
     monkeypatch.setattr(import_pipeline, "get_import_clean_title", lambda *args, **kwargs: "Track")
     monkeypatch.setattr(import_pipeline, "get_audio_quality_string", lambda file_path: "")
     monkeypatch.setattr(import_pipeline, "check_flac_bit_depth", lambda *args, **kwargs: None)
+    # Bypass integrity check — the 5-byte fixture would fail it; this test
+    # exercises the metadata-runtime forwarding path, not file integrity.
+    from core.imports.file_integrity import IntegrityResult
+    monkeypatch.setattr(import_pipeline, "check_audio_integrity",
+                        lambda *_a, **_kw: IntegrityResult(ok=True, checks={}))
     monkeypatch.setattr(import_pipeline, "build_final_path_for_track", lambda *args, **kwargs: (str(target_path), None))
 
     def _capture_enhance(file_path, context, artist, album_info, runtime=None):
