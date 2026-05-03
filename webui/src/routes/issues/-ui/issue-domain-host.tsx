@@ -14,6 +14,7 @@ import {
   TextArea,
   TextInput,
 } from '@/components/form';
+import { Show } from '@/components/primitives';
 import { useProfile } from '@/platform/shell/route-controllers';
 
 import type { IssuePriority, IssueReportPayload } from '../-issues.types';
@@ -23,6 +24,7 @@ import {
   REFRESH_EVENT,
   createDefaultIssueTitle,
   getIssueCategoriesForEntity,
+  getEntityLabel,
 } from '../-issues.helpers';
 import styles from './issue-detail-modal.module.css';
 
@@ -89,19 +91,21 @@ export function IssueDomainHost() {
     };
   }, [queryClient]);
 
-  if (!reportPayload) return null;
-
   return (
-    <ReportIssueModal
-      key={`${reportPayload.entityType}:${reportPayload.entityId}`}
-      payload={reportPayload}
-      profileId={profileId}
-      onClose={() => setReportPayload(null)}
-      onSubmitted={() => {
-        setReportPayload(null);
-        void queryClient.invalidateQueries({ queryKey: ISSUE_DOMAIN_QUERY_KEY });
-      }}
-    />
+    <Show when={reportPayload}>
+      {(payload) => (
+        <ReportIssueModal
+          key={`${payload.entityType}:${payload.entityId}`}
+          payload={payload}
+          profileId={profileId}
+          onClose={() => setReportPayload(null)}
+          onSubmitted={() => {
+            setReportPayload(null);
+            void queryClient.invalidateQueries({ queryKey: ISSUE_DOMAIN_QUERY_KEY });
+          }}
+        />
+      )}
+    </Show>
   );
 }
 
@@ -120,8 +124,6 @@ function ReportIssueModal({
     () => getIssueCategoriesForEntity(payload.entityType),
     [payload.entityType],
   );
-  const entityLabel =
-    payload.entityType === 'track' ? 'Track' : payload.entityType === 'album' ? 'Album' : 'Artist';
 
   const createMutation = useMutation({
     mutationFn: async (values: ReportIssueFormValues) => {
@@ -172,9 +174,11 @@ function ReportIssueModal({
         }
       }}
       className={styles.reportIssueDialog}
-      closeLabel="Close report issue modal"
     >
-      <DialogHeader title={`Report Issue - ${entityLabel}`} closeLabel="Close report issue modal" />
+      <DialogHeader
+        title={`Report Issue - ${getEntityLabel(payload.entityType)}`}
+        closeLabel="Close report issue modal"
+      />
       <DialogBody>
         <form
           className={styles.reportIssueForm}
@@ -186,12 +190,14 @@ function ReportIssueModal({
         >
           <div className={styles.reportIssueEntityInfo}>
             <div className={styles.reportIssueEntityName}>{payload.entityName}</div>
-            {payload.artistName ? (
-              <div className={styles.reportIssueEntityArtist}>
-                {payload.artistName}
-                {payload.albumTitle ? ` - ${payload.albumTitle}` : ''}
-              </div>
-            ) : null}
+            <Show when={payload.artistName}>
+              {(artistName) => (
+                <div className={styles.reportIssueEntityArtist}>
+                  {artistName}
+                  <Show when={payload.albumTitle}>{(albumTitle) => ` - ${albumTitle}`}</Show>
+                </div>
+              )}
+            </Show>
           </div>
 
           <FormField
@@ -228,8 +234,8 @@ function ReportIssueModal({
           </FormField>
 
           <form.Subscribe selector={(state) => state.values.category}>
-            {(selectedCategory) =>
-              selectedCategory ? (
+            {(selectedCategory) => (
+              <Show when={selectedCategory}>
                 <>
                   <form.Field name="title">
                     {(field) => (
@@ -296,8 +302,8 @@ function ReportIssueModal({
                     )}
                   </form.Field>
                 </>
-              ) : null
-            }
+              </Show>
+            )}
           </form.Subscribe>
 
           <form.Subscribe selector={(state) => state.errors}>
