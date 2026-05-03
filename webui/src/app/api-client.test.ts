@@ -1,7 +1,7 @@
 import type { ResponsePromise } from 'ky';
 
 import { HTTPError } from 'ky';
-import { describe, expect, it, vi } from 'vite-plus/test';
+import { describe, expect, it, vi } from 'vitest';
 
 import { readJson } from './api-client';
 

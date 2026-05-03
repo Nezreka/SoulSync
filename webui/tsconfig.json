@@ -18,6 +18,13 @@
     "noEmit": true,
     "types": ["node", "vitest/globals", "@testing-library/jest-dom", "react", "react-dom"]
   },
-  "include": ["./src", "./tests", "./vitest.setup.ts", "./vite.config.ts", "./playwright.config.ts"],
+  "include": [
+    "./src",
+    "./tests",
+    "./vitest.setup.ts",
+    "./vite.config.ts",
+    "./vitest.config.ts",
+    "./playwright.config.ts"
+  ],
   "references": []
 }
