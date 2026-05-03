@@ -189,6 +189,30 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
         except Exception:
             pass
 
+        # Pull the metadata-source IDs out of context. ``embed_source_ids``
+        # in core/metadata/source.py wrote them to ``_embedded_id_tags``
+        # at the end of post-processing — we persist them here so the
+        # watchlist scanner can recognize freshly downloaded files
+        # without waiting for the async enrichment workers.
+        embedded = context.get("_embedded_id_tags") or {}
+
+        def _embedded(*keys):
+            for k in keys:
+                v = embedded.get(k)
+                if v:
+                    return str(v)
+            return None
+
+        spotify_track_id = _embedded("SPOTIFY_TRACK_ID")
+        itunes_track_id = _embedded("ITUNES_TRACK_ID")
+        deezer_track_id = _embedded("DEEZER_TRACK_ID")
+        tidal_track_id = _embedded("TIDAL_TRACK_ID")
+        qobuz_track_id = _embedded("QOBUZ_TRACK_ID")
+        musicbrainz_recording_id = _embedded("MUSICBRAINZ_RECORDING_ID")
+        audiodb_id = _embedded("AUDIODB_TRACK_ID")
+        soul_id = _embedded("SOUL_ID")
+        isrc = context.get("_isrc")
+
         db = get_database()
         db.record_track_download(
             file_path=file_path,
@@ -203,6 +227,15 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
             bit_depth=bit_depth,
             sample_rate=sample_rate,
             bitrate=bitrate,
+            spotify_track_id=spotify_track_id,
+            itunes_track_id=itunes_track_id,
+            deezer_track_id=deezer_track_id,
+            tidal_track_id=tidal_track_id,
+            qobuz_track_id=qobuz_track_id,
+            musicbrainz_recording_id=musicbrainz_recording_id,
+            audiodb_id=audiodb_id,
+            soul_id=soul_id,
+            isrc=isrc,
         )
     except Exception:
         pass
