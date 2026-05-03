@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
 import { Button } from '@/components/form';
+import { Show } from '@/components/primitives';
 import { useProfile } from '@/platform/shell/route-controllers';
 import {
   launchAlbumDownloadWorkflow,
@@ -210,207 +211,7 @@ export function IssueDetailModal({
         title={issue ? `Issue #${issue.id}` : 'Issue details'}
         closeLabel="Close issue detail"
       />
-      <DialogBody>
-        {queryLoading ? (
-          <div className={styles.issuesLoading}>
-            <div className={styles.issuesSpinner} />
-            Loading issue details...
-          </div>
-        ) : queryError ? (
-          <div className={styles.issuesEmpty}>
-            <div className={styles.issuesEmptyTitle}>Failed to load issue</div>
-            <div className={styles.issuesEmptyText}>
-              {queryError instanceof Error ? queryError.message : 'Unknown error'}
-            </div>
-          </div>
-        ) : issue ? (
-          <>
-            <div className={styles.issueHero}>
-              <div className={styles.issueHeroArtGroup}>
-                {issue.entity_type === 'artist' && issueArtwork ? (
-                  <img className={styles.issueHeroArtistThumb} src={issueArtwork} alt="" />
-                ) : null}
-                {issueArtwork ? (
-                  <img className={styles.issueHeroAlbumArt} src={issueArtwork} alt="" />
-                ) : (
-                  <div className={styles.issueHeroAlbumPlaceholder}>
-                    {issueCategoryMeta?.icon || ISSUE_CATEGORY_META.other.icon}
-                  </div>
-                )}
-              </div>
-              <div className={styles.issueHeroInfo}>
-                {issue.entity_type !== 'artist' && snapshot.artist_name ? (
-                  <div className={styles.issueHeroArtist}>{String(snapshot.artist_name)}</div>
-                ) : null}
-                <div className={styles.issueHeroAlbum}>
-                  {String(
-                    issue.entity_type === 'artist'
-                      ? snapshot.name || issue.title
-                      : snapshot.album_title || snapshot.title || issue.title,
-                  )}
-                </div>
-                {issue.entity_type === 'track' ? (
-                  <div className={styles.issueHeroTrackName}>♪ {issue.title}</div>
-                ) : null}
-                {issue.entity_type !== 'artist' && albumMetaParts.length > 0 ? (
-                  <div className={styles.issueHeroMeta}>{albumMetaParts.join(' - ')}</div>
-                ) : null}
-                {genreTags.length > 0 ? (
-                  <div className={styles.issueHeroGenres}>
-                    {genreTags.map((genre) => (
-                      <span className={styles.issueHeroGenreTag} key={String(genre)}>
-                        {String(genre)}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                {externalLinks.length > 0 ? (
-                  <div className={styles.issueExternalLinks}>
-                    {externalLinks.map((link) =>
-                      link.url ? (
-                        <a
-                          key={`${link.service}-${link.type}-${link.label}`}
-                          className={`${styles.issueExternalLink} ${styles[link.className]}`}
-                          href={link.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={`${link.service} ${link.type}`}
-                        >
-                          <span className={styles.issueExternalLinkService}>{link.service}</span>
-                          <span className={styles.issueExternalLinkType}>{link.type}</span>
-                        </a>
-                      ) : (
-                        <span
-                          key={`${link.service}-${link.type}-${link.label}`}
-                          className={`${styles.issueExternalLink} ${styles[link.className]}`}
-                          title={`${link.service} ${link.type}: ${link.id}`}
-                        >
-                          <span className={styles.issueExternalLinkService}>{link.service}</span>
-                          <span className={styles.issueExternalLinkType}>{link.type}</span>
-                        </span>
-                      ),
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            </div>
-
-            <div className={styles.issueDetailInfoBar}>
-              <div className={styles.issueDetailInfoLeft}>
-                <span
-                  className={`${styles.issuePriorityDot} ${getPriorityDotClassName(priorityLevel)}`}
-                />
-                <span className={`${styles.issueStatusBadge} ${getStatusClassName(issue.status)}`}>
-                  {formatStatusLabel(issue.status)}
-                </span>
-                <span className={styles.issueDetailCategory}>{issueCategoryLabel}</span>
-              </div>
-              <div className={styles.issueDetailInfoRight}>
-                <span className={styles.issueDetailDate}>
-                  Reported {formatIssueDate(issue.created_at)}
-                </span>
-                {issue.resolved_at ? (
-                  <span className={styles.issueDetailDate}>
-                    Resolved {formatIssueDate(issue.resolved_at)}
-                  </span>
-                ) : null}
-                {issue.reporter_name && isAdmin ? (
-                  <span className={styles.issueDetailProfile}>by {issue.reporter_name}</span>
-                ) : null}
-              </div>
-            </div>
-
-            {issue.entity_type !== 'artist' && isAdmin && (
-              <div className={styles.issueDetailSection}>
-                <div className={styles.issueDetailSectionTitle}>Admin Actions</div>
-                <div className={styles.issueActionButtons}>
-                  <Button
-                    className={styles.issueActionDownload}
-                    type="button"
-                    disabled={downloadWorkflowMutation.isPending}
-                    onClick={() => downloadWorkflowMutation.mutate(albumWorkflowInput)}
-                  >
-                    {downloadWorkflowMutation.isPending ? 'Loading...' : 'Download Album'}
-                  </Button>
-                  <Button
-                    className={styles.issueActionWishlist}
-                    type="button"
-                    disabled={wishlistWorkflowMutation.isPending}
-                    onClick={() => wishlistWorkflowMutation.mutate(albumWorkflowInput)}
-                  >
-                    {wishlistWorkflowMutation.isPending ? 'Loading...' : 'Add to Wishlist'}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            <div className={styles.issueDetailSection}>
-              <div className={styles.issueDetailSectionTitle}>Issue</div>
-              <div className={styles.issueDetailTitleText}>{issue.title}</div>
-              <div
-                className={
-                  issue.description ? styles.issueDetailDescription : styles.issueDetailNoDesc
-                }
-              >
-                {issue.description || 'No additional details provided'}
-              </div>
-            </div>
-
-            {issue.entity_type === 'track' && trackMetaItems.length > 0 ? (
-              <div className={styles.issueDetailSection}>
-                <div className={styles.issueDetailSectionTitle}>Track Details</div>
-                <div className={styles.issueDetailMetaGrid}>
-                  {trackMetaItems.map((item) => (
-                    <div className={styles.issueMetaItem} key={item.label}>
-                      <span className={styles.issueMetaIcon}>{item.icon}</span>
-                      <span className={styles.issueMetaLabel}>{item.label}</span>
-                      <span className={styles.issueMetaValue}>{item.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {snapshot.file_path ? (
-              <div className={styles.issueDetailSection}>
-                <div className={styles.issueDetailSectionTitle}>File Path</div>
-                <div className={styles.issueDetailFilepath}>{String(snapshot.file_path)}</div>
-              </div>
-            ) : null}
-
-            {trackRows.length > 0 ? (
-              <div className={styles.issueDetailSection}>
-                <div className={styles.issueDetailSectionTitle}>
-                  Track Listing{' '}
-                  <span className={styles.issueDetailSectionCount}>{trackRows.length} tracks</span>
-                </div>
-                <div className={styles.issueDetailTracklist}>{renderTrackListing(trackRows)}</div>
-              </div>
-            ) : null}
-
-            {isAdmin && (
-              <div className={styles.issueDetailSection}>
-                <div className={styles.issueDetailSectionTitle}>Admin Response</div>
-                <textarea
-                  className={styles.issueDetailResponseTextarea}
-                  id="issue-detail-response-input"
-                  value={adminResponse}
-                  onChange={(event) => setAdminResponse(event.target.value)}
-                  placeholder="Write a response to the reporter..."
-                  rows={3}
-                />
-              </div>
-            )}
-
-            {!isAdmin && issue.admin_response ? (
-              <div className={styles.issueDetailSection}>
-                <div className={styles.issueDetailSectionTitle}>Admin Response</div>
-                <div className={styles.issueDetailAdminResponse}>{issue.admin_response}</div>
-              </div>
-            ) : null}
-          </>
-        ) : null}
-      </DialogBody>
+      <DialogBody>{renderIssueDetailContent()}</DialogBody>
       <DialogFooter>
         <Button className={styles.modalButtonSecondary} type="button" onClick={onClose}>
           Close
@@ -437,6 +238,231 @@ export function IssueDetailModal({
       </DialogFooter>
     </DialogFrame>
   );
+
+  function renderIssueDetailContent() {
+    if (queryLoading) {
+      return (
+        <div className={styles.issuesLoading}>
+          <div className={styles.issuesSpinner} />
+          Loading issue details...
+        </div>
+      );
+    }
+
+    if (queryError) {
+      return (
+        <div className={styles.issuesEmpty}>
+          <div className={styles.issuesEmptyTitle}>Failed to load issue</div>
+          <div className={styles.issuesEmptyText}>
+            {queryError instanceof Error ? queryError.message : 'Unknown error'}
+          </div>
+        </div>
+      );
+    }
+
+    if (!issue) {
+      return null;
+    }
+
+    return (
+      <>
+        <div className={styles.issueHero}>
+          <div className={styles.issueHeroArtGroup}>
+            <Show when={issue.entity_type === 'artist' && issueArtwork}>
+              <img className={styles.issueHeroArtistThumb} src={issueArtwork} alt="" />
+            </Show>
+            <Show
+              when={issueArtwork}
+              fallback={
+                <div className={styles.issueHeroAlbumPlaceholder}>
+                  {issueCategoryMeta?.icon || ISSUE_CATEGORY_META.other.icon}
+                </div>
+              }
+            >
+              <img className={styles.issueHeroAlbumArt} src={issueArtwork} alt="" />
+            </Show>
+          </div>
+          <div className={styles.issueHeroInfo}>
+            <Show when={issue.entity_type !== 'artist' && snapshot.artist_name}>
+              {(artistName) => <div className={styles.issueHeroArtist}>{String(artistName)}</div>}
+            </Show>
+            <div className={styles.issueHeroAlbum}>
+              {String(
+                issue.entity_type === 'artist'
+                  ? snapshot.name || issue.title
+                  : snapshot.album_title || snapshot.title || issue.title,
+              )}
+            </div>
+            <Show when={issue.entity_type === 'track'}>
+              <div className={styles.issueHeroTrackName}>♪ {issue.title}</div>
+            </Show>
+            <Show when={issue.entity_type !== 'artist' && albumMetaParts.length > 0}>
+              <div className={styles.issueHeroMeta}>{albumMetaParts.join(' - ')}</div>
+            </Show>
+            <Show when={genreTags.length}>
+              <div className={styles.issueHeroGenres}>
+                {genreTags.map((genre) => (
+                  <span className={styles.issueHeroGenreTag} key={String(genre)}>
+                    {String(genre)}
+                  </span>
+                ))}
+              </div>
+            </Show>
+            <Show when={externalLinks.length}>
+              <div className={styles.issueExternalLinks}>
+                {externalLinks.map((link) => (
+                  <Show
+                    key={`${link.service}-${link.type}-${link.label}`}
+                    when={link.url}
+                    fallback={
+                      <span
+                        className={`${styles.issueExternalLink} ${styles[link.className]}`}
+                        title={`${link.service} ${link.type}: ${link.id}`}
+                      >
+                        <span className={styles.issueExternalLinkService}>{link.service}</span>
+                        <span className={styles.issueExternalLinkType}>{link.type}</span>
+                      </span>
+                    }
+                  >
+                    <a
+                      className={`${styles.issueExternalLink} ${styles[link.className]}`}
+                      href={link.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={`${link.service} ${link.type}`}
+                    >
+                      <span className={styles.issueExternalLinkService}>{link.service}</span>
+                      <span className={styles.issueExternalLinkType}>{link.type}</span>
+                    </a>
+                  </Show>
+                ))}
+              </div>
+            </Show>
+          </div>
+        </div>
+
+        <div className={styles.issueDetailInfoBar}>
+          <div className={styles.issueDetailInfoLeft}>
+            <span
+              className={`${styles.issuePriorityDot} ${getPriorityDotClassName(priorityLevel)}`}
+            />
+            <span className={`${styles.issueStatusBadge} ${getStatusClassName(issue.status)}`}>
+              {formatStatusLabel(issue.status)}
+            </span>
+            <span className={styles.issueDetailCategory}>{issueCategoryLabel}</span>
+          </div>
+          <div className={styles.issueDetailInfoRight}>
+            <span className={styles.issueDetailDate}>
+              Reported {formatIssueDate(issue.created_at)}
+            </span>
+            <Show when={issue.resolved_at}>
+              {(resolvedAt) => (
+                <span className={styles.issueDetailDate}>
+                  Resolved {formatIssueDate(resolvedAt)}
+                </span>
+              )}
+            </Show>
+            <Show when={isAdmin && issue.reporter_name}>
+              {(reporterName) => (
+                <span className={styles.issueDetailProfile}>by {reporterName}</span>
+              )}
+            </Show>
+          </div>
+        </div>
+
+        <Show when={issue.entity_type !== 'artist' && isAdmin}>
+          <div className={styles.issueDetailSection}>
+            <div className={styles.issueDetailSectionTitle}>Admin Actions</div>
+            <div className={styles.issueActionButtons}>
+              <Button
+                className={styles.issueActionDownload}
+                type="button"
+                disabled={downloadWorkflowMutation.isPending}
+                onClick={() => downloadWorkflowMutation.mutate(albumWorkflowInput)}
+              >
+                {downloadWorkflowMutation.isPending ? 'Loading...' : 'Download Album'}
+              </Button>
+              <Button
+                className={styles.issueActionWishlist}
+                type="button"
+                disabled={wishlistWorkflowMutation.isPending}
+                onClick={() => wishlistWorkflowMutation.mutate(albumWorkflowInput)}
+              >
+                {wishlistWorkflowMutation.isPending ? 'Loading...' : 'Add to Wishlist'}
+              </Button>
+            </div>
+          </div>
+        </Show>
+
+        <div className={styles.issueDetailSection}>
+          <div className={styles.issueDetailSectionTitle}>Issue</div>
+          <div className={styles.issueDetailTitleText}>{issue.title}</div>
+          <div
+            className={issue.description ? styles.issueDetailDescription : styles.issueDetailNoDesc}
+          >
+            {issue.description || 'No additional details provided'}
+          </div>
+        </div>
+
+        <Show when={issue.entity_type === 'track' && trackMetaItems.length > 0}>
+          <div className={styles.issueDetailSection}>
+            <div className={styles.issueDetailSectionTitle}>Track Details</div>
+            <div className={styles.issueDetailMetaGrid}>
+              {trackMetaItems.map((item) => (
+                <div className={styles.issueMetaItem} key={item.label}>
+                  <span className={styles.issueMetaIcon}>{item.icon}</span>
+                  <span className={styles.issueMetaLabel}>{item.label}</span>
+                  <span className={styles.issueMetaValue}>{item.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Show>
+
+        <Show when={snapshot.file_path}>
+          {(filePath) => (
+            <div className={styles.issueDetailSection}>
+              <div className={styles.issueDetailSectionTitle}>File Path</div>
+              <div className={styles.issueDetailFilepath}>{String(filePath)}</div>
+            </div>
+          )}
+        </Show>
+
+        <Show when={trackRows.length}>
+          <div className={styles.issueDetailSection}>
+            <div className={styles.issueDetailSectionTitle}>
+              Track Listing{' '}
+              <span className={styles.issueDetailSectionCount}>{trackRows.length} tracks</span>
+            </div>
+            <div className={styles.issueDetailTracklist}>{renderTrackListing(trackRows)}</div>
+          </div>
+        </Show>
+
+        <Show when={isAdmin}>
+          <div className={styles.issueDetailSection}>
+            <div className={styles.issueDetailSectionTitle}>Admin Response</div>
+            <textarea
+              className={styles.issueDetailResponseTextarea}
+              id="issue-detail-response-input"
+              value={adminResponse}
+              onChange={(event) => setAdminResponse(event.target.value)}
+              placeholder="Write a response to the reporter..."
+              rows={3}
+            />
+          </div>
+        </Show>
+
+        <Show when={!isAdmin && issue.admin_response}>
+          {(response) => (
+            <div className={styles.issueDetailSection}>
+              <div className={styles.issueDetailSectionTitle}>Admin Response</div>
+              <div className={styles.issueDetailAdminResponse}>{response}</div>
+            </div>
+          )}
+        </Show>
+      </>
+    );
+  }
 }
 
 function renderTrackListing(trackRows: IssueTrackRow[]) {
@@ -470,12 +496,12 @@ function renderTrackListing(trackRows: IssueTrackRow[]) {
         <span className={styles.issueDetailTracklistTitle}>{String(track.title || 'Unknown')}</span>
         <span className={styles.issueDetailTracklistDur}>{duration}</span>
         <span className={styles.issueDetailTracklistMeta}>
-          {format ? (
+          <Show when={format}>
             <span className={`${styles.issueTrackBadge} ${formatClassName}`}>{format}</span>
-          ) : null}
-          {bitrate ? (
+          </Show>
+          <Show when={bitrate}>
             <span className={`${styles.issueTrackBadge} ${bitrateClassName}`}>{bitrate}</span>
-          ) : null}
+          </Show>
         </span>
       </div>,
     );
