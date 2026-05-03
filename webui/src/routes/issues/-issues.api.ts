@@ -2,7 +2,6 @@ import { queryOptions } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
 
-import type { NormalizedIssuesSearch } from './-issues.helpers';
 import type {
   CreateIssuePayload,
   IssueCounts,
@@ -10,6 +9,7 @@ import type {
   IssueDetailResponse,
   IssueListResponse,
   IssueRecord,
+  IssuesSearch,
 } from './-issues.types';
 
 const DEFAULT_LIMIT = 100;
@@ -34,7 +34,7 @@ export async function fetchIssueCounts(profileId: number): Promise<IssueCounts> 
 
 export async function fetchIssueList(
   profileId: number,
-  search: Pick<NormalizedIssuesSearch, 'status' | 'category'>,
+  search: Pick<IssuesSearch, 'status' | 'category'>,
 ): Promise<IssueListResponse> {
   const params = new URLSearchParams();
   params.set('limit', String(DEFAULT_LIMIT));
@@ -132,7 +132,7 @@ export function issueCountsQueryOptions(profileId: number) {
 
 export function issueListQueryOptions(
   profileId: number,
-  search: Pick<NormalizedIssuesSearch, 'status' | 'category'>,
+  search: Pick<IssuesSearch, 'status' | 'category'>,
 ) {
   return queryOptions({
     queryKey: ['issues', 'list', profileId, search.status, search.category],

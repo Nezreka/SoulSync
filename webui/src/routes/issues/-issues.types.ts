@@ -1,6 +1,45 @@
-export type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'dismissed';
-export type IssueEntityType = 'track' | 'album' | 'artist';
-export type IssuePriority = 'low' | 'normal' | 'high';
+import { z } from 'zod';
+
+export const ISSUE_ENTITY_TYPE_VALUES = ['track', 'album', 'artist'] as const;
+export type IssueEntityType = (typeof ISSUE_ENTITY_TYPE_VALUES)[number];
+
+export const ISSUE_CATEGORY_VALUES = [
+  'wrong_track',
+  'wrong_metadata',
+  'wrong_cover',
+  'wrong_artist',
+  'duplicate_tracks',
+  'missing_tracks',
+  'audio_quality',
+  'wrong_album',
+  'incomplete_album',
+  'other',
+] as const;
+
+export type IssueCategory = (typeof ISSUE_CATEGORY_VALUES)[number];
+
+export const ISSUE_STATUS_VALUES = ['open', 'in_progress', 'resolved', 'dismissed'] as const;
+export type IssueStatus = (typeof ISSUE_STATUS_VALUES)[number];
+
+export const ISSUE_PRIORITY_VALUES = ['low', 'normal', 'high'] as const;
+export type IssuePriority = (typeof ISSUE_PRIORITY_VALUES)[number];
+
+export const ISSUE_SEARCH_STATUS_VALUES = [
+  'open',
+  'all',
+  'in_progress',
+  'resolved',
+  'dismissed',
+] as const;
+export const ISSUE_SEARCH_CATEGORY_VALUES = ['all', ...ISSUE_CATEGORY_VALUES] as const;
+
+export const ISSUE_SEARCH_SCHEMA = z.object({
+  status: z.enum(ISSUE_SEARCH_STATUS_VALUES).default('open').catch('open'),
+  category: z.enum(ISSUE_SEARCH_CATEGORY_VALUES).default('all').catch('all'),
+  issueId: z.coerce.number().int().positive().optional().catch(undefined),
+});
+
+export type IssuesSearch = z.infer<typeof ISSUE_SEARCH_SCHEMA>;
 
 export interface IssueTrackRow extends Record<string, unknown> {
   bitrate?: string | number;
@@ -99,12 +138,6 @@ export interface IssueCountsResponse {
   success: boolean;
   counts: IssueCounts;
   error?: string;
-}
-
-export interface IssuesSearch {
-  category?: string;
-  issueId?: string | number;
-  status?: IssueStatus | 'all';
 }
 
 export interface CreateIssuePayload {

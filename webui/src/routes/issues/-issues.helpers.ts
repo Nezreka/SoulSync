@@ -1,14 +1,15 @@
-import type { IssueRecord, IssuesSearch, IssueSnapshot } from './-issues.types';
+import {
+  type IssueCategory,
+  type IssueRecord,
+  type IssueSnapshot,
+  type IssuePriority,
+  type IssueStatus,
+} from './-issues.types';
 
 export const REFRESH_EVENT = 'ss:issues-refresh';
 
-export const DEFAULT_ISSUES_SEARCH = {
-  status: 'open',
-  category: 'all',
-} satisfies Required<Pick<IssuesSearch, 'status' | 'category'>>;
-
 export const ISSUE_CATEGORY_META: Record<
-  string,
+  IssueCategory,
   { label: string; icon: string; description: string; applies: Array<'track' | 'album' | 'artist'> }
 > = {
   wrong_track: {
@@ -73,13 +74,7 @@ export const ISSUE_CATEGORY_META: Record<
   },
 };
 
-const ISSUE_CATEGORY_KEYS = new Set(Object.keys(ISSUE_CATEGORY_META));
-
-export type NormalizedIssuesSearch = Required<Pick<IssuesSearch, 'status' | 'category'>> & {
-  issueId?: number;
-};
-
-export const ISSUE_STATUS_META: Record<string, { label: string; className: string }> = {
+export const ISSUE_STATUS_META: Record<IssueStatus, { label: string; className: string }> = {
   open: { label: 'Open', className: 'is-open' },
   in_progress: { label: 'In Progress', className: 'is-progress' },
   resolved: { label: 'Resolved', className: 'is-resolved' },
@@ -93,32 +88,16 @@ export function getIssueCategoriesForEntity(entityType: IssueRecord['entity_type
 }
 
 export function createDefaultIssueTitle(category: string, entityName: string): string {
-  const label = ISSUE_CATEGORY_META[category]?.label || 'Issue';
+  const label = getIssueCategoryMeta(category)?.label || 'Issue';
   return `${label}: ${entityName || 'Unknown'}`;
 }
 
-export function normalizeIssuesSearch(search: IssuesSearch | undefined): NormalizedIssuesSearch {
-  const status = search?.status;
-  const category = search?.category;
-  const issueId = search?.issueId;
+export function getIssueCategoryMeta(category: string) {
+  return ISSUE_CATEGORY_META[category as IssueCategory];
+}
 
-  return {
-    status:
-      status === 'all' ||
-      status === 'open' ||
-      status === 'in_progress' ||
-      status === 'resolved' ||
-      status === 'dismissed'
-        ? status
-        : DEFAULT_ISSUES_SEARCH.status,
-    category: typeof category === 'string' && ISSUE_CATEGORY_KEYS.has(category) ? category : 'all',
-    issueId:
-      typeof issueId === 'number' && Number.isInteger(issueId) && issueId > 0
-        ? issueId
-        : typeof issueId === 'string' && /^[1-9]\d*$/.test(issueId)
-          ? Number(issueId)
-          : undefined,
-  };
+export function getIssueStatusMeta(status: string) {
+  return ISSUE_STATUS_META[status as IssueStatus];
 }
 
 export function dispatchIssuesRefreshEvent() {
@@ -179,10 +158,10 @@ export function formatIssueDate(value?: string): string {
 }
 
 export function formatStatusLabel(status: string): string {
-  return ISSUE_STATUS_META[status]?.label || status.replace(/_/g, ' ');
+  return getIssueStatusMeta(status)?.label || status.replace(/_/g, ' ');
 }
 
-export function getPriorityClassName(priority: string): 'high' | 'low' | 'normal' {
+export function getPriorityClassName(priority: string): IssuePriority {
   if (priority === 'high') return 'high';
   if (priority === 'low') return 'low';
   return 'normal';

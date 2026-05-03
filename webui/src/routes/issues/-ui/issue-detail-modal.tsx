@@ -17,6 +17,7 @@ import {
   formatStatusLabel,
   getIssueArtwork,
   getPriorityClassName,
+  getIssueCategoryMeta,
   ISSUE_CATEGORY_META,
   parseSnapshot,
 } from '../-issues.helpers';
@@ -178,15 +179,14 @@ export function IssueDetailModal({
 
   const snapshot = issue ? parseSnapshot(issue.snapshot_data) : {};
   const issueArtwork = getIssueArtwork(snapshot);
+  const issueCategoryMeta = issue ? getIssueCategoryMeta(issue.category) : undefined;
   const issueCategoryLabel = issue
-    ? `${ISSUE_CATEGORY_META[issue.category]?.icon || ''} ${
-        ISSUE_CATEGORY_META[issue.category]?.label || issue.category
-      }`.trim()
+    ? `${issueCategoryMeta?.icon || ''} ${issueCategoryMeta?.label || ISSUE_CATEGORY_META.other.label}`.trim()
     : '';
   const externalLinks = getExternalLinks(snapshot);
   const trackMetaItems = getTrackMetaItems(snapshot);
   const trackRows = Array.isArray(snapshot.tracks) ? snapshot.tracks : [];
-  const priorityClassName = issue ? getPriorityClassName(issue.priority) : 'normal';
+  const priorityLevel = issue ? getPriorityClassName(issue.priority) : 'normal';
   const albumMetaParts = issue ? getAlbumMetaParts(issue, snapshot) : [];
   const genreTags = Array.isArray(snapshot.genres) ? snapshot.genres.slice(0, 5) : [];
   const albumWorkflowInput = {
@@ -234,7 +234,7 @@ export function IssueDetailModal({
                   <img className={styles.issueHeroAlbumArt} src={issueArtwork} alt="" />
                 ) : (
                   <div className={styles.issueHeroAlbumPlaceholder}>
-                    {ISSUE_CATEGORY_META[issue.category]?.icon || ISSUE_CATEGORY_META.other.icon}
+                    {issueCategoryMeta?.icon || ISSUE_CATEGORY_META.other.icon}
                   </div>
                 )}
               </div>
@@ -298,7 +298,7 @@ export function IssueDetailModal({
             <div className={styles.issueDetailInfoBar}>
               <div className={styles.issueDetailInfoLeft}>
                 <span
-                  className={`${styles.issuePriorityDot} ${getPriorityDotClassName(priorityClassName)}`}
+                  className={`${styles.issuePriorityDot} ${getPriorityDotClassName(priorityLevel)}`}
                 />
                 <span className={`${styles.issueStatusBadge} ${getStatusClassName(issue.status)}`}>
                   {formatStatusLabel(issue.status)}
