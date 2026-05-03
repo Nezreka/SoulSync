@@ -2074,7 +2074,9 @@ class WatchlistScanner:
                 from core.library.track_identity import (
                     extract_external_ids,
                     find_library_track_by_external_id,
+                    find_provenance_by_external_id,
                 )
+                import os as _os_local
                 source_ids = extract_external_ids(track)
                 if source_ids:
                     matched = find_library_track_by_external_id(
@@ -2089,6 +2091,25 @@ class WatchlistScanner:
                             f"(matched on: {', '.join(sorted(source_ids.keys()))})"
                         )
                         return False  # Track exists in library
+
+                    # Second-tier fallback: provenance table. Catches the
+                    # window between "SoulSync downloaded the file" and
+                    # "media-server scan + sync populated the tracks row
+                    # with IDs". File still has to exist on disk —
+                    # otherwise a user who deleted a file would never get
+                    # it back.
+                    prov = find_provenance_by_external_id(
+                        self.database, external_ids=source_ids,
+                    )
+                    if prov is not None:
+                        prov_path = prov.get('file_path')
+                        if prov_path and _os_local.path.exists(prov_path):
+                            logger.info(
+                                f"[Provenance Match] Track found in download provenance: "
+                                f"'{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' "
+                                f"(matched on: {', '.join(sorted(source_ids.keys()))})"
+                            )
+                            return False
             except Exception as ext_id_err:
                 logger.debug(f"External-ID match probe failed (falling through to fuzzy): {ext_id_err}")
 

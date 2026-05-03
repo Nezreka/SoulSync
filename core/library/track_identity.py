@@ -199,8 +199,89 @@ def find_library_track_by_external_id(
                 pass
 
 
+# Maps the conceptual ID name to the column on the ``track_downloads``
+# (provenance) table where SoulSync persists the IDs at download time.
+# Naming convention differs from ``tracks``: provenance uses the
+# explicit ``_track_id`` suffix to match the existing column shape.
+PROVENANCE_ID_COLUMNS: Dict[str, str] = {
+    'spotify_id': 'spotify_track_id',
+    'itunes_id': 'itunes_track_id',
+    'deezer_id': 'deezer_track_id',
+    'tidal_id': 'tidal_track_id',
+    'qobuz_id': 'qobuz_track_id',
+    'mbid': 'musicbrainz_recording_id',
+    'audiodb_id': 'audiodb_id',
+    'soul_id': 'soul_id',
+    'isrc': 'isrc',
+}
+
+
+def find_provenance_by_external_id(
+    db: Any,
+    *,
+    external_ids: Dict[str, str],
+) -> Optional[Dict[str, Any]]:
+    """Return a row from the ``track_downloads`` table whose any external
+    ID column matches one of the provided IDs, or None.
+
+    Used as a second-tier fallback by the watchlist scanner: when the
+    primary library tracks-table lookup misses (e.g. the row exists but
+    the enrichment worker hasn't backfilled its IDs yet, or the row
+    doesn't exist yet because the media-server scan hasn't run since the
+    download), this checks whether SoulSync downloaded the file recently
+    enough that the IDs are sitting in the provenance table.
+
+    Caller should typically also confirm the ``file_path`` on the
+    returned row still exists on disk before treating the track as
+    "already in library" — otherwise a deleted file would prevent
+    re-download.
+    """
+    if not external_ids:
+        return None
+
+    clauses: List[str] = []
+    params: List[Any] = []
+    for id_name, id_value in external_ids.items():
+        column = PROVENANCE_ID_COLUMNS.get(id_name)
+        if not column or not id_value:
+            continue
+        clauses.append(f"({column} = ? AND {column} IS NOT NULL AND {column} != '')")
+        params.append(id_value)
+
+    if not clauses:
+        return None
+
+    where_external = " OR ".join(clauses)
+    sql = f"SELECT * FROM track_downloads WHERE ({where_external}) ORDER BY id DESC LIMIT 1"
+
+    conn = None
+    try:
+        conn = db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        try:
+            return dict(row)
+        except (TypeError, ValueError):
+            cols = [c[0] for c in cursor.description]
+            return dict(zip(cols, row, strict=False))
+    except Exception as exc:
+        logger.debug(f"find_provenance_by_external_id query failed: {exc}")
+        return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 __all__ = [
     'EXTERNAL_ID_COLUMNS',
+    'PROVENANCE_ID_COLUMNS',
     'extract_external_ids',
     'find_library_track_by_external_id',
+    'find_provenance_by_external_id',
 ]
