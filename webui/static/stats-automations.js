@@ -684,9 +684,22 @@ async function _autoImportLoadStatus() {
         if (settingsRow) settingsRow.style.display = data.running ? '' : 'none';
         if (scanNowBtn) scanNowBtn.style.display = data.running ? '' : 'none';
 
-        // Live scan progress
+        // Live scan + per-track processing progress
         if (progressEl) {
-            if (data.current_status === 'scanning') {
+            if (data.current_status === 'processing') {
+                progressEl.style.display = '';
+                if (progressText) {
+                    const idx = data.current_track_index || 0;
+                    const total = data.current_track_total || 0;
+                    const trackName = data.current_track_name || '';
+                    const folder = data.current_folder || '...';
+                    if (total > 0) {
+                        progressText.textContent = `Processing ${folder} — track ${idx}/${total}: ${trackName}`;
+                    } else {
+                        progressText.textContent = `Processing: ${folder}`;
+                    }
+                }
+            } else if (data.current_status === 'scanning') {
                 progressEl.style.display = '';
                 if (progressText) {
                     const stats = data.stats || {};
@@ -699,6 +712,7 @@ async function _autoImportLoadStatus() {
 
         if (statusText) {
             if (data.paused) statusText.textContent = 'Paused';
+            else if (data.current_status === 'processing') statusText.textContent = 'Processing...';
             else if (data.current_status === 'scanning') statusText.textContent = 'Scanning...';
             else if (data.running) {
                 // Show last scan time
@@ -713,7 +727,12 @@ async function _autoImportLoadStatus() {
                 }
                 statusText.textContent = watchText;
             } else statusText.textContent = 'Disabled';
-            statusText.className = 'auto-import-status ' + (data.running ? (data.current_status === 'scanning' ? 'scanning' : 'active') : 'disabled');
+            const _runningClass = data.current_status === 'scanning'
+                ? 'scanning'
+                : data.current_status === 'processing'
+                    ? 'processing'
+                    : 'active';
+            statusText.className = 'auto-import-status ' + (data.running ? _runningClass : 'disabled');
         }
     } catch (e) {}
 }

@@ -137,7 +137,15 @@ class AutoImportWorker:
         self._folder_snapshots: Dict[str, float] = {}  # path -> mtime_sum
         self._processing_paths: set = set()  # Paths currently being processed (skip on rescan)
         self._current_folder = ''
-        self._current_status = 'idle'
+        self._current_status = 'idle'  # 'idle' | 'scanning' | 'processing'
+        # Live per-track progress so the UI can show "Processing Speak Now
+        # (3/14: Mine)" while a multi-track album is being post-processed.
+        # Without this, auto-import goes silent for the entire processing
+        # window (which can be 5+ minutes for a full album) since
+        # ``_record_result`` only fires after every track is done.
+        self._current_track_index = 0
+        self._current_track_total = 0
+        self._current_track_name = ''
         self._stats = {'scanned': 0, 'auto_processed': 0, 'pending_review': 0, 'failed': 0}
         self._last_scan_time = None
 
@@ -173,6 +181,9 @@ class AutoImportWorker:
             'paused': self.paused,
             'current_folder': self._current_folder,
             'current_status': self._current_status,
+            'current_track_index': self._current_track_index,
+            'current_track_total': self._current_track_total,
+            'current_track_name': self._current_track_name,
             'stats': self._stats.copy(),
             'last_scan_time': self._last_scan_time,
         }
@@ -287,11 +298,19 @@ class AutoImportWorker:
                 has_strong_individual_matches = len(high_conf_matches) > 0
 
                 if (confidence >= threshold or has_strong_individual_matches) and auto_process:
-                    # Phase 5: Auto-process — process all tracks that matched
+                    # Phase 5: Auto-process — insert an in-progress row
+                    # so the UI sees the import the moment it starts,
+                    # then update it with the final status when done.
                     effective_conf = max(confidence, min(m['confidence'] for m in high_conf_matches) if high_conf_matches else 0)
                     logger.info(f"[Auto-Import] Processing {candidate.name} — "
                                 f"overall: {confidence:.0%}, {len(high_conf_matches)} strong matches, "
                                 f"{match_result.get('matched_count', 0)}/{match_result.get('total_tracks', '?')} tracks")
+
+                    in_progress_row_id = self._record_in_progress(
+                        candidate, identification, match_result,
+                    )
+                    self._current_status = 'processing'
+
                     success = self._process_matches(candidate, identification, match_result)
                     status = 'completed' if success else 'failed'
                     confidence = max(confidence, effective_conf)
@@ -299,22 +318,38 @@ class AutoImportWorker:
                         self._stats['auto_processed'] += 1
                     else:
                         self._stats['failed'] += 1
+
+                    # Reset live progress state regardless of outcome
+                    self._current_track_index = 0
+                    self._current_track_total = 0
+                    self._current_track_name = ''
+                    self._current_status = 'scanning' if not self.should_stop else 'idle'
+
+                    # Update the in-progress row in place — UI shows the
+                    # final result without a separate insert race.
+                    self._finalize_result(in_progress_row_id, status, confidence)
                 elif confidence >= 0.7:
                     status = 'pending_review'
                     self._stats['pending_review'] += 1
                     logger.info(f"[Auto-Import] Medium confidence ({confidence:.0%}) — pending review: {candidate.name}")
+                    self._record_result(candidate, status, confidence,
+                                        album_id=identification.get('album_id'),
+                                        album_name=identification.get('album_name'),
+                                        artist_name=identification.get('artist_name'),
+                                        image_url=identification.get('image_url'),
+                                        identification_method=identification.get('method'),
+                                        match_data=match_result)
                 else:
                     status = 'needs_identification'
                     self._stats['failed'] += 1
                     logger.info(f"[Auto-Import] Low confidence ({confidence:.0%}) — needs manual ID: {candidate.name}")
-
-                self._record_result(candidate, status, confidence,
-                                    album_id=identification.get('album_id'),
-                                    album_name=identification.get('album_name'),
-                                    artist_name=identification.get('artist_name'),
-                                    image_url=identification.get('image_url'),
-                                    identification_method=identification.get('method'),
-                                    match_data=match_result)
+                    self._record_result(candidate, status, confidence,
+                                        album_id=identification.get('album_id'),
+                                        album_name=identification.get('album_name'),
+                                        artist_name=identification.get('artist_name'),
+                                        image_url=identification.get('image_url'),
+                                        identification_method=identification.get('method'),
+                                        match_data=match_result)
 
             except Exception as e:
                 logger.error(f"[Auto-Import] Error processing {candidate.name}: {e}")
@@ -322,6 +357,12 @@ class AutoImportWorker:
                 self._stats['failed'] += 1
             finally:
                 self._processing_paths.discard(candidate.path)
+                # Defensive: if the inner code path didn't reset live
+                # progress (early raise, etc.), clear it so the UI
+                # doesn't show stale "processing track 3/14" forever.
+                self._current_track_index = 0
+                self._current_track_total = 0
+                self._current_track_name = ''
 
             # Rate limit between folders
             if self._interruptible_sleep(2):
@@ -1005,21 +1046,31 @@ class AutoImportWorker:
 
         processed = 0
         errors = []
+        all_matches = list(match_result.get('matches', []))
+        # Surface track total for the UI's live-progress widget. Matches
+        # the loop denominator so users see "3/14" while it's working.
+        self._current_track_total = len(all_matches)
 
-        for match in match_result.get('matches', []):
+        for index, match in enumerate(all_matches, start=1):
             track = match['track']
             file_path = match['file']
+
+            track_name = track.get('name', 'Unknown')
+            track_number = track.get('track_number', 1)
+            disc_number = track.get('disc_number', 1)
+            track_id = track.get('id', '')
+
+            # Update live progress BEFORE the per-track work so the UI
+            # sees the right "now processing track N: <name>" the
+            # moment polling fires (every 5s).
+            self._current_track_index = index
+            self._current_track_name = track_name
 
             if not os.path.exists(file_path):
                 errors.append(f"File not found: {os.path.basename(file_path)}")
                 continue
 
             try:
-                track_name = track.get('name', 'Unknown')
-                track_number = track.get('track_number', 1)
-                disc_number = track.get('disc_number', 1)
-                track_id = track.get('id', '')
-
                 # Build context matching the manual import format
                 context_key = f"auto_import_{candidate.folder_hash}_{track_number}"
                 context = {
@@ -1093,27 +1144,100 @@ class AutoImportWorker:
 
     # ── Database ──
 
+    def _record_in_progress(self, candidate: FolderCandidate, identification: Dict,
+                            match_result: Dict) -> Optional[int]:
+        """Insert a status='processing' row up-front so the UI can see
+        an in-flight import while it's still running. Returns the row's
+        id so ``_finalize_result`` can update the same row when done.
+
+        Without this, auto-import goes silent for the entire processing
+        window (5+ minutes for a full album) — the existing
+        ``_record_result`` only fires after every track is post-
+        processed, so the UI sees nothing in history while the user
+        waits.
+        """
+        try:
+            match_json = self._serialize_match_data(match_result)
+            conn = self.database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO auto_import_history
+                (folder_name, folder_path, folder_hash, status, confidence, album_id, album_name,
+                 artist_name, image_url, total_files, matched_files, match_data,
+                 identification_method, error_message, processed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                candidate.name, candidate.path, candidate.folder_hash,
+                'processing', match_result.get('confidence', 0.0),
+                identification.get('album_id'), identification.get('album_name'),
+                identification.get('artist_name'), identification.get('image_url'),
+                len(candidate.audio_files),
+                match_result.get('matched_count', 0),
+                match_json, identification.get('method'), None, None,
+            ))
+            row_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            return row_id
+        except Exception as e:
+            logger.error(f"Error recording in-progress auto-import row: {e}")
+            return None
+
+    def _finalize_result(self, row_id: int, status: str, confidence: float,
+                         error_message: Optional[str] = None) -> None:
+        """Update the in-progress row created by ``_record_in_progress``
+        with the final outcome. Idempotent — safe to call even if the
+        row creation failed (row_id is None)."""
+        if not row_id:
+            return
+        try:
+            conn = self.database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE auto_import_history
+                SET status = ?, confidence = ?, error_message = ?, processed_at = ?
+                WHERE id = ?
+            """, (
+                status, confidence, error_message,
+                datetime.now().isoformat() if status == 'completed' else None,
+                row_id,
+            ))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error finalizing auto-import row {row_id}: {e}")
+
+    def _serialize_match_data(self, match_data: Optional[Dict]) -> Optional[str]:
+        """Serialize match_result for storage. Strips the non-JSON-safe
+        ``album_data`` reference and per-match track dicts down to just
+        the fields the review UI uses."""
+        if not match_data:
+            return None
+        try:
+            serializable = {
+                'matches': [{'track_name': m['track']['name'],
+                             'track_number': m['track'].get('track_number', 0),
+                             'file': os.path.basename(m['file']),
+                             'confidence': m['confidence']} for m in match_data.get('matches', [])],
+                'unmatched_files': [os.path.basename(f) for f in match_data.get('unmatched_files', [])],
+                'total_tracks': match_data.get('total_tracks', 0),
+                'matched_count': match_data.get('matched_count', 0),
+                'coverage': match_data.get('coverage', 0),
+            }
+            return json.dumps(serializable)
+        except Exception:
+            return None
+
     def _record_result(self, candidate: FolderCandidate, status: str, confidence: float,
                        album_id: str = None, album_name: str = None, artist_name: str = None,
                        image_url: str = None, identification_method: str = None,
                        match_data: Dict = None, error_message: str = None):
-        """Record auto-import result to database."""
+        """Record auto-import result to database (one-shot, no in-progress
+        upsert). Used for early-failure paths that never enter the
+        per-track processing loop (identification failures, match
+        failures, low-confidence skips)."""
         try:
-            # Serialize match data (strip non-serializable album_data)
-            match_json = None
-            if match_data:
-                serializable = {
-                    'matches': [{'track_name': m['track']['name'],
-                                 'track_number': m['track'].get('track_number', 0),
-                                 'file': os.path.basename(m['file']),
-                                 'confidence': m['confidence']} for m in match_data.get('matches', [])],
-                    'unmatched_files': [os.path.basename(f) for f in match_data.get('unmatched_files', [])],
-                    'total_tracks': match_data.get('total_tracks', 0),
-                    'matched_count': match_data.get('matched_count', 0),
-                    'coverage': match_data.get('coverage', 0),
-                }
-                match_json = json.dumps(serializable)
-
+            match_json = self._serialize_match_data(match_data)
             conn = self.database._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
