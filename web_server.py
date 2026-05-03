@@ -3486,8 +3486,11 @@ def get_status():
             soulseek_relevant = (download_mode == 'soulseek' or
                                 (download_mode == 'hybrid' and 'soulseek' in hybrid_order))
 
-            # Serverless sources (YouTube, HiFi, Qobuz) are always available
-            serverless_sources = ('youtube', 'hifi', 'qobuz', 'tidal', 'deezer_dl')
+            # Serverless sources (YouTube, HiFi, Qobuz, Tidal, Deezer, Lidarr, SoundCloud)
+            # don't depend on slskd being reachable — when one of these is the
+            # active source, surface "connected" without probing slskd so the
+            # dashboard / sidebar indicator stays green.
+            serverless_sources = ('youtube', 'hifi', 'qobuz', 'tidal', 'deezer_dl', 'lidarr', 'soundcloud')
             is_serverless = (download_mode in serverless_sources or
                              (download_mode == 'hybrid' and
                               hybrid_order and any(s in serverless_sources for s in hybrid_order)))
