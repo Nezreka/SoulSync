@@ -438,7 +438,22 @@ class SoundcloudClient:
             if status == 'downloading':
                 downloaded = int(progress.get('downloaded_bytes') or 0)
                 total = int(progress.get('total_bytes') or progress.get('total_bytes_estimate') or 0)
-                self._update_download_progress(download_id, downloaded, total, speed_start)
+
+                # SoundCloud serves HLS-segmented audio. yt-dlp doesn't know
+                # the final byte total upfront — `total_bytes` and
+                # `total_bytes_estimate` reflect the CURRENT FRAGMENT size,
+                # not the whole download, so a byte-based percentage stays
+                # near 0 until the very end. Fall back to fragment progress
+                # which yt-dlp DOES populate accurately for HLS.
+                fragment_index = progress.get('fragment_index')
+                fragment_count = progress.get('fragment_count')
+                if (fragment_index is not None and fragment_count
+                        and fragment_count > 0):
+                    self._update_download_progress_fragmented(
+                        download_id, downloaded, fragment_index, fragment_count, speed_start,
+                    )
+                else:
+                    self._update_download_progress(download_id, downloaded, total, speed_start)
             elif status == 'finished':
                 # yt-dlp signals 'finished' once the bytes are on disk; the
                 # final size is authoritative. Mark progress at 99% — the
@@ -505,6 +520,52 @@ class SoundcloudClient:
             f"({final_size / (1024 * 1024):.1f} MB)"
         )
         return resolved_path
+
+    def _update_download_progress_fragmented(self, download_id: str, downloaded: int,
+                                             fragment_index: int, fragment_count: int,
+                                             speed_start: float) -> None:
+        """HLS-aware progress update.
+
+        SoundCloud's HLS streams arrive as N small fragments. yt-dlp can't
+        compute a true byte-based percentage because each fragment's
+        ``total_bytes`` only describes the current fragment, not the
+        whole download. fragment_index / fragment_count gives an accurate
+        progress signal — N fragments downloaded out of M known fragments
+        is the real ratio.
+        """
+        with self._download_lock:
+            if download_id not in self.active_downloads:
+                return
+            info = self.active_downloads[download_id]
+            info['transferred'] = downloaded
+
+            now = time.time()
+            elapsed = now - speed_start
+            info['speed'] = int(downloaded / elapsed) if elapsed > 0 else 0
+
+            # `fragment_index` is 1-based when yt-dlp finishes a fragment;
+            # use it directly. Cap below 100% so the worker thread owns the
+            # final flip.
+            progress = (fragment_index / fragment_count) * 100
+            info['progress'] = round(min(progress, 99.9), 1)
+
+            # Estimate total size so the UI's bytes-remaining reads match
+            # roughly what users expect — extrapolate from per-fragment
+            # average. Defensive against fragment_index being 0 on the
+            # very first callback.
+            if fragment_index > 0 and downloaded > 0:
+                est_total = int(downloaded * (fragment_count / fragment_index))
+                info['size'] = est_total
+            else:
+                info['size'] = downloaded
+
+            time_remaining: Optional[int] = None
+            remaining_fragments = max(0, fragment_count - fragment_index)
+            if info['speed'] > 0 and remaining_fragments > 0 and fragment_index > 0:
+                # Extrapolate seconds from per-fragment average download time.
+                seconds_per_fragment = elapsed / fragment_index if fragment_index > 0 else 0
+                time_remaining = int(remaining_fragments * seconds_per_fragment)
+            info['time_remaining'] = time_remaining
 
     def _update_download_progress(self, download_id: str, downloaded: int,
                                   total: int, speed_start: float) -> None:

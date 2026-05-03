@@ -515,6 +515,74 @@ def test_update_download_progress_silently_skips_unknown_id(tmp_dl: Path) -> Non
     client._update_download_progress('does_not_exist', 100, 1000, time.time())
 
 
+def test_update_download_progress_fragmented_uses_fragment_count(tmp_dl: Path) -> None:
+    """HLS-aware progress: fragment 5 of 10 → ~50%, regardless of byte
+    estimate. Pins the SoundCloud HLS UX fix where byte-based progress
+    stayed stuck near 0."""
+    client = SoundcloudClient(download_path=str(tmp_dl))
+    with client._download_lock:
+        client.active_downloads['hls1'] = {
+            'id': 'hls1', 'filename': '', 'username': 'soundcloud',
+            'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
+            'transferred': 0, 'speed': 0, 'time_remaining': None,
+        }
+    client._update_download_progress_fragmented(
+        'hls1', downloaded=512_000, fragment_index=5, fragment_count=10,
+        speed_start=time.time() - 1.0,
+    )
+    info = client.active_downloads['hls1']
+    assert 49.0 <= info['progress'] <= 51.0
+    # Total size estimate extrapolates from per-fragment average
+    assert info['size'] == 1_024_000  # 512000 * (10/5)
+    # Time remaining computed
+    assert info['time_remaining'] is not None and info['time_remaining'] > 0
+
+
+def test_update_download_progress_fragmented_caps_at_99_9(tmp_dl: Path) -> None:
+    """Final fragment shouldn't push percentage to 100 — outer thread
+    owns the final flip. Mirrors byte-based behavior."""
+    client = SoundcloudClient(download_path=str(tmp_dl))
+    with client._download_lock:
+        client.active_downloads['hls2'] = {
+            'id': 'hls2', 'filename': '', 'username': 'soundcloud',
+            'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
+            'transferred': 0, 'speed': 0, 'time_remaining': None,
+        }
+    client._update_download_progress_fragmented(
+        'hls2', downloaded=10_000_000, fragment_index=10, fragment_count=10,
+        speed_start=time.time() - 5.0,
+    )
+    assert client.active_downloads['hls2']['progress'] == 99.9
+
+
+def test_update_download_progress_fragmented_handles_zero_index(tmp_dl: Path) -> None:
+    """Defensive: yt-dlp can call the progress hook with fragment_index=0
+    on the very first callback (HLS init segment). Progress is 0% and
+    nothing crashes."""
+    client = SoundcloudClient(download_path=str(tmp_dl))
+    with client._download_lock:
+        client.active_downloads['hls3'] = {
+            'id': 'hls3', 'filename': '', 'username': 'soundcloud',
+            'state': 'InProgress, Downloading', 'progress': 0.0, 'size': 0,
+            'transferred': 0, 'speed': 0, 'time_remaining': None,
+        }
+    client._update_download_progress_fragmented(
+        'hls3', downloaded=0, fragment_index=0, fragment_count=10,
+        speed_start=time.time(),
+    )
+    # No exception, progress stays 0
+    assert client.active_downloads['hls3']['progress'] == 0.0
+
+
+def test_update_download_progress_fragmented_silently_skips_unknown_id(tmp_dl: Path) -> None:
+    client = SoundcloudClient(download_path=str(tmp_dl))
+    # Must not raise
+    client._update_download_progress_fragmented(
+        'unknown', downloaded=100, fragment_index=1, fragment_count=10,
+        speed_start=time.time(),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Status / cancel / clear
 # ---------------------------------------------------------------------------

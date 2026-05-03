@@ -641,6 +641,9 @@ if soulseek_client:
     if hasattr(soulseek_client, 'hifi'):
          soulseek_client.hifi.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
          logger.info("  Configured HiFi client shutdown callback")
+    if hasattr(soulseek_client, 'soundcloud') and soulseek_client.soundcloud:
+         soulseek_client.soundcloud.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
+         logger.info("  Configured SoundCloud client shutdown callback")
 
 # Initialize web scan manager for automatic post-download scanning
 try:
@@ -2472,11 +2475,15 @@ def get_cached_transfer_data():
                     key = _make_context_key(transfer.get('username'), transfer.get('filename', ''))
                     live_transfers_lookup[key] = transfer
 
-            # Also add non-Soulseek downloads (avoid redundant slskd call through orchestrator)
+            # Also add non-Soulseek downloads (avoid redundant slskd call through orchestrator).
+            # Every streaming source must appear here — task progress for in-flight
+            # downloads comes from this lookup. Missing a source = task.progress
+            # stays at 0 even when the underlying client knows the real percent.
             try:
                 all_downloads = []
                 for _dl_client in [soulseek_client.youtube, soulseek_client.tidal, soulseek_client.qobuz,
-                                   soulseek_client.hifi, soulseek_client.deezer_dl, soulseek_client.lidarr]:
+                                   soulseek_client.hifi, soulseek_client.deezer_dl, soulseek_client.lidarr,
+                                   getattr(soulseek_client, 'soundcloud', None)]:
                     if _dl_client:
                         try:
                             all_downloads.extend(run_async(_dl_client.get_all_downloads()))
@@ -3486,8 +3493,11 @@ def get_status():
             soulseek_relevant = (download_mode == 'soulseek' or
                                 (download_mode == 'hybrid' and 'soulseek' in hybrid_order))
 
-            # Serverless sources (YouTube, HiFi, Qobuz) are always available
-            serverless_sources = ('youtube', 'hifi', 'qobuz', 'tidal', 'deezer_dl')
+            # Serverless sources (YouTube, HiFi, Qobuz, Tidal, Deezer, Lidarr, SoundCloud)
+            # don't depend on slskd being reachable — when one of these is the
+            # active source, surface "connected" without probing slskd so the
+            # dashboard / sidebar indicator stays green.
+            serverless_sources = ('youtube', 'hifi', 'qobuz', 'tidal', 'deezer_dl', 'lidarr', 'soundcloud')
             is_serverless = (download_mode in serverless_sources or
                              (download_mode == 'hybrid' and
                               hybrid_order and any(s in serverless_sources for s in hybrid_order)))
@@ -7144,7 +7154,7 @@ def start_download():
             if download_id:
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
-                is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr')
+                is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud')
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -7526,7 +7536,7 @@ def get_download_status():
             all_streaming_downloads = run_async(soulseek_client.get_all_downloads())
 
             for download in all_streaming_downloads:
-                if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
+                if download.username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud'):
                     source_label = download.username.title()
                     # Convert DownloadStatus to transfer format that frontend expects
                     streaming_transfer = {
@@ -11715,7 +11725,7 @@ def redownload_search_sources(track_id):
                         quality = ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else candidate.quality or ''
                         svc = source_name if source_name != 'default' else 'hybrid'
                         uname = candidate.username
-                        if uname in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
+                        if uname in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud'):
                             svc = uname
                         source_candidates.append({
                             'username': uname,
@@ -17018,7 +17028,7 @@ def _try_source_reuse(task_id, batch_id, track):
     if not source_tracks or not last_source:
         _sr.info("Skipped — no source_tracks or no last_source")
         return False
-    if last_source.get('username') in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
+    if last_source.get('username') in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud'):
         _sr.info(f"Skipped — {last_source.get('username')} source (no folder-based reuse)")
         return False
 
@@ -17120,7 +17130,7 @@ def _store_batch_source(batch_id, username, filename):
     """Browse the successful download's folder and store results on the batch for reuse."""
     _sr = source_reuse_logger
     _sr.info(f"_store_batch_source called: batch={batch_id}, user={username}, file={filename}")
-    if not batch_id or username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr'):
+    if not batch_id or username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud'):
         _sr.info(f"Skipped — no batch_id or streaming source ({username})")
         return
 
@@ -19657,6 +19667,42 @@ def hifi_status():
         })
     except Exception as e:
         return jsonify({"available": False, "error": str(e)})
+
+
+@app.route('/api/soundcloud/status', methods=['GET'])
+def soundcloud_status():
+    """Report SoundCloud client availability + a quick reachability probe.
+
+    SoundCloud anonymous mode needs no credentials, so "configured" is
+    really "yt-dlp is installed and SoundCloud responds to a search."
+    The check fans out a real (cheap) yt-dlp call so the settings page's
+    Test Connection button gives a meaningful pass/fail signal instead
+    of just verifying the import succeeded.
+    """
+    try:
+        sc = None
+        if soulseek_client and hasattr(soulseek_client, 'soundcloud'):
+            sc = soulseek_client.soundcloud
+        if not sc:
+            return jsonify({
+                "available": False,
+                "configured": False,
+                "error": "SoundCloud client not initialized — check yt-dlp install",
+            })
+        if not sc.is_available():
+            return jsonify({
+                "available": False,
+                "configured": False,
+                "error": "yt-dlp not installed",
+            })
+        reachable = run_async(sc.check_connection())
+        return jsonify({
+            "available": True,
+            "configured": True,
+            "reachable": bool(reachable),
+        })
+    except Exception as exc:
+        return jsonify({"available": False, "configured": False, "error": str(exc)})
 
 
 @app.route('/api/hifi/instances', methods=['GET'])

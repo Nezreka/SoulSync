@@ -4365,6 +4365,7 @@
                                         <option value="hifi">HiFi Only (Free Lossless)</option>
                                         <option value="deezer_dl">Deezer Only</option>
                                         <option value="lidarr">Lidarr Only</option>
+                                        <option value="soundcloud">SoundCloud Only</option>
                                         <option value="hybrid">Hybrid (Primary + Fallback)</option>
                                     </select>
                                     <div class="setting-help-text">
@@ -4412,8 +4413,8 @@
                                         <!-- Populated by JS -->
                                     </div>
                                     <!-- Hidden selects for backward compatibility with saveSettings -->
-                                    <select id="hybrid-primary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option></select>
-                                    <select id="hybrid-secondary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option></select>
+                                    <select id="hybrid-primary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option><option value="soundcloud">SoundCloud</option></select>
+                                    <select id="hybrid-secondary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option><option value="soundcloud">SoundCloud</option></select>
                                 </div>
 
                                 <!-- Soulseek Settings (shown when soulseek is active source) -->
@@ -4671,6 +4672,28 @@
                                                 Test Connection
                                             </button>
                                             <span id="deezer-download-status" class="setting-help-text" style="margin-left: 8px;"></span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- SoundCloud Download Settings -->
+                                <div id="soundcloud-download-settings-container" style="display: none;">
+                                    <div class="form-group">
+                                        <div class="setting-help-text">
+                                            SoundCloud downloads run anonymously — no account required. Use this for DJ mixes,
+                                            remixes, and tracks that aren't on Spotify/Tidal/Deezer.
+                                            <br><br>
+                                            <strong>Quality:</strong> 128 kbps MP3 / AAC depending on the upload (anonymous tier).
+                                            SoundCloud doesn't expose lossless audio to anyone.
+                                        </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>SoundCloud Status:</label>
+                                        <div class="form-actions" style="margin-top: 4px;">
+                                            <button class="test-button" id="soundcloud-test-btn" onclick="testSoundcloudConnection()">
+                                                Test Connection
+                                            </button>
+                                            <span id="soundcloud-connection-status" class="setting-help-text" style="margin-left: 8px;"></span>
                                         </div>
                                     </div>
                                 </div>
