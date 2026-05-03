@@ -277,11 +277,12 @@ class LidarrDownloadClient:
                     root_folder = self._get_root_folder()
                     quality_profile_id = self._get_quality_profile_id()
 
+                    metadata_profile_id = self._get_metadata_profile_id()
                     add_artist = {
                         'foreignArtistId': artist_data.get('foreignArtistId', ''),
                         'artistName': artist_data.get('artistName', ''),
                         'qualityProfileId': quality_profile_id,
-                        'metadataProfileId': 1,
+                        'metadataProfileId': metadata_profile_id,
                         'rootFolderPath': root_folder,
                         'monitored': False,
                         'addOptions': {'monitor': 'none', 'searchForMissingAlbums': False},
@@ -331,8 +332,15 @@ class LidarrDownloadClient:
                 self._set_error(download_id, f'Failed to trigger download: {e}')
                 return
 
-            # Step 4: Poll queue for progress
+            # Step 4: Poll until Lidarr reports the album has imported files.
+            #
+            # Old approach used `for/else` with `break` from the inner queue
+            # loop, but inner-break only escaped the queue iteration — the
+            # outer poll loop kept spinning even after we'd detected
+            # completion. Replaced with an explicit `download_complete` flag
+            # that breaks the OUTER loop once trackFileCount > 0.
             max_polls = 600  # 10 minutes max
+            download_complete = False
             for poll in range(max_polls):
                 if self.shutdown_check and self.shutdown_check():
                     self._set_error(download_id, 'Server shutting down')
@@ -350,72 +358,125 @@ class LidarrDownloadClient:
                         for item in queue['records']:
                             item_album = item.get('album', {})
                             if item_album.get('foreignAlbumId') == album.get('foreignAlbumId', ''):
-                                # Found our download in the queue
+                                # Surface progress while still downloading.
                                 status = item.get('status', '').lower()
-                                progress = 100.0 - (item.get('sizeleft', 0) / max(item.get('size', 1), 1) * 100)
+                                size_left = item.get('sizeleft', 0)
+                                size_total = max(item.get('size', 1), 1)
+                                progress = 100.0 - (size_left / size_total * 100)
 
                                 with self._download_lock:
                                     self.active_downloads[download_id]['progress'] = min(progress, 95.0)
 
-                                if status in ('completed', 'imported'):
-                                    break
-                                elif status in ('failed', 'warning'):
+                                if status in ('failed', 'warning'):
                                     self._set_error(download_id, f'Lidarr download failed: {status}')
                                     return
+                                # 'completed' / 'imported' in the queue is
+                                # transient — Lidarr drops the item once
+                                # import finishes. Don't break here; let the
+                                # trackFileCount check below decide.
 
-                        else:
-                            # Not in queue — might be completed already
-                            # Check if album has files
-                            if poll > 10:  # Give it at least 10 seconds
-                                album_check = self._api_get(f'album/{lidarr_album_id}')
-                                if album_check and album_check.get('statistics', {}).get('trackFileCount', 0) > 0:
-                                    break
-                    else:
-                        # No queue data — check if completed
-                        if poll > 10:
-                            album_check = self._api_get(f'album/{lidarr_album_id}')
-                            if album_check and album_check.get('statistics', {}).get('trackFileCount', 0) > 0:
-                                break
+                    # Authoritative completion signal: album has imported
+                    # files. Cheap to call (single GET on a known id) and
+                    # works even when the queue record disappeared between
+                    # polls.
+                    if poll > 5:  # Give Lidarr a few seconds to start
+                        album_check = self._api_get(f'album/{lidarr_album_id}')
+                        if (album_check
+                                and album_check.get('statistics', {}).get('trackFileCount', 0) > 0):
+                            download_complete = True
+                            break
 
                 except Exception as e:
                     logger.debug(f"Queue poll error: {e}")
 
                 time.sleep(1)
-            else:
+
+            if not download_complete:
                 self._set_error(download_id, 'Download timed out')
                 return
 
-            # Step 5: Find and import downloaded files
+            # Step 5: Find and import the wanted track.
+            #
+            # Lidarr grabs whole albums; SoulSync's matched-context
+            # post-processing wants the SPECIFIC track the user
+            # requested. Old behavior copied every track in the album
+            # and reported `imported_files[0]` as `file_path` — which
+            # almost always pointed to track 1, not the user's actual
+            # track. Post-processing then tagged track 1 with the
+            # requested track's metadata. Misfiling guaranteed.
+            #
+            # New behavior: identify the wanted track by title (parsed
+            # from display_name), look up its trackFile via Lidarr's
+            # `track` API, copy ONLY that file. For album-level
+            # dispatches (no specific track in display_name), fall back
+            # to copying the first imported file so existing
+            # album-grab UX still works.
             with self._download_lock:
                 self.active_downloads[download_id]['progress'] = 96.0
 
             try:
-                # Get track files from Lidarr
-                track_files = self._api_get('trackfile', params={'albumId': lidarr_album_id})
-                if not track_files:
-                    self._set_error(download_id, 'No files found after download')
-                    return
+                wanted_title = self._extract_wanted_track_title(display_name)
+                wanted_src = self._pick_track_file_for_wanted(lidarr_album_id, wanted_title)
 
-                # Copy files to SoulSync's download path
-                imported_files = []
-                for tf in track_files:
-                    src_path = tf.get('path', '')
-                    if src_path and os.path.exists(src_path):
-                        dst_path = os.path.join(str(self.download_path), os.path.basename(src_path))
-                        try:
-                            shutil.copy2(src_path, dst_path)
-                            imported_files.append(dst_path)
-                        except Exception as e:
-                            logger.warning(f"Failed to copy {src_path}: {e}")
+                if wanted_src:
+                    # Copy ONLY the matched track. Other album files stay
+                    # in Lidarr's root folder and will be cleaned up by
+                    # the cleanup step (Step 6) when configured.
+                    dst_path = os.path.join(str(self.download_path),
+                                            os.path.basename(wanted_src))
+                    try:
+                        shutil.copy2(wanted_src, dst_path)
+                    except Exception as e:
+                        self._set_error(download_id, f'Failed to copy wanted track: {e}')
+                        return
 
-                if imported_files:
                     with self._download_lock:
                         self.active_downloads[download_id]['state'] = 'Completed, Succeeded'
                         self.active_downloads[download_id]['progress'] = 100.0
-                        self.active_downloads[download_id]['file_path'] = imported_files[0]
-                    logger.info(f"Lidarr download complete: {display_name} ({len(imported_files)} files)")
+                        self.active_downloads[download_id]['file_path'] = dst_path
+                    logger.info(
+                        f"Lidarr download complete: {display_name} "
+                        f"-> {os.path.basename(dst_path)}"
+                    )
                 else:
-                    self._set_error(download_id, 'Failed to import files')
+                    # No specific track wanted (album dispatch) OR fuzzy
+                    # match failed. Fall back to copying the first imported
+                    # file so something always lands on disk; album-level
+                    # callers still get a usable file_path.
+                    track_files = self._api_get('trackfile', params={'albumId': lidarr_album_id})
+                    if not track_files:
+                        self._set_error(download_id, 'No files found after download')
+                        return
+
+                    imported_files = []
+                    for tf in track_files:
+                        src_path = tf.get('path', '')
+                        if src_path and os.path.exists(src_path):
+                            dst_path = os.path.join(str(self.download_path),
+                                                    os.path.basename(src_path))
+                            try:
+                                shutil.copy2(src_path, dst_path)
+                                imported_files.append(dst_path)
+                            except Exception as e:
+                                logger.warning(f"Failed to copy {src_path}: {e}")
+
+                    if imported_files:
+                        with self._download_lock:
+                            self.active_downloads[download_id]['state'] = 'Completed, Succeeded'
+                            self.active_downloads[download_id]['progress'] = 100.0
+                            self.active_downloads[download_id]['file_path'] = imported_files[0]
+                        if wanted_title:
+                            logger.warning(
+                                f"Lidarr: wanted track '{wanted_title}' not matched in album "
+                                f"— falling back to first imported file ({len(imported_files)} total)"
+                            )
+                        else:
+                            logger.info(
+                                f"Lidarr album-level download complete: {display_name} "
+                                f"({len(imported_files)} files)"
+                            )
+                    else:
+                        self._set_error(download_id, 'Failed to import files')
 
             except Exception as e:
                 self._set_error(download_id, f'Import failed: {e}')
@@ -439,6 +500,102 @@ class LidarrDownloadClient:
                 self.active_downloads[download_id]['state'] = 'Errored'
                 self.active_downloads[download_id]['error'] = error
         logger.error(f"Lidarr download error: {error}")
+
+    @staticmethod
+    def _extract_wanted_track_title(display_name: str) -> str:
+        """Pull the track title out of the dispatch display string.
+
+        ``_search_sync`` builds two display shapes:
+        - Track dispatch: ``f"{artist} - {album} - {track_title}"``
+        - Album dispatch: ``f"{artist} - {album}"``
+
+        Need >=3 parts to confidently identify a track. 2-part strings
+        are album-level dispatches — return empty so the caller falls
+        back to copying the first file (correct behavior for "give me
+        the whole album"). Track titles that themselves contain ``' - '``
+        (e.g. live versions) get rejoined from parts[2:].
+        """
+        if not display_name:
+            return ''
+        parts = display_name.split(' - ')
+        if len(parts) < 3:
+            return ''
+        return ' - '.join(parts[2:]).strip()
+
+    def _pick_track_file_for_wanted(self, lidarr_album_id: int,
+                                    wanted_title: str) -> Optional[str]:
+        """Find the on-disk path of the imported file matching the wanted track.
+
+        Walks Lidarr's `track` API to map track titles → trackFileIds,
+        then resolves the trackFileId to a path via `trackfile`. Returns
+        None when the album has no usable wanted-track match (caller
+        falls back to the first imported file in that case so
+        album-level dispatches still work).
+        """
+        if not wanted_title:
+            return None
+
+        tracks = self._api_get('track', params={'albumId': lidarr_album_id})
+        if not tracks or not isinstance(tracks, list):
+            return None
+
+        # Normalize for case-insensitive fuzzy match. Lidarr's track titles
+        # come from MusicBrainz so they're usually canonical, but
+        # punctuation / casing varies.
+        wanted_norm = self._normalize_for_match(wanted_title)
+        best_track_file_id: Optional[int] = None
+        best_score = 0.0
+        for t in tracks:
+            track_title = t.get('title', '') or ''
+            track_file_id = t.get('trackFileId')
+            if not track_file_id:
+                continue
+            score = self._title_similarity(wanted_norm,
+                                            self._normalize_for_match(track_title))
+            if score > best_score:
+                best_score = score
+                best_track_file_id = track_file_id
+
+        # 0.7 threshold avoids picking the wrong track when none match
+        # well — caller falls back to first-imported behavior in that case.
+        if best_score < 0.7 or best_track_file_id is None:
+            return None
+
+        # Resolve trackFileId → path. /trackfile/{id} returns one record.
+        tf = self._api_get(f'trackfile/{best_track_file_id}')
+        if not tf:
+            return None
+        path = tf.get('path', '')
+        if path and os.path.exists(path):
+            return path
+        return None
+
+    @staticmethod
+    def _normalize_for_match(s: str) -> str:
+        """Lower + strip punctuation + collapse whitespace for fuzzy compare."""
+        if not s:
+            return ''
+        cleaned = re.sub(r'[^\w\s]', '', s.lower())
+        return ' '.join(cleaned.split())
+
+    @staticmethod
+    def _title_similarity(a: str, b: str) -> float:
+        """Cheap title similarity: equal → 1.0, substring → 0.85,
+        token overlap ratio otherwise. Avoids pulling SequenceMatcher
+        for every comparison since this runs in the hot download path."""
+        if not a or not b:
+            return 0.0
+        if a == b:
+            return 1.0
+        if a in b or b in a:
+            return 0.85
+        a_tokens = set(a.split())
+        b_tokens = set(b.split())
+        if not a_tokens or not b_tokens:
+            return 0.0
+        intersection = a_tokens & b_tokens
+        union = a_tokens | b_tokens
+        return len(intersection) / len(union) if union else 0.0
 
     async def get_all_downloads(self) -> List[DownloadStatus]:
         with self._download_lock:
@@ -536,3 +693,22 @@ class LidarrDownloadClient:
             if p.get('name', '').lower() == self._quality_profile.lower():
                 return p['id']
         return profiles[0].get('id', 1) if profiles else 1
+
+    def _get_metadata_profile_id(self) -> int:
+        """Resolve a usable metadataProfileId for adding artists.
+
+        Lidarr requires `metadataProfileId` when creating artist records.
+        The default profile is usually id=1, but on installs where the
+        user deleted/recreated profiles, that id may not exist — leading
+        to the API rejecting the artist-add with a 400. Fetch live to
+        pick whatever's actually configured. Falls back to 1 only when
+        the API call fails entirely (preserves previous behavior so this
+        change can't make things worse).
+        """
+        profiles = self._api_get('metadataprofile')
+        if profiles and isinstance(profiles, list):
+            for p in profiles:
+                pid = p.get('id')
+                if isinstance(pid, int):
+                    return pid
+        return 1
