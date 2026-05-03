@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { ISSUE_CATEGORY_META } from './-issues.helpers';
-import { ISSUE_SEARCH_SCHEMA } from './-issues.types';
+import { issueSearchSchema } from './-issues.types';
 
-describe('ISSUE_SEARCH_SCHEMA', () => {
+describe('issueSearchSchema', () => {
   it('falls back to all for unknown categories', () => {
-    expect(ISSUE_SEARCH_SCHEMA.parse({ category: 'not_real' })).toEqual({
+    expect(issueSearchSchema.parse({ category: 'not_real' })).toEqual({
       status: 'open',
       category: 'all',
       issueId: undefined,
@@ -13,15 +13,23 @@ describe('ISSUE_SEARCH_SCHEMA', () => {
   });
 
   it('preserves known categories', () => {
-    expect(ISSUE_SEARCH_SCHEMA.parse({ category: 'wrong_metadata' })).toEqual({
+    expect(issueSearchSchema.parse({ category: 'wrong_metadata' })).toEqual({
       status: 'open',
       category: 'wrong_metadata',
       issueId: undefined,
     });
   });
 
+  it('falls back to open for unknown statuses', () => {
+    expect(issueSearchSchema.parse({ status: 'not_real' })).toEqual({
+      status: 'open',
+      category: 'all',
+      issueId: undefined,
+    });
+  });
+
   it('drops invalid issue ids', () => {
-    expect(ISSUE_SEARCH_SCHEMA.parse({ issueId: 'abc123' })).toEqual({
+    expect(issueSearchSchema.parse({ issueId: 'abc123' })).toEqual({
       status: 'open',
       category: 'all',
       issueId: undefined,
@@ -29,7 +37,7 @@ describe('ISSUE_SEARCH_SCHEMA', () => {
   });
 
   it('normalizes numeric issue ids', () => {
-    expect(ISSUE_SEARCH_SCHEMA.parse({ issueId: '7' })).toEqual({
+    expect(issueSearchSchema.parse({ issueId: '7' })).toEqual({
       status: 'open',
       category: 'all',
       issueId: 7,

@@ -33,13 +33,13 @@ export const ISSUE_SEARCH_STATUS_VALUES = [
 ] as const;
 export const ISSUE_SEARCH_CATEGORY_VALUES = ['all', ...ISSUE_CATEGORY_VALUES] as const;
 
-export const ISSUE_SEARCH_SCHEMA = z.object({
+export const issueSearchSchema = z.object({
   status: z.enum(ISSUE_SEARCH_STATUS_VALUES).default('open').catch('open'),
   category: z.enum(ISSUE_SEARCH_CATEGORY_VALUES).default('all').catch('all'),
   issueId: z.coerce.number().int().positive().optional().catch(undefined),
 });
 
-export type IssuesSearch = z.infer<typeof ISSUE_SEARCH_SCHEMA>;
+export type IssuesSearch = z.infer<typeof issueSearchSchema>;
 
 export interface IssueTrackRow extends Record<string, unknown> {
   bitrate?: string | number;
