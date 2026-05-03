@@ -7,7 +7,7 @@ import { ROUTER_ROOT_ID } from '@/platform/shell/route-controllers';
 import { createAppQueryClient } from './query-client';
 import { AppRouterProvider, createAppRouter } from './router';
 
-export function bootstrapApp() {
+export async function bootstrapApp() {
   const container = document.getElementById(ROUTER_ROOT_ID);
   if (!container) return null;
 
@@ -20,4 +20,4 @@ export function bootstrapApp() {
   return { queryClient, router };
 }
 
-bootstrapApp();
+void bootstrapApp();

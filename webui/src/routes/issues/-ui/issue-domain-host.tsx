@@ -14,8 +14,7 @@ import {
   TextArea,
   TextInput,
 } from '@/components/form';
-import { getShellProfileContext } from '@/platform/shell/bridge';
-import { useShellBridge } from '@/platform/shell/route-controllers';
+import { useProfile } from '@/platform/shell/route-controllers';
 
 import type { IssuePriority, IssueReportPayload } from '../-issues.types';
 
@@ -44,15 +43,13 @@ const DEFAULT_REPORT_ISSUE_VALUES: ReportIssueFormValues = {
 };
 
 export function IssueDomainHost() {
-  const bridge = useShellBridge();
   const queryClient = useQueryClient();
-  const profile = getShellProfileContext(bridge);
+  const profile = useProfile();
   const [reportPayload, setReportPayload] = useState<IssueReportPayload | null>(null);
-  const profileId = profile?.profileId ?? 0;
+  const profileId = profile.profileId;
 
   const countsQuery = useQuery({
     ...issueCountsQueryOptions(profileId),
-    enabled: profileId > 0,
   });
 
   useEffect(() => {

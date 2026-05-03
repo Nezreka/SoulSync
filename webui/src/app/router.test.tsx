@@ -2,7 +2,11 @@ import { createMemoryHistory } from '@tanstack/react-router';
 import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ShellBridge, ShellPageId } from '@/platform/shell/bridge';
+import {
+  SHELL_PROFILE_CONTEXT_CHANGED_EVENT,
+  type ShellBridge,
+  type ShellPageId,
+} from '@/platform/shell/bridge';
 
 import { createAppQueryClient } from './query-client';
 import { AppRouterProvider, createAppRouter } from './router';
@@ -129,10 +133,30 @@ describe('createAppRouter', () => {
     render(<AppRouterProvider router={router} queryClient={queryClient} />);
 
     await waitFor(() => {
-      expect(window.SoulSyncWebShellBridge?.activateLegacyPath).toHaveBeenCalledWith('/discover');
+      expect(history.location.pathname).toBe('/discover');
+    });
+  });
+
+  it('waits for profile context before rendering React routes', async () => {
+    const getCurrentProfileContext = vi.fn(() => null);
+    window.SoulSyncWebShellBridge = createShellBridge({
+      getCurrentProfileContext,
     });
 
-    expect(history.location.pathname).toBe('/discover');
+    const queryClient = createAppQueryClient();
+    const history = createMemoryHistory({ initialEntries: ['/issues'] });
+    const router = createAppRouter({ history, queryClient });
+
+    render(<AppRouterProvider router={router} queryClient={queryClient} />);
+
+    expect(screen.queryByTestId('issues-board')).not.toBeInTheDocument();
+
+    getCurrentProfileContext.mockReturnValue({ profileId: 1, isAdmin: false });
+    window.dispatchEvent(new CustomEvent(SHELL_PROFILE_CONTEXT_CHANGED_EVENT));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('issues-board')).toBeInTheDocument();
+    });
   });
 
   it('redirects the root route to the profile home page', async () => {

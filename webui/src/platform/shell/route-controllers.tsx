@@ -1,30 +1,24 @@
-import { useRouter } from '@tanstack/react-router';
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useRouteContext, useRouter } from '@tanstack/react-router';
+import { useEffect, useLayoutEffect } from 'react';
 
-import { getProfileHomePath, getShellBridge, type ShellPageId } from './bridge';
+import { getProfileHomePath, type ShellContext, type ShellPageId } from './bridge';
 
 export const ROUTER_ROOT_ID = 'webui-react-root';
-export const SHELL_BRIDGE_READY_EVENT = 'ss:webui-shell-bridge-ready';
-export const SHELL_PROFILE_CONTEXT_CHANGED_EVENT = 'ss:webui-profile-context-changed';
+
+export function useShellContext(): ShellContext {
+  const context = useRouteContext({
+    from: '__root__',
+    select: (routeContext) => routeContext.shell,
+  });
+  return context;
+}
 
 export function useShellBridge() {
-  const [, setRevision] = useState(0);
+  return useShellContext().bridge;
+}
 
-  useEffect(() => {
-    const handleContextChange = () => {
-      setRevision((value) => value + 1);
-    };
-
-    handleContextChange();
-    window.addEventListener(SHELL_BRIDGE_READY_EVENT, handleContextChange);
-    window.addEventListener(SHELL_PROFILE_CONTEXT_CHANGED_EVENT, handleContextChange);
-    return () => {
-      window.removeEventListener(SHELL_BRIDGE_READY_EVENT, handleContextChange);
-      window.removeEventListener(SHELL_PROFILE_CONTEXT_CHANGED_EVENT, handleContextChange);
-    };
-  }, []);
-
-  return getShellBridge();
+export function useProfile() {
+  return useShellContext().profile;
 }
 
 export function LegacyRouteController({ pathname }: { pathname: string }) {
