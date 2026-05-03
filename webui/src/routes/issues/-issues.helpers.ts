@@ -1,7 +1,6 @@
 import type { IssueRecord, IssuesSearch, IssueSnapshot } from './-issues.types';
 
 export const REFRESH_EVENT = 'ss:issues-refresh';
-export const CLOSE_EVENT = 'ss:issues-close-detail';
 
 export const DEFAULT_ISSUES_SEARCH = {
   status: 'open',
@@ -124,10 +123,6 @@ export function normalizeIssuesSearch(search: IssuesSearch | undefined): Normali
 
 export function dispatchIssuesRefreshEvent() {
   window.dispatchEvent(new CustomEvent(REFRESH_EVENT));
-}
-
-export function dispatchIssuesCloseEvent() {
-  window.dispatchEvent(new CustomEvent(CLOSE_EVENT));
 }
 
 export function parseSnapshot(snapshot: IssueRecord['snapshot_data']): IssueSnapshot {
