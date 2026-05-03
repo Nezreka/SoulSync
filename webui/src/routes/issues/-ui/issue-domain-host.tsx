@@ -1,6 +1,6 @@
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
@@ -20,9 +20,8 @@ import { useProfile } from '@/platform/shell/route-controllers';
 
 import type { IssueReportPayload } from '../-issues.types';
 
-import { createIssue, issueCountsQueryOptions } from '../-issues.api';
+import { createIssue, issueCountsQueryOptions, invalidateIssuesQueries } from '../-issues.api';
 import {
-  REFRESH_EVENT,
   createDefaultIssueTitle,
   getIssueCategoriesForEntity,
   getEntityLabel,
@@ -35,6 +34,9 @@ export function IssueDomainHost() {
   const profile = useProfile();
   const [reportPayload, setReportPayload] = useState<IssueReportPayload | null>(null);
   const profileId = profile.profileId;
+  const refreshIssues = useCallback(() => {
+    void invalidateIssuesQueries(queryClient);
+  }, [queryClient]);
 
   const countsQuery = useQuery({
     ...issueCountsQueryOptions(profileId),
@@ -47,17 +49,6 @@ export function IssueDomainHost() {
   }, [countsQuery.data]);
 
   useEffect(() => {
-    const handleRefresh = () => {
-      void queryClient.invalidateQueries({ queryKey: ISSUE_DOMAIN_QUERY_KEY });
-    };
-
-    window.addEventListener(REFRESH_EVENT, handleRefresh);
-    return () => {
-      window.removeEventListener(REFRESH_EVENT, handleRefresh);
-    };
-  }, [queryClient]);
-
-  useEffect(() => {
     window.SoulSyncIssueDomain = {
       openReportIssue(payload) {
         setReportPayload(payload);
@@ -65,9 +56,7 @@ export function IssueDomainHost() {
       closeReportIssue() {
         setReportPayload(null);
       },
-      refresh() {
-        void queryClient.invalidateQueries({ queryKey: ISSUE_DOMAIN_QUERY_KEY });
-      },
+      refresh: refreshIssues,
     };
 
     return () => {
@@ -87,7 +76,7 @@ export function IssueDomainHost() {
           onClose={() => setReportPayload(null)}
           onSubmitted={() => {
             setReportPayload(null);
-            void queryClient.invalidateQueries({ queryKey: ISSUE_DOMAIN_QUERY_KEY });
+            refreshIssues();
           }}
         />
       )}
@@ -329,8 +318,6 @@ function ReportIssueModal({
     </DialogFrame>
   );
 }
-
-const ISSUE_DOMAIN_QUERY_KEY = ['issues'] as const;
 
 const DEFAULT_REPORT_ISSUE_VALUES: ReportIssueFormValues = {
   category: '',

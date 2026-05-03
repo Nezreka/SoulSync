@@ -1,6 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useEffect } from 'react';
 
 import { Select } from '@/components/form';
 import { Show } from '@/components/primitives';
@@ -8,10 +7,12 @@ import { useProfile, useReactPageShell } from '@/platform/shell/route-controller
 
 import type { IssueCounts, IssuePriority, IssueRecord, IssuesSearch } from '../-issues.types';
 
-import { issueCountsQueryOptions, issueListQueryOptions } from '../-issues.api';
 import {
-  REFRESH_EVENT,
-  dispatchIssuesRefreshEvent,
+  issueCountsQueryOptions,
+  issueListQueryOptions,
+  invalidateIssuesQueries,
+} from '../-issues.api';
+import {
   formatIssueDate,
   getEntityDetails,
   getEntityLabel,
@@ -31,6 +32,7 @@ import styles from './issues-page.module.css';
 
 export function IssuesPage() {
   useReactPageShell('issues');
+  const queryClient = useQueryClient();
   const navigate = useNavigate({ from: Route.fullPath });
   const params = Route.useSearch();
 
@@ -42,16 +44,18 @@ export function IssuesPage() {
     });
   };
 
+  const handleMutationSuccess = () => {
+    clearIssueSelection();
+    void invalidateIssuesQueries(queryClient);
+  };
+
   return (
     <>
       <IssueBoard />
       <IssueDetailModal
         issueId={params.issueId}
         onClose={clearIssueSelection}
-        onMutationSuccess={() => {
-          clearIssueSelection();
-          dispatchIssuesRefreshEvent();
-        }}
+        onMutationSuccess={handleMutationSuccess}
       />
     </>
   );
@@ -59,20 +63,8 @@ export function IssuesPage() {
 
 function IssueBoard() {
   const { isAdmin, profileId } = useProfile();
-  const queryClient = useQueryClient();
   const navigate = useNavigate({ from: Route.fullPath });
   const params = Route.useSearch();
-
-  useEffect(() => {
-    const handleRefresh = () => {
-      void queryClient.invalidateQueries({ queryKey: ['issues'] });
-    };
-
-    window.addEventListener(REFRESH_EVENT, handleRefresh);
-    return () => {
-      window.removeEventListener(REFRESH_EVENT, handleRefresh);
-    };
-  }, [queryClient]);
 
   const countsQuery = useQuery({
     ...issueCountsQueryOptions(profileId),

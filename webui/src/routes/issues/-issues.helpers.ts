@@ -6,8 +6,6 @@ import {
   type IssueStatus,
 } from './-issues.types';
 
-export const REFRESH_EVENT = 'ss:issues-refresh';
-
 export const ISSUE_CATEGORY_META: Record<
   IssueCategory,
   { label: string; icon: string; description: string; applies: Array<'track' | 'album' | 'artist'> }
@@ -98,10 +96,6 @@ export function getIssueCategoryMeta(category: string) {
 
 export function getIssueStatusMeta(status: string) {
   return ISSUE_STATUS_META[status as IssueStatus];
-}
-
-export function dispatchIssuesRefreshEvent() {
-  window.dispatchEvent(new CustomEvent(REFRESH_EVENT));
 }
 
 export function parseSnapshot(snapshot: IssueRecord['snapshot_data']): IssueSnapshot {
