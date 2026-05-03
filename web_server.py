@@ -5583,19 +5583,32 @@ def auth_tidal():
             tidal_oauth_state["code_verifier"] = temp_tidal_client.code_verifier
             tidal_oauth_state["code_challenge"] = temp_tidal_client.code_challenge
         
-        # Use the user's configured redirect_uri from settings — don't override
-        # with request.host, which in Docker returns the container hostname
+        # Use the user's configured redirect_uri from settings, falling back
+        # to the constructor default (``http://127.0.0.1:<port>/tidal/callback``).
+        # The settings UI displays the default as the placeholder, and SoulSync's
+        # docs tell users to register THAT URI with their Tidal Developer App
+        # — Tidal validates the redirect_uri sent in the authorize request
+        # against the one in the portal, so sending anything else (e.g. a
+        # network-IP variant built from request.host) returns Tidal error 1002
+        # "Invalid redirect URI" and the user can't authenticate.
+        #
+        # Docker/remote-access workflow is preserved by the post-auth swap step
+        # in the instructions page below: SoulSync sends ``127.0.0.1:<port>``,
+        # Tidal redirects the user's browser to that URI (which fails locally),
+        # the instructions tell the user to swap ``127.0.0.1`` for the host
+        # they're accessing SoulSync from, and the swapped URL hits the
+        # container's exposed callback port. Building the URI from request.host
+        # at authorize time used to skip the swap entirely but broke users
+        # who registered the documented default.
         configured_redirect = config_manager.get('tidal.redirect_uri', '')
         if configured_redirect:
             temp_tidal_client.redirect_uri = configured_redirect
             logger.info(f"Using configured Tidal redirect_uri: {configured_redirect}")
         else:
-            # Fallback: dynamically set based on request host (non-Docker local access)
-            request_host = request.host.split(':')[0]
-            if request_host not in ('127.0.0.1', 'localhost'):
-                dynamic_redirect = f"http://{request_host}:8889/tidal/callback"
-                temp_tidal_client.redirect_uri = dynamic_redirect
-                logger.info(f"Tidal redirect_uri set from request host: {dynamic_redirect}")
+            logger.info(
+                f"Using default Tidal redirect_uri (no config override): "
+                f"{temp_tidal_client.redirect_uri}"
+            )
 
         # Store PKCE + redirect_uri for callback to use the same values
         with tidal_oauth_lock:
