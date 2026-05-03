@@ -2077,7 +2077,16 @@ class WatchlistScanner:
                     find_provenance_by_external_id,
                 )
                 import os as _os_local
-                source_ids = extract_external_ids(track)
+                # Pass the configured primary source as a hint so the
+                # extractor can disambiguate raw Spotify / iTunes API
+                # responses that don't carry a provider / source field
+                # of their own (Deezer / Discogs / Hydrabase clients
+                # already tag tracks with _source).
+                try:
+                    _source_hint = get_primary_source()
+                except Exception:
+                    _source_hint = None
+                source_ids = extract_external_ids(track, source_hint=_source_hint)
                 if source_ids:
                     matched = find_library_track_by_external_id(
                         self.database,
