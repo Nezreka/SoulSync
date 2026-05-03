@@ -1,6 +1,6 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 
-import { getProfileHomePath, getShellProfileContext } from '@/platform/shell/bridge';
+import { getProfileHomePath } from '@/platform/shell/bridge';
 
 import {
   issueCountsQueryOptions,
@@ -13,8 +13,9 @@ import { IssuesPage } from './-ui/issues-page';
 export const Route = createFileRoute('/issues')({
   validateSearch: normalizeIssuesSearch,
   beforeLoad: ({ context }) => {
-    const bridge = context.platform.getShellBridge();
-    if (bridge && !bridge.isPageAllowed('issues')) {
+    const { bridge } = context.shell;
+
+    if (!bridge.isPageAllowed('issues')) {
       throw redirect({ href: getProfileHomePath(bridge), replace: true });
     }
   },
@@ -24,8 +25,7 @@ export const Route = createFileRoute('/issues')({
     issueId: search.issueId ?? null,
   }),
   loader: async ({ context, deps }) => {
-    const profile = getShellProfileContext(context.platform.getShellBridge());
-    if (!profile) return;
+    const { profile } = context.shell;
 
     await Promise.all([
       context.queryClient.ensureQueryData(issueCountsQueryOptions(profile.profileId)),

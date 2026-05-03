@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
 import { Button } from '@/components/form';
+import { useProfile } from '@/platform/shell/route-controllers';
 import {
   launchAlbumDownloadWorkflow,
   launchAlbumWishlistWorkflow,
@@ -22,21 +23,18 @@ import {
 import styles from './issue-detail-modal.module.css';
 
 export function IssueDetailModal({
-  isAdmin,
   issueId,
   onClose,
   onMutationSuccess,
-  profileId,
 }: {
-  isAdmin: boolean;
-  issueId: number | null;
+  issueId?: number;
   onClose: () => void;
   onMutationSuccess: () => void;
-  profileId: number;
 }) {
+  const { isAdmin, profileId } = useProfile();
   const selectedIssueQuery = useQuery({
     ...issueDetailQueryOptions(profileId, issueId ?? 0),
-    enabled: profileId > 0 && issueId !== null,
+    enabled: issueId != null,
   });
   const issue = selectedIssueQuery.data ?? null;
   const queryError = selectedIssueQuery.error;

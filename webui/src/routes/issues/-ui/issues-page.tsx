@@ -3,8 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
 
 import { Select } from '@/components/form';
-import { getShellProfileContext } from '@/platform/shell/bridge';
-import { useReactPageShell } from '@/platform/shell/route-controllers';
+import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { IssueCounts, IssueRecord, IssueStatus } from '../-issues.types';
 
@@ -28,75 +27,59 @@ import { Route } from '../route';
 import { IssueDetailModal } from './issue-detail-modal';
 import styles from './issues-page.module.css';
 
-type NavigateFunction = ReturnType<typeof useNavigate>;
-
-function clearIssueSelection(navigate: NavigateFunction) {
-  void navigate({
-    to: Route.fullPath,
-    search: (prev) => normalizeIssuesSearch({ ...prev, issueId: undefined }),
-    replace: true,
-  });
-}
-
 export function IssuesPage() {
-  const bridge = useReactPageShell('issues');
+  useReactPageShell('issues');
+  const { isAdmin, profileId } = useProfile();
   const queryClient = useQueryClient();
   const navigate = useNavigate({ from: Route.fullPath });
-  const search = Route.useSearch();
-  const normalizedSearch = normalizeIssuesSearch(search);
-  const selectedIssueId = normalizedSearch.issueId ? Number(normalizedSearch.issueId) : null;
-
-  const profile = getShellProfileContext(bridge);
-  const profileId = profile?.profileId ?? 0;
+  const params = Route.useSearch();
 
   const openIssue = (issueId: number) => {
-    void navigate({
+    navigate({
       to: Route.fullPath,
       search: (prev) => normalizeIssuesSearch({ ...prev, issueId }),
     });
   };
 
+  const clearIssueSelection = () => {
+    navigate({
+      to: Route.fullPath,
+      search: (prev) => normalizeIssuesSearch({ ...prev, issueId: undefined }),
+      replace: true,
+    });
+  };
+
   useEffect(() => {
     const handleRefresh = () => {
-      void queryClient.invalidateQueries({ queryKey: ['issues'] });
-    };
-
-    const handleClose = () => {
-      clearIssueSelection(navigate);
+      queryClient.invalidateQueries({ queryKey: ['issues'] });
     };
 
     window.addEventListener(REFRESH_EVENT, handleRefresh);
-    window.addEventListener(CLOSE_EVENT, handleClose);
+    window.addEventListener(CLOSE_EVENT, clearIssueSelection);
     return () => {
       window.removeEventListener(REFRESH_EVENT, handleRefresh);
-      window.removeEventListener(CLOSE_EVENT, handleClose);
+      window.removeEventListener(CLOSE_EVENT, clearIssueSelection);
     };
   }, [navigate, queryClient]);
 
   const countsQuery = useQuery({
     ...issueCountsQueryOptions(profileId),
-    enabled: profileId > 0,
   });
   const issuesQuery = useQuery({
-    ...issueListQueryOptions(profileId, normalizedSearch),
-    enabled: profileId > 0,
+    ...issueListQueryOptions(profileId, params),
   });
-
-  if (!bridge || !profile || !bridge.isPageAllowed('issues')) {
-    return null;
-  }
 
   return (
     <>
       <IssueBoard
-        categoryFilter={normalizedSearch.category}
+        categoryFilter={params.category}
         counts={countsQuery.data}
-        isAdmin={profile.isAdmin}
+        isAdmin={isAdmin}
         issues={issuesQuery.data?.issues ?? []}
         issuesError={issuesQuery.error}
         issuesLoading={issuesQuery.isLoading}
         onCategoryChange={(category) =>
-          void navigate({
+          navigate({
             to: Route.fullPath,
             search: (prev) =>
               normalizeIssuesSearch({
@@ -108,7 +91,7 @@ export function IssuesPage() {
         }
         onIssueSelect={openIssue}
         onStatusChange={(status) =>
-          void navigate({
+          navigate({
             to: Route.fullPath,
             search: (prev) =>
               normalizeIssuesSearch({
@@ -118,17 +101,15 @@ export function IssuesPage() {
             replace: true,
           })
         }
-        statusFilter={normalizedSearch.status}
+        statusFilter={params.status}
       />
       <IssueDetailModal
-        isAdmin={profile.isAdmin}
-        issueId={selectedIssueId}
-        onClose={() => clearIssueSelection(navigate)}
+        issueId={params.issueId}
+        onClose={clearIssueSelection}
         onMutationSuccess={() => {
-          clearIssueSelection(navigate);
+          clearIssueSelection();
           dispatchIssuesRefreshEvent();
         }}
-        profileId={profile.profileId}
       />
     </>
   );

@@ -7,8 +7,7 @@ export const Route = createFileRoute('/')({
   beforeLoad: ({ context, location }) => {
     if (location.pathname !== '/') return;
 
-    const bridge = context.platform.getShellBridge();
-    if (!bridge) return;
+    const { bridge } = context.shell;
 
     throw redirect({ href: getProfileHomePath(bridge), replace: true });
   },
