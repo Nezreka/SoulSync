@@ -490,7 +490,7 @@ class AutoImportWorker:
 
             # Otherwise recurse into non-disc subdirs (disc folders only
             # ever attach to a parent album, never stand alone).
-            for sub_name, sub_path in non_disc_subdirs:
+            for _sub_name, sub_path in non_disc_subdirs:
                 self._scan_directory(sub_path, candidates, staging_root=staging_root)
 
     def _is_folder_stable(self, candidate: FolderCandidate) -> bool:
