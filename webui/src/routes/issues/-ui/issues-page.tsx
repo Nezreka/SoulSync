@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useEffect } from 'react';
 
 import { Select } from '@/components/form';
+import { Show } from '@/components/primitives';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import type { IssueCounts, IssueRecord, IssueStatus } from '../-issues.types';
@@ -350,27 +351,27 @@ function IssueBoardCard({
             {catMeta.icon}
           </span>
           <span className={styles.issueCardTitle}>{issue.title}</span>
-          {issue.admin_response ? (
+          <Show when={issue.admin_response}>
             <span className={styles.issueCardResponded} title="Admin has responded">
               💬
             </span>
-          ) : null}
+          </Show>
         </div>
         <div className={styles.issueCardEntity}>
           <span className={styles.issueCardEntityType}>{getEntityLabel(issue.entity_type)}</span>
           <span className={styles.issueCardEntityName}>{entityName}</span>
-          {details.length > 0 ? (
+          <Show when={details.length}>
             <span className={styles.issueCardMetaLine}>{details.join(' - ')}</span>
-          ) : null}
+          </Show>
         </div>
-        {issue.description ? (
+        <Show when={issue.description}>
           <div className={styles.issueCardDescription}>{issue.description}</div>
-        ) : null}
+        </Show>
         <div className={styles.issueCardFooter}>
           <span className={styles.issueCardDate}>{createdDate}</span>
-          {showReporterName && issue.reporter_name ? (
+          <Show when={showReporterName && issue.reporter_name}>
             <span className={styles.issueCardProfile}>by {issue.reporter_name}</span>
-          ) : null}
+          </Show>
         </div>
       </div>
       <div className={styles.issueCardRight}>
