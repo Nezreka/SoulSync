@@ -1,4 +1,4 @@
-import { queryOptions } from '@tanstack/react-query';
+import { queryOptions, type QueryClient } from '@tanstack/react-query';
 
 import { apiClient, readJson } from '@/app/api-client';
 
@@ -13,6 +13,7 @@ import type {
 } from './-issues.types';
 
 const DEFAULT_LIMIT = 100;
+export const ISSUES_QUERY_KEY = ['issues'] as const;
 
 function createIssueHeaders(profileId: number, extra?: HeadersInit): Headers {
   const headers = new Headers(extra);
@@ -125,7 +126,7 @@ export async function deleteIssue(profileId: number, issueId: number): Promise<v
 
 export function issueCountsQueryOptions(profileId: number) {
   return queryOptions({
-    queryKey: ['issues', 'counts', profileId],
+    queryKey: [...ISSUES_QUERY_KEY, 'counts', profileId],
     queryFn: () => fetchIssueCounts(profileId),
   });
 }
@@ -135,15 +136,19 @@ export function issueListQueryOptions(
   search: Pick<IssuesSearch, 'status' | 'category'>,
 ) {
   return queryOptions({
-    queryKey: ['issues', 'list', profileId, search.status, search.category],
+    queryKey: [...ISSUES_QUERY_KEY, 'list', profileId, search.status, search.category],
     queryFn: () => fetchIssueList(profileId, search),
   });
 }
 
 export function issueDetailQueryOptions(profileId: number, issueId: number) {
   return queryOptions({
-    queryKey: ['issues', 'detail', profileId, issueId],
+    queryKey: [...ISSUES_QUERY_KEY, 'detail', profileId, issueId],
     queryFn: () => fetchIssue(profileId, issueId),
     enabled: issueId > 0,
   });
+}
+
+export function invalidateIssuesQueries(queryClient: QueryClient) {
+  return queryClient.invalidateQueries({ queryKey: ISSUES_QUERY_KEY });
 }
