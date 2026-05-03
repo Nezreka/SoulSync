@@ -33,7 +33,7 @@ export function IssuesPage() {
   const params = Route.useSearch();
 
   const clearIssueSelection = () => {
-    navigate({
+    void navigate({
       to: Route.fullPath,
       search: (prev) => normalizeIssuesSearch({ ...prev, issueId: undefined }),
       replace: true,
@@ -63,7 +63,7 @@ function IssueBoard() {
 
   useEffect(() => {
     const handleRefresh = () => {
-      queryClient.invalidateQueries({ queryKey: ['issues'] });
+      void queryClient.invalidateQueries({ queryKey: ['issues'] });
     };
 
     window.addEventListener(REFRESH_EVENT, handleRefresh);
@@ -80,14 +80,14 @@ function IssueBoard() {
   });
 
   const openIssue = (issueId: number) => {
-    navigate({
+    void navigate({
       to: Route.fullPath,
       search: (prev) => normalizeIssuesSearch({ ...prev, issueId }),
     });
   };
 
   const onCategoryChange = (category: string) => {
-    navigate({
+    void navigate({
       to: Route.fullPath,
       search: (prev) =>
         normalizeIssuesSearch({
@@ -99,7 +99,7 @@ function IssueBoard() {
   };
 
   const onStatusChange = (status: IssueStatus | 'all') => {
-    navigate({
+    void navigate({
       to: Route.fullPath,
       search: (prev) =>
         normalizeIssuesSearch({
