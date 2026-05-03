@@ -54,7 +54,6 @@ function mockIssuesFetch() {
 
 function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
   return {
-    getCurrentPageId: vi.fn<() => ShellPageId>(() => 'dashboard'),
     getCurrentProfileContext: vi.fn(() => ({ profileId: 1, isAdmin: false })),
     isPageAllowed: vi.fn(() => true),
     getProfileHomePage: vi.fn<() => ShellPageId>(() => 'discover'),

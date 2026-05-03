@@ -17,7 +17,6 @@ declare global {
     };
     SoulSyncWebRouter?: {
       routeManifest: ShellRouteDefinition[];
-      getCurrentPageId: () => ShellPageId | null;
       getCurrentPath: () => string;
       resolvePageId: (pathname: string) => ShellPageId | null;
       navigateToPage: (
@@ -28,7 +27,6 @@ declare global {
       ) => Promise<boolean>;
     };
     SoulSyncWebShellBridge?: {
-      getCurrentPageId: () => ShellPageId;
       getCurrentProfileContext: () => ShellProfileContext | null;
       isPageAllowed: (pageId: ShellPageId) => boolean;
       getProfileHomePage: () => ShellPageId;

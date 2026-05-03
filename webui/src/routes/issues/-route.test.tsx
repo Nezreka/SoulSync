@@ -16,7 +16,6 @@ function createResponse(body: unknown, ok = true, status = 200) {
 
 function createShellBridge(overrides: Partial<ShellBridge> = {}): ShellBridge {
   return {
-    getCurrentPageId: vi.fn<() => ShellPageId>(() => 'issues'),
     getCurrentProfileContext: vi.fn(() => ({ profileId: 2, isAdmin: true })),
     isPageAllowed: vi.fn(() => true),
     getProfileHomePage: vi.fn<() => ShellPageId>(() => 'discover'),
