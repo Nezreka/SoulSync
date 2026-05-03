@@ -99,10 +99,42 @@ class TestExtractExternalIdsFromProviderField:
         track = {'source': 'deezer', 'id': 'dz1', 'name': 'Hello'}
         assert extract_external_ids(track) == {'deezer_id': 'dz1'}
 
+    def test_underscore_source_field_treated_same_as_provider(self):
+        """Deezer / Discogs / Hydrabase clients tag normalized tracks
+        with ``_source`` (underscore prefix). Must be recognized as the
+        provider disambiguator — otherwise watchlist scans against those
+        sources silently miss the ID match and fall through to fuzzy."""
+        track = {'_source': 'deezer', 'id': 'dz1', 'name': 'Hello'}
+        assert extract_external_ids(track) == {'deezer_id': 'dz1'}
+
+    def test_underscore_source_hydrabase(self):
+        track = {'_source': 'hydrabase', 'id': 'hyd-soul-1', 'name': 'Hello'}
+        assert extract_external_ids(track) == {'soul_id': 'hyd-soul-1'}
+
     def test_native_id_without_provider_is_ignored(self):
         """Without a provider field we can't tell which source 'id' belongs to."""
         track = {'id': 'unknown', 'name': 'Hello'}
         assert extract_external_ids(track) == {}
+
+    def test_source_hint_disambiguates_when_track_has_no_provider(self):
+        """Spotify and iTunes raw API responses don't carry a provider /
+        source / _source field. The watchlist scanner passes the
+        configured primary source as a hint so the extractor can map
+        the track's native ``id`` field correctly."""
+        track = {'id': 'sp1', 'name': 'Hello'}  # No provider field
+        assert extract_external_ids(track, source_hint='spotify') == {'spotify_id': 'sp1'}
+        assert extract_external_ids(track, source_hint='itunes') == {'itunes_id': 'sp1'}
+        assert extract_external_ids(track, source_hint='deezer') == {'deezer_id': 'sp1'}
+
+    def test_source_hint_does_not_override_track_provider(self):
+        """If the track already carries an explicit provider, that wins
+        over the hint — defensive against the hint being wrong."""
+        track = {'_source': 'deezer', 'id': 'dz1', 'name': 'Hello'}
+        assert extract_external_ids(track, source_hint='spotify') == {'deezer_id': 'dz1'}
+
+    def test_source_hint_none_is_ignored(self):
+        track = {'id': 'unknown', 'name': 'Hello'}
+        assert extract_external_ids(track, source_hint=None) == {}
 
 
 class TestExtractExternalIdsMixedAndDefensive:
