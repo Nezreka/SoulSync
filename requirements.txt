@@ -1,5 +1,8 @@
 # SoulSync requirements
 # Web application dependencies only
+# (cache-bust 2026-05-02: dev nightly image was serving a poisoned layer
+#  with missing dependencies; touching this comment forces the GHA Docker
+#  layer cache to invalidate the pip-install step on the next build.)
 
 # Core web framework
 Flask>=3.0.0
