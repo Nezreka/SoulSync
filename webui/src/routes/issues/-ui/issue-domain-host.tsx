@@ -326,7 +326,7 @@ const DEFAULT_REPORT_ISSUE_VALUES: ReportIssueFormValues = {
   title: '',
 };
 
-const reportIssueFormBaseSchema = z.object({
+const reportIssueFormSchema = z.object({
   category: z
     .string()
     .trim()
@@ -336,8 +336,8 @@ const reportIssueFormBaseSchema = z.object({
   title: z.string().trim().min(1, 'Please provide a title for the issue'),
 });
 
-type ReportIssueFormValues = z.input<typeof reportIssueFormBaseSchema>;
-type NormalizedReportIssueFormValues = z.output<typeof reportIssueFormBaseSchema>;
+type ReportIssueFormValues = z.input<typeof reportIssueFormSchema>;
+type NormalizedReportIssueFormValues = z.output<typeof reportIssueFormSchema>;
 
 function notify(message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') {
   window.showToast?.(message, type);
@@ -353,7 +353,7 @@ function updateBadge(openCount: number) {
 function normalizeReportIssueFormValues(
   values: ReportIssueFormValues,
 ): NormalizedReportIssueFormValues {
-  return reportIssueFormBaseSchema.parse(values);
+  return reportIssueFormSchema.parse(values);
 }
 
 function validateReportIssueForm(
@@ -361,7 +361,7 @@ function validateReportIssueForm(
   values: ReportIssueFormValues,
 ): string | undefined {
   if (!profileId) return 'Profile is still loading';
-  const result = reportIssueFormBaseSchema.safeParse(values);
+  const result = reportIssueFormSchema.safeParse(values);
   if (result.success) return undefined;
   return result.error.issues[0]?.message || 'Unable to submit this issue';
 }
