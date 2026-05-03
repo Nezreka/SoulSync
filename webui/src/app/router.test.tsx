@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   SHELL_PROFILE_CONTEXT_CHANGED_EVENT,
   type ShellBridge,
+  type ShellProfileContext,
   type ShellPageId,
 } from '@/platform/shell/bridge';
 
@@ -138,7 +139,7 @@ describe('createAppRouter', () => {
   });
 
   it('waits for profile context before rendering React routes', async () => {
-    const getCurrentProfileContext = vi.fn(() => null);
+    const getCurrentProfileContext = vi.fn<() => ShellProfileContext | null>(() => null);
     window.SoulSyncWebShellBridge = createShellBridge({
       getCurrentProfileContext,
     });
