@@ -79,9 +79,6 @@ export async function waitForShellContext(): Promise<ShellContext> {
 export function bindWindowWebRouter(router: AnyRouter) {
   window.SoulSyncWebRouter = {
     routeManifest: [...shellRouteManifest],
-    getCurrentPageId() {
-      return resolveShellPageFromPath(window.location.pathname);
-    },
     getCurrentPath() {
       return normalizeShellPath(window.location.pathname);
     },

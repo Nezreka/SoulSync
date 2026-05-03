@@ -124,9 +124,6 @@ window.SoulSyncWorkflowActions = {
 };
 
 window.SoulSyncWebShellBridge = {
-    getCurrentPageId() {
-        return currentPage || getWebRouter()?.resolvePageId?.(window.location.pathname) || _getPageFromPath();
-    },
     getCurrentProfileContext() {
         if (!currentProfile) return null;
         return {
