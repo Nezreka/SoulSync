@@ -135,9 +135,14 @@ class UnknownArtistFixerJob(RepairJob):
             title = track['title'] or ''
             file_path = track['file_path']
 
-            # Resolve actual file on disk
-            from core.repair_worker import _resolve_file_path
-            resolved = _resolve_file_path(file_path, transfer)
+            # Resolve actual file on disk via the shared library resolver
+            # (picks up library.music_paths + Plex library locations).
+            from core.library.path_resolver import resolve_library_file_path
+            resolved = resolve_library_file_path(
+                file_path,
+                transfer_folder=transfer,
+                config_manager=context.config_manager,
+            )
             if not resolved or not os.path.exists(resolved):
                 result.skipped += 1
                 continue
