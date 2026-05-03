@@ -379,6 +379,24 @@ def run_service_test(service, test_config):
                 return False, "Hydrabase not connected. Configure URL + API key and click Connect."
             except Exception as e:
                 return False, f"Hydrabase connection error: {str(e)}"
+        elif service == "soundcloud":
+            # Anonymous SoundCloud has no auth, so "test" really means
+            # "is yt-dlp installed and can it reach SoundCloud right now."
+            # This mirrors the /api/soundcloud/status check.
+            try:
+                from core.soundcloud_client import SoundcloudClient
+                sc = SoundcloudClient()
+                if not sc.is_available():
+                    return False, "SoundCloud unavailable — yt-dlp not installed."
+                # Run a tiny live probe via asyncio so the dashboard test
+                # gives a meaningful pass/fail.
+                import asyncio
+                reachable = asyncio.new_event_loop().run_until_complete(sc.check_connection())
+                if reachable:
+                    return True, "SoundCloud reachable (anonymous)"
+                return False, "SoundCloud unreachable — search probe failed. Try again."
+            except Exception as e:
+                return False, f"SoundCloud connection error: {str(e)}"
         return False, "Unknown service."
     except AttributeError as e:
         # This specifically catches the error you reported for Jellyfin

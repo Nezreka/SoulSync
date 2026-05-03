@@ -288,6 +288,8 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                     'qobuz': getattr(orch, 'qobuz', None),
                     'hifi': getattr(orch, 'hifi', None),
                     'deezer_dl': getattr(orch, 'deezer_dl', None),
+                    'lidarr': getattr(orch, 'lidarr', None),
+                    'soundcloud': getattr(orch, 'soundcloud', None),
                 }
 
                 # The orchestrator tried sources in order but stopped at the first with results.
