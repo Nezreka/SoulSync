@@ -1,6 +1,5 @@
 // SoulSync shell bridge glue
-// Keep this file loaded after init.js so the legacy shell helpers it wraps
-// have already been defined.
+// Keep this file loaded after init.js so the legacy shell runtime state is ready.
 
 function getWebRouter() {
     return window.SoulSyncWebRouter ?? null;
@@ -27,9 +26,29 @@ function setActivePageChrome(pageId) {
     const navButton = document.querySelector(`[data-page="${pageId}"]`);
     if (navButton) {
         navButton.classList.add('active');
+    } else if (pageId === 'artist-detail') {
+        // Artist detail is a Library context, so keep the sidebar anchored there.
+        const libraryBtn = document.querySelector('[data-page="library"]');
+        if (libraryBtn) {
+            libraryBtn.classList.add('active');
+        }
     }
     currentPage = pageId;
+    if (typeof _updateSidebarLibraryBreadcrumb === 'function') _updateSidebarLibraryBreadcrumb();
     if (typeof _gsUpdateVisibility === 'function') _gsUpdateVisibility();
+    const downloadSidebar = document.getElementById('discover-download-sidebar');
+    if (downloadSidebar) {
+        if (pageId === 'discover') {
+            const activeDownloads = typeof discoverDownloads !== 'undefined'
+                ? Object.keys(discoverDownloads).length
+                : 0;
+            if (activeDownloads > 0 && typeof updateDiscoverDownloadBar === 'function') {
+                updateDiscoverDownloadBar();
+            }
+        } else {
+            downloadSidebar.classList.add('hidden');
+        }
+    }
     if (window.pageParticles && window._particlesEnabled !== false) window.pageParticles.setPage(pageId);
     if (window.workerOrbs) window.workerOrbs.setPage(pageId);
 }

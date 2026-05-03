@@ -29,12 +29,12 @@ flowchart LR
 - `webui/static/init.js`
   - boots the legacy shell
   - selects the active profile
-  - handles the old page activation flow
+  - handles the legacy page loading flow
 
 - `webui/static/shell-bridge.js`
   - owns the browser-side bridge object
   - exposes `window.SoulSyncWebShellBridge`
-  - syncs page chrome between legacy and React
+  - owns the shared page chrome and route handoff helpers
 
 - `webui/src/app/main.tsx`
   - mounts the React app
@@ -50,7 +50,7 @@ The current order in `index.html` matters:
 
 1. legacy shell scripts load first
 2. `init.js` sets up the shell runtime
-3. `shell-bridge.js` publishes the shell bridge after those helpers exist
+3. `shell-bridge.js` publishes the bridge and shared chrome helpers after the shell state exists
 4. the Vite React app is injected through `{{ vite_assets('body') }}` and boots as a module after parsing
 
 That order avoids load-time references to missing globals and keeps the React side able to react to bridge readiness events. The React entry can start fetching early, but the shell bridge and legacy globals are already available by the time the React runtime starts acting on them.
