@@ -24,6 +24,7 @@ from core.metadata_service import (
     get_source_priority,
     get_primary_source,
 )
+from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import get_all_jobs
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -33,29 +34,26 @@ logger = get_logger("repair_worker")
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 
-def _resolve_file_path(file_path, transfer_folder, download_folder=None):
+def _resolve_file_path(file_path, transfer_folder, download_folder=None,
+                       config_manager=None, plex_client=None):
     """Resolve a stored DB path to an actual file on disk.
 
-    Tries the raw path first, then progressively shorter suffixes against
-    configured directories.  Handles cross-environment path mismatches
-    (e.g. Docker paths vs native Windows paths).
+    Thin wrapper around ``core.library.path_resolver.resolve_library_file_path``
+    that preserves the legacy signature used by every caller in this module
+    and the repair-job modules. The shared resolver also probes the
+    user-configured ``library.music_paths`` and Plex-reported library
+    locations — which is what fixes the Album Completeness Auto-Fill
+    failure on Docker setups (issue #476). Pre-existing call sites that
+    don't pass ``config_manager`` keep the old transfer+download-only
+    behavior; sites that pass it in pick up the wider search automatically.
     """
-    if not file_path:
-        return None
-    if os.path.exists(file_path):
-        return file_path
-
-    path_parts = file_path.replace('\\', '/').split('/')
-
-    for base_dir in [transfer_folder, download_folder]:
-        if not base_dir or not os.path.isdir(base_dir):
-            continue
-        for i in range(1, len(path_parts)):
-            candidate = os.path.join(base_dir, *path_parts[i:])
-            if os.path.exists(candidate):
-                return candidate
-
-    return None
+    return resolve_library_file_path(
+        file_path,
+        transfer_folder=transfer_folder,
+        download_folder=download_folder,
+        config_manager=config_manager,
+        plex_client=plex_client,
+    )
 
 
 class RepairWorker:
@@ -1022,7 +1020,7 @@ class RepairWorker:
             download_folder = None
             if self._config_manager:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
-            resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) or file_path
+            resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager) or file_path
 
             if not os.path.exists(resolved):
                 return {'success': True, 'action': 'already_gone',
@@ -1100,7 +1098,7 @@ class RepairWorker:
         download_folder = None
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
-        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) or file_path
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager) or file_path
 
         if not os.path.isfile(resolved):
             return {'success': False, 'error': f'File not found: {os.path.basename(file_path)}'}
@@ -1285,7 +1283,7 @@ class RepairWorker:
         files_deleted = 0
         for fpath in remove_paths:
             try:
-                resolved = _resolve_file_path(fpath, self.transfer_folder, download_folder)
+                resolved = _resolve_file_path(fpath, self.transfer_folder, download_folder, config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     os.remove(resolved)
                     files_deleted += 1
@@ -1346,7 +1344,7 @@ class RepairWorker:
             if self._config_manager:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
             try:
-                resolved = _resolve_file_path(single_path, self.transfer_folder, download_folder)
+                resolved = _resolve_file_path(single_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     os.remove(resolved)
                     file_deleted = True
@@ -1414,7 +1412,7 @@ class RepairWorker:
             if self._config_manager:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
             try:
-                resolved = _resolve_file_path(track_path, self.transfer_folder, download_folder)
+                resolved = _resolve_file_path(track_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     os.remove(resolved)
                     file_deleted = True
@@ -1453,7 +1451,7 @@ class RepairWorker:
 
         # Resolve file
         download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else ''
-        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) if file_path else None
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager) if file_path else None
         if not resolved or not os.path.exists(resolved):
             return {'success': False, 'error': f'File not found: {file_path}'}
 
@@ -1560,7 +1558,7 @@ class RepairWorker:
         if fix_action == 'delete':
             # Delete file + DB record
             if file_path:
-                resolved = _resolve_file_path(file_path, self.transfer_folder)
+                resolved = _resolve_file_path(file_path, self.transfer_folder, config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     try:
                         os.remove(resolved)
@@ -1602,7 +1600,7 @@ class RepairWorker:
                     logger.warning("Could not add to wishlist: %s", e)
             # Delete wrong file
             if file_path:
-                resolved = _resolve_file_path(file_path, self.transfer_folder)
+                resolved = _resolve_file_path(file_path, self.transfer_folder, config_manager=self._config_manager)
                 if resolved and os.path.exists(resolved):
                     try:
                         os.remove(resolved)
@@ -1661,7 +1659,7 @@ class RepairWorker:
 
         # Write corrected tags to the actual audio file
         if file_path:
-            resolved = _resolve_file_path(file_path, self.transfer_folder)
+            resolved = _resolve_file_path(file_path, self.transfer_folder, config_manager=self._config_manager)
             if resolved and os.path.exists(resolved):
                 try:
                     from core.tag_writer import write_tags_to_file
@@ -1685,7 +1683,7 @@ class RepairWorker:
         download_folder = None
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
-        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder)
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
         if not resolved or not os.path.exists(resolved):
             return {'success': False, 'error': f'File not found: {file_path}'}
 
@@ -1731,7 +1729,7 @@ class RepairWorker:
             download_folder = None
             if self._config_manager:
                 download_folder = self._config_manager.get('soulseek.download_path', '')
-            resolved = _resolve_file_path(track_file, self.transfer_folder, download_folder)
+            resolved = _resolve_file_path(track_file, self.transfer_folder, download_folder, config_manager=self._config_manager)
             if not resolved or not os.path.exists(resolved):
                 continue
 
@@ -1877,7 +1875,7 @@ class RepairWorker:
 
         album_folder = None
         for t in existing_tracks:
-            resolved = _resolve_file_path(t.file_path, self.transfer_folder, download_folder)
+            resolved = _resolve_file_path(t.file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
             if resolved and os.path.exists(resolved):
                 album_folder = os.path.dirname(resolved)
                 break
@@ -1888,7 +1886,7 @@ class RepairWorker:
         # Detect filename pattern
         resolved_paths = []
         for t in existing_tracks:
-            rp = _resolve_file_path(t.file_path, self.transfer_folder, download_folder)
+            rp = _resolve_file_path(t.file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
             if rp:
                 resolved_paths.append(rp)
         filename_pattern = self._detect_filename_pattern(resolved_paths)
@@ -2145,7 +2143,7 @@ class RepairWorker:
         """Move or copy a candidate track into the album folder and update DB."""
         try:
             # Resolve source file
-            src_path = _resolve_file_path(candidate.file_path, self.transfer_folder, download_folder)
+            src_path = _resolve_file_path(candidate.file_path, self.transfer_folder, download_folder, config_manager=self._config_manager)
             if not src_path or not os.path.exists(src_path):
                 return {'success': False, 'error': f'Source file not found: {candidate.file_path}'}
 
@@ -2534,7 +2532,7 @@ class RepairWorker:
         download_folder = None
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
-        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder) or file_path
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder, config_manager=self._config_manager) or file_path
 
         if not os.path.exists(resolved):
             return {'success': False, 'error': f'Source file not found: {file_path}'}

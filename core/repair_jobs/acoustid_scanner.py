@@ -289,9 +289,14 @@ class AcoustIDScannerJob(RepairJob):
             return None
         if os.path.exists(file_path):
             return file_path
-        # Try the repair_worker's resolver
-        from core.repair_worker import _resolve_file_path
-        return _resolve_file_path(file_path, context.transfer_folder)
+        # Use the shared library-path resolver — picks up
+        # library.music_paths and Plex library locations too.
+        from core.library.path_resolver import resolve_library_file_path
+        return resolve_library_file_path(
+            file_path,
+            transfer_folder=context.transfer_folder,
+            config_manager=context.config_manager,
+        )
 
     def _save_checkpoint_id(self, context: JobContext, track_id):
         """Save or clear the scan checkpoint by track ID."""
