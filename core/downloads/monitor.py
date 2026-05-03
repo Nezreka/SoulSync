@@ -271,7 +271,8 @@ class WebUIDownloadMonitor:
             try:
                 all_downloads = []
                 for _dl_client in [soulseek_client.youtube, soulseek_client.tidal, soulseek_client.qobuz,
-                                   soulseek_client.hifi, soulseek_client.deezer_dl, soulseek_client.lidarr]:
+                                   soulseek_client.hifi, soulseek_client.deezer_dl, soulseek_client.lidarr,
+                                   getattr(soulseek_client, 'soundcloud', None)]:
                     if _dl_client:
                         try:
                             all_downloads.extend(run_async(_dl_client.get_all_downloads()))

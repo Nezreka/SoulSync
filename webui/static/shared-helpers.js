@@ -3393,7 +3393,7 @@ function updateSidebarServiceStatus(service, statusData, spotifyStatus = null) {
 
         // Update download source name based on configured mode
         if (service === 'soulseek' && statusData.source) {
-            const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', hybrid: 'Hybrid' };
+            const sourceNames = { soulseek: 'Soulseek', youtube: 'YouTube', tidal: 'Tidal', qobuz: 'Qobuz', hifi: 'HiFi', deezer_dl: 'Deezer', lidarr: 'Lidarr', soundcloud: 'SoundCloud', hybrid: 'Hybrid' };
             const displayName = sourceNames[statusData.source] || 'Soulseek';
             const sidebarName = document.getElementById('download-source-name');
             if (sidebarName) sidebarName.textContent = displayName;
