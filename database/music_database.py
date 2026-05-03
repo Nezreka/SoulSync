@@ -1384,6 +1384,33 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE track_downloads ADD COLUMN bitrate INTEGER")
                 logger.info("Added audio detail columns (bit_depth, sample_rate, bitrate) to track_downloads")
 
+            # Migration: Add external metadata-source ID columns to
+            # track_downloads. Persists the IDs we already collect at
+            # post-processing time so the watchlist scanner + media-server
+            # sync backfill can read them without waiting for the async
+            # enrichment workers.
+            external_id_cols = [
+                'spotify_track_id', 'itunes_track_id', 'deezer_track_id',
+                'tidal_track_id', 'qobuz_track_id', 'musicbrainz_recording_id',
+                'audiodb_id', 'soul_id', 'isrc',
+            ]
+            added_external = False
+            for _col in external_id_cols:
+                if _col not in td_columns:
+                    cursor.execute(f"ALTER TABLE track_downloads ADD COLUMN {_col} TEXT")
+                    added_external = True
+            if added_external:
+                logger.info(f"Added external-ID columns to track_downloads: {', '.join(external_id_cols)}")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_spotify_id ON track_downloads (spotify_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_itunes_id ON track_downloads (itunes_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_deezer_id ON track_downloads (deezer_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_tidal_id ON track_downloads (tidal_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_qobuz_id ON track_downloads (qobuz_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_mbid ON track_downloads (musicbrainz_recording_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_audiodb_id ON track_downloads (audiodb_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_soul_id ON track_downloads (soul_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_isrc ON track_downloads (isrc)")
+
             # Discovery artist blacklist — artists users never want to see in discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS discovery_artist_blacklist (
@@ -5008,6 +5035,20 @@ class MusicDatabase:
                     """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, server_source, track_artist, mbid, track_id))
 
                 conn.commit()
+
+                # Backfill external metadata-source IDs from track_downloads
+                # provenance. SoulSync collected them at download time but the
+                # media-server scan can't see them — without this hook,
+                # tracks.spotify_track_id / itunes_track_id / etc. stay empty
+                # until the async enrichment workers eventually catch up
+                # (hours later), during which window the watchlist scanner
+                # treats freshly downloaded files as missing and re-downloads
+                # them. Idempotent COALESCE on each column preserves any value
+                # the enrichment worker already wrote.
+                try:
+                    self.backfill_track_external_ids_from_provenance(track_id, file_path)
+                except Exception as backfill_err:
+                    logger.debug(f"Provenance ID backfill skipped for track {track_id}: {backfill_err}")
 
                 # Log new imports to library history
                 if is_new_track:
@@ -9914,8 +9955,24 @@ class MusicDatabase:
                                source_filename: str, source_size: int = 0, audio_quality: str = '',
                                track_title: str = '', track_artist: str = '', track_album: str = '',
                                status: str = 'completed', track_id: str = None,
-                               bit_depth: int = None, sample_rate: int = None, bitrate: int = None) -> Optional[int]:
-        """Record a download with full source provenance. Returns the record ID."""
+                               bit_depth: int = None, sample_rate: int = None, bitrate: int = None,
+                               spotify_track_id: Optional[str] = None,
+                               itunes_track_id: Optional[str] = None,
+                               deezer_track_id: Optional[str] = None,
+                               tidal_track_id: Optional[str] = None,
+                               qobuz_track_id: Optional[str] = None,
+                               musicbrainz_recording_id: Optional[str] = None,
+                               audiodb_id: Optional[str] = None,
+                               soul_id: Optional[str] = None,
+                               isrc: Optional[str] = None) -> Optional[int]:
+        """Record a download with full source provenance. Returns the record ID.
+
+        External-ID kwargs (spotify_track_id et al.) capture the metadata-
+        source identity that the user originally asked for — they're written
+        at download time so the watchlist scanner can recognize the file as
+        already present without waiting for the async enrichment workers
+        to backfill them onto the ``tracks`` row.
+        """
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -9941,16 +9998,122 @@ class MusicDatabase:
                 INSERT INTO track_downloads
                 (track_id, file_path, source_service, source_username, source_filename,
                  source_size, audio_quality, track_title, track_artist, track_album, status,
-                 bit_depth, sample_rate, bitrate)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 bit_depth, sample_rate, bitrate,
+                 spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
+                 qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (track_id, file_path, source_service, source_username, source_filename,
                   source_size, audio_quality, track_title, track_artist, track_album, status,
-                  bit_depth, sample_rate, bitrate))
+                  bit_depth, sample_rate, bitrate,
+                  spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
+                  qobuz_track_id, musicbrainz_recording_id, audiodb_id, soul_id, isrc))
             conn.commit()
             return cursor.lastrowid
         except Exception as e:
             logger.error(f"Error recording track download: {e}")
             return None
+
+    def get_provenance_by_file_path(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """Return the most recent track_downloads row matching ``file_path``.
+
+        Tries exact match first, then a basename-suffix LIKE fallback for
+        cases where the media-server scan reports the file at a slightly
+        different path than what was recorded at download time (Windows
+        separators, symlink resolution, container mount-root differences).
+        """
+        if not file_path:
+            return None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM track_downloads WHERE file_path = ? ORDER BY id DESC LIMIT 1",
+                (file_path,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                import os as _os
+                fname = _os.path.basename(file_path.replace('\\', '/'))
+                if fname:
+                    cursor.execute(
+                        "SELECT * FROM track_downloads WHERE file_path LIKE ? OR file_path LIKE ? "
+                        "ORDER BY id DESC LIMIT 1",
+                        (f'%/{fname}', f'%\\{fname}'),
+                    )
+                    row = cursor.fetchone()
+            if row is None:
+                return None
+            try:
+                return dict(row)
+            except (TypeError, ValueError):
+                cols = [c[0] for c in cursor.description]
+                return dict(zip(cols, row, strict=False))
+        except Exception as exc:
+            logger.debug(f"get_provenance_by_file_path failed: {exc}")
+            return None
+
+    def backfill_track_external_ids_from_provenance(self, track_id: str, file_path: Optional[str]) -> int:
+        """Copy external IDs from ``track_downloads`` onto a ``tracks`` row.
+
+        Idempotent: only writes columns that are currently NULL/empty on
+        the tracks row AND have a value in the provenance row. Returns the
+        number of columns updated. Called from
+        ``insert_or_update_media_track`` immediately after the row is
+        inserted/updated so freshly synced media-server rows pick up
+        whatever IDs SoulSync already knew at download time.
+        """
+        if not track_id or not file_path:
+            return 0
+        prov = self.get_provenance_by_file_path(file_path)
+        if not prov:
+            return 0
+
+        # Map provenance column -> tracks column. Different naming
+        # conventions because tracks.* uses shorter names (``deezer_id``,
+        # ``tidal_id``, ``qobuz_id``) while track_downloads uses the
+        # explicit ``_track_id`` suffix to avoid ambiguity.
+        prov_to_tracks = {
+            'spotify_track_id': 'spotify_track_id',
+            'itunes_track_id': 'itunes_track_id',
+            'deezer_track_id': 'deezer_id',
+            'tidal_track_id': 'tidal_id',
+            'qobuz_track_id': 'qobuz_id',
+            'musicbrainz_recording_id': 'musicbrainz_recording_id',
+            'audiodb_id': 'audiodb_id',
+            'soul_id': 'soul_id',
+            'isrc': 'isrc',
+        }
+
+        updates: Dict[str, str] = {}
+        for prov_col, track_col in prov_to_tracks.items():
+            val = prov.get(prov_col)
+            if not val:
+                continue
+            updates[track_col] = str(val)
+        if not updates:
+            return 0
+
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            # Coalesce-update: only fill empty columns. Preserves any IDs
+            # the enrichment worker already populated (those are usually
+            # more reliable than provenance for non-primary sources).
+            set_clauses = []
+            params = []
+            for track_col, val in updates.items():
+                set_clauses.append(f"{track_col} = COALESCE(NULLIF({track_col}, ''), ?)")
+                params.append(val)
+            params.append(track_id)
+            cursor.execute(
+                f"UPDATE tracks SET {', '.join(set_clauses)} WHERE id = ?",
+                params,
+            )
+            conn.commit()
+            return cursor.rowcount or 0
+        except Exception as exc:
+            logger.debug(f"backfill_track_external_ids_from_provenance failed: {exc}")
+            return 0
 
     def get_track_downloads(self, track_id: str) -> list:
         """Get all download records for a library track."""
