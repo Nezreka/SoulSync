@@ -36,6 +36,11 @@ class FolderCandidate:
     disc_structure: Dict[int, List[str]] = field(default_factory=dict)  # disc_num -> files
     folder_hash: str = ''
     is_single: bool = False  # True for loose files in staging root
+    # True when the candidate "folder" is the staging root itself (user dropped
+    # disc folders directly into staging without an album wrapper). The name is
+    # meaningless ("Staging", "Music", etc.) — folder-name identification must
+    # be skipped or it will false-match against random albums.
+    is_staging_root: bool = False
 
 
 def _compute_folder_hash(audio_files: List[str]) -> str:
@@ -58,7 +63,11 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
         if audio and audio.tags:
             tags = audio.tags
             result['title'] = (tags.get('title', [''])[0] or '').strip()
-            result['artist'] = (tags.get('artist', [''])[0] or tags.get('albumartist', [''])[0] or '').strip()
+            # Prefer albumartist for album-level identification (per-track artist
+            # often includes features like "Kendrick Lamar, Drake" which fragment
+            # consensus when grouping tracks into an album). Fall back to artist
+            # for files that lack albumartist.
+            result['artist'] = (tags.get('albumartist', [''])[0] or tags.get('artist', [''])[0] or '').strip()
             result['album'] = (tags.get('album', [''])[0] or '').strip()
             # Date/year — try 'date' first, fall back to 'year'
             date_str = (tags.get('date', [''])[0] or tags.get('year', [''])[0] or '').strip()
@@ -137,7 +146,15 @@ class AutoImportWorker:
         self._folder_snapshots: Dict[str, float] = {}  # path -> mtime_sum
         self._processing_paths: set = set()  # Paths currently being processed (skip on rescan)
         self._current_folder = ''
-        self._current_status = 'idle'
+        self._current_status = 'idle'  # 'idle' | 'scanning' | 'processing'
+        # Live per-track progress so the UI can show "Processing Speak Now
+        # (3/14: Mine)" while a multi-track album is being post-processed.
+        # Without this, auto-import goes silent for the entire processing
+        # window (which can be 5+ minutes for a full album) since
+        # ``_record_result`` only fires after every track is done.
+        self._current_track_index = 0
+        self._current_track_total = 0
+        self._current_track_name = ''
         self._stats = {'scanned': 0, 'auto_processed': 0, 'pending_review': 0, 'failed': 0}
         self._last_scan_time = None
 
@@ -173,6 +190,9 @@ class AutoImportWorker:
             'paused': self.paused,
             'current_folder': self._current_folder,
             'current_status': self._current_status,
+            'current_track_index': self._current_track_index,
+            'current_track_total': self._current_track_total,
+            'current_track_name': self._current_track_name,
             'stats': self._stats.copy(),
             'last_scan_time': self._last_scan_time,
         }
@@ -287,11 +307,19 @@ class AutoImportWorker:
                 has_strong_individual_matches = len(high_conf_matches) > 0
 
                 if (confidence >= threshold or has_strong_individual_matches) and auto_process:
-                    # Phase 5: Auto-process — process all tracks that matched
+                    # Phase 5: Auto-process — insert an in-progress row
+                    # so the UI sees the import the moment it starts,
+                    # then update it with the final status when done.
                     effective_conf = max(confidence, min(m['confidence'] for m in high_conf_matches) if high_conf_matches else 0)
                     logger.info(f"[Auto-Import] Processing {candidate.name} — "
                                 f"overall: {confidence:.0%}, {len(high_conf_matches)} strong matches, "
                                 f"{match_result.get('matched_count', 0)}/{match_result.get('total_tracks', '?')} tracks")
+
+                    in_progress_row_id = self._record_in_progress(
+                        candidate, identification, match_result,
+                    )
+                    self._current_status = 'processing'
+
                     success = self._process_matches(candidate, identification, match_result)
                     status = 'completed' if success else 'failed'
                     confidence = max(confidence, effective_conf)
@@ -299,22 +327,38 @@ class AutoImportWorker:
                         self._stats['auto_processed'] += 1
                     else:
                         self._stats['failed'] += 1
+
+                    # Reset live progress state regardless of outcome
+                    self._current_track_index = 0
+                    self._current_track_total = 0
+                    self._current_track_name = ''
+                    self._current_status = 'scanning' if not self.should_stop else 'idle'
+
+                    # Update the in-progress row in place — UI shows the
+                    # final result without a separate insert race.
+                    self._finalize_result(in_progress_row_id, status, confidence)
                 elif confidence >= 0.7:
                     status = 'pending_review'
                     self._stats['pending_review'] += 1
                     logger.info(f"[Auto-Import] Medium confidence ({confidence:.0%}) — pending review: {candidate.name}")
+                    self._record_result(candidate, status, confidence,
+                                        album_id=identification.get('album_id'),
+                                        album_name=identification.get('album_name'),
+                                        artist_name=identification.get('artist_name'),
+                                        image_url=identification.get('image_url'),
+                                        identification_method=identification.get('method'),
+                                        match_data=match_result)
                 else:
                     status = 'needs_identification'
                     self._stats['failed'] += 1
                     logger.info(f"[Auto-Import] Low confidence ({confidence:.0%}) — needs manual ID: {candidate.name}")
-
-                self._record_result(candidate, status, confidence,
-                                    album_id=identification.get('album_id'),
-                                    album_name=identification.get('album_name'),
-                                    artist_name=identification.get('artist_name'),
-                                    image_url=identification.get('image_url'),
-                                    identification_method=identification.get('method'),
-                                    match_data=match_result)
+                    self._record_result(candidate, status, confidence,
+                                        album_id=identification.get('album_id'),
+                                        album_name=identification.get('album_name'),
+                                        artist_name=identification.get('artist_name'),
+                                        image_url=identification.get('image_url'),
+                                        identification_method=identification.get('method'),
+                                        match_data=match_result)
 
             except Exception as e:
                 logger.error(f"[Auto-Import] Error processing {candidate.name}: {e}")
@@ -322,6 +366,12 @@ class AutoImportWorker:
                 self._stats['failed'] += 1
             finally:
                 self._processing_paths.discard(candidate.path)
+                # Defensive: if the inner code path didn't reset live
+                # progress (early raise, etc.), clear it so the UI
+                # doesn't show stale "processing track 3/14" forever.
+                self._current_track_index = 0
+                self._current_track_total = 0
+                self._current_track_name = ''
 
             # Rate limit between folders
             if self._interruptible_sleep(2):
@@ -344,10 +394,10 @@ class AutoImportWorker:
     def _enumerate_folders(self, staging: str) -> List[FolderCandidate]:
         """Find album folder and single file candidates in staging directory (recursive)."""
         candidates = []
-        self._scan_directory(staging, candidates)
+        self._scan_directory(staging, candidates, staging_root=staging)
         return candidates
 
-    def _scan_directory(self, directory: str, candidates: List[FolderCandidate]):
+    def _scan_directory(self, directory: str, candidates: List[FolderCandidate], staging_root: str = ''):
         """Recursively scan a directory for album folders and loose audio files."""
         try:
             entries = sorted(os.listdir(directory))
@@ -403,12 +453,45 @@ class AutoImportWorker:
                     disc_structure=disc_structure, folder_hash=folder_hash
                 ))
         else:
-            # No audio files here — recurse into subdirectories
-            for sub_name, sub_path in subdirs:
-                # Skip disc folders at this level (they'll be handled by the parent album)
-                if DISC_FOLDER_RE.match(sub_name):
-                    continue
-                self._scan_directory(sub_path, candidates)
+            # No loose audio files. If the only subdirs are disc folders,
+            # treat THIS directory as the album candidate (multi-disc album
+            # with no album-level loose files — common when a user drops
+            # `Album/Disc 1/`, `Album/Disc 2/` straight into staging, or
+            # drops `Disc 1/`, `Disc 2/` with the staging dir itself as
+            # the album root).
+            disc_subdirs = [(n, p) for n, p in subdirs if DISC_FOLDER_RE.match(n)]
+            non_disc_subdirs = [(n, p) for n, p in subdirs if not DISC_FOLDER_RE.match(n)]
+
+            if disc_subdirs and not non_disc_subdirs:
+                disc_structure = {}
+                audio_files = []
+                for sub_name, sub_path in disc_subdirs:
+                    disc_num = int(DISC_FOLDER_RE.match(sub_name).group(1))
+                    try:
+                        disc_files = [os.path.join(sub_path, f) for f in sorted(os.listdir(sub_path))
+                                      if os.path.isfile(os.path.join(sub_path, f))
+                                      and os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS]
+                    except OSError:
+                        disc_files = []
+                    if disc_files:
+                        disc_structure[disc_num] = disc_files
+                        audio_files.extend(disc_files)
+
+                if audio_files:
+                    folder_name = os.path.basename(directory)
+                    folder_hash = _compute_folder_hash(audio_files)
+                    is_staging_root = bool(staging_root) and os.path.normpath(directory) == os.path.normpath(staging_root)
+                    candidates.append(FolderCandidate(
+                        path=directory, name=folder_name, audio_files=audio_files,
+                        disc_structure=disc_structure, folder_hash=folder_hash,
+                        is_staging_root=is_staging_root,
+                    ))
+                return
+
+            # Otherwise recurse into non-disc subdirs (disc folders only
+            # ever attach to a parent album, never stand alone).
+            for _sub_name, sub_path in non_disc_subdirs:
+                self._scan_directory(sub_path, candidates, staging_root=staging_root)
 
     def _is_folder_stable(self, candidate: FolderCandidate) -> bool:
         """Check if folder contents have stopped changing."""
@@ -450,10 +533,15 @@ class AutoImportWorker:
         if tag_result:
             return tag_result
 
-        # Strategy 2: Parse folder name
-        folder_result = self._identify_from_folder_name(candidate)
-        if folder_result:
-            return folder_result
+        # Strategy 2: Parse folder name (skip when the candidate is the staging
+        # root itself — the folder name is meaningless and will false-match
+        # against random albums in the metadata source).
+        if candidate.is_staging_root:
+            logger.info(f"[Auto-Import] Skipping folder-name identification for staging root '{candidate.name}' — would false-match. Falling through to AcoustID.")
+        else:
+            folder_result = self._identify_from_folder_name(candidate)
+            if folder_result:
+                return folder_result
 
         # Strategy 3: AcoustID fingerprint
         acoustid_result = self._identify_from_acoustid(candidate)
@@ -643,29 +731,47 @@ class AutoImportWorker:
     def _identify_from_tags(self, candidate: FolderCandidate) -> Optional[Dict]:
         """Try to identify album from embedded file tags."""
         tags_list = []
-        for f in candidate.audio_files[:20]:  # Cap at 20 files
+        sampled = candidate.audio_files[:20]  # Cap at 20 files
+        for f in sampled:
             tags = _read_file_tags(f)
             if tags['album'] and tags['artist']:
                 tags_list.append(tags)
 
-        if len(tags_list) < max(1, len(candidate.audio_files) * 0.5):
+        if len(tags_list) < max(1, len(sampled) * 0.5):
+            logger.info(f"[Auto-Import] Tag identification rejected for '{candidate.name}' — only {len(tags_list)}/{len(sampled)} files have album+artist tags (need >=50%)")
             return None  # Less than 50% of files have usable tags
 
-        # Check consistency — most common album+artist
-        album_artist_counts = {}
+        # Group by album first (album-level identity). Per-track artist often
+        # varies due to features ("Artist", "Artist, Drake", etc.) so grouping
+        # by (album, artist) fragments consensus on a real album. Pick the
+        # dominant album, then within that album pick the most-common artist
+        # (which will usually be the album's primary artist).
+        album_counts = {}
         for t in tags_list:
-            key = (t['album'].lower().strip(), t['artist'].lower().strip())
-            album_artist_counts[key] = album_artist_counts.get(key, 0) + 1
+            album_key = t['album'].lower().strip()
+            album_counts[album_key] = album_counts.get(album_key, 0) + 1
 
-        if not album_artist_counts:
+        if not album_counts:
             return None
 
-        best_key, best_count = max(album_artist_counts.items(), key=lambda x: x[1])
-        if best_count < len(tags_list) * 0.6:
-            return None  # Tags too inconsistent
+        best_album, best_album_count = max(album_counts.items(), key=lambda x: x[1])
+        if best_album_count < len(tags_list) * 0.6:
+            sample = ', '.join([f"'{a}' x{c}" for a, c in sorted(album_counts.items(), key=lambda x: -x[1])[:3]])
+            logger.info(f"[Auto-Import] Tag identification rejected for '{candidate.name}' — best album '{best_album}' only {best_album_count}/{len(tags_list)} files (need >=60%). Top albums: {sample}")
+            return None
 
-        album_name, artist_name = best_key
-        return self._search_metadata_source(artist_name, album_name, 'tags', candidate)
+        # Most-common artist among files matching the dominant album
+        artist_counts = {}
+        for t in tags_list:
+            if t['album'].lower().strip() == best_album:
+                a = t['artist'].lower().strip()
+                if a:
+                    artist_counts[a] = artist_counts.get(a, 0) + 1
+        if not artist_counts:
+            return None
+        artist_name, _ = max(artist_counts.items(), key=lambda x: x[1])
+
+        return self._search_metadata_source(artist_name, best_album, 'tags', candidate)
 
     def _identify_from_folder_name(self, candidate: FolderCandidate) -> Optional[Dict]:
         """Try to identify album from folder name."""
@@ -1005,21 +1111,31 @@ class AutoImportWorker:
 
         processed = 0
         errors = []
+        all_matches = list(match_result.get('matches', []))
+        # Surface track total for the UI's live-progress widget. Matches
+        # the loop denominator so users see "3/14" while it's working.
+        self._current_track_total = len(all_matches)
 
-        for match in match_result.get('matches', []):
+        for index, match in enumerate(all_matches, start=1):
             track = match['track']
             file_path = match['file']
+
+            track_name = track.get('name', 'Unknown')
+            track_number = track.get('track_number', 1)
+            disc_number = track.get('disc_number', 1)
+            track_id = track.get('id', '')
+
+            # Update live progress BEFORE the per-track work so the UI
+            # sees the right "now processing track N: <name>" the
+            # moment polling fires (every 5s).
+            self._current_track_index = index
+            self._current_track_name = track_name
 
             if not os.path.exists(file_path):
                 errors.append(f"File not found: {os.path.basename(file_path)}")
                 continue
 
             try:
-                track_name = track.get('name', 'Unknown')
-                track_number = track.get('track_number', 1)
-                disc_number = track.get('disc_number', 1)
-                track_id = track.get('id', '')
-
                 # Build context matching the manual import format
                 context_key = f"auto_import_{candidate.folder_hash}_{track_number}"
                 context = {
@@ -1093,27 +1209,100 @@ class AutoImportWorker:
 
     # ── Database ──
 
+    def _record_in_progress(self, candidate: FolderCandidate, identification: Dict,
+                            match_result: Dict) -> Optional[int]:
+        """Insert a status='processing' row up-front so the UI can see
+        an in-flight import while it's still running. Returns the row's
+        id so ``_finalize_result`` can update the same row when done.
+
+        Without this, auto-import goes silent for the entire processing
+        window (5+ minutes for a full album) — the existing
+        ``_record_result`` only fires after every track is post-
+        processed, so the UI sees nothing in history while the user
+        waits.
+        """
+        try:
+            match_json = self._serialize_match_data(match_result)
+            conn = self.database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO auto_import_history
+                (folder_name, folder_path, folder_hash, status, confidence, album_id, album_name,
+                 artist_name, image_url, total_files, matched_files, match_data,
+                 identification_method, error_message, processed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                candidate.name, candidate.path, candidate.folder_hash,
+                'processing', match_result.get('confidence', 0.0),
+                identification.get('album_id'), identification.get('album_name'),
+                identification.get('artist_name'), identification.get('image_url'),
+                len(candidate.audio_files),
+                match_result.get('matched_count', 0),
+                match_json, identification.get('method'), None, None,
+            ))
+            row_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            return row_id
+        except Exception as e:
+            logger.error(f"Error recording in-progress auto-import row: {e}")
+            return None
+
+    def _finalize_result(self, row_id: int, status: str, confidence: float,
+                         error_message: Optional[str] = None) -> None:
+        """Update the in-progress row created by ``_record_in_progress``
+        with the final outcome. Idempotent — safe to call even if the
+        row creation failed (row_id is None)."""
+        if not row_id:
+            return
+        try:
+            conn = self.database._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE auto_import_history
+                SET status = ?, confidence = ?, error_message = ?, processed_at = ?
+                WHERE id = ?
+            """, (
+                status, confidence, error_message,
+                datetime.now().isoformat() if status == 'completed' else None,
+                row_id,
+            ))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Error finalizing auto-import row {row_id}: {e}")
+
+    def _serialize_match_data(self, match_data: Optional[Dict]) -> Optional[str]:
+        """Serialize match_result for storage. Strips the non-JSON-safe
+        ``album_data`` reference and per-match track dicts down to just
+        the fields the review UI uses."""
+        if not match_data:
+            return None
+        try:
+            serializable = {
+                'matches': [{'track_name': m['track']['name'],
+                             'track_number': m['track'].get('track_number', 0),
+                             'file': os.path.basename(m['file']),
+                             'confidence': m['confidence']} for m in match_data.get('matches', [])],
+                'unmatched_files': [os.path.basename(f) for f in match_data.get('unmatched_files', [])],
+                'total_tracks': match_data.get('total_tracks', 0),
+                'matched_count': match_data.get('matched_count', 0),
+                'coverage': match_data.get('coverage', 0),
+            }
+            return json.dumps(serializable)
+        except Exception:
+            return None
+
     def _record_result(self, candidate: FolderCandidate, status: str, confidence: float,
                        album_id: str = None, album_name: str = None, artist_name: str = None,
                        image_url: str = None, identification_method: str = None,
                        match_data: Dict = None, error_message: str = None):
-        """Record auto-import result to database."""
+        """Record auto-import result to database (one-shot, no in-progress
+        upsert). Used for early-failure paths that never enter the
+        per-track processing loop (identification failures, match
+        failures, low-confidence skips)."""
         try:
-            # Serialize match data (strip non-serializable album_data)
-            match_json = None
-            if match_data:
-                serializable = {
-                    'matches': [{'track_name': m['track']['name'],
-                                 'track_number': m['track'].get('track_number', 0),
-                                 'file': os.path.basename(m['file']),
-                                 'confidence': m['confidence']} for m in match_data.get('matches', [])],
-                    'unmatched_files': [os.path.basename(f) for f in match_data.get('unmatched_files', [])],
-                    'total_tracks': match_data.get('total_tracks', 0),
-                    'matched_count': match_data.get('matched_count', 0),
-                    'coverage': match_data.get('coverage', 0),
-                }
-                match_json = json.dumps(serializable)
-
+            match_json = self._serialize_match_data(match_data)
             conn = self.database._get_connection()
             cursor = conn.cursor()
             cursor.execute("""
