@@ -2,6 +2,7 @@
 
 import os
 
+from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
@@ -9,29 +10,14 @@ from utils.logging_config import get_logger
 logger = get_logger("repair_job.dead_files")
 
 
-def _resolve_file_path(file_path, transfer_folder, download_folder=None):
-    """Resolve a stored DB path to an actual file on disk.
-
-    Mirrors _resolve_library_file_path from web_server.py — tries the raw
-    path first, then progressively shorter suffixes against configured dirs.
-    """
-    if not file_path:
-        return None
-    if os.path.exists(file_path):
-        return file_path
-
-    path_parts = file_path.replace('\\', '/').split('/')
-
-    for base_dir in [transfer_folder, download_folder]:
-        if not base_dir or not os.path.isdir(base_dir):
-            continue
-        # Skip index 0 to avoid drive letter issues (e.g. E:)
-        for i in range(1, len(path_parts)):
-            candidate = os.path.join(base_dir, *path_parts[i:])
-            if os.path.exists(candidate):
-                return candidate
-
-    return None
+def _resolve_file_path(file_path, transfer_folder, download_folder=None, config_manager=None):
+    """Backwards-compat wrapper. Use ``resolve_library_file_path`` directly."""
+    return resolve_library_file_path(
+        file_path,
+        transfer_folder=transfer_folder,
+        download_folder=download_folder,
+        config_manager=config_manager,
+    )
 
 
 @register_job
@@ -122,7 +108,8 @@ class DeadFileCleanerJob(RepairJob):
                 )
 
             # Use the same path resolution logic as library playback
-            resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder)
+            resolved = _resolve_file_path(file_path, context.transfer_folder, download_folder,
+                                           config_manager=context.config_manager)
 
             if resolved is None:
                 # File is truly missing — create finding
