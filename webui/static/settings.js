@@ -596,10 +596,11 @@ const HYBRID_SOURCES = [
     { id: 'hifi', name: 'HiFi', icon: null, emoji: '🎶' },
     { id: 'deezer_dl', name: 'Deezer', icon: 'https://www.svgrepo.com/show/519734/deezer.svg', emoji: '🎧' },
     { id: 'lidarr', name: 'Lidarr', icon: null, emoji: '📦' },
+    { id: 'soundcloud', name: 'SoundCloud', icon: 'https://www.svgrepo.com/show/452219/soundcloud.svg', emoji: '☁️' },
 ];
 
 let _hybridSourceOrder = ['soulseek', 'youtube'];
-let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, lidarr: false };
+let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, lidarr: false, soundcloud: false };
 let _hybridVisualOrder = null; // Full visual order including disabled sources
 
 function buildHybridSourceList() {
@@ -1475,6 +1476,7 @@ function updateDownloadSourceUI() {
     const hifiContainer = document.getElementById('hifi-download-settings-container');
     const deezerDlContainer = document.getElementById('deezer-download-settings-container');
     const lidarrContainer = document.getElementById('lidarr-download-settings-container');
+    const soundcloudContainer = document.getElementById('soundcloud-download-settings-container');
 
     hybridContainer.style.display = mode === 'hybrid' ? 'block' : 'none';
 
@@ -1496,6 +1498,7 @@ function updateDownloadSourceUI() {
     hifiContainer.style.display = activeSources.has('hifi') ? 'block' : 'none';
     if (deezerDlContainer) deezerDlContainer.style.display = activeSources.has('deezer_dl') ? 'block' : 'none';
     if (lidarrContainer) lidarrContainer.style.display = activeSources.has('lidarr') ? 'block' : 'none';
+    if (soundcloudContainer) soundcloudContainer.style.display = activeSources.has('soundcloud') ? 'block' : 'none';
 
     // Quality profile is Soulseek-only and downloads-tab-only
     const qualityProfileSection = document.getElementById('quality-profile-section');
@@ -1514,6 +1517,9 @@ function updateDownloadSourceUI() {
     if (activeSources.has('hifi')) {
         testHiFiConnection();
     }
+    if (activeSources.has('soundcloud')) {
+        testSoundcloudConnection();
+    }
 }
 
 function updateHybridSecondaryOptions() {
@@ -1526,6 +1532,9 @@ function updateHybridSecondaryOptions() {
         { value: 'tidal', label: 'Tidal' },
         { value: 'qobuz', label: 'Qobuz' },
         { value: 'hifi', label: 'HiFi' },
+        { value: 'deezer_dl', label: 'Deezer' },
+        { value: 'lidarr', label: 'Lidarr' },
+        { value: 'soundcloud', label: 'SoundCloud' },
     ];
 
     secondary.innerHTML = '';
@@ -2667,6 +2676,11 @@ async function saveSettings(quiet = false) {
             url: document.getElementById('lidarr-url').value || '',
             api_key: document.getElementById('lidarr-api-key').value || '',
         },
+        soundcloud_download: {
+            // No knobs yet — anonymous-only. Keeping the key present so
+            // future tier-2 OAuth wiring (Go+ session token) doesn't have
+            // to migrate existing configs.
+        },
         qobuz: {
             quality: document.getElementById('qobuz-quality').value || 'lossless',
             embed_tags: document.getElementById('embed-qobuz').checked,
@@ -3414,6 +3428,32 @@ async function testHiFiConnection() {
         } else {
             statusEl.textContent = 'No instances reachable';
             statusEl.style.color = '#ff9800';
+        }
+    } catch (e) {
+        statusEl.textContent = 'Connection error';
+        statusEl.style.color = '#f44336';
+    }
+}
+
+async function testSoundcloudConnection() {
+    const statusEl = document.getElementById('soundcloud-connection-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking...';
+    statusEl.style.color = '#aaa';
+    try {
+        const resp = await fetch('/api/soundcloud/status');
+        const data = await resp.json();
+        if (data.available && data.reachable) {
+            statusEl.textContent = 'Connected (anonymous)';
+            statusEl.style.color = '#4caf50';
+        } else if (data.available) {
+            // Client up but the live probe failed — likely a SoundCloud
+            // outage or a transient yt-dlp parse error. Surface plainly.
+            statusEl.textContent = 'Reachable check failed — try again';
+            statusEl.style.color = '#ff9800';
+        } else {
+            statusEl.textContent = data.error || 'Unavailable';
+            statusEl.style.color = '#f44336';
         }
     } catch (e) {
         statusEl.textContent = 'Connection error';

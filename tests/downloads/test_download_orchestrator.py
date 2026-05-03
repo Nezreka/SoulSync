@@ -24,6 +24,7 @@ def _build_orchestrator(**clients):
     orch.hifi = clients.get("hifi")
     orch.deezer_dl = clients.get("deezer_dl")
     orch.lidarr = clients.get("lidarr")
+    orch.soundcloud = clients.get("soundcloud")
     return orch
 
 
