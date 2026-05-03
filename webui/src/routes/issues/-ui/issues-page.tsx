@@ -6,7 +6,7 @@ import { Select } from '@/components/form';
 import { Show } from '@/components/primitives';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
-import type { IssueCounts, IssueRecord, IssueStatus } from '../-issues.types';
+import type { IssueCounts, IssuePriority, IssueRecord, IssuesSearch } from '../-issues.types';
 
 import { issueCountsQueryOptions, issueListQueryOptions } from '../-issues.api';
 import {
@@ -20,9 +20,11 @@ import {
   getPriorityClassName,
   ISSUE_CATEGORY_META,
   ISSUE_STATUS_META,
-  normalizeIssuesSearch,
+  getIssueCategoryMeta,
+  getIssueStatusMeta,
   parseSnapshot,
 } from '../-issues.helpers';
+import { ISSUE_CATEGORY_VALUES, ISSUE_SEARCH_STATUS_VALUES } from '../-issues.types';
 import { Route } from '../route';
 import { IssueDetailModal } from './issue-detail-modal';
 import styles from './issues-page.module.css';
@@ -35,7 +37,7 @@ export function IssuesPage() {
   const clearIssueSelection = () => {
     void navigate({
       to: Route.fullPath,
-      search: (prev) => normalizeIssuesSearch({ ...prev, issueId: undefined }),
+      search: (prev) => ({ ...prev, issueId: undefined }),
       replace: true,
     });
   };
@@ -82,30 +84,22 @@ function IssueBoard() {
   const openIssue = (issueId: number) => {
     void navigate({
       to: Route.fullPath,
-      search: (prev) => normalizeIssuesSearch({ ...prev, issueId }),
+      search: (prev) => ({ ...prev, issueId }),
     });
   };
 
-  const onCategoryChange = (category: string) => {
+  const onCategoryChange = (category: IssuesSearch['category']) => {
     void navigate({
       to: Route.fullPath,
-      search: (prev) =>
-        normalizeIssuesSearch({
-          ...prev,
-          category,
-        }),
+      search: (prev) => ({ ...prev, category }),
       replace: true,
     });
   };
 
-  const onStatusChange = (status: IssueStatus | 'all') => {
+  const onStatusChange = (status: IssuesSearch['status']) => {
     void navigate({
       to: Route.fullPath,
-      search: (prev) =>
-        normalizeIssuesSearch({
-          ...prev,
-          status,
-        }),
+      search: (prev) => ({ ...prev, status }),
       replace: true,
     });
   };
@@ -140,11 +134,11 @@ function IssueBoardHeader({
   onCategoryChange,
   onStatusChange,
 }: {
-  category: string;
+  category: IssuesSearch['category'];
   isAdmin: boolean;
-  status: IssueStatus | 'all';
-  onCategoryChange: (category: string) => void;
-  onStatusChange: (status: IssueStatus | 'all') => void;
+  status: IssuesSearch['status'];
+  onCategoryChange: (category: IssuesSearch['category']) => void;
+  onStatusChange: (status: IssuesSearch['status']) => void;
 }) {
   return (
     <div className={styles.issuesHeader} id="issues-header">
@@ -162,37 +156,30 @@ function IssueBoardHeader({
             id="issues-filter-status"
             aria-label="Status"
             value={status}
-            onChange={(event) => onStatusChange(event.target.value as IssueStatus | 'all')}
+            onChange={(event) => onStatusChange(event.target.value as IssuesSearch['status'])}
           >
-            <option value="open">Open</option>
-            <option value="all">All Statuses</option>
-            <option value="in_progress">In Progress</option>
-            <option value="resolved">Resolved</option>
-            <option value="dismissed">Dismissed</option>
+            {ISSUE_SEARCH_STATUS_VALUES.map((option) => (
+              <option key={option} value={option}>
+                {getIssueStatusFilterLabel(option)}
+              </option>
+            ))}
           </Select>
           <Select
             id="issues-filter-category"
             aria-label="Category"
             value={category}
-            onChange={(event) => onCategoryChange(event.target.value)}
+            onChange={(event) => onCategoryChange(event.target.value as IssuesSearch['category'])}
           >
             <option value="all">All Categories</option>
-            <optgroup label="Track Issues">
-              <option value="wrong_track">Wrong Track</option>
-              <option value="wrong_artist">Wrong Artist</option>
-              <option value="wrong_album">Wrong Album</option>
-              <option value="audio_quality">Audio Quality</option>
-            </optgroup>
-            <optgroup label="Album Issues">
-              <option value="wrong_cover">Wrong Cover Art</option>
-              <option value="duplicate_tracks">Duplicate Tracks</option>
-              <option value="missing_tracks">Missing Tracks</option>
-              <option value="incomplete_album">Incomplete Album</option>
-            </optgroup>
-            <optgroup label="Both">
-              <option value="wrong_metadata">Wrong Metadata</option>
-              <option value="other">Other</option>
-            </optgroup>
+            {ISSUE_CATEGORY_FILTER_GROUPS.map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {getIssueCategoryFilterOptions(group).map((option) => (
+                  <option key={option} value={option}>
+                    {ISSUE_CATEGORY_META[option].label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
           </Select>
         </div>
       </div>
@@ -256,7 +243,7 @@ function IssueBoardList({
   issuesLoading: boolean;
   onIssueSelect: (issueId: number) => void;
   showReporterName: boolean;
-  statusFilter: IssueStatus | 'all';
+  statusFilter: IssuesSearch['status'];
 }) {
   return (
     <div className={styles.issuesList} id="issues-list" data-testid="issue-list">
@@ -325,8 +312,8 @@ function IssueBoardCard({
   const artwork = getIssueArtwork(snapshot);
   const entityName = getEntityName(issue, snapshot);
   const details = getEntityDetails(issue, snapshot);
-  const statusMeta = ISSUE_STATUS_META[issue.status] || ISSUE_STATUS_META.open;
-  const catMeta = ISSUE_CATEGORY_META[issue.category] || ISSUE_CATEGORY_META.other;
+  const statusMeta = getIssueStatusMeta(issue.status) || ISSUE_STATUS_META.open;
+  const catMeta = getIssueCategoryMeta(issue.category) || ISSUE_CATEGORY_META.other;
   const priorityClass = getIssuePriorityClassName(getPriorityClassName(issue.priority));
   const statusClassName = getIssueStatusClassName(issue.status);
   const createdDate = formatIssueDate(issue.created_at);
@@ -400,16 +387,44 @@ const ISSUE_STATUS_CLASS_NAMES: Record<IssueRecord['status'], string> = {
   dismissed: styles.issueStatusDismissed,
 };
 
-const ISSUE_PRIORITY_CLASS_NAMES: Record<'high' | 'low' | 'normal', string> = {
+const ISSUE_PRIORITY_CLASS_NAMES: Record<IssuePriority, string> = {
   high: styles.issuePriorityHigh,
   low: styles.issuePriorityLow,
   normal: styles.issuePriorityNormal,
 };
 
+function getIssueStatusFilterLabel(status: IssuesSearch['status']): string {
+  if (status === 'all') return 'All Statuses';
+  return getIssueStatusMeta(status)?.label || status.replace(/_/g, ' ');
+}
+
 function getIssueStatusClassName(status: IssueRecord['status']): string {
   return ISSUE_STATUS_CLASS_NAMES[status] || styles.issueStatusOpen;
 }
 
-function getIssuePriorityClassName(priority: 'high' | 'low' | 'normal'): string {
+function getIssuePriorityClassName(priority: IssuePriority): string {
   return ISSUE_PRIORITY_CLASS_NAMES[priority] || styles.issuePriorityNormal;
+}
+
+const ISSUE_CATEGORY_FILTER_GROUPS = [
+  {
+    label: 'Track Issues',
+    matches: (applies: Array<'track' | 'album' | 'artist'>) =>
+      applies.length === 1 && applies.includes('track'),
+  },
+  {
+    label: 'Album Issues',
+    matches: (applies: Array<'track' | 'album' | 'artist'>) =>
+      applies.length === 1 && applies.includes('album'),
+  },
+  {
+    label: 'Both',
+    matches: (applies: Array<'track' | 'album' | 'artist'>) => applies.length > 1,
+  },
+] as const;
+
+function getIssueCategoryFilterOptions(group: (typeof ISSUE_CATEGORY_FILTER_GROUPS)[number]) {
+  return ISSUE_CATEGORY_VALUES.filter((category) =>
+    group.matches(ISSUE_CATEGORY_META[category].applies),
+  );
 }

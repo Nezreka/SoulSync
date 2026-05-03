@@ -7,11 +7,11 @@ import {
   issueDetailQueryOptions,
   issueListQueryOptions,
 } from './-issues.api';
-import { normalizeIssuesSearch } from './-issues.helpers';
+import { ISSUE_SEARCH_SCHEMA } from './-issues.types';
 import { IssuesPage } from './-ui/issues-page';
 
 export const Route = createFileRoute('/issues')({
-  validateSearch: normalizeIssuesSearch,
+  validateSearch: ISSUE_SEARCH_SCHEMA,
   beforeLoad: ({ context }) => {
     const { bridge } = context.shell;
 

@@ -19,7 +19,8 @@
     "clsx": "^2.1.1",
     "ky": "^2.0.2",
     "react": "^19.2.5",
-    "react-dom": "^19.2.5"
+    "react-dom": "^19.2.5",
+    "zod": "^4.4.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

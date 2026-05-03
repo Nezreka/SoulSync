@@ -1,6 +1,7 @@
 import { useForm } from '@tanstack/react-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
+import { z } from 'zod';
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
 import {
@@ -17,7 +18,7 @@ import {
 import { Show } from '@/components/primitives';
 import { useProfile } from '@/platform/shell/route-controllers';
 
-import type { IssuePriority, IssueReportPayload } from '../-issues.types';
+import type { IssueReportPayload } from '../-issues.types';
 
 import { createIssue, issueCountsQueryOptions } from '../-issues.api';
 import {
@@ -26,23 +27,8 @@ import {
   getIssueCategoriesForEntity,
   getEntityLabel,
 } from '../-issues.helpers';
+import { ISSUE_CATEGORY_VALUES, ISSUE_PRIORITY_VALUES } from '../-issues.types';
 import styles from './issue-detail-modal.module.css';
-
-const ISSUE_DOMAIN_QUERY_KEY = ['issues'] as const;
-
-interface ReportIssueFormValues {
-  category: string;
-  description: string;
-  priority: IssuePriority;
-  title: string;
-}
-
-const DEFAULT_REPORT_ISSUE_VALUES: ReportIssueFormValues = {
-  category: '',
-  description: '',
-  priority: 'normal',
-  title: '',
-};
 
 export function IssueDomainHost() {
   const queryClient = useQueryClient();
@@ -287,7 +273,7 @@ function ReportIssueModal({
                         label="Priority"
                       >
                         <OptionButtonGroup>
-                          {(['low', 'normal', 'high'] as const).map((priority) => (
+                          {ISSUE_PRIORITY_VALUES.map((priority) => (
                             <OptionButton
                               key={priority}
                               onClick={() => field.handleChange(priority)}
@@ -344,24 +330,53 @@ function ReportIssueModal({
   );
 }
 
-function normalizeReportIssueFormValues(values: ReportIssueFormValues): ReportIssueFormValues {
-  return {
-    category: values.category,
-    description: values.description.trim(),
-    priority: values.priority,
-    title: values.title.trim(),
-  };
+const ISSUE_DOMAIN_QUERY_KEY = ['issues'] as const;
+
+const DEFAULT_REPORT_ISSUE_VALUES: ReportIssueFormValues = {
+  category: '',
+  description: '',
+  priority: 'normal',
+  title: '',
+};
+
+const reportIssueFormBaseSchema = z.object({
+  category: z
+    .string()
+    .trim()
+    .pipe(z.enum(ISSUE_CATEGORY_VALUES, { error: 'Please select an issue category' })),
+  description: z.string().trim(),
+  priority: z.enum(ISSUE_PRIORITY_VALUES),
+  title: z.string().trim().min(1, 'Please provide a title for the issue'),
+});
+
+type ReportIssueFormValues = z.input<typeof reportIssueFormBaseSchema>;
+type NormalizedReportIssueFormValues = z.output<typeof reportIssueFormBaseSchema>;
+
+function notify(message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') {
+  window.showToast?.(message, type);
+}
+
+function updateBadge(openCount: number) {
+  const badge = document.getElementById('issues-nav-badge');
+  if (!badge) return;
+  badge.textContent = String(openCount || 0);
+  badge.classList.toggle('hidden', !openCount);
+}
+
+function normalizeReportIssueFormValues(
+  values: ReportIssueFormValues,
+): NormalizedReportIssueFormValues {
+  return reportIssueFormBaseSchema.parse(values);
 }
 
 function validateReportIssueForm(
   profileId: number,
   values: ReportIssueFormValues,
 ): string | undefined {
-  const normalizedValues = normalizeReportIssueFormValues(values);
   if (!profileId) return 'Profile is still loading';
-  if (!normalizedValues.category) return 'Please select an issue category';
-  if (!normalizedValues.title) return 'Please provide a title for the issue';
-  return undefined;
+  const result = reportIssueFormBaseSchema.safeParse(values);
+  if (result.success) return undefined;
+  return result.error.issues[0]?.message || 'Unable to submit this issue';
 }
 
 function getReportIssueFormError(errors: Array<unknown>): string {
@@ -373,15 +388,4 @@ function getReportIssueFormError(errors: Array<unknown>): string {
     return String(error);
   }
   return 'Unable to submit this issue';
-}
-
-function notify(message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') {
-  window.showToast?.(message, type);
-}
-
-function updateBadge(openCount: number) {
-  const badge = document.getElementById('issues-nav-badge');
-  if (!badge) return;
-  badge.textContent = String(openCount || 0);
-  badge.classList.toggle('hidden', !openCount);
 }
