@@ -369,7 +369,10 @@ function getReportIssueFormError(errors: Array<unknown>): string {
   if (!error) return '';
   if (typeof error === 'string') return error;
   if (error instanceof Error) return error.message;
-  return String(error);
+  if (typeof error === 'number' || typeof error === 'boolean' || typeof error === 'bigint') {
+    return String(error);
+  }
+  return 'Unable to submit this issue';
 }
 
 function notify(message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') {

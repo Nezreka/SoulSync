@@ -2,10 +2,34 @@ export type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'dismissed';
 export type IssueEntityType = 'track' | 'album' | 'artist';
 export type IssuePriority = 'low' | 'normal' | 'high';
 
+export interface IssueTrackRow extends Record<string, unknown> {
+  bitrate?: string | number;
+  disc_number?: string | number;
+  duration?: string | number;
+  format?: string;
+  id?: string | number;
+  title?: string;
+  track_number?: string | number;
+}
+
 export interface IssueSnapshot {
   [key: string]: unknown;
-  title?: string;
+  album_track_count?: string | number;
+  bitrate?: string | number;
+  bpm?: string | number;
+  disc_number?: string | number;
+  duration?: string | number;
+  file_path?: string;
+  format?: string;
+  genres?: string[];
+  label?: string;
   name?: string;
+  record_type?: string;
+  title?: string;
+  track_count?: string | number;
+  tracks?: IssueTrackRow[];
+  track_number?: string | number;
+  year?: string | number;
   artist_name?: string;
   album_title?: string;
   thumb_url?: string;
@@ -16,14 +40,7 @@ export interface IssueSnapshot {
   spotify_track_id?: string;
   artist_id?: string | number;
   album_id?: string | number;
-  track_number?: string | number;
-  duration?: string | number;
-  format?: string;
-  bitrate?: string | number;
-  bpm?: string | number;
   quality?: string;
-  file_path?: string;
-  tracks?: Array<Record<string, unknown>>;
   artist_musicbrainz_id?: string;
   musicbrainz_release_id?: string;
   musicbrainz_recording_id?: string;
@@ -44,8 +61,8 @@ export interface IssueRecord {
   category: string;
   title: string;
   description?: string | null;
-  status: IssueStatus | string;
-  priority: 'low' | 'normal' | 'high' | string;
+  status: string;
+  priority: string;
   snapshot_data: IssueSnapshot | string | null;
   created_at?: string;
   updated_at?: string;

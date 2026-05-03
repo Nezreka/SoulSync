@@ -9,7 +9,7 @@ import {
   launchAlbumWishlistWorkflow,
 } from '@/platform/workflows/album-workflows';
 
-import type { IssueRecord } from '../-issues.types';
+import type { IssueRecord, IssueTrackRow } from '../-issues.types';
 
 import { deleteIssue, issueDetailQueryOptions, updateIssue } from '../-issues.api';
 import {
@@ -439,7 +439,7 @@ export function IssueDetailModal({
   );
 }
 
-function renderTrackListing(trackRows: Array<Record<string, unknown>>) {
+function renderTrackListing(trackRows: IssueTrackRow[]) {
   const nodes: ReactNode[] = [];
   let lastDisc: number | null = null;
   const hasMultiDisc = trackRows.some((track) => Number(track.disc_number || 1) > 1);
