@@ -1093,5 +1093,24 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             metadata["musicbrainz_release_id"] = release_id
             _update_album_year_in_database(db, metadata, release_year)
 
+        # Expose the final ID tag set + per-source values back to the
+        # import context so downstream side-effects (notably
+        # ``record_download_provenance``) can persist them to the
+        # ``track_downloads`` table without re-collecting. Without this,
+        # the watchlist scanner would have to wait for the async
+        # enrichment workers to backfill ``tracks.spotify_track_id`` etc.
+        # before recognizing freshly downloaded files.
+        if isinstance(context, dict):
+            try:
+                context["_embedded_id_tags"] = dict(pp.get("id_tags") or {})
+                isrc_value = (
+                    pp.get("isrc") or pp.get("deezer_isrc") or pp.get("tidal_isrc")
+                    or pp.get("hifi_isrc") or pp.get("qobuz_isrc")
+                )
+                if isrc_value:
+                    context["_isrc"] = str(isrc_value)
+            except Exception:
+                pass
+
     except Exception as exc:
         logger.error("Error embedding source IDs (non-fatal): %s", exc)
