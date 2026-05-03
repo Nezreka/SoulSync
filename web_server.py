@@ -641,6 +641,9 @@ if soulseek_client:
     if hasattr(soulseek_client, 'hifi'):
          soulseek_client.hifi.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
          logger.info("  Configured HiFi client shutdown callback")
+    if hasattr(soulseek_client, 'soundcloud') and soulseek_client.soundcloud:
+         soulseek_client.soundcloud.set_shutdown_check(lambda: IS_SHUTTING_DOWN)
+         logger.info("  Configured SoundCloud client shutdown callback")
 
 # Initialize web scan manager for automatic post-download scanning
 try:
@@ -2472,11 +2475,15 @@ def get_cached_transfer_data():
                     key = _make_context_key(transfer.get('username'), transfer.get('filename', ''))
                     live_transfers_lookup[key] = transfer
 
-            # Also add non-Soulseek downloads (avoid redundant slskd call through orchestrator)
+            # Also add non-Soulseek downloads (avoid redundant slskd call through orchestrator).
+            # Every streaming source must appear here — task progress for in-flight
+            # downloads comes from this lookup. Missing a source = task.progress
+            # stays at 0 even when the underlying client knows the real percent.
             try:
                 all_downloads = []
                 for _dl_client in [soulseek_client.youtube, soulseek_client.tidal, soulseek_client.qobuz,
-                                   soulseek_client.hifi, soulseek_client.deezer_dl, soulseek_client.lidarr]:
+                                   soulseek_client.hifi, soulseek_client.deezer_dl, soulseek_client.lidarr,
+                                   getattr(soulseek_client, 'soundcloud', None)]:
                     if _dl_client:
                         try:
                             all_downloads.extend(run_async(_dl_client.get_all_downloads()))
