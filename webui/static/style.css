@@ -39449,6 +39449,72 @@ div.artist-hero-badge {
     text-align: right;
 }
 
+/* Library Disk Usage */
+.stats-disk-usage-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin-top: 8px;
+}
+
+.stats-disk-total-row {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.stats-disk-total-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: rgb(var(--accent-rgb));
+}
+
+.stats-disk-total-meta {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.stats-disk-formats {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.stats-disk-format-row {
+    display: grid;
+    grid-template-columns: 60px 1fr 80px;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+}
+
+.stats-disk-format-name {
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.stats-disk-format-bar {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.stats-disk-format-fill {
+    height: 100%;
+    background: linear-gradient(90deg,
+        rgb(var(--accent-rgb)) 0%,
+        rgba(var(--accent-rgb), 0.6) 100%);
+    border-radius: 4px;
+}
+
+.stats-disk-format-size {
+    text-align: right;
+    color: rgba(255, 255, 255, 0.55);
+    font-variant-numeric: tabular-nums;
+}
+
 /* Database Storage Chart */
 .stats-db-storage-wrap {
     display: flex;

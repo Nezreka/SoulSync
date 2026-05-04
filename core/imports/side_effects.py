@@ -324,6 +324,17 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         except Exception:
             pass
 
+        # File size on disk (powers Library Disk Usage card on Stats).
+        # SoulSync standalone is the only path where the file is local
+        # at insert time, so we read it directly via os.path.getsize.
+        # Mirrors what JellyfinTrack/NavidromeTrack pull from API
+        # responses for the media-server flows.
+        file_size = None
+        try:
+            file_size = os.path.getsize(final_path) or None
+        except OSError:
+            pass
+
         artist_id = _stable_soulsync_id(artist_name.lower().strip())
         album_id = _stable_soulsync_id(f"{artist_name}::{album_name}".lower().strip())
         track_id = _stable_soulsync_id(final_path)
@@ -410,9 +421,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                 cursor.execute(
                     """
                     INSERT INTO tracks (id, album_id, artist_id, title, track_number,
-                                        duration, file_path, bitrate, track_artist, server_source,
+                                        duration, file_path, bitrate, file_size, track_artist, server_source,
                                         created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
                     (
                         track_id,
@@ -423,6 +434,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                         duration_ms,
                         final_path,
                         bitrate,
+                        file_size,
                         track_artist,
                     ),
                 )
