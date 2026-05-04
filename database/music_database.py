@@ -1411,6 +1411,28 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_soul_id ON track_downloads (soul_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_isrc ON track_downloads (isrc)")
 
+            # Persistent MusicBrainz album → release-MBID cache.
+            # Backs `core/metadata/album_mbid_cache.py`. Keyed by the same
+            # (normalized_album_key, artist_key) shape the in-memory
+            # `mb_release_cache` uses, so a successful lookup remembered
+            # ONCE applies to every future track of the same album for
+            # the install's lifetime. Solves the "tracks of one album get
+            # different release MBIDs after cache eviction / restart"
+            # issue that causes Navidrome to split albums.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mb_album_release_cache (
+                    normalized_album_key TEXT NOT NULL,
+                    artist_key TEXT NOT NULL,
+                    release_mbid TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (normalized_album_key, artist_key)
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mb_album_release_mbid "
+                "ON mb_album_release_cache (release_mbid)"
+            )
+
             # Discovery artist blacklist — artists users never want to see in discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS discovery_artist_blacklist (
