@@ -37,9 +37,19 @@ def authed_client():
     return DiscogsClient(token='dummy_test_token')
 
 
-def test_get_user_collection_returns_empty_without_token():
+def test_get_user_collection_returns_empty_without_token(monkeypatch):
     """Defensive: no token → empty list, never raises. Discogs collection
-    is private so an unauthenticated call would 403 anyway."""
+    is private so an unauthenticated call would 403 anyway.
+
+    DiscogsClient's constructor falls back to ``config_manager.get(
+    'discogs.token')`` when no token is passed — including when the
+    empty-string sentinel is passed (because empty-string is falsy).
+    Stub the config lookup so this test stays deterministic regardless
+    of the developer's local config (which may have a real token set
+    after using the Your Albums Discogs source feature)."""
+    from config.settings import config_manager
+    monkeypatch.setattr(config_manager, 'get',
+                        lambda key, default=None: '' if key == 'discogs.token' else default)
     client = DiscogsClient(token='')
     assert client.get_user_collection() == []
 
