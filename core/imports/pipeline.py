@@ -927,6 +927,50 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             _notify_download_completed(batch_id, task_id, success=False)
             return
 
+        # Integrity rejection — the inner pipeline quarantined the file
+        # because audio integrity (size / parse / duration) failed. Wrapper
+        # was previously falling through to "assuming success" because
+        # quarantined files have no _final_processed_path, which left the
+        # task showing ✅ Completed in the UI even though the file is in
+        # quarantine. Reported by user when downloading Mr. Morale: 3
+        # tracks (Rich Interlude, Savior Interlude, Savior) showed
+        # Completed in the modal but were missing on disk because their
+        # source files failed integrity and were quarantined.
+        if context.get('_integrity_failure_msg'):
+            failure_msg = context.get('_integrity_failure_msg', 'unknown')
+            logger.error(
+                f"Task {task_id} failed integrity check — marking failed: {failure_msg}"
+            )
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = (
+                        f"File integrity check failed: {failure_msg}"
+                    )
+            with matched_context_lock:
+                if context_key in matched_downloads_context:
+                    del matched_downloads_context[context_key]
+            _notify_download_completed(batch_id, task_id, success=False)
+            return
+
+        # Race guard failure — inner code set this when the source file
+        # disappeared and there was no known destination to fall back on
+        # (vs the legitimate race-guard skip where a sibling thread
+        # already moved the file to its destination).
+        if context.get('_race_guard_failed'):
+            logger.error(f"Task {task_id} failed race guard — source file gone with no known destination")
+            with tasks_lock:
+                if task_id in download_tasks:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = (
+                        "Source file disappeared before post-processing could complete"
+                    )
+            with matched_context_lock:
+                if context_key in matched_downloads_context:
+                    del matched_downloads_context[context_key]
+            _notify_download_completed(batch_id, task_id, success=False)
+            return
+
         expected_final_path = context.get('_final_processed_path')
         if not expected_final_path:
             logger.info(f"No _final_processed_path in context for task {task_id} — cannot verify, assuming success")
