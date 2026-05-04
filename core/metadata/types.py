@@ -378,6 +378,120 @@ class Album:
         )
 
     @classmethod
+    def from_qobuz_dict(cls, raw: Dict[str, Any]) -> 'Album':
+        """Qobuz API ``album/get`` response shape."""
+        artist = raw.get('artist') or {}
+        artist_name = _str(artist.get('name'), default='Unknown Artist') if isinstance(artist, dict) else _str(artist) or 'Unknown Artist'
+        artist_id = _str(artist.get('id')) if isinstance(artist, dict) else ''
+
+        # Qobuz `image` is a dict with small/large/thumbnail variants.
+        image = raw.get('image') or {}
+        image_url = None
+        if isinstance(image, dict):
+            image_url = (
+                _str(image.get('large'))
+                or _str(image.get('small'))
+                or _str(image.get('thumbnail'))
+                or None
+            )
+
+        external_ids = {}
+        if raw.get('id'):
+            external_ids['qobuz'] = _str(raw['id'])
+        if raw.get('upc'):
+            external_ids['upc'] = _str(raw['upc'])
+
+        external_urls = {}
+        if raw.get('url'):
+            external_urls['qobuz'] = _str(raw['url'])
+
+        # Qobuz exposes both `release_date_original` (vinyl/original
+        # press date) and `released_at` (digital release timestamp).
+        # Prefer the original date for cross-provider matching.
+        release_date = _str(raw.get('release_date_original') or raw.get('released_at'))
+        if release_date and 'T' in release_date:
+            release_date = release_date.split('T', 1)[0]
+
+        genre = raw.get('genre') or {}
+        genre_name = _str(genre.get('name')) if isinstance(genre, dict) else _str(genre)
+
+        label = raw.get('label') or {}
+        label_name = _str(label.get('name')) if isinstance(label, dict) else _str(label)
+
+        return cls(
+            id=_str(raw.get('id')),
+            name=_str(raw.get('title')),
+            artists=[artist_name],
+            release_date=release_date,
+            total_tracks=_int(raw.get('tracks_count')),
+            album_type='album',  # Qobuz doesn't tag this consistently
+            image_url=image_url,
+            artist_id=artist_id or None,
+            genres=[genre_name] if genre_name else [],
+            label=label_name or None,
+            barcode=external_ids.get('upc'),
+            source='qobuz',
+            external_ids=external_ids,
+            external_urls=external_urls,
+        )
+
+    @classmethod
+    def from_tidal_object(cls, obj: Any) -> 'Album':
+        """tidalapi ``Album`` object shape.
+
+        Tidal goes through the ``tidalapi`` library which returns
+        Python objects, not raw dicts — so this converter is named
+        ``from_tidal_object`` to make the input contract explicit.
+        Duck-types attribute access so unit tests can pass simple
+        SimpleNamespace stand-ins."""
+        artist = getattr(obj, 'artist', None)
+        artist_name = _str(getattr(artist, 'name', None), default='Unknown Artist')
+        artist_id = _str(getattr(artist, 'id', '')) if artist else ''
+
+        # tidalapi exposes `image()` as a method that returns a URL at
+        # a given size. Try a sensible default size; fall back to the
+        # `picture` field (the raw image id) if the method's missing.
+        image_url = None
+        try:
+            if hasattr(obj, 'image') and callable(obj.image):
+                image_url = obj.image(640) or None
+        except Exception:
+            image_url = None
+        if not image_url:
+            picture = _str(getattr(obj, 'picture', ''))
+            if picture:
+                # Tidal CDN URL format
+                pic_path = picture.replace('-', '/')
+                image_url = f"https://resources.tidal.com/images/{pic_path}/640x640.jpg"
+
+        release_date = ''
+        rd = getattr(obj, 'release_date', None)
+        if rd is not None:
+            release_date = _str(rd).split('T')[0] if 'T' in _str(rd) else _str(rd)
+
+        external_ids = {}
+        if getattr(obj, 'id', None):
+            external_ids['tidal'] = _str(obj.id)
+        if getattr(obj, 'universal_product_number', None):
+            external_ids['upc'] = _str(obj.universal_product_number)
+
+        return cls(
+            id=_str(getattr(obj, 'id', '')),
+            name=_str(getattr(obj, 'name', '')),
+            artists=[artist_name],
+            release_date=release_date,
+            total_tracks=_int(getattr(obj, 'num_tracks', 0)),
+            album_type=_str(getattr(obj, 'type', None), default='album').lower() or 'album',
+            image_url=image_url,
+            artist_id=artist_id or None,
+            genres=[],  # tidalapi doesn't expose genres on Album
+            barcode=external_ids.get('upc'),
+            source='tidal',
+            external_ids=external_ids,
+            external_urls={},
+        )
+
+    @classmethod
     def from_hydrabase_dict(cls, raw: Dict[str, Any]) -> 'Album':
         """Hydrabase metadata service response shape."""
         artists_raw = raw.get('artists') or []
