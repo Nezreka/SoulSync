@@ -196,18 +196,26 @@ class DownloadOrchestrator:
 
         return False
 
+    def _resolve_source_chain(self) -> List[str]:
+        """Order the configured sources for hybrid mode. Prefers
+        ``hybrid_order`` config; falls back to legacy
+        primary/secondary pair when no order set."""
+        registry_names = set(self.registry.names())
+        if self.hybrid_order:
+            return [s for s in self.hybrid_order if s in registry_names]
+        primary = self.hybrid_primary if self.hybrid_primary in registry_names else 'soulseek'
+        secondary = self.hybrid_secondary if self.hybrid_secondary in registry_names else 'soulseek'
+        if secondary == primary:
+            secondary = next((name for name in registry_names if name != primary), 'soulseek')
+        chain = [primary, secondary]
+        if not chain:
+            chain = ['soulseek']
+        return chain
+
     async def search(self, query: str, timeout: int = None, progress_callback=None) -> Tuple[List[TrackResult], List[AlbumResult]]:
-        """
-        Search for tracks using configured source(s).
-
-        Args:
-            query: Search query
-            timeout: Search timeout (for Soulseek)
-            progress_callback: Progress callback (for Soulseek)
-
-        Returns:
-            Tuple of (track_results, album_results)
-        """
+        """Search for tracks using configured source(s). Single-source
+        modes route directly; hybrid mode delegates to
+        ``engine.search_with_fallback`` which tries the chain in order."""
         if self.mode != 'hybrid':
             client = self._client(self.mode)
             if not client:
@@ -216,53 +224,9 @@ class DownloadOrchestrator:
             logger.info(f"Searching {self.registry.display_name(self.mode)}: {query}")
             return await client.search(query, timeout, progress_callback)
 
-        elif self.mode == 'hybrid':
-            clients = {name: self._client(name) for name in self.registry.names()}
-
-            # Build ordered source list: prefer hybrid_order, fall back to legacy primary/secondary
-            if self.hybrid_order:
-                source_order = [s for s in self.hybrid_order if s in clients]
-            else:
-                primary = self.hybrid_primary if self.hybrid_primary in clients else 'soulseek'
-                secondary = self.hybrid_secondary if self.hybrid_secondary in clients else 'soulseek'
-                if secondary == primary:
-                    secondary = next((name for name in clients if name != primary), 'soulseek')
-                source_order = [primary, secondary]
-
-            if not source_order:
-                source_order = ['soulseek']
-
-            logger.info(f"Hybrid search ({' → '.join(source_order)}): {query}")
-
-            # Try each source in priority order (skip unconfigured/unavailable ones)
-            for i, source_name in enumerate(source_order):
-                client = clients.get(source_name)
-                if not client:
-                    logger.info(f"Skipping {source_name} (not available)")
-                    continue
-                if hasattr(client, 'is_configured') and not client.is_configured():
-                    logger.info(f"Skipping {source_name} (not configured)")
-                    continue
-
-                try:
-                    if i == 0:
-                        logger.info(f"Trying {source_name} (priority {i+1}): {query}")
-                    else:
-                        logger.info(f"Trying {source_name} (priority {i+1}): {query}")
-
-                    tracks, albums = await client.search(query, timeout, progress_callback)
-                    if tracks:
-                        logger.info(f"{source_name} found {len(tracks)} tracks")
-                        return (tracks, albums)
-                except Exception as e:
-                    logger.warning(f"{source_name} search failed: {e}")
-
-            # Nothing found from any source
-            logger.warning(f"Hybrid search: all sources ({', '.join(source_order)}) found nothing for: {query}")
-            return ([], [])
-
-        # Fallback: empty results
-        return ([], [])
+        chain = self._resolve_source_chain()
+        logger.info(f"Hybrid search ({' → '.join(chain)}): {query}")
+        return await self.engine.search_with_fallback(query, chain, timeout, progress_callback)
 
     async def search_and_download_best(self, query: str, expected_track=None) -> Optional[str]:
         """
