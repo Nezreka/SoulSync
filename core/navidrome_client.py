@@ -117,6 +117,14 @@ class NavidromeTrack:
         self.suffix = navidrome_data.get('suffix')      # e.g. "flac", "mp3"
         self.bitRate = navidrome_data.get('bitRate')     # e.g. 320
         self.path = navidrome_data.get('path')           # e.g. "/music/Artist/Album/track.flac"
+        # File size in bytes (Subsonic <song size="..."/>) — powers the
+        # Library Disk Usage card on Stats. None when the server didn't
+        # report a size (rare but possible for streaming-only nodes).
+        _nv_size = navidrome_data.get('size')
+        try:
+            self.file_size = int(_nv_size) if _nv_size else None
+        except (TypeError, ValueError):
+            self.file_size = None
 
         self._album_id = navidrome_data.get('albumId', '')
         self._artist_id = navidrome_data.get('artistId', '')

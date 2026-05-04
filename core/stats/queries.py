@@ -172,6 +172,17 @@ def get_db_storage(database) -> dict:
     return database.get_db_storage_stats()
 
 
+def get_library_disk_usage(database) -> dict:
+    """On-disk size of the library, with per-format breakdown.
+
+    Backed by `tracks.file_size` populated during the deep scan from
+    media-server-reported sizes (Plex MediaPart.size, Jellyfin
+    MediaSources[].Size, Navidrome <song size="...">,
+    SoulSync standalone os.path.getsize).
+    """
+    return database.get_library_disk_usage()
+
+
 def get_recent_tracks(database, limit: int) -> list[dict]:
     """Recently played tracks from listening_history."""
     conn = database._get_connection()

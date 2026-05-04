@@ -200,6 +200,8 @@ async function loadStatsData() {
 
     // DB storage chart (separate fetch — not part of cached stats)
     _loadDbStorageChart();
+    // Library disk usage (separate fetch — populated by deep scan)
+    _loadLibraryDiskUsage();
 
     // Recent plays
     _renderRecentPlays(data.recent || []);
@@ -385,6 +387,70 @@ async function _loadDbStorageChart() {
     } catch (e) {
         console.debug('DB storage chart load failed:', e);
     }
+}
+
+async function _loadLibraryDiskUsage() {
+    try {
+        const resp = await fetch('/api/stats/library-disk-usage');
+        const data = await resp.json();
+        if (!data.success) return;
+        _renderLibraryDiskUsage(data);
+    } catch (e) {
+        console.debug('Library disk usage load failed:', e);
+    }
+}
+
+function _formatBytes(n) {
+    if (!n || n <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    let v = n;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return `${v.toFixed(v < 10 ? 2 : 1)} ${units[i]}`;
+}
+
+function _renderLibraryDiskUsage(data) {
+    const totalEl = document.getElementById('stats-disk-total-value');
+    const metaEl = document.getElementById('stats-disk-total-meta');
+    const formatsEl = document.getElementById('stats-disk-formats');
+    if (!totalEl || !metaEl || !formatsEl) return;
+
+    if (!data.has_data || !data.total_bytes) {
+        totalEl.textContent = '—';
+        metaEl.textContent = data.tracks_without_size > 0
+            ? `Run a Deep Scan to populate (${data.tracks_without_size.toLocaleString()} tracks pending)`
+            : 'No tracks in library yet';
+        formatsEl.innerHTML = '';
+        return;
+    }
+
+    totalEl.textContent = _formatBytes(data.total_bytes);
+
+    const withSize = data.tracks_with_size || 0;
+    const withoutSize = data.tracks_without_size || 0;
+    const trackBits = `${withSize.toLocaleString()} tracks measured`;
+    const pendingBits = withoutSize > 0
+        ? ` (+${withoutSize.toLocaleString()} pending next Deep Scan)`
+        : '';
+    metaEl.textContent = trackBits + pendingBits;
+
+    // Per-format bars sorted by size descending. Skip if no breakdown.
+    const formats = Object.entries(data.by_format || {}).sort((a, b) => b[1] - a[1]);
+    if (!formats.length) { formatsEl.innerHTML = ''; return; }
+
+    const max = formats[0][1] || 1;
+    formatsEl.innerHTML = formats.map(([ext, bytes]) => {
+        const pct = Math.max(2, Math.round((bytes / max) * 100));
+        return `
+            <div class="stats-disk-format-row">
+                <span class="stats-disk-format-name">${ext.toUpperCase()}</span>
+                <div class="stats-disk-format-bar">
+                    <div class="stats-disk-format-fill" style="width:${pct}%"></div>
+                </div>
+                <span class="stats-disk-format-size">${_formatBytes(bytes)}</span>
+            </div>
+        `;
+    }).join('');
 }
 
 function _renderDbStorageChart(tables, totalFileSize, method) {

@@ -1,3 +1,4 @@
+import os
 import sqlite3
 from types import SimpleNamespace
 
@@ -58,6 +59,7 @@ def _make_soulsync_db():
             duration INTEGER,
             file_path TEXT,
             bitrate INTEGER,
+            file_size INTEGER,
             track_artist TEXT,
             server_source TEXT,
             created_at TEXT,
@@ -142,6 +144,10 @@ def test_record_soulsync_library_entry_writes_artist_album_and_track(tmp_path, m
     assert track_row["track_artist"] == "Guest Artist"
     assert track_row["album_id"] == album_row["id"]
     assert track_row["file_path"] == str(final_path)
+    # File size in bytes — populates the Library Disk Usage card on Stats.
+    # Read via os.path.getsize at insert time since SoulSync standalone is
+    # the only flow where the file is local at the moment we write the row.
+    assert track_row["file_size"] == os.path.getsize(str(final_path))
 
 
 def test_record_soulsync_library_entry_ignores_numeric_spotify_ids(tmp_path, monkeypatch):
