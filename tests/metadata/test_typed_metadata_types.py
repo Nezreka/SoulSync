@@ -343,6 +343,121 @@ def test_album_from_musicbrainz_dict_release_group_type_overrides_default():
 
 
 # ---------------------------------------------------------------------------
+# Qobuz
+# ---------------------------------------------------------------------------
+
+
+def test_album_from_qobuz_dict_full_response():
+    raw = {
+        'id': 12345,
+        'title': 'GNX',
+        'artist': {'id': 67890, 'name': 'Kendrick Lamar'},
+        'release_date_original': '2024-11-22',
+        'released_at': '2024-11-22T08:00:00',
+        'tracks_count': 12,
+        'image': {
+            'small': 'https://qobuz/small.jpg',
+            'large': 'https://qobuz/large.jpg',
+            'thumbnail': 'https://qobuz/thumb.jpg',
+        },
+        'genre': {'id': 116, 'name': 'Hip-Hop/Rap'},
+        'label': {'id': 999, 'name': 'pgLang'},
+        'upc': '00602465123456',
+        'url': 'https://www.qobuz.com/album/gnx/12345',
+    }
+    album = Album.from_qobuz_dict(raw)
+    assert album.id == '12345'
+    assert album.name == 'GNX'
+    assert album.artists == ['Kendrick Lamar']
+    assert album.artist_id == '67890'
+    assert album.release_date == '2024-11-22'
+    assert album.total_tracks == 12
+    assert album.image_url == 'https://qobuz/large.jpg'
+    assert album.genres == ['Hip-Hop/Rap']
+    assert album.label == 'pgLang'
+    assert album.barcode == '00602465123456'
+    assert album.source == 'qobuz'
+
+
+def test_album_from_qobuz_dict_falls_back_through_image_sizes():
+    base = {'id': 1, 'title': 'X', 'artist': {'name': 'A'}}
+    a = Album.from_qobuz_dict({**base, 'image': {'small': 'S'}})
+    assert a.image_url == 'S'
+    b = Album.from_qobuz_dict({**base, 'image': {}})
+    assert b.image_url is None
+
+
+def test_album_from_qobuz_dict_strips_iso_timestamp_to_date():
+    raw = {'id': 1, 'title': 'X', 'artist': {'name': 'A'},
+           'released_at': '2024-11-22T08:00:00'}
+    assert Album.from_qobuz_dict(raw).release_date == '2024-11-22'
+
+
+# ---------------------------------------------------------------------------
+# Tidal
+# ---------------------------------------------------------------------------
+
+
+def test_album_from_tidal_object_full_shape():
+    """tidalapi returns objects, not dicts. Use SimpleNamespace stand-ins
+    to mirror the tidalapi.Album shape."""
+    from types import SimpleNamespace
+
+    artist_obj = SimpleNamespace(id=67890, name='Kendrick Lamar')
+    album_obj = SimpleNamespace(
+        id=12345,
+        name='GNX',
+        artist=artist_obj,
+        release_date='2024-11-22',
+        num_tracks=12,
+        type='ALBUM',
+        picture='abc-123-def',
+        universal_product_number='00602465123456',
+        image=lambda size=640: f'https://resources.tidal.com/images/abc/123/def/{size}x{size}.jpg',
+    )
+
+    album = Album.from_tidal_object(album_obj)
+    assert album.id == '12345'
+    assert album.name == 'GNX'
+    assert album.artists == ['Kendrick Lamar']
+    assert album.artist_id == '67890'
+    assert album.release_date == '2024-11-22'
+    assert album.total_tracks == 12
+    assert album.album_type == 'album'  # lowercased
+    assert album.image_url and 'tidal.com' in album.image_url
+    assert album.barcode == '00602465123456'
+    assert album.source == 'tidal'
+    assert album.external_ids['tidal'] == '12345'
+
+
+def test_album_from_tidal_object_falls_back_to_picture_url_when_image_method_missing():
+    from types import SimpleNamespace
+    album_obj = SimpleNamespace(
+        id=1, name='X',
+        artist=SimpleNamespace(name='A', id=2),
+        release_date='2024',
+        num_tracks=10,
+        picture='aa-bb-cc',
+    )
+    album = Album.from_tidal_object(album_obj)
+    assert album.image_url and 'aa/bb/cc' in album.image_url
+
+
+def test_album_from_tidal_object_handles_missing_attrs():
+    """Bare-minimum tidalapi-shaped object — should still produce a
+    valid Album with sensible defaults."""
+    from types import SimpleNamespace
+    album_obj = SimpleNamespace(id=1, name='X', artist=None)
+    album = Album.from_tidal_object(album_obj)
+    assert album.id == '1'
+    assert album.name == 'X'
+    assert album.artists == ['Unknown Artist']
+    assert album.total_tracks == 0
+    assert album.album_type == 'album'
+    assert album.image_url is None
+
+
+# ---------------------------------------------------------------------------
 # Hydrabase
 # ---------------------------------------------------------------------------
 
@@ -393,6 +508,7 @@ def test_album_from_hydrabase_dict_handles_string_artists():
     ('from_musicbrainz_dict', {'id': 'x', 'title': 'X',
                                 'artist-credit': [{'artist': {'name': 'A'}}]}),
     ('from_hydrabase_dict', {'id': 'x', 'name': 'X', 'artists': [{'name': 'A'}]}),
+    ('from_qobuz_dict', {'id': 1, 'title': 'X', 'artist': {'name': 'A'}}),
 ])
 def test_every_converter_produces_required_fields(factory, raw):
     """Every converter MUST populate the required fields with sensible
@@ -419,6 +535,7 @@ def test_every_converter_produces_required_fields(factory, raw):
     ('from_musicbrainz_dict', {'id': 'x', 'title': 'X',
                                 'artist-credit': [{'artist': {'name': 'A'}}]}),
     ('from_hydrabase_dict', {'id': 'x', 'name': 'X', 'artists': [{'name': 'A'}]}),
+    ('from_qobuz_dict', {'id': 1, 'title': 'X', 'artist': {'name': 'A'}}),
 ])
 def test_to_context_dict_shape_is_uniform_across_providers(factory, raw):
     """The bridge dict every consumer currently expects has the same

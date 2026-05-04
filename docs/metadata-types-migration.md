@@ -49,6 +49,16 @@ Plus per-provider classmethod converters on `Album`:
 - `Album.from_discogs_dict(raw)`
 - `Album.from_musicbrainz_dict(raw)`
 - `Album.from_hydrabase_dict(raw)`
+- `Album.from_qobuz_dict(raw)`
+- `Album.from_tidal_object(obj)` — note: Tidal goes through the
+  ``tidalapi`` library which returns Python objects rather than
+  raw dicts, so this converter is named ``_object`` not ``_dict``
+  to make the input contract explicit.
+
+Enrichment-only providers (Last.fm, Genius, AcoustID, ListenBrainz,
+AudioDB) don't return Album-shaped responses — they enrich
+existing rows with tags, lyrics URLs, fingerprint matches, etc.
+No Album converter needed for those.
 
 Each converter is the SINGLE place that knows that provider's wire
 shape. Adding a new provider = adding one classmethod here and
