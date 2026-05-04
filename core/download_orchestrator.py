@@ -389,70 +389,21 @@ class DownloadOrchestrator:
         return await soulseek.download(username, filename, file_size)
 
     async def get_all_downloads(self) -> List[DownloadStatus]:
-        """
-        Get all active downloads from all sources.
-
-        Returns:
-            List of DownloadStatus objects
-        """
-        all_downloads = []
-        for _, client in self.registry.all_plugins():
-            try:
-                all_downloads.extend(await client.get_all_downloads())
-            except Exception:
-                pass
-        return all_downloads
+        """Aggregated view across every source. Delegates to the
+        engine, which iterates registered plugins."""
+        return await self.engine.get_all_downloads()
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
-        """
-        Get status of a specific download.
-
-        Args:
-            download_id: Download ID to query
-
-        Returns:
-            DownloadStatus object or None if not found
-        """
-        for _, client in self.registry.all_plugins():
-            try:
-                status = await client.get_download_status(download_id)
-                if status:
-                    return status
-            except Exception:
-                pass
-
-        return None
+        """Find a download by id across every source. Delegates to
+        the engine."""
+        return await self.engine.get_download_status(download_id)
 
     async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:
-        """
-        Cancel an active download.
-
-        Args:
-            download_id: Download ID to cancel
-            username: Username hint (optional). Streaming source name
-                (e.g. ``'youtube'``) routes directly to that source;
-                anything else routes to Soulseek as a peer username.
-            remove: Whether to remove from active downloads
-
-        Returns:
-            True if cancelled successfully
-        """
-        spec = self.registry.get_spec(username) if username else None
-        if spec is not None and spec.name != 'soulseek':
-            client = self.registry.get(spec.name)
-            return await client.cancel_download(download_id, username, remove) if client else False
-        elif username:
-            soulseek = self.registry.get('soulseek')
-            return await soulseek.cancel_download(download_id, username, remove) if soulseek else False
-
-        # No hint — try every source
-        for _, client in self.registry.all_plugins():
-            try:
-                if await client.cancel_download(download_id, username, remove):
-                    return True
-            except Exception:
-                pass
-        return False
+        """Cancel an active download. Delegates to the engine, which
+        handles source-hint routing (streaming source name → direct
+        plugin, unknown name → Soulseek as peer username, no hint →
+        try every plugin)."""
+        return await self.engine.cancel_download(download_id, username, remove)
 
     async def signal_download_completion(self, download_id: str, username: str, remove: bool = True) -> bool:
         """
@@ -472,24 +423,10 @@ class DownloadOrchestrator:
         return await self.soulseek.signal_download_completion(download_id, username, remove)
 
     async def clear_all_completed_downloads(self) -> bool:
-        """
-        Clear all completed downloads from every source.
-
-        Returns:
-            True if successful
-        """
-        results = []
-        for name, client in self.registry.all_plugins():
-            if hasattr(client, "is_configured") and not client.is_configured():
-                logger.debug("Skipping %s clear_all_completed_downloads (not configured)", name)
-                continue
-            try:
-                results.append(await client.clear_all_completed_downloads())
-            except Exception as exc:
-                logger.warning("%s clear_all_completed_downloads failed: %s", name, exc)
-                results.append(False)
-
-        return all(results) if results else True
+        """Clear completed downloads from every source. Delegates
+        to the engine, which skips unconfigured plugins and treats
+        per-plugin failures as False (not an exception)."""
+        return await self.engine.clear_all_completed_downloads()
 
     # ===== Soulseek-specific methods (for backwards compatibility) =====
     # These are internal methods that some parts of the codebase use directly
