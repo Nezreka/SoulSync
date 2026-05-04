@@ -1,3 +1,4 @@
+from core.download_engine import DownloadEngine
 from core.download_orchestrator import DownloadOrchestrator
 from core.download_plugins.registry import DownloadPluginRegistry, PluginSpec
 
@@ -58,6 +59,12 @@ def _build_orchestrator(**clients):
     orch.deezer_dl = registry.get('deezer')
     orch.lidarr = registry.get('lidarr')
     orch.soundcloud = registry.get('soundcloud')
+    # Engine — orchestrator delegates per-source query/cancel
+    # methods to it, so the test fixture must build one and
+    # register every mock plugin under its canonical name.
+    orch.engine = DownloadEngine()
+    for source_name, plugin in registry.all_plugins():
+        orch.engine.register_plugin(source_name, plugin)
     return orch
 
 
