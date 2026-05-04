@@ -1230,17 +1230,6 @@ const HELPER_CONTENT = {
         description: 'Click to browse tracks in this genre from your discovery pool.',
     },
 
-    // Spotify Library
-    '#spotify-library-section': {
-        title: 'Your Spotify Library',
-        description: 'Albums saved in your Spotify account. Browse, search, and download albums you\'ve saved on Spotify but don\'t have locally.',
-        tips: [
-            'Search and filter by status (All/Missing/Owned)',
-            'Sort by date saved, artist, album name, or release date',
-            '"Download Missing" downloads all albums not in your library'
-        ],
-    },
-
     // Playlist Sync/Download buttons (generic — matches all discover playlist sections)
     '.discover-section-actions .action-button.primary': {
         title: 'Sync to Media Server',
@@ -2485,7 +2474,6 @@ const HELPER_TOURS = {
             { page: 'discover', selector: '#discover-hero-view-all', title: 'View All Recommendations', description: 'Opens a modal with all recommended artists at once. "Watch All" adds every recommended artist to your watchlist in one click.' },
 
             // Content sections (top to bottom)
-            { page: 'discover', selector: '#spotify-library-section', title: 'Your Spotify Library', description: 'If Spotify is connected, this shows all your saved albums. Filter by Missing/Owned, sort by date, and click "Download Missing" to grab everything you don\'t have yet. Only visible with Spotify connected.' },
             { page: 'discover', selector: '#recent-releases-carousel', title: 'Recent Releases', description: 'New music from artists in your watchlist. Album cards show cover art — click any to open the download modal. Updates automatically when watchlist scans find new releases.' },
             { page: 'discover', selector: '#seasonal-albums-section', title: 'Seasonal Content', description: 'Season-aware sections that appear automatically — Christmas albums in December, summer vibes in July. Includes curated albums and a Seasonal Mix playlist you can sync to your server.' },
 
@@ -3444,6 +3432,7 @@ const WHATS_NEW = {
     '2.4.2': [
         // --- post-2.4.1 dev work — entries hidden by _getLatestWhatsNewVersion until the build version bumps ---
         { date: 'Unreleased — 2.4.2 dev cycle' },
+        { title: 'Drop Redundant "Your Spotify Library" Section on Discover', desc: 'discover page used to show two near-identical sections: "Your Albums" (cross-source aggregator across spotify/deezer/etc) AND "Your Spotify Library" (spotify-only). same UI, same grid, same filter / sort / download-missing controls — the spotify-only one was a strict subset of what your albums already covers. removed it. spotify saved albums still surface via the your albums section with spotify as one of its configured sources (gear button → configure sources). backend collection / storage is unchanged — the watchlist scanner still populates the spotify_library_albums cache for your albums to read.', page: 'discover' },
         { title: 'Library Disk Usage on Stats Page', desc: 'discord request (samuel [KC]): show how much disk space the library takes. new card on stats → system statistics shows total bytes + per-format breakdown (FLAC vs MP3 vs M4A bars). data comes from `tracks.file_size` populated during deep scan from whatever the media server already returns (plex MediaPart.size, jellyfin MediaSources[].Size, navidrome song.size, soulsync standalone os.path.getsize) — zero filesystem walk overhead. existing libraries see "Run a Deep Scan to populate" until the next deep scan fills in sizes; partial coverage shown as "X tracks measured (+Y pending)". migration is additive (NULL on legacy rows) so upgrading users have nothing to do.', page: 'stats' },
         { title: 'Fix: ReplayGain Wrote Same +52 dB Gain to Every Track', desc: 'noticed every downloaded track came out with `replaygain_track_gain: +52.00 dB` regardless of actual loudness. cause: parser used `re.search` which returned the FIRST `I:` (integrated loudness) reading from ffmpeg\'s ebur128 output. that\'s the per-window measurement at t=0.5s — almost always ~-70 LUFS because tracks start with silence/encoder padding. -18 (RG2 reference) - (-70) = +52 dB on every track. fix: parser now anchors to the `Summary:` block at the end of ffmpeg\'s output and reads the actual integrated loudness from there, not the silent-intro partial. defensive fallback uses the LAST per-window reading if Summary is missing (still better than the first). gains now reflect real per-track loudness.', page: 'downloads' },
         { title: 'Fix: Tracks Showed Completed When File Was Quarantined', desc: 'caught downloading kendrick mr morale: three tracks (rich interlude, savior interlude, savior) showed ✅ completed in the modal but were missing on disk. two layered bugs. (1) the post-process verification wrapper had a fallback that assumed success when no `_final_processed_path` was in context — but integrity-rejected files (which get quarantined instead of moved) leave that path unset, so the wrapper marked them complete. now wrapper explicitly checks `_integrity_failure_msg` and `_race_guard_failed` markers before the assume-success fallback. failed integrity = task marked failed, batch tracker notified with success=false. (2) acoustid skip-logic was too lenient — when fingerprint confidence was very high and either title OR artist matched a bit, it skipped verification with reason "likely same song in different language/script." that fired for english-vs-english by the same artist with the word "interlude" in both — same artist + 0.55 title sim = skip = wrong file accepted. tightened: skip now requires non-ASCII chars present (real language/script case) AND artist match, OR very high title similarity (≥0.80) AND artist match. english-vs-english with very different titles by same artist no longer skipped — verification correctly returns FAIL and the wrong file gets quarantined.', page: 'downloads' },
