@@ -26,6 +26,7 @@ from pathlib import Path
 
 from utils.logging_config import get_logger
 from config.settings import config_manager
+from core.download_engine import DownloadEngine
 from core.download_plugins.registry import DownloadPluginRegistry, build_default_registry
 from core.soulseek_client import TrackResult, AlbumResult, DownloadStatus
 
@@ -40,12 +41,17 @@ class DownloadOrchestrator:
     Routes requests to the appropriate client(s) based on configured mode.
     """
 
-    def __init__(self, registry: Optional[DownloadPluginRegistry] = None):
+    def __init__(self, registry: Optional[DownloadPluginRegistry] = None,
+                 engine: Optional[DownloadEngine] = None):
         """Initialize orchestrator with a plugin registry. Each plugin
         is built and registered independently — one failing plugin
         doesn't prevent others from working. The ``registry`` arg
         exists so tests can inject a registry with mock plugins; in
         production callers leave it None and get the default.
+
+        ``engine`` is the cross-source state owner. Phase B introduces
+        it as a held reference; it isn't on any code path yet — Phase
+        C/D/E/F migrate behavior into it incrementally.
         """
         self.registry = registry if registry is not None else build_default_registry()
         self.registry.initialize()
@@ -63,6 +69,14 @@ class DownloadOrchestrator:
         self.deezer_dl = self.registry.get('deezer')
         self.lidarr = self.registry.get('lidarr')
         self.soundcloud = self.registry.get('soundcloud')
+
+        # Engine — owns cross-source state, threading, search retry,
+        # rate-limits, fallback. Built in subsequent phases. For Phase
+        # B it's just an empty registry of plugins so future phases
+        # can route through it without further orchestrator changes.
+        self.engine = engine if engine is not None else DownloadEngine()
+        for source_name, plugin in self.registry.all_plugins():
+            self.engine.register_plugin(source_name, plugin)
 
         if self._init_failures:
             logger.warning(f"Download clients failed to initialize: {', '.join(self._init_failures)}")
