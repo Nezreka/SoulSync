@@ -841,6 +841,7 @@ class RepairWorker:
             'duplicate_tracks': self._fix_duplicates,
             'single_album_redundant': self._fix_single_album_redundant,
             'mbid_mismatch': self._fix_mbid_mismatch,
+            'album_mbid_mismatch': self._fix_album_mbid_mismatch,
             'album_tag_inconsistency': self._fix_album_tag_inconsistency,
             'incomplete_album': self._fix_incomplete_album,
             'path_mismatch': self._fix_path_mismatch,
@@ -1703,6 +1704,47 @@ class RepairWorker:
                 return {'success': False, 'error': 'MBID tag not found in file (may have been removed already)'}
         except Exception as e:
             return {'success': False, 'error': f'Failed to remove MBID: {str(e)}'}
+
+    def _fix_album_mbid_mismatch(self, entity_type, entity_id, file_path, details):
+        """Rewrite the dissenting track's album MBID to match the consensus.
+
+        The detector flagged this track because its embedded
+        MUSICBRAINZ_ALBUMID disagreed with the consensus across the
+        album's other tracks. Fix is to rewrite the dissenter's tag —
+        does NOT touch the other tracks (they're already in agreement).
+        """
+        consensus_mbid = details.get('consensus_mbid')
+        if not consensus_mbid:
+            return {'success': False, 'error': 'No consensus MBID in finding details'}
+        if not file_path:
+            return {'success': False, 'error': 'No file path associated with this finding'}
+
+        download_folder = None
+        if self._config_manager:
+            download_folder = self._config_manager.get('soulseek.download_path', '')
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder,
+                                      config_manager=self._config_manager)
+        if not resolved or not os.path.exists(resolved):
+            return {'success': False, 'error': f'File not found: {file_path}'}
+
+        try:
+            from core.repair_jobs.mbid_mismatch_detector import _write_album_mbid_to_file
+            ok = _write_album_mbid_to_file(resolved, consensus_mbid)
+            if ok:
+                wrong = (details.get('wrong_mbid') or '')[:8]
+                consensus_short = consensus_mbid[:8]
+                title = details.get('title', 'track')
+                return {
+                    'success': True,
+                    'action': 'rewrote_album_mbid',
+                    'message': (
+                        f'Updated album MBID on "{title}" '
+                        f'({wrong}… → {consensus_short}…)'
+                    ),
+                }
+            return {'success': False, 'error': 'Could not write album MBID — unsupported format or write failed'}
+        except Exception as e:
+            return {'success': False, 'error': f'Failed to rewrite album MBID: {str(e)}'}
 
     def _fix_album_tag_inconsistency(self, entity_type, entity_id, file_path, details):
         """Normalize inconsistent tags across all tracks in an album to the canonical (majority) value."""
@@ -2692,6 +2734,7 @@ class RepairWorker:
             fixable_types = ('dead_file', 'orphan_file', 'track_number_mismatch',
                              'missing_cover_art', 'metadata_gap', 'duplicate_tracks',
                              'single_album_redundant', 'mbid_mismatch',
+                             'album_mbid_mismatch',
                              'album_tag_inconsistency',
                              'incomplete_album', 'path_mismatch',
                              'missing_lossy_copy',
