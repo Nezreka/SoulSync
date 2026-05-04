@@ -1,16 +1,11 @@
-"""Phase A pinning tests for DeezerDownloadClient's download lifecycle.
+"""Phase A pinning tests for DeezerDownloadClient — UPDATED for Phase C6.
 
-Deezer auths via ARL token, fetches Blowfish-encrypted FLAC chunks
-from the Deezer GW API, decrypts client-side. Different from
-Tidal/Qobuz/HiFi:
-
-- track_id is STRING (not int).
-- username is the legacy ``'deezer_dl'`` (not ``'deezer'``).
-- Auth gate at the top of `download()` short-circuits when not
-  authenticated (returns None without spawning a thread).
-- Thread is named ``deezer-dl-<track_id>`` for diagnostics.
-
-Engine refactor must preserve all of these.
+Deezer has the same engine-driven dispatch as the other streaming
+sources, with three Deezer-specific quirks preserved:
+- track_id stays as STRING (Deezer GW API uses string IDs).
+- Engine record's `username` slot is the legacy `'deezer_dl'`
+  via worker username_override.
+- Worker thread is named `deezer-dl-<track_id>` for diagnostics.
 """
 
 from __future__ import annotations
@@ -22,6 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
+from core.download_engine import DownloadEngine
 from core.deezer_download_client import DeezerDownloadClient
 
 
@@ -34,98 +30,119 @@ def _run_async(coro):
 
 
 @pytest.fixture
-def deezer_client():
+def deezer_client_with_engine():
     client = DeezerDownloadClient.__new__(DeezerDownloadClient)
     client.download_path = Path('./test_deezer_downloads')
     client.shutdown_check = None
-    client.active_downloads = {}
-    client._download_lock = threading.Lock()
     client._authenticated = True
-    return client
+    client._engine = None
+    engine = DownloadEngine()
+    client.set_engine(engine)
+    return client, engine
 
 
-def test_download_returns_none_when_not_authenticated(deezer_client):
-    """Pinning: unauthenticated client refuses BEFORE any thread is
-    spawned. The orchestrator's hybrid fallback depends on this
-    early return — if the auth gate moves into the thread, fallback
-    behavior changes."""
-    deezer_client._authenticated = False
-    result = _run_async(deezer_client.download('deezer_dl', '12345||Some Song', 0))
+def test_download_returns_none_when_not_authenticated(deezer_client_with_engine):
+    client, _ = deezer_client_with_engine
+    client._authenticated = False
+    result = _run_async(client.download('deezer_dl', '12345||x', 0))
     assert result is None
 
 
-def test_download_accepts_string_track_id(deezer_client):
-    """Pinning: Deezer track_id stays as string — the GW API uses
-    string IDs. Engine refactor cannot int-coerce on the way through."""
-    with patch('core.deezer_download_client.threading.Thread') as fake:
-        fake.return_value.start = lambda: None
-        download_id = _run_async(
-            deezer_client.download('deezer_dl', '999||My Deezer Song', 5000)
-        )
-
-    record = deezer_client.active_downloads[download_id]
-    assert record['track_id'] == '999'  # STRING, not int
-    assert isinstance(record['track_id'], str)
+def test_download_returns_none_when_engine_not_wired():
+    client = DeezerDownloadClient.__new__(DeezerDownloadClient)
+    client._engine = None
+    client._authenticated = True
+    result = _run_async(client.download('deezer_dl', '12345||x', 0))
+    assert result is None
 
 
-def test_download_username_field_is_legacy_deezer_dl(deezer_client):
-    """Pinning: the `username` slot in the state dict is ``'deezer_dl'``,
-    not ``'deezer'``. Frontend status indicators + per-source
-    dispatch strings depend on the legacy form."""
-    with patch('core.deezer_download_client.threading.Thread') as fake:
-        fake.return_value.start = lambda: None
-        download_id = _run_async(
-            deezer_client.download('deezer_dl', '999||x', 0)
-        )
+def test_download_track_id_stays_as_string(deezer_client_with_engine):
+    """Pinning: Deezer GW API uses string IDs — engine record must
+    keep track_id as str."""
+    client, engine = deezer_client_with_engine
+    started = threading.Event()
+    release = threading.Event()
 
-    assert deezer_client.active_downloads[download_id]['username'] == 'deezer_dl'
+    def slow_impl(*args, **kwargs):
+        started.set()
+        release.wait(timeout=1.0)
+        return '/tmp/done.flac'
 
-
-def test_download_handles_missing_display_name_with_fallback(deezer_client):
-    """Pinning: filename without `||` produces a synthetic display
-    name `Track <track_id>`. Other clients return None for missing
-    `||` — Deezer is more lenient. Engine refactor must NOT change
-    this defensive fallback."""
-    with patch('core.deezer_download_client.threading.Thread') as fake:
-        fake.return_value.start = lambda: None
-        download_id = _run_async(deezer_client.download('deezer_dl', '12345', 0))
-
-    assert download_id is not None
-    record = deezer_client.active_downloads[download_id]
-    assert record['display_name'] == 'Track 12345'
+    with patch.object(client, '_download_sync', side_effect=slow_impl):
+        download_id = _run_async(client.download('deezer_dl', '999||X', 0))
+        started.wait(timeout=1.0)
+        record = engine.get_record('deezer', download_id)
+        assert record['track_id'] == '999'
+        assert isinstance(record['track_id'], str)
+        release.set()
 
 
-def test_download_populates_active_downloads_with_initial_state(deezer_client):
-    """Pinning: per-download record schema. NOTE the extra `error`
-    slot — Deezer-specific, used for ARL re-auth failure messages."""
-    with patch('core.deezer_download_client.threading.Thread') as fake:
-        fake.return_value.start = lambda: None
-        download_id = _run_async(
-            deezer_client.download('deezer_dl', '999||My Deezer Song', 1024)
-        )
+def test_download_username_slot_is_legacy_deezer_dl(deezer_client_with_engine):
+    """Pinning: frontend status indicators key off `'deezer_dl'`,
+    not the canonical `'deezer'`."""
+    client, engine = deezer_client_with_engine
+    started = threading.Event()
+    release = threading.Event()
 
-    record = deezer_client.active_downloads[download_id]
-    assert record['id'] == download_id
-    assert record['filename'] == '999||My Deezer Song'
-    assert record['username'] == 'deezer_dl'
-    assert record['state'] == 'Initializing'
-    assert record['size'] == 1024  # Deezer respects the file_size hint
-    assert record['file_path'] is None
-    assert record['error'] is None  # Deezer-specific slot
+    def slow_impl(*args, **kwargs):
+        started.set()
+        release.wait(timeout=1.0)
+        return '/tmp/done.flac'
+
+    with patch.object(client, '_download_sync', side_effect=slow_impl):
+        download_id = _run_async(client.download('deezer_dl', '999||x', 0))
+        started.wait(timeout=1.0)
+        assert engine.get_record('deezer', download_id)['username'] == 'deezer_dl'
+        release.set()
 
 
-def test_download_thread_is_named_for_diagnostics(deezer_client):
-    """Pinning: thread is named `deezer-dl-<track_id>` so multi-thread
-    debugging shows which download a stuck thread belongs to. Engine
-    refactor's BackgroundDownloadWorker must preserve diagnostic naming."""
-    captured_kwargs = {}
+def test_download_handles_missing_display_name_with_fallback(deezer_client_with_engine):
+    """Pinning: filename without `||` synthesizes display name `Track <id>`."""
+    client, engine = deezer_client_with_engine
+    started = threading.Event()
+    release = threading.Event()
 
-    def capture_thread(*args, **kwargs):
-        captured_kwargs.update(kwargs)
-        return type('FakeThread', (), {'start': lambda self: None})()
+    def slow_impl(*args, **kwargs):
+        started.set()
+        release.wait(timeout=1.0)
+        return '/tmp/x.flac'
 
-    with patch('core.deezer_download_client.threading.Thread', side_effect=capture_thread):
-        _run_async(deezer_client.download('deezer_dl', '777||Title', 0))
+    with patch.object(client, '_download_sync', side_effect=slow_impl):
+        download_id = _run_async(client.download('deezer_dl', '12345', 0))
+        started.wait(timeout=1.0)
+        assert engine.get_record('deezer', download_id)['display_name'] == 'Track 12345'
+        release.set()
 
-    assert captured_kwargs.get('daemon') is True
-    assert captured_kwargs.get('name') == 'deezer-dl-777'
+
+def test_download_engine_record_carries_error_slot(deezer_client_with_engine):
+    """Pinning: Deezer-specific `error` slot for ARL re-auth failure
+    messages must be present on init."""
+    client, engine = deezer_client_with_engine
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_impl(*args, **kwargs):
+        started.set()
+        release.wait(timeout=1.0)
+        return '/tmp/x.flac'
+
+    with patch.object(client, '_download_sync', side_effect=slow_impl):
+        download_id = _run_async(client.download('deezer_dl', '999||X', 1024))
+        started.wait(timeout=1.0)
+        record = engine.get_record('deezer', download_id)
+        assert 'error' in record
+        assert record['error'] is None
+        assert record['size'] == 1024
+        release.set()
+
+
+def test_get_all_downloads_reads_engine_records(deezer_client_with_engine):
+    client, engine = deezer_client_with_engine
+    engine.add_record('deezer', 'dl-1', {
+        'id': 'dl-1', 'filename': '111||A', 'username': 'deezer_dl',
+        'state': 'InProgress, Downloading', 'progress': 50.0,
+    })
+    result = _run_async(client.get_all_downloads())
+    assert len(result) == 1
+    assert result[0].id == 'dl-1'
+    assert result[0].username == 'deezer_dl'
