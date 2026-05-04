@@ -125,10 +125,24 @@ class YouTubeClient:
         # tests that bypass the orchestrator.
         self._engine = None
 
+    def rate_limit_policy(self):
+        """YouTube reads its download delay from user-tunable config
+        (``youtube.download_delay``, default 3s). Engine reads this
+        at ``register_plugin`` time, then ``set_engine`` runs and
+        re-applies if the config changed since instance construction."""
+        from core.download_engine import RateLimitPolicy
+        return RateLimitPolicy(
+            download_concurrency=1,
+            download_delay_seconds=float(self._download_delay),
+        )
+
     def set_engine(self, engine):
         """Engine callback — gives the client access to the central
         thread worker + state store. Engine calls this during
-        ``register_plugin`` if the plugin defines it."""
+        ``register_plugin`` if the plugin defines it. Worker delay
+        was already set from rate_limit_policy() — re-apply here so
+        runtime ``reload_settings`` updates take effect via the
+        same pathway."""
         self._engine = engine
         engine.worker.set_delay('youtube', float(self._download_delay))
 
