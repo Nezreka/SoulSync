@@ -33079,7 +33079,9 @@ try:
             state['status'] = status
             state['progress'] = 100
             state['finished_at'] = datetime.now(timezone.utc).isoformat()
-            summary = f'Done: {result.scanned} scanned, {result.auto_fixed} fixed, {result.findings_created} findings, {result.errors} errors'
+            skipped_dedup = getattr(result, 'findings_skipped_dedup', 0) or 0
+            existing_part = f' ({skipped_dedup} already existed)' if skipped_dedup else ''
+            summary = f'Done: {result.scanned} scanned, {result.auto_fixed} fixed, {result.findings_created} findings{existing_part}, {result.errors} errors'
             state['log'].append({'type': 'success' if status == 'finished' else 'error', 'text': summary})
             try:
                 socketio.emit('repair:progress', {job_id: dict(state)})

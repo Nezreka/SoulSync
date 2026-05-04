@@ -138,7 +138,7 @@ class MissingCoverArtJob(RepairJob):
                 # Create finding for user to approve
                 if context.create_finding:
                     try:
-                        context.create_finding(
+                        inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='missing_cover_art',
                             severity='info',
@@ -156,7 +156,10 @@ class MissingCoverArtJob(RepairJob):
                                 'artist_thumb_url': artist_thumb or None,
                             }
                         )
-                        result.findings_created += 1
+                        if inserted:
+                            result.findings_created += 1
+                        else:
+                            result.findings_skipped_dedup += 1
                     except Exception as e:
                         logger.debug("Error creating cover art finding for album %s: %s", album_id, e)
                         result.errors += 1

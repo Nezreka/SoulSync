@@ -320,7 +320,7 @@ class DiscographyBackfillJob(RepairJob):
                 # Create finding
                 if context.create_finding:
                     try:
-                        context.create_finding(
+                        inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='missing_discography_track',
                             severity='info',
@@ -340,13 +340,18 @@ class DiscographyBackfillJob(RepairJob):
                                 'source': source,
                             },
                         )
-                        result.findings_created += 1
-                        missing_count += 1
+                        if inserted:
+                            result.findings_created += 1
+                            missing_count += 1
+                        else:
+                            result.findings_skipped_dedup += 1
 
                         # Auto-wishlist mode: also push to wishlist now. The
                         # finding still gets created so the user has a log of
-                        # what the backfill picked up.
-                        if auto_add:
+                        # what the backfill picked up. Only fire on a NEW
+                        # finding — skip if dedup-suppressed (already on the
+                        # wishlist or already auto-added in a prior scan).
+                        if auto_add and inserted:
                             try:
                                 context.db.add_to_wishlist(
                                     spotify_track_data=track_data,
