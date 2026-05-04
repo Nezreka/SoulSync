@@ -25,5 +25,6 @@ commit so behavior never breaks across the suite.
 """
 
 from core.download_engine.engine import DownloadEngine
+from core.download_engine.worker import BackgroundDownloadWorker
 
-__all__ = ["DownloadEngine"]
+__all__ = ["DownloadEngine", "BackgroundDownloadWorker"]

@@ -70,6 +70,11 @@ class DownloadEngine:
         # plugin lookup local to the engine instead of forcing every
         # caller to also touch the registry.
         self._plugins: Dict[str, Any] = {}
+        # Background download worker — lives on the engine because
+        # it owns the cross-source state the worker mutates. Lazy
+        # import keeps the engine module standalone.
+        from core.download_engine.worker import BackgroundDownloadWorker
+        self.worker = BackgroundDownloadWorker(self)
 
     # ------------------------------------------------------------------
     # Plugin registration
