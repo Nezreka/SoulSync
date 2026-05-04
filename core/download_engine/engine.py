@@ -85,14 +85,24 @@ class DownloadEngine:
         once per source by the orchestrator after the registry's
         ``initialize`` builds the client instances.
 
-        Phase B is purely informational — the engine doesn't yet
-        dispatch through plugins. Subsequent phases use these
-        references to call ``plugin._download_impl`` /
-        ``plugin._search_raw`` etc.
+        If the plugin exposes ``set_engine(engine)``, the engine
+        passes a self-reference so the plugin can dispatch into
+        ``engine.worker`` / read state / etc. Plugins that haven't
+        been migrated to the engine yet simply don't define
+        ``set_engine`` — they keep their pre-engine behavior
+        unchanged.
         """
         if source_name in self._plugins:
             logger.warning("Plugin %s already registered with engine — overwriting", source_name)
         self._plugins[source_name] = plugin
+        set_engine = getattr(plugin, 'set_engine', None)
+        if callable(set_engine):
+            try:
+                set_engine(self)
+            except Exception as exc:
+                logger.warning(
+                    "Plugin %s set_engine callback failed: %s", source_name, exc,
+                )
 
     def get_plugin(self, source_name: str) -> Optional[Any]:
         return self._plugins.get(source_name)
