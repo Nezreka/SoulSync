@@ -288,7 +288,8 @@ class AlbumTagConsistencyJob(RepairJob):
                         variants_str = ' vs '.join(f'"{v}"' for v in inc['variants'][:3])
                         desc_parts.append(f"{inc['field']}: {variants_str}")
 
-                    context.create_finding(
+                    inserted = context.create_finding(
+                        job_id=self.job_id,
                         finding_type='album_tag_inconsistency',
                         severity='warning',
                         entity_type='album',
@@ -306,7 +307,10 @@ class AlbumTagConsistencyJob(RepairJob):
                                         'file_path': t['file_path']} for t in tag_data],
                         }
                     )
-                    result.findings_created += 1
+                    if inserted:
+                        result.findings_created += 1
+                    else:
+                        result.findings_skipped_dedup += 1
 
                     if context.report_progress:
                         context.report_progress(

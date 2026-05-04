@@ -150,7 +150,7 @@ class LossyConverterJob(RepairJob):
             if context.create_finding:
                 try:
                     file_size = os.path.getsize(resolved)
-                    context.create_finding(
+                    inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='missing_lossy_copy',
                         severity='info',
@@ -177,7 +177,10 @@ class LossyConverterJob(RepairJob):
                             'artist_thumb_url': artist_thumb or None,
                         }
                     )
-                    result.findings_created += 1
+                    if inserted:
+                        result.findings_created += 1
+                    else:
+                        result.findings_skipped_dedup += 1
                 except Exception as e:
                     logger.debug("Error creating finding for track %s: %s", track_id, e)
                     result.errors += 1

@@ -616,7 +616,7 @@ class MbidMismatchDetectorJob(RepairJob):
             )
         if context.create_finding:
             try:
-                context.create_finding(
+                inserted = context.create_finding(
                     job_id=self.job_id,
                     finding_type='album_mbid_mismatch',
                     severity='warning',
@@ -648,7 +648,10 @@ class MbidMismatchDetectorJob(RepairJob):
                         'artist_thumb_url': track['artist_thumb'] or None,
                     }
                 )
-                result.findings_created += 1
+                if inserted:
+                    result.findings_created += 1
+                else:
+                    result.findings_skipped_dedup += 1
             except Exception as e:
                 logger.debug("Error creating album MBID mismatch finding for track %s: %s",
                               track['track_id'], e)
@@ -665,7 +668,7 @@ class MbidMismatchDetectorJob(RepairJob):
             )
         if context.create_finding:
             try:
-                context.create_finding(
+                inserted = context.create_finding(
                     job_id=self.job_id,
                     finding_type='mbid_mismatch',
                     severity='warning',
@@ -692,7 +695,10 @@ class MbidMismatchDetectorJob(RepairJob):
                         'artist_thumb_url': artist_thumb or None,
                     }
                 )
-                result.findings_created += 1
+                if inserted:
+                    result.findings_created += 1
+                else:
+                    result.findings_skipped_dedup += 1
             except Exception as e:
                 logger.debug("Error creating MBID mismatch finding for track %s: %s", track_id, e)
                 result.errors += 1

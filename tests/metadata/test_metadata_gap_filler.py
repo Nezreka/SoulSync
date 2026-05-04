@@ -127,7 +127,7 @@ def _make_context(conn):
         report_progress=lambda *args, **kwargs: None,
         sleep_or_stop=lambda seconds: False,
         mb_client=_FakeMBClient(),
-        create_finding=lambda **kwargs: findings.append(kwargs),
+        create_finding=lambda **kwargs: (findings.append(kwargs) or True),
         findings=findings,
     )
 

@@ -495,7 +495,7 @@ class LibraryReorganizeJob(RepairJob):
                 rel_actual = os.path.relpath(actual_norm, transfer)
                 rel_expected = os.path.relpath(expected_norm, transfer)
                 if context.create_finding:
-                    context.create_finding(
+                    inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='path_mismatch',
                         severity='info',
@@ -506,7 +506,10 @@ class LibraryReorganizeJob(RepairJob):
                         description=f'From: {rel_actual}\nTo: {rel_expected}',
                         details={'from': rel_actual, 'to': rel_expected}
                     )
-                    result.findings_created += 1
+                    if inserted:
+                        result.findings_created += 1
+                    else:
+                        result.findings_skipped_dedup += 1
                 if context.report_progress:
                     context.report_progress(
                         scanned=i + 1, total=total,

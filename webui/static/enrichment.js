@@ -1425,6 +1425,7 @@ let _repairCurrentTab = 'jobs';
 let _repairFindingsPage = 0;
 let _repairSelectedFindings = new Set();
 let _repairFindingsTotal = 0;
+let _repairFindingsAutoSwitched = false;  // Set after auto-switching to "All Status" so we don't loop
 const REPAIR_FINDINGS_PAGE_SIZE = 30;
 let _repairJobsCache = {}; // Cache job data for help modal
 
@@ -2459,6 +2460,38 @@ async function loadRepairFindings() {
         if (selectAllCb) { selectAllCb.checked = false; selectAllCb.indeterminate = false; }
 
         if (items.length === 0) {
+            // If the user is on the default "pending" filter and there are
+            // ZERO pending rows but other statuses (dismissed/resolved) do
+            // have rows, auto-switch the filter to "All Status" so the user
+            // sees the carry-over findings instead of an empty pane. Common
+            // case: scanner re-found same issues that were dismissed
+            // previously — dedup-skip means no new pending row, so the
+            // default-filtered tab looks empty even though the badge count
+            // referenced existing dismissed rows.
+            if (statusFilter && statusFilter.value === 'pending' && !_repairFindingsAutoSwitched) {
+                try {
+                    const countsResp = await fetch('/api/repair/findings/counts');
+                    if (countsResp.ok) {
+                        const counts = await countsResp.json();
+                        const otherTotal = (counts.resolved || 0) + (counts.dismissed || 0) + (counts.auto_fixed || 0);
+                        if (otherTotal > 0) {
+                            _repairFindingsAutoSwitched = true;
+                            statusFilter.value = '';
+                            _repairFindingsPage = 0;
+                            await loadRepairFindings();
+                            const list = document.getElementById('repair-findings-list');
+                            if (list && !list.querySelector('.repair-auto-switch-notice')) {
+                                const notice = document.createElement('div');
+                                notice.className = 'repair-auto-switch-notice';
+                                notice.style.cssText = 'background:rgba(96,165,250,0.08);border:1px solid rgba(96,165,250,0.25);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#cbd5e1;';
+                                notice.innerHTML = `No <b>pending</b> findings, but ${otherTotal.toLocaleString()} carry-over (resolved/dismissed/auto-fixed). Showing <b>All Status</b> — change the filter above to switch back.`;
+                                list.parentNode.insertBefore(notice, list);
+                            }
+                            return;
+                        }
+                    }
+                } catch (e) { /* fall through to empty state */ }
+            }
             container.innerHTML = `<div class="repair-empty-state">
                 <div class="repair-empty-icon">&#10003;</div>
                 <div class="repair-empty-title">All Clear</div>
