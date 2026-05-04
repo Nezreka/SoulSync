@@ -528,7 +528,7 @@ def test_scan_uses_cached_api_track_count_without_expected_total_lookup(monkeypa
     job._get_expected_total = spy
 
     findings = []
-    context = _make_job_context(db, create_finding=lambda **kwargs: findings.append(kwargs))
+    context = _make_job_context(db, create_finding=lambda **kwargs: (findings.append(kwargs) or True))
 
     result = job.scan(context)
 
@@ -568,7 +568,7 @@ def test_scan_falls_back_to_api_and_persists_count_on_cache_miss(monkeypatch):
     )
 
     findings = []
-    context = _make_job_context(db, create_finding=lambda **kwargs: findings.append(kwargs))
+    context = _make_job_context(db, create_finding=lambda **kwargs: (findings.append(kwargs) or True))
 
     job = AlbumCompletenessJob()
     result = job.scan(context)
@@ -606,7 +606,7 @@ def test_scan_ignores_track_count_completely(monkeypatch):
     )
 
     findings = []
-    context = _make_job_context(db, create_finding=lambda **kwargs: findings.append(kwargs))
+    context = _make_job_context(db, create_finding=lambda **kwargs: (findings.append(kwargs) or True))
 
     job = AlbumCompletenessJob()
     result = job.scan(context)

@@ -110,7 +110,7 @@ class FakeLosslessDetectorJob(RepairJob):
                             log_type='error'
                         )
                     if context.create_finding:
-                        context.create_finding(
+                        inserted = context.create_finding(
                             job_id=self.job_id,
                             finding_type='fake_lossless',
                             severity='warning',
@@ -134,7 +134,10 @@ class FakeLosslessDetectorJob(RepairJob):
                                 'file_size': os.path.getsize(fpath),
                             }
                         )
-                        result.findings_created += 1
+                        if inserted:
+                            result.findings_created += 1
+                        else:
+                            result.findings_skipped_dedup += 1
 
             except Exception as e:
                 logger.debug("Error analyzing %s: %s", os.path.basename(fpath), e)

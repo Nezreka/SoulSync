@@ -217,7 +217,7 @@ class OrphanFileDetectorJob(RepairJob):
                 stat = os.stat(fpath)
                 ext = os.path.splitext(fpath)[1].lower().lstrip('.')
                 if context.create_finding:
-                    context.create_finding(
+                    inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='orphan_file',
                         severity='warning' if mass_orphan else 'info',
@@ -241,7 +241,10 @@ class OrphanFileDetectorJob(RepairJob):
                             'mass_orphan': mass_orphan,
                         }
                     )
-                    result.findings_created += 1
+                    if inserted:
+                        result.findings_created += 1
+                    else:
+                        result.findings_skipped_dedup += 1
             except Exception as e:
                 logger.debug("Error creating orphan finding for %s: %s", fpath, e)
                 result.errors += 1

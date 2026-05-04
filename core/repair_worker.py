@@ -655,8 +655,18 @@ class RepairWorker:
     # ------------------------------------------------------------------
     def _create_finding(self, job_id: str, finding_type: str, severity: str,
                         entity_type: str, entity_id: str, file_path: str,
-                        title: str, description: str, details: dict = None):
-        """Create a repair finding in the database."""
+                        title: str, description: str, details: dict = None) -> bool:
+        """Create a repair finding in the database.
+
+        Returns:
+            True  — a NEW pending row was inserted.
+            False — dedup-skipped (an equivalent row already exists with
+                    status pending/resolved/dismissed) OR a DB error
+                    occurred. Callers should only increment their
+                    ``findings_created`` counter when this returns True
+                    so the badge / scan log reports REAL new findings,
+                    not silently-skipped duplicates.
+        """
         conn = None
         try:
             conn = self.db._get_connection()
@@ -672,7 +682,7 @@ class RepairWorker:
             """, (job_id, finding_type, entity_type, entity_id, file_path))
 
             if cursor.fetchone():
-                return  # Already exists or was already fixed
+                return False  # Already exists or was already fixed
 
             cursor.execute("""
                 INSERT INTO repair_findings
@@ -685,8 +695,10 @@ class RepairWorker:
                 json.dumps(details) if details else '{}'
             ))
             conn.commit()
+            return True
         except Exception as e:
             logger.debug("Error creating finding: %s", e)
+            return False
         finally:
             if conn:
                 conn.close()

@@ -11,6 +11,7 @@ class JobResult:
     """Result of a single job scan run."""
     scanned: int = 0
     findings_created: int = 0
+    findings_skipped_dedup: int = 0  # Findings the worker already had a row for
     auto_fixed: int = 0
     errors: int = 0
     skipped: int = 0
