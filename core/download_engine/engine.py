@@ -302,3 +302,80 @@ class DownloadEngine:
                 logger.warning("%s clear_all_completed_downloads failed: %s", source_name, exc)
                 results.append(False)
         return all(results) if results else True
+
+    # ------------------------------------------------------------------
+    # Hybrid fallback — Phase F surface
+    # ------------------------------------------------------------------
+
+    async def search_with_fallback(self, query: str, source_chain,
+                                   timeout=None, progress_callback=None):
+        """Try each source in ``source_chain`` until one returns
+        tracks. Skips unconfigured / unregistered sources, swallows
+        per-source exceptions. Returns the first non-empty
+        (tracks, albums) tuple, or ``([], [])`` when every source
+        in the chain is exhausted.
+
+        Replaces orchestrator's hand-rolled hybrid search loop. The
+        chain is ordered (most-preferred first).
+        """
+        for i, source_name in enumerate(source_chain):
+            plugin = self._plugins.get(source_name)
+            if plugin is None:
+                logger.info(f"Skipping {source_name} (not available)")
+                continue
+            if hasattr(plugin, 'is_configured') and not plugin.is_configured():
+                logger.info(f"Skipping {source_name} (not configured)")
+                continue
+
+            try:
+                logger.info(f"Trying {source_name} (priority {i+1}): {query}")
+                tracks, albums = await plugin.search(query, timeout, progress_callback)
+                if tracks:
+                    logger.info(f"{source_name} found {len(tracks)} tracks")
+                    return (tracks, albums)
+            except Exception as e:
+                logger.warning(f"{source_name} search failed: {e}")
+
+        logger.warning(
+            "Hybrid search: all sources (%s) found nothing for: %s",
+            ', '.join(source_chain), query,
+        )
+        return ([], [])
+
+    async def download_with_fallback(self, username: str, filename: str,
+                                     file_size: int, source_chain) -> Optional[str]:
+        """Try each source in ``source_chain`` until one accepts the
+        download (returns a non-None download_id). Fixes the legacy
+        bug where hybrid mode silently routed to a single source via
+        the username hint with no retry on failure.
+
+        ``username`` is treated as a hint when it matches a source
+        name in the chain — that source is tried FIRST regardless of
+        chain order. Anything else (e.g. a real Soulseek peer name)
+        routes through the chain in declared order.
+        """
+        # Promote a matching source-name hint to the head of the chain.
+        ordered_chain = list(source_chain)
+        if username and username in ordered_chain:
+            ordered_chain.remove(username)
+            ordered_chain.insert(0, username)
+
+        for source_name in ordered_chain:
+            plugin = self._plugins.get(source_name)
+            if plugin is None:
+                continue
+            if hasattr(plugin, 'is_configured') and not plugin.is_configured():
+                continue
+            try:
+                download_id = await plugin.download(username, filename, file_size)
+                if download_id is not None:
+                    return download_id
+                logger.info(f"{source_name} declined download — trying next in chain")
+            except Exception as e:
+                logger.warning(f"{source_name} download raised — trying next in chain: {e}")
+
+        logger.warning(
+            "Hybrid download: every source in chain (%s) refused %r",
+            ', '.join(ordered_chain), filename,
+        )
+        return None

@@ -387,3 +387,160 @@ def test_engine_clear_all_returns_false_when_any_configured_plugin_fails():
 
     result = _run_async(engine.clear_all_completed_downloads())
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Hybrid fallback (Phase F)
+# ---------------------------------------------------------------------------
+
+
+class _FakeSearchPlugin:
+    def __init__(self, name, configured=True, search_result=None, raises=None):
+        self.name = name
+        self._configured = configured
+        self._search_result = search_result if search_result is not None else ([], [])
+        self._raises = raises
+        self.search_calls = 0
+
+    def is_configured(self):
+        return self._configured
+
+    async def search(self, query, timeout=None, progress_callback=None):
+        self.search_calls += 1
+        if self._raises:
+            raise self._raises
+        return self._search_result
+
+
+class _FakeDownloadPlugin:
+    def __init__(self, name, configured=True, download_result=None, raises=None):
+        self.name = name
+        self._configured = configured
+        self._download_result = download_result
+        self._raises = raises
+        self.download_calls = []
+
+    def is_configured(self):
+        return self._configured
+
+    async def download(self, username, filename, file_size):
+        self.download_calls.append((username, filename, file_size))
+        if self._raises:
+            raise self._raises
+        return self._download_result
+
+
+def test_search_with_fallback_returns_first_non_empty_result():
+    engine = DownloadEngine()
+    yt = _FakeSearchPlugin('youtube', search_result=([], []))
+    td = _FakeSearchPlugin('tidal', search_result=(['track1'], []))
+    qz = _FakeSearchPlugin('qobuz', search_result=(['track2'], []))
+    engine.register_plugin('youtube', yt)
+    engine.register_plugin('tidal', td)
+    engine.register_plugin('qobuz', qz)
+
+    tracks, _ = _run_async(engine.search_with_fallback('q', ['youtube', 'tidal', 'qobuz']))
+    assert tracks == ['track1']
+    # Tidal short-circuits — qobuz never queried.
+    assert yt.search_calls == 1
+    assert td.search_calls == 1
+    assert qz.search_calls == 0
+
+
+def test_search_with_fallback_skips_unconfigured_plugins():
+    engine = DownloadEngine()
+    yt = _FakeSearchPlugin('youtube', configured=False)
+    td = _FakeSearchPlugin('tidal', configured=True, search_result=(['hit'], []))
+    engine.register_plugin('youtube', yt)
+    engine.register_plugin('tidal', td)
+
+    tracks, _ = _run_async(engine.search_with_fallback('q', ['youtube', 'tidal']))
+    assert tracks == ['hit']
+    assert yt.search_calls == 0  # skipped
+
+
+def test_search_with_fallback_continues_after_per_source_exception():
+    engine = DownloadEngine()
+    yt = _FakeSearchPlugin('youtube', raises=RuntimeError("yt down"))
+    td = _FakeSearchPlugin('tidal', search_result=(['fallback-hit'], []))
+    engine.register_plugin('youtube', yt)
+    engine.register_plugin('tidal', td)
+
+    tracks, _ = _run_async(engine.search_with_fallback('q', ['youtube', 'tidal']))
+    assert tracks == ['fallback-hit']
+
+
+def test_search_with_fallback_returns_empty_when_chain_exhausted():
+    engine = DownloadEngine()
+    yt = _FakeSearchPlugin('youtube', search_result=([], []))
+    td = _FakeSearchPlugin('tidal', search_result=([], []))
+    engine.register_plugin('youtube', yt)
+    engine.register_plugin('tidal', td)
+
+    tracks, _ = _run_async(engine.search_with_fallback('q', ['youtube', 'tidal']))
+    assert tracks == []
+    assert yt.search_calls == 1
+    assert td.search_calls == 1
+
+
+def test_download_with_fallback_returns_first_accepted_download_id():
+    """Phase F bug fix: legacy hybrid download routed to one source
+    via username hint with no retry. Engine now falls through chain."""
+    engine = DownloadEngine()
+    yt = _FakeDownloadPlugin('youtube', download_result=None)  # refuses
+    td = _FakeDownloadPlugin('tidal', download_result='td-id')
+    engine.register_plugin('youtube', yt)
+    engine.register_plugin('tidal', td)
+
+    result = _run_async(engine.download_with_fallback(
+        'youtube', 'v||t', 0, ['youtube', 'tidal'],
+    ))
+    assert result == 'td-id'
+    assert len(yt.download_calls) == 1  # tried first
+    assert len(td.download_calls) == 1  # took over
+
+
+def test_download_with_fallback_promotes_username_hint_to_head():
+    """A username hint that matches a source-chain entry tries that
+    source FIRST regardless of declared chain order."""
+    engine = DownloadEngine()
+    yt = _FakeDownloadPlugin('youtube', download_result='yt-id')
+    td = _FakeDownloadPlugin('tidal', download_result='td-id')
+    engine.register_plugin('youtube', yt)
+    engine.register_plugin('tidal', td)
+
+    # Chain says tidal-first, but username hint promotes youtube.
+    result = _run_async(engine.download_with_fallback(
+        'youtube', 'v||t', 0, ['tidal', 'youtube'],
+    ))
+    assert result == 'yt-id'
+    assert len(yt.download_calls) == 1
+    assert len(td.download_calls) == 0  # never reached
+
+
+def test_download_with_fallback_returns_none_when_all_refuse():
+    engine = DownloadEngine()
+    yt = _FakeDownloadPlugin('youtube', download_result=None)
+    td = _FakeDownloadPlugin('tidal', download_result=None)
+    engine.register_plugin('youtube', yt)
+    engine.register_plugin('tidal', td)
+
+    result = _run_async(engine.download_with_fallback(
+        'youtube', 'v||t', 0, ['youtube', 'tidal'],
+    ))
+    assert result is None
+    assert len(yt.download_calls) == 1
+    assert len(td.download_calls) == 1
+
+
+def test_download_with_fallback_continues_past_exception():
+    engine = DownloadEngine()
+    yt = _FakeDownloadPlugin('youtube', raises=RuntimeError("yt died"))
+    td = _FakeDownloadPlugin('tidal', download_result='td-id')
+    engine.register_plugin('youtube', yt)
+    engine.register_plugin('tidal', td)
+
+    result = _run_async(engine.download_with_fallback(
+        'youtube', 'v||t', 0, ['youtube', 'tidal'],
+    ))
+    assert result == 'td-id'
