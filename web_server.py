@@ -19641,6 +19641,81 @@ def get_discover_album(source, album_id):
                 'source': fallback_source,
             })
 
+        elif source == 'discogs':
+            # Discogs release detail. release_id comes from the Your
+            # Albums Discogs source. Tracklist needs normalizing —
+            # Discogs uses {position, title, duration} (duration as
+            # string like "3:45") so map to the standard
+            # {name, track_number, duration_ms, artists} shape the
+            # download modal expects.
+            from core.discogs_client import DiscogsClient
+            try:
+                rel_id = int(album_id)
+            except (TypeError, ValueError):
+                return jsonify({"error": "Invalid Discogs release id"}), 400
+
+            release = DiscogsClient().get_release(rel_id)
+            if not release:
+                return jsonify({"error": "Discogs release not found"}), 404
+
+            import re as _re
+            _disambig_re = _re.compile(r'\s*\(\d+\)$')
+            artists_raw = release.get('artists') or []
+            artist_names = []
+            for a in artists_raw:
+                name = (a.get('name') or '').strip() if isinstance(a, dict) else str(a)
+                # Strip Discogs disambiguation suffix "(N)"
+                name = _disambig_re.sub('', name)
+                if name:
+                    artist_names.append({'name': name})
+
+            tracks_out = []
+            for idx, t in enumerate(release.get('tracklist', []) or [], start=1):
+                if not isinstance(t, dict):
+                    continue
+                title = (t.get('title') or '').strip()
+                if not title:
+                    continue
+                # Discogs duration: "3:45" or "1:23:45". Convert to ms.
+                dur_ms = 0
+                dur_str = (t.get('duration') or '').strip()
+                if dur_str:
+                    try:
+                        parts = [int(p) for p in dur_str.split(':')]
+                        if len(parts) == 2:
+                            dur_ms = (parts[0] * 60 + parts[1]) * 1000
+                        elif len(parts) == 3:
+                            dur_ms = (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000
+                    except (ValueError, TypeError):
+                        dur_ms = 0
+                tracks_out.append({
+                    'id': f"discogs_{rel_id}_{idx}",
+                    'name': title,
+                    'track_number': idx,
+                    'duration_ms': dur_ms,
+                    'artists': artist_names,
+                })
+
+            images = release.get('images') or []
+            cover_url = ''
+            if images and isinstance(images[0], dict):
+                cover_url = images[0].get('uri') or images[0].get('uri150') or ''
+
+            year = release.get('year')
+            release_date = str(year) if year and int(year) > 0 else ''
+
+            return jsonify({
+                'id': str(rel_id),
+                'name': release.get('title', ''),
+                'artists': artist_names,
+                'release_date': release_date,
+                'total_tracks': len(tracks_out),
+                'album_type': 'album',
+                'images': [{'url': cover_url}] if cover_url else [],
+                'tracks': tracks_out,
+                'source': 'discogs',
+            })
+
         else:
             return jsonify({"error": f"Unknown source: {source}"}), 400
 
@@ -27578,6 +27653,15 @@ def get_your_albums_sources():
         except Exception:
             pass
 
+        # Discogs: counts as "connected" when a personal access token is
+        # configured. Username comes from /oauth/identity at fetch time;
+        # not required up front.
+        try:
+            if config_manager.get('discogs.token', ''):
+                connected.append('discogs')
+        except Exception:
+            pass
+
         return jsonify({"success": True, "enabled": enabled, "connected": connected})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -27687,6 +27771,38 @@ def _fetch_liked_albums(profile_id: int):
                 logger.info(f"[Your Albums] Fetched {len(albums)} from Deezer")
     except Exception as e:
         logger.error(f"[Your Albums] Deezer fetch error: {e}")
+
+    # 4. Fetch from Discogs (user's collection) — uses personal access
+    # token from `discogs.token` config. Username resolved via the
+    # `/oauth/identity` endpoint at fetch time. Discogs is physical-
+    # media-first so many releases won't have streaming equivalents,
+    # but the click-context dispatch in the frontend opens the Discogs
+    # release detail and the user can manually trigger a download
+    # search if a digital match exists.
+    try:
+        if 'discogs' not in enabled_sources:
+            logger.warning("[Your Albums] Discogs skipped (disabled in sources config)")
+        elif not config_manager.get('discogs.token', ''):
+            logger.info("[Your Albums] Discogs skipped (no token configured)")
+        else:
+            from core.discogs_client import DiscogsClient
+            discogs_cl = DiscogsClient()
+            if discogs_cl.is_authenticated():
+                logger.info("[Your Albums] Fetching collection from Discogs...")
+                releases = discogs_cl.get_user_collection()
+                for r in releases:
+                    database.upsert_liked_album(
+                        album_name=r['album_name'], artist_name=r['artist_name'],
+                        source_service='discogs',
+                        source_id=str(r['release_id']), source_id_type='discogs',
+                        image_url=r.get('image_url'), release_date=r.get('release_date', ''),
+                        total_tracks=r.get('total_tracks', 0), profile_id=profile_id
+                    )
+                fetched += len(releases)
+                if releases:
+                    logger.info(f"[Your Albums] Fetched {len(releases)} from Discogs")
+    except Exception as e:
+        logger.error(f"[Your Albums] Discogs fetch error: {e}")
 
     logger.info(f"[Your Albums] Total fetched: {fetched}")
 
