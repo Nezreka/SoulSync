@@ -174,34 +174,6 @@ class DownloadEngine:
         for record in snapshot:
             yield record
 
-    def iter_all_records(self) -> Iterator[Tuple[str, DownloadRecord]]:
-        """Yield ``(source_name, record_copy)`` for every active
-        download across every source. Used by Phase B3's unified
-        ``get_all_downloads`` query."""
-        with self.state_lock:
-            snapshot = [
-                (source, dict(record))
-                for (source, _), record in self._records.items()
-            ]
-        for source, record in snapshot:
-            yield source, record
-
-    def find_record(self, download_id: str) -> Optional[Tuple[str, DownloadRecord]]:
-        """Look up a record by download_id alone (no source hint).
-        Used by ``cancel_download`` / ``get_download_status`` API
-        endpoints that don't pass the source name. Returns
-        ``(source_name, record_copy)`` or None.
-
-        O(N) over total downloads — fine for the tens-to-hundreds
-        of in-flight transfers SoulSync sees, would need an index
-        if downloads scaled to thousands.
-        """
-        with self.state_lock:
-            for (source, dl_id), record in self._records.items():
-                if dl_id == download_id:
-                    return source, dict(record)
-        return None
-
     # ------------------------------------------------------------------
     # Cross-source query dispatch — Phase B2 surface
     # ------------------------------------------------------------------
@@ -222,29 +194,32 @@ class DownloadEngine:
 
     async def get_all_downloads(self):
         """Aggregated view across every registered plugin's active
-        downloads. Returns a flat list of DownloadStatus objects."""
+        downloads. Per-plugin exceptions are swallowed (one source
+        failing shouldn't take down cross-source aggregation) but
+        logged at debug level — same defensive shape the legacy
+        orchestrator had."""
         all_downloads = []
-        for plugin in self._plugins.values():
+        for source_name, plugin in self._plugins.items():
             if plugin is None:
                 continue
             try:
                 all_downloads.extend(await plugin.get_all_downloads())
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("%s get_all_downloads failed: %s", source_name, exc)
         return all_downloads
 
     async def get_download_status(self, download_id: str):
         """Find a download_id across every plugin. Returns the first
         plugin's response or None if no plugin owns it."""
-        for plugin in self._plugins.values():
+        for source_name, plugin in self._plugins.items():
             if plugin is None:
                 continue
             try:
                 status = await plugin.get_download_status(download_id)
                 if status:
                     return status
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("%s get_download_status failed: %s", source_name, exc)
         return None
 
     async def cancel_download(self, download_id: str,
@@ -265,24 +240,26 @@ class DownloadEngine:
                     return await target_plugin.cancel_download(
                         download_id, source_hint, remove,
                     )
-                except Exception:
+                except Exception as exc:
+                    logger.debug("%s cancel_download failed: %s", source_hint, exc)
                     return False
             soulseek = self._plugins.get('soulseek')
             if soulseek is not None:
                 try:
                     return await soulseek.cancel_download(download_id, source_hint, remove)
-                except Exception:
+                except Exception as exc:
+                    logger.debug("soulseek cancel_download failed: %s", exc)
                     return False
 
         # No hint → ask every plugin until one cancels successfully.
-        for plugin in self._plugins.values():
+        for source_name, plugin in self._plugins.items():
             if plugin is None:
                 continue
             try:
                 if await plugin.cancel_download(download_id, source_hint, remove):
                     return True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("%s cancel_download failed: %s", source_name, exc)
         return False
 
     async def clear_all_completed_downloads(self) -> bool:

@@ -322,18 +322,10 @@ def test_download_thread_marks_failed_when_sync_returns_none(tmp_dl: Path) -> No
 
 def test_download_thread_does_not_clobber_cancelled_state(tmp_dl: Path) -> None:
     """If a user cancels mid-download and the sync function then returns
-    None, the engine state should NOT overwrite the explicit Cancelled
-    state with a generic Errored state.
-
-    NOTE: Phase C7 lifted state into engine.worker. The worker DOES
-    overwrite Cancelled with Errored when impl returns None — the
-    Cancelled-preserve guard the legacy per-client thread had isn't
-    in the shared worker. This test now pins the new behavior.
-    Future work: if Cancelled-preserve becomes important again, add
-    that guard to BackgroundDownloadWorker uniformly. For now the
-    cancellation-mid-download path is the user's explicit cancel
-    button, which calls cancel_download (engine.update_record) AFTER
-    the worker has already written its terminal state."""
+    None, the worker must NOT overwrite the explicit Cancelled state
+    with a generic Errored state. The legacy per-client thread had
+    this guard; engine.worker._mark_terminal preserves it for every
+    source via a single check."""
     client = SoundcloudClient(download_path=str(tmp_dl))
     engine = _wire_engine(client)
 
@@ -345,18 +337,13 @@ def test_download_thread_does_not_clobber_cancelled_state(tmp_dl: Path) -> None:
     with patch.object(client, '_download_sync', side_effect=_slow_sync):
         download_id = _run(client.download('soundcloud', '1||u||n'))
 
-    # Wait for the worker to finish (state will be terminal).
     deadline = time.time() + 2
     while time.time() < deadline:
         record = engine.get_record('soundcloud', download_id)
         if record and record['state'] in ('Cancelled', 'Errored'):
             break
         time.sleep(0.05)
-    final_state = engine.get_record('soundcloud', download_id)['state']
-    # Worker may have overwritten Cancelled with Errored — accept
-    # either since the overwrite-prevention isn't in the shared
-    # worker yet.
-    assert final_state in ('Cancelled', 'Errored')
+    assert engine.get_record('soundcloud', download_id)['state'] == 'Cancelled'
 
 
 # ---------------------------------------------------------------------------

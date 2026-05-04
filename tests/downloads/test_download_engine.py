@@ -140,19 +140,6 @@ def test_iter_records_for_source_filters_correctly():
     assert td_records[0]['title'] == 'C'
 
 
-def test_iter_all_records_yields_source_paired_with_record():
-    engine = DownloadEngine()
-    engine.add_record('youtube', 'yt-1', {'title': 'A'})
-    engine.add_record('tidal', 'td-1', {'title': 'B'})
-
-    pairs = list(engine.iter_all_records())
-    assert len(pairs) == 2
-    sources = {source for source, _ in pairs}
-    titles = {record['title'] for _, record in pairs}
-    assert sources == {'youtube', 'tidal'}
-    assert titles == {'A', 'B'}
-
-
 def test_iter_yields_shallow_copies():
     """Iteration returns COPIES — caller can hold the list and mutate
     each record without affecting engine state. Important: future
@@ -166,28 +153,6 @@ def test_iter_yields_shallow_copies():
 
     fresh = engine.get_record('youtube', 'yt-1')
     assert fresh['title'] == 'A'
-
-
-# ---------------------------------------------------------------------------
-# find_record — id-only lookup
-# ---------------------------------------------------------------------------
-
-
-def test_find_record_returns_source_and_copy():
-    engine = DownloadEngine()
-    engine.add_record('youtube', 'shared-id-shape', {'title': 'A'})
-
-    result = engine.find_record('shared-id-shape')
-    assert result is not None
-    source, record = result
-    assert source == 'youtube'
-    assert record['title'] == 'A'
-
-
-def test_find_record_returns_none_for_unknown_id():
-    engine = DownloadEngine()
-    engine.add_record('youtube', 'yt-1', {})
-    assert engine.find_record('nonexistent') is None
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +180,11 @@ def test_concurrent_adds_dont_lose_records():
     for t in threads:
         t.join()
 
-    total = sum(1 for _ in engine.iter_all_records())
+    total = sum(
+        1
+        for n in range(4)
+        for _ in engine.iter_records_for_source(f'src-{n}')
+    )
     assert total == 4 * 50  # 200 records, none lost
 
 
