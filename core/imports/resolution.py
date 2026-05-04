@@ -2,10 +2,28 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from core.metadata import registry as metadata_registry
+from core.metadata.types import Album
 from utils.logging_config import get_logger
+
+
+# Per-source typed converter dispatch — same registry pattern as
+# ``core/metadata/album_tracks.py``. When the embedded ``album`` blob in
+# a track response is dispatched through the typed converter for that
+# provider, the resulting Album fields drive the album_payload below.
+# Falls through to the legacy duck-typed path when source is empty,
+# unknown, or the converter raises.
+_TYPED_ALBUM_CONVERTERS: Dict[str, Callable[[Dict[str, Any]], Album]] = {
+    'spotify': Album.from_spotify_dict,
+    'itunes': Album.from_itunes_dict,
+    'deezer': Album.from_deezer_dict,
+    'discogs': Album.from_discogs_dict,
+    'musicbrainz': Album.from_musicbrainz_dict,
+    'hydrabase': Album.from_hydrabase_dict,
+    'qobuz': Album.from_qobuz_dict,
+}
 
 
 logger = get_logger("imports.resolution")
@@ -156,17 +174,62 @@ def _build_single_import_context_payload(
     album_artists = _normalize_context_artists(_extract_lookup_value(track_data, 'album_artists', 'artists', default=[]))
 
     if isinstance(album_data, dict):
-        album_name = _extract_lookup_value(album_data, 'name', 'title', 'collectionName', default=album_name) or album_name
-        album_id = str(_extract_lookup_value(album_data, 'id', 'album_id', 'collectionId', default=album_id) or album_id)
-        release_date = str(_extract_lookup_value(album_data, 'release_date', default=release_date) or release_date)
-        album_type = str(_extract_lookup_value(album_data, 'album_type', default=album_type) or album_type)
-        total_tracks = int(_extract_lookup_value(album_data, 'total_tracks', 'track_count', 'nb_tracks', default=total_tracks) or total_tracks)
-        album_images = _extract_lookup_value(album_data, 'images', default=[]) or []
-        if not album_image_url:
-            album_image_url = str(_extract_lookup_value(album_data, 'image_url', 'thumb_url', default='') or '')
-            if not album_image_url and album_images:
-                album_image_url = str(_extract_lookup_value(album_images[0], 'url', default='') or '')
-        album_artists = _normalize_context_artists(_extract_lookup_value(album_data, 'artists', default=[]))
+        # Typed dispatch: when the source is a known provider, route the
+        # embedded album blob through Album.from_<source>_dict() and read
+        # canonical fields off the typed result. Falls back to the
+        # legacy duck-typed extraction below on unknown/missing source
+        # OR if the converter raises (so a converter bug can't break
+        # import context resolution).
+        typed_album: Optional[Album] = None
+        source_key = (source or '').strip().lower()
+        if source_key:
+            converter = _TYPED_ALBUM_CONVERTERS.get(source_key)
+            if converter is not None:
+                try:
+                    typed_album = converter(album_data)
+                except Exception as exc:
+                    logger.debug(
+                        "Typed album converter failed for source %s in import "
+                        "context build, falling back to legacy: %s", source, exc,
+                    )
+                    typed_album = None
+
+        if typed_album is not None:
+            if typed_album.name:
+                album_name = typed_album.name
+            if typed_album.id:
+                album_id = typed_album.id
+            if typed_album.release_date:
+                release_date = typed_album.release_date
+            if typed_album.album_type:
+                album_type = typed_album.album_type
+            if typed_album.total_tracks:
+                total_tracks = typed_album.total_tracks
+            # Preserve raw images list verbatim (legacy behavior — some
+            # downstream consumers iterate the full multi-resolution
+            # array to pick a different size).
+            raw_images = album_data.get('images')
+            if isinstance(raw_images, list) and raw_images:
+                album_images = raw_images
+            if not album_image_url:
+                album_image_url = typed_album.image_url or ''
+                if not album_image_url and album_images:
+                    album_image_url = str(_extract_lookup_value(album_images[0], 'url', default='') or '')
+            album_artists = _normalize_context_artists(
+                [{'name': name} for name in typed_album.artists]
+            )
+        else:
+            album_name = _extract_lookup_value(album_data, 'name', 'title', 'collectionName', default=album_name) or album_name
+            album_id = str(_extract_lookup_value(album_data, 'id', 'album_id', 'collectionId', default=album_id) or album_id)
+            release_date = str(_extract_lookup_value(album_data, 'release_date', default=release_date) or release_date)
+            album_type = str(_extract_lookup_value(album_data, 'album_type', default=album_type) or album_type)
+            total_tracks = int(_extract_lookup_value(album_data, 'total_tracks', 'track_count', 'nb_tracks', default=total_tracks) or total_tracks)
+            album_images = _extract_lookup_value(album_data, 'images', default=[]) or []
+            if not album_image_url:
+                album_image_url = str(_extract_lookup_value(album_data, 'image_url', 'thumb_url', default='') or '')
+                if not album_image_url and album_images:
+                    album_image_url = str(_extract_lookup_value(album_images[0], 'url', default='') or '')
+            album_artists = _normalize_context_artists(_extract_lookup_value(album_data, 'artists', default=[]))
     elif album_data:
         album_name = album_name or str(album_data)
 
