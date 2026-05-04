@@ -106,12 +106,15 @@ class SoundcloudClient:
         # in-flight downloads when the worker is shutting down.
         self.shutdown_check: Optional[Callable[[], bool]] = None
 
-        self.active_downloads: Dict[str, Dict[str, Any]] = {}
-        self._download_lock = threading.Lock()
+        self._engine = None
 
     # ------------------------------------------------------------------
     # Lifecycle / availability
     # ------------------------------------------------------------------
+
+    def set_engine(self, engine):
+        """Engine callback — wires the central thread worker + state store."""
+        self._engine = engine
 
     def set_shutdown_check(self, check_callable: Optional[Callable[[], bool]]) -> None:
         self.shutdown_check = check_callable
@@ -316,98 +319,43 @@ class SoundcloudClient:
     # ------------------------------------------------------------------
 
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
-        """Kick off a SoundCloud download in a background thread.
-
-        Returns the internal download_id used by status/cancel calls,
-        matching the contract of every other download client.
-        """
-        try:
-            parts = filename.split('||', 2)
-            if len(parts) < 2:
-                logger.error(f"Invalid SoundCloud filename format: {filename}")
-                return None
-
-            sc_track_id = parts[0]
-            permalink_url = parts[1]
-            display_name = parts[2] if len(parts) > 2 else sc_track_id
-
-            if not sc_track_id or not permalink_url:
-                logger.error(f"Missing SoundCloud track id or url in: {filename}")
-                return None
-
-            logger.info(f"Starting SoundCloud download: {display_name}")
-
-            download_id = str(uuid.uuid4())
-
-            with self._download_lock:
-                self.active_downloads[download_id] = {
-                    'id': download_id,
-                    'filename': filename,
-                    'username': 'soundcloud',
-                    'state': 'Initializing',
-                    'progress': 0.0,
-                    'size': 0,
-                    'transferred': 0,
-                    'speed': 0,
-                    'time_remaining': None,
-                    'track_id': sc_track_id,
-                    'permalink_url': permalink_url,
-                    'display_name': display_name,
-                    'file_path': None,
-                }
-
-            download_thread = threading.Thread(
-                target=self._download_thread_worker,
-                args=(download_id, permalink_url, display_name, filename),
-                daemon=True,
-            )
-            download_thread.start()
-
-            logger.info(f"SoundCloud download {download_id} started in background")
-            return download_id
-
-        except Exception as exc:
-            logger.error(f"Failed to start SoundCloud download: {exc}")
-            import traceback
-            traceback.print_exc()
+        """Kick off a SoundCloud download via engine.worker."""
+        parts = filename.split('||', 2)
+        if len(parts) < 2:
+            logger.error(f"Invalid SoundCloud filename format: {filename}")
             return None
 
-    def _download_thread_worker(self, download_id: str, permalink_url: str,
-                                 display_name: str, original_filename: str) -> None:
-        """Background-thread wrapper around `_download_sync`.
+        sc_track_id = parts[0]
+        permalink_url = parts[1]
+        display_name = parts[2] if len(parts) > 2 else sc_track_id
 
-        Owns the state transitions on `self.active_downloads[...]` so the
-        sync impl can just return a path / None and not worry about state.
-        """
-        try:
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'InProgress, Downloading'
+        if not sc_track_id or not permalink_url:
+            logger.error(f"Missing SoundCloud track id or url in: {filename}")
+            return None
+        if self._engine is None:
+            logger.error("SoundCloud client has no engine reference — cannot dispatch download")
+            return None
 
-            file_path = self._download_sync(download_id, permalink_url, display_name)
+        logger.info(f"Starting SoundCloud download: {display_name}")
 
-            if file_path:
-                with self._download_lock:
-                    if download_id in self.active_downloads:
-                        self.active_downloads[download_id]['state'] = 'Completed, Succeeded'
-                        self.active_downloads[download_id]['progress'] = 100.0
-                        self.active_downloads[download_id]['file_path'] = file_path
-                logger.info(f"SoundCloud download {download_id} completed: {file_path}")
-            else:
-                with self._download_lock:
-                    if download_id in self.active_downloads:
-                        # Don't clobber an explicit Cancelled state with Errored.
-                        if self.active_downloads[download_id]['state'] != 'Cancelled':
-                            self.active_downloads[download_id]['state'] = 'Errored'
-                logger.error(f"SoundCloud download {download_id} failed")
+        # Worker passes (download_id, target_id, display_name) to impl;
+        # SoundCloud's _download_sync wants permalink_url (not track_id),
+        # so adapt by closing over permalink_url here.
+        def _impl(download_id, _target_id, _display_name):
+            return self._download_sync(download_id, permalink_url, display_name)
 
-        except Exception as exc:
-            logger.error(f"SoundCloud download thread failed for {download_id}: {exc}")
-            import traceback
-            traceback.print_exc()
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'Errored'
+        return self._engine.worker.dispatch(
+            source_name='soundcloud',
+            target_id=sc_track_id,
+            display_name=display_name,
+            original_filename=filename,
+            impl_callable=_impl,
+            extra_record_fields={
+                'track_id': sc_track_id,
+                'permalink_url': permalink_url,
+                'display_name': display_name,
+            },
+        )
 
     def _download_sync(self, download_id: str, permalink_url: str,
                        display_name: str) -> Optional[str]:
@@ -524,162 +472,128 @@ class SoundcloudClient:
     def _update_download_progress_fragmented(self, download_id: str, downloaded: int,
                                              fragment_index: int, fragment_count: int,
                                              speed_start: float) -> None:
-        """HLS-aware progress update.
+        """HLS-aware progress update — fragment_index / fragment_count
+        gives an accurate signal even when each fragment's
+        ``total_bytes`` only describes the current fragment."""
+        if self._engine is None:
+            return
+        record = self._engine.get_record('soundcloud', download_id)
+        if record is None:
+            return
 
-        SoundCloud's HLS streams arrive as N small fragments. yt-dlp can't
-        compute a true byte-based percentage because each fragment's
-        ``total_bytes`` only describes the current fragment, not the
-        whole download. fragment_index / fragment_count gives an accurate
-        progress signal — N fragments downloaded out of M known fragments
-        is the real ratio.
-        """
-        with self._download_lock:
-            if download_id not in self.active_downloads:
-                return
-            info = self.active_downloads[download_id]
-            info['transferred'] = downloaded
+        now = time.time()
+        elapsed = now - speed_start
+        speed = int(downloaded / elapsed) if elapsed > 0 else 0
 
-            now = time.time()
-            elapsed = now - speed_start
-            info['speed'] = int(downloaded / elapsed) if elapsed > 0 else 0
+        progress = round(min((fragment_index / fragment_count) * 100, 99.9), 1) if fragment_count > 0 else 0.0
 
-            # `fragment_index` is 1-based when yt-dlp finishes a fragment;
-            # use it directly. Cap below 100% so the worker thread owns the
-            # final flip.
-            progress = (fragment_index / fragment_count) * 100
-            info['progress'] = round(min(progress, 99.9), 1)
+        # Estimate total size from per-fragment average.
+        if fragment_index > 0 and downloaded > 0:
+            est_total = int(downloaded * (fragment_count / fragment_index))
+        else:
+            est_total = downloaded
 
-            # Estimate total size so the UI's bytes-remaining reads match
-            # roughly what users expect — extrapolate from per-fragment
-            # average. Defensive against fragment_index being 0 on the
-            # very first callback.
-            if fragment_index > 0 and downloaded > 0:
-                est_total = int(downloaded * (fragment_count / fragment_index))
-                info['size'] = est_total
-            else:
-                info['size'] = downloaded
+        time_remaining: Optional[int] = None
+        remaining_fragments = max(0, fragment_count - fragment_index)
+        if speed > 0 and remaining_fragments > 0 and fragment_index > 0:
+            seconds_per_fragment = elapsed / fragment_index if fragment_index > 0 else 0
+            time_remaining = int(remaining_fragments * seconds_per_fragment)
 
-            time_remaining: Optional[int] = None
-            remaining_fragments = max(0, fragment_count - fragment_index)
-            if info['speed'] > 0 and remaining_fragments > 0 and fragment_index > 0:
-                # Extrapolate seconds from per-fragment average download time.
-                seconds_per_fragment = elapsed / fragment_index if fragment_index > 0 else 0
-                time_remaining = int(remaining_fragments * seconds_per_fragment)
-            info['time_remaining'] = time_remaining
+        self._engine.update_record('soundcloud', download_id, {
+            'transferred': downloaded,
+            'speed': speed,
+            'progress': progress,
+            'size': est_total,
+            'time_remaining': time_remaining,
+        })
 
     def _update_download_progress(self, download_id: str, downloaded: int,
                                   total: int, speed_start: float) -> None:
-        """Push a progress update into the active_downloads ledger.
+        """Byte-based progress update for non-HLS streams."""
+        if self._engine is None:
+            return
+        record = self._engine.get_record('soundcloud', download_id)
+        if record is None:
+            return
 
-        Mirrors the structure other download clients populate so the
-        existing /api/downloads endpoint can serialize it without caring
-        about the source.
-        """
-        with self._download_lock:
-            if download_id not in self.active_downloads:
-                return
-            info = self.active_downloads[download_id]
-            info['transferred'] = downloaded
-            info['size'] = total
+        now = time.time()
+        elapsed = now - speed_start
+        speed = int(downloaded / elapsed) if elapsed > 0 else 0
 
-            now = time.time()
-            elapsed = now - speed_start
-            info['speed'] = int(downloaded / elapsed) if elapsed > 0 else 0
+        progress = record.get('progress', 0.0)
+        if total > 0:
+            progress = round(min((downloaded / total) * 100, 99.9), 1)
 
-            if total > 0:
-                progress = (downloaded / total) * 100
-                # Cap pre-completion progress at 99.9% so the worker thread
-                # owns the final flip to 100% / Completed.
-                info['progress'] = round(min(progress, 99.9), 1)
+        time_remaining: Optional[int] = None
+        if speed > 0 and total > 0:
+            remaining = total - downloaded
+            if remaining > 0:
+                time_remaining = int(remaining / speed)
 
-            time_remaining: Optional[int] = None
-            if info['speed'] > 0 and total > 0:
-                remaining = total - downloaded
-                if remaining > 0:
-                    time_remaining = int(remaining / info['speed'])
-            info['time_remaining'] = time_remaining
+        self._engine.update_record('soundcloud', download_id, {
+            'transferred': downloaded,
+            'size': total,
+            'speed': speed,
+            'progress': progress,
+            'time_remaining': time_remaining,
+        })
 
     # ------------------------------------------------------------------
     # Status / cancellation
     # ------------------------------------------------------------------
 
+    def _record_to_status(self, record: dict) -> DownloadStatus:
+        return DownloadStatus(
+            id=record['id'],
+            filename=record['filename'],
+            username=record['username'],
+            state=record['state'],
+            progress=record['progress'],
+            size=record.get('size', 0),
+            transferred=record.get('transferred', 0),
+            speed=record.get('speed', 0),
+            time_remaining=record.get('time_remaining'),
+            file_path=record.get('file_path'),
+        )
+
     async def get_all_downloads(self) -> List[DownloadStatus]:
-        """Snapshot every tracked download as DownloadStatus objects."""
-        out: List[DownloadStatus] = []
-        with self._download_lock:
-            for _download_id, info in self.active_downloads.items():
-                out.append(DownloadStatus(
-                    id=info['id'],
-                    filename=info['filename'],
-                    username=info['username'],
-                    state=info['state'],
-                    progress=info['progress'],
-                    size=info['size'],
-                    transferred=info['transferred'],
-                    speed=info['speed'],
-                    time_remaining=info.get('time_remaining'),
-                    file_path=info.get('file_path'),
-                ))
-        return out
+        if self._engine is None:
+            return []
+        return [
+            self._record_to_status(record)
+            for record in self._engine.iter_records_for_source('soundcloud')
+        ]
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
-        with self._download_lock:
-            info = self.active_downloads.get(download_id)
-            if info is None:
-                return None
-            return DownloadStatus(
-                id=info['id'],
-                filename=info['filename'],
-                username=info['username'],
-                state=info['state'],
-                progress=info['progress'],
-                size=info['size'],
-                transferred=info['transferred'],
-                speed=info['speed'],
-                time_remaining=info.get('time_remaining'),
-                file_path=info.get('file_path'),
-            )
+        if self._engine is None:
+            return None
+        record = self._engine.get_record('soundcloud', download_id)
+        return self._record_to_status(record) if record is not None else None
 
     async def cancel_download(self, download_id: str, username: Optional[str] = None,
                               remove: bool = False) -> bool:
-        """Mark a download as cancelled.
-
-        Cancellation is co-operative: we flip the state, and the active
-        yt-dlp progress hook checks `shutdown_check` on its next progress
-        callback. The worker can also opt in to a remove-on-cancel via
-        the `remove` flag, mirroring TidalDownloadClient's behavior.
-        """
-        try:
-            with self._download_lock:
-                info = self.active_downloads.get(download_id)
-                if info is None:
-                    logger.warning(f"SoundCloud download {download_id} not found")
-                    return False
-
-                info['state'] = 'Cancelled'
-                logger.info(f"Marked SoundCloud download {download_id} as cancelled")
-
-                if remove:
-                    del self.active_downloads[download_id]
-                    logger.info(f"Removed SoundCloud download {download_id} from queue")
-            return True
-        except Exception as exc:
-            logger.error(f"Failed to cancel SoundCloud download {download_id}: {exc}")
+        """Mark a download as cancelled. Co-operative — yt-dlp's
+        progress hook checks shutdown_check on next callback."""
+        if self._engine is None:
             return False
+        if self._engine.get_record('soundcloud', download_id) is None:
+            logger.warning(f"SoundCloud download {download_id} not found")
+            return False
+        self._engine.update_record('soundcloud', download_id, {'state': 'Cancelled'})
+        logger.info(f"Marked SoundCloud download {download_id} as cancelled")
+        if remove:
+            self._engine.remove_record('soundcloud', download_id)
+            logger.info(f"Removed SoundCloud download {download_id} from queue")
+        return True
 
     async def clear_all_completed_downloads(self) -> bool:
-        """Drop terminal-state entries from the active_downloads ledger."""
-        try:
-            with self._download_lock:
-                terminal_states = {'Completed, Succeeded', 'Cancelled', 'Errored', 'Aborted'}
-                ids_to_remove = [
-                    did for did, info in self.active_downloads.items()
-                    if info.get('state', '') in terminal_states
-                ]
-                for did in ids_to_remove:
-                    del self.active_downloads[did]
-                logger.info(f"Cleared {len(ids_to_remove)} completed SoundCloud downloads")
+        if self._engine is None:
             return True
-        except Exception as exc:
-            logger.error(f"Failed to clear SoundCloud downloads: {exc}")
-            return False
+        terminal = {'Completed, Succeeded', 'Cancelled', 'Errored', 'Aborted'}
+        cleared = 0
+        for record in list(self._engine.iter_records_for_source('soundcloud')):
+            if record.get('state') in terminal:
+                self._engine.remove_record('soundcloud', record['id'])
+                cleared += 1
+        logger.info(f"Cleared {cleared} completed SoundCloud downloads")
+        return True
