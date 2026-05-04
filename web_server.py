@@ -32845,6 +32845,21 @@ def stats_db_storage():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/stats/library-disk-usage', methods=['GET'])
+def stats_library_disk_usage():
+    """Library on-disk size + per-format breakdown.
+
+    Reads `tracks.file_size` populated by the deep scan from data the
+    media server already returns. Returns ``has_data: false`` on fresh
+    installs that haven't run a deep scan since the migration — UI
+    shows "Run a Deep Scan to populate" in that case.
+    """
+    try:
+        data = _stats_queries.get_library_disk_usage(get_database())
+        return jsonify({'success': True, **data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/stats/recent', methods=['GET'])
 def stats_recent():
     """Get recently played tracks."""
