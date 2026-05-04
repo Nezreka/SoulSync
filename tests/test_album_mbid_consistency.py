@@ -233,6 +233,8 @@ def _build_context(rows: list, tmp_path: Path) -> SimpleNamespace:
 
     def _create_finding(**kwargs):
         findings_created.append(kwargs)
+        # Mirror real `_create_finding` contract: True on insert.
+        return True
 
     ctx = SimpleNamespace(
         db=_FakeDB(),
