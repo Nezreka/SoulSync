@@ -1213,14 +1213,36 @@ async function openYourAlbumsSourcesModal() {
     window._yaaSourcesState = state;
 }
 
+// Source-id → human label + setup hint shown when user tries to enable
+// a disconnected source. Without this, the toggle silently bailed and
+// users saw no feedback — just a non-responsive switch.
+const _YAA_DISCONNECTED_HINTS = {
+    spotify: 'Spotify not connected — log in at Settings → Connections first',
+    tidal: 'Tidal not connected — set up Tidal in Settings → Connections first',
+    deezer: 'Deezer not connected — log in or set ARL token at Settings → Connections first',
+    discogs: 'Discogs not connected — paste your personal access token at Settings → Connections first',
+};
+
+function _yaaShowDisconnectedHint(id) {
+    const msg = _YAA_DISCONNECTED_HINTS[id]
+        || `${id} not connected — set it up in Settings → Connections first`;
+    if (typeof showToast === 'function') showToast(msg, 'warning');
+}
+
 function _yaaSourceRowClick(id) {
     const row = document.querySelector(`.ya-source-row[data-yaa-source="${id}"]`);
-    if (row && row.classList.contains('disconnected')) return;
+    if (row && row.classList.contains('disconnected')) {
+        _yaaShowDisconnectedHint(id);
+        return;
+    }
     _yaaSourceToggle(id);
 }
 function _yaaSourceToggle(id) {
     const row = document.querySelector(`.ya-source-row[data-yaa-source="${id}"]`);
-    if (row && row.classList.contains('disconnected')) return;
+    if (row && row.classList.contains('disconnected')) {
+        _yaaShowDisconnectedHint(id);
+        return;
+    }
     window._yaaSourcesState[id] = !window._yaaSourcesState[id];
     const btn = document.getElementById(`yaa-toggle-${id}`);
     if (btn) btn.classList.toggle('on', window._yaaSourcesState[id]);
@@ -1237,7 +1259,7 @@ async function _yaaSourcesSave() {
         if (resp.ok) {
             document.getElementById('ya-albums-sources-modal-overlay')?.remove();
             showToast('Sources saved — refresh to apply', 'success');
-            const sourceNames = { spotify: 'Spotify', tidal: 'Tidal', deezer: 'Deezer' };
+            const sourceNames = { spotify: 'Spotify', tidal: 'Tidal', deezer: 'Deezer', discogs: 'Discogs' };
             const subtitle = document.getElementById('your-albums-subtitle');
             if (subtitle) {
                 const names = enabledArr.map(s => sourceNames[s] || s).join(' and ');
