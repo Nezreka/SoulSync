@@ -136,12 +136,18 @@ class QobuzClient:
         self.user_info: Optional[Dict] = None
         self._auth_error: Optional[str] = None
 
-        # Download queue management
-        self.active_downloads: Dict[str, Dict[str, Any]] = {}
-        self._download_lock = threading.Lock()
+        # Engine reference is populated by set_engine() at registration
+        # time. None until orchestrator wires the registry.
+        self._engine = None
 
         # Try to restore saved session
         self._restore_session()
+
+    def set_engine(self, engine):
+        """Engine callback — gives the client access to the central
+        thread worker + state store. Engine calls this during
+        ``register_plugin`` if the plugin defines it."""
+        self._engine = engine
 
     def set_shutdown_check(self, check_callable):
         """Set a callback function to check for system shutdown"""
@@ -884,97 +890,35 @@ class QobuzClient:
             return None
 
     async def download(self, username: str, filename: str, file_size: int = 0) -> Optional[str]:
-        """
-        Download a Qobuz track (async, Soulseek-compatible interface).
-
-        Returns download_id immediately and runs download in background thread.
-
-        Args:
-            username: Ignored for Qobuz (always "qobuz")
-            filename: Encoded as "track_id||display_name"
-            file_size: Ignored
-        """
-        try:
-            if '||' not in filename:
-                logger.error(f"Invalid filename format: {filename}")
-                return None
-
-            track_id_str, display_name = filename.split('||', 1)
-            try:
-                track_id = int(track_id_str)
-            except ValueError:
-                logger.error(f"Invalid Qobuz track ID: {track_id_str}")
-                return None
-
-            logger.info(f"Starting Qobuz download: {display_name}")
-
-            download_id = str(uuid.uuid4())
-
-            with self._download_lock:
-                self.active_downloads[download_id] = {
-                    'id': download_id,
-                    'filename': filename,
-                    'username': 'qobuz',
-                    'state': 'Initializing',
-                    'progress': 0.0,
-                    'size': 0,
-                    'transferred': 0,
-                    'speed': 0,
-                    'time_remaining': None,
-                    'track_id': track_id,
-                    'display_name': display_name,
-                    'file_path': None,
-                }
-
-            # Start download in background thread
-            download_thread = threading.Thread(
-                target=self._download_thread_worker,
-                args=(download_id, track_id, display_name, filename),
-                daemon=True,
-            )
-            download_thread.start()
-
-            logger.info(f"Qobuz download {download_id} started in background")
-            return download_id
-
-        except Exception as e:
-            logger.error(f"Failed to start Qobuz download: {e}")
-            import traceback
-            traceback.print_exc()
+        """Download a Qobuz track. Delegates to engine.worker which
+        spawns the background thread + manages state."""
+        if '||' not in filename:
+            logger.error(f"Invalid filename format: {filename}")
+            return None
+        if self._engine is None:
+            logger.error("Qobuz client has no engine reference — cannot dispatch download")
             return None
 
-    def _download_thread_worker(self, download_id: str, track_id: int, display_name: str, original_filename: str):
-        """Background thread worker for downloading Qobuz tracks."""
+        track_id_str, display_name = filename.split('||', 1)
         try:
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'InProgress, Downloading'
+            track_id = int(track_id_str)
+        except ValueError:
+            logger.error(f"Invalid Qobuz track ID: {track_id_str}")
+            return None
 
-            file_path = self._download_sync(download_id, track_id, display_name)
+        logger.info(f"Starting Qobuz download: {display_name}")
 
-            if file_path:
-                with self._download_lock:
-                    if download_id in self.active_downloads:
-                        self.active_downloads[download_id]['state'] = 'Completed, Succeeded'
-                        self.active_downloads[download_id]['progress'] = 100.0
-                        self.active_downloads[download_id]['file_path'] = file_path
-
-                logger.info(f"Qobuz download {download_id} completed: {file_path}")
-            else:
-                with self._download_lock:
-                    if download_id in self.active_downloads:
-                        self.active_downloads[download_id]['state'] = 'Errored'
-
-                logger.error(f"Qobuz download {download_id} failed")
-
-        except Exception as e:
-            logger.error(f"Qobuz download thread failed for {download_id}: {e}")
-            import traceback
-            traceback.print_exc()
-
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['state'] = 'Errored'
+        return self._engine.worker.dispatch(
+            source_name='qobuz',
+            target_id=track_id,
+            display_name=display_name,
+            original_filename=filename,
+            impl_callable=self._download_sync,
+            extra_record_fields={
+                'track_id': track_id,
+                'display_name': display_name,
+            },
+        )
 
     def _download_sync(self, download_id: str, track_id: int, display_name: str) -> Optional[str]:
         """
@@ -1050,9 +994,8 @@ class QobuzClient:
             chunk_size = 64 * 1024  # 64KB chunks
             start_time = time.time()
 
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    self.active_downloads[download_id]['size'] = total_size
+            if self._engine is not None:
+                self._engine.update_record('qobuz', download_id, {'size': total_size})
 
             with open(out_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=chunk_size):
@@ -1061,9 +1004,10 @@ class QobuzClient:
 
                     # Check for shutdown or cancellation
                     cancelled = False
-                    with self._download_lock:
-                        if download_id in self.active_downloads:
-                            cancelled = self.active_downloads[download_id].get('state') == 'Cancelled'
+                    if self._engine is not None:
+                        rec = self._engine.get_record('qobuz', download_id)
+                        if rec is not None:
+                            cancelled = rec.get('state') == 'Cancelled'
                     if cancelled or (self.shutdown_check and self.shutdown_check()):
                         reason = "cancelled" if cancelled else "server shutting down"
                         logger.info(f"Aborting Qobuz download mid-stream: {reason}")
@@ -1084,18 +1028,20 @@ class QobuzClient:
                         progress = 0
                         time_remaining = None
 
-                    with self._download_lock:
-                        if download_id in self.active_downloads:
-                            self.active_downloads[download_id]['transferred'] = downloaded
-                            self.active_downloads[download_id]['progress'] = round(progress, 1)
-                            self.active_downloads[download_id]['speed'] = int(speed)
-                            self.active_downloads[download_id]['time_remaining'] = time_remaining
+                    if self._engine is not None:
+                        self._engine.update_record('qobuz', download_id, {
+                            'transferred': downloaded,
+                            'progress': round(progress, 1),
+                            'speed': int(speed),
+                            'time_remaining': time_remaining,
+                        })
 
             # If download was aborted (shutdown/cancel), clean up partial file
             abort_check = False
-            with self._download_lock:
-                if download_id in self.active_downloads:
-                    abort_check = self.active_downloads[download_id].get('state') == 'Cancelled'
+            if self._engine is not None:
+                rec = self._engine.get_record('qobuz', download_id)
+                if rec is not None:
+                    abort_check = rec.get('state') == 'Cancelled'
             if abort_check or (self.shutdown_check and self.shutdown_check()):
                 out_path.unlink(missing_ok=True)
                 return None
@@ -1139,79 +1085,55 @@ class QobuzClient:
 
     # ===================== Status / Cancel / Clear =====================
 
+    def _record_to_status(self, record):
+        return DownloadStatus(
+            id=record['id'],
+            filename=record['filename'],
+            username=record['username'],
+            state=record['state'],
+            progress=record['progress'],
+            size=record.get('size', 0),
+            transferred=record.get('transferred', 0),
+            speed=record.get('speed', 0),
+            time_remaining=record.get('time_remaining'),
+            file_path=record.get('file_path'),
+        )
+
     async def get_all_downloads(self) -> List[DownloadStatus]:
-        """Get all active downloads (matches Soulseek interface)."""
-        download_statuses = []
-
-        with self._download_lock:
-            for _download_id, info in self.active_downloads.items():
-                status = DownloadStatus(
-                    id=info['id'],
-                    filename=info['filename'],
-                    username=info['username'],
-                    state=info['state'],
-                    progress=info['progress'],
-                    size=info['size'],
-                    transferred=info['transferred'],
-                    speed=info['speed'],
-                    time_remaining=info.get('time_remaining'),
-                    file_path=info.get('file_path'),
-                )
-                download_statuses.append(status)
-
-        return download_statuses
+        if self._engine is None:
+            return []
+        return [
+            self._record_to_status(record)
+            for record in self._engine.iter_records_for_source('qobuz')
+        ]
 
     async def get_download_status(self, download_id: str) -> Optional[DownloadStatus]:
-        """Get status of a specific download (matches Soulseek interface)."""
-        with self._download_lock:
-            if download_id not in self.active_downloads:
-                return None
-
-            info = self.active_downloads[download_id]
-            return DownloadStatus(
-                id=info['id'],
-                filename=info['filename'],
-                username=info['username'],
-                state=info['state'],
-                progress=info['progress'],
-                size=info['size'],
-                transferred=info['transferred'],
-                speed=info['speed'],
-                time_remaining=info.get('time_remaining'),
-                file_path=info.get('file_path'),
-            )
+        if self._engine is None:
+            return None
+        record = self._engine.get_record('qobuz', download_id)
+        return self._record_to_status(record) if record is not None else None
 
     async def cancel_download(self, download_id: str, username: str = None, remove: bool = False) -> bool:
-        """Cancel an active download (matches Soulseek interface)."""
-        try:
-            with self._download_lock:
-                if download_id not in self.active_downloads:
-                    logger.warning(f"Download {download_id} not found")
-                    return False
-
-                self.active_downloads[download_id]['state'] = 'Cancelled'
-                logger.info(f"Marked Qobuz download {download_id} as cancelled")
-
-                if remove:
-                    del self.active_downloads[download_id]
-                    logger.info(f"Removed Qobuz download {download_id} from queue")
-
-            return True
-        except Exception as e:
-            logger.error(f"Failed to cancel download {download_id}: {e}")
+        if self._engine is None:
             return False
+        if self._engine.get_record('qobuz', download_id) is None:
+            logger.warning(f"Qobuz download {download_id} not found")
+            return False
+        self._engine.update_record('qobuz', download_id, {'state': 'Cancelled'})
+        logger.info(f"Marked Qobuz download {download_id} as cancelled")
+        if remove:
+            self._engine.remove_record('qobuz', download_id)
+            logger.info(f"Removed Qobuz download {download_id} from queue")
+        return True
 
     async def clear_all_completed_downloads(self) -> bool:
-        """Clear all terminal downloads from the list (matches Soulseek interface)."""
+        if self._engine is None:
+            return True
         try:
-            with self._download_lock:
-                ids_to_remove = [
-                    did for did, info in self.active_downloads.items()
-                    if info.get('state', '') in ('Completed, Succeeded', 'Cancelled', 'Errored', 'Aborted')
-                ]
-                for did in ids_to_remove:
-                    del self.active_downloads[did]
-
+            terminal = {'Completed, Succeeded', 'Cancelled', 'Errored', 'Aborted'}
+            for record in list(self._engine.iter_records_for_source('qobuz')):
+                if record.get('state') in terminal:
+                    self._engine.remove_record('qobuz', record['id'])
             return True
         except Exception as e:
             logger.error(f"Error clearing downloads: {e}")
