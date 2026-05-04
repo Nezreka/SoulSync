@@ -1503,6 +1503,7 @@ class MusicDatabase:
                     spotify_album_id TEXT,
                     tidal_album_id TEXT,
                     deezer_album_id TEXT,
+                    discogs_release_id TEXT,
                     image_url TEXT,
                     release_date TEXT,
                     total_tracks INTEGER DEFAULT 0,
@@ -1516,6 +1517,18 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lalp_profile ON liked_albums_pool (profile_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lalp_spotify ON liked_albums_pool (spotify_album_id)")
+
+            # Migration: add discogs_release_id column for the Discogs
+            # collection source on the Your Albums section. Idempotent —
+            # safe on existing installs that already have the table.
+            try:
+                cursor.execute("SELECT discogs_release_id FROM liked_albums_pool LIMIT 1")
+            except Exception:
+                try:
+                    cursor.execute("ALTER TABLE liked_albums_pool ADD COLUMN discogs_release_id TEXT")
+                    logger.info("Added discogs_release_id column to liked_albums_pool")
+                except Exception:
+                    pass
 
             logger.info("Discovery tables added/verified successfully")
 
@@ -9967,7 +9980,8 @@ class MusicDatabase:
 
                 if source_id and source_id_type:
                     col = {'spotify': 'spotify_album_id', 'tidal': 'tidal_album_id',
-                           'deezer': 'deezer_album_id'}.get(source_id_type)
+                           'deezer': 'deezer_album_id',
+                           'discogs': 'discogs_release_id'}.get(source_id_type)
                     if col:
                         set_parts.append(f"{col} = COALESCE({col}, ?)")
                         params.append(source_id)
@@ -9989,7 +10003,8 @@ class MusicDatabase:
             else:
                 sources_json = json.dumps([source_service])
                 id_cols = {'spotify': 'spotify_album_id', 'tidal': 'tidal_album_id',
-                           'deezer': 'deezer_album_id'}
+                           'deezer': 'deezer_album_id',
+                           'discogs': 'discogs_release_id'}
                 col_values = {v: None for v in id_cols.values()}
                 if source_id and source_id_type and source_id_type in id_cols:
                     col_values[id_cols[source_id_type]] = source_id
@@ -9997,13 +10012,13 @@ class MusicDatabase:
                 cursor.execute("""
                     INSERT INTO liked_albums_pool
                     (album_name, artist_name, normalized_key, spotify_album_id, tidal_album_id,
-                     deezer_album_id, image_url, release_date, total_tracks, source_services,
-                     profile_id, last_fetched_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                     deezer_album_id, discogs_release_id, image_url, release_date, total_tracks,
+                     source_services, profile_id, last_fetched_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (
                     album_name, artist_name, normalized,
                     col_values['spotify_album_id'], col_values['tidal_album_id'],
-                    col_values['deezer_album_id'],
+                    col_values['deezer_album_id'], col_values['discogs_release_id'],
                     image_url, release_date, total_tracks or 0,
                     sources_json, profile_id
                 ))
