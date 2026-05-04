@@ -2,14 +2,51 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from core.metadata import registry as metadata_registry
 from core.metadata.album_tracks import get_artist_albums_for_source
 from core.metadata.lookup import MetadataLookupOptions
+from core.metadata.types import Album
 from utils.logging_config import get_logger
 
 logger = get_logger("metadata.discography")
+
+
+# Per-source typed converter dispatch — same registry pattern as
+# ``core/metadata/album_tracks.py`` and ``core/imports/resolution.py``.
+# Discography release builders dispatch through the typed Album
+# converter when the active source is known. Falls back to legacy
+# duck-typed extraction below on unknown source / converter error.
+_TYPED_ALBUM_CONVERTERS: Dict[str, Callable[[Dict[str, Any]], Album]] = {
+    'spotify': Album.from_spotify_dict,
+    'itunes': Album.from_itunes_dict,
+    'deezer': Album.from_deezer_dict,
+    'discogs': Album.from_discogs_dict,
+    'musicbrainz': Album.from_musicbrainz_dict,
+    'hydrabase': Album.from_hydrabase_dict,
+    'qobuz': Album.from_qobuz_dict,
+}
+
+
+def _typed_album_for_source(release: Any, source: Optional[str]) -> Optional[Album]:
+    """Return a typed Album when source maps to a registered converter
+    and the converter succeeds. ``None`` means the caller should fall
+    back to the legacy duck-typed extraction.
+    """
+    if not source or not isinstance(release, dict):
+        return None
+    converter = _TYPED_ALBUM_CONVERTERS.get(source.strip().lower())
+    if converter is None:
+        return None
+    try:
+        return converter(release)
+    except Exception as exc:
+        logger.debug(
+            "Typed album converter failed for source %s in discography "
+            "build, falling back to legacy: %s", source, exc,
+        )
+        return None
 
 
 def _extract_lookup_value(value: Any, *names: str, default: Any = None) -> Any:
@@ -89,7 +126,32 @@ def _pick_best_artist_match(search_results: List[Any], artist_name: str) -> Opti
     return search_results[0]
 
 
-def _build_discography_release_dict(release: Any, artist_id: str) -> Optional[Dict[str, Any]]:
+def _build_discography_release_dict(release: Any, artist_id: str,
+                                    source: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Build a normalized discography release dict.
+
+    When ``source`` is provided AND maps to a registered typed Album
+    converter, routes through ``Album.from_<source>_dict()`` and pulls
+    canonical fields off the typed Album. Falls back to the legacy
+    duck-typed extraction on unknown source / non-dict input / typed
+    converter error.
+    """
+    typed_album = _typed_album_for_source(release, source)
+    if typed_album is not None:
+        if not typed_album.id:
+            return None
+        artist_name = typed_album.artists[0] if typed_album.artists else ''
+        return {
+            'id': typed_album.id,
+            'name': typed_album.name or typed_album.id,
+            'artist_name': artist_name,
+            'release_date': typed_album.release_date or None,
+            'album_type': typed_album.album_type or 'album',
+            'image_url': typed_album.image_url,
+            'total_tracks': typed_album.total_tracks or 0,
+            'external_urls': typed_album.external_urls or {},
+        }
+
     release_id = _extract_lookup_value(release, 'id', 'album_id', 'release_id')
     if not release_id:
         return None
@@ -308,7 +370,7 @@ def get_artist_discography(
     seen_albums = set()
 
     for release in albums or []:
-        release_data = _build_discography_release_dict(release, artist_id)
+        release_data = _build_discography_release_dict(release, artist_id, source=active_source)
         if not release_data:
             continue
 
@@ -341,7 +403,46 @@ def get_artist_discography(
     }
 
 
-def _build_artist_detail_release_card(release: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _build_artist_detail_release_card(release: Dict[str, Any],
+                                      source: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Build an artist-detail release card.
+
+    NOTE on inputs: this function may receive EITHER raw provider
+    release dicts (when called directly during a fresh discography
+    lookup) OR pre-built canonical release dicts produced by
+    ``_build_discography_release_dict`` (the more common case via
+    ``get_artist_detail_discography``). Pre-built dicts already carry
+    canonical keys, so the typed dispatch is a no-op for them — and
+    the legacy duck-typed path also handles them correctly. The typed
+    dispatch only kicks in when the caller passes a known source AND
+    the release dict matches a provider's wire shape.
+    """
+    typed_album = _typed_album_for_source(release, source)
+    if typed_album is not None and typed_album.id:
+        release_year = None
+        if typed_album.release_date:
+            try:
+                release_year = str(typed_album.release_date)[:4]
+            except Exception:
+                release_year = None
+
+        card = {
+            'id': typed_album.id,
+            'name': typed_album.name or typed_album.id,
+            'title': typed_album.name or typed_album.id,
+            'album_type': (typed_album.album_type or 'album').lower(),
+            'image_url': typed_album.image_url,
+            'year': release_year,
+            'track_count': typed_album.total_tracks or 0,
+            'owned': None,
+            'track_completion': 'checking',
+        }
+        if typed_album.release_date:
+            card['release_date'] = typed_album.release_date
+        elif release_year:
+            card['release_date'] = f"{release_year}-01-01"
+        return card
+
     release_id = _extract_lookup_value(release, 'id', 'album_id', 'release_id')
     if not release_id:
         return None
