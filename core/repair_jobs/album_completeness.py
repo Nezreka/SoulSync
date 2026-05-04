@@ -234,7 +234,7 @@ class AlbumCompletenessJob(RepairJob):
                 )
             if context.create_finding:
                 try:
-                    context.create_finding(
+                    inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='incomplete_album',
                         severity='info',
@@ -264,7 +264,10 @@ class AlbumCompletenessJob(RepairJob):
                             'artist_thumb_url': artist_thumb or None,
                         }
                     )
-                    result.findings_created += 1
+                    if inserted:
+                        result.findings_created += 1
+                    else:
+                        result.findings_skipped_dedup += 1
                 except Exception as e:
                     logger.debug("Error creating completeness finding for album %s: %s", album_id, e)
                     result.errors += 1

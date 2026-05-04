@@ -237,7 +237,7 @@ class TrackNumberRepairJob(RepairJob):
                                 details['album_title'] = art_info['album_title']
                             if art_info.get('artist_name'):
                                 details['artist_name'] = art_info['artist_name']
-                            context.create_finding(
+                            inserted = context.create_finding(
                                 job_id=self.job_id,
                                 finding_type='track_number_mismatch',
                                 severity='warning',
@@ -248,7 +248,10 @@ class TrackNumberRepairJob(RepairJob):
                                 description=finding['description'],
                                 details=details
                             )
-                            result.findings_created += 1
+                            if inserted:
+                                result.findings_created += 1
+                            else:
+                                result.findings_skipped_dedup += 1
                 else:
                     if _repair_single_track(fpath, fname, api_tracks, len(api_tracks), title_sim, context):
                         result.auto_fixed += 1

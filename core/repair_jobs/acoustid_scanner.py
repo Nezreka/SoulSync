@@ -212,7 +212,7 @@ class AcoustIDScannerJob(RepairJob):
             )
         if context.create_finding:
             severity = 'warning' if best_score >= 0.90 else 'info'
-            context.create_finding(
+            inserted = context.create_finding(
                 job_id=self.job_id,
                 finding_type='acoustid_mismatch',
                 severity=severity,
@@ -240,7 +240,10 @@ class AcoustIDScannerJob(RepairJob):
                     'track_number': expected.get('track_number'),
                 }
             )
-            result.findings_created += 1
+            if inserted:
+                result.findings_created += 1
+            else:
+                result.findings_skipped_dedup += 1
 
     def _load_db_tracks(self, context: JobContext) -> dict:
         """Load all tracks from DB keyed by track ID."""

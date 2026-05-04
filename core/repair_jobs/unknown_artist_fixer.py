@@ -190,7 +190,7 @@ class UnknownArtistFixerJob(RepairJob):
                     desc_parts.append(f'Path: → {expected_rel}')
 
                 if context.create_finding:
-                    context.create_finding(
+                    inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='unknown_artist',
                         severity='warning',
@@ -217,7 +217,10 @@ class UnknownArtistFixerJob(RepairJob):
                             'cover_url': corrected.get('image_url', ''),
                         }
                     )
-                    result.findings_created += 1
+                    if inserted:
+                        result.findings_created += 1
+                    else:
+                        result.findings_skipped_dedup += 1
             else:
                 # Live mode — apply fix
                 try:

@@ -119,7 +119,8 @@ def _make_context(conn, prefer_source=None):
         wait_if_paused=lambda: False,
         update_progress=lambda *args, **kwargs: None,
         report_progress=lambda *args, **kwargs: None,
-        create_finding=lambda **kwargs: findings.append(kwargs),
+        # Mirror real `_create_finding` contract: True on insert.
+        create_finding=lambda **kwargs: (findings.append(kwargs) or True),
         findings=findings,
     )
 
