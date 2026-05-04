@@ -155,6 +155,67 @@ def test_worker_marks_completed_on_successful_impl():
     assert record['file_path'] == '/tmp/done.flac'
 
 
+def test_worker_preserves_cancelled_when_impl_returns_none():
+    """Pinning: if the user cancels mid-download (state flips to
+    Cancelled via engine.update_record from cancel_download), the
+    worker must NOT clobber it back to Errored when impl returns
+    None. The legacy per-client thread workers had this guard
+    (``if state != 'Cancelled': state = 'Errored'``); the shared
+    worker preserves that contract."""
+    engine = DownloadEngine()
+
+    def impl(download_id, target_id, display_name):
+        # Simulate user cancelling mid-impl by writing Cancelled.
+        engine.update_record('youtube', download_id, {'state': 'Cancelled'})
+        return None  # impl returns None because download was interrupted
+
+    download_id = engine.worker.dispatch(
+        source_name='youtube',
+        target_id='vid',
+        display_name='X',
+        original_filename='vid||X',
+        impl_callable=impl,
+    )
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        record = engine.get_record('youtube', download_id)
+        if record and record['state'] in ('Cancelled', 'Errored'):
+            break
+        time.sleep(0.01)
+
+    record = engine.get_record('youtube', download_id)
+    assert record['state'] == 'Cancelled', (
+        f"Worker clobbered user's Cancelled with {record['state']}"
+    )
+
+
+def test_worker_preserves_cancelled_when_impl_raises():
+    """Same Cancelled-preserve guard, but for the impl-raises path."""
+    engine = DownloadEngine()
+
+    def impl(download_id, target_id, display_name):
+        engine.update_record('youtube', download_id, {'state': 'Cancelled'})
+        raise RuntimeError("simulated mid-cancel exception")
+
+    download_id = engine.worker.dispatch(
+        source_name='youtube',
+        target_id='vid',
+        display_name='X',
+        original_filename='vid||X',
+        impl_callable=impl,
+    )
+
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        record = engine.get_record('youtube', download_id)
+        if record and record['state'] in ('Cancelled', 'Errored'):
+            break
+        time.sleep(0.01)
+
+    assert engine.get_record('youtube', download_id)['state'] == 'Cancelled'
+
+
 def test_worker_marks_errored_when_impl_returns_none():
     engine = DownloadEngine()
 

@@ -247,10 +247,10 @@ class BackgroundDownloadWorker:
                         "%s download %s failed (impl raised): %s",
                         source_name, download_id, exc,
                     )
-                    self._engine.update_record(source_name, download_id, {
-                        'state': 'Errored',
-                        'error': str(exc),
-                    })
+                    self._mark_terminal(
+                        source_name, download_id,
+                        success=False, error=str(exc),
+                    )
                     return
 
                 self._last_download_at[source_name] = time.time()
@@ -266,24 +266,40 @@ class BackgroundDownloadWorker:
                         source_name, download_id, file_path,
                     )
                 else:
-                    self._engine.update_record(source_name, download_id, {
-                        'state': 'Errored',
-                    })
+                    self._mark_terminal(source_name, download_id, success=False)
                     logger.error(
                         "%s download %s failed (impl returned None)",
                         source_name, download_id,
                     )
 
         except Exception as exc:
-            # Defensive — anything in the worker_loop itself
-            # (semaphore, sleep) shouldn't blow up the thread, but
-            # if it does the record gets marked Errored so the
-            # download doesn't sit forever in 'Initializing'.
+            # Defensive — semaphore / sleep shouldn't blow up the
+            # thread, but if they do the record needs SOME terminal
+            # state or it sits at 'Initializing' forever.
             logger.exception(
                 "%s worker_loop crashed for download %s: %s",
                 source_name, download_id, exc,
             )
-            self._engine.update_record(source_name, download_id, {
-                'state': 'Errored',
-                'error': f'worker crash: {exc}',
-            })
+            self._mark_terminal(
+                source_name, download_id,
+                success=False, error=f'worker crash: {exc}',
+            )
+
+    def _mark_terminal(self, source_name: str, download_id: str,
+                       success: bool, error: Optional[str] = None) -> None:
+        """Write a terminal state, but DON'T clobber an explicit
+        'Cancelled' state set by the user via cancel_download.
+        Mirrors the legacy per-client guard
+        (``if state != 'Cancelled': state = 'Errored'``) every
+        client used to hand-roll inside its thread worker."""
+        record = self._engine.get_record(source_name, download_id)
+        if record is None:
+            return  # already removed (e.g. cancel + remove)
+        if record.get('state') == 'Cancelled':
+            return  # user explicitly cancelled — leave it
+        patch: Dict[str, Any] = {
+            'state': 'Completed, Succeeded' if success else 'Errored',
+        }
+        if error is not None:
+            patch['error'] = error
+        self._engine.update_record(source_name, download_id, patch)
