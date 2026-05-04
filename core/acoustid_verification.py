@@ -356,27 +356,61 @@ class AcoustIDVerification:
                     return VerificationResult.PASS, msg
 
             # No match found — but if fingerprint score is very high (≥0.95)
-            # AND there's partial similarity in title or artist, the mismatch is
-            # likely a language/script difference (e.g. Japanese kanji vs English).
-            # Skip rather than quarantine a correct file.
-            # But if both title AND artist similarity are very low, the download
-            # source gave us a completely wrong file — fail it.
-            if best_score >= 0.95 and (title_sim >= 0.55 or artist_sim >= ARTIST_MATCH_THRESHOLD):
-                top = recordings[0]
+            # AND we have evidence the mismatch is a language/script case
+            # (rather than two genuinely different songs by the same artist),
+            # skip rather than quarantine a correct file. Two routes:
+            #
+            # (a) Either side of the comparison contains non-ASCII characters
+            #     — strong signal of transliteration / kanji↔roman cases.
+            #     Artist must still be a strong match to use this path.
+            # (b) Both title AND artist similarity are very high (the song
+            #     is recognizably the same with minor punctuation / casing
+            #     differences that fell below the strict match thresholds).
+            #
+            # The OLD logic was ``title_sim >= 0.55 OR artist_sim >= match``.
+            # That fired for English-vs-English songs by the same artist that
+            # share NO actual content — e.g. "R.O.T.C (Interlude)" by
+            # Kendrick Lamar getting accepted as "Rich (Interlude)" by
+            # Kendrick Lamar because the artist matched perfectly and
+            # "interlude" was shared in both titles. Reported by user when
+            # downloading Mr. Morale: three tracks (Rich Interlude, Savior
+            # Interlude, Savior) all received the wrong R.O.T.C audio file
+            # because of this leak.
+            top = recordings[0]
+            top_title = top.get('title', '?') or ''
+            top_artist = top.get('artist', '?') or ''
+            has_non_ascii = (
+                any(ord(c) > 127 for c in (expected_track_name or ''))
+                or any(ord(c) > 127 for c in top_title)
+            )
+            language_script_skip = (
+                best_score >= 0.95
+                and has_non_ascii
+                and artist_sim >= ARTIST_MATCH_THRESHOLD
+            )
+            high_confidence_strong_match_skip = (
+                best_score >= 0.95
+                and title_sim >= 0.80
+                and artist_sim >= ARTIST_MATCH_THRESHOLD
+            )
+            if language_script_skip or high_confidence_strong_match_skip:
+                reason = (
+                    "likely same song in different language/script"
+                    if language_script_skip
+                    else "title/artist match within tolerance"
+                )
                 msg = (
                     f"Title/artist mismatch but fingerprint confidence very high ({best_score:.2f}): "
-                    f"AcoustID='{top.get('title', '?')}' by '{top.get('artist', '?')}', "
+                    f"AcoustID='{top_title}' by '{top_artist}', "
                     f"expected '{expected_track_name}' by '{expected_artist_name}' — "
-                    f"likely same song in different language/script"
+                    f"{reason}"
                 )
                 logger.info(f"AcoustID verification SKIPPED (high confidence) - {msg}")
                 return VerificationResult.SKIP, msg
 
             # Low fingerprint score + no metadata match — file is likely wrong
-            top = recordings[0]
-            top_title = top.get('title', '?')
-            top_artist = top.get('artist', '?')
-
+            # `top`, `top_title`, `top_artist` already resolved above for the
+            # skip-eligibility check.
             msg = (
                 f"Audio mismatch: file identified as '{top_title}' by '{top_artist}', "
                 f"expected '{expected_track_name}' by '{expected_artist_name}' "
