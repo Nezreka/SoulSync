@@ -255,7 +255,8 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
     album_name_for_mb = metadata.get("album", "")
     if album_name_for_mb:
         artist_key = (pp.get("batch_artist_name") or artist_name).lower().strip()
-        rc_key_norm = (normalize_album_cache_key(album_name_for_mb), artist_key)
+        normalized_album_key = normalize_album_cache_key(album_name_for_mb)
+        rc_key_norm = (normalized_album_key, artist_key)
         rc_key_exact = (album_name_for_mb.lower().strip(), artist_key)
         release_mbid = None
         with mb_release_cache_lock:
@@ -265,12 +266,38 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
             if cached:
                 release_mbid = cached
             else:
-                rc_result = _call_source_lookup("MusicBrainz release", mb_service.match_release, album_name_for_mb, artist_name)
-                if rc_result and rc_result.get("mbid"):
-                    release_mbid = rc_result["mbid"]
+                # Persistent cache check BEFORE the live MB lookup. If a
+                # previous SoulSync run already resolved this album's
+                # release MBID, reuse it — guarantees every track of the
+                # same album gets the SAME MUSICBRAINZ_ALBUMID tag, even
+                # across server restarts and after the in-memory bounded
+                # cache evicts the entry. Strictly additive: any failure
+                # in the persistent lookup falls through to the live MB
+                # query exactly as today.
+                try:
+                    from core.metadata import album_mbid_cache as _persisted_cache
+                    persisted = _persisted_cache.lookup(normalized_album_key, artist_key)
+                except Exception:
+                    persisted = None
+
+                if persisted:
+                    release_mbid = persisted
+                else:
+                    rc_result = _call_source_lookup("MusicBrainz release", mb_service.match_release, album_name_for_mb, artist_name)
+                    if rc_result and rc_result.get("mbid"):
+                        release_mbid = rc_result["mbid"]
+
                 if release_mbid:
                     _bounded_cache_set(mb_release_cache, rc_key_norm, release_mbid, _MB_RELEASE_CACHE_MAX_ENTRIES)
                     _bounded_cache_set(mb_release_cache, rc_key_exact, release_mbid, _MB_RELEASE_CACHE_MAX_ENTRIES)
+                    # Also persist for future SoulSync runs. Defensive
+                    # try/except so a DB write failure can't block the
+                    # in-memory store + tag write that follow.
+                    try:
+                        from core.metadata import album_mbid_cache as _persisted_cache
+                        _persisted_cache.record(normalized_album_key, artist_key, release_mbid)
+                    except Exception:
+                        pass
         pp["release_mbid"] = release_mbid or ""
         if pp["release_mbid"]:
             pp["id_tags"]["MUSICBRAINZ_RELEASE_ID"] = pp["release_mbid"]

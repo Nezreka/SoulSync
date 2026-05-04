@@ -8,6 +8,25 @@ import requests
 from core.metadata import enrichment as me
 from core.metadata import artwork as ma
 from core.metadata import source as ms
+from core.metadata import album_mbid_cache as _album_mbid_cache
+
+
+@pytest.fixture(autouse=True)
+def _isolate_persistent_album_mbid_cache(monkeypatch):
+    """The MB release lookup in `core/metadata/source.py` consults the
+    persistent album-MBID cache (`core/metadata/album_mbid_cache.py`)
+    before calling MusicBrainz. Tests in this file pin per-test MB
+    call counts and in-memory cache state — they shouldn't get
+    bypassed by leftover persistent rows from other tests sharing the
+    same SQLite database.
+
+    Easiest fix: monkeypatch the persistent cache to be a no-op for
+    these tests. They focus on the in-memory layer + MB call shape;
+    the persistent layer has its own dedicated tests at
+    `tests/metadata/test_album_mbid_cache.py`.
+    """
+    monkeypatch.setattr(_album_mbid_cache, 'lookup', lambda *a, **kw: None)
+    monkeypatch.setattr(_album_mbid_cache, 'record', lambda *a, **kw: False)
 
 
 class _Config:
