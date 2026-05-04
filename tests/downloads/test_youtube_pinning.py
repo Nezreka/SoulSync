@@ -149,6 +149,17 @@ def test_set_engine_configures_worker_delay(yt_client_with_engine):
     assert engine.worker._get_delay('youtube') == 3.0
 
 
+def test_rate_limit_policy_reflects_configured_delay(yt_client_with_engine):
+    """Pinning (Phase E): YouTube's rate_limit_policy() returns a
+    RateLimitPolicy with the configured download_delay (3s default
+    from `youtube.download_delay` config). Engine reads this at
+    register_plugin time."""
+    client, _ = yt_client_with_engine
+    policy = client.rate_limit_policy()
+    assert policy.download_delay_seconds == 3.0
+    assert policy.download_concurrency == 1
+
+
 # ---------------------------------------------------------------------------
 # Query / cancel — engine-backed reads
 # ---------------------------------------------------------------------------
